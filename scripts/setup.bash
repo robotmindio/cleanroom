@@ -27,4 +27,5 @@ fi
 . "$_lekiwi_workspace/install/setup.$_lekiwi_shell"
 export PATH="$HOME/.local/bin:$PATH"
 export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+export CYCLONEDDS_URI="file://$_lekiwi_workspace/install/lekiwi_rmf/share/lekiwi_rmf/config/cyclonedds.xml"
 unset _lekiwi_workspace _lekiwi_shell

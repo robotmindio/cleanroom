@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!-- Cyclone DDS allows 10 participants per domain per host by default
+     (MaxAutoParticipantIndex=9). One bringup starts ~19 nodes, and every node
+     past the tenth aborts with "Failed to find a free participant index". -->
+<CycloneDDS xmlns="https://cdds.io/config">
+  <Domain id="any">
+    <Discovery>
+      <MaxAutoParticipantIndex>100</MaxAutoParticipantIndex>
+    </Discovery>
+  </Domain>
+</CycloneDDS>
