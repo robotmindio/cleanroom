@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<sdf version="1.10">
+  <world name="cleanroom">
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+    <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors"><render_engine>ogre2</render_engine></plugin>
+    <scene><ambient>0.7 0.7 0.7 1</ambient><background>0.9 0.9 0.9 1</background></scene>
+    <light name="sun" type="directional"><pose>0 0 10 0 0 0</pose><diffuse>0.9 0.9 0.9 1</diffuse><direction>-0.4 0.2 -1</direction></light>
+    <model name="floor"><static>true</static><link name="link"><collision name="collision"><geometry><box><size>10 7 0.1</size></box></geometry></collision><visual name="visual"><geometry><box><size>10 7 0.1</size></box></geometry><material><diffuse>0.72 0.76 0.78 1</diffuse></material></visual></link></model>
+
+    <model name="walls"><static>true</static><link name="link">
+      <collision name="north"><pose>0 3.5 1 0 0 0</pose><geometry><box><size>10 0.1 2</size></box></geometry></collision>
+      <collision name="south"><pose>0 -3.5 1 0 0 0</pose><geometry><box><size>10 0.1 2</size></box></geometry></collision>
+      <collision name="east"><pose>5 0 1 0 0 0</pose><geometry><box><size>0.1 7 2</size></box></geometry></collision>
+      <collision name="west"><pose>-5 0 1 0 0 0</pose><geometry><box><size>0.1 7 2</size></box></geometry></collision>
+      <collision name="divider"><pose>0 1.25 1 0 0 0</pose><geometry><box><size>0.1 4.5 2</size></box></geometry></collision>
+      <visual name="north"><pose>0 3.5 1 0 0 0</pose><geometry><box><size>10 0.1 2</size></box></geometry></visual>
+      <visual name="south"><pose>0 -3.5 1 0 0 0</pose><geometry><box><size>10 0.1 2</size></box></geometry></visual>
+      <visual name="east"><pose>5 0 1 0 0 0</pose><geometry><box><size>0.1 7 2</size></box></geometry></visual>
+      <visual name="west"><pose>-5 0 1 0 0 0</pose><geometry><box><size>0.1 7 2</size></box></geometry></visual>
+      <visual name="divider"><pose>0 1.25 1 0 0 0</pose><geometry><box><size>0.1 4.5 2</size></box></geometry></visual>
+    </link></model>
+
+    <model name="workbench"><static>true</static><pose>3 2.5 0.45 0 0 0</pose><link name="link"><collision name="collision"><geometry><box><size>2.5 0.7 0.9</size></box></geometry></collision><visual name="visual"><geometry><box><size>2.5 0.7 0.9</size></box></geometry><material><diffuse>0.18 0.35 0.52 1</diffuse></material></visual></link></model>
+  </world>
+</sdf>

@@ -1,0 +1,23 @@
+building_name: cleanroom
+doors: {}
+levels:
+  L1:
+    lanes:
+      - [0, 1, {}]
+      - [1, 0, {}]
+      - [1, 2, {}]
+      - [2, 1, {}]
+      - [2, 3, {}]
+      - [3, 2, {}]
+      - [3, 4, {}]
+      - [4, 3, {}]
+      - [3, 5, {}]
+      - [5, 3, {}]
+    vertices:
+      - [-4.0, -2.5, {is_charger: true, is_parking_spot: true, name: charger}]
+      - [-3.0, 0.0, {name: west_corridor}]
+      - [-0.5, -1.8, {name: doorway}]
+      - [2.0, -1.8, {name: east_corridor}]
+      - [4.0, -2.0, {name: dropoff}]
+      - [3.0, 1.0, {name: workcell}]
+lifts: {}

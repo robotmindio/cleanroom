@@ -1,0 +1,122 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="lekiwi">
+  <xacro:arg name="sim" default="false"/>
+  <!-- Nothing actuates the arm in Gazebo, so revolute joints let it collapse under gravity
+       into the lidar plane, where the collision monitor sees it and refuses to drive.
+       RMF does not schedule arm trajectories here, so the sim arm is rigid. -->
+  <!-- .lower(): the launch passes sim:=True (PythonExpression stringifies a Python bool). -->
+  <xacro:property name="arm_joint" value="${'fixed' if '$(arg sim)'.lower() == 'true' else 'revolute'}"/>
+  <xacro:property name="roll_joint" value="${'fixed' if '$(arg sim)'.lower() == 'true' else 'continuous'}"/>
+  <material name="black"><color rgba="0.04 0.04 0.04 1"/></material>
+  <material name="white"><color rgba="0.9 0.9 0.9 1"/></material>
+  <material name="orange"><color rgba="1.0 0.32 0.02 1"/></material>
+
+  <link name="base_footprint"/>
+  <joint name="base_joint" type="fixed">
+    <parent link="base_footprint"/><child link="base_link"/><origin xyz="0 0 0.10"/>
+  </joint>
+  <link name="base_link">
+    <visual><geometry><cylinder radius="0.18" length="0.08"/></geometry><material name="white"/></visual>
+    <collision><geometry><cylinder radius="0.18" length="0.08"/></geometry></collision>
+    <inertial><mass value="5"/><inertia ixx="0.03" ixy="0" ixz="0" iyy="0.03" iyz="0" izz="0.06"/></inertial>
+  </link>
+
+  <xacro:macro name="wheel" params="name x y yaw">
+    <joint name="${name}_joint" type="fixed">
+      <parent link="base_link"/><child link="${name}_link"/><origin xyz="${x} ${y} -0.04" rpy="1.5708 0 ${yaw}"/>
+    </joint>
+    <link name="${name}_link">
+      <visual><geometry><cylinder radius="0.05" length="0.025"/></geometry><material name="black"/></visual>
+    </link>
+  </xacro:macro>
+  <xacro:wheel name="left_wheel" x="-0.108" y="0.108" yaw="-0.7854"/>
+  <xacro:wheel name="back_wheel" x="-0.108" y="-0.108" yaw="0.7854"/>
+  <xacro:wheel name="right_wheel" x="0.145" y="0" yaw="1.5708"/>
+
+  <joint name="mast_joint" type="fixed">
+    <parent link="base_link"/><child link="mast"/><origin xyz="0 0 0.22"/>
+  </joint>
+  <link name="mast">
+    <visual><geometry><box size="0.05 0.05 0.36"/></geometry><material name="orange"/></visual>
+  </link>
+
+  <xacro:macro name="arm_link" params="name length radius:=0.025">
+    <link name="${name}">
+      <visual><origin xyz="0 0 ${length/2}"/><geometry><cylinder radius="${radius}" length="${length}"/></geometry><material name="orange"/></visual>
+      <collision><origin xyz="0 0 ${length/2}"/><geometry><cylinder radius="${radius}" length="${length}"/></geometry></collision>
+      <inertial><origin xyz="0 0 ${length/2}"/><mass value="0.12"/><inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/></inertial>
+    </link>
+  </xacro:macro>
+  <xacro:arm_link name="shoulder" length="0.10"/>
+  <xacro:arm_link name="upper_arm" length="0.12"/>
+  <xacro:arm_link name="forearm" length="0.12"/>
+  <xacro:arm_link name="wrist" length="0.06"/>
+  <xacro:arm_link name="tool" length="0.05" radius="0.018"/>
+  <xacro:arm_link name="gripper" length="0.07" radius="0.012"/>
+
+  <joint name="arm_shoulder_pan" type="${arm_joint}">
+    <parent link="mast"/><child link="shoulder"/><origin xyz="0 0 0.18"/><axis xyz="0 0 1"/><limit lower="-1.92" upper="1.92" effort="4" velocity="2"/>
+  </joint>
+  <joint name="arm_shoulder_lift" type="${arm_joint}">
+    <parent link="shoulder"/><child link="upper_arm"/><origin xyz="0 0 0.10"/><axis xyz="0 1 0"/><limit lower="-1.75" upper="1.75" effort="4" velocity="2"/>
+  </joint>
+  <joint name="arm_elbow_flex" type="${arm_joint}">
+    <parent link="upper_arm"/><child link="forearm"/><origin xyz="0 0 0.12"/><axis xyz="0 1 0"/><limit lower="-1.75" upper="1.75" effort="4" velocity="2"/>
+  </joint>
+  <joint name="arm_wrist_flex" type="${arm_joint}">
+    <parent link="forearm"/><child link="wrist"/><origin xyz="0 0 0.12"/><axis xyz="0 1 0"/><limit lower="-1.75" upper="1.75" effort="2" velocity="3"/>
+  </joint>
+  <joint name="arm_wrist_roll" type="${roll_joint}">
+    <parent link="wrist"/><child link="tool"/><origin xyz="0 0 0.06"/><axis xyz="0 0 1"/><limit effort="2" velocity="3"/>
+  </joint>
+  <joint name="arm_gripper" type="${arm_joint}">
+    <parent link="tool"/><child link="gripper"/><origin xyz="0 0 0.05"/><axis xyz="0 1 0"/><limit lower="0" upper="1.57" effort="1" velocity="2"/>
+  </joint>
+
+  <joint name="laser_joint" type="fixed">
+    <parent link="mast"/><child link="laser"/><origin xyz="0 0 0.08"/>
+  </joint>
+  <link name="laser">
+    <visual><geometry><cylinder radius="0.035" length="0.03"/></geometry><material name="black"/></visual>
+  </link>
+
+  <joint name="front_camera_joint" type="fixed">
+    <parent link="mast"/><child link="front_camera_link"/><origin xyz="0.03 0 0.14"/>
+  </joint>
+  <link name="front_camera_link">
+    <visual><geometry><box size="0.035 0.07 0.035"/></geometry><material name="black"/></visual>
+  </link>
+  <joint name="front_camera_optical_joint" type="fixed">
+    <parent link="front_camera_link"/><child link="front_camera_optical_frame"/><origin rpy="-1.5708 0 -1.5708"/>
+  </joint>
+  <link name="front_camera_optical_frame"/>
+
+  <xacro:if value="$(arg sim)">
+    <gazebo>
+      <plugin filename="gz-sim-velocity-control-system" name="gz::sim::systems::VelocityControl">
+        <topic>/cmd_vel</topic>
+      </plugin>
+      <plugin filename="gz-sim-odometry-publisher-system" name="gz::sim::systems::OdometryPublisher">
+        <odom_frame>odom</odom_frame><robot_base_frame>base_footprint</robot_base_frame>
+        <odom_topic>/odom</odom_topic><tf_topic>/tf</tf_topic><dimensions>2</dimensions>
+      </plugin>
+    </gazebo>
+    <gazebo reference="laser">
+      <sensor name="lidar" type="gpu_lidar">
+        <topic>/scan</topic><gz_frame_id>laser</gz_frame_id><update_rate>10</update_rate><always_on>true</always_on>
+        <lidar><scan><horizontal><samples>360</samples><resolution>1</resolution><min_angle>-3.14159</min_angle><max_angle>3.14159</max_angle></horizontal></scan><range><min>0.08</min><max>12</max><resolution>0.01</resolution></range></lidar>
+      </sensor>
+    </gazebo>
+    <gazebo reference="front_camera_link">
+      <sensor name="front_camera" type="camera">
+        <topic>/camera/front</topic><gz_frame_id>front_camera_optical_frame</gz_frame_id>
+        <update_rate>20</update_rate><always_on>true</always_on>
+        <camera>
+          <horizontal_fov>1.0472</horizontal_fov>
+          <image><width>640</width><height>480</height><format>R8G8B8</format></image>
+          <clip><near>0.05</near><far>20</far></clip>
+        </camera>
+      </sensor>
+    </gazebo>
+  </xacro:if>
+</robot>

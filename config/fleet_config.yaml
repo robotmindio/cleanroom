@@ -1,0 +1,40 @@
+rmf_fleet:
+  name: lekiwi
+  limits:
+    linear: [0.3, 0.5]
+    angular: [1.0, 1.5]
+  profile:
+    footprint: 0.22
+    vicinity: 0.35
+  reversible: true
+  battery_system:
+    voltage: 12.0
+    capacity: 5.0
+    charging_current: 2.0
+  mechanical_system:
+    mass: 6.0
+    moment_of_inertia: 0.08
+    friction_coefficient: 0.35
+  ambient_system: {power: 15.0}
+  tool_system: {power: 5.0}
+  recharge_threshold: 0.15
+  recharge_soc: 0.95
+  account_for_battery_drain: false
+  task_capabilities: {loop: true, delivery: true}
+  finishing_request: charge
+  responsive_wait: true
+  robots:
+    lekiwi_1:
+      charger: charger
+      navigation_stack: 2
+      init_timeout_sec: 30
+      initial_map: L1
+      map_frame: map
+      robot_frame: base_footprint
+      service_call_timeout_sec: 2.0
+  robot_state_update_frequency: 5.0
+
+reference_coordinates:
+  L1:
+    rmf: [[-4.0, -2.5], [-3.0, 0.0], [2.0, -1.8], [3.0, 1.0]]
+    robot: [[-4.0, -2.5], [-3.0, 0.0], [2.0, -1.8], [3.0, 1.0]]

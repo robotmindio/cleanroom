@@ -1,0 +1,18 @@
+# colcon
+build/
+install/
+log/
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.benchmarks/
+
+# session tooling, never publish
+.memsearch/
+
+# runtime artifacts written into the source tree by RMF and RTAB-Map
+.rmf_schedule_node.yaml
+*.db
