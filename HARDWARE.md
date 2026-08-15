@@ -176,8 +176,12 @@ for which wheel is which.
 Only the arms need calibration; the wheels do not.
 
 ```bash
-lerobot-calibrate --robot.type=lekiwi --robot.id=lekiwi_1
+scripts/lekiwi.sh calibrate
 ```
+
+That wraps `lerobot-calibrate` with `--robot.cameras='{}'`. Calibration only
+talks to the motor bus, but `LeKiwiConfig` still opens both cameras on connect,
+so a missing or misnumbered camera aborts it before the first prompt.
 
 Move every joint to the middle of its range, press Enter, then sweep each joint
 through its full range. Use `lekiwi_1` as the ID — that is the default the ROS
@@ -208,15 +212,24 @@ device — override the whole dict rather than fighting the default:
 Note that `/dev/video1` is usually the metadata node of the same UVC device as
 `/dev/video0`, not a second camera.
 
+On a laptop, `/dev/video0` is almost always the built-in webcam, so the stock
+defaults point `front` at your screen and shift both robot cameras up by one.
+Identify each device by model before trusting the numbering:
+
+```bash
+udevadm info -q property -n /dev/video2 | grep ID_MODEL=
+```
+
+`scripts/lekiwi.sh host` carries the resulting paths; set `LEKIWI_FRONT` and
+`LEKIWI_WRIST` if yours differ from `/dev/video2` and `/dev/video4`.
+
 ## 5. Run the host
 
 On the machine physically wired to the motors — the Pi on the robot, or your
 laptop for the wired LeKiwi variant:
 
 ```bash
-python -m lerobot.robots.lekiwi.lekiwi_host \
-  --robot.id=lekiwi_1 \
-  --host.connection_time_s=86400
+scripts/lekiwi.sh host
 ```
 
 Defaults: command socket `5555/tcp`, observations `5556/tcp`, watchdog 500 ms,

@@ -175,9 +175,7 @@ this section will.
 The computer attached to the motors and cameras needs LeRobot with the `lekiwi` extra. If it is a separate Raspberry Pi, install LeRobot there following the official [LeKiwi setup](https://github.com/huggingface/lerobot/blob/main/docs/source/lekiwi.mdx), then run:
 
 ```bash
-python -m lerobot.robots.lekiwi.lekiwi_host \
-  --robot.id=lekiwi_1 \
-  --host.connection_time_s=86400
+scripts/lekiwi.sh host
 ```
 
 Keep the host watchdog enabled. Ports `5555/tcp` and `5556/tcp` must be reachable from the ROS computer; do not expose them to an untrusted network.
