@@ -148,11 +148,15 @@ class LeKiwiDriver(Node):
         action = {
             f"{joint}.pos": float(observation.get(f"{joint}.pos", 0.0)) for joint in ARM_JOINTS
         }
+        # The scales divide here and multiply below: LeRobot's kinematics use a nominal
+        # base_radius of 0.125 m, so a robot whose wheels sit elsewhere both under-turns
+        # what it is asked for and over-reports what it did, by the same factor. Fixing
+        # only the odometry would leave Nav2 asking for rotations it never gets.
         action.update(
             {
-                "x.vel": self.clamp(cmd.linear.x, self.max_linear),
-                "y.vel": self.clamp(cmd.linear.y, self.max_linear),
-                "theta.vel": math.degrees(self.clamp(cmd.angular.z, self.max_angular)),
+                "x.vel": self.clamp(cmd.linear.x, self.max_linear) / self.xy_scale,
+                "y.vel": self.clamp(cmd.linear.y, self.max_linear) / self.xy_scale,
+                "theta.vel": math.degrees(self.clamp(cmd.angular.z, self.max_angular) / self.yaw_scale),
             }
         )
         self.robot.send_action(action)

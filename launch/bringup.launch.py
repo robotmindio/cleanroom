@@ -31,6 +31,8 @@ def generate_launch_description():
     slam_mode = LaunchConfiguration("slam_mode")
     publish_camera = LaunchConfiguration("publish_camera")
     camera_info_url = LaunchConfiguration("camera_info_url")
+    xy_velocity_scale = LaunchConfiguration("xy_velocity_scale")
+    yaw_velocity_scale = LaunchConfiguration("yaw_velocity_scale")
     rtabmap_database = LaunchConfiguration("rtabmap_database")
     sim = PythonExpression(["'", mode, "' == 'sim'"])
     real = PythonExpression(["'", mode, "' == 'real'"])
@@ -59,6 +61,11 @@ def generate_launch_description():
             DeclareLaunchArgument("localization", default_value="visual_slam", choices=["amcl", "visual_slam"]),
             DeclareLaunchArgument("slam_mode", default_value="mapping", choices=["mapping", "localization"]),
             DeclareLaunchArgument("publish_camera", default_value="true"),
+            # LeRobot's kinematics assume base_radius=0.125 m. Measure your own robot --
+            # wheel-centre to wheel-centre, divided by sqrt(3), gives the real radius --
+            # and set yaw_velocity_scale to 0.125 / that. Wheels 24 cm apart give 0.90.
+            DeclareLaunchArgument("xy_velocity_scale", default_value="1.0"),
+            DeclareLaunchArgument("yaw_velocity_scale", default_value="0.90"),
             DeclareLaunchArgument(
                 "camera_info_url", default_value="file://${ROS_HOME}/camera_info/lekiwi_front.yaml"
             ),
@@ -115,6 +122,8 @@ def generate_launch_description():
                 executable="lekiwi_driver",
                 parameters=[{
                     "remote_ip": remote_ip,
+                    "xy_velocity_scale": ParameterValue(xy_velocity_scale, value_type=float),
+                    "yaw_velocity_scale": ParameterValue(yaw_velocity_scale, value_type=float),
                     "publish_camera": ParameterValue(publish_camera, value_type=bool),
                     "require_camera_calibration": ParameterValue(visual_slam, value_type=bool),
                     "camera_info_url": camera_info_url,

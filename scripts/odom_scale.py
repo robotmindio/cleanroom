@@ -32,6 +32,27 @@ BOARD = (8, 6)
 CRITERIA = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
 
 
+def find_board(gray):
+    """Locate the grid, preferring the detector that survives real lighting.
+
+    findChessboardCornersSB reads a board that the classic detector refuses -- ceiling
+    light glaring off the paper, or a board small in frame -- and returns subpixel
+    corners without a separate refinement pass. The classic one stays as a fallback for
+    OpenCV builds without it.
+    """
+    found, corners = cv2.findChessboardCornersSB(
+        gray, BOARD, cv2.CALIB_CB_NORMALIZE_IMAGE | cv2.CALIB_CB_ACCURACY
+    )
+    if found:
+        return True, corners
+    found, corners = cv2.findChessboardCorners(
+        gray, BOARD, cv2.CALIB_CB_ADAPTIVE_THRESH | cv2.CALIB_CB_NORMALIZE_IMAGE
+    )
+    if found:
+        corners = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), CRITERIA)
+    return found, corners
+
+
 class OdomScale(Node):
     def __init__(self, square):
         super().__init__("odom_scale")
@@ -63,39 +84,47 @@ class OdomScale(Node):
         while rclpy.ok() and time.monotonic() < deadline:
             rclpy.spin_once(self, timeout_sec=0.05)
 
-    def camera_pose(self, attempts=40):
-        """Camera position and orientation in the board's frame, averaged over frames."""
-        positions, yaws = [], []
-        for _ in range(attempts):
-            self.spin(0.1)
-            if self.frame is None or self.k is None:
-                continue
-            gray = cv2.cvtColor(self.frame, cv2.COLOR_BGR2GRAY)
-            found, corners = cv2.findChessboardCorners(gray, BOARD, cv2.CALIB_CB_ADAPTIVE_THRESH)
-            if not found:
-                continue
-            corners = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), CRITERIA)
-            ok, rvec, tvec = cv2.solvePnP(self.object_points, corners, self.k, self.d)
-            if not ok:
-                continue
-            rotation, _ = cv2.Rodrigues(rvec)
-            # solvePnP gives the board in camera coordinates; invert for camera in board
-            # coordinates, which is the frame the robot actually moves through.
-            positions.append((-rotation.T @ tvec).ravel())
-            yaws.append(math.atan2(-rotation.T[1, 0], rotation.T[0, 0]))
-            if len(positions) >= 10:
-                break
-        if len(positions) < 5:
-            raise RuntimeError("no pude ver el tablero -- ponlo completo y quieto frente a la camara")
-        return np.median(positions, axis=0), float(np.median(yaws))
+    def sample(self):
+        """One (camera pose in board frame, odometry pose) pair, or None."""
+        if self.frame is None or self.k is None or self.odom is None:
+            return None
+        gray = cv2.cvtColor(self.frame, cv2.COLOR_BGR2GRAY)
+        found, corners = find_board(gray)
+        if not found:
+            return None
+        ok, rvec, tvec = cv2.solvePnP(self.object_points, corners, self.k, self.d)
+        if not ok:
+            return None
+        rotation, _ = cv2.Rodrigues(rvec)
+        # solvePnP gives the board in camera coordinates; invert for camera in board
+        # coordinates, which is the frame the robot actually moves through.
+        position = (-rotation.T @ tvec).ravel()
+        return position, rotation.T, self.odom
 
-    def drive(self, twist, seconds):
+    def drive_sampling(self, twist, seconds, samples):
+        """Drive while collecting samples.
+
+        Sampling throughout instead of only at the endpoints is what makes this usable
+        on a real floor: a ceiling light glaring off the board kills detection at some
+        poses, and demanding a detection at exactly the start and end pose fails the
+        whole run. Any two well-separated samples measure the motion between them.
+        """
         deadline = time.monotonic() + seconds
+        next_sample = 0.0
         while rclpy.ok() and time.monotonic() < deadline:
             self.cmd_pub.publish(twist)
             rclpy.spin_once(self, timeout_sec=0.05)
+            if time.monotonic() >= next_sample:
+                next_sample = time.monotonic() + 0.2
+                found = self.sample()
+                if found:
+                    samples.append(found)
         self.cmd_pub.publish(Twist())
-        self.spin(1.0)
+        for _ in range(15):
+            self.spin(0.1)
+            found = self.sample()
+            if found:
+                samples.append(found)
 
 
 def main():
@@ -112,10 +141,15 @@ def main():
     node = OdomScale(args.square)
     try:
         node.spin(2.0)
-        start_position, start_yaw = node.camera_pose()
-        start_odom = node.odom
-        if start_odom is None:
+        if node.odom is None:
             raise RuntimeError("sin /odom -- el driver no esta publicando")
+
+        samples = []
+        for _ in range(15):
+            node.spin(0.1)
+            found = node.sample()
+            if found:
+                samples.append(found)
 
         twist = Twist()
         if args.axis == "linear":
@@ -123,19 +157,38 @@ def main():
         else:
             twist.angular.z = speed
         print(f"moviendo {args.seconds:.1f}s a {speed}...", flush=True)
-        node.drive(twist, args.seconds)
+        node.drive_sampling(twist, args.seconds, samples)
 
-        end_position, end_yaw = node.camera_pose()
-        end_odom = node.odom
+        if len(samples) < 2:
+            raise RuntimeError(
+                f"solo {len(samples)} deteccion(es) del tablero -- ponlo completo en el cuadro "
+                "y sin reflejo encima"
+            )
+        (start_position, start_rotation, start_odom) = samples[0]
+        (end_position, end_rotation, end_odom) = samples[-1]
+        print(f"{len(samples)} detecciones utiles", flush=True)
 
         if args.axis == "linear":
             measured = float(np.linalg.norm(end_position - start_position))
             reported = math.hypot(end_odom[0] - start_odom[0], end_odom[1] - start_odom[1])
             name = "xy_velocity_scale"
         else:
-            measured = abs(math.atan2(math.sin(end_yaw - start_yaw), math.cos(end_yaw - start_yaw)))
+            # Magnitude of the relative rotation, straight off Rodrigues. Pulling a yaw
+            # angle out of the board frame would need the board's axes to line up with
+            # the robot's, and a board leaning a few degrees breaks that; the rotation
+            # angle itself needs no such assumption.
+            relative, _ = cv2.Rodrigues(start_rotation.T @ end_rotation)
+            measured = float(np.linalg.norm(relative))
             reported = abs(math.atan2(math.sin(end_odom[2] - start_odom[2]), math.cos(end_odom[2] - start_odom[2])))
             name = "yaw_velocity_scale"
+
+        if args.axis == "angular" and measured < 0.3:
+            print(
+                f"AVISO: solo {math.degrees(measured):.0f} grados medidos. La orientacion que "
+                "solvePnP saca de un tablero plano visto casi de frente se equivoca varios "
+                "grados, asi que por debajo de ~20 grados este numero no sirve. Para el giro "
+                "mide la separacion entre ruedas: yaw_velocity_scale = 0.125 / (sep / 1.732)."
+            )
 
         unit = "m" if args.axis == "linear" else "rad"
         print(f"camara (real): {measured:.4f} {unit}")
