@@ -25,6 +25,8 @@ first_match() { # first existing path matching a glob, empty if none
 }
 FRONT="${LEKIWI_FRONT:-$(first_match '/dev/v4l/by-id/*WEBCAM*-video-index0')}"
 [ -n "$FRONT" ] || { echo "$0: no front camera found -- set LEKIWI_FRONT" >&2; exit 1; }
+# The wrist camera is optional: unplugged, or LEKIWI_WRIST=none, and the stack runs without it.
+WRIST="${LEKIWI_WRIST:-$(first_match '/dev/v4l/by-id/*JYU2C*-video-index0')}"
 
 exec ros2 launch lekiwi_rmf bringup.launch.py mode:=real \
-  camera_device:="$FRONT" "$@"
+  camera_device:="$FRONT" wrist_camera_device:="${WRIST:-none}" "$@"

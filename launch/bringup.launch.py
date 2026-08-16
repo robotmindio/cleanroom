@@ -33,6 +33,7 @@ def generate_launch_description():
     camera_info_url = LaunchConfiguration("camera_info_url")
     camera_device = LaunchConfiguration("camera_device")
     camera_source = LaunchConfiguration("camera_source")
+    wrist_device = LaunchConfiguration("wrist_camera_device")
     xy_velocity_scale = LaunchConfiguration("xy_velocity_scale")
     yaw_velocity_scale = LaunchConfiguration("yaw_velocity_scale")
     rtabmap_database = LaunchConfiguration("rtabmap_database")
@@ -43,6 +44,7 @@ def generate_launch_description():
     slam_localization = PythonExpression(["'", slam_mode, "' == 'localization'"])
     camera_on = PythonExpression(["'", publish_camera, "' == 'true'"])
     camera_here = PythonExpression([camera_on, " and '", camera_source, "' == 'local'"])
+    wrist_here = PythonExpression([camera_here, " and '", wrist_device, "' != 'none'"])
     camera_remote = PythonExpression([camera_on, " and '", camera_source, "' == 'remote'"])
     # The Pi keeps every camera topic in its own namespace so its raw image cannot be
     # subscribed to by accident from here; camera_info is small, so it is read across
@@ -78,6 +80,9 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "camera_source", default_value="local", choices=["local", "remote"]
             ),
+            # "none" leaves the wrist camera out. Both cameras hang off one USB 2.0 hub and
+            # neither can be compressed here, so the wrist runs small -- see the node below.
+            DeclareLaunchArgument("wrist_camera_device", default_value="none"),
             # LeRobot's kinematics assume base_radius=0.125 m. Measure your own robot --
             # wheel-centre to wheel-centre, divided by sqrt(3), gives the real radius --
             # and set yaw_velocity_scale to 0.125 / that. Wheels 24 cm apart give 0.90.
@@ -162,6 +167,30 @@ def generate_launch_description():
                     "image_size": [640, 480],
                 }],
                 condition=IfCondition(PythonExpression([camera_here, " and ", real])),
+                output="screen",
+            ),
+            # The wrist camera is for watching the gripper, not for SLAM: nothing subscribes
+            # to it and it carries no calibration. camera_frame_id is the arm's tool link
+            # rather than an optical frame, since the mount has never been measured.
+            Node(
+                package="v4l2_camera",
+                executable="v4l2_camera_node",
+                name="wrist_camera",
+                namespace="/camera/wrist",
+                parameters=[{
+                    "video_device": wrist_device,
+                    "camera_frame_id": "tool",
+                    "camera_name": "lekiwi_wrist",
+                    # v4l2_camera has no JPEG decoder -- ask it for MJPG and it aborts on the
+                    # first frame, so this is uncompressed and has to stay small: both cameras
+                    # share one USB 2.0 hub, and a second 640x480 YUYV feed starves the front
+                    # camera into solid green frames. The camera answers with the nearest mode
+                    # it has, 352x288, which is what actually leaves the bus.
+                    "pixel_format": "YUYV",
+                    "output_encoding": "rgb8",
+                    "image_size": [160, 120],
+                }],
+                condition=IfCondition(PythonExpression([wrist_here, " and ", real])),
                 output="screen",
             ),
             # With the cameras on the robot's Pi, only their compressed form crosses the

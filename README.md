@@ -144,6 +144,8 @@ With a Pi on the robot, the Pi runs the camera nodes (see [HARDWARE.md](HARDWARE
 
 On the wired variant everything is local, so `camera_source:=local` with `camera_device` pointing at a `/dev/v4l/by-id/...` path.
 
+The wrist camera is optional and off unless `wrist_camera_device` names a device; `scripts/ros-start.sh` fills it in from `/dev/v4l/by-id/` when the camera is plugged in. It publishes on `/camera/wrist/image_raw` for watching the gripper — nothing subscribes to it and it carries no calibration. It streams small on purpose: both cameras share one USB 2.0 hub, `v4l2_camera` cannot decompress MJPG, and a second full-size uncompressed feed starves the front camera into solid green frames.
+
 ### Odometry scale
 
 LeRobot's kinematics assume a wheel 12.5 cm from the centre of rotation. Measure your robot — wheel centre to wheel centre, divided by √3 — and set `yaw_velocity_scale` to `0.125 / that`. Wheels 24 cm apart give 0.90, the default here. The factor corrects both what the base reports and what it executes, so a rotation Nav2 asks for is the rotation it gets.
@@ -215,16 +217,15 @@ answers on `5555/tcp`. Stop everything with `Ctrl-C`, or `scripts/ros-stop.sh`
 from another terminal.
 
 To watch the robot, `scripts/rviz.sh` opens RViz on `config/lekiwi.rviz` — map,
-costmaps, robot model, TF, and the goal-pose tool. Camera frames come from a
-separate viewer, one window per publishing camera:
+costmaps, robot model, TF, the goal-pose tool, and a panel for each camera. The
+camera panels depend on the saved dock layout in that file; the header of
+`scripts/rviz.sh` explains what not to touch.
+
+For camera frames without RViz, one window per publishing camera:
 
 ```bash
 scripts/cameras.sh
 ```
-
-RViz deliberately carries no Image display: an image panel next to the Nav2 scene
-aborts RViz on some GPUs, and `rqt_image_view` cannot take the navigation view
-down with it.
 
 The rest of this section is what those two commands are doing, and the
 calibration each one depends on.
