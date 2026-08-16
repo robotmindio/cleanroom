@@ -48,6 +48,13 @@ entries=""
 CAMERAS="{$entries}"
 
 run_host() {
+  # A second host on the same bus is the confusing failure: both talk over each other and
+  # the handshake dies with "[TxRxResult] Incorrect status packet!", which reads like a
+  # broken cable or a wrong port. Refuse instead.
+  if pgrep -f 'lerobot.robots.lekiwi.lekiwi_host' | grep -qv "^$$\$"; then
+    echo "$0: a LeKiwi host already owns $PORT -- stop it first" >&2
+    exit 1
+  fi
   # The servos lose their calibration registers on every power cycle, so connect() stops
   # to ask whether to reuse ~/.cache/.../lekiwi_1.json. Empty answer = reuse it. Without
   # this the host dies on EOFError whenever it runs without a terminal.
