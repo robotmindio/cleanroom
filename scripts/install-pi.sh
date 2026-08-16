@@ -76,8 +76,22 @@ python3 -m venv "$VENV"
 # shellcheck disable=SC1091
 source "$VENV/bin/activate"
 python -m pip install --upgrade pip
-# Torch pulls a large aarch64 wheel; on a 2 GB Pi this is the step that runs out of memory.
-python -m pip install "lerobot[lekiwi,hardware]==${LEROBOT_VERSION}"
+
+# PyPI's aarch64 torch wheel now depends on the CUDA runtime, for Jetson and GH200 boards:
+# over a gigabyte of nvidia-* wheels that a Pi has no GPU to use. Install the CPU build
+# from PyTorch's own index first, so the lerobot resolve below sees torch as satisfied.
+# The bounds are lerobot 0.6.1's own; they resolve to torch 2.11.0+cpu / torchvision 0.26.0+cpu.
+# --resume-retries: these are ~100 MB wheels over the robot's wifi, and the default of one
+# resume attempt is not enough to survive a dropout.
+log "Installing CPU-only PyTorch"
+python -m pip install --resume-retries 10 \
+  --index-url https://download.pytorch.org/whl/cpu \
+  --extra-index-url https://pypi.org/simple \
+  "torch>=2.7,<2.12" "torchvision>=0.22,<0.27"
+
+log "Installing LeRobot $LEROBOT_VERSION"
+python -m pip install --resume-retries 10 "lerobot[lekiwi,hardware]==${LEROBOT_VERSION}"
+python -c 'import torch; assert "+cpu" in torch.__version__, f"CUDA build leaked in: {torch.__version__}"'
 
 log "Fetching the LeKiwi example scripts"
 # LeRobot packages only src/, so examples/ is absent from the wheel but the docs use it.
