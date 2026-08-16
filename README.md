@@ -194,6 +194,29 @@ calibration, cameras, and keyboard teleoperation. See
 [HARDWARE.md](HARDWARE.md). If teleoperation does not work there, nothing in
 this section will.
 
+Once the calibration steps below have been done once, two commands bring the
+whole stack up. On the robot:
+
+```bash
+scripts/lekiwi.sh host
+```
+
+On the workstation, in a second terminal:
+
+```bash
+scripts/ros-start.sh
+```
+
+`ros-start.sh` resolves the front camera by its stable `/dev/v4l/by-id` name and
+launches everything in `mode:=real`; any extra arguments go straight to the launch
+file, so `scripts/ros-start.sh slam_mode:=localization remote_ip:=192.168.1.50`
+works. The host has to be up first — the driver gives up and exits if no host
+answers on `5555/tcp`. Stop everything with `Ctrl-C`, or `scripts/ros-stop.sh`
+from another terminal.
+
+The rest of this section is what those two commands are doing, and the
+calibration each one depends on.
+
 ### 1. Start the LeRobot host
 
 The computer attached to the motors and cameras needs LeRobot with the `lekiwi` extra. If it is a separate Raspberry Pi, copy this repository there and install only the host side — `scripts/install.sh` is for the ROS workstation and must not run on the Pi:
