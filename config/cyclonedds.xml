@@ -5,7 +5,11 @@
 <CycloneDDS xmlns="https://cdds.io/config">
   <Domain id="any">
     <Discovery>
-      <MaxAutoParticipantIndex>100</MaxAutoParticipantIndex>
+      <!-- "none" drops the participant index entirely: participants take ephemeral
+           ports and find each other over multicast SPDP. Raising the index limit
+           instead makes discovery quadratic -- every participant probes every
+           allowed index of every peer, and `ros2 topic list` stops answering. -->
+      <ParticipantIndex>none</ParticipantIndex>
     </Discovery>
   </Domain>
 </CycloneDDS>
