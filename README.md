@@ -172,7 +172,13 @@ this section will.
 
 ### 1. Start the LeRobot host
 
-The computer attached to the motors and cameras needs LeRobot with the `lekiwi` extra. If it is a separate Raspberry Pi, install LeRobot there following the official [LeKiwi setup](https://github.com/huggingface/lerobot/blob/main/docs/source/lekiwi.mdx), then run:
+The computer attached to the motors and cameras needs LeRobot with the `lekiwi` extra. If it is a separate Raspberry Pi, copy this repository there and install only the host side — `scripts/install.sh` is for the ROS workstation and must not run on the Pi:
+
+```bash
+./scripts/install-pi.sh
+```
+
+It needs a 64-bit image with Python 3.12+ (Raspberry Pi OS Trixie or Ubuntu 24.04; Bookworm's 3.11 is too old). Then, on the Pi:
 
 ```bash
 scripts/lekiwi.sh host

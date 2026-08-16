@@ -31,17 +31,32 @@ import sys
 raise SystemExit(0 if sys.version_info >= (3, 12) else 1)
 PY
 
-command -v sudo >/dev/null || [[ $EUID -eq 0 ]] || die "sudo is required"
 SUDO=()
 [[ $EUID -eq 0 ]] || SUDO=(sudo)
+# Only escalate for the steps that still need it, so a Pi that is already provisioned
+# installs over SSH without a sudo password.
+need_root() {
+  [[ $EUID -eq 0 ]] || command -v sudo >/dev/null || die "sudo is required to $1"
+}
 
-log "Installing system prerequisites"
-"${SUDO[@]}" apt-get update
-"${SUDO[@]}" apt-get install -y curl git python3-venv python3-pip
+log "Checking system prerequisites"
+installed() { dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q 'ok installed'; }
+missing=()
+for pkg in curl git python3-venv python3-pip; do
+  installed "$pkg" || missing+=("$pkg")
+done
+if (( ${#missing[@]} )); then
+  need_root "install ${missing[*]}"
+  "${SUDO[@]}" apt-get update
+  "${SUDO[@]}" apt-get install -y "${missing[@]}"
+else
+  printf 'already installed\n'
+fi
 
 # brltty claims CH34x USB serial adapters and steals the Feetech bus from LeRobot.
-if dpkg-query -W -f='${Status}' brltty 2>/dev/null | grep -q 'ok installed'; then
+if installed brltty; then
   log "Removing brltty (it grabs the CH34x motor bus adapter)"
+  need_root "remove brltty"
   "${SUDO[@]}" apt-get remove -y brltty
 fi
 
@@ -50,6 +65,7 @@ for group in dialout video; do
   if id -nG "$USER" | tr ' ' '\n' | grep -qx "$group"; then
     printf 'already in %s\n' "$group"
   else
+    need_root "add $USER to $group"
     "${SUDO[@]}" usermod -aG "$group" "$USER"
     printf 'added to %s (log out and back in to take effect)\n' "$group"
   fi

@@ -4,7 +4,10 @@
 # Override per machine: LEKIWI_PORT, LEKIWI_FRONT, LEKIWI_WRIST, LEKIWI_ID
 set -Eeuo pipefail
 
+# install.sh puts the venv in the workspace; install-pi.sh puts it in ~/lerobot-venv,
+# because the Pi has no ROS workspace. Take whichever exists.
 BIN="${LEKIWI_WS:-$HOME/lekiwi_ws}/.venv-lerobot/bin"
+[ -x "$BIN/python" ] || BIN="${LEKIWI_LEROBOT_VENV:-$HOME/lerobot-venv}/bin"
 ID="${LEKIWI_ID:-lekiwi_1}"
 
 # /dev/ttyACM0 and /dev/videoN are renumbered by every USB re-enumeration -- a bumped
