@@ -5,10 +5,11 @@ through the LeRobot host instead would put the cameras back on the critical path
 motor control: the host aborts the whole robot when a frame arrives late, and a USB
 webcam does exactly that. Here a stalled camera costs frames and nothing else.
 
-Images go out on a Pi-local topic and only their compressed form crosses the network --
-raw 640x480 at 30 Hz is 27 MB/s, which no robot wifi will carry. The workstation turns
-compressed back into the canonical /camera/front/image_raw. camera_info is small enough
-to publish straight onto its canonical topic.
+Every topic lives under /pi/, so nothing here can be mistaken for the canonical topics
+the rest of the graph uses. Only the compressed image crosses the network -- raw 640x480
+at 30 Hz is 27 MB/s, which no robot wifi will carry -- and the workstation expands it
+back into /camera/front/image_raw. camera_info is a few hundred bytes and is read from
+/pi/camera/front/camera_info directly.
 
     ros2 launch pi_cameras.launch.py front_device:=/dev/v4l/by-id/usb-...-video-index0
 """
@@ -17,12 +18,14 @@ from launch.actions import DeclareLaunchArgument
 from launch.conditions import UnlessCondition
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
     front_device = LaunchConfiguration("front_device")
     wrist_device = LaunchConfiguration("wrist_device")
     camera_info_url = LaunchConfiguration("camera_info_url")
+    jpeg_quality = ParameterValue(LaunchConfiguration("jpeg_quality"), value_type=int)
     no_wrist = PythonExpression(["'", wrist_device, "' == 'none'"])
 
     return LaunchDescription(
@@ -34,6 +37,7 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "camera_info_url", default_value="file://${ROS_HOME}/camera_info/lekiwi_front.yaml"
             ),
+            DeclareLaunchArgument("jpeg_quality", default_value="50"),
             Node(
                 package="v4l2_camera",
                 executable="v4l2_camera_node",
@@ -46,12 +50,16 @@ def generate_launch_description():
                     "pixel_format": "YUYV",
                     "output_encoding": "rgb8",
                     "image_size": [640, 480],
+                    # Default quality 95 costs ~90 KB a frame, 18 Mbit/s at 25 Hz. RTAB-Map
+                    # matches features, not pixels, and does not need the last 45 KB.
+                    # The leading dot is image_transport's own naming, taken from the
+                    # resolved topic; without it the parameter is silently ignored.
+                    ".image_raw.compressed.jpeg_quality": jpeg_quality,
                 }],
-                remappings=[
-                    ("image_raw", "/pi/camera/front/image_raw"),
-                    ("camera_info", "/camera/front/camera_info"),
-                    ("set_camera_info", "/camera/front/set_camera_info"),
-                ],
+                # A namespace rather than remappings: image_transport builds its extra
+                # transport topics from the unremapped base name, so remapping image_raw
+                # leaves compressed advertised at /image_raw/compressed.
+                namespace="/pi/camera/front",
                 output="screen",
             ),
             Node(
@@ -66,11 +74,7 @@ def generate_launch_description():
                     "output_encoding": "rgb8",
                     "image_size": [640, 480],
                 }],
-                remappings=[
-                    ("image_raw", "/pi/camera/wrist/image_raw"),
-                    ("camera_info", "/camera/wrist/camera_info"),
-                    ("set_camera_info", "/camera/wrist/set_camera_info"),
-                ],
+                namespace="/pi/camera/wrist",
                 condition=UnlessCondition(no_wrist),
                 output="screen",
             ),

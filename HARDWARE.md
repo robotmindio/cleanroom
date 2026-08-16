@@ -260,6 +260,11 @@ ros2 launch launch/pi_cameras.launch.py \
 Find that path with `ls /dev/v4l/by-id/`. Use it rather than `/dev/video0`, which is
 reassigned whenever USB re-enumerates.
 
+Only the compressed image crosses the network. At the default `jpeg_quality:=50` a
+640x480 frame measures about 14 KB, so 30 Hz costs roughly 3 Mbit/s; the same frame at
+the library default of 95 costs 70–90 KB, or 18 Mbit/s. Raise it if RTAB-Map starts
+losing loop closures, lower it if the link is saturated.
+
 ## 6. Teleoperate
 
 Set `remote_ip` and `port` at the top of the script, then on the driving machine:

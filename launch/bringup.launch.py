@@ -44,6 +44,12 @@ def generate_launch_description():
     camera_on = PythonExpression(["'", publish_camera, "' == 'true'"])
     camera_here = PythonExpression([camera_on, " and '", camera_source, "' == 'local'"])
     camera_remote = PythonExpression([camera_on, " and '", camera_source, "' == 'remote'"])
+    # The Pi keeps every camera topic in its own namespace so its raw image cannot be
+    # subscribed to by accident from here; camera_info is small, so it is read across
+    # the network as published rather than relayed.
+    camera_info_topic = PythonExpression([
+        "'/pi/camera/front/camera_info' if '", camera_source, "' == 'remote' else '/camera/front/camera_info'"
+    ])
     slam_mapping = PythonExpression(["'", slam_mode, "' == 'mapping'"])
     nav2_share = FindPackageShare("nav2_bringup")
     map_file = PathJoinSubstitution([package, "maps", "cleanroom.yaml"])
@@ -136,6 +142,10 @@ def generate_launch_description():
                 package="v4l2_camera",
                 executable="v4l2_camera_node",
                 name="front_camera",
+                # A namespace rather than remappings: image_transport builds its extra
+                # transport topics from the unremapped base name, so remapping image_raw
+                # leaves compressed advertised at /image_raw/compressed.
+                namespace="/camera/front",
                 parameters=[{
                     "video_device": camera_device,
                     "camera_info_url": camera_info_url,
@@ -145,11 +155,6 @@ def generate_launch_description():
                     "output_encoding": "rgb8",
                     "image_size": [640, 480],
                 }],
-                remappings=[
-                    ("image_raw", "/camera/front/image_raw"),
-                    ("camera_info", "/camera/front/camera_info"),
-                    ("set_camera_info", "/camera/front/set_camera_info"),
-                ],
                 condition=IfCondition(PythonExpression([camera_here, " and ", real])),
                 output="screen",
             ),
@@ -159,7 +164,14 @@ def generate_launch_description():
                 package="image_transport",
                 executable="republish",
                 name="front_camera_decompress",
-                arguments=["compressed", "raw"],
+                # Jazzy's republish reads the transports as parameters, and only from the
+                # command line: positional arguments and a launch parameters= block are
+                # both ignored, leaving it relaying raw to raw with nothing to subscribe to.
+                arguments=[
+                    "--ros-args",
+                    "-p", "in_transport:=compressed",
+                    "-p", "out_transport:=raw",
+                ],
                 remappings=[
                     ("in/compressed", "/pi/camera/front/image_raw/compressed"),
                     ("out", "/camera/front/image_raw"),
@@ -228,7 +240,7 @@ def generate_launch_description():
                 }],
                 remappings=[
                     ("rgb/image", "/camera/front/image_raw"),
-                    ("rgb/camera_info", "/camera/front/camera_info"),
+                    ("rgb/camera_info", camera_info_topic),
                     ("odom", "/odom"),
                     # RTAB-Map also publishes an occupancy grid on /map. Monocular RGB gives it
                     # no depth, so its grid is near-empty -- and it would overwrite the checked-in
