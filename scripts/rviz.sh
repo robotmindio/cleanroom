@@ -11,19 +11,14 @@ set +u
 source scripts/setup.bash
 set -u
 
-# Nav2's stock view with its Gazebo Realsense group swapped for the front camera.
-# Read from the source tree, not the install space, so an edit takes effect without a
-# rebuild.
+# Nav2's stock view minus its Gazebo Realsense group. Read from the source tree, not the
+# install space, so an edit takes effect without a rebuild.
 #
-# An Image display only comes up enabled if `Window Geometry: QMainWindow State` holds a
-# dock widget with the display's exact name -- RViz binds the display's enabled state to
-# its panel, and Qt drops a dock the saved layout never mentions. Renaming the display in
-# the YAML is not enough; the name is also a length-prefixed UTF-16 string inside that
-# hex blob, which is why config/lekiwi.rviz carries a patched one. Rename the display and
-# the camera goes dark again.
-#
-# The inherited dock is saved hidden, so the panel does not appear on its own: untick and
-# re-tick Front Camera to pop it out, then File > Save Config to keep it. For frames
-# without the ceremony:
-#   ros2 run rqt_image_view rqt_image_view /camera/front/image_raw
+# No camera here, deliberately. This GPU cannot give RViz a second render window beside
+# the Nav2 scene: make an Image panel visible and Ogre aborts the process with "Cannot
+# create GL vertex buffer" or GLX "failed to create drawable" -- reproducible with the
+# map displays off, under LIBGL_ALWAYS_SOFTWARE, and with 7 GB of RAM free. (The same
+# panels open fine in rtabmap_examples' lighter config, so it is the combination.)
+# Leave an Image display in the config and RViz just shows it unticked, subscribing to
+# nothing, which is worse than not offering it. Cameras come from scripts/cameras.sh.
 exec rviz2 -d config/lekiwi.rviz "$@"

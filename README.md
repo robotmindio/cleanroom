@@ -215,13 +215,16 @@ answers on `5555/tcp`. Stop everything with `Ctrl-C`, or `scripts/ros-stop.sh`
 from another terminal.
 
 To watch the robot, `scripts/rviz.sh` opens RViz on `config/lekiwi.rviz` — map,
-costmaps, robot model, TF, the goal-pose tool, and a Front Camera display. For
-camera frames on their own, or for a second camera, `rqt_image_view` renders in
-its own process:
+costmaps, robot model, TF, and the goal-pose tool. Camera frames come from a
+separate viewer, one window per publishing camera:
 
 ```bash
-ros2 run rqt_image_view rqt_image_view /camera/front/image_raw
+scripts/cameras.sh
 ```
+
+RViz deliberately carries no Image display: an image panel next to the Nav2 scene
+aborts RViz on some GPUs, and `rqt_image_view` cannot take the navigation view
+down with it.
 
 The rest of this section is what those two commands are doing, and the
 calibration each one depends on.
