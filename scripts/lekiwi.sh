@@ -16,6 +16,7 @@ ID="${LEKIWI_ID:-lekiwi_1}"
 first_match() { # first existing path matching a glob, empty if none
   set -- $1
   [ -e "$1" ] && printf '%s' "$1"
+  return 0 # a miss is not an error here; require() reports it with the variable name
 }
 PORT="${LEKIWI_PORT:-$(first_match '/dev/serial/by-id/*USB_Single_Serial*')}"
 FRONT="${LEKIWI_FRONT:-$(first_match '/dev/v4l/by-id/*WEBCAM*-video-index0')}"
