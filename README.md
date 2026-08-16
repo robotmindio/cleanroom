@@ -306,6 +306,18 @@ The checked-in PGM provides Nav2's 2D collision map. Monocular RTAB-Map builds a
 
 ## Troubleshooting
 
+### `ros2 topic list` hangs and never returns
+
+Orphaned nodes from an earlier bringup are still holding DDS participants. `ros2 launch`
+shuts its nodes down on SIGINT to the whole process group; killing the launcher alone
+leaves around twenty nodes running. Those orphans keep talking to each other, so a new
+stack still works while introspection dies silently. Stop a run with `Ctrl-C`, or from
+another terminal:
+
+```bash
+scripts/ros-stop.sh
+```
+
 ### Installer reports a ParaView/VTK conflict
 
 Ubuntu's `python3-paraview` conflicts with the `python3-vtk9` package required by RTAB-Map through PCL. If you do not need the existing ParaView installation, remove it and rerun the installer:
