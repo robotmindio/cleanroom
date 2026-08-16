@@ -18,10 +18,11 @@ done
 sleep 15
 
 # Match on the install prefixes rather than on open sockets: every node of this stack
-# runs out of /opt/ros or the workspace, and nothing else on the machine does.
+# runs out of /opt/ros or the workspace, and nothing else on the machine does. The
+# Zenoh bridge is the exception -- the installer puts it in ~/.local/bin.
 # The ros2 CLI daemon is meant to outlive a run -- killing it only costs a slow
 # first command.
-orphans=$(pgrep -f "/opt/ros/jazzy|${LEKIWI_WS:-$HOME/lekiwi_ws}/install" | grep -v "^$$\$" || true)
+orphans=$(pgrep -f "/opt/ros/jazzy|${LEKIWI_WS:-$HOME/lekiwi_ws}/install|zenoh-bridge-ros2dds" | grep -v "^$$\$" || true)
 for pid in $orphans; do
   grep -qa ros2cli.daemon "/proc/$pid/cmdline" 2>/dev/null && continue
   kill -9 "$pid" 2>/dev/null || true
