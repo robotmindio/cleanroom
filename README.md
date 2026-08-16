@@ -214,6 +214,9 @@ works. The host has to be up first — the driver gives up and exits if no host
 answers on `5555/tcp`. Stop everything with `Ctrl-C`, or `scripts/ros-stop.sh`
 from another terminal.
 
+To watch the robot, `scripts/rviz.sh` opens RViz on Nav2's stock view — map,
+costmaps, robot model, TF, and the goal-pose tool.
+
 The rest of this section is what those two commands are doing, and the
 calibration each one depends on.
 
