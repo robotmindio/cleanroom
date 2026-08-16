@@ -30,4 +30,14 @@ set -u
 #     carries the old name.
 #
 # Editing displays is safe; editing panels, display names, or the window state is not.
+#
+# Starting before the cameras publish also loses the panels, so wait for them. A camera
+# that never appears is not fatal -- the other panel and the whole navigation view still
+# come up.
+for topic in $(grep -o '/camera/[a-z]*/image_raw' config/lekiwi.rviz | sort -u); do
+  for _ in $(seq 30); do
+    [ -n "$(ros2 topic info "$topic" 2>/dev/null | grep 'Publisher count: [1-9]')" ] && break
+    sleep 1
+  done
+done
 exec rviz2 -d config/lekiwi.rviz "$@"
