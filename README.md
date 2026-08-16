@@ -123,6 +123,10 @@ ros2 launch lekiwi_rmf bringup.launch.py mode:=sim \
 | `remote_ip` | IPv4/hostname | `127.0.0.1` | Address of the LeKiwi ZMQ host |
 | `rtabmap_database` | file path | `~/.ros/lekiwi_rtabmap.db` | Visual map database |
 | `camera_info_url` | ROS camera URL | `file://${ROS_HOME}/camera_info/lekiwi_front.yaml` | Real front-camera calibration |
+| `camera_source` | `local`, `remote` | `local` | Read the camera here, or decompress what the robot's Pi publishes |
+| `camera_device` | V4L2 path | `/dev/video0` | Front camera when `camera_source:=local` |
+| `xy_velocity_scale` | float | `1.0` | Correction for reported and commanded translation |
+| `yaw_velocity_scale` | float | `0.90` | Correction for reported and commanded rotation |
 | `start_rmf` | `true`, `false` | `true` | Start Zenoh, RMF schedule, dispatcher, and fleet adapter |
 | `rmf_domain` | integer | `55` | DDS domain used by RMF processes |
 | `start_rosbridge` | `true`, `false` | `true` | Start rosbridge WebSocket and ROS API nodes |
@@ -131,6 +135,26 @@ ros2 launch lekiwi_rmf bringup.launch.py mode:=sim \
 | `rosbridge_domain` | integer | `0` | ROS graph exposed through rosbridge |
 
 Only one localization mode should run. `visual_slam` publishes `map -> odom` through RTAB-Map; `amcl` publishes it from the fixed occupancy map.
+
+### Where the camera comes from
+
+The cameras are read by `v4l2_camera` nodes on whichever machine they are plugged into, not relayed through the LeRobot host. The host aborts the whole robot — motor control included — when a camera frame arrives more than half a second late, and USB webcams do that regularly.
+
+With a Pi on the robot, the Pi runs the camera nodes (see [HARDWARE.md](HARDWARE.md)) and the workstation launches with `camera_source:=remote`. Only the compressed image crosses the network; the workstation expands it back onto `/camera/front/image_raw`. Raw 640x480 at 30 Hz is 27 MB/s, which robot wifi will not carry.
+
+On the wired variant everything is local, so `camera_source:=local` with `camera_device` pointing at a `/dev/v4l/by-id/...` path.
+
+### Odometry scale
+
+LeRobot's kinematics assume a wheel 12.5 cm from the centre of rotation. Measure your robot — wheel centre to wheel centre, divided by √3 — and set `yaw_velocity_scale` to `0.125 / that`. Wheels 24 cm apart give 0.90, the default here. The factor corrects both what the base reports and what it executes, so a rotation Nav2 asks for is the rotation it gets.
+
+Check translation against a printed checkerboard, which needs no measuring tools beyond the board itself:
+
+```bash
+ros2 run lekiwi_rmf odom_scale.py --axis linear
+```
+
+It drives a short leg and compares the distance the calibrated camera sees against the distance odometry claims. Rotation is better derived from the wheel measurement above: estimating orientation from a flat target viewed head-on is unreliable at small angles.
 
 ## WebSocket access with rosbridge
 

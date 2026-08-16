@@ -38,15 +38,23 @@ require() {
 # their mounting. This mast holds the camera upright -- frames read straight off the
 # device come out right way up, so rotating them puts the optical frame 180 out of step
 # with the URDF and RTAB-Map corrects poses in the wrong direction.
-CAMERAS="{front: {type: opencv, index_or_path: $FRONT, width: 640, height: 480, fps: 30, fourcc: MJPG, rotation: 0, warmup_s: 3}"
-# LEKIWI_WRIST=none drops the wrist camera: its cable runs along the arm and drops off
-# the bus under movement, and a dead read thread takes the whole host down with it. The
-# ROS driver only ever publishes the front camera, so nothing downstream misses it.
-if [ "$WRIST" != none ]; then
-  CAMERAS="$CAMERAS,
-          wrist: {type: opencv, index_or_path: $WRIST, width: 480, height: 640, fps: 30, fourcc: MJPG, rotation: 90, warmup_s: 3}"
-fi
-CAMERAS="$CAMERAS}"
+# LEKIWI_WRIST=none (or LEKIWI_FRONT=none) drops that camera: the wrist cable runs along
+# the arm and falls off the bus under movement, and one dead read thread takes the whole
+# host down with it.
+entries=""
+[ "$FRONT" = none ] || entries="front: {type: opencv, index_or_path: $FRONT, width: 640, height: 480, fps: 30, fourcc: MJPG, rotation: 0, warmup_s: 3}"
+[ "$WRIST" = none ] || entries="${entries:+$entries,
+          }wrist: {type: opencv, index_or_path: $WRIST, width: 480, height: 640, fps: 30, fourcc: MJPG, rotation: 90, warmup_s: 3}"
+CAMERAS="{$entries}"
+
+run_host() {
+  # The servos lose their calibration registers on every power cycle, so connect() stops
+  # to ask whether to reuse ~/.cache/.../lekiwi_1.json. Empty answer = reuse it. Without
+  # this the host dies on EOFError whenever it runs without a terminal.
+  printf '\n' | "$BIN/python" -m lerobot.robots.lekiwi.lekiwi_host \
+    --robot.id="$ID" --robot.port="$PORT" --robot.cameras="$1" \
+    --host.connection_time_s=86400
+}
 
 case "${1:-}" in
   # ponytail: calibration only talks to the motor bus, so skip the cameras entirely.
@@ -55,17 +63,19 @@ case "${1:-}" in
     exec "$BIN/lerobot-calibrate" --robot.type=lekiwi --robot.id="$ID" \
       --robot.port="$PORT" --robot.cameras='{}'
     ;;
+  # ROS reads the cameras itself through v4l2_camera, so the host it talks to carries
+  # motors only -- a stalled webcam frame aborts this process, robot control included.
+  # host-cams is for standalone LeRobot work (teleoperation, dataset recording).
   host)
+    require PORT
+    run_host "{}"
+    ;;
+  host-cams)
     require PORT FRONT WRIST
-    # The servos lose their calibration registers on every power cycle, so connect()
-    # stops to ask whether to reuse ~/.cache/.../lekiwi_1.json. Empty answer = reuse it.
-    # Without this the host dies on EOFError whenever it runs without a terminal.
-    printf '\n' | "$BIN/python" -m lerobot.robots.lekiwi.lekiwi_host \
-      --robot.id="$ID" --robot.port="$PORT" --robot.cameras="$CAMERAS" \
-      --host.connection_time_s=86400
+    run_host "$CAMERAS"
     ;;
   *)
-    echo "usage: $0 calibrate|host" >&2
+    echo "usage: $0 calibrate|host|host-cams" >&2
     exit 2
     ;;
 esac

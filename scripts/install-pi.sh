@@ -93,6 +93,35 @@ log "Installing LeRobot $LEROBOT_VERSION"
 python -m pip install --resume-retries 10 "lerobot[lekiwi,hardware]==${LEROBOT_VERSION}"
 python -c 'import torch; assert "+cpu" in torch.__version__, f"CUDA build leaked in: {torch.__version__}"'
 
+log "Installing the ROS camera stack"
+# The cameras are wired to this Pi, so the ROS nodes that read them run here. Only
+# ros-base plus the camera packages -- Nav2, RTAB-Map and RMF stay on the workstation.
+# ROS 2 Jazzy ships binaries for Ubuntu 24.04 only; Raspberry Pi OS has no ROS packages,
+# so an image other than noble gets the LeRobot host and nothing else.
+if [[ $(. /etc/os-release && echo "${VERSION_CODENAME:-}") == noble ]]; then
+  if [[ ! -f /etc/apt/sources.list.d/ros2.list ]]; then
+    need_root "add the ROS 2 apt repository"
+    "${SUDO[@]}" apt-get install -y curl gnupg
+    "${SUDO[@]}" curl -fsSL -o /usr/share/keyrings/ros-archive-keyring.gpg \
+      https://raw.githubusercontent.com/ros/rosdistro/master/ros.key
+    echo "deb [signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] \
+http://packages.ros.org/ros2/ubuntu noble main" |
+      "${SUDO[@]}" tee /etc/apt/sources.list.d/ros2.list >/dev/null
+    "${SUDO[@]}" apt-get update
+  fi
+  need_root "install the ROS camera packages"
+  # image-transport-plugins provides the compressed transport: raw 640x480 at 30 Hz is
+  # 27 MB/s, which the robot's wifi cannot carry. cyclonedds matches the workstation.
+  "${SUDO[@]}" apt-get install -y \
+    ros-jazzy-ros-base \
+    ros-jazzy-v4l2-camera \
+    ros-jazzy-image-transport-plugins \
+    ros-jazzy-rmw-cyclonedds-cpp
+else
+  printf 'not Ubuntu 24.04 -- skipping ROS; this Pi can run the LeRobot host but not\n'
+  printf 'publish cameras to ROS. Reimage with Ubuntu Server 24.04 arm64 for that.\n'
+fi
+
 log "Fetching the LeKiwi example scripts"
 # LeRobot packages only src/, so examples/ is absent from the wheel but the docs use it.
 if [[ -d $EXAMPLES/.git ]]; then

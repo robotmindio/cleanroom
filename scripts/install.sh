@@ -66,7 +66,9 @@ fi
   ros-jazzy-ros-base \
   ros-jazzy-rosbridge-server \
   ros-jazzy-ros-gz \
-  ros-jazzy-rtabmap-ros
+  ros-jazzy-image-transport-plugins \
+  ros-jazzy-rtabmap-ros \
+  ros-jazzy-v4l2-camera
 
 if [[ ! -e /etc/ros/rosdep/sources.list.d/20-default.list ]]; then
   "${SUDO[@]}" rosdep init

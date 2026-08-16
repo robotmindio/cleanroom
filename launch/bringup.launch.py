@@ -31,6 +31,8 @@ def generate_launch_description():
     slam_mode = LaunchConfiguration("slam_mode")
     publish_camera = LaunchConfiguration("publish_camera")
     camera_info_url = LaunchConfiguration("camera_info_url")
+    camera_device = LaunchConfiguration("camera_device")
+    camera_source = LaunchConfiguration("camera_source")
     xy_velocity_scale = LaunchConfiguration("xy_velocity_scale")
     yaw_velocity_scale = LaunchConfiguration("yaw_velocity_scale")
     rtabmap_database = LaunchConfiguration("rtabmap_database")
@@ -39,6 +41,9 @@ def generate_launch_description():
     amcl = PythonExpression(["'", localization, "' == 'amcl'"])
     visual_slam = PythonExpression(["'", localization, "' == 'visual_slam'"])
     slam_localization = PythonExpression(["'", slam_mode, "' == 'localization'"])
+    camera_on = PythonExpression(["'", publish_camera, "' == 'true'"])
+    camera_here = PythonExpression([camera_on, " and '", camera_source, "' == 'local'"])
+    camera_remote = PythonExpression([camera_on, " and '", camera_source, "' == 'remote'"])
     slam_mapping = PythonExpression(["'", slam_mode, "' == 'mapping'"])
     nav2_share = FindPackageShare("nav2_bringup")
     map_file = PathJoinSubstitution([package, "maps", "cleanroom.yaml"])
@@ -61,6 +66,12 @@ def generate_launch_description():
             DeclareLaunchArgument("localization", default_value="visual_slam", choices=["amcl", "visual_slam"]),
             DeclareLaunchArgument("slam_mode", default_value="mapping", choices=["mapping", "localization"]),
             DeclareLaunchArgument("publish_camera", default_value="true"),
+            # Prefer a /dev/v4l/by-id/... path: /dev/videoN is reassigned on every USB
+            # re-enumeration, and on a laptop video0 is usually the built-in webcam.
+            DeclareLaunchArgument("camera_device", default_value="/dev/video0"),
+            DeclareLaunchArgument(
+                "camera_source", default_value="local", choices=["local", "remote"]
+            ),
             # LeRobot's kinematics assume base_radius=0.125 m. Measure your own robot --
             # wheel-centre to wheel-centre, divided by sqrt(3), gives the real radius --
             # and set yaw_velocity_scale to 0.125 / that. Wheels 24 cm apart give 0.90.
@@ -117,6 +128,45 @@ def generate_launch_description():
                 condition=IfCondition(sim),
                 output="screen",
             ),
+            # The front camera is read straight off V4L2 rather than relayed through the
+            # LeRobot host: the host aborts the whole robot -- motor control included --
+            # when a camera frame arrives half a second late, which a USB webcam does. Off
+            # the critical path, a stalled camera costs frames instead of the robot.
+            Node(
+                package="v4l2_camera",
+                executable="v4l2_camera_node",
+                name="front_camera",
+                parameters=[{
+                    "video_device": camera_device,
+                    "camera_info_url": camera_info_url,
+                    "camera_frame_id": "front_camera_optical_frame",
+                    "camera_name": "lekiwi_front",
+                    "pixel_format": "YUYV",
+                    "output_encoding": "rgb8",
+                    "image_size": [640, 480],
+                }],
+                remappings=[
+                    ("image_raw", "/camera/front/image_raw"),
+                    ("camera_info", "/camera/front/camera_info"),
+                    ("set_camera_info", "/camera/front/set_camera_info"),
+                ],
+                condition=IfCondition(PythonExpression([camera_here, " and ", real])),
+                output="screen",
+            ),
+            # With the cameras on the robot's Pi, only their compressed form crosses the
+            # network; this turns it back into the raw topic the rest of the graph expects.
+            Node(
+                package="image_transport",
+                executable="republish",
+                name="front_camera_decompress",
+                arguments=["compressed", "raw"],
+                remappings=[
+                    ("in/compressed", "/pi/camera/front/image_raw/compressed"),
+                    ("out", "/camera/front/image_raw"),
+                ],
+                condition=IfCondition(PythonExpression([camera_remote, " and ", real])),
+                output="screen",
+            ),
             Node(
                 package="lekiwi_rmf",
                 executable="lekiwi_driver",
@@ -124,9 +174,6 @@ def generate_launch_description():
                     "remote_ip": remote_ip,
                     "xy_velocity_scale": ParameterValue(xy_velocity_scale, value_type=float),
                     "yaw_velocity_scale": ParameterValue(yaw_velocity_scale, value_type=float),
-                    "publish_camera": ParameterValue(publish_camera, value_type=bool),
-                    "require_camera_calibration": ParameterValue(visual_slam, value_type=bool),
-                    "camera_info_url": camera_info_url,
                 }],
                 condition=IfCondition(real),
                 additional_env=lerobot_env,

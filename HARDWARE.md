@@ -10,16 +10,23 @@ The main [README](README.md) picks up from the end of this document.
 
 | Machine | Runs | Installer |
 | --- | --- | --- |
-| Robot's Raspberry Pi | LeRobot host only: Feetech bus + cameras, ZMQ server | `scripts/install-pi.sh` |
+| Robot's Raspberry Pi | LeRobot host (Feetech bus, ZMQ server) and the ROS camera nodes | `scripts/install-pi.sh` |
 | Workstation | ROS 2, Nav2, RTAB-Map, Open-RMF, and the LeRobot *client* | `scripts/install.sh` |
 
-The two talk over ZMQ `5555/tcp` (commands) and `5556/tcp` (observations). The Pi
-never runs ROS, so `scripts/install.sh` must not be run on it — it requires Ubuntu
-24.04 amd64/arm64 with ROS Jazzy and would pull in the entire ROS stack the Pi has
-no use for.
+Motor commands and joint state travel over ZMQ `5555/tcp` and `5556/tcp`. Camera
+frames do not: the Pi publishes them as ROS topics directly.
+
+That split is deliberate. The LeRobot host aborts the entire robot — motor control
+included — when a camera frame arrives more than half a second late, which a USB
+webcam does regularly. Keeping the cameras in their own ROS nodes means a stalled
+camera costs frames instead of the robot.
+
+The Pi therefore runs `ros-base` plus the camera packages, which `scripts/install-pi.sh`
+installs. It does not run Nav2, RTAB-Map or RMF, so `scripts/install.sh` must not be
+run there.
 
 For the **wired** LeKiwi variant there is no Pi: run both installers on the
-workstation and use `remote_ip:=127.0.0.1`.
+workstation, use `remote_ip:=127.0.0.1`, and leave `camera_source:=local`.
 
 ## Choosing the Pi image
 
@@ -28,10 +35,14 @@ decides this:
 
 | Image | Python | Verdict |
 | --- | --- | --- |
-| Raspberry Pi OS **Trixie** (64-bit) | 3.13 | **Recommended.** Native Pi support, smallest install |
-| Ubuntu Server 24.04 LTS (arm64) | 3.12 | Fine. Pick this if you may later run ROS 2 Jazzy on the Pi |
+| Ubuntu Server 24.04 LTS (arm64) | 3.12 | **Required.** The only image with ROS 2 Jazzy packages |
+| Raspberry Pi OS **Trixie** (64-bit) | 3.13 | LeRobot host works; no ROS packages exist, so no cameras in ROS |
 | Raspberry Pi OS **Bookworm** | 3.11 | **Will not work** — below LeRobot's floor |
 | Any 32-bit image | — | **Will not work** — no aarch64 PyTorch wheels |
+
+ROS 2 Jazzy publishes binaries for Ubuntu 24.04 (noble) only, and the Pi needs ROS to
+publish its cameras. On any other image `scripts/install-pi.sh` installs the LeRobot
+host and says it skipped ROS.
 
 Raspberry Pi OS Lite is enough; the host needs no desktop. Trixie is the newer
 Raspberry Pi OS series, rebased on Debian 13, and moved system Python from
@@ -235,6 +246,19 @@ scripts/lekiwi.sh host
 Defaults: command socket `5555/tcp`, observations `5556/tcp`, watchdog 500 ms,
 loop 30 Hz. The watchdog stops the base when commands stop arriving. It is not
 an E-stop.
+
+`host` carries motors only. Use `scripts/lekiwi.sh host-cams` for standalone LeRobot
+work — teleoperation and dataset recording, where the client wants images over ZMQ.
+Under ROS the cameras come from their own nodes instead:
+
+```bash
+source scripts/setup-pi.bash
+ros2 launch launch/pi_cameras.launch.py \
+  front_device:=/dev/v4l/by-id/usb-YOUR_CAMERA-video-index0
+```
+
+Find that path with `ls /dev/v4l/by-id/`. Use it rather than `/dev/video0`, which is
+reassigned whenever USB re-enumerates.
 
 ## 6. Teleoperate
 
