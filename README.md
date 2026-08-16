@@ -350,6 +350,19 @@ another terminal:
 scripts/ros-stop.sh
 ```
 
+### RTAB-Map floods the log with `Not found word N (dict size=M)`
+
+Mapping restarted on top of a database from an earlier session whose visual dictionary no
+longer matches. Every loop closure is then rejected with `Not enough features in images
+(old=0)`. Delete the database or point `rtabmap_database:=` at a fresh path.
+
+### The machine runs out of memory during a long mapping run
+
+RTAB-Map's working memory lives in RAM. `rtabmap_wm_nodes` (default 300) caps how many
+nodes stay resident; the rest move to the database and return when the robot comes back
+near them. Lower it on a small machine, raise it where memory allows — a larger working
+memory recognises places sooner.
+
 ### Installer reports a ParaView/VTK conflict
 
 Ubuntu's `python3-paraview` conflicts with the `python3-vtk9` package required by RTAB-Map through PCL. If you do not need the existing ParaView installation, remove it and rerun the installer:

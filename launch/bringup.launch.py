@@ -90,6 +90,12 @@ def generate_launch_description():
                 "rtabmap_database",
                 default_value=[EnvironmentVariable("HOME"), "/.ros/lekiwi_rtabmap.db"],
             ),
+            # RTAB-Map keeps its working memory in RAM and, unbounded, grows without end:
+            # an hour of mapping at 1 Hz took 6.6 GB and starved the rest of the machine.
+            # Past this many nodes the oldest move to the database and come back only when
+            # the robot returns near them, so loop closure still works. Raise it on a
+            # machine with memory to spare -- larger working memory closes loops sooner.
+            DeclareLaunchArgument("rtabmap_wm_nodes", default_value="300"),
             Node(
                 package="robot_state_publisher",
                 executable="robot_state_publisher",
@@ -232,6 +238,9 @@ def generate_launch_description():
                     "qos_image": 2,
                     "qos_camera_info": 2,
                     "qos_odom": 1,
+                    "Rtabmap/MemoryThr": ParameterValue(
+                        LaunchConfiguration("rtabmap_wm_nodes"), value_type=str
+                    ),
                     "Mem/IncrementalMemory": ParameterValue(slam_mapping, value_type=str),
                     "Mem/InitWMWithAllNodes": ParameterValue(slam_localization, value_type=str),
                     "RGBD/NeighborLinkRefining": "true",

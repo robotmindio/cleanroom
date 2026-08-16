@@ -15,12 +15,15 @@ set -u
 # Read from the source tree, not the install space, so an edit takes effect without a
 # rebuild.
 #
-# One Image display only: a second one aborts RViz before the window opens, with
-# "Cannot create GL vertex buffer" out of Ogre. Not a GPU shortage -- it also happens
-# under LIBGL_ALWAYS_SOFTWARE, and with both displays on the same live topic.
+# An Image display only comes up enabled if `Window Geometry: QMainWindow State` holds a
+# dock widget with the display's exact name -- RViz binds the display's enabled state to
+# its panel, and Qt drops a dock the saved layout never mentions. Renaming the display in
+# the YAML is not enough; the name is also a length-prefixed UTF-16 string inside that
+# hex blob, which is why config/lekiwi.rviz carries a patched one. Rename the display and
+# the camera goes dark again.
 #
-# On this machine even the single display comes up unchecked and never subscribes:
-# Ogre cannot give the image panel its render texture, so RViz disables the display.
-# Until that is fixed, camera frames come from its own process:
+# The inherited dock is saved hidden, so the panel does not appear on its own: untick and
+# re-tick Front Camera to pop it out, then File > Save Config to keep it. For frames
+# without the ceremony:
 #   ros2 run rqt_image_view rqt_image_view /camera/front/image_raw
 exec rviz2 -d config/lekiwi.rviz "$@"
