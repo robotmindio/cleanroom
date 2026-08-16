@@ -6,6 +6,7 @@ find_package(ament_cmake_python REQUIRED)
 
 ament_python_install_package(${PROJECT_NAME})
 install(PROGRAMS lekiwi_rmf/driver.py DESTINATION lib/${PROJECT_NAME} RENAME lekiwi_driver)
+install(PROGRAMS scripts/odom_scale.py DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY config launch maps urdf worlds DESTINATION share/${PROJECT_NAME})
 
 if(BUILD_TESTING)
