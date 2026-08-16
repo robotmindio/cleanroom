@@ -66,9 +66,12 @@ fi
   ros-jazzy-ros-base \
   ros-jazzy-rosbridge-server \
   ros-jazzy-ros-gz \
+  ros-jazzy-image-transport \
   ros-jazzy-image-transport-plugins \
   ros-jazzy-rtabmap-ros \
-  ros-jazzy-v4l2-camera
+  ros-jazzy-rviz2 \
+  ros-jazzy-v4l2-camera \
+  python3-opencv
 
 if [[ ! -e /etc/ros/rosdep/sources.list.d/20-default.list ]]; then
   "${SUDO[@]}" rosdep init
