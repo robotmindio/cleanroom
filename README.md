@@ -240,9 +240,34 @@ Keys go to the terminal running it, and only while that terminal has focus. Tele
 and Nav2 both write `/cmd_vel`, so drive or send goals, not both at once.
 
 To drive it from RViz instead, click **2D Goal Pose**, then press on the map where the
-robot should end up and drag before releasing to set which way it should face. Nav2 plans
-against the checked-in map only: this robot has no laser, `/scan` has no publisher, and
-nothing it meets on the way will stop it.
+robot should end up and drag before releasing to set which way it should face.
+
+### Obstacles from the front camera
+
+There is no laser on this robot, so by default Nav2 plans against the checked-in map and
+nothing it meets on the way will stop it. `free_space:=true` fills that gap from the front
+camera: the floor is flat, so every floor pixel is at a known distance, and the first pixel
+that stops looking like floor is an obstacle. It publishes `/scan`, which Nav2's obstacle
+layer already subscribes to.
+
+It only means anything once the camera's geometry is measured. Lay the printed 8x6
+checkerboard flat on the floor in view of the camera and run:
+
+```bash
+ros2 run lekiwi_rmf free_space.py --ros-args -p calibrate:=true \
+  -r image:=/camera/front/image_raw -r camera_info:=/camera/front/camera_info
+```
+
+It prints the camera height and pitch. Pass them back in and turn it on:
+
+```bash
+scripts/up.sh free_space:=true camera_height:=0.21 camera_pitch:=0.32
+```
+
+Watch the LaserScan in RViz before trusting it. It reads a uniform floor: patterned tiles,
+hard shadows and reflections come back as obstacles, an object the colour of the floor comes
+back as nothing, and it measures where things touch the floor, so a table is as far away as
+its legs. Wrong height or pitch puts phantom walls in the costmap.
 
 The rest of this section is what those two commands are doing, and the
 calibration each one depends on.

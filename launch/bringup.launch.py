@@ -101,6 +101,11 @@ def generate_launch_description():
             # the robot returns near them, so loop closure still works. Raise it on a
             # machine with memory to spare -- larger working memory closes loops sooner.
             DeclareLaunchArgument("rtabmap_wm_nodes", default_value="300"),
+            # Camera-as-laser obstacle detection, and the geometry it stands on. Measure
+            # both with `free_space.py --ros-args -p calibrate:=true` before turning it on.
+            DeclareLaunchArgument("free_space", default_value="false"),
+            DeclareLaunchArgument("camera_height", default_value="0.20"),
+            DeclareLaunchArgument("camera_pitch", default_value="0.30"),
             Node(
                 package="robot_state_publisher",
                 executable="robot_state_publisher",
@@ -191,6 +196,31 @@ def generate_launch_description():
                     "image_size": [160, 120],
                 }],
                 condition=IfCondition(PythonExpression([wrist_here, " and ", real])),
+                output="screen",
+            ),
+            # There is no laser on this robot, so obstacles come from the front camera: the
+            # floor is flat, which makes every floor pixel a known distance, and the first
+            # pixel that stops looking like floor is an obstacle. Nav2's obstacle layer
+            # reads /scan and needs nothing else. Off until the geometry is measured --
+            # `free_space.py --ros-args -p calibrate:=true` prints the two numbers, and
+            # wrong ones put phantom walls in the costmap.
+            Node(
+                package="lekiwi_rmf",
+                executable="free_space.py",
+                name="free_space",
+                parameters=[{
+                    "camera_height": ParameterValue(
+                        LaunchConfiguration("camera_height"), value_type=float),
+                    "camera_pitch": ParameterValue(
+                        LaunchConfiguration("camera_pitch"), value_type=float),
+                }],
+                remappings=[
+                    ("image", "/camera/front/image_raw"),
+                    ("camera_info", camera_info_topic),
+                    ("scan", "/scan"),
+                ],
+                condition=IfCondition(PythonExpression([
+                    "'", LaunchConfiguration("free_space"), "' == 'true' and ", real])),
                 output="screen",
             ),
             # With the cameras on the robot's Pi, only their compressed form crosses the
