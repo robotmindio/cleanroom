@@ -239,6 +239,12 @@ scripts/teleop.sh
 Keys go to the terminal running it, and only while that terminal has focus. Teleoperation
 and Nav2 both write `/cmd_vel`, so drive or send goals, not both at once.
 
+The driving keys are the WASD block by position rather than by letter, so a Dvorak
+keyboard gets `,aoe` and `'.` under the same fingers. It reads the layout from
+`setxkbmap`, prints the keys it chose on startup, and takes `LEKIWI_LAYOUT=qwerty`
+or `LEKIWI_LAYOUT=dvorak` when the guess is wrong — which it will be if several
+layouts are installed and the one it finds is not the one in use.
+
 To drive it from RViz instead, click **2D Goal Pose**, then press on the map where the
 robot should end up and drag before releasing to set which way it should face.
 
