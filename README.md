@@ -227,6 +227,14 @@ For camera frames without RViz, one window per publishing camera:
 scripts/cameras.sh
 ```
 
+To drive the base by hand:
+
+```bash
+ros2 run lekiwi_rmf teleop.py
+```
+
+Teleoperation and Nav2 both write `/cmd_vel`, so drive or send goals, not both at once.
+
 The rest of this section is what those two commands are doing, and the
 calibration each one depends on.
 
