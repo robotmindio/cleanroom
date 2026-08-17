@@ -104,13 +104,20 @@ class FreeSpace(Node):
     def calibrate(self, bgr):
         """Camera height and pitch from a checkerboard lying flat on the floor."""
         gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
-        found, corners = cv2.findChessboardCorners(gray, BOARD, None)
+        # SB copes with the blur and poor light of a webcam looking down a dim floor, and
+        # returns corners already refined.
+        found, corners = cv2.findChessboardCornersSB(gray, BOARD, cv2.CALIB_CB_EXHAUSTIVE)
         if not found:
-            self.get_logger().warn("no checkerboard yet -- lay it flat on the floor, in view")
+            # Mounted this low, the usual mistake is a board so close that its far rows fall
+            # off the top or bottom of the frame -- worth saying which failure it is.
+            partial, _ = cv2.findChessboardCornersSB(gray, (BOARD[0], 3), cv2.CALIB_CB_EXHAUSTIVE)
+            if partial:
+                self.get_logger().warn(
+                    "checkerboard is cut off by the edge of the frame -- slide it further away "
+                    "until the whole board is visible with a margin around it")
+            else:
+                self.get_logger().warn("no checkerboard yet -- lay it flat on the floor, in view")
             return
-        corners = cv2.cornerSubPix(
-            gray, corners, (11, 11), (-1, -1),
-            (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001))
         object_points = np.zeros((BOARD[0] * BOARD[1], 3), np.float32)
         object_points[:, :2] = np.mgrid[0:BOARD[0], 0:BOARD[1]].T.reshape(-1, 2) * SQUARE
         ok, rvec, tvec = cv2.solvePnP(object_points, corners, self.k, self.d)
