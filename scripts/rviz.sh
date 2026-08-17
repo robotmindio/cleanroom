@@ -24,6 +24,12 @@ set -u
 #   - a panel set the layout does not budget for (Nav2's side panels) squeezes the image
 #     docks to zero height, and a zero-height render window aborts Ogre with
 #     "Cannot create GL vertex buffer";
+#   - the blob also carries a pixel height per dock, and if the visible docks in one
+#     column add up to more than the column, Qt gives up on the overflowing ones and
+#     floats them off the bottom of the screen -- which reads as "the cameras are gone",
+#     with the displays un-ticked to match. The left column is 978 px: Displays 470 plus
+#     two 209 px camera docks and their handles leaves room to spare, so growing Displays
+#     is what to be careful about;
 #   - two displays sharing one name leaves Qt's dock matching ambiguous, and the panels
 #     came back hidden on about half the launches;
 #   - renaming a display in the YAML alone silently un-ticks it, since the blob still
