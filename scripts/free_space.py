@@ -104,22 +104,31 @@ class FreeSpace(Node):
     def calibrate(self, bgr):
         """Camera height and pitch from a checkerboard lying flat on the floor."""
         gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
-        # SB copes with the blur and poor light of a webcam looking down a dim floor, and
-        # returns corners already refined.
-        found, corners = cv2.findChessboardCornersSB(gray, BOARD, cv2.CALIB_CB_EXHAUSTIVE)
-        if not found:
-            # Mounted this low, the usual mistake is a board so close that its far rows fall
-            # off the top or bottom of the frame -- worth saying which failure it is.
-            partial, _ = cv2.findChessboardCornersSB(gray, (BOARD[0], 3), cv2.CALIB_CB_EXHAUSTIVE)
-            if partial:
-                self.get_logger().warn(
-                    "checkerboard is cut off by the edge of the frame -- slide it further away "
-                    "until the whole board is visible with a margin around it")
-            else:
-                self.get_logger().warn("no checkerboard yet -- lay it flat on the floor, in view")
+        # A board lying flat in front of a nearly level camera is brutally foreshortened:
+        # its far rows shrink to a couple of pixels and no detector finds the full grid.
+        # It does not matter -- all we want is the plane the board lies in, and any patch
+        # of it defines the same plane, at the same scale, because the squares are known.
+        size, corners = None, None
+        for candidate in [(BOARD[0] - n, BOARD[1] - n) for n in range(BOARD[1] - 2)]:
+            found, found_corners = cv2.findChessboardCorners(gray, candidate, None)
+            if not found:
+                found, found_corners = cv2.findChessboardCornersSB(
+                    gray, candidate, cv2.CALIB_CB_EXHAUSTIVE)
+            if found:
+                size, corners = candidate, found_corners
+                break
+        if size is None:
+            self.get_logger().warn("no checkerboard yet -- lay it flat on the floor, in view")
             return
-        object_points = np.zeros((BOARD[0] * BOARD[1], 3), np.float32)
-        object_points[:, :2] = np.mgrid[0:BOARD[0], 0:BOARD[1]].T.reshape(-1, 2) * SQUARE
+        if size != BOARD:
+            self.get_logger().info(
+                f"using a {size[0]}x{size[1]} patch of the board -- the rest is too "
+                "foreshortened to resolve")
+        corners = cv2.cornerSubPix(
+            gray, corners.astype(np.float32), (7, 7), (-1, -1),
+            (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001))
+        object_points = np.zeros((size[0] * size[1], 3), np.float32)
+        object_points[:, :2] = np.mgrid[0:size[0], 0:size[1]].T.reshape(-1, 2) * SQUARE
         ok, rvec, tvec = cv2.solvePnP(object_points, corners, self.k, self.d)
         if not ok:
             self.get_logger().warn("checkerboard found but the pose solve failed")
@@ -224,7 +233,8 @@ def main():
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

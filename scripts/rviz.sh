@@ -54,28 +54,4 @@ run_config="${LEKIWI_LOGS:-$HOME/.ros/lekiwi}/lekiwi.rviz"
 mkdir -p "$(dirname "$run_config")"
 cp config/lekiwi.rviz "$run_config"
 
-# Belt and braces: the panels either subscribe or they do not, and the subscription is the
-# only honest signal that one exists. Restart rather than leave the window camera-less.
-bound() { ros2 node info /rviz 2>/dev/null | grep 'image_raw' >/dev/null; }
-
-for attempt in 1 2 3; do
-  rviz2 -d "$run_config" "$@" &
-  rviz=$!
-  # One check, once RViz has had time to settle: `ros2 node info` costs seconds, so
-  # polling it in a tight loop only makes the wait longer.
-  sleep 20
-  if ! kill -0 "$rviz" 2>/dev/null; then
-    wait "$rviz"
-    exit $?
-  fi
-  if bound; then
-    wait "$rviz"
-    exit $?
-  fi
-  echo "camera panels did not come up, restarting RViz (attempt $attempt)" >&2
-  kill "$rviz" 2>/dev/null || true
-  wait "$rviz" 2>/dev/null || true
-done
-
-echo "$0: RViz keeps coming up without its camera panels -- run scripts/cameras.sh" >&2
-exit 1
+exec rviz2 -d "$run_config" "$@"

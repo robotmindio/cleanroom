@@ -101,11 +101,13 @@ def generate_launch_description():
             # the robot returns near them, so loop closure still works. Raise it on a
             # machine with memory to spare -- larger working memory closes loops sooner.
             DeclareLaunchArgument("rtabmap_wm_nodes", default_value="300"),
-            # Camera-as-laser obstacle detection, and the geometry it stands on. Measure
-            # both with `free_space.py --ros-args -p calibrate:=true` before turning it on.
-            DeclareLaunchArgument("free_space", default_value="false"),
-            DeclareLaunchArgument("camera_height", default_value="0.20"),
-            DeclareLaunchArgument("camera_pitch", default_value="0.30"),
+            # Camera-as-laser obstacle detection, and the geometry it stands on.
+            DeclareLaunchArgument("free_space", default_value="true"),
+            # Measured with the checkerboard on the floor, not taken from the URDF: the
+            # camera sits 9.3 cm up and all but level, which is why it sees a chair leg at
+            # 20 cm. Re-measure after touching the mount.
+            DeclareLaunchArgument("camera_height", default_value="0.093"),
+            DeclareLaunchArgument("camera_pitch", default_value="0.031"),
             Node(
                 package="robot_state_publisher",
                 executable="robot_state_publisher",
@@ -201,9 +203,9 @@ def generate_launch_description():
             # There is no laser on this robot, so obstacles come from the front camera: the
             # floor is flat, which makes every floor pixel a known distance, and the first
             # pixel that stops looking like floor is an obstacle. Nav2's obstacle layer
-            # reads /scan and needs nothing else. Off until the geometry is measured --
-            # `free_space.py --ros-args -p calibrate:=true` prints the two numbers, and
-            # wrong ones put phantom walls in the costmap.
+            # reads /scan and needs nothing else. The geometry below was measured with the
+            # checkerboard; `free_space.py --ros-args -p calibrate:=true` prints it again,
+            # and wrong numbers put phantom walls in the costmap.
             Node(
                 package="lekiwi_rmf",
                 executable="free_space.py",
