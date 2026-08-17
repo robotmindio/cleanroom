@@ -50,8 +50,9 @@ CAMERAS="{$entries}"
 run_host() {
   # A second host on the same bus is the confusing failure: both talk over each other and
   # the handshake dies with "[TxRxResult] Incorrect status packet!", which reads like a
-  # broken cable or a wrong port. Refuse instead.
-  if pgrep -f 'lerobot.robots.lekiwi.lekiwi_host' | grep -qv "^$$\$"; then
+  # broken cable or a wrong port. Refuse instead. Ask who holds the device rather than
+  # matching process names -- `pgrep -f` also matches the shell that typed the name.
+  if fuser -s "$(readlink -f "$PORT")" 2>/dev/null; then
     echo "$0: a LeKiwi host already owns $PORT -- stop it first" >&2
     exit 1
   fi
