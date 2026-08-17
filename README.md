@@ -233,10 +233,16 @@ scripts/cameras.sh
 To drive the base by hand:
 
 ```bash
-ros2 run lekiwi_rmf teleop.py
+scripts/teleop.sh
 ```
 
-Teleoperation and Nav2 both write `/cmd_vel`, so drive or send goals, not both at once.
+Keys go to the terminal running it, and only while that terminal has focus. Teleoperation
+and Nav2 both write `/cmd_vel`, so drive or send goals, not both at once.
+
+To drive it from RViz instead, click **2D Goal Pose**, then press on the map where the
+robot should end up and drag before releasing to set which way it should face. Nav2 plans
+against the checked-in map only: this robot has no laser, `/scan` has no publisher, and
+nothing it meets on the way will stop it.
 
 The rest of this section is what those two commands are doing, and the
 calibration each one depends on.
