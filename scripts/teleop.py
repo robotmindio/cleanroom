@@ -3,9 +3,13 @@
 
     ros2 run lekiwi_rmf teleop.py
 
-The keys are the WASD block by position, not by letter, so a Dvorak layout gets the
-same physical keys under the same fingers. The program prints the ones it picked;
-set LEKIWI_LAYOUT=qwerty or =dvorak to override what it detects.
+    up/down     forward, back        left/right  strafe left, right
+    1/2         turn left, right     space       stop
+    9/0         slower, faster       Ctrl-C      quit
+
+Arrows, digits and space are the only keys here because they sit on the same physical
+key and send the same character on every layout -- QWERTY, Dvorak, Latin American --
+so there is no layout to detect and nothing to configure.
 
 Publishes Twist on /cmd_vel, the same topic Nav2 drives, so send a goal or teleoperate
 but not both at once. Releasing a key does not stop the robot -- the base runs until the
@@ -16,7 +20,6 @@ There is nothing here that ros-jazzy-teleop-twist-keyboard would not do; it is o
 apt needs a password and this does not.
 """
 import os
-import subprocess
 import sys
 import select
 import termios
@@ -26,64 +29,35 @@ import rclpy
 from geometry_msgs.msg import Twist
 from rclpy.node import Node
 
-# x, y, yaw per QWERTY key, scaled by the current speed setting
+# x, y, yaw per key, scaled by the current speed setting. Arrows arrive as escape
+# sequences; the terminal sends these three bytes for them in normal cursor mode.
 KEYS = {
-    "w": (1.0, 0.0, 0.0),
-    "s": (-1.0, 0.0, 0.0),
-    "a": (0.0, 1.0, 0.0),
-    "d": (0.0, -1.0, 0.0),
-    "q": (0.0, 0.0, 1.0),
-    "e": (0.0, 0.0, -1.0),
+    "\x1b[A": (1.0, 0.0, 0.0),   # up
+    "\x1b[B": (-1.0, 0.0, 0.0),  # down
+    "\x1b[D": (0.0, 1.0, 0.0),   # left
+    "\x1b[C": (0.0, -1.0, 0.0),  # right
+    "1": (0.0, 0.0, 1.0),
+    "2": (0.0, 0.0, -1.0),
     " ": (0.0, 0.0, 0.0),
 }
-# What those same physical keys type on Dvorak, unshifted and shifted.
-DVORAK = str.maketrans("wasdqe-_+=", ",aoe'.[{}]")
+SLOWER, FASTER = "9", "0"
 # The base is geared for walking pace; these are gentle enough for an indoor first drive.
 LINEAR = 0.15  # m/s
 ANGULAR = 0.8  # rad/s
 
 
-def is_dvorak():
-    """True if this session types Dvorak. LEKIWI_LAYOUT wins if set."""
-    override = os.environ.get("LEKIWI_LAYOUT", "")
-    if override:
-        return override.lower().startswith("dv")
-    # ponytail: any Dvorak in the layout list counts, so a second QWERTY group we are
-    # not currently on still reads as Dvorak -- LEKIWI_LAYOUT=qwerty is the way out.
-    for cmd in (["setxkbmap", "-query"], ["localectl", "status"]):
-        try:
-            out = subprocess.run(cmd, capture_output=True, text=True, timeout=2).stdout
-        except (OSError, subprocess.SubprocessError):
-            continue
-        if "dvorak" in out.lower():
-            return True
-    return False
-
-
-def layout():
-    """(key -> twist, slower keys, faster keys, help text) for this keyboard."""
-    dvorak = is_dvorak()
-    table = DVORAK if dvorak else {}
-    keys = {k.translate(table): v for k, v in KEYS.items()}
-    slower, faster = ("[{", "]}") if dvorak else ("-_", "+=")
-    k = {name: key.translate(table) for name, key in
-         (("fwd", "w"), ("back", "s"), ("left", "a"), ("right", "d"),
-          ("ccw", "q"), ("cw", "e"))}
-    text = (
-        f"\n{'Dvorak' if dvorak else 'QWERTY'} keys:\n"
-        f"    {k['fwd']}/{k['back']}   forward, back        "
-        f"{k['left']}/{k['right']}   strafe left, right\n"
-        f"    {k['ccw']}/{k['cw']}   turn left, right     space  stop\n"
-        f"    {slower[0]}/{faster[0]}   slower, faster       Ctrl-C quit\n"
-    )
-    return keys, slower, faster, text
-
-
 def read_key(timeout):
-    """One keypress, or None if nothing arrives within timeout seconds."""
-    if select.select([sys.stdin], [], [], timeout)[0]:
-        return sys.stdin.read(1)
-    return None
+    """One keypress, or None if nothing arrives within timeout seconds.
+
+    Reads the file descriptor rather than sys.stdin, because Python's buffer would
+    swallow the tail of an arrow key's escape sequence where select cannot see it.
+    """
+    if not select.select([sys.stdin], [], [], timeout)[0]:
+        return None
+    key = os.read(sys.stdin.fileno(), 3).decode(errors="ignore")
+    if key.startswith("\x1bO"):  # some terminals put the cursor keys in application mode
+        key = "\x1b[" + key[2:]
+    return key
 
 
 def main():
@@ -91,27 +65,24 @@ def main():
     node = Node("lekiwi_teleop")
     pub = node.create_publisher(Twist, "/cmd_vel", 10)
 
-    keys, slower, faster, help_text = layout()
     settings = termios.tcgetattr(sys.stdin)
     twist = Twist()
     scale = 1.0
     try:
         tty.setcbreak(sys.stdin.fileno())
-        print(help_text)
+        print(__doc__.split("\n\n")[2])  # the key table, which is also the help above
         while rclpy.ok():
             key = read_key(0.1)
             if key == "\x03":  # cbreak leaves Ctrl-C to us
                 break
-            if key is None:  # `None in "-_"` is a TypeError, so say so first
-                pass
-            elif key in slower:
+            if key == SLOWER:
                 scale = max(0.1, scale - 0.1)
                 print(f"speed {scale:.1f}\r")
-            elif key in faster:
+            elif key == FASTER:
                 scale = min(2.0, scale + 0.1)
                 print(f"speed {scale:.1f}\r")
-            elif key in keys:
-                x, y, yaw = keys[key]
+            elif key in KEYS:
+                x, y, yaw = KEYS[key]
                 twist.linear.x = x * LINEAR * scale
                 twist.linear.y = y * LINEAR * scale
                 twist.angular.z = yaw * ANGULAR * scale
