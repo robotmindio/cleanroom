@@ -380,7 +380,9 @@ map -> odom -> base_footprint -> mast -> front_camera_link -> front_camera_optic
 | `/navigate_to_pose` | Nav2 action server | Free Fleet through Zenoh |
 | `ws://ROBOT_IP:9090` | rosbridge | Browser/external clients |
 
-The checked-in PGM provides Nav2's 2D collision map. Monocular RTAB-Map builds a visual place database and corrects pose drift; it cannot infer obstacle depth or generate a reliable occupancy map from one RGB image.
+By default nothing serves the checked-in PGM: RTAB-Map publishes `/map` itself, drawing the occupancy grid from the camera-derived `/scan` while its visual place database corrects pose drift. The robot starts at the origin of a map it has not seen yet, and the grid grows as it drives. `static_map:=true` puts the checked-in floor plan back on `/map` instead, and moves RTAB-Map's own grid to `/rtabmap/map`.
+
+A live map and the checked-in RMF navigation graph do not agree on coordinates: the graph names points in the PGM's frame. Keep `start_rmf:=false` while mapping, or regenerate the graph against the map the robot draws.
 
 ## Troubleshooting
 

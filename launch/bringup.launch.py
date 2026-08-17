@@ -53,6 +53,13 @@ def generate_launch_description():
         "'/pi/camera/front/camera_info' if '", camera_source, "' == 'remote' else '/camera/front/camera_info'"
     ])
     slam_mapping = PythonExpression(["'", slam_mode, "' == 'mapping'"])
+    static_map = LaunchConfiguration("static_map")
+    canned_map = PythonExpression([visual_slam, " and '", static_map, "' == 'true'"])
+    # Whoever owns /map owns what Nav2 plans against: the map server when a floor plan is
+    # supplied, RTAB-Map's own grid when the robot is left to draw one.
+    rtabmap_map_topic = PythonExpression([
+        "'/rtabmap/map' if '", static_map, "' == 'true' else '/map'"])
+    scanning = PythonExpression(["'", LaunchConfiguration("free_space"), "' == 'true'"])
     nav2_share = FindPackageShare("nav2_bringup")
     map_file = PathJoinSubstitution([package, "maps", "cleanroom.yaml"])
     params_file = PathJoinSubstitution([nav2_share, "params", "nav2_params.yaml"])
@@ -101,6 +108,9 @@ def generate_launch_description():
             # the robot returns near them, so loop closure still works. Raise it on a
             # machine with memory to spare -- larger working memory closes loops sooner.
             DeclareLaunchArgument("rtabmap_wm_nodes", default_value="300"),
+            # The checked-in PGM is a floor plan of a room that does not exist. Left false,
+            # nothing serves it and RTAB-Map draws the map itself from what the robot sees.
+            DeclareLaunchArgument("static_map", default_value="false"),
             # Camera-as-laser obstacle detection, and the geometry it stands on.
             DeclareLaunchArgument("free_space", default_value="true"),
             # Measured with the checkerboard on the floor, not taken from the URDF: the
@@ -251,6 +261,14 @@ def generate_launch_description():
                 executable="lekiwi_driver",
                 parameters=[{
                     "remote_ip": remote_ip,
+                    # Odometry starts where the map says the robot starts. Without a floor
+                    # plan there is no such place, so the robot's own start is the origin.
+                    "initial_x": ParameterValue(
+                        PythonExpression(["-4.0 if '", static_map, "' == 'true' else 0.0"]),
+                        value_type=float),
+                    "initial_y": ParameterValue(
+                        PythonExpression(["-2.5 if '", static_map, "' == 'true' else 0.0"]),
+                        value_type=float),
                     "xy_velocity_scale": ParameterValue(xy_velocity_scale, value_type=float),
                     "yaw_velocity_scale": ParameterValue(yaw_velocity_scale, value_type=float),
                 }],
@@ -268,7 +286,7 @@ def generate_launch_description():
                 executable="map_server",
                 name="map_server",
                 parameters=[{"yaml_filename": map_file, "use_sim_time": ParameterValue(sim, value_type=bool)}],
-                condition=IfCondition(visual_slam),
+                condition=IfCondition(canned_map),
                 output="screen",
             ),
             Node(
@@ -276,7 +294,7 @@ def generate_launch_description():
                 executable="lifecycle_manager",
                 name="lifecycle_manager_map_server",
                 parameters=[{"autostart": True, "node_names": ["map_server"], "use_sim_time": ParameterValue(sim, value_type=bool)}],
-                condition=IfCondition(visual_slam),
+                condition=IfCondition(canned_map),
                 output="screen",
             ),
             Node(
@@ -292,7 +310,7 @@ def generate_launch_description():
                     "subscribe_rgb": True,
                     "subscribe_depth": False,
                     "subscribe_rgbd": False,
-                    "subscribe_scan": False,
+                    "subscribe_scan": ParameterValue(scanning, value_type=bool),
                     "subscribe_odom_info": False,
                     "approx_sync": True,
                     "publish_tf": True,
@@ -307,15 +325,18 @@ def generate_launch_description():
                     "RGBD/NeighborLinkRefining": "true",
                     "RGBD/ProximityBySpace": "true",
                     "Reg/Force3DoF": "true",
+                    # Build the occupancy grid from the scan alone: a single RGB camera
+                    # contributes no depth, so there is nothing else to fill it with.
+                    "Grid/Sensor": "0",
+                    "Grid/RangeMax": "3.0",
+                    "Grid/CellSize": "0.05",
                 }],
                 remappings=[
                     ("rgb/image", "/camera/front/image_raw"),
                     ("rgb/camera_info", camera_info_topic),
                     ("odom", "/odom"),
-                    # RTAB-Map also publishes an occupancy grid on /map. Monocular RGB gives it
-                    # no depth, so its grid is near-empty -- and it would overwrite the checked-in
-                    # PGM in nav2's static layer, leaving the planner a metre-wide world.
-                    ("map", "/rtabmap/map"),
+                    ("scan", "/scan"),
+                    ("map", rtabmap_map_topic),
                     ("grid_map", "/rtabmap/grid_map"),
                 ],
                 condition=IfCondition(visual_slam),
