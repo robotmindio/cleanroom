@@ -196,17 +196,20 @@ calibration, cameras, and keyboard teleoperation. See
 [HARDWARE.md](HARDWARE.md). If teleoperation does not work there, nothing in
 this section will.
 
-Once the calibration steps below have been done once, two commands bring the
-whole stack up. On the robot:
+Once the calibration steps below have been done once, the wired robot — motors on
+the machine that runs ROS — comes up with one command:
 
 ```bash
-scripts/lekiwi.sh host
+scripts/up.sh
 ```
 
-On the workstation, in a second terminal:
+It starts the LeRobot host, waits for the nine servos to answer, brings up the ROS
+stack, and opens RViz; logs land in `~/.ros/lekiwi`. `scripts/ros-stop.sh` stops
+all of it. With a Pi on the robot the host runs there instead:
 
 ```bash
-scripts/ros-start.sh
+scripts/lekiwi.sh host       # on the robot
+scripts/ros-start.sh         # on the workstation
 ```
 
 `ros-start.sh` resolves the front camera by its stable `/dev/v4l/by-id` name and

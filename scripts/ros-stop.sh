@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stop a bringup and every node it left behind.
+# Stop a bringup and every node it left behind, plus the LeRobot host if one is running.
 # Usage: scripts/ros-stop.sh
 #
 # `ros2 launch` only shuts its nodes down on SIGINT to the whole process group;
@@ -28,4 +28,10 @@ for pid in $orphans; do
   kill -9 "$pid" 2>/dev/null || true
 done
 
-echo "ROS stack stopped."
+# The host is what scripts/up.sh starts first, so this is what takes it down. It holds the
+# motor bus, and leaving it behind is what makes the next `lekiwi.sh host` refuse to start.
+if pkill -f 'lerobot.robots.lekiwi.lekiwi_host'; then
+  echo "ROS stack and LeRobot host stopped."
+else
+  echo "ROS stack stopped."
+fi
