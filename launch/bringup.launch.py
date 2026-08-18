@@ -1,7 +1,7 @@
 import os
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, ExecuteProcess, IncludeLaunchDescription, TimerAction
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, IncludeLaunchDescription, Shutdown, TimerAction
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import Command, EnvironmentVariable, LaunchConfiguration, PathJoinSubstitution, PythonExpression
@@ -281,6 +281,11 @@ def generate_launch_description():
                 condition=IfCondition(real),
                 additional_env=lerobot_env,
                 output="screen",
+                # The driver exits non-zero when the LeKiwi host stops answering.
+                # Take the rest down with it: Nav2 and RMF outlive the driver
+                # happily, and a fleet manager still handing out tasks to a robot
+                # with no odometry is worse than no stack at all.
+                on_exit=Shutdown(),
             ),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(PathJoinSubstitution([nav2_share, "launch", "localization_launch.py"])),
