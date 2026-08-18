@@ -238,7 +238,24 @@ ros2 launch lekiwi_rmf bringup.launch.py mode:=sim \
   rosbridge_domain:=55
 ```
 
-This test configuration has no authentication, authorization, or TLS. Use it only on a disposable or trusted test network. Rosbridge accepts `{op: publish, topic: /cmd_vel}` from anyone who can reach the port, which is remote motion control; keep it off routable networks, or put TLS and auth in front of 9090.
+Rosbridge has no authentication, authorization, or TLS, and it accepts
+`{op: publish, topic: /cmd_vel}` from anyone who can reach the port — that is
+remote motion control. The default `rosbridge_address:=0.0.0.0` listens on every
+interface, including WiFi, which is fine for a disposable test network and wrong
+for anything else.
+
+Bind it to the tailnet instead, so the only clients that can reach it are devices
+already authenticated onto the WireGuard mesh:
+
+```bash
+scripts/up.sh rosbridge_address:=$(tailscale ip -4)
+```
+
+The port then answers on the tailnet address and refuses connections on LAN
+addresses — and on `127.0.0.1` too, so a local client has to use the tailnet
+address as well. This is a network-layer gate, not application auth: any device
+on the tailnet still has full control of the robot. Narrow it further with a
+Tailscale ACL on port 9090 if more than your own machines are on the mesh.
 
 ### Driving the robot from Fiber
 
