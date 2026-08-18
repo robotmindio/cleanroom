@@ -238,7 +238,24 @@ ros2 launch lekiwi_rmf bringup.launch.py mode:=sim \
   rosbridge_domain:=55
 ```
 
-This test configuration has no authentication, authorization, or TLS. Use it only on a disposable or trusted test network.
+This test configuration has no authentication, authorization, or TLS. Use it only on a disposable or trusted test network. Rosbridge accepts `{op: publish, topic: /cmd_vel}` from anyone who can reach the port, which is remote motion control; keep it off routable networks, or put TLS and auth in front of 9090.
+
+### Driving the robot from Fiber
+
+[Fiber](https://github.com/robotmindio/robotmind/tree/main/fiber-core) talks to this
+stack over the same port with its `rosbridge` connector, and
+`fiber-core/examples/lekiwi/` is the worked wiring: a Nav2 goal built from a
+webhook, an emergency stop, and `/rosout` errors arriving as alerts.
+
+Two things matter when subscribing from outside. Throttle everything —
+`/odom` publishes at 50 Hz and an unthrottled subscription puts 50 events a
+second through whatever is listening. And do not subscribe to image topics;
+pull a frame on demand instead, or every message carries a base64 payload.
+
+Motion belongs on the `/navigate_to_pose` action, not on `/cmd_vel`. Nav2's
+collision monitor only sees the former. Fiber's connector enforces this from
+its side by refusing any non-zero publish to `/cmd_vel`, but nothing stops
+another client, which is the same reason the port needs a trusted network.
 
 ## Real robot
 
