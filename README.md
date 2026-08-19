@@ -23,12 +23,12 @@ The package includes:
 
 ## Supported platform
 
-- Ubuntu 24.04, `amd64` or `arm64`
-- ROS 2 Jazzy
-- Gazebo Harmonic
-- Python 3.12
+- Ubuntu 24.04 or 26.04, `amd64` or `arm64`
+- ROS 2 Jazzy (24.04) or Lyrical (26.04)
+- Gazebo Harmonic (24.04) or Jetty (26.04)
+- Python 3.12 (24.04) or 3.13 (26.04)
 
-The installer intentionally rejects other platforms. Jazzy/Harmonic is the official pairing documented by [Gazebo](https://gazebosim.org/docs/harmonic/ros_installation/), and Open-RMF recommends its Jazzy binary packages via `ros-jazzy-rmf-dev`.
+The installer detects the Ubuntu version and picks the matching ROS distro; it rejects any other platform. Jazzy/Harmonic and Lyrical/Jetty are the official Gazebo pairings for each ROS release ([docs](https://gazebosim.org/docs/latest/ros_installation/)), and Open-RMF publishes `rmf-dev` binaries for both. The robot and the workstation must run the **same** distro — ROS 2 does not guarantee cross-distro wire compatibility, so a Jazzy robot needs a Jazzy workstation.
 
 ## Install everything
 
@@ -54,7 +54,7 @@ Installed upstream components are pinned where compatibility matters:
 
 | Component | Installed version |
 | --- | --- |
-| ROS/Gazebo/Open-RMF/RTAB-Map | Current Jazzy apt packages |
+| ROS/Gazebo/Open-RMF/RTAB-Map | Current apt packages for the detected distro (Jazzy or Lyrical) |
 | LeRobot | 0.6.1 |
 | Zenoh Python + ROS bridge | 1.5.0 |
 | Free Fleet | Pinned commit from its Jazzy-supported branch |
@@ -284,7 +284,7 @@ The computer attached to the motors and cameras needs LeRobot with the `lekiwi` 
 ./scripts/install-pi.sh
 ```
 
-It needs a 64-bit image with Python 3.12+ (Raspberry Pi OS Trixie or Ubuntu 24.04; Bookworm's 3.11 is too old). Then, on the Pi:
+It needs a 64-bit image with Python 3.12+ (Raspberry Pi OS Trixie, Ubuntu 24.04, or Ubuntu 26.04; Bookworm's 3.11 is too old) — and must match the workstation's Ubuntu version to get the same ROS distro on both sides. Then, on the Pi:
 
 ```bash
 scripts/lekiwi.sh host

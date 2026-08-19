@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-ROS_DISTRO=jazzy
 ZENOH_VERSION=1.5.0
 LEROBOT_VERSION=0.6.1
 FREE_FLEET_REV=e178db662720e36116a5559e4c13847466d5be2d
@@ -21,8 +20,12 @@ fi
 
 # shellcheck disable=SC1091
 source /etc/os-release
-[[ ${ID:-} == ubuntu && ${VERSION_ID:-} == 24.04 ]] || \
-  die "Ubuntu 24.04 is required (found ${PRETTY_NAME:-unknown})"
+[[ ${ID:-} == ubuntu ]] || die "Ubuntu 24.04 or 26.04 is required (found ${PRETTY_NAME:-unknown})"
+case ${VERSION_ID:-} in
+  24.04) ROS_DISTRO=jazzy ;;
+  26.04) ROS_DISTRO=lyrical ;;
+  *) die "Ubuntu 24.04 or 26.04 is required (found ${PRETTY_NAME:-unknown})" ;;
+esac
 
 case $(uname -m) in
   x86_64) ZENOH_ARCH=x86_64-unknown-linux-gnu ;;
@@ -45,32 +48,32 @@ if [[ ! -e /etc/apt/sources.list.d/ros2.sources ]]; then
     sed -n 's/.*"tag_name": "\([^"]*\)".*/\1/p')
   [[ -n $ros_apt_version ]] || die "could not determine ros-apt-source release"
   curl -fL -o "$tmp_dir/ros2-apt-source.deb" \
-    "https://github.com/ros-infrastructure/ros-apt-source/releases/download/${ros_apt_version}/ros2-apt-source_${ros_apt_version}.noble_all.deb"
+    "https://github.com/ros-infrastructure/ros-apt-source/releases/download/${ros_apt_version}/ros2-apt-source_${ros_apt_version}.${VERSION_CODENAME}_all.deb"
   "${SUDO[@]}" dpkg -i "$tmp_dir/ros2-apt-source.deb"
   find "$tmp_dir" -type f -delete
   rmdir "$tmp_dir"
 fi
 
-log "Installing ROS 2 Jazzy, Nav2, Gazebo, RTAB-Map, and Open-RMF"
+log "Installing ROS 2 ${ROS_DISTRO}, Nav2, Gazebo, RTAB-Map, and Open-RMF"
 "${SUDO[@]}" apt-get update
 if dpkg-query -W -f='${Status}' python3-paraview 2>/dev/null | grep -q 'ok installed'; then
   die "Ubuntu ParaView conflicts with RTAB-Map's python3-vtk9; remove it first: sudo apt-get remove paraview python3-paraview"
 fi
 "${SUDO[@]}" apt-get install -y \
   ros-dev-tools \
-  ros-jazzy-camera-calibration \
-  ros-jazzy-nav2-bringup \
-  ros-jazzy-navigation2 \
-  ros-jazzy-rmf-dev \
-  ros-jazzy-rmw-cyclonedds-cpp \
-  ros-jazzy-ros-base \
-  ros-jazzy-rosbridge-server \
-  ros-jazzy-ros-gz \
-  ros-jazzy-image-transport \
-  ros-jazzy-image-transport-plugins \
-  ros-jazzy-rtabmap-ros \
-  ros-jazzy-rviz2 \
-  ros-jazzy-v4l2-camera \
+  "ros-$ROS_DISTRO-camera-calibration" \
+  "ros-$ROS_DISTRO-nav2-bringup" \
+  "ros-$ROS_DISTRO-navigation2" \
+  "ros-$ROS_DISTRO-rmf-dev" \
+  "ros-$ROS_DISTRO-rmw-cyclonedds-cpp" \
+  "ros-$ROS_DISTRO-ros-base" \
+  "ros-$ROS_DISTRO-rosbridge-server" \
+  "ros-$ROS_DISTRO-ros-gz" \
+  "ros-$ROS_DISTRO-image-transport" \
+  "ros-$ROS_DISTRO-image-transport-plugins" \
+  "ros-$ROS_DISTRO-rtabmap-ros" \
+  "ros-$ROS_DISTRO-rviz2" \
+  "ros-$ROS_DISTRO-v4l2-camera" \
   python3-opencv
 
 if [[ ! -e /etc/ros/rosdep/sources.list.d/20-default.list ]]; then
@@ -116,19 +119,22 @@ log "Creating the ROS-compatible Python environment"
 python3 -m venv --system-site-packages "$WORKSPACE/.venv"
 # ponytail: ROS setup.bash and venv activate both read unset vars; -u must be off for them
 set +u
-# shellcheck disable=SC1091
-source /opt/ros/jazzy/setup.bash
+# shellcheck disable=SC1090,SC1091
+source "/opt/ros/$ROS_DISTRO/setup.bash"
 # shellcheck disable=SC1091
 source "$WORKSPACE/.venv/bin/activate"
 set -u
 python -m pip install --upgrade pip
-# ROS's compiled extensions (rmf_adapter, cv_bridge) are built against the system numpy
-# 1.26. Keeping numpy<2 here is what stops rmf_adapter from segfaulting mid-run.
-# setuptools<80 is colcon-core's ceiling. transforms3d 0.4.2 replaces the np.maximum_sctype
-# call that Ubuntu's 0.4.1 makes, which numpy removed in 2.0.
+# ROS's compiled extensions (rmf_adapter, cv_bridge) are built against the system numpy,
+# so this venv must match it or rmf_adapter segfaults mid-run: Jazzy/Noble ships numpy
+# 1.26, Lyrical/Resolute ships numpy 2.3. setuptools<80 is colcon-core's ceiling.
+# transforms3d 0.4.2 replaces the np.maximum_sctype call that Ubuntu's 0.4.1 makes, which
+# numpy removed in 2.0.
+numpy_constraint="numpy<2"
+[[ $ROS_DISTRO == jazzy ]] || numpy_constraint="numpy>=2"
 python -m pip install \
   "setuptools<80" \
-  "numpy<2" \
+  "$numpy_constraint" \
   "eclipse-zenoh==${ZENOH_VERSION}" \
   nudged pycdr2 rosbags \
   "transforms3d>=0.4.2"
