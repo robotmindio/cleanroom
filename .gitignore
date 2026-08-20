@@ -16,3 +16,4 @@ __pycache__/
 # runtime artifacts written into the source tree by RMF and RTAB-Map
 .rmf_schedule_node.yaml
 *.db
+.claude/

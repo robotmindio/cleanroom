@@ -56,6 +56,7 @@ class LeKiwiDriver(Node):
         self.last_fresh = self.last_update
         self.link_lost = False
         self.armed = False
+        self.stop_pending = True
         self.state_lock = threading.Lock()
         self.arm_zero_positions, self.arm_directions = load_calibration(calibration_file)
         if not os.path.exists(os.path.expanduser(calibration_file)):
@@ -107,6 +108,7 @@ class LeKiwiDriver(Node):
             self.armed = False
         self.command = Twist()
         self.command_stamp = self.get_clock().now()
+        self.stop_pending = True
         self.cancel_trajectory("safety disarmed")
         if was_armed:
             self.get_logger().warn(f"Robot disarmed: {state}")
@@ -233,6 +235,20 @@ class LeKiwiDriver(Node):
             self.arm_positions = arm_positions
 
         if not self.armed:
+            if self.stop_pending:
+                try:
+                    self.robot.send_action({
+                        **{f"{joint}.pos": float(observation.get(f"{joint}.pos", 0.0)) for joint in ARM_JOINTS},
+                        "x.vel": 0.0,
+                        "y.vel": 0.0,
+                        "theta.vel": 0.0,
+                    })
+                except Exception as error:
+                    self.get_logger().error(f"LeKiwi stop command failed: {error}")
+                    self.link_lost = True
+                    self.publish_safety("LINK_LOST")
+                    return
+                self.stop_pending = False
             self.publish_state(now.to_msg(), observation, (0.0, 0.0, 0.0))
             return
 
