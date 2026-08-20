@@ -49,7 +49,7 @@ class LeKiwiDriver(Node):
         initial_y = self.declare_parameter("initial_y", -2.5).value
         initial_yaw = self.declare_parameter("initial_yaw", 0.0).value
         camera_info_url = self.declare_parameter(
-            "camera_info_url", "file://${ROS_HOME}/camera_info/lekiwi_front.yaml"
+            "camera_info_url", "file://~/.ros/camera_info/lekiwi_front.yaml"
         ).value
 
         self.robot = LeKiwiClient(LeKiwiClientConfig(remote_ip=remote_ip, id=robot_id))

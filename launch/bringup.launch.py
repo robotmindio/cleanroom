@@ -94,7 +94,8 @@ def generate_launch_description():
             DeclareLaunchArgument("xy_velocity_scale", default_value="1.0"),
             DeclareLaunchArgument("yaw_velocity_scale", default_value="0.90"),
             DeclareLaunchArgument(
-                "camera_info_url", default_value="file://${ROS_HOME}/camera_info/lekiwi_front.yaml"
+                "camera_info_url",
+                default_value=["file://", EnvironmentVariable("HOME"), "/.ros/camera_info/lekiwi_front.yaml"],
             ),
             DeclareLaunchArgument(
                 "rtabmap_database",

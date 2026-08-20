@@ -16,7 +16,7 @@ back into /camera/front/image_raw. camera_info is a few hundred bytes and is rea
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.conditions import UnlessCondition
-from launch.substitutions import LaunchConfiguration, PythonExpression
+from launch.substitutions import EnvironmentVariable, LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
@@ -35,7 +35,8 @@ def generate_launch_description():
             DeclareLaunchArgument("front_device", default_value="/dev/video0"),
             DeclareLaunchArgument("wrist_device", default_value="none"),
             DeclareLaunchArgument(
-                "camera_info_url", default_value="file://${ROS_HOME}/camera_info/lekiwi_front.yaml"
+                "camera_info_url",
+                default_value=["file://", EnvironmentVariable("HOME"), "/.ros/camera_info/lekiwi_front.yaml"],
             ),
             DeclareLaunchArgument("jpeg_quality", default_value="50"),
             Node(

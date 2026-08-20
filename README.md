@@ -123,7 +123,7 @@ ros2 launch lekiwi_rmf bringup.launch.py mode:=sim \
 | `slam_mode` | `mapping`, `localization` | `mapping` | Extend or reuse the RTAB-Map database |
 | `remote_ip` | IPv4/hostname | `127.0.0.1` | Address of the LeKiwi ZMQ host |
 | `rtabmap_database` | file path | `~/.ros/lekiwi_rtabmap.db` | Visual map database |
-| `camera_info_url` | ROS camera URL | `file://${ROS_HOME}/camera_info/lekiwi_front.yaml` | Real front-camera calibration |
+| `camera_info_url` | ROS camera URL | `file://~/.ros/camera_info/lekiwi_front.yaml` | Real front-camera calibration |
 | `camera_source` | `local`, `remote` | `local` | Read the camera here, or decompress what the robot's Pi publishes |
 | `camera_device` | V4L2 path | `/dev/video0` | Front camera when `camera_source:=local` |
 | `xy_velocity_scale` | float | `1.0` | Correction for reported and commanded translation |
@@ -433,7 +433,6 @@ Use a new database filename for the first mapping run:
 ros2 launch lekiwi_rmf bringup.launch.py \
   mode:=real remote_ip:=192.168.1.50 \
   localization:=visual_slam slam_mode:=mapping \
-  camera_info_url:='file://${ROS_HOME}/camera_info/lekiwi_front.yaml' \
   rtabmap_database:=$HOME/.ros/lekiwi_cleanroom.db
 ```
 
@@ -449,7 +448,6 @@ Start from the charger pose and switch RTAB-Map to localization mode:
 ros2 launch lekiwi_rmf bringup.launch.py \
   mode:=real remote_ip:=192.168.1.50 \
   localization:=visual_slam slam_mode:=localization \
-  camera_info_url:='file://${ROS_HOME}/camera_info/lekiwi_front.yaml' \
   rtabmap_database:=$HOME/.ros/lekiwi_cleanroom.db
 ```
 
