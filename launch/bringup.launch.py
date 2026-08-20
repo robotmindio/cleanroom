@@ -24,6 +24,7 @@ def generate_launch_description():
     start_rmf = LaunchConfiguration("start_rmf")
     rmf_domain = LaunchConfiguration("rmf_domain")
     start_rosbridge = LaunchConfiguration("start_rosbridge")
+    start_moveit = LaunchConfiguration("start_moveit")
     rosbridge_address = LaunchConfiguration("rosbridge_address")
     rosbridge_port = LaunchConfiguration("rosbridge_port")
     rosbridge_domain = LaunchConfiguration("rosbridge_domain")
@@ -75,6 +76,7 @@ def generate_launch_description():
             DeclareLaunchArgument("start_rmf", default_value="true"),
             DeclareLaunchArgument("rmf_domain", default_value="55"),
             DeclareLaunchArgument("start_rosbridge", default_value="true"),
+            DeclareLaunchArgument("start_moveit", default_value="false"),
             DeclareLaunchArgument("rosbridge_address", default_value="0.0.0.0"),
             DeclareLaunchArgument("rosbridge_port", default_value="9090"),
             DeclareLaunchArgument("rosbridge_domain", default_value="0"),
@@ -234,6 +236,10 @@ def generate_launch_description():
                 condition=IfCondition(PythonExpression([
                     "'", LaunchConfiguration("free_space"), "' == 'true' and ", real])),
                 output="screen",
+            ),
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(PathJoinSubstitution([package, "launch", "moveit.launch.py"])),
+                condition=IfCondition(PythonExpression([real, " and '", start_moveit, "' == 'true'"])),
             ),
             # With the cameras on the robot's Pi, only their compressed form crosses the
             # network; this turns it back into the raw topic the rest of the graph expects.

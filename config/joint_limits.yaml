@@ -1,0 +1,8 @@
+default_velocity_scaling_factor: 0.1
+default_acceleration_scaling_factor: 0.1
+joint_limits:
+  arm_shoulder_pan: {has_velocity_limits: true, max_velocity: 2.0, has_acceleration_limits: false}
+  arm_shoulder_lift: {has_velocity_limits: true, max_velocity: 2.0, has_acceleration_limits: false}
+  arm_elbow_flex: {has_velocity_limits: true, max_velocity: 2.0, has_acceleration_limits: false}
+  arm_wrist_flex: {has_velocity_limits: true, max_velocity: 3.0, has_acceleration_limits: false}
+  arm_wrist_roll: {has_velocity_limits: true, max_velocity: 3.0, has_acceleration_limits: false}

@@ -1,24 +1,18 @@
 #!/usr/bin/env python3
 import math
+import time
 
 import rclpy
+from control_msgs.action import FollowJointTrajectory
 from geometry_msgs.msg import TransformStamped, Twist
+from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
 from tf2_ros import TransformBroadcaster
 
+from lekiwi_rmf.arm_trajectory import ARM_JOINTS, action_positions
 from lekiwi_rmf.odometry import integrate_pose
-
-
-ARM_JOINTS = (
-    "arm_shoulder_pan",
-    "arm_shoulder_lift",
-    "arm_elbow_flex",
-    "arm_wrist_flex",
-    "arm_wrist_roll",
-    "arm_gripper",
-)
 
 
 class LeKiwiDriver(Node):
@@ -49,12 +43,51 @@ class LeKiwiDriver(Node):
         self.joint_pub = self.create_publisher(JointState, "joint_states", 10)
         self.tf = TransformBroadcaster(self)
         self.create_subscription(Twist, "cmd_vel", self.on_command, 10)
+        self.trajectory_server = ActionServer(
+            self, FollowJointTrajectory, "arm_controller/follow_joint_trajectory",
+            execute_callback=self.execute_trajectory, goal_callback=self.accept_trajectory,
+            cancel_callback=lambda _: CancelResponse.ACCEPT,
+        )
         self.create_timer(0.05, self.update)
         self.get_logger().info(f"Connected to LeKiwi host at {remote_ip}")
 
     def on_command(self, message):
         self.command = message
         self.command_stamp = self.get_clock().now()
+
+    def accept_trajectory(self, goal):
+        try:
+            if not goal.trajectory.points:
+                raise ValueError("trajectory must contain a point")
+            previous_time = -1.0
+            for point in goal.trajectory.points:
+                action_positions(goal.trajectory.joint_names, point.positions)
+                point_time = point.time_from_start.sec + point.time_from_start.nanosec / 1e9
+                if point_time < 0 or point_time < previous_time:
+                    raise ValueError("trajectory times must be ordered")
+                previous_time = point_time
+        except (IndexError, ValueError):
+            return GoalResponse.REJECT
+        return GoalResponse.ACCEPT
+
+    def execute_trajectory(self, goal_handle):
+        start = time.monotonic()
+        names = goal_handle.request.trajectory.joint_names
+        for point in goal_handle.request.trajectory.points:
+            while time.monotonic() - start < point.time_from_start.sec + point.time_from_start.nanosec / 1e9:
+                if goal_handle.is_cancel_requested:
+                    goal_handle.canceled()
+                    return FollowJointTrajectory.Result(error_code=FollowJointTrajectory.Result.SUCCESSFUL)
+                time.sleep(0.01)
+            action = {
+                f"{name}.pos": float(self.robot.get_observation().get(f"{name}.pos", 0.0))
+                for name in ARM_JOINTS
+            }
+            action.update({f"{name}.pos": value for name, value in action_positions(names, point.positions).items()})
+            action.update({"x.vel": 0.0, "y.vel": 0.0, "theta.vel": 0.0})
+            self.robot.send_action(action)
+        goal_handle.succeed()
+        return FollowJointTrajectory.Result(error_code=FollowJointTrajectory.Result.SUCCESSFUL)
 
     @staticmethod
     def clamp(value, limit):
@@ -128,6 +161,7 @@ class LeKiwiDriver(Node):
         self.joint_pub.publish(joints)
 
     def destroy_node(self):
+        self.trajectory_server.destroy()
         self.robot.disconnect()
         return super().destroy_node()
 

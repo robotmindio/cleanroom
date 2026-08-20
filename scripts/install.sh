@@ -60,6 +60,7 @@ fi
   "ros-$ROS_DISTRO-camera-calibration" \
   "ros-$ROS_DISTRO-nav2-bringup" \
   "ros-$ROS_DISTRO-navigation2" \
+  "ros-$ROS_DISTRO-moveit" \
   "ros-$ROS_DISTRO-rmf-dev" \
   "ros-$ROS_DISTRO-rmw-cyclonedds-cpp" \
   "ros-$ROS_DISTRO-ros-base" \

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<robot name="lekiwi">
+  <group name="arm">
+    <chain base_link="mast" tip_link="tool"/>
+  </group>
+  <group_state name="home" group="arm">
+    <joint name="arm_shoulder_pan" value="0"/>
+    <joint name="arm_shoulder_lift" value="0"/>
+    <joint name="arm_elbow_flex" value="0"/>
+    <joint name="arm_wrist_flex" value="0"/>
+    <joint name="arm_wrist_roll" value="0"/>
+  </group_state>
+</robot>

@@ -16,6 +16,7 @@ The package includes:
 - a Gazebo cleanroom and LeKiwi model;
 - a metric Nav2 occupancy map and matching RMF navigation graph;
 - a LeRobot-to-ROS driver for velocity, odometry, arm joints, and the front camera;
+- MoveIt planning and execution for the five-joint arm on real hardware;
 - RTAB-Map monocular place recognition and loop closure using metric wheel odometry;
 - a Free Fleet adapter connecting Nav2 to Open-RMF;
 - optional rosbridge WebSocket access for browsers and external applications;
@@ -130,11 +131,24 @@ ros2 launch lekiwi_rmf bringup.launch.py mode:=sim \
 | `start_rmf` | `true`, `false` | `true` | Start Zenoh, RMF schedule, dispatcher, and fleet adapter |
 | `rmf_domain` | integer | `55` | DDS domain used by RMF processes |
 | `start_rosbridge` | `true`, `false` | `true` | Start rosbridge WebSocket and ROS API nodes |
+| `start_moveit` | `true`, `false` | `false` | Start MoveIt arm planning and execution (real hardware only) |
 | `rosbridge_address` | bind address | `0.0.0.0` | Interface exposed by rosbridge |
 | `rosbridge_port` | TCP port | `9090` | WebSocket listening port |
 | `rosbridge_domain` | integer | `0` | ROS graph exposed through rosbridge |
 
 Only one localization mode should run. `visual_slam` publishes `map -> odom` through RTAB-Map; `amcl` publishes it from the fixed occupancy map.
+
+### Arm planning
+
+Start MoveIt with the real robot, then add RViz's **MotionPlanning** panel, select
+the `arm` group, and plan and execute normally:
+
+```bash
+ros2 launch lekiwi_rmf bringup.launch.py mode:=real start_moveit:=true
+```
+
+MoveIt executes through `/arm_controller/follow_joint_trajectory`. Gazebo keeps
+the unactuated arm rigid, so arm execution is deliberately unavailable in `mode:=sim`.
 
 ### Where the camera comes from
 
