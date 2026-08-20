@@ -131,7 +131,7 @@ ros2 launch lekiwi_rmf bringup.launch.py mode:=sim \
 | `start_rmf` | `true`, `false` | `true` | Start Zenoh, RMF schedule, dispatcher, and fleet adapter |
 | `rmf_domain` | integer | `55` | DDS domain used by RMF processes |
 | `start_rosbridge` | `true`, `false` | `true` | Start rosbridge WebSocket and ROS API nodes |
-| `start_moveit` | `true`, `false` | `false` | Start MoveIt arm planning and execution (real hardware only) |
+| `start_moveit` | `true`, `false` | `true` | Start MoveIt arm planning and execution (real hardware only) |
 | `rosbridge_address` | bind address | `0.0.0.0` | Interface exposed by rosbridge |
 | `rosbridge_port` | TCP port | `9090` | WebSocket listening port |
 | `rosbridge_domain` | integer | `0` | ROS graph exposed through rosbridge |
@@ -144,7 +144,7 @@ Start MoveIt with the real robot, then add RViz's **MotionPlanning** panel, sele
 the `arm` group, and plan and execute normally:
 
 ```bash
-ros2 launch lekiwi_rmf bringup.launch.py mode:=real start_moveit:=true
+ros2 launch lekiwi_rmf bringup.launch.py mode:=real
 ```
 
 MoveIt executes through `/arm_controller/follow_joint_trajectory`. Gazebo keeps

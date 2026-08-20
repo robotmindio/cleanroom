@@ -76,7 +76,7 @@ def generate_launch_description():
             DeclareLaunchArgument("start_rmf", default_value="true"),
             DeclareLaunchArgument("rmf_domain", default_value="55"),
             DeclareLaunchArgument("start_rosbridge", default_value="true"),
-            DeclareLaunchArgument("start_moveit", default_value="false"),
+            DeclareLaunchArgument("start_moveit", default_value="true"),
             DeclareLaunchArgument("rosbridge_address", default_value="0.0.0.0"),
             DeclareLaunchArgument("rosbridge_port", default_value="9090"),
             DeclareLaunchArgument("rosbridge_domain", default_value="0"),
