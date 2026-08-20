@@ -155,6 +155,17 @@ rosdep install --from-paths \
   "$WORKSPACE/src/free_fleet" \
   "$WORKSPACE/src/rmf_demos/rmf_demos_tasks" \
   --ignore-src --rosdistro "$ROS_DISTRO" -yr
+# colcon reuses each package's CMake cache. If this repository was previously built from
+# another worktree, CMake refuses the reused cache before it can regenerate anything.
+package_build="$WORKSPACE/build/lekiwi_rmf"
+cache="$package_build/CMakeCache.txt"
+if [[ -f $cache ]]; then
+  cached_source=$(sed -n 's/^CMAKE_HOME_DIRECTORY:INTERNAL=//p' "$cache")
+  if [[ -n $cached_source && $cached_source != "$PROJECT_ROOT" ]]; then
+    log "Removing stale lekiwi_rmf build cache from $cached_source"
+    rm -rf -- "$package_build"
+  fi
+fi
 colcon --log-base "$WORKSPACE/log" build \
   --base-paths "$PROJECT_ROOT" "$WORKSPACE/src/free_fleet" "$WORKSPACE/src/rmf_demos/rmf_demos_tasks" \
   --packages-select lekiwi_rmf free_fleet free_fleet_adapter rmf_demos_tasks \
