@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import math
+import os
 import threading
 import time
 
@@ -14,7 +15,9 @@ from rclpy.node import Node
 from sensor_msgs.msg import JointState
 from tf2_ros import TransformBroadcaster
 
-from lekiwi_rmf.arm_trajectory import ARM_JOINTS, action_positions, interpolate_positions
+from lekiwi_rmf.arm_trajectory import (
+    ARM_JOINTS, action_positions, interpolate_positions, joint_positions, load_calibration,
+)
 from lekiwi_rmf.odometry import integrate_pose
 
 
@@ -33,6 +36,9 @@ class LeKiwiDriver(Node):
         self.command_timeout = self.declare_parameter("command_timeout", 0.4).value
         self.trajectory_tolerance = self.declare_parameter("trajectory_tolerance", 0.05).value
         self.trajectory_timeout = self.declare_parameter("trajectory_timeout", 5.0).value
+        calibration_file = self.declare_parameter(
+            "arm_calibration_file", os.path.expanduser("~/.ros/lekiwi_arm_calibration.json")
+        ).value
         initial_x = self.declare_parameter("initial_x", -4.0).value
         initial_y = self.declare_parameter("initial_y", -2.5).value
         initial_yaw = self.declare_parameter("initial_yaw", 0.0).value
@@ -43,6 +49,11 @@ class LeKiwiDriver(Node):
         self.command_stamp = self.get_clock().now()
         self.pose = (initial_x, initial_y, initial_yaw)
         self.last_update = self.get_clock().now()
+        self.arm_zero_positions, self.arm_directions = load_calibration(calibration_file)
+        if not os.path.exists(os.path.expanduser(calibration_file)):
+            self.get_logger().warn(
+                f"No URDF arm calibration at {calibration_file}; publishing raw LeRobot joint positions"
+            )
         self.arm_positions = {name: 0.0 for name in ARM_JOINTS}
         self.trajectory = None
         self.trajectory_lock = threading.Lock()
@@ -70,7 +81,10 @@ class LeKiwiDriver(Node):
                 raise ValueError("trajectory must contain a point")
             previous_time = -1.0
             for point in goal.trajectory.points:
-                action_positions(goal.trajectory.joint_names, point.positions)
+                action_positions(
+                    goal.trajectory.joint_names, point.positions,
+                    self.arm_zero_positions, self.arm_directions,
+                )
                 point_time = point.time_from_start.sec + point.time_from_start.nanosec / 1e9
                 if point_time < 0 or point_time < previous_time:
                     raise ValueError("trajectory times must be ordered")
@@ -122,12 +136,9 @@ class LeKiwiDriver(Node):
         dt = (now - self.last_update).nanoseconds / 1e9
         self.last_update = now
         observation = self.robot.get_observation()
-        arm_positions = {
-            name: float(observation.get(f"{name}.pos", 0.0)) / 100.0 * math.pi / 2
-            if name == "arm_gripper"
-            else math.radians(float(observation.get(f"{name}.pos", 0.0)))
-            for name in ARM_JOINTS
-        }
+        arm_positions = joint_positions(
+            observation, self.arm_zero_positions, self.arm_directions
+        )
 
         stale = (now - self.command_stamp).nanoseconds / 1e9 > self.command_timeout
         cmd = Twist() if stale else self.command
@@ -144,7 +155,8 @@ class LeKiwiDriver(Node):
                 )
                 action.update({
                     f"{name}.pos": value for name, value in action_positions(
-                        positions.keys(), positions.values()
+                        positions.keys(), positions.values(),
+                        self.arm_zero_positions, self.arm_directions,
                     ).items()
                 })
                 final_time, final_positions = trajectory["points"][-1]

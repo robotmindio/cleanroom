@@ -152,6 +152,26 @@ the unactuated arm rigid, so arm execution is deliberately unavailable in `mode:
 The host uses five motor read retries while the arm moves; override only after validating
 your bus with `LEKIWI_READ_RETRIES`.
 
+### Arm pose calibration
+
+LeRobot's motor calibration defines motor ranges, not the URDF's upright zero pose. Once,
+with the stack stopped and torque off, support the arm and align its links to the upright
+URDF pose (and put the gripper at its zero position). Start the stack, then capture that
+held pose:
+
+```bash
+scripts/up.sh
+ros2 run lekiwi_rmf arm_calibration.py
+scripts/ros-stop.sh
+scripts/up.sh
+```
+
+The command writes `~/.ros/lekiwi_arm_calibration.json`. The driver converts both reported
+joint states and MoveIt commands through this machine-local mapping. Do not replace it with
+LeRobot's own calibration file: that file records motor limits and mid-range homing, not the
+robot geometry. If a joint moves opposite in RViz after restarting, change only that joint's
+`directions` value in this file from `1` to `-1`, then restart again.
+
 ### Where the camera comes from
 
 The cameras are read by `v4l2_camera` nodes on whichever machine they are plugged into, not relayed through the LeRobot host. The host aborts the whole robot — motor control included — when a camera frame arrives more than half a second late, and USB webcams do that regularly.
