@@ -14,6 +14,7 @@ import pytest
 
 cv2 = pytest.importorskip("cv2")
 rclpy = pytest.importorskip("rclpy")
+from sensor_msgs.msg import CameraInfo
 
 SCRIPT = pathlib.Path(__file__).resolve().parent.parent / "scripts" / "free_space.py"
 spec = importlib.util.spec_from_file_location("free_space", SCRIPT)
@@ -82,3 +83,11 @@ def test_camera_fault_reports_a_blocked_scan(node):
     scan = node.blocked_scan(stamp=None)
     assert len(scan.ranges) == 41
     assert all(value == pytest.approx(0.11) for value in scan.ranges)
+
+
+def test_invalid_camera_intrinsics_are_rejected(node):
+    info = CameraInfo()
+    info.k = [0.0] * 9
+    node.on_info(info)
+    assert node.k is None
+    node.k, node.d = K, np.zeros(5)

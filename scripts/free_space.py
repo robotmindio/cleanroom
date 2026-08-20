@@ -73,8 +73,13 @@ class FreeSpace(Node):
     # -- geometry ---------------------------------------------------------------
 
     def on_info(self, msg):
-        self.k = np.array(msg.k, dtype=np.float64).reshape(3, 3)
-        self.d = np.array(msg.d, dtype=np.float64)
+        k = np.array(msg.k, dtype=np.float64).reshape(3, 3)
+        d = np.array(msg.d, dtype=np.float64)
+        if not np.isfinite(k).all() or not np.isfinite(d).all() or k[0, 0] <= 0 or k[1, 1] <= 0:
+            self.k = self.d = None
+            self.get_logger().warn("ignoring invalid camera intrinsics")
+            return
+        self.k, self.d = k, d
 
     def ground_points(self, rows, cols):
         """Where each pixel of a grid lands on the floor, in metres from the camera.

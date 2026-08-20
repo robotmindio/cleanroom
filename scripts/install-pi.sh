@@ -7,6 +7,7 @@ set -Eeuo pipefail
 LEROBOT_VERSION=0.6.1
 VENV=${LEKIWI_LEROBOT_VENV:-"$HOME/lerobot-venv"}
 EXAMPLES=${LEKIWI_LEROBOT_SRC:-"$HOME/lerobot-src"}
+PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 
 log() { printf '\n==> %s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
@@ -151,7 +152,7 @@ One-time motor setup (see HARDWARE.md for the full procedure):
   lerobot-calibrate --robot.type=lekiwi --robot.id=lekiwi_1
 
 Then start the host that the workstation connects to:
-  python -m lerobot.robots.lekiwi.lekiwi_host --robot.id=lekiwi_1 --host.connection_time_s=86400
+  $PROJECT_ROOT/scripts/lekiwi.sh host
 
 This Pi's address (give it to the workstation as remote_ip):
   $(hostname -I 2>/dev/null | awk '{print $1}')
