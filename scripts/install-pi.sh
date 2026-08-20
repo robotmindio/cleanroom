@@ -25,7 +25,7 @@ case $(uname -m) in
 esac
 
 # LeRobot 0.6.1 declares requires-python >=3.12. Raspberry Pi OS Bookworm ships 3.11 and
-# will fail here; Trixie (3.13), Ubuntu 24.04 (3.12), and Ubuntu 26.04 (3.13) all work.
+# will fail here; Trixie (3.13) and Ubuntu 24.04 (3.12) both work.
 python3 - <<'PY' || die "LeRobot $LEROBOT_VERSION needs Python 3.12+; this image has an older one"
 import sys
 raise SystemExit(0 if sys.version_info >= (3, 12) else 1)
@@ -96,13 +96,12 @@ python -c 'import torch; assert "+cpu" in torch.__version__, f"CUDA build leaked
 log "Installing the ROS camera stack"
 # The cameras are wired to this Pi, so the ROS nodes that read them run here. Only
 # ros-base plus the camera packages -- Nav2, RTAB-Map and RMF stay on the workstation.
-# ROS 2 ships binaries for specific Ubuntu codenames only (noble/jazzy, resolute/lyrical);
+# ROS 2 ships binaries for Ubuntu noble/Jazzy only;
 # Raspberry Pi OS has no ROS packages, so any other image gets the LeRobot host and
 # nothing else. Must match the workstation's distro -- see scripts/install.sh.
 codename=$(. /etc/os-release && echo "${VERSION_CODENAME:-}")
 case $codename in
   noble) pi_ros_distro=jazzy ;;
-  resolute) pi_ros_distro=lyrical ;;
   *) pi_ros_distro="" ;;
 esac
 if [[ -n $pi_ros_distro ]]; then
@@ -125,8 +124,8 @@ http://packages.ros.org/ros2/ubuntu $codename main" |
     "ros-$pi_ros_distro-image-transport-plugins" \
     "ros-$pi_ros_distro-rmw-cyclonedds-cpp"
 else
-  printf 'not Ubuntu 24.04 or 26.04 -- skipping ROS; this Pi can run the LeRobot host but\n'
-  printf 'not publish cameras to ROS. Reimage with Ubuntu Server 24.04 or 26.04 arm64 for that.\n'
+  printf 'not Ubuntu 24.04 -- skipping ROS; this Pi can run the LeRobot host but\n'
+  printf 'not publish cameras to ROS. Reimage with Ubuntu Server 24.04 arm64 for that.\n'
 fi
 
 log "Fetching the LeKiwi example scripts"

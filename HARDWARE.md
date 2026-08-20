@@ -36,14 +36,12 @@ decides this:
 | Image | Python | Verdict |
 | --- | --- | --- |
 | Ubuntu Server 24.04 LTS (arm64) | 3.12 | **Required for a Jazzy workstation.** Has ROS 2 Jazzy packages |
-| Ubuntu Server 26.04 LTS (arm64) | 3.13 | **Required for a Lyrical workstation.** Has ROS 2 Lyrical packages |
 | Raspberry Pi OS **Trixie** (64-bit) | 3.13 | LeRobot host works; no ROS packages exist, so no cameras in ROS |
 | Raspberry Pi OS **Bookworm** | 3.11 | **Will not work** — below LeRobot's floor |
 | Any 32-bit image | — | **Will not work** — no aarch64 PyTorch wheels |
 
-Match the workstation: a Jazzy workstation needs a noble (24.04) Pi, a Lyrical workstation
-needs a resolute (26.04) Pi — ROS 2 does not guarantee cross-distro wire compatibility.
-ROS 2 publishes binaries per Ubuntu codename (noble/Jazzy, resolute/Lyrical) only, and the
+Match the workstation: a Jazzy workstation needs a noble (24.04) Pi — ROS 2 does not
+guarantee cross-distro wire compatibility. ROS 2 publishes binaries for noble/Jazzy, and the
 Pi needs ROS to publish its cameras. On any other image `scripts/install-pi.sh` installs the LeRobot
 host and says it skipped ROS.
 
@@ -103,14 +101,12 @@ This split only exists on the workstation; the Pi has no ROS, so `~/lerobot-venv
 is the only environment there.
 
 LeRobot requires `numpy>=2`; ROS 2's compiled extensions are built against the
-system's numpy — 1.26 on Jazzy/Ubuntu 24.04, 2.3 on Lyrical/Ubuntu 26.04. On Jazzy
-that mismatch does not merely warn — `rmf_adapter` segfaults mid-run — so the
-workstation always keeps two virtualenvs, even on Lyrical where both could in
-principle share one interpreter:
+system's numpy — 1.26 on Jazzy/Ubuntu 24.04. That mismatch does not merely warn —
+`rmf_adapter` segfaults mid-run — so the workstation keeps two virtualenvs:
 
 | Venv | numpy | Holds | Used by |
 | --- | --- | --- | --- |
-| `.venv` | 1.26 (Jazzy) / 2.3 (Lyrical) | zenoh, pycdr2, nudged, rosbags, transforms3d | Everything ROS; `scripts/setup.bash` activates it |
+| `.venv` | 1.26 | zenoh, pycdr2, nudged, rosbags, transforms3d | Everything ROS; `scripts/setup.bash` activates it |
 | `.venv-lerobot` | 2.2 | lerobot + feetech/pyzmq | LeRobot CLIs and the hardware driver only |
 
 **For every command in this document, activate the LeRobot venv — never

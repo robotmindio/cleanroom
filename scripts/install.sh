@@ -20,12 +20,8 @@ fi
 
 # shellcheck disable=SC1091
 source /etc/os-release
-[[ ${ID:-} == ubuntu ]] || die "Ubuntu 24.04 or 26.04 is required (found ${PRETTY_NAME:-unknown})"
-case ${VERSION_ID:-} in
-  24.04) ROS_DISTRO=jazzy ;;
-  26.04) ROS_DISTRO=lyrical ;;
-  *) die "Ubuntu 24.04 or 26.04 is required (found ${PRETTY_NAME:-unknown})" ;;
-esac
+[[ ${ID:-} == ubuntu && ${VERSION_ID:-} == 24.04 ]] || die "Ubuntu 24.04 is required (found ${PRETTY_NAME:-unknown})"
+ROS_DISTRO=jazzy
 
 case $(uname -m) in
   x86_64) ZENOH_ARCH=x86_64-unknown-linux-gnu ;;
@@ -127,14 +123,12 @@ set -u
 python -m pip install --upgrade pip
 # ROS's compiled extensions (rmf_adapter, cv_bridge) are built against the system numpy,
 # so this venv must match it or rmf_adapter segfaults mid-run: Jazzy/Noble ships numpy
-# 1.26, Lyrical/Resolute ships numpy 2.3. setuptools<80 is colcon-core's ceiling.
+# 1.26. setuptools<80 is colcon-core's ceiling.
 # transforms3d 0.4.2 replaces the np.maximum_sctype call that Ubuntu's 0.4.1 makes, which
 # numpy removed in 2.0.
-numpy_constraint="numpy<2"
-[[ $ROS_DISTRO == jazzy ]] || numpy_constraint="numpy>=2"
 python -m pip install \
   "setuptools<80" \
-  "$numpy_constraint" \
+  "numpy<2" \
   "eclipse-zenoh==${ZENOH_VERSION}" \
   nudged pycdr2 rosbags \
   "transforms3d>=0.4.2"
