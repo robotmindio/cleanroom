@@ -38,7 +38,18 @@ log "Installing Ubuntu and ROS repository prerequisites"
 "${SUDO[@]}" apt-get install -y curl git locales python3-pip python3-venv software-properties-common unzip
 "${SUDO[@]}" add-apt-repository -y universe
 
-if [[ ! -e /etc/apt/sources.list.d/ros2.sources ]]; then
+legacy_ros_source=/etc/apt/sources.list.d/ros2.list
+modern_ros_source=/etc/apt/sources.list.d/ros2.sources
+# Older ROS instructions create ros2.list directly. The current ros-apt-source
+# package creates ros2.sources with an inline key; apt refuses to read both for
+# the same repository because their Signed-By values differ. Keep the legacy
+# file beside it, disabled, so this migration is reversible.
+if [[ -e $legacy_ros_source ]]; then
+  log "Disabling the legacy ROS apt source"
+  "${SUDO[@]}" mv -f "$legacy_ros_source" "$legacy_ros_source.disabled"
+fi
+
+if [[ ! -e $modern_ros_source ]]; then
   tmp_dir=$(mktemp -d)
   ros_apt_version=$(curl -fsSL https://api.github.com/repos/ros-infrastructure/ros-apt-source/releases/latest |
     sed -n 's/.*"tag_name": "\([^"]*\)".*/\1/p')

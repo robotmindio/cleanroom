@@ -293,14 +293,14 @@ stack, and opens RViz; logs land in `~/.ros/lekiwi`. `scripts/ros-stop.sh` stops
 all of it. With a Pi on the robot the host runs there instead:
 
 ```bash
-scripts/lekiwi.sh host       # on the robot
-scripts/ros-start.sh         # on the workstation
+scripts/pi-up.sh                         # on the robot Pi
+scripts/workstation-up.sh <PI_IP>         # on the workstation
 ```
 
-`ros-start.sh` resolves the front camera by its stable `/dev/v4l/by-id` name and
-launches everything in `mode:=real`; any extra arguments go straight to the launch
-file, so `scripts/ros-start.sh slam_mode:=localization remote_ip:=192.168.1.50`
-works. The host has to be up first — the driver gives up and exits if no host
+`workstation-up.sh` starts the remote ROS stack and RViz; any following arguments go
+to the ROS launch file, so
+`scripts/workstation-up.sh 192.168.1.50 slam_mode:=localization` works. The Pi host
+has to be up first — the driver gives up and exits if no host
 answers on `5555/tcp`. Stop everything with `Ctrl-C`, or `scripts/ros-stop.sh`
 from another terminal.
 
@@ -363,7 +363,7 @@ calibration each one depends on.
 
 ### 1. Start the LeRobot host
 
-The computer attached to the motors and cameras needs LeRobot with the `lekiwi` extra. If it is a separate Raspberry Pi, copy this repository there and install only the host side — `scripts/install.sh` is for the ROS workstation and must not run on the Pi:
+The computer attached to the motors and cameras needs LeRobot with the `lekiwi` extra. If it is a separate Raspberry Pi, copy this repository there and install the Pi side:
 
 ```bash
 ./scripts/install-pi.sh
@@ -372,7 +372,7 @@ The computer attached to the motors and cameras needs LeRobot with the `lekiwi` 
 It needs a 64-bit image with Python 3.12+. Use Ubuntu 24.04 when the Pi publishes cameras to this Jazzy workstation; Raspberry Pi OS Trixie can run the LeRobot host only. Then, on the Pi:
 
 ```bash
-scripts/lekiwi.sh host
+scripts/pi-up.sh
 ```
 
 Keep the host watchdog enabled. Ports `5555/tcp` and `5556/tcp` must be reachable from the ROS computer; do not expose them to an untrusted network.

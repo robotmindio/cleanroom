@@ -106,7 +106,16 @@ case $codename in
   *) pi_ros_distro="" ;;
 esac
 if [[ -n $pi_ros_distro ]]; then
-  if [[ ! -f /etc/apt/sources.list.d/ros2.list ]]; then
+  legacy_ros_source=/etc/apt/sources.list.d/ros2.list
+  modern_ros_source=/etc/apt/sources.list.d/ros2.sources
+  # The workstation installer uses ros-apt-source (ros2.sources). Do not add
+  # the legacy list beside it: apt rejects their different Signed-By settings.
+  if [[ -e $legacy_ros_source && -e $modern_ros_source ]]; then
+    log "Disabling the duplicate legacy ROS apt source"
+    need_root "disable the duplicate ROS 2 apt source"
+    "${SUDO[@]}" mv -f "$legacy_ros_source" "$legacy_ros_source.disabled"
+  fi
+  if [[ ! -e $legacy_ros_source && ! -e $modern_ros_source ]]; then
     need_root "add the ROS 2 apt repository"
     "${SUDO[@]}" apt-get install -y curl gnupg
     "${SUDO[@]}" curl -fsSL -o /usr/share/keyrings/ros-archive-keyring.gpg \
@@ -149,10 +158,10 @@ Activate the environment in every new shell:
 One-time motor setup (see HARDWARE.md for the full procedure):
   lerobot-find-port
   lerobot-setup-motors --robot.type=lekiwi --robot.port=/dev/ttyACM0
-  lerobot-calibrate --robot.type=lekiwi --robot.id=lekiwi_1
 
-Then start the host that the workstation connects to:
-  $PROJECT_ROOT/scripts/lekiwi.sh host
+Then start the Pi host and camera publisher. On its first run it guides you through
+motor calibration automatically:
+  $PROJECT_ROOT/scripts/pi-up.sh
 
 This Pi's address (give it to the workstation as remote_ip):
   $(hostname -I 2>/dev/null | awk '{print $1}')

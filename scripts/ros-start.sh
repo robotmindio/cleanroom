@@ -5,7 +5,7 @@
 #   scripts/ros-start.sh slam_mode:=localization            # drive a map you already built
 #   scripts/ros-start.sh start_rmf:=false                   # Nav2 only
 # Override per machine: LEKIWI_FRONT, LEKIWI_WS
-# The LeRobot host must already be running -- `scripts/lekiwi.sh host` on the robot.
+# The LeRobot host must already be running -- `scripts/robot-host.sh` on the robot.
 set -Eeuo pipefail
 
 cd "$(dirname "$0")/.."
@@ -17,16 +17,30 @@ source scripts/setup.bash
 set -u
 
 # /dev/videoN shifts on every USB re-enumeration and on a laptop video0 is the built-in
-# webcam, so resolve the front camera by its device name -- same glob as lekiwi.sh.
+# webcam, so resolve the front camera by its device name -- same glob as robot-host.sh.
+# A workstation using the robot Pi's ROS camera topics has no local camera at all.
 first_match() { # first existing path matching a glob, empty if none
   set -- $1
   [ -e "$1" ] && printf '%s' "$1"
   return 0
 }
-FRONT="${LEKIWI_FRONT:-$(first_match '/dev/v4l/by-id/*WEBCAM*-video-index0')}"
-[ -n "$FRONT" ] || { echo "$0: no front camera found -- set LEKIWI_FRONT" >&2; exit 1; }
-# The wrist camera is optional: unplugged, or LEKIWI_WRIST=none, and the stack runs without it.
-WRIST="${LEKIWI_WRIST:-$(first_match '/dev/v4l/by-id/*JYU2C*-video-index0')}"
+camera_source=local
+for arg in "$@"; do
+  case "$arg" in
+    camera_source:=remote) camera_source=remote ;;
+    camera_source:=local) camera_source=local ;;
+  esac
+done
+
+if [[ $camera_source == local ]]; then
+  FRONT="${LEKIWI_FRONT:-$(first_match '/dev/v4l/by-id/*WEBCAM*-video-index0')}"
+  [ -n "$FRONT" ] || { echo "$0: no front camera found -- set LEKIWI_FRONT or pass camera_source:=remote" >&2; exit 1; }
+  # The wrist camera is optional: unplugged, or LEKIWI_WRIST=none, and the stack runs without it.
+  WRIST="${LEKIWI_WRIST:-$(first_match '/dev/v4l/by-id/*JYU2C*-video-index0')}"
+else
+  FRONT=none
+  WRIST=none
+fi
 
 exec ros2 launch lekiwi_rmf bringup.launch.py mode:=real \
   camera_device:="$FRONT" wrist_camera_device:="${WRIST:-none}" "$@"

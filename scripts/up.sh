@@ -34,7 +34,7 @@ fi
 if host_up; then
   echo "host: already running"
 else
-  setsid scripts/lekiwi.sh host > "$LOGS/host.log" 2>&1 &
+  setsid scripts/robot-host.sh > "$LOGS/host.log" 2>&1 &
   wait_for 90 host_up || {
     echo "host did not come up -- see $LOGS/host.log" >&2
     tail -5 "$LOGS/host.log" >&2

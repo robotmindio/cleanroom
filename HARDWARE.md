@@ -21,9 +21,10 @@ included — when a camera frame arrives more than half a second late, which a U
 webcam does regularly. Keeping the cameras in their own ROS nodes means a stalled
 camera costs frames instead of the robot.
 
-The Pi therefore runs `ros-base` plus the camera packages, which `scripts/install-pi.sh`
-installs. It does not run Nav2, RTAB-Map or RMF, so `scripts/install.sh` must not be
-run there.
+The Pi therefore normally runs `ros-base` plus the camera packages, which
+`scripts/install-pi.sh` installs. The full stack belongs on the workstation. A Pi 5
+can also run `scripts/install.sh` for occasional self-contained debugging, but Nav2 and
+especially RTAB-Map are memory-constrained there.
 
 For the **wired** LeKiwi variant there is no Pi: run both installers on the
 workstation, use `remote_ip:=127.0.0.1`, and leave `camera_source:=local`.
@@ -187,13 +188,17 @@ for which wheel is which.
 
 Only the arms need calibration; the wheels do not.
 
+Run `scripts/robot-host.sh` with no arguments. On its first run for an ID it
+automatically starts calibration, then starts the complete host when calibration
+finishes. To force calibration again, run:
+
 ```bash
-scripts/lekiwi.sh calibrate
+scripts/robot-host.sh calibrate
 ```
 
-That wraps `lerobot-calibrate` with `--robot.cameras='{}'`. Calibration only
-talks to the motor bus, but `LeKiwiConfig` still opens both cameras on connect,
-so a missing or misnumbered camera aborts it before the first prompt.
+Calibration wraps `lerobot-calibrate` with `--robot.cameras='{}'`. Calibration
+only talks to the motor bus, but `LeKiwiConfig` still opens both cameras on
+connect, so a missing or misnumbered camera aborts it before the first prompt.
 
 Move every joint to the middle of its range, press Enter, then sweep each joint
 through its full range. Use `lekiwi_1` as the ID — that is the default the ROS
@@ -232,7 +237,7 @@ Identify each device by model before trusting the numbering:
 udevadm info -q property -n /dev/video2 | grep ID_MODEL=
 ```
 
-`scripts/lekiwi.sh host` carries the resulting paths; set `LEKIWI_FRONT` and
+`scripts/robot-host.sh` carries the resulting paths; set `LEKIWI_FRONT` and
 `LEKIWI_WRIST` if yours differ from `/dev/video2` and `/dev/video4`.
 
 ## 5. Run the host
@@ -241,16 +246,15 @@ On the machine physically wired to the motors — the Pi on the robot, or your
 laptop for the wired LeKiwi variant:
 
 ```bash
-scripts/lekiwi.sh host
+scripts/robot-host.sh
 ```
 
 Defaults: command socket `5555/tcp`, observations `5556/tcp`, watchdog 500 ms,
 loop 30 Hz. The watchdog stops the base when commands stop arriving. It is not
 an E-stop.
 
-`host` carries motors only. Use `scripts/lekiwi.sh host-cams` for standalone LeRobot
-work — teleoperation and dataset recording, where the client wants images over ZMQ.
-Under ROS the cameras come from their own nodes instead:
+The host always carries motors and both cameras, so its ZMQ clients can use images
+for teleoperation and dataset recording. ROS can still use its own camera nodes:
 
 ```bash
 source scripts/setup-pi.bash
@@ -260,6 +264,13 @@ ros2 launch launch/pi_cameras.launch.py \
 
 Find that path with `ls /dev/v4l/by-id/`. Use it rather than `/dev/video0`, which is
 reassigned whenever USB re-enumerates.
+
+For the normal two-computer setup, use the single Pi launcher instead. It starts a
+motor-only host and the ROS camera publisher, so only one process owns the webcams:
+
+```bash
+scripts/pi-up.sh
+```
 
 Only the compressed image crosses the network. At the default `jpeg_quality:=50` a
 640x480 frame measures about 14 KB, so 30 Hz costs roughly 3 Mbit/s; the same frame at

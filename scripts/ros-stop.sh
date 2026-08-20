@@ -7,6 +7,8 @@
 set -Eeuo pipefail
 
 mapfile -t launch_pids < <(pgrep -f 'ros2 launch lekiwi_rmf' || true)
+mapfile -t pi_camera_pids < <(pgrep -f 'ros2 launch .*pi_cameras\.launch\.py' || true)
+launch_pids+=("${pi_camera_pids[@]}")
 for pid in "${launch_pids[@]}"; do
   kill -INT "$pid" 2>/dev/null || true
 done
@@ -34,7 +36,7 @@ for pid in "${launch_pids[@]}"; do
 done
 
 # The host is what scripts/up.sh starts first, so this is what takes it down. It holds the
-# motor bus, and leaving it behind is what makes the next `lekiwi.sh host` refuse to start.
+# motor bus, and leaving it behind is what makes the next `robot-host.sh` refuse to start.
 if pkill -f 'lerobot.robots.lekiwi.lekiwi_host'; then
   echo "ROS stack and LeRobot host stopped."
 else

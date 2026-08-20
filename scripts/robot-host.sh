@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Motor calibration and ZMQ host for a LeKiwi, with this machine's camera paths.
-# Usage: scripts/lekiwi.sh calibrate|host
+# Motor calibration and ZMQ robot host for a LeKiwi, with this machine's camera paths.
+# Usage: scripts/robot-host.sh [calibrate|--no-cameras]
 # Override per machine: LEKIWI_PORT, LEKIWI_FRONT, LEKIWI_WRIST, LEKIWI_ID
 set -Eeuo pipefail
 
@@ -10,6 +10,13 @@ BIN="${LEKIWI_WS:-$HOME/lekiwi_ws}/.venv-lerobot/bin"
 [ -x "$BIN/python" ] || BIN="${LEKIWI_LEROBOT_VENV:-$HOME/lerobot-venv}/bin"
 ID="${LEKIWI_ID:-lekiwi_1}"
 READ_RETRIES="${LEKIWI_READ_RETRIES:-5}"
+
+# This mirrors LeRobot's default calibration location. Keep the environment overrides
+# so a machine using a shared/custom Hugging Face cache gets the same behaviour.
+HF_CACHE="${HF_HOME:-$HOME/.cache/huggingface}"
+LEROBOT_HOME="${HF_LEROBOT_HOME:-$HF_CACHE/lerobot}"
+CALIBRATION_DIR="${HF_LEROBOT_CALIBRATION:-$LEROBOT_HOME/calibration}"
+CALIBRATION_FILE="$CALIBRATION_DIR/robots/lekiwi/$ID.json"
 
 # /dev/ttyACM0 and /dev/videoN are renumbered by every USB re-enumeration -- a bumped
 # cable moves the motor bus to ttyACM1 and shifts both cameras. by-id names follow the
@@ -66,26 +73,39 @@ run_host() {
     --host.connection_time_s=86400
 }
 
+run_calibration() {
+  "$BIN/lerobot-calibrate" --robot.type=lekiwi --robot.id="$ID" \
+    --robot.port="$PORT" --robot.cameras='{}'
+}
+
 case "${1:-}" in
-  # ponytail: calibration only talks to the motor bus, so skip the cameras entirely.
+  # Calibration only talks to the motor bus, so skip the cameras entirely.
   calibrate)
     require PORT
     exec "$BIN/lerobot-calibrate" --robot.type=lekiwi --robot.id="$ID" \
       --robot.port="$PORT" --robot.cameras='{}'
     ;;
-  # ROS reads the cameras itself through v4l2_camera, so the host it talks to carries
-  # motors only -- a stalled webcam frame aborts this process, robot control included.
-  # host-cams is for standalone LeRobot work (teleoperation, dataset recording).
-  host)
+  --no-cameras)
     require PORT
-    run_host "{}"
+    run_host '{}'
     ;;
-  host-cams)
-    require PORT FRONT WRIST
+  '')
+    require PORT
+    if [ ! -f "$CALIBRATION_FILE" ]; then
+      echo "No calibration found for $ID; starting calibration first."
+      run_calibration
+      [ -f "$CALIBRATION_FILE" ] || {
+        echo "$0: calibration completed but did not create $CALIBRATION_FILE" >&2
+        exit 1
+      }
+    fi
+    # Always expose both cameras: this is the one complete host entrypoint for ROS,
+    # teleoperation, and dataset recording.
+    require FRONT WRIST
     run_host "$CAMERAS"
     ;;
   *)
-    echo "usage: $0 calibrate|host|host-cams" >&2
+    echo "usage: $0 [calibrate|--no-cameras]" >&2
     exit 2
     ;;
 esac
