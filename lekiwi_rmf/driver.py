@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 import math
+import threading
 import time
 
 import rclpy
 from control_msgs.action import FollowJointTrajectory
 from geometry_msgs.msg import TransformStamped, Twist
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
+from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.executors import MultiThreadedExecutor
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
 from tf2_ros import TransformBroadcaster
 
-from lekiwi_rmf.arm_trajectory import ARM_JOINTS, action_positions
+from lekiwi_rmf.arm_trajectory import ARM_JOINTS, action_positions, interpolate_positions
 from lekiwi_rmf.odometry import integrate_pose
 
 
@@ -28,6 +31,8 @@ class LeKiwiDriver(Node):
         self.max_linear = self.declare_parameter("max_linear_speed", 0.3).value
         self.max_angular = self.declare_parameter("max_angular_speed", math.pi / 2).value
         self.command_timeout = self.declare_parameter("command_timeout", 0.4).value
+        self.trajectory_tolerance = self.declare_parameter("trajectory_tolerance", 0.05).value
+        self.trajectory_timeout = self.declare_parameter("trajectory_timeout", 5.0).value
         initial_x = self.declare_parameter("initial_x", -4.0).value
         initial_y = self.declare_parameter("initial_y", -2.5).value
         initial_yaw = self.declare_parameter("initial_yaw", 0.0).value
@@ -38,6 +43,9 @@ class LeKiwiDriver(Node):
         self.command_stamp = self.get_clock().now()
         self.pose = (initial_x, initial_y, initial_yaw)
         self.last_update = self.get_clock().now()
+        self.arm_positions = {name: 0.0 for name in ARM_JOINTS}
+        self.trajectory = None
+        self.trajectory_lock = threading.Lock()
 
         self.odom_pub = self.create_publisher(Odometry, "odom", 10)
         self.joint_pub = self.create_publisher(JointState, "joint_states", 10)
@@ -47,6 +55,7 @@ class LeKiwiDriver(Node):
             self, FollowJointTrajectory, "arm_controller/follow_joint_trajectory",
             execute_callback=self.execute_trajectory, goal_callback=self.accept_trajectory,
             cancel_callback=lambda _: CancelResponse.ACCEPT,
+            callback_group=ReentrantCallbackGroup(),
         )
         self.create_timer(0.05, self.update)
         self.get_logger().info(f"Connected to LeKiwi host at {remote_ip}")
@@ -71,23 +80,38 @@ class LeKiwiDriver(Node):
         return GoalResponse.ACCEPT
 
     def execute_trajectory(self, goal_handle):
-        start = time.monotonic()
         names = goal_handle.request.trajectory.joint_names
-        for point in goal_handle.request.trajectory.points:
-            while time.monotonic() - start < point.time_from_start.sec + point.time_from_start.nanosec / 1e9:
-                if goal_handle.is_cancel_requested:
-                    goal_handle.canceled()
-                    return FollowJointTrajectory.Result(error_code=FollowJointTrajectory.Result.SUCCESSFUL)
-                time.sleep(0.01)
-            action = {
-                f"{name}.pos": float(self.robot.get_observation().get(f"{name}.pos", 0.0))
-                for name in ARM_JOINTS
-            }
-            action.update({f"{name}.pos": value for name, value in action_positions(names, point.positions).items()})
-            action.update({"x.vel": 0.0, "y.vel": 0.0, "theta.vel": 0.0})
-            self.robot.send_action(action)
-        goal_handle.succeed()
-        return FollowJointTrajectory.Result(error_code=FollowJointTrajectory.Result.SUCCESSFUL)
+        points = [
+            (point.time_from_start.sec + point.time_from_start.nanosec / 1e9,
+             dict(zip(names, point.positions)))
+            for point in goal_handle.request.trajectory.points
+        ]
+        trajectory = {"start": time.monotonic(), "points": points, "done": threading.Event()}
+        with self.trajectory_lock:
+            if self.trajectory:
+                self.trajectory["outcome"] = "preempted"
+                self.trajectory["done"].set()
+            trajectory["start_positions"] = {name: self.arm_positions[name] for name in names}
+            self.trajectory = trajectory
+        self.command = Twist()
+        self.command_stamp = self.get_clock().now()
+
+        while not trajectory["done"].wait(0.05):
+            if goal_handle.is_cancel_requested:
+                with self.trajectory_lock:
+                    if self.trajectory is trajectory:
+                        self.trajectory = None
+                goal_handle.canceled()
+                return FollowJointTrajectory.Result(error_code=FollowJointTrajectory.Result.SUCCESSFUL)
+
+        if trajectory.get("outcome") == "succeeded":
+            goal_handle.succeed()
+            return FollowJointTrajectory.Result(error_code=FollowJointTrajectory.Result.SUCCESSFUL)
+        goal_handle.abort()
+        return FollowJointTrajectory.Result(
+            error_code=FollowJointTrajectory.Result.GOAL_TOLERANCE_VIOLATED,
+            error_string=trajectory.get("outcome", "trajectory preempted"),
+        )
 
     @staticmethod
     def clamp(value, limit):
@@ -98,12 +122,45 @@ class LeKiwiDriver(Node):
         dt = (now - self.last_update).nanoseconds / 1e9
         self.last_update = now
         observation = self.robot.get_observation()
+        arm_positions = {
+            name: float(observation.get(f"{name}.pos", 0.0)) / 100.0 * math.pi / 2
+            if name == "arm_gripper"
+            else math.radians(float(observation.get(f"{name}.pos", 0.0)))
+            for name in ARM_JOINTS
+        }
 
         stale = (now - self.command_stamp).nanoseconds / 1e9 > self.command_timeout
         cmd = Twist() if stale else self.command
         action = {
             f"{joint}.pos": float(observation.get(f"{joint}.pos", 0.0)) for joint in ARM_JOINTS
         }
+        with self.trajectory_lock:
+            self.arm_positions = arm_positions
+            trajectory = self.trajectory
+            if trajectory:
+                elapsed = time.monotonic() - trajectory["start"]
+                positions = interpolate_positions(
+                    trajectory["start_positions"], trajectory["points"], elapsed
+                )
+                action.update({
+                    f"{name}.pos": value for name, value in action_positions(
+                        positions.keys(), positions.values()
+                    ).items()
+                })
+                final_time, final_positions = trajectory["points"][-1]
+                if elapsed >= final_time and all(
+                    abs(self.arm_positions[name] - position) <= self.trajectory_tolerance
+                    for name, position in final_positions.items()
+                ):
+                    trajectory["outcome"] = "succeeded"
+                    trajectory["done"].set()
+                    self.trajectory = None
+                elif elapsed > final_time + self.trajectory_timeout:
+                    trajectory["outcome"] = "goal tolerance exceeded"
+                    trajectory["done"].set()
+                    self.trajectory = None
+        if trajectory:
+            cmd = Twist()
         # The scales divide here and multiply below: LeRobot's kinematics use a nominal
         # base_radius of 0.125 m, so a robot whose wheels sit elsewhere both under-turns
         # what it is asked for and over-reports what it did, by the same factor. Fixing
@@ -152,12 +209,7 @@ class LeKiwiDriver(Node):
         joints = JointState()
         joints.header.stamp = stamp
         joints.name = list(ARM_JOINTS)
-        joints.position = [
-            float(observation.get(f"{name}.pos", 0.0)) / 100.0 * math.pi / 2
-            if name == "arm_gripper"
-            else math.radians(float(observation.get(f"{name}.pos", 0.0)))
-            for name in ARM_JOINTS
-        ]
+        joints.position = [self.arm_positions[name] for name in ARM_JOINTS]
         self.joint_pub.publish(joints)
 
     def destroy_node(self):
@@ -169,9 +221,12 @@ class LeKiwiDriver(Node):
 def main():
     rclpy.init()
     node = LeKiwiDriver()
+    executor = MultiThreadedExecutor(num_threads=2)
+    executor.add_node(node)
     try:
-        rclpy.spin(node)
+        executor.spin()
     finally:
+        executor.shutdown()
         node.destroy_node()
         rclpy.shutdown()
 

@@ -149,6 +149,8 @@ ros2 launch lekiwi_rmf bringup.launch.py mode:=real start_moveit:=true
 
 MoveIt executes through `/arm_controller/follow_joint_trajectory`. Gazebo keeps
 the unactuated arm rigid, so arm execution is deliberately unavailable in `mode:=sim`.
+The host uses five motor read retries while the arm moves; override only after validating
+your bus with `LEKIWI_READ_RETRIES`.
 
 ### Where the camera comes from
 

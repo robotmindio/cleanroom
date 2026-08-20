@@ -33,3 +33,15 @@ def action_positions(names, positions):
         name: position / (math.pi / 2) * 100 if name == "arm_gripper" else math.degrees(position)
         for name, position in zip(names, positions)
     }
+
+
+def interpolate_positions(start, points, elapsed):
+    previous_time, previous = 0.0, start
+    for point_time, point in points:
+        if elapsed <= point_time:
+            if point_time == previous_time:
+                return point.copy()
+            fraction = (elapsed - previous_time) / (point_time - previous_time)
+            return {name: previous[name] + fraction * (point[name] - previous[name]) for name in point}
+        previous_time, previous = point_time, point
+    return points[-1][1].copy()

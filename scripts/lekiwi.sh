@@ -9,6 +9,7 @@ set -Eeuo pipefail
 BIN="${LEKIWI_WS:-$HOME/lekiwi_ws}/.venv-lerobot/bin"
 [ -x "$BIN/python" ] || BIN="${LEKIWI_LEROBOT_VENV:-$HOME/lerobot-venv}/bin"
 ID="${LEKIWI_ID:-lekiwi_1}"
+READ_RETRIES="${LEKIWI_READ_RETRIES:-5}"
 
 # /dev/ttyACM0 and /dev/videoN are renumbered by every USB re-enumeration -- a bumped
 # cable moves the motor bus to ttyACM1 and shifts both cameras. by-id names follow the
@@ -61,6 +62,7 @@ run_host() {
   # this the host dies on EOFError whenever it runs without a terminal.
   printf '\n' | "$BIN/python" -m lerobot.robots.lekiwi.lekiwi_host \
     --robot.id="$ID" --robot.port="$PORT" --robot.cameras="$1" \
+    --robot.num_read_retries="$READ_RETRIES" \
     --host.connection_time_s=86400
 }
 
