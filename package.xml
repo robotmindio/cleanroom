@@ -11,7 +11,6 @@
 
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>camera_calibration</exec_depend>
-  <exec_depend>action_msgs</exec_depend>
   <exec_depend>control_msgs</exec_depend>
   <exec_depend>free_fleet_adapter</exec_depend>
   <exec_depend>image_transport</exec_depend>
@@ -42,7 +41,6 @@
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
   <exec_depend>tf2_msgs</exec_depend>
-  <exec_depend>trajectory_msgs</exec_depend>
   <exec_depend>xacro</exec_depend>
 
   <test_depend>ament_cmake_pytest</test_depend>

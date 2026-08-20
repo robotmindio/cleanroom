@@ -300,7 +300,7 @@ The computer attached to the motors and cameras needs LeRobot with the `lekiwi` 
 ./scripts/install-pi.sh
 ```
 
-It needs a 64-bit image with Python 3.12+ (Raspberry Pi OS Trixie or Ubuntu 24.04; Bookworm's 3.11 is too old) — and must match the workstation's Ubuntu version to get the same ROS distro on both sides. Then, on the Pi:
+It needs a 64-bit image with Python 3.12+. Use Ubuntu 24.04 when the Pi publishes cameras to this Jazzy workstation; Raspberry Pi OS Trixie can run the LeRobot host only. Then, on the Pi:
 
 ```bash
 scripts/lekiwi.sh host

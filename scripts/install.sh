@@ -63,6 +63,7 @@ fi
   "ros-$ROS_DISTRO-moveit" \
   "ros-$ROS_DISTRO-rmf-dev" \
   "ros-$ROS_DISTRO-rmw-cyclonedds-cpp" \
+  "ros-$ROS_DISTRO-rqt-image-view" \
   "ros-$ROS_DISTRO-ros-base" \
   "ros-$ROS_DISTRO-rosbridge-server" \
   "ros-$ROS_DISTRO-ros-gz" \
@@ -71,6 +72,7 @@ fi
   "ros-$ROS_DISTRO-rtabmap-ros" \
   "ros-$ROS_DISTRO-rviz2" \
   "ros-$ROS_DISTRO-v4l2-camera" \
+  python3-matplotlib \
   python3-opencv
 
 if [[ ! -e /etc/ros/rosdep/sources.list.d/20-default.list ]]; then

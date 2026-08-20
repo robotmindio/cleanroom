@@ -76,3 +76,9 @@ def test_empty_floor_reports_nothing(node):
     image = np.full((480, 640, 3), 130, np.uint8)
     scan = node.scan(image, stamp=None)
     assert all(math.isinf(r) for r in scan.ranges)
+
+
+def test_camera_fault_reports_a_blocked_scan(node):
+    scan = node.blocked_scan(stamp=None)
+    assert len(scan.ranges) == 41
+    assert all(value == pytest.approx(0.11) for value in scan.ranges)

@@ -41,6 +41,7 @@ from sensor_msgs.msg import CameraInfo, Image, LaserScan
 
 BOARD = (8, 6)  # inner corners of scripts/checkerboard.py
 SQUARE = 0.025  # m
+FAIL_SAFE_HALF_FOV = math.radians(30)
 
 
 class FreeSpace(Node):
@@ -56,6 +57,7 @@ class FreeSpace(Node):
         # How far a pixel may drift from the floor's colour before it counts as an
         # obstacle, in Lab units. Lower is twitchier.
         self.declare_parameter("floor_tolerance", 14.0)
+        self.declare_parameter("scan_timeout", 0.5)
         self.declare_parameter("calibrate", False)
 
         self.k = None
@@ -65,6 +67,8 @@ class FreeSpace(Node):
         self.scan_pub = self.create_publisher(LaserScan, "scan", qos_profile_sensor_data)
         self.calibrated = False
         self.last_scan = 0
+        self.last_valid_scan = 0
+        self.create_timer(0.2, self.watchdog)
 
     # -- geometry ---------------------------------------------------------------
 
@@ -169,9 +173,29 @@ class FreeSpace(Node):
         scan = self.scan(bgr, msg.header.stamp)
         if scan is not None:
             self.scan_pub.publish(scan)
+            self.last_valid_scan = now
+
+    def watchdog(self):
+        now = self.get_clock().now()
+        if now.nanoseconds - self.last_valid_scan > self.get_parameter("scan_timeout").value * 1e9:
+            self.scan_pub.publish(self.blocked_scan(now.to_msg()))
+
+    def blocked_scan(self, stamp):
+        beams = max(2, int(self.get_parameter("beams").value))
+        rmin = self.get_parameter("range_min").value
+        scan = LaserScan()
+        scan.header.stamp = stamp
+        scan.header.frame_id = self.get_parameter("frame_id").value
+        scan.angle_min = -FAIL_SAFE_HALF_FOV
+        scan.angle_max = FAIL_SAFE_HALF_FOV
+        scan.angle_increment = (scan.angle_max - scan.angle_min) / (beams - 1)
+        scan.range_min = rmin
+        scan.range_max = self.get_parameter("range_max").value
+        scan.ranges = [rmin + 0.01] * beams
+        return scan
 
     def scan(self, bgr, stamp):
-        beams = int(self.get_parameter("beams").value)
+        beams = max(2, int(self.get_parameter("beams").value))
         rmin = self.get_parameter("range_min").value
         rmax = self.get_parameter("range_max").value
         tol = self.get_parameter("floor_tolerance").value
