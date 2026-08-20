@@ -34,7 +34,7 @@ fi
 if host_up; then
   echo "host: already running"
 else
-  nohup scripts/lekiwi.sh host > "$LOGS/host.log" 2>&1 &
+  setsid scripts/lekiwi.sh host > "$LOGS/host.log" 2>&1 &
   wait_for 90 host_up || {
     echo "host did not come up -- see $LOGS/host.log" >&2
     tail -5 "$LOGS/host.log" >&2
@@ -43,13 +43,13 @@ else
   echo "host: up"
 fi
 
-nohup scripts/ros-start.sh "$@" > "$LOGS/stack.log" 2>&1 &
+setsid scripts/ros-start.sh "$@" > "$LOGS/stack.log" 2>&1 &
 wait_for 120 grep -q 'Connected to LeKiwi host' "$LOGS/stack.log" || {
   echo "driver never reached the host -- see $LOGS/stack.log" >&2
   exit 1
 }
 echo "stack: up"
 
-nohup scripts/rviz.sh > "$LOGS/rviz.log" 2>&1 &
+setsid scripts/rviz.sh > "$LOGS/rviz.log" 2>&1 &
 echo "rviz: starting (it waits for the cameras)"
 echo "logs in $LOGS -- stop everything with scripts/ros-stop.sh"
