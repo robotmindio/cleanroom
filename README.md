@@ -191,7 +191,9 @@ expose torque control, so use the physical emergency stop for that.
 
 The cameras are read by `v4l2_camera` nodes on whichever machine they are plugged into, not relayed through the LeRobot host. The host aborts the whole robot — motor control included — when a camera frame arrives more than half a second late, and USB webcams do that regularly.
 
-With a Pi on the robot, the Pi runs the camera nodes (see [HARDWARE.md](HARDWARE.md)) and the workstation launches with `camera_source:=remote`. Only the compressed image crosses the network; the workstation expands it back onto `/camera/front/image_raw`. Raw 640x480 at 30 Hz is 27 MB/s, which robot wifi will not carry.
+With a Pi on the robot, `robot-host.sh` sends the front camera over its ZMQ observation
+stream. The workstation driver republishes it onto `/camera/front/image_raw` when a
+`remote_ip` is supplied. The JPEG stream crosses the network rather than raw video.
 
 On the wired variant everything is local, so `camera_source:=local` with `camera_device` pointing at a `/dev/v4l/by-id/...` path.
 

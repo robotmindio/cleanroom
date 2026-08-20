@@ -10,19 +10,17 @@ The main [README](README.md) picks up from the end of this document.
 
 | Machine | Runs | Installer |
 | --- | --- | --- |
-| Robot's Raspberry Pi | LeRobot host (Feetech bus, ZMQ server) and the ROS camera nodes | `scripts/install-pi.sh` |
+| Robot's Raspberry Pi | LeRobot host (Feetech bus, ZMQ server, and cameras) | `scripts/install-pi.sh` |
 | Workstation | ROS 2, Nav2, RTAB-Map, Open-RMF, and the LeRobot *client* | `scripts/install.sh` |
 
-Motor commands and joint state travel over ZMQ `5555/tcp` and `5556/tcp`. Camera
-frames do not: the Pi publishes them as ROS topics directly.
+Motor commands, joint state, and camera frames travel over the LeRobot ZMQ ports
+`5555/tcp` and `5556/tcp`.
 
-That split is deliberate. The LeRobot host aborts the entire robot — motor control
-included — when a camera frame arrives more than half a second late, which a USB
-webcam does regularly. Keeping the cameras in their own ROS nodes means a stalled
-camera costs frames instead of the robot.
+The workstation driver republishes the host's front frame as `/camera/front/image_raw`
+for ROS. A stalled camera must still be investigated because it also affects host
+observations.
 
-The Pi therefore normally runs `ros-base` plus the camera packages, which
-`scripts/install-pi.sh` installs. The full stack belongs on the workstation. A Pi 5
+The Pi normally runs the LeRobot host. The full stack belongs on the workstation. A Pi 5
 can also run `scripts/install.sh` for occasional self-contained debugging, but Nav2 and
 especially RTAB-Map are memory-constrained there.
 
@@ -265,8 +263,8 @@ ros2 launch launch/pi_cameras.launch.py \
 Find that path with `ls /dev/v4l/by-id/`. Use it rather than `/dev/video0`, which is
 reassigned whenever USB re-enumerates.
 
-For the normal two-computer setup, use the single Pi launcher instead. It starts a
-motor-only host and the ROS camera publisher, so only one process owns the webcams:
+For the normal two-computer setup, use the single Pi launcher instead. It starts the
+motor-and-camera host, which sends the front frame to the workstation over ZMQ:
 
 ```bash
 scripts/pi-up.sh

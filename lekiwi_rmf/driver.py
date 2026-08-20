@@ -3,6 +3,8 @@ import math
 import os
 import threading
 import time
+from copy import deepcopy
+from pathlib import Path
 
 import rclpy
 from control_msgs.action import FollowJointTrajectory
@@ -12,10 +14,11 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
-from sensor_msgs.msg import JointState
+from sensor_msgs.msg import CameraInfo, Image, JointState
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
 from tf2_ros import TransformBroadcaster
+import yaml
 
 from lekiwi_rmf.arm_trajectory import (
     ARM_JOINTS, action_positions, interpolate_positions, joint_positions, load_calibration,
@@ -45,6 +48,9 @@ class LeKiwiDriver(Node):
         initial_x = self.declare_parameter("initial_x", -4.0).value
         initial_y = self.declare_parameter("initial_y", -2.5).value
         initial_yaw = self.declare_parameter("initial_yaw", 0.0).value
+        camera_info_url = self.declare_parameter(
+            "camera_info_url", "file://${ROS_HOME}/camera_info/lekiwi_front.yaml"
+        ).value
 
         self.robot = LeKiwiClient(LeKiwiClientConfig(remote_ip=remote_ip, id=robot_id))
         self.robot.connect()
@@ -69,6 +75,9 @@ class LeKiwiDriver(Node):
 
         self.odom_pub = self.create_publisher(Odometry, "odom", 10)
         self.joint_pub = self.create_publisher(JointState, "joint_states", 10)
+        self.front_image_pub = self.create_publisher(Image, "/camera/front/image_raw", 10)
+        self.front_info_pub = self.create_publisher(CameraInfo, "/camera/front/camera_info", 10)
+        self.front_camera_info = self.load_camera_info(camera_info_url)
         self.safety_pub = self.create_publisher(String, "safety/state", 1)
         self.tf = TransformBroadcaster(self)
         self.create_subscription(Twist, "cmd_vel", self.on_command, 10)
@@ -94,6 +103,43 @@ class LeKiwiDriver(Node):
         message = String()
         message.data = state
         self.safety_pub.publish(message)
+
+    def load_camera_info(self, url):
+        """Load a standard ROS camera-calibration YAML file for host-streamed frames."""
+        info = CameraInfo()
+        path = Path(os.path.expandvars(url.removeprefix("file://"))).expanduser()
+        try:
+            data = yaml.safe_load(path.read_text())
+            info.width = int(data["image_width"])
+            info.height = int(data["image_height"])
+            info.distortion_model = data["distortion_model"]
+            info.d = data["distortion_coefficients"]["data"]
+            info.k = data["camera_matrix"]["data"]
+            info.r = data["rectification_matrix"]["data"]
+            info.p = data["projection_matrix"]["data"]
+        except (FileNotFoundError, KeyError, TypeError, ValueError, yaml.YAMLError) as error:
+            self.get_logger().warn(f"Could not load front-camera calibration from {path}: {error}")
+        return info
+
+    def publish_front_camera(self, stamp, observation):
+        frame = observation.get("front")
+        if frame is None or getattr(frame, "ndim", 0) != 3 or frame.shape[2] != 3:
+            return
+        image = Image()
+        image.header.stamp = stamp
+        image.header.frame_id = "front_camera_optical_frame"
+        image.height, image.width = frame.shape[:2]
+        image.encoding = "bgr8"
+        image.is_bigendian = False
+        image.step = image.width * 3
+        image.data = frame.tobytes()
+        self.front_image_pub.publish(image)
+
+        info = deepcopy(self.front_camera_info)
+        info.header = image.header
+        if not info.width:
+            info.width, info.height = image.width, image.height
+        self.front_info_pub.publish(info)
 
     def cancel_trajectory(self, outcome):
         with self.trajectory_lock:
@@ -228,6 +274,8 @@ class LeKiwiDriver(Node):
             self.link_lost = False
             self.publish_safety("DISARMED")
             self.get_logger().warn("LeKiwi telemetry recovered; inspect robot, then call safety/arm")
+        if "front" in observation:
+            self.publish_front_camera(now.to_msg(), observation)
         arm_positions = joint_positions(
             observation, self.arm_zero_positions, self.arm_directions
         )

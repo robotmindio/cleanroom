@@ -46,13 +46,9 @@ def generate_launch_description():
     camera_on = PythonExpression(["'", publish_camera, "' == 'true'"])
     camera_here = PythonExpression([camera_on, " and '", camera_source, "' == 'local'"])
     wrist_here = PythonExpression([camera_here, " and '", wrist_device, "' != 'none'"])
-    camera_remote = PythonExpression([camera_on, " and '", camera_source, "' == 'remote'"])
-    # The Pi keeps every camera topic in its own namespace so its raw image cannot be
-    # subscribed to by accident from here; camera_info is small, so it is read across
-    # the network as published rather than relayed.
-    camera_info_topic = PythonExpression([
-        "'/pi/camera/front/camera_info' if '", camera_source, "' == 'remote' else '/camera/front/camera_info'"
-    ])
+    # In remote mode the LeKiwi driver receives the host's front JPEG over ZMQ and
+    # republishes it on the same canonical ROS topics as a local V4L2 camera.
+    camera_info_topic = "/camera/front/camera_info"
     slam_mapping = PythonExpression(["'", slam_mode, "' == 'mapping'"])
     static_map = LaunchConfiguration("static_map")
     canned_map = PythonExpression([visual_slam, " and '", static_map, "' == 'true'"])
@@ -241,32 +237,12 @@ def generate_launch_description():
                 PythonLaunchDescriptionSource(PathJoinSubstitution([package, "launch", "moveit.launch.py"])),
                 condition=IfCondition(PythonExpression([real, " and '", start_moveit, "' == 'true'"])),
             ),
-            # With the cameras on the robot's Pi, only their compressed form crosses the
-            # network; this turns it back into the raw topic the rest of the graph expects.
-            Node(
-                package="image_transport",
-                executable="republish",
-                name="front_camera_decompress",
-                # Jazzy's republish reads the transports as parameters, and only from the
-                # command line: positional arguments and a launch parameters= block are
-                # both ignored, leaving it relaying raw to raw with nothing to subscribe to.
-                arguments=[
-                    "--ros-args",
-                    "-p", "in_transport:=compressed",
-                    "-p", "out_transport:=raw",
-                ],
-                remappings=[
-                    ("in/compressed", "/pi/camera/front/image_raw/compressed"),
-                    ("out", "/camera/front/image_raw"),
-                ],
-                condition=IfCondition(PythonExpression([camera_remote, " and ", real])),
-                output="screen",
-            ),
             Node(
                 package="lekiwi_rmf",
                 executable="lekiwi_driver",
                 parameters=[{
                     "remote_ip": remote_ip,
+                    "camera_info_url": camera_info_url,
                     # Odometry starts where the map says the robot starts. Without a floor
                     # plan there is no such place, so the robot's own start is the origin.
                     "initial_x": ParameterValue(

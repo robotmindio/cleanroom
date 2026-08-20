@@ -18,19 +18,21 @@ set -u
 
 # /dev/videoN shifts on every USB re-enumeration and on a laptop video0 is the built-in
 # webcam, so resolve the front camera by its device name -- same glob as robot-host.sh.
-# A workstation using the robot Pi's ROS camera topics has no local camera at all.
+# A workstation using a remote LeKiwi host has no local camera at all.
 first_match() { # first existing path matching a glob, empty if none
   set -- $1
   [ -e "$1" ] && printf '%s' "$1"
   return 0
 }
-camera_source=local
+camera_source=""
 for arg in "$@"; do
   case "$arg" in
     camera_source:=remote) camera_source=remote ;;
     camera_source:=local) camera_source=local ;;
+    remote_ip:=*) [[ -n $camera_source ]] || camera_source=remote ;;
   esac
 done
+: "${camera_source:=local}"
 
 if [[ $camera_source == local ]]; then
   FRONT="${LEKIWI_FRONT:-$(first_match '/dev/v4l/by-id/*WEBCAM*-video-index0')}"
