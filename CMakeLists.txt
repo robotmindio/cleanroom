@@ -15,6 +15,7 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_odometry test/test_odometry.py)
   ament_add_pytest_test(test_free_space test/test_free_space.py)
   ament_add_pytest_test(test_arm_trajectory test/test_arm_trajectory.py)
+  ament_add_pytest_test(test_driver_link test/test_driver_link.py)
   ament_add_pytest_test(test_teleop test/test_teleop.py)
 endif()
 

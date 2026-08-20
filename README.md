@@ -172,6 +172,21 @@ LeRobot's own calibration file: that file records motor limits and mid-range hom
 robot geometry. If a joint moves opposite in RViz after restarting, change only that joint's
 `directions` value in this file from `1` to `-1`, then restart again.
 
+### Recovery after motor power loss
+
+The driver starts disarmed and disarms on stale or failed LeRobot telemetry. It keeps publishing
+the measured joint state after telemetry returns, but does not accept base or arm motion until an
+operator has inspected the robot and explicitly armed it:
+
+```bash
+ros2 service call /safety/arm std_srvs/srv/Trigger '{}'
+```
+
+`/safety/state` reports `DISARMED`, `ARMED`, or `LINK_LOST`. A power-loss recovery always needs
+a fresh navigation or MoveIt command; an interrupted trajectory is aborted and is never replayed.
+`safety/disarm` stops ROS commands, but cannot remove servo torque: LeRobot's ZMQ client does not
+expose torque control, so use the physical emergency stop for that.
+
 ### Where the camera comes from
 
 The cameras are read by `v4l2_camera` nodes on whichever machine they are plugged into, not relayed through the LeRobot host. The host aborts the whole robot — motor control included — when a camera frame arrives more than half a second late, and USB webcams do that regularly.

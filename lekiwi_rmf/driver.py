@@ -13,6 +13,8 @@ from rclpy.executors import MultiThreadedExecutor
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
+from std_msgs.msg import String
+from std_srvs.srv import Trigger
 from tf2_ros import TransformBroadcaster
 
 from lekiwi_rmf.arm_trajectory import (
@@ -34,6 +36,7 @@ class LeKiwiDriver(Node):
         self.max_linear = self.declare_parameter("max_linear_speed", 0.3).value
         self.max_angular = self.declare_parameter("max_angular_speed", math.pi / 2).value
         self.command_timeout = self.declare_parameter("command_timeout", 0.4).value
+        self.link_timeout = self.declare_parameter("link_timeout", 1.0).value
         self.trajectory_tolerance = self.declare_parameter("trajectory_tolerance", 0.05).value
         self.trajectory_timeout = self.declare_parameter("trajectory_timeout", 5.0).value
         calibration_file = self.declare_parameter(
@@ -49,6 +52,11 @@ class LeKiwiDriver(Node):
         self.command_stamp = self.get_clock().now()
         self.pose = (initial_x, initial_y, initial_yaw)
         self.last_update = self.get_clock().now()
+        self.last_observation = None
+        self.last_fresh = self.last_update
+        self.link_lost = False
+        self.armed = False
+        self.state_lock = threading.Lock()
         self.arm_zero_positions, self.arm_directions = load_calibration(calibration_file)
         if not os.path.exists(os.path.expanduser(calibration_file)):
             self.get_logger().warn(
@@ -60,8 +68,11 @@ class LeKiwiDriver(Node):
 
         self.odom_pub = self.create_publisher(Odometry, "odom", 10)
         self.joint_pub = self.create_publisher(JointState, "joint_states", 10)
+        self.safety_pub = self.create_publisher(String, "safety/state", 1)
         self.tf = TransformBroadcaster(self)
         self.create_subscription(Twist, "cmd_vel", self.on_command, 10)
+        self.create_service(Trigger, "safety/arm", self.arm)
+        self.create_service(Trigger, "safety/disarm", self.disarm)
         self.trajectory_server = ActionServer(
             self, FollowJointTrajectory, "arm_controller/follow_joint_trajectory",
             execute_callback=self.execute_trajectory, goal_callback=self.accept_trajectory,
@@ -70,12 +81,62 @@ class LeKiwiDriver(Node):
         )
         self.create_timer(0.05, self.update)
         self.get_logger().info(f"Connected to LeKiwi host at {remote_ip}")
+        self.publish_safety("DISARMED")
 
     def on_command(self, message):
+        if not self.armed:
+            return
         self.command = message
         self.command_stamp = self.get_clock().now()
 
+    def publish_safety(self, state):
+        message = String()
+        message.data = state
+        self.safety_pub.publish(message)
+
+    def cancel_trajectory(self, outcome):
+        with self.trajectory_lock:
+            if self.trajectory:
+                self.trajectory["outcome"] = outcome
+                self.trajectory["done"].set()
+                self.trajectory = None
+
+    def set_disarmed(self, state):
+        with self.state_lock:
+            was_armed = self.armed
+            self.armed = False
+        self.command = Twist()
+        self.command_stamp = self.get_clock().now()
+        self.cancel_trajectory("safety disarmed")
+        if was_armed:
+            self.get_logger().warn(f"Robot disarmed: {state}")
+        self.publish_safety(state)
+
+    def arm(self, request, response):
+        del request
+        if self.link_lost or self.last_observation is None:
+            response.success = False
+            response.message = "no fresh LeKiwi telemetry"
+            return response
+        with self.state_lock:
+            self.armed = True
+        self.command = Twist()
+        self.command_stamp = self.get_clock().now()
+        self.publish_safety("ARMED")
+        response.success = True
+        response.message = "armed at current measured position; send a new command"
+        return response
+
+    def disarm(self, request, response):
+        del request
+        self.set_disarmed("DISARMED")
+        response.success = True
+        response.message = "commands disabled; motor torque is controlled by the LeRobot host"
+        return response
+
     def accept_trajectory(self, goal):
+        if not self.armed:
+            return GoalResponse.REJECT
         try:
             if not goal.trajectory.points:
                 raise ValueError("trajectory must contain a point")
@@ -131,14 +192,49 @@ class LeKiwiDriver(Node):
     def clamp(value, limit):
         return max(-limit, min(limit, value))
 
+    def observation_is_fresh(self, observation):
+        fresh = observation is not self.last_observation
+        self.last_observation = observation
+        return fresh
+
     def update(self):
         now = self.get_clock().now()
         dt = (now - self.last_update).nanoseconds / 1e9
         self.last_update = now
-        observation = self.robot.get_observation()
+        try:
+            observation = self.robot.get_observation()
+        except Exception as error:
+            if not self.link_lost:
+                self.get_logger().error(f"LeKiwi telemetry failed: {error}")
+                self.link_lost = True
+                self.set_disarmed("LINK_LOST")
+            return
+
+        if not self.observation_is_fresh(observation):
+            quiet = (now - self.last_fresh).nanoseconds / 1e9
+            if quiet > self.link_timeout:
+                if not self.link_lost:
+                    self.get_logger().error(
+                        f"No fresh LeKiwi telemetry for {quiet:.1f}s; waiting for recovery"
+                    )
+                    self.link_lost = True
+                    self.set_disarmed("LINK_LOST")
+            return
+
+        self.last_fresh = now
+        if self.link_lost:
+            self.link_lost = False
+            self.publish_safety("DISARMED")
+            self.get_logger().warn("LeKiwi telemetry recovered; inspect robot, then call safety/arm")
         arm_positions = joint_positions(
             observation, self.arm_zero_positions, self.arm_directions
         )
+        with self.trajectory_lock:
+            self.arm_positions = arm_positions
+
+        if not self.armed:
+            self.publish_state(now.to_msg(), observation, (0.0, 0.0, 0.0))
+            return
 
         stale = (now - self.command_stamp).nanoseconds / 1e9 > self.command_timeout
         cmd = Twist() if stale else self.command
@@ -146,7 +242,6 @@ class LeKiwiDriver(Node):
             f"{joint}.pos": float(observation.get(f"{joint}.pos", 0.0)) for joint in ARM_JOINTS
         }
         with self.trajectory_lock:
-            self.arm_positions = arm_positions
             trajectory = self.trajectory
             if trajectory:
                 elapsed = time.monotonic() - trajectory["start"]
@@ -184,7 +279,13 @@ class LeKiwiDriver(Node):
                 "theta.vel": math.degrees(self.clamp(cmd.angular.z, self.max_angular) / self.yaw_scale),
             }
         )
-        self.robot.send_action(action)
+        try:
+            self.robot.send_action(action)
+        except Exception as error:
+            self.get_logger().error(f"LeKiwi command failed: {error}")
+            self.link_lost = True
+            self.set_disarmed("LINK_LOST")
+            return
 
         velocity = (
             float(observation.get("x.vel", 0.0)) * self.xy_scale,
