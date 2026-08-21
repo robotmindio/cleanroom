@@ -38,6 +38,7 @@ def generate_launch_description():
     xy_velocity_scale = LaunchConfiguration("xy_velocity_scale")
     yaw_velocity_scale = LaunchConfiguration("yaw_velocity_scale")
     rtabmap_database = LaunchConfiguration("rtabmap_database")
+    headless = LaunchConfiguration("headless")
     sim = PythonExpression(["'", mode, "' == 'sim'"])
     real = PythonExpression(["'", mode, "' == 'real'"])
     amcl = PythonExpression(["'", localization, "' == 'amcl'"])
@@ -68,6 +69,10 @@ def generate_launch_description():
     return LaunchDescription(
         [
             DeclareLaunchArgument("mode", default_value="sim", choices=["sim", "real"]),
+            # RViz is the normal visualization for this stack. Running Gazebo's server
+            # only also works from CI and a machine reached over SSH without an X/GLX
+            # display. Pass headless:=false to open Gazebo's own GUI.
+            DeclareLaunchArgument("headless", default_value="true", choices=["true", "false"]),
             DeclareLaunchArgument("remote_ip", default_value="127.0.0.1"),
             DeclareLaunchArgument("start_rmf", default_value="true"),
             DeclareLaunchArgument("rmf_domain", default_value="55"),
@@ -130,7 +135,13 @@ def generate_launch_description():
             ),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(PathJoinSubstitution([FindPackageShare("ros_gz_sim"), "launch", "gz_sim.launch.py"])),
-                launch_arguments={"gz_args": ["-r ", PathJoinSubstitution([package, "worlds", "cleanroom.sdf"])]}.items(),
+                launch_arguments={"gz_args": [
+                    PythonExpression([
+                        "'-r -s --headless-rendering ' if '", headless,
+                        "' == 'true' else '-r '"
+                    ]),
+                    PathJoinSubstitution([package, "worlds", "cleanroom.sdf"]),
+                ]}.items(),
                 condition=IfCondition(sim),
             ),
             Node(

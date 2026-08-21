@@ -119,6 +119,7 @@ ros2 launch lekiwi_rmf bringup.launch.py mode:=sim \
 | Argument | Values | Default | Purpose |
 | --- | --- | --- | --- |
 | `mode` | `sim`, `real` | `sim` | Select Gazebo or the LeRobot hardware bridge |
+| `headless` | `true`, `false` | `true` | Run Gazebo server-only with offscreen rendering; set false to open its GUI |
 | `localization` | `visual_slam`, `amcl` | `visual_slam` | Select the sole `map -> odom` provider |
 | `slam_mode` | `mapping`, `localization` | `mapping` | Extend or reuse the RTAB-Map database |
 | `remote_ip` | IPv4/hostname | `127.0.0.1` | Address of the LeKiwi ZMQ host |

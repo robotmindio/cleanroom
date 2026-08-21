@@ -30,7 +30,7 @@ def load_calibration(path):
         data = json.loads(calibration.read_text())
         zero_positions = {name: float(data["zero_positions"][name]) for name in ARM_JOINTS}
         directions = {name: float(data.get("directions", {})[name]) for name in ARM_JOINTS}
-    except (KeyError, OSError, ValueError) as error:
+    except (KeyError, OSError, TypeError, ValueError) as error:
         raise ValueError(f"invalid arm calibration {calibration}: {error}") from error
     if not all(math.isfinite(value) for value in zero_positions.values()):
         raise ValueError(f"invalid arm calibration {calibration}: non-finite zero position")

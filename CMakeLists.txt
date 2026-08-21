@@ -12,11 +12,15 @@ install(DIRECTORY config launch maps urdf worlds DESTINATION share/${PROJECT_NAM
 
 if(BUILD_TESTING)
   find_package(ament_cmake_pytest REQUIRED)
-  ament_add_pytest_test(test_odometry test/test_odometry.py)
-  ament_add_pytest_test(test_free_space test/test_free_space.py)
-  ament_add_pytest_test(test_arm_trajectory test/test_arm_trajectory.py)
-  ament_add_pytest_test(test_driver_link test/test_driver_link.py)
-  ament_add_pytest_test(test_teleop test/test_teleop.py)
+  # Test the package under construction, not a similarly named package sourced
+  # from another overlay workspace.
+  set(test_pythonpath "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}:$ENV{PYTHONPATH}")
+  ament_add_pytest_test(test_odometry test/test_odometry.py ENV "${test_pythonpath}")
+  ament_add_pytest_test(test_odom_scale test/test_odom_scale.py ENV "${test_pythonpath}")
+  ament_add_pytest_test(test_free_space test/test_free_space.py ENV "${test_pythonpath}")
+  ament_add_pytest_test(test_arm_trajectory test/test_arm_trajectory.py ENV "${test_pythonpath}")
+  ament_add_pytest_test(test_driver_link test/test_driver_link.py ENV "${test_pythonpath}")
+  ament_add_pytest_test(test_teleop test/test_teleop.py ENV "${test_pythonpath}")
 endif()
 
 ament_package()

@@ -45,3 +45,12 @@ def test_calibration_maps_urdf_zero_to_the_lerobot_position(tmp_path):
     assert action_positions(("arm_shoulder_pan",), (0.0,), zero_positions, directions) == {
         "arm_shoulder_pan": math.degrees(0.5)
     }
+
+
+@pytest.mark.parametrize("contents", ["[]", '"not an object"'])
+def test_calibration_with_wrong_json_shape_is_reported_as_invalid(tmp_path, contents):
+    calibration = tmp_path / "arm.json"
+    calibration.write_text(contents)
+
+    with pytest.raises(ValueError, match="invalid arm calibration"):
+        load_calibration(calibration)

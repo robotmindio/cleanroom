@@ -242,21 +242,26 @@ class FreeSpace(Node):
         reference = np.median(lab[seed], axis=0)
         floor = np.linalg.norm(lab - reference, axis=2) < tol
 
+        # Transform the floor intersections from the camera frame into the scan frame.
+        # A LaserScan's bearing and range are both relative to header.frame_id; adding
+        # the camera offset to an already computed range is only correct on centreline.
+        scan_fwd = fwd + offset
+        scan_left = left
+        scan_bearing = np.arctan2(scan_left, scan_fwd)
+        scan_distance = np.hypot(scan_fwd, scan_left)
+
         # Cover the field of view the lens actually has rather than a guessed arc.
-        half = float(np.nanmax(np.abs(np.arctan2(left[visible], fwd[visible]))))
+        half = float(np.nanmax(np.abs(scan_bearing[visible])))
         angles = np.linspace(-half, half, beams)
         ranges = [float("inf")] * beams
-        bearing = np.arctan2(left, fwd)
-        distance = np.hypot(fwd, left)
         step = angles[1] - angles[0]
         for i, angle in enumerate(angles):
-            sector = visible & (np.abs(bearing - angle) < step / 2) & (distance < rmax)
+            sector = visible & (np.abs(scan_bearing - angle) < step / 2) & (scan_distance < rmax)
             if not sector.any():
                 continue
             blocked = sector & ~floor
             if blocked.any():
-                # nearest blocked pixel in this direction, plus the camera's own offset
-                measured = float(distance[blocked].min()) + offset
+                measured = float(scan_distance[blocked].min())
                 if rmin <= measured <= rmax:
                     ranges[i] = measured
 

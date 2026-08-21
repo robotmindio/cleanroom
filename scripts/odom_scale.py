@@ -72,7 +72,34 @@ class OdomScale(Node):
         self.d = np.array(msg.d, dtype=np.float64)
 
     def on_image(self, msg):
-        self.frame = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, -1)
+        try:
+            self.frame = self.bgr_image(msg)
+        except ValueError as error:
+            # Do not pair an old image with newer odometry after a camera fault.
+            self.frame = None
+            self.get_logger().warn(f"ignoring camera image: {error}")
+
+    @staticmethod
+    def bgr_image(msg):
+        """Decode a ROS image into packed BGR, honoring its encoding and row stride."""
+        channels = {"bgr8": 3, "rgb8": 3, "mono8": 1}.get(msg.encoding)
+        if channels is None:
+            raise ValueError(f"unsupported image encoding {msg.encoding!r}")
+        row_bytes = msg.width * channels
+        if msg.height <= 0 or msg.width <= 0 or msg.step < row_bytes:
+            raise ValueError("malformed image dimensions or row stride")
+        required = msg.step * msg.height
+        if len(msg.data) < required:
+            raise ValueError("image data is shorter than its declared stride")
+
+        rows = np.frombuffer(msg.data, dtype=np.uint8, count=required)
+        image = rows.reshape(msg.height, msg.step)[:, :row_bytes]
+        image = image.reshape(msg.height, msg.width, channels)
+        if msg.encoding == "rgb8":
+            return cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        if msg.encoding == "mono8":
+            return cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+        return image
 
     def on_odom(self, msg):
         pose = msg.pose.pose

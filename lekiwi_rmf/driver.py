@@ -14,10 +14,12 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import CameraInfo, Image, JointState
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
 from tf2_ros import TransformBroadcaster
+from visualization_msgs.msg import Marker
 import yaml
 
 from lekiwi_rmf.arm_trajectory import (
@@ -81,7 +83,9 @@ class LeKiwiDriver(Node):
         self.front_info_pub = self.create_publisher(CameraInfo, "/camera/front/camera_info", 10)
         self.wrist_image_pub = self.create_publisher(Image, "/camera/wrist/image_raw", 10)
         self.front_camera_info = self.load_camera_info(camera_info_url)
-        self.safety_pub = self.create_publisher(String, "safety/state", 1)
+        safety_qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        self.safety_pub = self.create_publisher(String, "safety/state", safety_qos)
+        self.safety_marker_pub = self.create_publisher(Marker, "safety/marker", safety_qos)
         self.tf = TransformBroadcaster(self)
         self.create_subscription(Twist, "cmd_vel", self.on_command, 10)
         self.create_service(Trigger, "safety/arm", self.arm)
@@ -106,6 +110,25 @@ class LeKiwiDriver(Node):
         message = String()
         message.data = state
         self.safety_pub.publish(message)
+
+        marker = Marker()
+        marker.header.frame_id = "base_footprint"
+        marker.header.stamp = self.get_clock().now().to_msg()
+        marker.ns = "safety"
+        marker.id = 0
+        marker.type = Marker.TEXT_VIEW_FACING
+        marker.action = Marker.ADD
+        marker.pose.position.z = 0.5
+        marker.pose.orientation.w = 1.0
+        marker.scale.z = 0.2
+        marker.color.a = 1.0
+        marker.color.r, marker.color.g, marker.color.b = {
+            "ARMED": (0.0, 1.0, 0.0),
+            "DISARMED": (1.0, 0.75, 0.0),
+            "LINK_LOST": (1.0, 0.0, 0.0),
+        }[state]
+        marker.text = state
+        self.safety_marker_pub.publish(marker)
 
     def load_camera_info(self, url):
         """Load a standard ROS camera-calibration YAML file for host-streamed frames."""

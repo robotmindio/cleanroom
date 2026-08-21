@@ -65,6 +65,14 @@ def floor_with_block(distance, half_width=0.15):
     return image
 
 
+def floor_with_offset_block(forward, left, half_width=0.06):
+    image = np.full((480, 640, 3), 130, np.uint8)
+    near_left = pixel_of(forward, left + half_width)
+    near_right = pixel_of(forward, left - half_width)
+    cv2.rectangle(image, (near_left[0], 0), (near_right[0], near_left[1]), (20, 20, 20), -1)
+    return image
+
+
 @pytest.mark.parametrize("distance", [0.4, 0.8, 1.5])
 def test_block_reported_at_its_distance(node, distance):
     scan = node.scan(floor_with_block(distance), stamp=None)
@@ -77,6 +85,18 @@ def test_empty_floor_reports_nothing(node):
     image = np.full((480, 640, 3), 130, np.uint8)
     scan = node.scan(image, stamp=None)
     assert all(math.isinf(r) for r in scan.ranges)
+
+
+def test_camera_offset_transforms_bearing_and_range_into_scan_frame(node):
+    forward, left, offset = 0.8, 0.25, 0.03
+    node.set_parameters([rclpy.parameter.Parameter("camera_offset_x", value=offset)])
+    scan = node.scan(floor_with_offset_block(forward, left), stamp=None)
+    node.set_parameters([rclpy.parameter.Parameter("camera_offset_x", value=0.0)])
+
+    index = min(range(len(scan.ranges)), key=lambda i: scan.ranges[i])
+    angle = scan.angle_min + index * scan.angle_increment
+    assert scan.ranges[index] == pytest.approx(math.hypot(forward + offset, left), abs=0.1)
+    assert angle == pytest.approx(math.atan2(left, forward + offset), abs=0.1)
 
 
 def test_camera_fault_reports_a_blocked_scan(node):
