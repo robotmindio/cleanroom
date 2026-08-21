@@ -8,10 +8,11 @@ set -Eeuo pipefail
 
 mapfile -t launch_pids < <(pgrep -f 'ros2 launch lekiwi_rmf' || true)
 mapfile -t pi_camera_pids < <(pgrep -f 'ros2 launch .*pi_cameras\.launch\.py' || true)
-# A launcher can die before relaying SIGINT, leaving its driver re-parented to the
-# user manager. Match this package's executable, not every Python ROS node.
+# A launcher can die before relaying SIGINT, leaving its Python nodes re-parented to the
+# user manager. Match this stack's executables, not every Python ROS node.
 mapfile -t driver_pids < <(pgrep -f '[/]lekiwi_rmf/lib/lekiwi_rmf/lekiwi_driver([[:space:]]|$)' || true)
-launch_pids+=("${pi_camera_pids[@]}" "${driver_pids[@]}")
+mapfile -t fleet_adapter_pids < <(pgrep -f '[/]free_fleet_adapter/lib/free_fleet_adapter/fleet_adapter\.py([[:space:]]|$)' || true)
+launch_pids+=("${pi_camera_pids[@]}" "${driver_pids[@]}" "${fleet_adapter_pids[@]}")
 for pid in "${launch_pids[@]}"; do
   kill -INT "$pid" 2>/dev/null || true
 done
