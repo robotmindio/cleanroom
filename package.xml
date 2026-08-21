@@ -44,6 +44,7 @@
   <exec_depend>tf2_ros</exec_depend>
   <exec_depend>tf2_msgs</exec_depend>
   <exec_depend>xacro</exec_depend>
+  <exec_depend>visualization_msgs</exec_depend>
 
   <test_depend>ament_cmake_pytest</test_depend>
 
