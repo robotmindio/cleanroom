@@ -15,5 +15,12 @@ def generate_launch_description():
         .to_moveit_configs()
     )
     return LaunchDescription([
-        Node(package="moveit_ros_move_group", executable="move_group", output="screen", parameters=[config.to_dict()]),
+        Node(
+            package="moveit_ros_move_group",
+            executable="move_group",
+            output="screen",
+            parameters=[config.to_dict()],
+            respawn=True,
+            respawn_delay=2.0,
+        ),
     ])

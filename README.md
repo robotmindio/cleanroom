@@ -141,8 +141,8 @@ Only one localization mode should run. `visual_slam` publishes `map -> odom` thr
 
 ### Arm planning
 
-Start MoveIt with the real robot, then add RViz's **MotionPlanning** panel, select
-the `arm` group, and plan and execute normally:
+Start MoveIt with the real robot. RViz opens with the **MotionPlanning** display;
+select the `arm` group, then plan and execute normally:
 
 ```bash
 ros2 launch lekiwi_rmf bringup.launch.py mode:=real
