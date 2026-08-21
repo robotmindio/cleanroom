@@ -14,7 +14,7 @@ import pytest
 
 cv2 = pytest.importorskip("cv2")
 rclpy = pytest.importorskip("rclpy")
-from sensor_msgs.msg import CameraInfo
+from sensor_msgs.msg import CameraInfo, Image
 
 SCRIPT = pathlib.Path(__file__).resolve().parent.parent / "scripts" / "free_space.py"
 spec = importlib.util.spec_from_file_location("free_space", SCRIPT)
@@ -91,3 +91,21 @@ def test_invalid_camera_intrinsics_are_rejected(node):
     node.on_info(info)
     assert node.k is None
     node.k, node.d = K, np.zeros(5)
+
+
+def test_no_floor_in_view_does_not_crash(node):
+    node.set_parameters([rclpy.parameter.Parameter("camera_pitch", value=-2.0)])
+    image = np.full((480, 640, 3), 130, np.uint8)
+    assert node.scan(image, stamp=None) is None
+    node.set_parameters([rclpy.parameter.Parameter("camera_pitch", value=PITCH)])
+
+
+@pytest.mark.parametrize("encoding", ["rgb8", "bgr8"])
+def test_image_decoder_honors_encoding_and_row_padding(node, encoding):
+    bgr = np.array([[[10, 20, 30], [40, 50, 60]]], dtype=np.uint8)
+    source = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB) if encoding == "rgb8" else bgr
+    msg = Image()
+    msg.height, msg.width, msg.encoding = 1, 2, encoding
+    msg.step = 8
+    msg.data = source.tobytes() + b"\x00\x00"
+    assert np.array_equal(node.bgr_image(msg), bgr)

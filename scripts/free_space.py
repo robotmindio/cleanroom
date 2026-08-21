@@ -160,11 +160,25 @@ class FreeSpace(Node):
 
     # -- detection --------------------------------------------------------------
 
+    def bgr_image(self, msg):
+        """Decode the supported ROS encodings without assuming tightly packed RGB."""
+        if msg.encoding not in ("rgb8", "bgr8"):
+            self.get_logger().warn(f"ignoring unsupported image encoding {msg.encoding!r}")
+            return None
+        row_bytes = msg.width * 3
+        if msg.step < row_bytes or len(msg.data) < msg.step * msg.height:
+            self.get_logger().warn("ignoring malformed camera image")
+            return None
+        rows = np.frombuffer(msg.data, dtype=np.uint8, count=msg.step * msg.height)
+        image = rows.reshape(msg.height, msg.step)[:, :row_bytes].reshape(msg.height, msg.width, 3)
+        return cv2.cvtColor(image, cv2.COLOR_RGB2BGR) if msg.encoding == "rgb8" else image
+
     def on_image(self, msg):
         if self.k is None:
             return
-        rgb = np.frombuffer(msg.data, dtype=np.uint8).reshape(msg.height, msg.width, 3)
-        bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+        bgr = self.bgr_image(msg)
+        if bgr is None:
+            return
         if self.get_parameter("calibrate").value:
             if not self.calibrated:
                 self.calibrate(bgr)
@@ -213,6 +227,9 @@ class FreeSpace(Node):
         rows = np.arange(height) * 2.0
         cols = np.arange(width) * 2.0
         fwd, left, visible = self.ground_points(rows, cols)
+
+        if not visible.any():
+            return None
 
         lab = cv2.cvtColor(cv2.GaussianBlur(bgr, (5, 5), 0), cv2.COLOR_BGR2Lab).astype(np.float32)
         # The strip of floor directly under the camera is the reference: if the robot is

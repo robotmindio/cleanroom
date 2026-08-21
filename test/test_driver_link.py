@@ -1,6 +1,7 @@
 """Pure checks for the driver's stale-telemetry detector."""
 
 import ast
+import math
 import pathlib
 import threading
 import types
@@ -11,19 +12,50 @@ _NODE = next(node for node in _TREE.body if getattr(node, "name", None) == "LeKi
 _NODE.bases = []
 _NODE.body = [
     item for item in _NODE.body
-    if getattr(item, "name", None) in ("observation_is_fresh", "set_disarmed", "update")
+    if getattr(item, "name", None) in (
+        "observation_is_fresh", "set_disarmed", "update", "validate_motion_parameters"
+    )
 ]
 driver = types.ModuleType("driver_under_test")
 exec(compile(ast.Module(body=[_NODE], type_ignores=[]), "driver.py", "exec"), driver.__dict__)
+driver.math = math
 
 
 def test_repeated_cached_observation_is_not_fresh():
     node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
     node.last_observation = None
+    node.last_observation_token = None
     cached = {"arm_shoulder_pan.pos": 12.0}
     assert node.observation_is_fresh(cached)
     assert not node.observation_is_fresh(cached)
     assert node.observation_is_fresh({"arm_shoulder_pan.pos": 12.0})
+
+
+def test_mutated_cached_observation_is_fresh():
+    node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
+    node.last_observation = None
+    node.last_observation_token = None
+    cached = {"arm_shoulder_pan.pos": 12.0}
+
+    assert node.observation_is_fresh(cached)
+    cached["arm_shoulder_pan.pos"] = 13.0
+    assert node.observation_is_fresh(cached)
+
+
+def test_invalid_motion_scale_is_rejected():
+    node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
+    node.xy_scale = 0.0
+    node.yaw_scale = 1.0
+    node.command_timeout = node.link_timeout = 1.0
+    node.trajectory_tolerance = node.trajectory_timeout = 1.0
+    node.max_linear = node.max_angular = 1.0
+
+    try:
+        node.validate_motion_parameters()
+    except ValueError as error:
+        assert "xy_velocity_scale" in str(error)
+    else:
+        raise AssertionError("zero xy_velocity_scale was accepted")
 
 
 def test_disarm_queues_a_stop():

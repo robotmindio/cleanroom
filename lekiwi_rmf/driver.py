@@ -59,6 +59,7 @@ class LeKiwiDriver(Node):
         self.pose = (initial_x, initial_y, initial_yaw)
         self.last_update = self.get_clock().now()
         self.last_observation = None
+        self.last_observation_token = None
         self.last_fresh = self.last_update
         self.link_lost = False
         self.armed = False
@@ -72,6 +73,7 @@ class LeKiwiDriver(Node):
         self.arm_positions = {name: 0.0 for name in ARM_JOINTS}
         self.trajectory = None
         self.trajectory_lock = threading.Lock()
+        self.validate_motion_parameters()
 
         self.odom_pub = self.create_publisher(Odometry, "odom", 10)
         self.joint_pub = self.create_publisher(JointState, "joint_states", 10)
@@ -252,8 +254,41 @@ class LeKiwiDriver(Node):
     def clamp(value, limit):
         return max(-limit, min(limit, value))
 
+    def validate_motion_parameters(self):
+        """Reject values that would make a command unsafe or undefined."""
+        positive = {
+            "xy_velocity_scale": self.xy_scale,
+            "yaw_velocity_scale": self.yaw_scale,
+            "command_timeout": self.command_timeout,
+            "link_timeout": self.link_timeout,
+            "trajectory_tolerance": self.trajectory_tolerance,
+            "trajectory_timeout": self.trajectory_timeout,
+        }
+        nonnegative = {
+            "max_linear_speed": self.max_linear,
+            "max_angular_speed": self.max_angular,
+        }
+        for name, value in positive.items():
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError(f"{name} must be finite and greater than zero")
+        for name, value in nonnegative.items():
+            if not math.isfinite(value) or value < 0:
+                raise ValueError(f"{name} must be finite and non-negative")
+
     def observation_is_fresh(self, observation):
-        fresh = observation is not self.last_observation
+        # LeRobot normally replaces its observation dict for every packet, but some
+        # client versions update one cached dict in place. Identity alone therefore
+        # turns a healthy, moving robot into a false link-loss. The numeric telemetry
+        # and frame identity detect that in-place update while preserving the cheap
+        # identity check for the usual case.
+        numeric = tuple(sorted(
+            (name, float(value))
+            for name, value in observation.items()
+            if name.endswith((".pos", ".vel"))
+        ))
+        token = (id(observation), numeric, id(observation.get("front")))
+        fresh = token != getattr(self, "last_observation_token", None)
+        self.last_observation_token = token
         self.last_observation = observation
         return fresh
 
