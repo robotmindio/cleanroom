@@ -13,7 +13,8 @@ _NODE.bases = []
 _NODE.body = [
     item for item in _NODE.body
     if getattr(item, "name", None) in (
-        "observation_is_fresh", "set_disarmed", "update", "validate_motion_parameters"
+        "observation_is_fresh", "set_disarmed", "update", "validate_motion_parameters",
+        "publish_safety",
     )
 ]
 driver = types.ModuleType("driver_under_test")
@@ -109,3 +110,32 @@ def test_disarmed_driver_sends_zero_velocity_once():
 
     assert sent == [{"joint.pos": 0.0, "x.vel": 0.0, "y.vel": 0.0, "theta.vel": 0.0}]
     assert node.stop_pending is False
+
+
+def test_safety_marker_matches_the_safety_state():
+    class Marker:
+        TEXT_VIEW_FACING = 9
+        ADD = 0
+
+        def __init__(self):
+            self.header = types.SimpleNamespace()
+            self.pose = types.SimpleNamespace(
+                position=types.SimpleNamespace(), orientation=types.SimpleNamespace()
+            )
+            self.scale = types.SimpleNamespace()
+            self.color = types.SimpleNamespace()
+
+    messages = []
+    markers = []
+    driver.String = lambda: types.SimpleNamespace()
+    driver.Marker = Marker
+    node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
+    node.get_clock = lambda: type("Clock", (), {"now": lambda _: type("Now", (), {"to_msg": lambda _: object()})()})()
+    node.safety_pub = types.SimpleNamespace(publish=messages.append)
+    node.safety_marker_pub = types.SimpleNamespace(publish=markers.append)
+
+    node.publish_safety("LINK_LOST")
+
+    assert messages[0].data == "LINK_LOST"
+    assert markers[0].text == "LINK_LOST"
+    assert (markers[0].color.r, markers[0].color.g, markers[0].color.b) == (1.0, 0.0, 0.0)

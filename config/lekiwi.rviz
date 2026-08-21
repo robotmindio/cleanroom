@@ -117,6 +117,67 @@ Visualization Manager:
     Tree: {}
     Update Interval: 0
     Value: true
+  - Angle Tolerance: 0.10000000149011612
+    Class: rviz_default_plugins/Odometry
+    Covariance:
+      Orientation:
+        Alpha: 0.5
+        Color: 255; 255; 127
+        Color Style: Unique
+        Frame: Local
+        Offset: 1
+        Scale: 1
+        Value: true
+      Position:
+        Alpha: 0.30000001192092896
+        Color: 204; 51; 204
+        Scale: 1
+        Value: true
+      Value: true
+    Enabled: true
+    Keep: 100
+    Name: Odometry
+    Position Tolerance: 0.10000000149011612
+    Shape:
+      Alpha: 1
+      Axes Length: 0.4
+      Axes Radius: 0.04
+      Color: 0; 255; 255
+      Head Length: 0.12
+      Head Radius: 0.06
+      Shaft Length: 0.3
+      Shaft Radius: 0.03
+      Value: Arrow
+    Topic:
+      Depth: 5
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /odom
+    Value: true
+  - Class: rviz_default_plugins/Pose
+    Color: 255; 0; 255
+    Enabled: true
+    Name: Navigation Goal
+    Shape: Arrow
+    Topic:
+      Depth: 5
+      Durability Policy: Volatile
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /goal_pose
+    Value: true
+  - Class: rviz_default_plugins/Marker
+    Enabled: true
+    Name: Safety State
+    Namespaces: {}
+    Topic:
+      Depth: 1
+      Durability Policy: Transient Local
+      History Policy: Keep Last
+      Reliability Policy: Reliable
+      Value: /safety/marker
+    Value: true
   - Alpha: 1
     Autocompute Intensity Bounds: true
     Autocompute Value Bounds:
