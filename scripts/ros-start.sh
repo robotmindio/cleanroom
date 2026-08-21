@@ -45,4 +45,4 @@ else
 fi
 
 exec ros2 launch lekiwi_rmf bringup.launch.py mode:=real \
-  camera_device:="$FRONT" wrist_camera_device:="${WRIST:-none}" "$@"
+  camera_source:="$camera_source" camera_device:="$FRONT" wrist_camera_device:="${WRIST:-none}" "$@"

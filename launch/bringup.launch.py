@@ -299,6 +299,7 @@ def generate_launch_description():
                     "publish_tf": True,
                     "qos_image": 2,
                     "qos_camera_info": 2,
+                    "qos_scan": 2,
                     "qos_odom": 1,
                     "Rtabmap/MemoryThr": ParameterValue(
                         LaunchConfiguration("rtabmap_wm_nodes"), value_type=str
