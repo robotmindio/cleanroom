@@ -256,7 +256,9 @@ class FreeSpace(Node):
             blocked = sector & ~floor
             if blocked.any():
                 # nearest blocked pixel in this direction, plus the camera's own offset
-                ranges[i] = float(distance[blocked].min()) + offset
+                measured = float(distance[blocked].min()) + offset
+                if rmin <= measured <= rmax:
+                    ranges[i] = measured
 
         scan = LaserScan()
         scan.header.stamp = stamp

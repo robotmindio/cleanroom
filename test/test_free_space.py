@@ -85,6 +85,16 @@ def test_camera_fault_reports_a_blocked_scan(node):
     assert all(value == pytest.approx(0.11) for value in scan.ranges)
 
 
+def test_scan_never_exceeds_declared_range_max(node):
+    node.set_parameters([
+        rclpy.parameter.Parameter("camera_offset_x", value=10.0),
+        rclpy.parameter.Parameter("range_max", value=3.0),
+    ])
+    scan = node.scan(floor_with_block(0.8), stamp=None)
+    assert all(math.isinf(value) or scan.range_min <= value <= scan.range_max for value in scan.ranges)
+    node.set_parameters([rclpy.parameter.Parameter("camera_offset_x", value=0.0)])
+
+
 def test_invalid_camera_intrinsics_are_rejected(node):
     info = CameraInfo()
     info.k = [0.0] * 9

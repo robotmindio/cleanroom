@@ -184,6 +184,31 @@ colcon --log-base "$WORKSPACE/log" build \
   --install-base "$WORKSPACE/install" \
   --cmake-args -DCMAKE_BUILD_TYPE=Release
 
+setup_file="$PROJECT_ROOT/scripts/setup.bash"
+setup_marker='# >>> lekiwi setup >>>'
+install_shell_setup() {
+  local profile=$1
+  if [[ -f $profile ]] && grep -Fq "$setup_file" "$profile"; then
+    return
+  fi
+  touch "$profile"
+  {
+    printf '\n%s\n' "$setup_marker"
+    printf '# Added by LeKiwi installer. Remove this block to disable automatic ROS setup.\n'
+    printf 'if [ -z "${LEKIWI_WS:-}" ]; then export LEKIWI_WS=%q; fi\n' "$WORKSPACE"
+    printf 'if [ -f %q ]; then\n  . %q\nfi\n' "$setup_file" "$setup_file"
+    printf '# <<< lekiwi setup <<<\n'
+  } >> "$profile"
+  log "Added LeKiwi setup to $profile"
+}
+
+# setup.bash selects the matching ROS setup file, so the same source line is valid
+# in bash and zsh. Do not create .zshrc for bash-only users.
+install_shell_setup "$HOME/.bashrc"
+if [[ ${SHELL:-} == */zsh || -f "$HOME/.zshrc" ]]; then
+  install_shell_setup "$HOME/.zshrc"
+fi
+
 log "Installation complete"
-printf 'Open a new shell and run:\n  source %q/scripts/setup.bash\n' "$PROJECT_ROOT"
+printf 'Open a new shell to load the LeKiwi environment automatically.\n'
 printf 'Then launch the simulation:\n  ros2 launch lekiwi_rmf bringup.launch.py mode:=sim\n'

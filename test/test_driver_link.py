@@ -13,7 +13,8 @@ _NODE.bases = []
 _NODE.body = [
     item for item in _NODE.body
     if getattr(item, "name", None) in (
-        "observation_is_fresh", "set_disarmed", "update", "validate_motion_parameters"
+        "observation_is_fresh", "observation_is_valid", "set_disarmed", "update",
+        "validate_motion_parameters"
     )
 ]
 driver = types.ModuleType("driver_under_test")
@@ -28,7 +29,7 @@ def test_repeated_cached_observation_is_not_fresh():
     cached = {"arm_shoulder_pan.pos": 12.0}
     assert node.observation_is_fresh(cached)
     assert not node.observation_is_fresh(cached)
-    assert node.observation_is_fresh({"arm_shoulder_pan.pos": 12.0})
+    assert not node.observation_is_fresh({"arm_shoulder_pan.pos": 12.0})
 
 
 def test_mutated_cached_observation_is_fresh():
@@ -40,6 +41,13 @@ def test_mutated_cached_observation_is_fresh():
     assert node.observation_is_fresh(cached)
     cached["arm_shoulder_pan.pos"] = 13.0
     assert node.observation_is_fresh(cached)
+
+
+def test_incomplete_or_non_finite_telemetry_is_rejected():
+    driver.ARM_JOINTS = ("joint",)
+    assert driver.LeKiwiDriver.observation_is_valid({"joint.pos": 0.0})
+    assert not driver.LeKiwiDriver.observation_is_valid({"joint.pos": float("nan")})
+    assert not driver.LeKiwiDriver.observation_is_valid({"other.pos": 0.0})
 
 
 def test_invalid_motion_scale_is_rejected():

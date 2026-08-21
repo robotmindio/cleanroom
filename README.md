@@ -33,7 +33,7 @@ The installer supports Ubuntu 24.04 only and rejects any other platform. The rob
 
 ## Install everything
 
-The installer uses `sudo` for apt packages, downloads pinned Free Fleet/RMF task sources, installs the Zenoh bridge in `~/.local/bin`, creates a Python virtual environment, installs LeRobot, and builds the workspace. It does not modify `.bashrc` or `.zshrc`.
+The installer uses `sudo` for apt packages, downloads pinned Free Fleet/RMF task sources, installs the Zenoh bridge in `~/.local/bin`, creates a Python virtual environment, installs LeRobot, and builds the workspace. It adds an idempotent, marked setup block to `~/.bashrc`; when zsh is the login shell or `~/.zshrc` already exists, it adds the same block there. The block remembers the chosen workspace unless `LEKIWI_WS` is already set. Remove that marked block to opt out of automatic setup.
 
 ```bash
 chmod +x scripts/install.sh

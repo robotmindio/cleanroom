@@ -276,21 +276,34 @@ class LeKiwiDriver(Node):
                 raise ValueError(f"{name} must be finite and non-negative")
 
     def observation_is_fresh(self, observation):
-        # LeRobot normally replaces its observation dict for every packet, but some
-        # client versions update one cached dict in place. Identity alone therefore
-        # turns a healthy, moving robot into a false link-loss. The numeric telemetry
-        # and frame identity detect that in-place update while preserving the cheap
-        # identity check for the usual case.
+        # The client can return a newly allocated copy of its last packet. A dict's
+        # identity consequently says nothing about whether it came from the robot.
+        # Numeric telemetry changes and replacement camera frames are observable
+        # evidence of a new packet; anything else is treated conservatively as stale.
         numeric = tuple(sorted(
             (name, float(value))
             for name, value in observation.items()
             if name.endswith((".pos", ".vel"))
         ))
-        token = (id(observation), numeric, id(observation.get("front")))
+        token = (numeric, id(observation.get("front")), id(observation.get("wrist")))
         fresh = token != getattr(self, "last_observation_token", None)
         self.last_observation_token = token
         self.last_observation = observation
         return fresh
+
+    @staticmethod
+    def observation_is_valid(observation):
+        """Require finite arm feedback before using an observation to hold the robot."""
+        if not isinstance(observation, dict):
+            return False
+        try:
+            values = [observation[f"{joint}.pos"] for joint in ARM_JOINTS]
+            values.extend(
+                value for name, value in observation.items() if name.endswith((".pos", ".vel"))
+            )
+            return all(math.isfinite(float(value)) for value in values)
+        except (KeyError, TypeError, ValueError):
+            return False
 
     def update(self):
         now = self.get_clock().now()
@@ -301,6 +314,13 @@ class LeKiwiDriver(Node):
         except Exception as error:
             if not self.link_lost:
                 self.get_logger().error(f"LeKiwi telemetry failed: {error}")
+                self.link_lost = True
+                self.set_disarmed("LINK_LOST")
+            return
+
+        if not self.observation_is_valid(observation):
+            if not self.link_lost:
+                self.get_logger().error("LeKiwi telemetry is incomplete or non-finite")
                 self.link_lost = True
                 self.set_disarmed("LINK_LOST")
             return

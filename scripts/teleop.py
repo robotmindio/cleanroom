@@ -86,6 +86,9 @@ def main():
                 twist.linear.x = x * LINEAR * scale
                 twist.linear.y = y * LINEAR * scale
                 twist.angular.z = yaw * ANGULAR * scale
+            elif key is not None:
+                # Do not keep driving after a typo or an unexpected terminal sequence.
+                twist = Twist()
             pub.publish(twist)  # repeat: the host stops the base without a fresh command
     except KeyboardInterrupt:
         pass
