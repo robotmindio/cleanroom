@@ -77,6 +77,7 @@ class LeKiwiDriver(Node):
         self.joint_pub = self.create_publisher(JointState, "joint_states", 10)
         self.front_image_pub = self.create_publisher(Image, "/camera/front/image_raw", 10)
         self.front_info_pub = self.create_publisher(CameraInfo, "/camera/front/camera_info", 10)
+        self.wrist_image_pub = self.create_publisher(Image, "/camera/wrist/image_raw", 10)
         self.front_camera_info = self.load_camera_info(camera_info_url)
         self.safety_pub = self.create_publisher(String, "safety/state", 1)
         self.tf = TransformBroadcaster(self)
@@ -121,25 +122,36 @@ class LeKiwiDriver(Node):
             self.get_logger().warn(f"Could not load front-camera calibration from {path}: {error}")
         return info
 
-    def publish_front_camera(self, stamp, observation):
-        frame = observation.get("front")
+    @staticmethod
+    def publish_image(stamp, frame, publisher, frame_id):
         if frame is None or getattr(frame, "ndim", 0) != 3 or frame.shape[2] != 3:
-            return
+            return None
         image = Image()
         image.header.stamp = stamp
-        image.header.frame_id = "front_camera_optical_frame"
+        image.header.frame_id = frame_id
         image.height, image.width = frame.shape[:2]
         image.encoding = "bgr8"
         image.is_bigendian = False
         image.step = image.width * 3
         image.data = frame.tobytes()
-        self.front_image_pub.publish(image)
+        publisher.publish(image)
+        return image
+
+    def publish_front_camera(self, stamp, observation):
+        image = self.publish_image(
+            stamp, observation.get("front"), self.front_image_pub, "front_camera_optical_frame"
+        )
+        if image is None:
+            return
 
         info = deepcopy(self.front_camera_info)
         info.header = image.header
         if not info.width:
             info.width, info.height = image.width, image.height
         self.front_info_pub.publish(info)
+
+    def publish_wrist_camera(self, stamp, observation):
+        self.publish_image(stamp, observation.get("wrist"), self.wrist_image_pub, "tool")
 
     def cancel_trajectory(self, outcome):
         with self.trajectory_lock:
@@ -276,6 +288,8 @@ class LeKiwiDriver(Node):
             self.get_logger().warn("LeKiwi telemetry recovered; inspect robot, then call safety/arm")
         if "front" in observation:
             self.publish_front_camera(now.to_msg(), observation)
+        if "wrist" in observation:
+            self.publish_wrist_camera(now.to_msg(), observation)
         arm_positions = joint_positions(
             observation, self.arm_zero_positions, self.arm_directions
         )

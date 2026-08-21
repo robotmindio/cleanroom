@@ -197,7 +197,7 @@ stream. The workstation driver republishes it onto `/camera/front/image_raw` whe
 
 On the wired variant everything is local, so `camera_source:=local` with `camera_device` pointing at a `/dev/v4l/by-id/...` path.
 
-The wrist camera is optional and off unless `wrist_camera_device` names a device; `scripts/ros-start.sh` fills it in from `/dev/v4l/by-id/` when the camera is plugged in. It publishes on `/camera/wrist/image_raw` for watching the gripper — nothing subscribes to it and it carries no calibration. It streams small on purpose: both cameras share one USB 2.0 hub, `v4l2_camera` cannot decompress MJPG, and a second full-size uncompressed feed starves the front camera into solid green frames.
+The wrist camera is optional and off unless `wrist_camera_device` names a device; `scripts/ros-start.sh` fills it in from `/dev/v4l/by-id/` when the camera is plugged in. It publishes on `/camera/wrist/image_raw` for watching the gripper — nothing subscribes to it and it carries no calibration. In remote mode the LeRobot host streams that same small wrist frame to the workstation. Both cameras share one USB 2.0 hub, so the wrist feed stays small.
 
 ### Odometry scale
 
