@@ -55,6 +55,9 @@ Visualization Manager:
       Loop Animation: true
       State Display Time: 0.05 s
       Trajectory Topic: /display_planned_path
+    # Without this the panel starts with no group selected and every Plan click is a no-op
+    # until "arm" is picked by hand. A display property, so safe under the header rules.
+    Planning Group: arm
     Planning Scene Topic: /monitored_planning_scene
     Robot Description: robot_description
     Scene Geometry:

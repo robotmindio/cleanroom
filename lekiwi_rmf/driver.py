@@ -234,6 +234,10 @@ class LeKiwiDriver(Node):
 
     def accept_trajectory(self, goal):
         if not self.armed:
+            # MoveIt surfaces this only as an unexplained "goal was rejected"; say why here.
+            self.get_logger().warn(
+                "Rejecting arm trajectory: driver is disarmed -- call the safety/arm service first"
+            )
             return GoalResponse.REJECT
         try:
             if not goal.trajectory.points:
@@ -248,7 +252,8 @@ class LeKiwiDriver(Node):
                 if point_time < 0 or point_time < previous_time:
                     raise ValueError("trajectory times must be ordered")
                 previous_time = point_time
-        except (IndexError, ValueError):
+        except (IndexError, ValueError) as error:
+            self.get_logger().warn(f"Rejecting arm trajectory: {error}")
             return GoalResponse.REJECT
         return GoalResponse.ACCEPT
 

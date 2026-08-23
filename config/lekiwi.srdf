@@ -3,11 +3,25 @@
   <group name="arm">
     <chain base_link="mast" tip_link="tool"/>
   </group>
+  <!-- The gripper is deliberately its own group, not part of the arm chain: planning an
+       arm goal never moves the claw. It shares the driver's single FollowJointTrajectory
+       action server with the arm (see config/moveit_controllers.yaml). -->
+  <group name="gripper">
+    <joint name="arm_gripper"/>
+  </group>
   <group_state name="home" group="arm">
     <joint name="arm_shoulder_pan" value="0"/>
     <joint name="arm_shoulder_lift" value="0"/>
     <joint name="arm_elbow_flex" value="0"/>
     <joint name="arm_wrist_flex" value="0"/>
     <joint name="arm_wrist_roll" value="0"/>
+  </group_state>
+  <!-- open/closed assume the default calibration direction; if the gripper's
+       "directions" entry in ~/.ros/lekiwi_arm_calibration.json is -1, swap them. -->
+  <group_state name="open" group="gripper">
+    <joint name="arm_gripper" value="0"/>
+  </group_state>
+  <group_state name="closed" group="gripper">
+    <joint name="arm_gripper" value="1.57"/>
   </group_state>
 </robot>

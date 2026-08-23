@@ -12,3 +12,6 @@ joint_limits:
   arm_wrist_flex: {has_velocity_limits: true, max_velocity: 3.0, has_acceleration_limits: true, max_acceleration: 5.0}
   # wrist_roll is continuous in the real URDF, so this file is also its only velocity limit.
   arm_wrist_roll: {has_velocity_limits: true, max_velocity: 3.0, has_acceleration_limits: true, max_acceleration: 5.0}
+  # Needed once the SRDF's gripper group can be planned: TOTG parameterizes every
+  # planned group, not just "arm". Velocity matches the URDF <limit>.
+  arm_gripper: {has_velocity_limits: true, max_velocity: 2.0, has_acceleration_limits: true, max_acceleration: 3.0}
