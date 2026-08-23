@@ -59,7 +59,16 @@ def generate_launch_description():
     # supplied, RTAB-Map's own grid when the robot is left to draw one.
     rtabmap_map_topic = PythonExpression([
         "'/rtabmap/map' if '", static_map, "' == 'true' else '/map'"])
-    scanning = PythonExpression(["'", LaunchConfiguration("free_space"), "' == 'true'"])
+    # Whoever owns /scan, owns what Nav2 dodges: a real LD06 on the mast, the
+    # front camera's floor-geometry trick, or nobody at all. In sim Gazebo
+    # always publishes /scan itself and none of this runs.
+    laser_source = LaunchConfiguration("laser_source")
+    lidar_port = LaunchConfiguration("lidar_port")
+    lidar_on = PythonExpression(["'", laser_source, "' != 'none'"])
+    camera_laser = PythonExpression([
+        "'", laser_source, "' == 'camera' and ", real])
+    ld06 = PythonExpression([
+        "'", laser_source, "' == 'ld06' and ", real])
     nav2_share = FindPackageShare("nav2_bringup")
     map_file = PathJoinSubstitution([package, "maps", "cleanroom.yaml"])
     params_file = PathJoinSubstitution([nav2_share, "params", "nav2_params.yaml"])
@@ -117,8 +126,15 @@ def generate_launch_description():
             # The checked-in PGM is a floor plan of a room that does not exist. Left false,
             # nothing serves it and RTAB-Map draws the map itself from what the robot sees.
             DeclareLaunchArgument("static_map", default_value="false"),
+            # What publishes /scan on the real robot: the camera-derived obstacle scan
+            # (default, needs no extra hardware), an LDROBOT LD06 on the mast, or none.
+            # In sim this is ignored -- Gazebo publishes /scan from its own lidar model.
+            DeclareLaunchArgument(
+                "laser_source", default_value="camera", choices=["camera", "ld06", "none"]
+            ),
+            # Prefer a /dev/serial/by-id/... path for the same reason as camera_device.
+            DeclareLaunchArgument("lidar_port", default_value="/dev/ttyUSB0"),
             # Camera-as-laser obstacle detection, and the geometry it stands on.
-            DeclareLaunchArgument("free_space", default_value="true"),
             DeclareLaunchArgument("camera_height", default_value="0.093"),
             # Measured with the checkerboard on the floor, not taken from the URDF: the
             # camera sits 9.3 cm up and all but level, which is why it sees a chair leg at
@@ -239,10 +255,10 @@ def generate_launch_description():
                 condition=IfCondition(remote_camera),
                 output="screen",
             ),
-            # There is no laser on this robot, so obstacles come from the front camera: the
-            # floor is flat, which makes every floor pixel a known distance, and the first
-            # pixel that stops looking like floor is an obstacle. Nav2's obstacle layer
-            # reads /scan and needs nothing else. The geometry below was measured with the
+            # laser_source:=camera: there is no depth sensor, but the floor is flat,
+            # which makes every floor pixel a known distance, and the first pixel that
+            # stops looking like floor is an obstacle. Nav2's obstacle layer reads /scan
+            # and needs nothing else. The geometry below was measured with the
             # checkerboard; `free_space.py --ros-args -p calibrate:=true` prints it again,
             # and wrong numbers put phantom walls in the costmap.
             Node(
@@ -260,8 +276,26 @@ def generate_launch_description():
                     ("camera_info", camera_info_topic),
                     ("scan", "/scan"),
                 ],
-                condition=IfCondition(PythonExpression([
-                    "'", LaunchConfiguration("free_space"), "' == 'true' and ", real])),
+                condition=IfCondition(camera_laser),
+                output="screen",
+            ),
+            # laser_source:=ld06: a real LDROBOT LD06 on the mast. frame_id is the
+            # URDF's `laser` link (8 cm up the mast), so robot_state_publisher already
+            # provides its pose -- the stock upstream launch adds a static TF that
+            # would fight it. The LD06's 12 m range dwarfs the camera trick; keep
+            # both off Nav2 at once by never enabling them together.
+            Node(
+                package="ldlidar_stl_ros2",
+                executable="ldlidar_stl_ros2_node",
+                name="ld06_lidar",
+                parameters=[{
+                    "product_name": "LDLiDAR_LD06",
+                    "topic_name": "/scan",
+                    "frame_id": "laser",
+                    "port_name": lidar_port,
+                    "port_baudrate": 230400,
+                }],
+                condition=IfCondition(ld06),
                 output="screen",
             ),
             IncludeLaunchDescription(
@@ -322,7 +356,7 @@ def generate_launch_description():
                     "subscribe_rgb": True,
                     "subscribe_depth": False,
                     "subscribe_rgbd": False,
-                    "subscribe_scan": ParameterValue(scanning, value_type=bool),
+                    "subscribe_scan": ParameterValue(lidar_on, value_type=bool),
                     "subscribe_odom_info": False,
                     "approx_sync": True,
                     "publish_tf": True,

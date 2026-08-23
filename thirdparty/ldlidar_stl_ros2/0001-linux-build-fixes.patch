@@ -1,0 +1,29 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index ed83e6c..161bbda 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1,6 +1,11 @@
+ cmake_minimum_required(VERSION 3.5)
+ project(ldlidar_stl_ros2)
+ 
++# The SDK guards its Windows-only code paths (comutil.h and friends) with
++# #ifndef LINUX and relies on the build system to define the macro; upstream
++# never does, so Linux builds fail until it is set here.
++add_compile_definitions(LINUX)
++
+ # Default to C99
+ if(NOT CMAKE_C_STANDARD)
+   set(CMAKE_C_STANDARD 99)
+diff --git a/ldlidar_driver/src/logger/log_module.cpp b/ldlidar_driver/src/logger/log_module.cpp
+index 61369e0..3476259 100644
+--- a/ldlidar_driver/src/logger/log_module.cpp
++++ b/ldlidar_driver/src/logger/log_module.cpp
+@@ -16,6 +16,8 @@
+ * limitations under the License.
+ **/
+ #include "log_module.h"
++// Ubuntu 24.04 GCC 13 no longer pulls <pthread.h> transitively.
++#include <pthread.h>
+ 
+ #include <time.h>
+ #include <string.h>

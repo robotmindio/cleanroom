@@ -5,6 +5,9 @@ ZENOH_VERSION=1.5.0
 LEROBOT_VERSION=0.6.1
 FREE_FLEET_REV=e178db662720e36116a5559e4c13847466d5be2d
 RMF_DEMOS_REV=2.3.0
+# LDROBOT LD06 lidar driver, tag v3.0.3. Not released into the ROS apt repos;
+# thirdparty/ldlidar_stl_ros2/ carries a build fix applied after this clone.
+LIDLIDAR_STL_REV=cac5d3d4c15522c6126ef65cfa8a65b08531a66b
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 WORKSPACE=${LEKIWI_WS:-"$HOME/lekiwi_ws"}
 
@@ -113,6 +116,18 @@ log "Fetching pinned Free Fleet and RMF task tools"
 checkout https://github.com/open-rmf/free_fleet.git "$WORKSPACE/src/free_fleet" "$FREE_FLEET_REV"
 checkout https://github.com/open-rmf/rmf_demos.git "$WORKSPACE/src/rmf_demos" "$RMF_DEMOS_REV"
 
+log "Fetching the pinned LDROBOT LD06 driver"
+checkout https://github.com/ldrobotSensorTeam/ldlidar_stl_ros2.git \
+  "$WORKSPACE/src/ldlidar_stl_ros2" "$LIDLIDAR_STL_REV"
+# checkout() resets to the pinned revision, so reapplying is safe; skip it only
+# when a previous run already succeeded, since git apply refuses duplicates.
+pthread_fix="$WORKSPACE/src/ldlidar_stl_ros2/ldlidar_driver/src/logger/log_module.cpp"
+if ! grep -q '#include <pthread.h>' "$pthread_fix"; then
+  git -C "$WORKSPACE/src/ldlidar_stl_ros2" apply \
+    "$PROJECT_ROOT/thirdparty/ldlidar_stl_ros2/0001-linux-build-fixes.patch" ||
+    die "could not apply the Linux build fixes -- upstream may have changed"
+fi
+
 log "Installing the Zenoh ROS 2 bridge"
 zenoh_zip="zenoh-plugin-ros2dds-${ZENOH_VERSION}-${ZENOH_ARCH}-standalone.zip"
 tmp_dir=$(mktemp -d)
@@ -164,6 +179,7 @@ log "Resolving package dependencies and building the workspace"
 rosdep install --from-paths \
   "$PROJECT_ROOT" \
   "$WORKSPACE/src/free_fleet" \
+  "$WORKSPACE/src/ldlidar_stl_ros2" \
   "$WORKSPACE/src/rmf_demos/rmf_demos_tasks" \
   --ignore-src --rosdistro "$ROS_DISTRO" -yr
 # colcon reuses each package's CMake cache. If this repository was previously built from
@@ -177,10 +193,10 @@ if [[ -f $cache ]]; then
     rm -rf -- "$package_build"
   fi
 fi
-# A Pi-sized machine can exhaust itself here: many packages building in
-# parallel while everything else runs is how oomd ended up killing a whole
-# session (2026-08-23). On small RAM, cap packages-in-flight and compiler jobs
-# per package; CMAKE_BUILD_PARALLEL_LEVEL is what make/ninja actually read.
+# A Pi-sized machine can exhaust itself here: five packages building in parallel
+# while everything else runs is how oomd ended up killing a whole session
+# (2026-08-23). On small RAM, cap packages-in-flight and compiler jobs per
+# package; CMAKE_BUILD_PARALLEL_LEVEL is what make/ninja actually read.
 mem_total_mb=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
 parallel_args=()
 if (( mem_total_mb < 8000 )); then
@@ -189,8 +205,9 @@ if (( mem_total_mb < 8000 )); then
   export CMAKE_BUILD_PARALLEL_LEVEL=2
 fi
 colcon --log-base "$WORKSPACE/log" build \
-  --base-paths "$PROJECT_ROOT" "$WORKSPACE/src/free_fleet" "$WORKSPACE/src/rmf_demos/rmf_demos_tasks" \
-  --packages-select lekiwi_rmf free_fleet free_fleet_adapter rmf_demos_tasks \
+  --base-paths "$PROJECT_ROOT" "$WORKSPACE/src/free_fleet" \
+    "$WORKSPACE/src/ldlidar_stl_ros2" "$WORKSPACE/src/rmf_demos/rmf_demos_tasks" \
+  --packages-select lekiwi_rmf free_fleet free_fleet_adapter ldlidar_stl_ros2 rmf_demos_tasks \
   --build-base "$WORKSPACE/build" \
   --install-base "$WORKSPACE/install" \
   "${parallel_args[@]}" \

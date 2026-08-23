@@ -317,6 +317,33 @@ python ~/lerobot-src/examples/lekiwi/record.py
 Adapt `remote_ip`, `repo_id`, `port`, and `task` inside the script. Datasets land
 in `~/.cache/huggingface/lerobot/{repo-id}`.
 
+## 8. Mount the LD06 lidar (optional)
+
+The LDROBOT LD06 replaces the camera-as-laser obstacle scan (`laser_source:=ld06`
+instead of the default `camera`). It mounts partway up the mast: the URDF puts
+its `laser` frame 8 cm above the mast's origin -- about 30 cm off the base
+plate, level and facing forward -- so any bracket holding it there needs no TF
+work, only screws.
+
+It is a USB serial device (typically a CP2102 bridge), so it appears as
+`/dev/ttyUSB0`, owned `root:dialout` -- the same group the motor bus needs, and
+the installer adds you to it. Prefer its stable name over `/dev/ttyUSB0`, for
+the same reason as with cameras:
+
+```bash
+ls /dev/serial/by-id/    # e.g. usb-Silicon_Labs_CP2102N_...-if00-port0
+```
+
+Nothing else is configurable: the LD06 speaks 230400 baud and the driver is
+launched with that fixed. Run the stack with
+
+```bash
+scripts/up.sh laser_source:=ld06 lidar_port:=/dev/serial/by-id/usb-...-if00-port0
+```
+
+and check the scan against reality in RViz before trusting it: spin the robot by
+hand and watch a nearby wall stay put in the LaserScan display.
+
 ## Troubleshooting
 
 ### `/dev/ttyACM0` does not appear

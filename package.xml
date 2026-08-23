@@ -18,6 +18,7 @@
   <exec_depend>image_transport_plugins</exec_depend>
   <exec_depend>joint_state_publisher</exec_depend>
   <exec_depend>launch_ros</exec_depend>
+  <exec_depend>ldlidar_stl_ros2</exec_depend>
   <exec_depend>nav2_bringup</exec_depend>
   <exec_depend>nav2_lifecycle_manager</exec_depend>
   <exec_depend>nav2_map_server</exec_depend>

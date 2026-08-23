@@ -127,6 +127,8 @@ ros2 launch lekiwi_rmf bringup.launch.py mode:=sim \
 | `camera_info_url` | ROS camera URL | `file://~/.ros/camera_info/lekiwi_front.yaml` | Real front-camera calibration |
 | `camera_source` | `local`, `remote` | `local` | Read the camera here, or decompress what the robot's Pi publishes |
 | `camera_device` | V4L2 path | `/dev/video0` | Front camera when `camera_source:=local` |
+| `laser_source` | `camera`, `ld06`, `none` | `camera` | What publishes `/scan` on the real robot; ignored in sim |
+| `lidar_port` | serial path | `/dev/ttyUSB0` | LD06 device when `laser_source:=ld06` |
 | `xy_velocity_scale` | float | `1.0` | Correction for reported and commanded translation |
 | `yaw_velocity_scale` | float | `0.90` | Correction for reported and commanded rotation |
 | `start_rmf` | `true`, `false` | `true` | Start Zenoh, RMF schedule, dispatcher, and fleet adapter |
@@ -380,13 +382,15 @@ character on every layout, so a Dvorak or Latin American keyboard needs no setti
 To drive it from RViz instead, click **2D Goal Pose**, then press on the map where the
 robot should end up and drag before releasing to set which way it should face.
 
-### Obstacles from the front camera
+### Choosing what publishes /scan
 
-There is no laser on this robot, so by default Nav2 plans against the checked-in map and
-nothing it meets on the way will stop it. `free_space:=true` fills that gap from the front
-camera: the floor is flat, so every floor pixel is at a known distance, and the first pixel
-that stops looking like floor is an obstacle. It publishes `/scan`, which Nav2's obstacle
-layer already subscribes to.
+Nav2's obstacle layer and RTAB-Map both read `/scan`, and `laser_source` decides who
+produces it on the real robot. In simulation Gazebo always provides it and this argument
+does nothing.
+
+`laser_source:=camera` (the default) needs no extra hardware: the floor is flat, so every
+floor pixel is at a known distance, and the first pixel that stops looking like floor is an
+obstacle.
 
 It only means anything once the camera's geometry is measured. Lay the printed 8x6
 checkerboard flat on the floor in view of the camera and run:
@@ -399,7 +403,7 @@ ros2 run lekiwi_rmf free_space.py --ros-args -p calibrate:=true \
 It prints the camera height and pitch. Pass them back in and turn it on:
 
 ```bash
-scripts/up.sh free_space:=true camera_height:=0.21 camera_pitch:=0.32
+scripts/up.sh laser_source:=camera camera_height:=0.21 camera_pitch:=0.32
 ```
 
 Watch the LaserScan in RViz before trusting it. It reads a uniform floor: patterned tiles,
@@ -407,8 +411,20 @@ hard shadows and reflections come back as obstacles, an object the colour of the
 back as nothing, and it measures where things touch the floor, so a table is as far away as
 its legs. Wrong height or pitch puts phantom walls in the costmap.
 
-The rest of this section is what those two commands are doing, and the
-calibration each one depends on.
+`laser_source:=ld06` replaces all of that guesswork with a real LDROBOT LD06 on the mast --
+see HARDWARE.md for the mount, port and permissions. Give the bringup the serial device,
+preferably by its stable `/dev/serial/by-id` name:
+
+```bash
+scripts/up.sh laser_source:=ld06 lidar_port:=/dev/serial/by-id/usb-...-if00-port0
+```
+
+Its 12 m range makes the camera trick redundant, which is why the two are mutually
+exclusive: pick one, or `laser_source:=none` to run without obstacle detection (RViz still
+shows everything else; Nav2 just plans against walls it cannot see).
+
+The rest of this section walks through bringing up the real robot and the
+calibration each piece depends on.
 
 ### 1. Start the LeRobot host
 
@@ -512,6 +528,7 @@ map -> odom -> base_footprint -> mast -> front_camera_link -> front_camera_optic
 | `/odom`, `odom -> base_footprint` | Gazebo or `lekiwi_driver` | RTAB-Map and Nav2 |
 | `/camera/front/image_raw` | Gazebo, local `v4l2_camera`, or the remote-camera relay | RTAB-Map |
 | `/camera/front/camera_info` | Gazebo, calibrated `v4l2_camera`, or the relay | RTAB-Map |
+| `/scan` | Gazebo, `free_space.py`, or the LD06 driver (`laser_source`) | Nav2 and RTAB-Map |
 | `map -> odom` | RTAB-Map or AMCL | Nav2 and Free Fleet |
 | `/navigate_to_pose` | Nav2 action server | Free Fleet through Zenoh |
 | `ws://ROBOT_IP:9090` | rosbridge | Browser/external clients |
