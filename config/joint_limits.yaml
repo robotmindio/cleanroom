@@ -1,8 +1,14 @@
 default_velocity_scaling_factor: 0.1
 default_acceleration_scaling_factor: 0.1
+# AddTimeOptimalParameterization refuses to time-stamp a trajectory unless every
+# active joint of the group bounds BOTH velocity and acceleration (it exits with
+# "No acceleration limit was defined"), so has_acceleration_limits is mandatory here.
+# The URDF <limit> elements carry no acceleration attribute either, which makes these
+# overrides the only source. Values are conservative servo guesses, not measurements.
 joint_limits:
-  arm_shoulder_pan: {has_velocity_limits: true, max_velocity: 2.0, has_acceleration_limits: false}
-  arm_shoulder_lift: {has_velocity_limits: true, max_velocity: 2.0, has_acceleration_limits: false}
-  arm_elbow_flex: {has_velocity_limits: true, max_velocity: 2.0, has_acceleration_limits: false}
-  arm_wrist_flex: {has_velocity_limits: true, max_velocity: 3.0, has_acceleration_limits: false}
-  arm_wrist_roll: {has_velocity_limits: true, max_velocity: 3.0, has_acceleration_limits: false}
+  arm_shoulder_pan: {has_velocity_limits: true, max_velocity: 2.0, has_acceleration_limits: true, max_acceleration: 3.0}
+  arm_shoulder_lift: {has_velocity_limits: true, max_velocity: 2.0, has_acceleration_limits: true, max_acceleration: 3.0}
+  arm_elbow_flex: {has_velocity_limits: true, max_velocity: 2.0, has_acceleration_limits: true, max_acceleration: 3.0}
+  arm_wrist_flex: {has_velocity_limits: true, max_velocity: 3.0, has_acceleration_limits: true, max_acceleration: 5.0}
+  # wrist_roll is continuous in the real URDF, so this file is also its only velocity limit.
+  arm_wrist_roll: {has_velocity_limits: true, max_velocity: 3.0, has_acceleration_limits: true, max_acceleration: 5.0}

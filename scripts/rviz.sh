@@ -106,8 +106,18 @@ package_share="$(ros2 pkg prefix lekiwi_rmf)/share/lekiwi_rmf"
 robot_description="$(xacro "$package_share/urdf/lekiwi.urdf.xacro" sim:=false)"
 robot_description_semantic="$(< "$package_share/config/lekiwi.srdf")"
 
+# The Planning panel's interactive markers solve IK inside RViz, which loads the solver
+# from this parameter; a plain -p cannot carry a nested map, so it goes through a
+# generated params file instead.
+run_params="${LEKIWI_LOGS:-$HOME/.ros/lekiwi}/rviz-moveit-params.yaml"
+{
+  printf '/**:\n  ros__parameters:\n    robot_description_kinematics:\n'
+  sed 's/^/      /' "$package_share/config/kinematics.yaml"
+} > "$run_params"
+
 # Do not let the startup lock leak into RViz itself.
 exec 9>&-
 exec rviz2 -d "$run_config" "$@" --ros-args \
   -p "robot_description:=$robot_description" \
-  -p "robot_description_semantic:=$robot_description_semantic"
+  -p "robot_description_semantic:=$robot_description_semantic" \
+  --params-file "$run_params"
