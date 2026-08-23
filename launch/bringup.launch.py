@@ -47,8 +47,10 @@ def generate_launch_description():
     camera_on = PythonExpression(["'", publish_camera, "' == 'true'"])
     camera_here = PythonExpression([camera_on, " and '", camera_source, "' == 'local'"])
     wrist_here = PythonExpression([camera_here, " and '", wrist_device, "' != 'none'"])
-    # In remote mode the LeKiwi driver receives the host's front JPEG over ZMQ and
-    # republishes it on the same canonical ROS topics as a local V4L2 camera.
+    remote_camera = PythonExpression([camera_on, " and ", real, " and '", camera_source, "' == 'remote'"])
+    # The canonical camera topics, wherever the frames were read: a local v4l2_camera
+    # publishes here directly, and in remote mode the relays below reconstruct them
+    # from the compressed stream off the device machine.
     camera_info_topic = "/camera/front/camera_info"
     slam_mapping = PythonExpression(["'", slam_mode, "' == 'mapping'"])
     static_map = LaunchConfiguration("static_map")
@@ -117,6 +119,7 @@ def generate_launch_description():
             DeclareLaunchArgument("static_map", default_value="false"),
             # Camera-as-laser obstacle detection, and the geometry it stands on.
             DeclareLaunchArgument("free_space", default_value="true"),
+            DeclareLaunchArgument("camera_height", default_value="0.093"),
             # Measured with the checkerboard on the floor, not taken from the URDF: the
             # camera sits 9.3 cm up and all but level, which is why it sees a chair leg at
             # 20 cm. Re-measure after touching the mount.
@@ -221,6 +224,21 @@ def generate_launch_description():
                 condition=IfCondition(PythonExpression([wrist_here, " and ", real])),
                 output="screen",
             ),
+            # Remote topology: the cameras are read by v4l2_camera on the machine they
+            # are plugged into (launch/pi_cameras.launch.py, usually via the
+            # lekiwi-cameras service) and only compressed frames cross the network.
+            # This relay re-creates what a local v4l2_camera would have published --
+            # raw images and CameraInfo on the canonical topics -- so nothing
+            # downstream can tell the topologies apart. Frames keep their original
+            # stamps: RTAB-Map syncs approximately (approx_sync), which ordinary
+            # NTP-synced clocks comfortably satisfy.
+            Node(
+                package="lekiwi_rmf",
+                executable="camera_relay",
+                name="camera_relay",
+                condition=IfCondition(remote_camera),
+                output="screen",
+            ),
             # There is no laser on this robot, so obstacles come from the front camera: the
             # floor is flat, which makes every floor pixel a known distance, and the first
             # pixel that stops looking like floor is an obstacle. Nav2's obstacle layer
@@ -255,7 +273,6 @@ def generate_launch_description():
                 executable="lekiwi_driver",
                 parameters=[{
                     "remote_ip": remote_ip,
-                    "camera_info_url": camera_info_url,
                     # Odometry starts where the map says the robot starts. Without a floor
                     # plan there is no such place, so the robot's own start is the origin.
                     "initial_x": ParameterValue(

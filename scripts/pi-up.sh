@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Start everything that runs on the robot Pi: the motor-and-camera host.
+# Start everything that runs on this device machine: the motor-bus host and
+# the camera publishers.
 # Usage: scripts/pi-up.sh
 set -Eeuo pipefail
 
@@ -22,11 +23,14 @@ wait_for() { # wait_for <seconds> <command...>
 }
 
 host_up() { ss -tln | grep -q ':5555'; }
+cameras_up() { pgrep -f '[v]4l2_camera_node' >/dev/null; }
 
-if ss -tln | grep -q ':5555'; then
+# Motors and cameras are separate processes on purpose: one reader per USB
+# device, and a stalled camera frame must never abort the motor host.
+if host_up; then
   echo "host: already running"
 else
-  setsid scripts/robot-host.sh >"$LOGS/host.log" 2>&1 &
+  setsid scripts/robot-host.sh --no-cameras >"$LOGS/host.log" 2>&1 &
   wait_for 90 host_up || {
     echo "host did not come up -- see $LOGS/host.log" >&2
     tail -5 "$LOGS/host.log" >&2
@@ -35,6 +39,20 @@ else
   echo "host: up"
 fi
 
+if cameras_up; then
+  echo "cameras: already running"
+else
+  setsid scripts/ros-cameras.sh >"$LOGS/cameras.log" 2>&1 &
+  # The camera nodes appear within seconds of the launch starting; a missing
+  # calibration or camera makes ros-cameras.sh fail fast with the reason.
+  wait_for 30 cameras_up || {
+    echo "camera publishers did not come up -- see $LOGS/cameras.log" >&2
+    tail -5 "$LOGS/cameras.log" >&2
+    exit 1
+  }
+  echo "cameras: up"
+fi
+
 flock -u 9
 exec 9>&-
-echo "Pi ready -- logs in $LOGS"
+echo "device side ready -- logs in $LOGS"

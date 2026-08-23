@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Calibrate the local front camera and save the result for the real-robot stack.
 # Usage: scripts/calibrate-camera.sh [output-yaml]
+# The calibration belongs to the machine the camera is plugged into. Stop that
+# machine's camera publisher first (the lekiwi-cameras service, or
+# scripts/ros-cameras.sh) -- it holds the device and this script opens it too.
 set -Eeuo pipefail
 
 cd "$(dirname "$0")/.."

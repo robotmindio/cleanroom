@@ -293,10 +293,10 @@ scripts/up.sh
 
 It starts the LeRobot host, waits for the nine servos to answer, brings up the ROS
 stack, and opens RViz; logs land in `~/.ros/lekiwi`. `scripts/ros-stop.sh` stops
-all of it. With a Pi on the robot the host runs there instead:
+all of it. With a robot computer holding the devices, its half runs there instead:
 
 ```bash
-scripts/pi-up.sh                         # on the robot Pi
+scripts/pi-up.sh                         # on the robot computer (motor host + cameras)
 scripts/workstation-up.sh <PI_IP>         # on the workstation
 ```
 
@@ -309,23 +309,48 @@ from another terminal.
 
 ### Boot services
 
-The same bringup can run as systemd units instead of hand-run scripts:
+The bringup splits into services named for what they own rather than which
+computer they run on. Every topology works: everything on the robot's
+computer, devices there and compute on a desk machine, or a wired robot with
+both on one desktop.
 
 ```bash
-scripts/install-services.sh          # on either machine; add --now to start immediately
+scripts/install-device-services.sh          # where motors and cameras plug in
+scripts/install-compute-services.sh         # where the ROS stack should run
 ```
 
-On a robot Pi this installs `lekiwi-host.service` (the full motor-and-camera
-host); on a machine with a ROS workspace it installs that host without cameras
-plus `lekiwi-stack.service`, which is ordered after the host and only starts
-once `5555/tcp` answers — the same sequencing `up.sh` does interactively. RViz
-is deliberately not a service (it needs a desktop session): run
-`scripts/rviz.sh` when you sit down at it. Extra launch arguments ride in
-`/etc/default/lekiwi-stack`, e.g. `LEKIWI_STACK_ARGS="slam_mode:=localization"`.
-The units restart themselves on failure, so stop them with `systemctl stop`,
-not `scripts/ros-stop.sh`, which would just be undone. For the Pi-plus-
-workstation topology, keep `lekiwi-stack.service` off on the workstation and
-drive the stack manually with `workstation-up.sh`.
+The device side installs two units: `lekiwi-host.service` (the motor bus,
+served on `5555/tcp`) and `lekiwi-cameras.service` (the cameras, published by
+`v4l2_camera` right where they are plugged in — never read by the motor host:
+one reader per device, so a stalled camera frame cannot abort the motor bus).
+The compute side installs `lekiwi-stack.service`:
+
+- without arguments it assumes the device side is this same machine and
+  orders itself after the host, starting only once its ZMQ port answers;
+- with `--remote <device-address>` it reaches a host on another machine;
+  compressed frames stream from the device machine and relays in the bringup
+  expand them into the same canonical topics, so nothing downstream can tell
+  the topologies apart.
+
+Both installers are re-runnable when the split changes; keep the machines'
+clocks roughly in sync (anything NTP-ish) since camera stamps now originate
+on the device machine and RTAB-Map pairs them approximately. The stack keeps
+retrying until the device half appears, however long the other machine takes
+to boot; stop services with `systemctl`, not `scripts/ros-stop.sh`, which the
+restart policy would simply undo. RViz is deliberately not a service — it
+needs a desktop session — so run `scripts/rviz.sh` when you sit down at it.
+
+The two halves can also mix ownership: keep the device services running and
+drive the stack by hand whenever you feel like it —
+
+```bash
+scripts/ros-start.sh camera_source:=remote   # frames come from the cameras service
+scripts/rviz.sh                              # Ctrl-C on ros-start.sh stops it
+```
+
+— and `scripts/ros-stop.sh` knows about the units: an active
+`lekiwi-host.service` or `lekiwi-cameras.service` is left alone and reported,
+so stopping a manual stack never takes the boot services down with it.
 
 
 To watch the robot, `scripts/rviz.sh` opens RViz on `config/lekiwi.rviz` — map,
@@ -485,8 +510,8 @@ map -> odom -> base_footprint -> mast -> front_camera_link -> front_camera_optic
 | --- | --- | --- |
 | `/cmd_vel` | Nav2 | Gazebo or `lekiwi_driver` |
 | `/odom`, `odom -> base_footprint` | Gazebo or `lekiwi_driver` | RTAB-Map and Nav2 |
-| `/camera/front/image_raw` | Gazebo or `lekiwi_driver` | RTAB-Map |
-| `/camera/front/camera_info` | Gazebo or calibrated driver | RTAB-Map |
+| `/camera/front/image_raw` | Gazebo, local `v4l2_camera`, or the remote-camera relay | RTAB-Map |
+| `/camera/front/camera_info` | Gazebo, calibrated `v4l2_camera`, or the relay | RTAB-Map |
 | `map -> odom` | RTAB-Map or AMCL | Nav2 and Free Fleet |
 | `/navigate_to_pose` | Nav2 action server | Free Fleet through Zenoh |
 | `ws://ROBOT_IP:9090` | rosbridge | Browser/external clients |

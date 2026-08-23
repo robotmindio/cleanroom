@@ -27,6 +27,7 @@
     </joint>
     <link name="${name}_link">
       <visual><geometry><cylinder radius="0.05" length="0.025"/></geometry><material name="black"/></visual>
+      <collision><geometry><cylinder radius="0.05" length="0.025"/></geometry></collision>
     </link>
   </xacro:macro>
   <xacro:wheel name="left_wheel" x="-0.108" y="0.108" yaw="-0.7854"/>
@@ -38,6 +39,7 @@
   </joint>
   <link name="mast">
     <visual><geometry><box size="0.05 0.05 0.36"/></geometry><material name="orange"/></visual>
+    <collision><geometry><box size="0.05 0.05 0.36"/></geometry></collision>
   </link>
 
   <xacro:macro name="arm_link" params="name length radius:=0.025">
@@ -78,6 +80,7 @@
   </joint>
   <link name="laser">
     <visual><geometry><cylinder radius="0.035" length="0.03"/></geometry><material name="black"/></visual>
+    <collision><geometry><cylinder radius="0.035" length="0.03"/></geometry></collision>
   </link>
 
   <joint name="front_camera_joint" type="fixed">
@@ -85,6 +88,7 @@
   </joint>
   <link name="front_camera_link">
     <visual><geometry><box size="0.035 0.07 0.035"/></geometry><material name="black"/></visual>
+    <collision><geometry><box size="0.035 0.07 0.035"/></geometry></collision>
   </link>
   <joint name="front_camera_optical_joint" type="fixed">
     <parent link="front_camera_link"/><child link="front_camera_optical_frame"/><origin rpy="-1.5708 0 -1.5708"/>

@@ -31,6 +31,7 @@ with the printed 8x6 checkerboard lying flat on the floor in view. It prints the
 height and pitch to pass back in.
 """
 import math
+import signal
 
 import cv2
 import numpy as np
@@ -62,6 +63,7 @@ class FreeSpace(Node):
 
         self.k = None
         self.d = None
+        self.last_intrinsics_warn = 0
         self.create_subscription(CameraInfo, "camera_info", self.on_info, qos_profile_sensor_data)
         self.create_subscription(Image, "image", self.on_image, qos_profile_sensor_data)
         # Nav2's obstacle layer requests reliable scan delivery. A reliable publisher is
@@ -82,7 +84,16 @@ class FreeSpace(Node):
         d = np.array(msg.d, dtype=np.float64)
         if not np.isfinite(k).all() or not np.isfinite(d).all() or k[0, 0] <= 0 or k[1, 1] <= 0:
             self.k = self.d = None
-            self.get_logger().warn("ignoring invalid camera intrinsics")
+            # The driver spams CameraInfo at frame rate; without this gate a
+            # missing calibration floods the log at 25 Hz (19k warnings in one
+            # 19-hour run) and hides the actual fault.
+            now = self.get_clock().now().nanoseconds
+            if now - self.last_intrinsics_warn > 10e9:
+                self.last_intrinsics_warn = now
+                self.get_logger().warn(
+                    "ignoring invalid camera intrinsics -- the camera driver is "
+                    "publishing an uncalibrated CameraInfo; usually the "
+                    "camera_info_url's camera_name does not match the driver's")
             return
         self.k, self.d = k, d
 
@@ -284,6 +295,14 @@ class FreeSpace(Node):
 
 def main():
     rclpy.init()
+
+    def on_sigterm(_signum, _frame):
+        # launch escalates to SIGTERM when a node ignores SIGINT for 5s; the
+        # default disposition dies uncleanly and leaves DDS participants
+        # lingering. Treat it as Ctrl-C so the finally-block runs.
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, on_sigterm)
     node = FreeSpace()
     try:
         rclpy.spin(node)

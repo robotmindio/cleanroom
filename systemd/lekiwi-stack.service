@@ -1,21 +1,26 @@
-# Full ROS stack (bringup.launch.py) as a boot service: the ROS half of
-# scripts/up.sh. Install with scripts/install-services.sh -- it fills in the
-# @PLACEHOLDER@s and enables the unit; do not copy this file by hand.
+# The ROS bringup as a boot service: the compute side of the split. This unit
+# belongs wherever the heavy software should run -- the robot's own computer
+# or a separate one. Install with scripts/install-compute-services.sh, which
+# fills in the @PLACEHOLDER@s, enables the unit, and adapts it to the
+# topology; do not copy this file by hand.
 #
-# Ordering leans on the host unit's ExecStartPost gate: After= holds this unit
-# back until :5555 answers, which is the same wait up.sh performs by hand.
-# PartOf= propagates a deliberate host stop or restart to the stack, so the
-# pair moves together like one ros-stop.sh invocation.
+# Two topologies, decided by that installer:
 #
-# Launch arguments ride in /etc/default/lekiwi-stack, e.g.
-#   LEKIWI_STACK_ARGS="slam_mode:=localization"
+#   devices on this machine too (default): lekiwi-host.service is pulled in
+#     with Requires= and ordered After= it, so the stack starts only once
+#     :5555 answers -- the wait up.sh performs by hand. The dependency lives
+#     in a drop-in (lekiwi-stack.service.d/topology.conf) so both halves of
+#     an all-in-one machine move together like one ros-stop.sh invocation.
 #
-# For the robot-Pi topology (what scripts/workstation-up.sh drives, host on
-# another machine) disable lekiwi-host and clear the dependency with a drop-in:
-#   systemctl disable lekiwi-host.service
-#   # /etc/systemd/system/lekiwi-stack.service.d/remote.conf:
-#   #   [Unit]
-#   #   Requires=
+#   devices elsewhere (--remote <addr>): the drop-in instead clears
+#     Requires/PartOf/After -- there is no local host to depend on -- and
+#     LEKIWI_STACK_ARGS carries camera_source:=remote remote_ip:=<addr>. The
+#     driver then republishes the host's front JPEG as if it were local.
+#
+# Either way the stack may come up before the other half of the robot does.
+# Restart=always with no rate limit lets it keep trying at a calm cadence:
+# the robot computer can boot long after this one, over wifi that drops.
+# Explicit `systemctl stop` still stops it for good.
 [Unit]
 Description=LeKiwi ROS 2 stack (bringup.launch.py)
 Documentation=file://@PROJECT_ROOT@/README.md
@@ -23,18 +28,19 @@ Requires=lekiwi-host.service
 PartOf=lekiwi-host.service
 After=network-online.target lekiwi-host.service
 Wants=network-online.target
-StartLimitIntervalSec=600
-StartLimitBurst=30
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 User=@SERVICE_USER@
 WorkingDirectory=@PROJECT_ROOT@
+# Extra launch arguments, e.g. slam_mode:=localization. In the remote
+# topology the installer also puts camera_source:=remote remote_ip:=... here.
 Environment=LEKIWI_STACK_ARGS=
 EnvironmentFile=-/etc/default/lekiwi-stack
 ExecStart=@PROJECT_ROOT@/scripts/ros-start.sh $LEKIWI_STACK_ARGS
-Restart=on-failure
-RestartSec=10s
+Restart=always
+RestartSec=15s
 # Nav2's lifecycle teardown alone takes ~15 s (see scripts/ros-stop.sh).
 TimeoutStopSec=45s
 

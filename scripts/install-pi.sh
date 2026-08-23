@@ -163,8 +163,9 @@ Then start the Pi host and camera publisher. On its first run it guides you thro
 motor calibration automatically:
   $PROJECT_ROOT/scripts/pi-up.sh
 
-Once that works by hand, run $PROJECT_ROOT/scripts/install-services.sh to have
-the host start by itself at boot.
+Once that works by hand, run $PROJECT_ROOT/scripts/install-device-services.sh
+to have the host start by itself at boot. If this Pi should also run the ROS
+stack, add $PROJECT_ROOT/scripts/install-compute-services.sh (no arguments).
 
 This Pi's address (give it to the workstation as remote_ip):
   $(hostname -I 2>/dev/null | awk '{print $1}')

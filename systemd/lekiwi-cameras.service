@@ -1,0 +1,29 @@
+# Camera publisher as a boot service: the ROS half of the device side. This
+# unit belongs on whatever machine the USB cameras are plugged into, next to
+# lekiwi-host.service (which owns the motors and deliberately never opens the
+# cameras -- one reader per device, and a stalled camera must not be able to
+# take the motor bus down with it). Install with
+# scripts/install-device-services.sh; do not copy this file by hand.
+#
+# Frames are published compressed under /pi/camera/...; when the ROS stack
+# runs on another machine, its bringup relays them into the canonical topics.
+[Unit]
+Description=LeKiwi camera publisher (v4l2_camera on the device machine)
+Documentation=file://@PROJECT_ROOT@/README.md
+# The /dev/v4l/by-id globs only resolve after udev has settled.
+After=systemd-udevd.service
+StartLimitIntervalSec=600
+StartLimitBurst=8
+
+[Service]
+Type=simple
+User=@SERVICE_USER@
+WorkingDirectory=@PROJECT_ROOT@
+ExecStartPre=-/usr/bin/udevadm settle --timeout=15
+ExecStart=@PROJECT_ROOT@/scripts/ros-cameras.sh
+Restart=on-failure
+RestartSec=10s
+TimeoutStopSec=20s
+
+[Install]
+WantedBy=multi-user.target

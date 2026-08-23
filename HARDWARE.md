@@ -251,8 +251,14 @@ Defaults: command socket `5555/tcp`, observations `5556/tcp`, watchdog 500 ms,
 loop 30 Hz. The watchdog stops the base when commands stop arriving. It is not
 an E-stop.
 
-The host always carries motors and both cameras, so its ZMQ clients can use images
-for teleoperation and dataset recording. ROS can still use its own camera nodes:
+By default the host carries motors and both cameras, so its ZMQ clients can
+use images for teleoperation and dataset recording. Under ROS this mode is an
+exclusive alternative: ROS reads cameras through its own nodes on whichever
+machine they are plugged into, one reader per device, and a stalled frame must
+not be able to abort the motor host. So when ROS runs against this machine,
+start the host without cameras (`scripts/robot-host.sh --no-cameras`, or just
+use the boot services) and let ROS own the USB devices. The ROS camera
+publisher on a remote device machine:
 
 ```bash
 source scripts/setup-pi.bash
@@ -263,17 +269,19 @@ ros2 launch launch/pi_cameras.launch.py \
 Find that path with `ls /dev/v4l/by-id/`. Use it rather than `/dev/video0`, which is
 reassigned whenever USB re-enumerates.
 
-For the normal two-computer setup, use the single Pi launcher instead. It starts the
-motor-and-camera host, which sends the front frame to the workstation over ZMQ:
+For the normal two-computer setup, use the device launcher instead. It starts
+the camera-less motor host and the ROS camera publisher — v4l2_camera reads
+the sensors here, and only compressed frames cross the network to the
+workstation:
 
 ```bash
 scripts/pi-up.sh
 ```
 
-Only the compressed image crosses the network. At the default `jpeg_quality:=50` a
-640x480 frame measures about 14 KB, so 30 Hz costs roughly 3 Mbit/s; the same frame at
-the library default of 95 costs 70–90 KB, or 18 Mbit/s. Raise it if RTAB-Map starts
-losing loop closures, lower it if the link is saturated.
+At the default `jpeg_quality:=50` a 640x480 frame measures about 14 KB, so
+30 Hz costs roughly 3 Mbit/s; the same frame at the library default of 95
+costs 70–90 KB, or 18 Mbit/s. Raise it if RTAB-Map starts losing loop
+closures, lower it if the link is saturated.
 
 ## 6. Teleoperate
 

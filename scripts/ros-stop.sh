@@ -8,6 +8,18 @@ set -Eeuo pipefail
 
 mapfile -t launch_pids < <(pgrep -f 'ros2 launch lekiwi_rmf' || true)
 mapfile -t pi_camera_pids < <(pgrep -f 'ros2 launch .*pi_cameras\.launch\.py' || true)
+# Processes owned by the boot units are not ours to kill: systemd would undo it
+# (restart) or, for a clean exit, leave the unit silently down. Either way the
+# fix belongs to systemctl.
+service_managed=false
+if command -v systemctl >/dev/null && systemctl is-active --quiet lekiwi-cameras.service; then
+  if (( ${#pi_camera_pids[@]} )); then
+    echo "lekiwi-cameras.service is active -- leaving its camera publisher running"
+    echo "(stop it with: sudo systemctl stop lekiwi-cameras.service)"
+    service_managed=true
+  fi
+  pi_camera_pids=()
+fi
 mapfile -t rviz_pids < <(pgrep -f '[r]viz2 -d .*lekiwi\.rviz' || true)
 # A launcher can die before relaying SIGINT, leaving its Python nodes re-parented to the
 # user manager. Match this stack's executables, not every Python ROS node.
@@ -48,26 +60,31 @@ done
 # robot-host.sh supervises a crashed LeRobot process, therefore stop the supervisor too
 # or it would immediately reconnect after this script stops its child.
 host_stopped=false
-# `pkill -f` considers a terminal command line too, so it can kill the shell which
-# invoked this script merely because that command mentioned robot-host.sh. Restrict the
-# selection to actual bash processes and inspect their argument vector instead.
-host_wrapper_pids=()
-for pid in $(pgrep -x bash 2>/dev/null || true); do
-  cmdline=$(tr '\0' ' ' 2>/dev/null < "/proc/$pid/cmdline" || true)
-  case "$cmdline" in
-    *" scripts/robot-host.sh "*|*"/scripts/robot-host.sh "*) host_wrapper_pids+=("$pid") ;;
-  esac
-done
-for pid in "${host_wrapper_pids[@]}"; do
-  kill -TERM "$pid" 2>/dev/null && host_stopped=true || true
-done
-if pkill -TERM -f '[l]erobot\.robots\.lekiwi\.lekiwi_host'; then
-  host_stopped=true
+if command -v systemctl >/dev/null && systemctl is-active --quiet lekiwi-host.service; then
+  echo "lekiwi-host.service is active -- left running; stop it with:"
+  echo "  sudo systemctl stop lekiwi-host.service"
+else
+  # `pkill -f` considers a terminal command line too, so it can kill the shell which
+  # invoked this script merely because that command mentioned robot-host.sh. Restrict the
+  # selection to actual bash processes and inspect their argument vector instead.
+  host_wrapper_pids=()
+  for pid in $(pgrep -x bash 2>/dev/null || true); do
+    cmdline=$(tr '\0' ' ' 2>/dev/null < "/proc/$pid/cmdline" || true)
+    case "$cmdline" in
+      *" scripts/robot-host.sh "*|*"/scripts/robot-host.sh "*) host_wrapper_pids+=("$pid") ;;
+    esac
+  done
+  for pid in "${host_wrapper_pids[@]}"; do
+    kill -TERM "$pid" 2>/dev/null && host_stopped=true || true
+  done
+  if pkill -TERM -f '[l]erobot\.robots\.lekiwi\.lekiwi_host'; then
+    host_stopped=true
+  fi
+  sleep 1
+  for pid in "${host_wrapper_pids[@]}"; do
+    kill -KILL "$pid" 2>/dev/null || true
+  done
 fi
-sleep 1
-for pid in "${host_wrapper_pids[@]}"; do
-  kill -KILL "$pid" 2>/dev/null || true
-done
 if "$host_stopped"; then
   echo "ROS stack and LeRobot host stopped."
 else

@@ -177,11 +177,23 @@ if [[ -f $cache ]]; then
     rm -rf -- "$package_build"
   fi
 fi
+# A Pi-sized machine can exhaust itself here: many packages building in
+# parallel while everything else runs is how oomd ended up killing a whole
+# session (2026-08-23). On small RAM, cap packages-in-flight and compiler jobs
+# per package; CMAKE_BUILD_PARALLEL_LEVEL is what make/ninja actually read.
+mem_total_mb=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
+parallel_args=()
+if (( mem_total_mb < 8000 )); then
+  log "Low memory (${mem_total_mb} MB): capping build parallelism"
+  parallel_args=(--parallel-workers 2)
+  export CMAKE_BUILD_PARALLEL_LEVEL=2
+fi
 colcon --log-base "$WORKSPACE/log" build \
   --base-paths "$PROJECT_ROOT" "$WORKSPACE/src/free_fleet" "$WORKSPACE/src/rmf_demos/rmf_demos_tasks" \
   --packages-select lekiwi_rmf free_fleet free_fleet_adapter rmf_demos_tasks \
   --build-base "$WORKSPACE/build" \
   --install-base "$WORKSPACE/install" \
+  "${parallel_args[@]}" \
   --cmake-args -DCMAKE_BUILD_TYPE=Release
 
 setup_file="$PROJECT_ROOT/scripts/setup.bash"
@@ -212,5 +224,7 @@ fi
 log "Installation complete"
 printf 'Open a new shell to load the LeKiwi environment automatically.\n'
 printf 'Then launch the simulation:\n  ros2 launch lekiwi_rmf bringup.launch.py mode:=sim\n'
-printf 'For the real robot, scripts/up.sh brings everything up by hand and\n'
-printf 'scripts/install-services.sh makes that happen at boot instead.\n'
+printf 'For the real robot, scripts/up.sh brings everything up by hand.\n'
+printf 'At boot instead: install-device-services.sh where the motors/cameras\n'
+printf 'plug in, install-compute-services.sh where the stack should run --\n'
+printf 'the same machine or two different ones, in either direction.\n'
