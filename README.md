@@ -307,6 +307,27 @@ has to be up first — the driver gives up and exits if no host
 answers on `5555/tcp`. Stop everything with `Ctrl-C`, or `scripts/ros-stop.sh`
 from another terminal.
 
+### Boot services
+
+The same bringup can run as systemd units instead of hand-run scripts:
+
+```bash
+scripts/install-services.sh          # on either machine; add --now to start immediately
+```
+
+On a robot Pi this installs `lekiwi-host.service` (the full motor-and-camera
+host); on a machine with a ROS workspace it installs that host without cameras
+plus `lekiwi-stack.service`, which is ordered after the host and only starts
+once `5555/tcp` answers — the same sequencing `up.sh` does interactively. RViz
+is deliberately not a service (it needs a desktop session): run
+`scripts/rviz.sh` when you sit down at it. Extra launch arguments ride in
+`/etc/default/lekiwi-stack`, e.g. `LEKIWI_STACK_ARGS="slam_mode:=localization"`.
+The units restart themselves on failure, so stop them with `systemctl stop`,
+not `scripts/ros-stop.sh`, which would just be undone. For the Pi-plus-
+workstation topology, keep `lekiwi-stack.service` off on the workstation and
+drive the stack manually with `workstation-up.sh`.
+
+
 To watch the robot, `scripts/rviz.sh` opens RViz on `config/lekiwi.rviz` — map,
 costmaps, robot model, TF, the goal-pose tool, and a panel for each camera. The
 camera panels depend on the saved dock layout in that file; the header of

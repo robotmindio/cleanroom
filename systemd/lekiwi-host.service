@@ -1,0 +1,44 @@
+# LeRobot motor-and-camera host for the LeKiwi, as a boot service.
+# Install with scripts/install-services.sh -- it fills in the @PLACEHOLDER@s
+# and enables the unit; do not copy this file by hand.
+#
+# Granularity mirrors what scripts/up.sh and scripts/pi-up.sh orchestrate by
+# hand: this is one long-lived process per unit. RViz deliberately stays
+# manual (scripts/rviz.sh) because it needs a desktop session.
+#
+# robot-host.sh already supervises the LeRobot process and reconnects the
+# motor bus after a dropped packet, so systemd here only backs up the outer
+# script. The ExecStartPost gate is the wait pi-up.sh performs by hand: the
+# host binds :5555 only after connect() has found all nine servos, so a unit
+# ordered After=this one starts against a host that can actually talk. A host
+# that never binds marks the unit failed instead of active-but-useless.
+[Unit]
+Description=LeKiwi LeRobot host (motor bus + ZMQ :5555)
+Documentation=file://@PROJECT_ROOT@/HARDWARE.md
+# The device globs (/dev/serial/by-id, /dev/v4l/by-id) only resolve after udev
+# has settled; without this a slow boot can race the first enumeration.
+After=systemd-udevd.service
+StartLimitIntervalSec=600
+StartLimitBurst=8
+
+[Service]
+Type=simple
+User=@SERVICE_USER@
+WorkingDirectory=@PROJECT_ROOT@
+# Arguments for robot-host.sh. Empty (the Pi default) runs the full host with
+# cameras. The wired machine sets LEKIWI_HOST_ARGS=--no-cameras in
+# /etc/default/lekiwi-host, because there ROS reads the cameras directly and a
+# second V4L2 client would starve it (see up.sh).
+Environment=LEKIWI_HOST_ARGS=
+EnvironmentFile=-/etc/default/lekiwi-host
+ExecStartPre=-/usr/bin/udevadm settle --timeout=15
+ExecStart=@PROJECT_ROOT@/scripts/robot-host.sh $LEKIWI_HOST_ARGS
+ExecStartPost=/bin/sh -c 'for i in $(seq 120); do ss -tln | grep -q ":5555 " && exit 0; sleep 1; done; echo "host never bound :5555" >&2; exit 1'
+Restart=on-failure
+RestartSec=10s
+# robot-host.sh exits cleanly on SIGTERM (it traps INT TERM HUP); the cgroup
+# kill mops up its python child, which holds the motor bus.
+TimeoutStopSec=20s
+
+[Install]
+WantedBy=multi-user.target

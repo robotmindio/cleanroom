@@ -1,0 +1,42 @@
+# Full ROS stack (bringup.launch.py) as a boot service: the ROS half of
+# scripts/up.sh. Install with scripts/install-services.sh -- it fills in the
+# @PLACEHOLDER@s and enables the unit; do not copy this file by hand.
+#
+# Ordering leans on the host unit's ExecStartPost gate: After= holds this unit
+# back until :5555 answers, which is the same wait up.sh performs by hand.
+# PartOf= propagates a deliberate host stop or restart to the stack, so the
+# pair moves together like one ros-stop.sh invocation.
+#
+# Launch arguments ride in /etc/default/lekiwi-stack, e.g.
+#   LEKIWI_STACK_ARGS="slam_mode:=localization"
+#
+# For the robot-Pi topology (what scripts/workstation-up.sh drives, host on
+# another machine) disable lekiwi-host and clear the dependency with a drop-in:
+#   systemctl disable lekiwi-host.service
+#   # /etc/systemd/system/lekiwi-stack.service.d/remote.conf:
+#   #   [Unit]
+#   #   Requires=
+[Unit]
+Description=LeKiwi ROS 2 stack (bringup.launch.py)
+Documentation=file://@PROJECT_ROOT@/README.md
+Requires=lekiwi-host.service
+PartOf=lekiwi-host.service
+After=network-online.target lekiwi-host.service
+Wants=network-online.target
+StartLimitIntervalSec=600
+StartLimitBurst=30
+
+[Service]
+Type=simple
+User=@SERVICE_USER@
+WorkingDirectory=@PROJECT_ROOT@
+Environment=LEKIWI_STACK_ARGS=
+EnvironmentFile=-/etc/default/lekiwi-stack
+ExecStart=@PROJECT_ROOT@/scripts/ros-start.sh $LEKIWI_STACK_ARGS
+Restart=on-failure
+RestartSec=10s
+# Nav2's lifecycle teardown alone takes ~15 s (see scripts/ros-stop.sh).
+TimeoutStopSec=45s
+
+[Install]
+WantedBy=multi-user.target

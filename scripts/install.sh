@@ -212,3 +212,5 @@ fi
 log "Installation complete"
 printf 'Open a new shell to load the LeKiwi environment automatically.\n'
 printf 'Then launch the simulation:\n  ros2 launch lekiwi_rmf bringup.launch.py mode:=sim\n'
+printf 'For the real robot, scripts/up.sh brings everything up by hand and\n'
+printf 'scripts/install-services.sh makes that happen at boot instead.\n'
