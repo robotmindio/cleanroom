@@ -14,6 +14,12 @@ shift
 LOGS="${LEKIWI_LOGS:-$HOME/.ros/lekiwi}"
 mkdir -p "$LOGS"
 
+exec 9>"$LOGS/workstation-up-start.lock"
+if ! flock -n 9; then
+  echo "$0: startup is already in progress" >&2
+  exit 0
+fi
+
 wait_for() { # wait_for <seconds> <command...>
   local deadline=$((SECONDS + $1)); shift
   until "$@" >/dev/null 2>&1; do
@@ -36,5 +42,7 @@ wait_for 120 grep -q 'Connected to LeKiwi host' "$LOGS/stack.log" || {
 echo "stack: up"
 
 setsid scripts/rviz.sh >"$LOGS/rviz.log" 2>&1 &
+flock -u 9
+exec 9>&-
 echo "rviz: starting"
 echo "logs in $LOGS -- stop the workstation stack with scripts/ros-stop.sh"

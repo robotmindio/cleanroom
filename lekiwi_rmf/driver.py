@@ -34,6 +34,19 @@ class LeKiwiDriver(Node):
         from lerobot.robots.lekiwi.config_lekiwi import LeKiwiClientConfig
         from lerobot.robots.lekiwi.lekiwi_client import LeKiwiClient
 
+        class SequencedLeKiwiClient(LeKiwiClient):
+            """Expose whether the client actually received a new ZMQ observation."""
+
+            def __init__(self, *args, **kwargs):
+                self.observation_sequence = 0
+                super().__init__(*args, **kwargs)
+
+            def _poll_and_get_latest_message(self):
+                message = super()._poll_and_get_latest_message()
+                if message is not None:
+                    self.observation_sequence += 1
+                return message
+
         remote_ip = self.declare_parameter("remote_ip", "127.0.0.1").value
         robot_id = self.declare_parameter("robot_id", "lekiwi_1").value
         self.xy_scale = self.declare_parameter("xy_velocity_scale", 1.0).value
@@ -54,7 +67,7 @@ class LeKiwiDriver(Node):
             "camera_info_url", "file://~/.ros/camera_info/lekiwi_front.yaml"
         ).value
 
-        self.robot = LeKiwiClient(LeKiwiClientConfig(remote_ip=remote_ip, id=robot_id))
+        self.robot = SequencedLeKiwiClient(LeKiwiClientConfig(remote_ip=remote_ip, id=robot_id))
         self.robot.connect()
         self.command = Twist()
         self.command_stamp = self.get_clock().now()
@@ -299,16 +312,22 @@ class LeKiwiDriver(Node):
                 raise ValueError(f"{name} must be finite and non-negative")
 
     def observation_is_fresh(self, observation):
-        # The client can return a newly allocated copy of its last packet. A dict's
-        # identity consequently says nothing about whether it came from the robot.
-        # Numeric telemetry changes and replacement camera frames are observable
-        # evidence of a new packet; anything else is treated conservatively as stale.
-        numeric = tuple(sorted(
-            (name, float(value))
-            for name, value in observation.items()
-            if name.endswith((".pos", ".vel"))
-        ))
-        token = (numeric, id(observation.get("front")), id(observation.get("wrist")))
+        # A stationary robot with cameras intentionally disabled reports identical
+        # numeric values in every packet. Comparing those values mistakes healthy,
+        # fresh telemetry for a dropout. The client sequence advances only when its ZMQ
+        # socket consumed a new multipart observation; cached observations leave it
+        # unchanged, which is the signal the driver actually needs for link safety.
+        sequence = getattr(getattr(self, "robot", None), "observation_sequence", None)
+        if sequence is None:
+            # Keep the function useful for lightweight tests and alternate clients that
+            # have not implemented the transport sequence yet.
+            token = tuple(sorted(
+                (name, float(value))
+                for name, value in observation.items()
+                if name.endswith((".pos", ".vel"))
+            ))
+        else:
+            token = ("zmq", sequence)
         fresh = token != getattr(self, "last_observation_token", None)
         self.last_observation_token = token
         self.last_observation = observation

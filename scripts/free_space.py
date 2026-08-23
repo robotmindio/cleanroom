@@ -36,7 +36,7 @@ import cv2
 import numpy as np
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from sensor_msgs.msg import CameraInfo, Image, LaserScan
 
 BOARD = (8, 6)  # inner corners of scripts/checkerboard.py
@@ -64,7 +64,12 @@ class FreeSpace(Node):
         self.d = None
         self.create_subscription(CameraInfo, "camera_info", self.on_info, qos_profile_sensor_data)
         self.create_subscription(Image, "image", self.on_image, qos_profile_sensor_data)
-        self.scan_pub = self.create_publisher(LaserScan, "scan", qos_profile_sensor_data)
+        # Nav2's obstacle layer requests reliable scan delivery. A reliable publisher is
+        # compatible with both that subscriber and best-effort visualizers; publishing
+        # sensor-data (best effort) here silently left Nav2 with no safety scan at all.
+        self.scan_pub = self.create_publisher(
+            LaserScan, "scan", QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
+        )
         self.calibrated = False
         self.last_scan = 0
         self.last_valid_scan = 0

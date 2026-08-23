@@ -8,11 +8,15 @@ set -Eeuo pipefail
 
 mapfile -t launch_pids < <(pgrep -f 'ros2 launch lekiwi_rmf' || true)
 mapfile -t pi_camera_pids < <(pgrep -f 'ros2 launch .*pi_cameras\.launch\.py' || true)
+mapfile -t rviz_pids < <(pgrep -f '[r]viz2 -d .*lekiwi\.rviz' || true)
 # A launcher can die before relaying SIGINT, leaving its Python nodes re-parented to the
 # user manager. Match this stack's executables, not every Python ROS node.
 mapfile -t driver_pids < <(pgrep -f '[/]lekiwi_rmf/lib/lekiwi_rmf/lekiwi_driver([[:space:]]|$)' || true)
 mapfile -t fleet_adapter_pids < <(pgrep -f '[/]free_fleet_adapter/lib/free_fleet_adapter/fleet_adapter\.py([[:space:]]|$)' || true)
-launch_pids+=("${pi_camera_pids[@]}" "${driver_pids[@]}" "${fleet_adapter_pids[@]}")
+# Calibration starts this node outside a launch process. Include it so Ctrl-C or this
+# stop script never leaves the front camera busy for the next `scripts/up.sh`.
+mapfile -t calibration_camera_pids < <(pgrep -f '[/]v4l2_camera/v4l2_camera_node.*__ns:=/camera/front' || true)
+launch_pids+=("${pi_camera_pids[@]}" "${rviz_pids[@]}" "${driver_pids[@]}" "${fleet_adapter_pids[@]}" "${calibration_camera_pids[@]}")
 for pid in "${launch_pids[@]}"; do
   kill -INT "$pid" 2>/dev/null || true
 done
@@ -41,7 +45,30 @@ done
 
 # The host is what scripts/up.sh starts first, so this is what takes it down. It holds the
 # motor bus, and leaving it behind is what makes the next `robot-host.sh` refuse to start.
-if pkill -f 'lerobot.robots.lekiwi.lekiwi_host'; then
+# robot-host.sh supervises a crashed LeRobot process, therefore stop the supervisor too
+# or it would immediately reconnect after this script stops its child.
+host_stopped=false
+# `pkill -f` considers a terminal command line too, so it can kill the shell which
+# invoked this script merely because that command mentioned robot-host.sh. Restrict the
+# selection to actual bash processes and inspect their argument vector instead.
+host_wrapper_pids=()
+for pid in $(pgrep -x bash 2>/dev/null || true); do
+  cmdline=$(tr '\0' ' ' 2>/dev/null < "/proc/$pid/cmdline" || true)
+  case "$cmdline" in
+    *" scripts/robot-host.sh "*|*"/scripts/robot-host.sh "*) host_wrapper_pids+=("$pid") ;;
+  esac
+done
+for pid in "${host_wrapper_pids[@]}"; do
+  kill -TERM "$pid" 2>/dev/null && host_stopped=true || true
+done
+if pkill -TERM -f '[l]erobot\.robots\.lekiwi\.lekiwi_host'; then
+  host_stopped=true
+fi
+sleep 1
+for pid in "${host_wrapper_pids[@]}"; do
+  kill -KILL "$pid" 2>/dev/null || true
+done
+if "$host_stopped"; then
   echo "ROS stack and LeRobot host stopped."
 else
   echo "ROS stack stopped."

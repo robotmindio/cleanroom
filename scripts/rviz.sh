@@ -40,6 +40,44 @@ set -u
 # Starting before the cameras publish also loses the panels, so wait for them. A camera
 # that never appears is not fatal -- the other panel and the whole navigation view still
 # come up.
+mkdir -p "${LEKIWI_LOGS:-$HOME/.ros/lekiwi}"
+
+# `up.sh` and `workstation-up.sh` both deliberately return while RViz is coming up.  A
+# second start can otherwise get here while the first one is still waiting for topics,
+# so neither sees an rviz2 process to replace and two expensive RViz instances appear.
+# Keep the lock only while starting: after exec the normal "replace the old RViz" path
+# below remains available to a later, intentional `scripts/rviz.sh` invocation.
+exec 9>"${LEKIWI_LOGS:-$HOME/.ros/lekiwi}/rviz-start.lock"
+if ! flock -n 9; then
+  echo "rviz: a launch is already in progress"
+  exit 0
+fi
+
+mapfile -t old_rviz_pids < <(pgrep -f '[r]viz2 -d .*lekiwi\.rviz' || true)
+for pid in "${old_rviz_pids[@]}"; do
+  # A previous RViz keeps its in-memory, user-modified dock state even after a new stack
+  # starts. Replace it so the fresh copy below is the one visible layout.
+  kill -TERM "$pid" 2>/dev/null || true
+done
+
+# Do not start a second OpenGL renderer until the old one has released its display and
+# camera subscriptions.  On a normal close this is near-instant; SIGKILL is reserved
+# for a hung renderer after a short grace period.
+for _ in $(seq 25); do
+  still_running=false
+  for pid in "${old_rviz_pids[@]}"; do
+    if kill -0 "$pid" 2>/dev/null; then
+      still_running=true
+      break
+    fi
+  done
+  "$still_running" || break
+  sleep 0.2
+done
+for pid in "${old_rviz_pids[@]}"; do
+  kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null || true
+done
+
 topics=$(grep -o '/camera/[a-z]*/image_raw' config/lekiwi.rviz | sort -u)
 for topic in $topics; do
   for _ in $(seq 30); do
@@ -60,4 +98,16 @@ run_config="${LEKIWI_LOGS:-$HOME/.ros/lekiwi}/lekiwi.rviz"
 mkdir -p "$(dirname "$run_config")"
 cp config/lekiwi.rviz "$run_config"
 
-exec rviz2 -d "$run_config" "$@"
+# The MoveIt RViz plugin is a separate ROS node. Unlike move_group it does not inherit
+# these parameters from the launch file, so give it the same generated URDF and SRDF.
+# Without them the Planning panel cannot construct its robot model and emits a misleading
+# robot_description_semantic error even though move_group itself is healthy.
+package_share="$(ros2 pkg prefix lekiwi_rmf)/share/lekiwi_rmf"
+robot_description="$(xacro "$package_share/urdf/lekiwi.urdf.xacro" sim:=false)"
+robot_description_semantic="$(< "$package_share/config/lekiwi.srdf")"
+
+# Do not let the startup lock leak into RViz itself.
+exec 9>&-
+exec rviz2 -d "$run_config" "$@" --ros-args \
+  -p "robot_description:=$robot_description" \
+  -p "robot_description_semantic:=$robot_description_semantic"

@@ -7,6 +7,12 @@ cd "$(dirname "$0")/.."
 LOGS="${LEKIWI_LOGS:-$HOME/.ros/lekiwi}"
 mkdir -p "$LOGS"
 
+exec 9>"$LOGS/pi-up-start.lock"
+if ! flock -n 9; then
+  echo "$0: startup is already in progress" >&2
+  exit 0
+fi
+
 wait_for() { # wait_for <seconds> <command...>
   local deadline=$((SECONDS + $1)); shift
   until "$@" >/dev/null 2>&1; do
@@ -29,4 +35,6 @@ else
   echo "host: up"
 fi
 
+flock -u 9
+exec 9>&-
 echo "Pi ready -- logs in $LOGS"

@@ -211,11 +211,12 @@ def generate_launch_description():
                     # v4l2_camera has no JPEG decoder -- ask it for MJPG and it aborts on the
                     # first frame, so this is uncompressed and has to stay small: both cameras
                     # share one USB 2.0 hub, and a second 640x480 YUYV feed starves the front
-                    # camera into solid green frames. The camera answers with the nearest mode
-                    # it has, 352x288, which is what actually leaves the bus.
+                    # camera into solid green frames. This camera's smallest native YUYV mode
+                    # is 352x288; requesting 160x120 can succeed at format negotiation but
+                    # then produce no frames on this UVC device.
                     "pixel_format": "YUYV",
                     "output_encoding": "rgb8",
-                    "image_size": [160, 120],
+                    "image_size": [352, 288],
                 }],
                 condition=IfCondition(PythonExpression([wrist_here, " and ", real])),
                 output="screen",
