@@ -21,8 +21,15 @@ rmf_fleet:
   recharge_soc: 0.95
   account_for_battery_drain: false
   task_capabilities: {loop: true, delivery: true}
-  finishing_request: charge
-  responsive_wait: true
+  # When the robot is idle and no tasks are pending, RMF applies this request.
+  # 'charge' made the adapter send an idle robot to its charger forever --
+  # re-dispatching on every Nav2 timeout -- which is only safe if you happen
+  # to want your robot driving uninvited. Hold position instead; charging is
+  # dispatched manually or by a battery-aware task when that exists.
+  finishing_request: nothing
+  # 'true' gives every idle robot a recurring go-park idle task (~30 s cycle).
+  # With one bench-bound robot there is no traffic to dodge, so hold position.
+  responsive_wait: false
   robots:
     lekiwi_1:
       charger: charger

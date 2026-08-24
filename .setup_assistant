@@ -1,0 +1,11 @@
+# Read by moveit_configs_utils' MoveItConfigsBuilder to infer the description
+# files without warning. launch/moveit.launch.py passes explicit paths anyway;
+# this exists so the constructor's inference succeeds and stays in sync with
+# them instead of falling back to config/lekiwi.urdf, which does not exist.
+moveit_setup_assistant_config:
+  urdf:
+    package: lekiwi_rmf
+    relative_path: urdf/lekiwi.urdf.xacro
+    xacro_args: "sim:=false"
+  srdf:
+    relative_path: config/lekiwi.srdf

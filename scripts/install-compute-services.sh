@@ -51,6 +51,7 @@ install_unit() { # install_unit <name>
 }
 
 host_unit="$UNIT_DIR/lekiwi-host.service"
+cameras_unit="$UNIT_DIR/lekiwi-cameras.service"
 topology_dir="$UNIT_DIR/lekiwi-stack.service.d"
 topology_conf="$topology_dir/topology.conf"
 
@@ -66,6 +67,7 @@ if [[ -n $REMOTE ]]; then
     log "warning: device services are also installed on this machine -- an"
     log "unusual split. If the devices are actually here, drop --remote."
   fi
+  STACK_ARGS="camera_source:=remote remote_ip:=$REMOTE"
 else
   # All-in-one: restore the base dependency set in case a previous remote
   # configuration left the drop-in behind.
@@ -73,29 +75,36 @@ else
     log "Removing stale topology override $(printf %q "$topology_conf")"
     as_root rm -f "$topology_conf"
   fi
-  if [[ ! -f $host_unit ]]; then
-    log "No device services here yet. If the motors and cameras end up on"
-    log "this machine, also run: scripts/install-device-services.sh"
-    log "Until something answers on :5555 the stack will keep retrying."
+  if [[ -f $cameras_unit ]]; then
+    # The camera publisher service owns this machine's USB cameras. Letting the
+    # stack open them again would fight it for the devices (v4l2 allows one
+    # reader), so the stack takes the same compressed stream a remote machine
+    # would -- over loopback.
+    log "Camera publisher service found here: stack takes its frames over"
+    log "loopback, so each USB device keeps exactly one reader."
+    STACK_ARGS="camera_source:=remote remote_ip:=127.0.0.1"
+  else
+    if [[ ! -f $host_unit ]]; then
+      log "No device services here yet. If the motors and cameras end up on"
+      log "this machine, also run: scripts/install-device-services.sh"
+      log "Until something answers on :5555 the stack will keep retrying."
+    fi
+    STACK_ARGS=""
   fi
 fi
 
 if [[ -n $REMOTE ]]; then
-  log "Installing lekiwi-stack.service (camera_source:=remote remote_ip:=$REMOTE)"
+  log "Installing lekiwi-stack.service (--remote $REMOTE)"
+elif [[ $STACK_ARGS == *remote* ]]; then
+  log "Installing lekiwi-stack.service (loopback camera_source:=remote)"
 else
   log "Installing lekiwi-stack.service (local cameras)"
 fi
 install_unit lekiwi-stack.service
 
 stack_env=/etc/default/lekiwi-stack
-{
-  printf '# Written by scripts/install-compute-services.sh.\n'
-  if [[ -n $REMOTE ]]; then
-    printf 'LEKIWI_STACK_ARGS=camera_source:=remote remote_ip:=%s\n' "$REMOTE"
-  else
-    printf 'LEKIWI_STACK_ARGS=\n'
-  fi
-} | as_root tee "$stack_env" >/dev/null
+printf '# Written by scripts/install-compute-services.sh.\nLEKIWI_STACK_ARGS=%s\n' \
+  "$STACK_ARGS" | as_root tee "$stack_env" >/dev/null
 
 log "Reloading systemd and enabling lekiwi-stack.service"
 as_root systemctl daemon-reload

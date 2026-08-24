@@ -3,17 +3,27 @@ doors: {}
 levels:
   L1:
     lanes:
-      - [0, 1, {}]
-      - [1, 0, {}]
       - [1, 2, {}]
       - [2, 1, {}]
       - [2, 3, {}]
       - [3, 2, {}]
+      - [0, 3, {}]
+      - [3, 0, {}]
+      - [0, 4, {}]
+      - [4, 0, {}]
       - [3, 4, {}]
       - [4, 3, {}]
-      - [3, 5, {}]
-      - [5, 3, {}]
+      - [4, 5, {}]
+      - [5, 4, {}]
+      - [4, 6, {}]
+      - [6, 4, {}]
     vertices:
+      # bench sits where the robot actually powers on: the driver's odometry
+      # origin. Without a vertex here EasyFullControl never considers the idle
+      # robot localized, and keeps dispatching go_to_place to drag it onto the
+      # nearest lane -- forever, since Nav2 cannot plan out of the clutter
+      # around the bench.
+      - [0.0, 0.0, {is_parking_spot: true, name: bench}]
       - [-4.0, -2.5, {is_charger: true, is_parking_spot: true, name: charger}]
       - [-3.0, 0.0, {name: west_corridor}]
       - [-0.5, -1.8, {name: doorway}]

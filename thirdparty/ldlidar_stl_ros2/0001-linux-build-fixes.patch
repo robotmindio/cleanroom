@@ -27,3 +27,75 @@ index 61369e0..3476259 100644
  
  #include <time.h>
  #include <string.h>
+diff --git a/ldlidar_driver/src/serialcom/serial_interface_linux.cpp b/ldlidar_driver/src/serialcom/serial_interface_linux.cpp
+index c110c77..cad0eb4 100644
+--- a/ldlidar_driver/src/serialcom/serial_interface_linux.cpp
++++ b/ldlidar_driver/src/serialcom/serial_interface_linux.cpp
+@@ -105,17 +105,20 @@ bool SerialInterfaceLinux::Close() {
+ 
+   rx_thread_exit_flag_ = true;
+ 
+-  if (com_handle_ != -1) {
+-    close(com_handle_);
+-    com_handle_ = -1;
+-  }
+-
++  // Stop the reader before the descriptor disappears. Closing first left the
++  // rx thread racing FD_SET()/pselect() against com_handle_ becoming -1,
++  // which glibc rejects with "bit out of range 0 - FD_SETSIZE" and SIGABRT.
+   if ((rx_thread_ != nullptr) && rx_thread_->joinable()) {
+     rx_thread_->join();
+     delete rx_thread_;
+     rx_thread_ = nullptr;
+   }
+ 
++  if (com_handle_ != -1) {
++    close(com_handle_);
++    com_handle_ = -1;
++  }
++
+   is_cmd_opened_ = false;
+ 
+   return true;
+@@ -127,10 +130,15 @@ bool SerialInterfaceLinux::ReadFromIO(uint8_t *rx_buf, uint32_t rx_buf_len,
+   int32_t len = -1;
+ 
+   if (IsOpened()) {
++    // Snapshot: another thread may close the port between the check and use.
++    const int fd = com_handle_;
++    if (fd < 0) {
++      return false;
++    }
+     fd_set read_fds;
+     FD_ZERO(&read_fds);
+-    FD_SET(com_handle_, &read_fds);
+-    int r = pselect(com_handle_ + 1, &read_fds, NULL, NULL, &timeout, NULL);
++    FD_SET(fd, &read_fds);
++    int r = pselect(fd + 1, &read_fds, NULL, NULL, &timeout, NULL);
+     if (r < 0) {
+       // Select was interrupted
+       if (errno == EINTR) {
+@@ -140,8 +148,8 @@ bool SerialInterfaceLinux::ReadFromIO(uint8_t *rx_buf, uint32_t rx_buf_len,
+       return false;
+     }
+ 
+-    if (FD_ISSET(com_handle_, &read_fds)) {
+-      len = (int32_t)read(com_handle_, rx_buf, rx_buf_len);
++    if (FD_ISSET(fd, &read_fds)) {
++      len = (int32_t)read(fd, rx_buf, rx_buf_len);
+       if ((len != -1) && rx_len) {
+         *rx_len = len;
+       }
+@@ -155,7 +163,11 @@ bool SerialInterfaceLinux::WriteToIo(const uint8_t *tx_buf, uint32_t tx_buf_len,
+   int32_t len = -1;
+ 
+   if (IsOpened()) {
+-    len = (int32_t)write(com_handle_, tx_buf, tx_buf_len);
++    const int fd = com_handle_;
++    if (fd < 0) {
++      return false;
++    }
++    len = (int32_t)write(fd, tx_buf, tx_buf_len);
+     if ((len != -1) && tx_len) {
+       *tx_len = len;
+     }

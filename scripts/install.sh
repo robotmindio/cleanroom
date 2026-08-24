@@ -213,6 +213,26 @@ colcon --log-base "$WORKSPACE/log" build \
   "${parallel_args[@]}" \
   --cmake-args -DCMAKE_BUILD_TYPE=Release
 
+# colcon prints "Finished" per package it reached, and an interrupted run can
+# still leave a plausible-looking install tree with share/ metadata but no
+# compiled node (an oomd kill mid-build did exactly that once). Trust binaries,
+# not summaries.
+log "Verifying the built executables"
+missing=()
+for exe in \
+  "$WORKSPACE/install/lekiwi_rmf/lib/lekiwi_rmf/lekiwi_driver" \
+  "$WORKSPACE/install/lekiwi_rmf/lib/lekiwi_rmf/camera_relay" \
+  "$WORKSPACE/install/ldlidar_stl_ros2/lib/ldlidar_stl_ros2/ldlidar_stl_ros2_node" \
+  "$WORKSPACE/install/free_fleet_adapter/lib/free_fleet_adapter/fleet_adapter.py"
+do
+  [[ -x $exe ]] || missing+=("$exe")
+done
+if (( ${#missing[@]} )); then
+  die "build finished but these executables are missing: ${missing[*]}
+       (a killed or interrupted build leaves stub installs behind; delete the
+       package's build/ and install/ dirs and re-run this script)"
+fi
+
 setup_file="$PROJECT_ROOT/scripts/setup.bash"
 setup_marker='# >>> lekiwi setup >>>'
 install_shell_setup() {

@@ -71,6 +71,13 @@ log "Reloading systemd and enabling services"
 as_root systemctl daemon-reload
 as_root systemctl enable --now lekiwi-host.service lekiwi-cameras.service
 
+if [[ -f $UNIT_DIR/lekiwi-stack.service ]]; then
+  log "A ROS stack service is also installed here -- re-run"
+  log "scripts/install-compute-services.sh so it takes this machine's"
+  log "camera stream over loopback instead of opening the devices again;"
+  log "v4l2 allows one reader per camera."
+fi
+
 cat <<EOF
 Done. Check on them with:
   systemctl status lekiwi-host.service lekiwi-cameras.service

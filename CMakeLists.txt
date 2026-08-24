@@ -10,6 +10,9 @@ install(PROGRAMS lekiwi_rmf/driver.py DESTINATION lib/${PROJECT_NAME} RENAME lek
 install(PROGRAMS lekiwi_rmf/camera_relay.py DESTINATION lib/${PROJECT_NAME} RENAME camera_relay)
 install(PROGRAMS scripts/arm_calibration.py scripts/odom_scale.py scripts/teleop.py scripts/free_space.py DESTINATION lib/${PROJECT_NAME})
 install(FILES scripts/setup-pi.bash DESTINATION share/${PROJECT_NAME}/scripts)
+# MoveItConfigsBuilder reads this from the package share root to infer the
+# description files silently; see launch/moveit.launch.py.
+install(FILES .setup_assistant DESTINATION share/${PROJECT_NAME})
 install(DIRECTORY config launch maps urdf worlds DESTINATION share/${PROJECT_NAME})
 
 if(BUILD_TESTING)

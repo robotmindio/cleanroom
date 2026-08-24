@@ -11,6 +11,9 @@
 #     :5555 answers -- the wait up.sh performs by hand. The dependency lives
 #     in a drop-in (lekiwi-stack.service.d/topology.conf) so both halves of
 #     an all-in-one machine move together like one ros-stop.sh invocation.
+#     When a lekiwi-cameras.service is installed here as well, the installer
+#     points the stack at it over loopback: v4l2 allows one reader per
+#     camera, and the service already holds the devices.
 #
 #   devices elsewhere (--remote <addr>): the drop-in instead clears
 #     Requires/PartOf/After -- there is no local host to depend on -- and

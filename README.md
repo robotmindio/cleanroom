@@ -328,7 +328,10 @@ one reader per device, so a stalled camera frame cannot abort the motor bus).
 The compute side installs `lekiwi-stack.service`:
 
 - without arguments it assumes the device side is this same machine and
-  orders itself after the host, starting only once its ZMQ port answers;
+  orders itself after the host, starting only once its ZMQ port answers. If a
+  `lekiwi-cameras.service` is installed here too, the stack takes that
+  service's compressed frames over loopback (`camera_source:=remote`) — v4l2
+  allows one reader per camera, and the service already holds them;
 - with `--remote <device-address>` it reaches a host on another machine;
   compressed frames stream from the device machine and relays in the bringup
   expand them into the same canonical topics, so nothing downstream can tell

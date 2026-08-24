@@ -94,38 +94,60 @@ def pump_until(executor, device, checker, ready, timeout=3.0):
 def test_front_frame_expands_to_canonical_topics(graph):
     device, _, executor = graph
     seen_images, seen_infos = [], []
+    ours_image, ours_info = None, None
+
+    def on_image(msg):
+        seen_images.append(msg)
+        # The graph may carry unrelated live traffic (a deployed stack on this
+        # machine publishes these very topics); only our marked frame counts.
+        nonlocal ours_image
+        if msg.header.stamp.sec == 7 and ours_image is None:
+            ours_image = msg
+
+    def on_info(msg):
+        seen_infos.append(msg)
+        nonlocal ours_info
+        if msg.header.stamp.sec == 7 and ours_info is None:
+            ours_info = msg
+
     checker = rclpy.create_node("front_checker")
-    checker.create_subscription(Image, "/camera/front/image_raw", seen_images.append, SENSOR_QOS)
+    checker.create_subscription(Image, "/camera/front/image_raw", on_image, SENSOR_QOS)
     # free_space/RTAB-Map request reliable delivery from their scan-and-image
     # sources, so the info topic has to satisfy a reliable subscription too.
-    checker.create_subscription(CameraInfo, "/camera/front/camera_info", seen_infos.append, RELIABLE_QOS)
+    checker.create_subscription(CameraInfo, "/camera/front/camera_info", on_info, RELIABLE_QOS)
     executor.add_node(checker)
     try:
-        pump_until(executor, device, checker, lambda: seen_images and seen_infos)
+        pump_until(executor, device, checker, lambda: ours_image and ours_info)
     finally:
         executor.remove_node(checker)
         checker.destroy_node()
 
-    assert seen_images, "relay published no raw image -- subscription mismatch?"
-    assert seen_images[0].header.stamp.sec == 7, "frames must keep their original stamps"
-    assert np.array_equal(BRIDGE.imgmsg_to_cv2(seen_images[0], "bgr8"), FRAME)
-    assert seen_infos, "relay published no CameraInfo alongside the image"
-    assert seen_infos[0].width == 640
-    assert seen_infos[0].header.stamp.sec == 7, "info is re-stamped onto each frame"
+    assert ours_image, "relay published no raw image -- subscription mismatch?"
+    assert np.array_equal(BRIDGE.imgmsg_to_cv2(ours_image, "bgr8"), FRAME)
+    assert ours_info, "relay published no CameraInfo alongside the image"
+    assert ours_info.width == 640
 
 
 def test_wrist_frames_are_relayed_but_its_missing_calibration_is_not_invented(graph):
     device, _, executor = graph
     seen_images, seen_infos = [], []
+    ours_image = None
     checker = rclpy.create_node("wrist_checker")
-    checker.create_subscription(Image, "/camera/wrist/image_raw", seen_images.append, SENSOR_QOS)
+
+    def on_image(msg):
+        seen_images.append(msg)
+        nonlocal ours_image
+        if msg.header.stamp.sec == 7:
+            ours_image = msg
+
+    checker.create_subscription(Image, "/camera/wrist/image_raw", on_image, SENSOR_QOS)
     checker.create_subscription(CameraInfo, "/camera/wrist/camera_info", seen_infos.append, RELIABLE_QOS)
     executor.add_node(checker)
     try:
-        pump_until(executor, device, checker, lambda: bool(seen_images))
+        pump_until(executor, device, checker, lambda: ours_image is not None)
     finally:
         executor.remove_node(checker)
         checker.destroy_node()
 
-    assert seen_images, "wrist frames should be relayed like any other camera"
+    assert ours_image, "wrist frames should be relayed like any other camera"
     assert not seen_infos, "wrist has no calibration; inventing one would be worse"
