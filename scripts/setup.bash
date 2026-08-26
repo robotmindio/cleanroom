@@ -11,12 +11,14 @@ else
 fi
 _lekiwi_repo_workspace="$(cd "$(dirname "$_lekiwi_setup_file")/.." && pwd)"
 _lekiwi_workspace=${LEKIWI_WS:-"$_lekiwi_repo_workspace"}
-# A source checkout may intentionally share a separately installed LeRobot
-# environment. In that case retain the established overlay until install.sh has
-# created this checkout's own .venv; never select a half-installed workspace.
+# A source checkout can share the established ROS/LeRobot Python environment
+# without also inheriting its older lekiwi_rmf overlay. Source the repository's
+# built package last, so it wins, while the established workspace remains a
+# dependency underlay for Free Fleet, RMF demos, and the lidar driver.
+_lekiwi_venv_workspace=$_lekiwi_workspace
 if [ -z "${LEKIWI_WS:-}" ] && [ ! -f "$_lekiwi_workspace/.venv/bin/activate" ] \
   && [ -f "$HOME/lekiwi_ws/.venv/bin/activate" ]; then
-  _lekiwi_workspace="$HOME/lekiwi_ws"
+  _lekiwi_venv_workspace="$HOME/lekiwi_ws"
 fi
 # ponytail: zsh must use the .zsh variants -- the .bash ones read ${BASH_SOURCE[0]},
 # which is unset in zsh, and the .zsh ones use `builtin cd -q` so a chpwd hook that
@@ -28,9 +30,10 @@ else
 fi
 
 if [ ! -f "/opt/ros/jazzy/setup.$_lekiwi_shell" ] ||
-   [ ! -f "$_lekiwi_workspace/install/setup.$_lekiwi_shell" ]; then
+   [ ! -f "$_lekiwi_workspace/install/setup.$_lekiwi_shell" ] ||
+   [ ! -f "$_lekiwi_venv_workspace/.venv/bin/activate" ]; then
   printf 'LeKiwi stack is not installed. Run scripts/install.sh first.\n' >&2
-  unset _lekiwi_workspace _lekiwi_repo_workspace _lekiwi_setup_file _lekiwi_shell
+  unset _lekiwi_venv_workspace _lekiwi_workspace _lekiwi_repo_workspace _lekiwi_setup_file _lekiwi_shell
   return 1 2>/dev/null
   exit 1
 fi
@@ -38,10 +41,19 @@ fi
 # shellcheck disable=SC1090
 . "/opt/ros/jazzy/setup.$_lekiwi_shell"
 # shellcheck disable=SC1091
-. "$_lekiwi_workspace/.venv/bin/activate"
+. "$_lekiwi_venv_workspace/.venv/bin/activate"
+# A developer checkout normally contains only lekiwi_rmf, while the established
+# deployment workspace owns the pinned third-party packages. Load it first as
+# an underlay, then overlay this checkout's current build. An explicit
+# LEKIWI_WS selects a complete deployment and deliberately skips this fallback.
+if [ -z "${LEKIWI_WS:-}" ] && [ "$_lekiwi_workspace" != "$HOME/lekiwi_ws" ] &&
+   [ -f "$HOME/lekiwi_ws/install/setup.$_lekiwi_shell" ]; then
+  # shellcheck disable=SC1090
+  . "$HOME/lekiwi_ws/install/setup.$_lekiwi_shell"
+fi
 # shellcheck disable=SC1090
 . "$_lekiwi_workspace/install/setup.$_lekiwi_shell"
 export PATH="$HOME/.local/bin:$PATH"
 export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 export CYCLONEDDS_URI="file://$_lekiwi_workspace/install/lekiwi_rmf/share/lekiwi_rmf/config/cyclonedds.xml"
-unset _lekiwi_workspace _lekiwi_repo_workspace _lekiwi_setup_file _lekiwi_shell
+unset _lekiwi_venv_workspace _lekiwi_workspace _lekiwi_repo_workspace _lekiwi_setup_file _lekiwi_shell

@@ -40,7 +40,11 @@ set -u
 # Starting before the cameras publish also loses the panels, so wait for them. A camera
 # that never appears is not fatal -- the other panel and the whole navigation view still
 # come up.
-mkdir -p "${LEKIWI_LOGS:-$HOME/.ros/lekiwi}"
+logs_dir="${LEKIWI_LOGS:-$HOME/.ros/lekiwi}"
+runtime_dir="${LEKIWI_RUNTIME_DIR:-$logs_dir/runtime}"
+run_config="$logs_dir/lekiwi.rviz"
+rviz_pid_file="$runtime_dir/rviz.pid"
+mkdir -p "$logs_dir" "$runtime_dir"
 
 # `up.sh` and `workstation-up.sh` both deliberately return while RViz is coming up.  A
 # second start can otherwise get here while the first one is still waiting for topics,
@@ -53,7 +57,22 @@ if ! flock -n 9; then
   exit 0
 fi
 
-mapfile -t old_rviz_pids < <(pgrep -f '[r]viz2 -d .*lekiwi\.rviz' || true)
+# Replace only the RViz process started by this repository. A broad process
+# search can kill a different robot's RViz on a shared workstation.
+old_rviz_pids=()
+if [[ -r "$rviz_pid_file" ]]; then
+  old_rviz_pid=$(<"$rviz_pid_file")
+  if [[ $old_rviz_pid =~ ^[1-9][0-9]*$ ]] && kill -0 "$old_rviz_pid" 2>/dev/null; then
+    old_rviz_command=$(tr '\0' ' ' < "/proc/$old_rviz_pid/cmdline" 2>/dev/null || true)
+    if [[ $old_rviz_command == *"rviz2"* && $old_rviz_command == *"-d $run_config"* ]]; then
+      old_rviz_pids=("$old_rviz_pid")
+    else
+      echo "rviz: recorded PID $old_rviz_pid is not this stack's RViz; leaving it alone" >&2
+    fi
+  else
+    rm -f -- "$rviz_pid_file"
+  fi
+fi
 for pid in "${old_rviz_pids[@]}"; do
   # A previous RViz keeps its in-memory, user-modified dock state even after a new stack
   # starts. Replace it so the fresh copy below is the one visible layout.
@@ -94,8 +113,6 @@ done
 # all. Close it once with the camera docks hidden and the config is quietly ruined for
 # every launch after -- which is exactly how they went missing. Run from a copy so the
 # checked-in file is the only source of truth and RViz's own saves land in the scratch one.
-run_config="${LEKIWI_LOGS:-$HOME/.ros/lekiwi}/lekiwi.rviz"
-mkdir -p "$(dirname "$run_config")"
 cp config/lekiwi.rviz "$run_config"
 
 # The MoveIt RViz plugin is a separate ROS node. Unlike move_group it does not inherit
@@ -134,6 +151,7 @@ exec 9>&-
 # MoveIt's panel queries these names before it loads the rest of its configuration.
 # Supply them as explicit process overrides as well as in the generated YAML; the
 # RViz node then has them declared when MotionPlanningFrame reads them.
+printf '%s\n' "$$" > "$rviz_pid_file"
 exec rviz2 -d "$run_config" "$@" --ros-args --params-file "$run_params" \
   -p "robot_description_planning.default_velocity_scaling_factor:=$velocity_scale" \
   -p "robot_description_planning.default_acceleration_scaling_factor:=$acceleration_scale"
