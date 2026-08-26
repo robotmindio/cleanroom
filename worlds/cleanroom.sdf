@@ -4,9 +4,11 @@
     <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
     <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
     <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
-    <!-- Ogre1 supports the Raspberry Pi V3D OpenGL 3.1 driver; Ogre2 requires
-         OpenGL 3.3 and leaves all camera/lidar topics silent on that target. -->
-    <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors"><render_engine>ogre</render_engine></plugin>
+    <!-- GPU lidar needs Ogre2. It requires an OpenGL 3.3-capable driver. The
+         Raspberry Pi V3D driver exposes only OpenGL 3.1, so run simulation on
+         a workstation/server with a supported GPU and leave this configuration
+         free of host-specific environment overrides. -->
+    <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors"><render_engine>ogre2</render_engine></plugin>
     <scene><ambient>0.7 0.7 0.7 1</ambient><background>0.9 0.9 0.9 1</background></scene>
     <light name="sun" type="directional"><pose>0 0 10 0 0 0</pose><diffuse>0.9 0.9 0.9 1</diffuse><direction>-0.4 0.2 -1</direction></light>
     <model name="floor"><static>true</static><link name="link"><collision name="collision"><geometry><box><size>10 7 0.1</size></box></geometry></collision><visual name="visual"><geometry><box><size>10 7 0.1</size></box></geometry><material><diffuse>0.72 0.76 0.78 1</diffuse></material></visual></link></model>

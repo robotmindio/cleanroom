@@ -16,10 +16,17 @@ die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 trap 'printf "error: installer failed at line %s\n" "$LINENO" >&2' ERR
 
 if [[ ${1:-} == --help ]]; then
-  printf 'Usage: LEKIWI_WS=/path/to/workspace %s\n' "$0"
+  printf 'Usage: LEKIWI_WS=/path/to/workspace %s [--simulation]\n' "$0"
+  printf '  --simulation  install the Gazebo/ROS stack without the LeRobot hardware environment\n'
   exit 0
 fi
-[[ $# -eq 0 ]] || die "unknown argument: $1"
+install_mode=full
+[[ $# -le 1 ]] || die "unknown argument: $2"
+case ${1:-} in
+  '') ;;
+  --simulation) install_mode=simulation ;;
+  *) die "unknown argument: $1" ;;
+esac
 
 # shellcheck disable=SC1091
 source /etc/os-release
@@ -176,18 +183,22 @@ python -m pip install \
   nudged pycdr2 rosbags \
   "transforms3d>=0.4.2"
 
-log "Creating the LeRobot Python environment"
-# ponytail: LeRobot requires numpy>=2, which cannot coexist with ROS's numpy 1.26 in one
-# interpreter. Separate venv; only the hardware driver runs in it (see bringup.launch.py).
-python3 -m venv --system-site-packages "$WORKSPACE/.venv-lerobot"
-(
-  set +u
-  # shellcheck disable=SC1091
-  source "$WORKSPACE/.venv-lerobot/bin/activate"
-  set -u
-  python -m pip install --upgrade pip
-  python -m pip install "lerobot[lekiwi,hardware]==${LEROBOT_VERSION}"
-)
+if [[ $install_mode == full ]]; then
+  log "Creating the LeRobot Python environment"
+  # ponytail: LeRobot requires numpy>=2, which cannot coexist with ROS's numpy 1.26 in one
+  # interpreter. Separate venv; only the hardware driver runs in it (see bringup.launch.py).
+  python3 -m venv --system-site-packages "$WORKSPACE/.venv-lerobot"
+  (
+    set +u
+    # shellcheck disable=SC1091
+    source "$WORKSPACE/.venv-lerobot/bin/activate"
+    set -u
+    python -m pip install --upgrade pip
+    python -m pip install "lerobot[lekiwi,hardware]==${LEROBOT_VERSION}"
+  )
+else
+  log "Simulation-only installation: skipping the LeRobot hardware environment"
+fi
 
 log "Resolving package dependencies and building the workspace"
 rosdep install --from-paths \
@@ -274,7 +285,7 @@ fi
 
 log "Installation complete"
 printf 'Open a new shell to load the LeKiwi environment automatically.\n'
-printf 'Then launch the simulation:\n  ros2 launch lekiwi_rmf bringup.launch.py mode:=sim\n'
+printf 'Then launch the managed simulation with renderer preflight:\n  scripts/sim-up.sh\n'
 printf 'For the real robot, scripts/up.sh brings everything up by hand.\n'
 printf 'At boot instead: install-device-services.sh where the motors/cameras\n'
 printf 'plug in, install-compute-services.sh where the stack should run --\n'

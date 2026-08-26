@@ -1,7 +1,7 @@
 import os
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, ExecuteProcess, IncludeLaunchDescription, LogInfo, RegisterEventHandler
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, IncludeLaunchDescription, LogInfo, RegisterEventHandler, SetEnvironmentVariable
 from launch.conditions import IfCondition
 from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
@@ -11,12 +11,24 @@ from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
 
+LD06_SERIAL_PORTS = (
+    # CP2102's usual Linux interface suffix. This is the device presently
+    # attached to this robot (ID_SERIAL_SHORT=0001).
+    "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0",
+    # Kept for an earlier udev naming variant seen on the same adapter family.
+    "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if0-port0",
+)
+
+
 def _lidar_serial_present():
     # /dev/ttyUSB0 is only a kernel-assigned slot: it can just as easily be a
     # console cable or another USB-UART.  Auto mode is deliberately conservative.
-    return any(os.path.exists(path) for path in [
-        "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if0-port0",
-    ])
+    return any(os.path.exists(path) for path in LD06_SERIAL_PORTS)
+
+
+def _lidar_default_port():
+    """Select the stable serial name that actually exists at launch time."""
+    return next((path for path in LD06_SERIAL_PORTS if os.path.exists(path)), LD06_SERIAL_PORTS[0])
 
 
 def _after_success(stage, actions):
@@ -26,7 +38,12 @@ def _after_success(stage, actions):
     exit-status check also keeps an invalid parameter, import error, or other
     gate crash from being treated as readiness by ``OnProcessExit``.
     """
-    def on_exit(event, _context):
+    def on_exit(event, context):
+        # SIGINT makes the lightweight gates leave their spin loops cleanly.
+        # Do not mistake that clean exit for readiness and start RTAB-Map/Nav2
+        # after launch has already begun tearing the stack down.
+        if context.is_shutdown or event.returncode == 130:
+            return []
         if event.returncode == 0:
             return actions
         return [LogInfo(msg=f"ERROR: {stage} readiness gate exited with {event.returncode}; dependents remain stopped")]
@@ -232,7 +249,15 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 "rtabmap_database",
-                default_value=[EnvironmentVariable("HOME"), "/.ros/lekiwi_rtabmap.db"],
+                # Simulation must not reopen a physical mapping session. Apart
+                # from polluting a real map, a partially written hardware DB
+                # can make RTAB-Map spend startup restoring stale words before
+                # it produces the first simulated grid.
+                default_value=PythonExpression([
+                    "('", EnvironmentVariable("HOME"), "/.ros/lekiwi_rtabmap_sim.db' "
+                    "if '", mode, "' == 'sim' else '",
+                    EnvironmentVariable("HOME"), "/.ros/lekiwi_rtabmap.db')",
+                ]),
             ),
             # RTAB-Map keeps its working memory in RAM and, unbounded, grows without end:
             # an hour of mapping at 1 Hz took 6.6 GB and starved the rest of the machine.
@@ -252,7 +277,7 @@ def generate_launch_description():
             # Prefer a /dev/serial/by-id/... path for the same reason as camera_device.
             DeclareLaunchArgument(
                 "lidar_port",
-                default_value="/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if0-port0",
+                default_value=_lidar_default_port(),
             ),
             # Camera-as-laser obstacle detection, and the geometry it stands on.
             # Measured with the checkerboard on the floor, not taken from the URDF: the
@@ -274,6 +299,19 @@ def generate_launch_description():
                 executable="joint_state_publisher",
                 condition=IfCondition(sim),
                 parameters=[{"use_sim_time": True}],
+            ),
+            # Gazebo resolves the CAD's ``model://lekiwi_rmf/...`` URIs from
+            # resource-path roots, not from ament's package index. The parent
+            # of this package share is the root that contains ``lekiwi_rmf``.
+            # Without it every visual fails to load and GPU lidar receives an
+            # invalid empty scene in headless mode.
+            SetEnvironmentVariable(
+                name="GZ_SIM_RESOURCE_PATH",
+                value=[
+                    EnvironmentVariable("GZ_SIM_RESOURCE_PATH", default_value=""),
+                    os.pathsep,
+                    PathJoinSubstitution([package, ".."]),
+                ],
             ),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(PathJoinSubstitution([FindPackageShare("ros_gz_sim"), "launch", "gz_sim.launch.py"])),
