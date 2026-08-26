@@ -78,6 +78,20 @@ extensions are built against numpy 1.26, and mixing them segfaults `rmf_adapter`
 `bringup.launch.py` runs the hardware driver against `.venv-lerobot` on its own.
 See [HARDWARE.md](HARDWARE.md).
 
+### Headless simulation server
+
+Use the repository's simulation-only installer on a remote brain/server. It
+installs the ROS/Gazebo stack and builds this workspace, but deliberately omits
+the LeRobot motor/camera environment:
+
+```bash
+./scripts/install-sim-host.sh
+```
+
+The server still needs a GPU whose driver exposes OpenGL 3.3 or newer to
+headless EGL. See [SERVER-HANDOFF.md](SERVER-HANDOFF.md) for the validation
+sequence after it is provisioned.
+
 ## Simulation quick start
 
 Source the environment in every new terminal:
@@ -86,12 +100,16 @@ Source the environment in every new terminal:
 source scripts/setup.bash
 ```
 
-Launch Gazebo, visual SLAM, and Nav2:
+Launch Gazebo, visual SLAM, and Nav2 through the managed renderer preflight:
 
 ```bash
-ros2 launch lekiwi_rmf bringup.launch.py mode:=sim \
-  rtabmap_database:=$HOME/.ros/lekiwi_sim.db
+scripts/sim-up.sh
 ```
+
+It refuses a host that cannot create a headless OpenGL 3.3 context, records
+only its own process group, and writes `~/.ros/lekiwi/sim-stack.log`. Stop it
+with `scripts/ros-stop.sh`; that script escalates only within the recorded
+process group if an external Gazebo/ROS binary does not exit on SIGINT.
 
 Test Nav2 only after `/scan` has real ranges and `/map` covers a clear nearby
 goal (see `TROUBLESHOOTING.md`):
@@ -101,8 +119,13 @@ ros2 action send_goal /navigate_to_pose nav2_msgs/action/NavigateToPose \
   '{pose: {header: {frame_id: map}, pose: {position: {x: 0.3, y: 0.0}, orientation: {w: 1.0}}}}'
 ```
 
-RMF is opt-in because it connects the robot to the configured fleet graph. Add
-`start_rmf:=true` to the launch above, then dispatch an RMF patrol from another sourced terminal:
+RMF is opt-in because it connects the robot to the configured fleet graph. To
+run it, start the managed simulation initially with `start_rmf:=true`, then
+dispatch an RMF patrol from another sourced terminal:
+
+```bash
+scripts/sim-up.sh start_rmf:=true
+```
 
 ```bash
 ROS_DOMAIN_ID=0 ros2 run rmf_demos_tasks dispatch_patrol \
@@ -112,8 +135,8 @@ ROS_DOMAIN_ID=0 ros2 run rmf_demos_tasks dispatch_patrol \
 On later runs, reuse the visual database without adding new map nodes:
 
 ```bash
-ros2 launch lekiwi_rmf bringup.launch.py mode:=sim \
-  slam_mode:=localization rtabmap_database:=$HOME/.ros/lekiwi_sim.db
+scripts/sim-up.sh slam_mode:=localization \
+  rtabmap_database:=$HOME/.ros/lekiwi_rtabmap_sim.db
 ```
 
 ## Launch options
@@ -125,7 +148,7 @@ ros2 launch lekiwi_rmf bringup.launch.py mode:=sim \
 | `localization` | `visual_slam`, `amcl` | `visual_slam` | Select the sole `map -> odom` provider |
 | `slam_mode` | `mapping`, `localization` | `mapping` | Extend or reuse the RTAB-Map database |
 | `remote_ip` | IPv4/hostname | `127.0.0.1` | Address of the LeKiwi ZMQ host |
-| `rtabmap_database` | file path | `~/.ros/lekiwi_rtabmap.db` | Visual map database |
+| `rtabmap_database` | file path | sim: `~/.ros/lekiwi_rtabmap_sim.db`; real: `~/.ros/lekiwi_rtabmap.db` | Visual map database |
 | `camera_info_url` | ROS camera URL | `file://~/.ros/camera_info/lekiwi_front.yaml` | Real front-camera calibration |
 | `wrist_camera_info_url` | ROS camera URL | `file://~/.ros/camera_info/lekiwi_wrist.yaml` | Optional wrist-camera calibration |
 | `camera_source` | `local`, `remote` | `local` | Read the camera here, or decompress what the robot's Pi publishes |
@@ -139,7 +162,7 @@ ros2 launch lekiwi_rmf bringup.launch.py mode:=sim \
 | `start_rmf` | `true`, `false` | `false` | Start Zenoh, RMF schedule, dispatcher, and fleet adapter |
 | `rmf_domain` | integer | `0` | DDS domain used by RMF processes; must match the robot graph unless a cross-domain bridge is configured |
 | `start_rosbridge` | `true`, `false` | `true` | Start rosbridge WebSocket and ROS API nodes |
-| `start_moveit` | `true`, `false` | `true` | Start MoveIt arm planning and execution (real hardware only) |
+| `start_moveit` | `true`, `false` | `false` | Start MoveIt arm planning and execution (real hardware only) |
 | `rosbridge_address` | bind address | `0.0.0.0` | Interface exposed by rosbridge |
 | `rosbridge_port` | TCP port | `9090` | WebSocket listening port |
 | `rosbridge_domain` | integer | `0` | ROS graph exposed through rosbridge |
@@ -228,7 +251,7 @@ It drives a short leg and compares the distance the calibrated camera sees again
 Rosbridge is separate from Zenoh: Zenoh remains the transport required by Free Fleet, while rosbridge exposes one ROS graph as JSON over WebSocket. It starts by default and binds on every IPv4 interface (`0.0.0.0`).
 
 ```bash
-ros2 launch lekiwi_rmf bringup.launch.py mode:=sim start_rosbridge:=true
+scripts/sim-up.sh start_rosbridge:=true
 ```
 
 Connect a rosbridge-compatible client such as roslibjs to the robot's address:
@@ -248,8 +271,7 @@ ros.on("error", console.error);
 The default `rosbridge_domain:=0` exposes LeKiwi, camera, SLAM, and Nav2. To expose the separate RMF graph instead:
 
 ```bash
-ros2 launch lekiwi_rmf bringup.launch.py mode:=sim \
-  rosbridge_domain:=55
+scripts/sim-up.sh rosbridge_domain:=55
 ```
 
 Rosbridge has no authentication, authorization, or TLS. Any network client that can reach port
@@ -568,6 +590,17 @@ RTAB-Map's working memory lives in RAM. `rtabmap_wm_nodes` (default 300) caps ho
 nodes stay resident; the rest move to the database and return when the robot comes back
 near them. Lower it on a small machine, raise it where memory allows — a larger working
 memory recognises places sooner.
+
+### RTAB-Map database or old crash archives consume disk
+
+Before every repository-managed real-hardware launch, the default
+`~/.ros/lekiwi_rtabmap.db` is rotated once it exceeds 512 MiB. Its SQLite sidecars move with
+it, so a fresh database cannot replay an old WAL. Automatic `stale-*` and `corrupt-*` archives
+are retained for at most 14 days, three sessions, and 1.5 GiB combined (including sidecars).
+An explicit `rtabmap_database:=...` is never rotated or deleted; use it for a map that must be
+kept. The same policy runs from both `scripts/up.sh` and the systemd `scripts/ros-start.sh` path.
+If the stack is already running, `scripts/rtabmap-db-maintenance.py --prune-only` safely applies
+only the automatic-archive retention policy; it never opens or moves the active database.
 
 ### Installer reports a ParaView/VTK conflict
 
