@@ -21,6 +21,7 @@ from typing import Optional
 
 import rclpy
 from geometry_msgs.msg import Twist
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 
 
@@ -132,7 +133,14 @@ class CmdVelMux(Node):
         if source != self._last_source:
             self.get_logger().info(f"velocity source switched to {source}")
             self._last_source = source
-        self._publisher.publish(message)
+        try:
+            self._publisher.publish(message)
+        except RuntimeError:
+            # ROS invalidates publishers before a spinning executor observes
+            # SIGINT. A timer already in flight must not turn an otherwise
+            # clean stack shutdown into a process failure.
+            if rclpy.ok():
+                raise
 
 
 def main(args: Optional[list[str]] = None) -> None:
@@ -141,10 +149,12 @@ def main(args: Optional[list[str]] = None) -> None:
     try:
         node = CmdVelMux()
         rclpy.spin(node)
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass
     finally:
         if node is not None:
             node.destroy_node()
-        rclpy.shutdown()
+        rclpy.try_shutdown()
 
 
 if __name__ == "__main__":

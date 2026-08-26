@@ -28,7 +28,11 @@ class CameraRelay(Node):
         self.last_info = {}
         # Canonical raw camera topics are consumed by the floor scan and RTAB-Map.
         # Keep their delivery contract identical to the local v4l2 camera path.
-        self.raw_qos = QoSProfile(depth=5, reliability=ReliabilityPolicy.RELIABLE)
+        # Perception used for collision stopping must prefer the newest frame.
+        # A reliable five-frame history let RTAB-Map/free_space work through old
+        # decoded images on the Pi, making valid scans arrive more than the
+        # collision source timeout after their camera timestamp.
+        self.raw_qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE)
         for name, with_info in self.CAMERAS:
             self.create_subscription(
                 CompressedImage, f"/pi/camera/{name}/image_raw/compressed",

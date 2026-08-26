@@ -15,6 +15,7 @@ import rclpy
 from nav2_msgs.action import NavigateToPose
 from nav_msgs.msg import OccupancyGrid, Odometry
 from rclpy.action import ActionClient
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Image
@@ -85,14 +86,22 @@ class ReadinessGate(Node):
 def main(args: Optional[list[str]] = None) -> None:
     rclpy.init(args=args)
     node: Optional[ReadinessGate] = None
+    interrupted = False
     try:
         node = ReadinessGate()
         while rclpy.ok() and not node._ready:
             rclpy.spin_once(node, timeout_sec=0.2)
+    except (KeyboardInterrupt, ExternalShutdownException):
+        # A gate returning zero means its dependency is ready. SIGINT is not
+        # readiness: make the launch OnProcessExit success handler leave all
+        # downstream actions stopped even if shutdown events are reordered.
+        interrupted = True
     finally:
         if node is not None:
             node.destroy_node()
-        rclpy.shutdown()
+        rclpy.try_shutdown()
+    if interrupted:
+        raise SystemExit(130)
 
 
 if __name__ == "__main__":

@@ -100,7 +100,12 @@ class FreeSpace(Node):
         # best-effort subscriber can be starved under image load even while other
         # reliable subscribers receive every frame, leaving the safety watchdog to
         # fence the robot in.  camera_relay publishes the same canonical contract.
-        camera_qos = QoSProfile(depth=5, reliability=ReliabilityPolicy.RELIABLE)
+        # ``scan()`` is deliberately conservative and can cost hundreds of
+        # milliseconds on the Pi. Retaining a deep reliable history then turns
+        # a live camera into an old scan, which collision_monitor rightly
+        # rejects. Process the newest frame only; a missed frame is safer than
+        # planning from its stale predecessor.
+        camera_qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE)
         self.create_subscription(CameraInfo, "camera_info", self.on_info, camera_qos)
         self.create_subscription(Image, "image", self.on_image, camera_qos)
         # Nav2's obstacle layer requests reliable scan delivery. A reliable publisher is

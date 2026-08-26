@@ -184,7 +184,10 @@ while (( ! stopping )); do
     -p video_device:="$device" -p camera_info_url:="$effective_info_url" \
     -p camera_frame_id:="$frame" \
     -p pixel_format:=YUYV -p output_encoding:=rgb8 -p image_size:="$size")
-  [[ -z $jpeg_quality ]] || camera_args+=(-p ".image_raw.compressed.jpeg_quality:=$jpeg_quality")
+  # ROS 2 parameter names may be dot-qualified but cannot begin with a dot.
+  # A leading dot aborts v4l2_camera during argument parsing, leaving the
+  # supervisor to retry forever without publishing a front-camera frame.
+  [[ -z $jpeg_quality ]] || camera_args+=(-p "image_raw.compressed.jpeg_quality:=$jpeg_quality")
   "${camera_args[@]}" &
   child=$!
   disconnected=0

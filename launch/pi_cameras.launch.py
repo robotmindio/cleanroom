@@ -6,10 +6,10 @@ motor control: the host aborts the whole robot when a frame arrives late, and a 
 webcam does exactly that. Here a stalled camera costs frames and nothing else.
 
 Every topic lives under /pi/, so nothing here can be mistaken for the canonical topics
-the rest of the graph uses. Only the compressed image crosses the network -- raw 640x480
-at 30 Hz is 27 MB/s, which no robot wifi will carry -- and the workstation expands it
-back into /camera/front/image_raw. camera_info is a few hundred bytes and is read from
-/pi/camera/front/camera_info directly.
+the rest of the graph uses. Only the compressed image crosses the network; 320x240 keeps
+both JPEG decode and floor-derived collision scanning current on the Pi. The workstation
+expands it back into /camera/front/image_raw. camera_info is a few hundred bytes and is
+read from /pi/camera/front/camera_info directly.
 
     ros2 launch pi_cameras.launch.py front_device:=/dev/v4l/by-id/usb-...-video-index0
 """
@@ -50,10 +50,13 @@ def generate_launch_description():
                     camera_supervisor,
                     "--device", front_device, "--name", "front_camera",
                     "--namespace", "/pi/camera/front", "--camera-name", "lekiwi_front",
-                    "--frame", "front_camera_optical_frame", "--size", "[640, 480]",
+                    # The supervisor scales the 640x480 calibration into its
+                    # private CameraInfo copy. This cuts the floor-scan and
+                    # JPEG decode work by four while preserving geometry.
+                    "--frame", "front_camera_optical_frame", "--size", "[320, 240]",
                     "--camera-info-url", camera_info_url,
-                    # Default quality 50 keeps a 25 Hz stream inside robot Wi-Fi bandwidth.
-                    # matches features, not pixels, and does not need the last 45 KB.
+                    # Floor geometry matches features, not pixels; quality 50
+                    # is enough while keeping the compressed stream bounded.
                     "--jpeg-quality", jpeg_quality,
                 ],
                 output="screen",
