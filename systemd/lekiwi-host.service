@@ -40,6 +40,7 @@ RestartSec=10s
 # robot-host.sh exits cleanly on SIGTERM (it traps INT TERM HUP); the cgroup
 # kill mops up its python child, which holds the motor bus.
 TimeoutStopSec=20s
+KillMode=control-group
 
 [Install]
 WantedBy=multi-user.target

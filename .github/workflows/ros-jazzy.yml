@@ -1,0 +1,37 @@
+name: ROS Jazzy
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-test-lint:
+    runs-on: ubuntu-24.04
+    container: ros:jazzy-ros-base
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build and validation tools
+        run: |
+          apt-get update
+          apt-get install -y python3-pip python3-opencv shellcheck ros-jazzy-xacro
+          rosdep update
+          # Free Fleet is pinned and built by the repository installer; it is
+          # not an apt/rosdep package and is not needed to compile this package.
+          rosdep install --from-paths . --ignore-src --rosdistro jazzy -y \
+            --skip-keys free_fleet_adapter
+      - name: Build and test
+        env:
+          ROS_DOMAIN_ID: 237
+        run: |
+          . /opt/ros/jazzy/setup.sh
+          colcon build --symlink-install --event-handlers console_cohesion+
+          . install/setup.sh
+          colcon test --event-handlers console_cohesion+
+          colcon test-result --verbose
+      - name: Expand representative robot description
+        run: |
+          . /opt/ros/jazzy/setup.sh
+          xacro urdf/lekiwi.urdf.xacro sim:=true >/tmp/lekiwi.urdf
+          test -s /tmp/lekiwi.urdf
+      - name: Shell validation
+        run: shellcheck scripts/install.sh scripts/install-pi.sh scripts/install-device-services.sh

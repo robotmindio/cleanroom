@@ -17,6 +17,7 @@ The robot moves. Keep the area clear and stay near the power switch.
 """
 import argparse
 import math
+import os
 import time
 
 import cv2
@@ -30,6 +31,32 @@ from sensor_msgs.msg import CameraInfo, Image
 
 BOARD = (8, 6)
 CRITERIA = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+ODOM_TIMEOUT = 0.5
+MAX_CALIBRATION_SPEED = {"linear": 0.15, "angular": 0.8}
+
+
+def save_launch_calibration(key, value):
+    if not math.isfinite(value) or value <= 0.0:
+        raise ValueError(f"refusing to save invalid {key}: {value!r}")
+    path = os.environ.get("LEKIWI_LAUNCH_CALIBRATION", os.path.expanduser("~/.ros/lekiwi_launch_calibration.conf"))
+    saved = {}
+    try:
+        with open(path) as source:
+            for line in source:
+                name, separator, current = line.strip().partition("=")
+                if separator and name in {"camera_height", "camera_pitch", "xy_velocity_scale", "yaw_velocity_scale"}:
+                    saved[name] = current
+    except FileNotFoundError:
+        pass
+    saved[key] = f"{value:.6f}"
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    temporary = f"{path}.tmp"
+    with open(temporary, "w") as output:
+        for name in ("camera_height", "camera_pitch", "xy_velocity_scale", "yaw_velocity_scale"):
+            if name in saved:
+                output.write(f"{name}={saved[name]}\n")
+    os.replace(temporary, path)
+    print(f"Saved {key} for future launches in {path}")
 
 
 def find_board(gray):
@@ -62,10 +89,11 @@ class OdomScale(Node):
         self.d = None
         self.frame = None
         self.odom = None
+        self.odom_stamp = None
         self.create_subscription(CameraInfo, "/camera/front/camera_info", self.on_info, qos_profile_sensor_data)
         self.create_subscription(Image, "/camera/front/image_raw", self.on_image, qos_profile_sensor_data)
         self.create_subscription(Odometry, "/odom", self.on_odom, 10)
-        self.cmd_pub = self.create_publisher(Twist, "/cmd_vel", 10)
+        self.cmd_pub = self.create_publisher(Twist, "/cmd_vel_manual", 10)
 
     def on_info(self, msg):
         self.k = np.array(msg.k, dtype=np.float64).reshape(3, 3)
@@ -103,8 +131,35 @@ class OdomScale(Node):
 
     def on_odom(self, msg):
         pose = msg.pose.pose
+        twist = msg.twist.twist
+        values = (
+            pose.position.x, pose.position.y, pose.position.z,
+            pose.orientation.x, pose.orientation.y,
+            pose.orientation.z, pose.orientation.w,
+            twist.linear.x, twist.linear.y, twist.linear.z,
+            twist.angular.x, twist.angular.y, twist.angular.z,
+        )
+        quaternion_norm = math.sqrt(sum(
+            value * value for value in (
+                pose.orientation.x, pose.orientation.y,
+                pose.orientation.z, pose.orientation.w,
+            )
+        ))
+        if not all(math.isfinite(value) for value in values) or quaternion_norm < 1e-6:
+            self.odom = None
+            self.odom_stamp = None
+            self.get_logger().warn("ignoring incomplete or non-finite odometry")
+            return
         yaw = 2.0 * math.atan2(pose.orientation.z, pose.orientation.w)
         self.odom = (pose.position.x, pose.position.y, yaw)
+        self.odom_stamp = time.monotonic()
+
+    def odom_is_fresh(self):
+        return (
+            self.odom is not None
+            and self.odom_stamp is not None
+            and time.monotonic() - self.odom_stamp <= ODOM_TIMEOUT
+        )
 
     def spin(self, seconds):
         deadline = time.monotonic() + seconds
@@ -139,6 +194,9 @@ class OdomScale(Node):
         deadline = time.monotonic() + seconds
         next_sample = 0.0
         while rclpy.ok() and time.monotonic() < deadline:
+            if not self.odom_is_fresh():
+                self.cmd_pub.publish(Twist())
+                raise RuntimeError("/odom is missing, stale, or non-finite; motion stopped")
             self.cmd_pub.publish(twist)
             rclpy.spin_once(self, timeout_sec=0.05)
             if time.monotonic() >= next_sample:
@@ -162,14 +220,28 @@ def main():
     parser.add_argument("--seconds", type=float, default=4.0)
     parser.add_argument("--current-scale", type=float, default=1.0, help="scale the driver runs with now")
     args = parser.parse_args()
-    speed = args.speed if args.speed else (0.08 if args.axis == "linear" else 0.4)
+    speed = args.speed if args.speed is not None else (0.08 if args.axis == "linear" else 0.4)
+    numeric_arguments = {
+        "--square": args.square,
+        "--speed": speed,
+        "--seconds": args.seconds,
+        "--current-scale": args.current_scale,
+    }
+    for name, value in numeric_arguments.items():
+        if not math.isfinite(value) or value <= 0.0:
+            parser.error(f"{name} must be finite and greater than zero")
+    if speed > MAX_CALIBRATION_SPEED[args.axis]:
+        parser.error(
+            f"--speed exceeds the conservative {args.axis} calibration limit "
+            f"({MAX_CALIBRATION_SPEED[args.axis]})"
+        )
 
     rclpy.init()
     node = OdomScale(args.square)
     try:
         node.spin(2.0)
-        if node.odom is None:
-            raise RuntimeError("sin /odom -- el driver no esta publicando")
+        if not node.odom_is_fresh():
+            raise RuntimeError("sin /odom reciente y finita -- el driver no esta publicando")
 
         samples = []
         for _ in range(15):
@@ -226,7 +298,9 @@ def main():
             print("la camara no vio movimiento -- el robot no se movio?")
         else:
             print(f"error: {100 * (reported / measured - 1):+.1f}%")
-            print(f"{name}: {args.current_scale * measured / reported:.4f}")
+            scale = args.current_scale * measured / reported
+            print(f"{name}: {scale:.4f}")
+            save_launch_calibration(name, scale)
     finally:
         node.cmd_pub.publish(Twist())
         node.destroy_node()

@@ -78,6 +78,7 @@ fi
   "ros-$ROS_DISTRO-rmf-dev" \
   "ros-$ROS_DISTRO-rmw-cyclonedds-cpp" \
   "ros-$ROS_DISTRO-rqt-image-view" \
+  "ros-$ROS_DISTRO-topic-tools" \
   "ros-$ROS_DISTRO-ros-base" \
   "ros-$ROS_DISTRO-rosbridge-server" \
   "ros-$ROS_DISTRO-ros-gz" \
@@ -102,11 +103,17 @@ done
 mkdir -p "$WORKSPACE/src" "$HOME/.local/bin"
 
 checkout() {
-  local url=$1 destination=$2 revision=$3
+  local url=$1 destination=$2 revision=$3 expected_patch=${4:-}
   if [[ ! -d $destination/.git ]]; then
     git clone --filter=blob:none "$url" "$destination"
   elif [[ -n $(git -C "$destination" status --porcelain) ]]; then
-    die "$destination has local changes; preserve them before rerunning"
+    # Some vendored sources need a tracked build patch after checkout. Permit
+    # only that exact, reversible diff; all other local edits remain protected.
+    if [[ -n $expected_patch ]] && git -C "$destination" apply --reverse --check "$expected_patch" 2>/dev/null; then
+      git -C "$destination" reset --hard HEAD >/dev/null
+    else
+      die "$destination has local changes; preserve them before rerunning"
+    fi
   fi
   git -C "$destination" fetch --depth 1 origin "$revision"
   git -C "$destination" checkout --detach FETCH_HEAD
@@ -118,14 +125,21 @@ checkout https://github.com/open-rmf/rmf_demos.git "$WORKSPACE/src/rmf_demos" "$
 
 log "Fetching the pinned LDROBOT LD06 driver"
 checkout https://github.com/ldrobotSensorTeam/ldlidar_stl_ros2.git \
-  "$WORKSPACE/src/ldlidar_stl_ros2" "$LIDLIDAR_STL_REV"
-# checkout() resets to the pinned revision, so reapplying is safe; skip it only
-# when a previous run already succeeded, since git apply refuses duplicates.
-pthread_fix="$WORKSPACE/src/ldlidar_stl_ros2/ldlidar_driver/src/logger/log_module.cpp"
-if ! grep -q '#include <pthread.h>' "$pthread_fix"; then
-  git -C "$WORKSPACE/src/ldlidar_stl_ros2" apply \
-    "$PROJECT_ROOT/thirdparty/ldlidar_stl_ros2/0001-linux-build-fixes.patch" ||
-    die "could not apply the Linux build fixes -- upstream may have changed"
+  "$WORKSPACE/src/ldlidar_stl_ros2" "$LIDLIDAR_STL_REV" \
+  "$PROJECT_ROOT/thirdparty/ldlidar_stl_ros2/0001-linux-build-fixes.patch"
+# The patch intentionally leaves this checkout dirty. On a rerun, checkout()
+# must therefore be able to recognize and discard exactly this known patch;
+# otherwise an otherwise-safe rerun aborts with "local changes". Checking the
+# whole patch also catches partial application (the old pthread-only check did
+# not).
+ldlidar_source="$WORKSPACE/src/ldlidar_stl_ros2"
+ldlidar_patch="$PROJECT_ROOT/thirdparty/ldlidar_stl_ros2/0001-linux-build-fixes.patch"
+if git -C "$ldlidar_source" apply --reverse --check "$ldlidar_patch" 2>/dev/null; then
+  git -C "$ldlidar_source" reset --hard HEAD >/dev/null
+elif git -C "$ldlidar_source" apply --check "$ldlidar_patch" 2>/dev/null; then
+  git -C "$ldlidar_source" apply "$ldlidar_patch"
+else
+  die "could not apply the Linux build fixes -- upstream may have changed or the checkout has unexpected edits"
 fi
 
 log "Installing the Zenoh ROS 2 bridge"

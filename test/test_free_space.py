@@ -99,6 +99,25 @@ def test_camera_offset_transforms_bearing_and_range_into_scan_frame(node):
     assert angle == pytest.approx(math.atan2(left, forward + offset), abs=0.1)
 
 
+def test_distorted_pixels_are_undistorted_before_floor_projection(node):
+    forward, left = 1.0, 0.20
+    cos_p, sin_p = math.cos(PITCH), math.sin(PITCH)
+    point = np.array([[-left, HEIGHT * cos_p - forward * sin_p,
+                      forward * cos_p + HEIGHT * sin_p]], dtype=np.float64)
+    distortion = np.array([0.16, -0.08, 0.001, -0.001, 0.0])
+    pixel, _ = cv2.projectPoints(point, np.zeros(3), np.zeros(3), K, distortion)
+    u, v = pixel.reshape(2)
+    node.d = distortion
+    measured_fwd, measured_left, visible = node.ground_points(
+        np.array([v]), np.array([u])
+    )
+    node.d = np.zeros(5)
+
+    assert visible[0, 0]
+    assert measured_fwd[0, 0] == pytest.approx(forward, abs=1e-6)
+    assert measured_left[0, 0] == pytest.approx(left, abs=1e-6)
+
+
 def test_camera_fault_reports_a_blocked_scan(node):
     scan = node.blocked_scan(stamp=None)
     assert len(scan.ranges) == 41

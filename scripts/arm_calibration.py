@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Capture the LeRobot joint values for the URDF's upright zero pose.
+"""Capture the LeRobot joint values for the URDF CAD's folded zero pose.
 
 Start the real stack with no ~/.ros/lekiwi_arm_calibration.json, put the supported arm
-in the upright URDF pose, then run this once. Restart the stack after it writes the file.
+in the vendor CAD's folded home/rest pose (all URDF arm joints at zero), then run this
+once. Restart the stack after it writes the file.
 """
 import argparse
 import json

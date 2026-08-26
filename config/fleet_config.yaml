@@ -34,7 +34,10 @@ rmf_fleet:
     lekiwi_1:
       charger: charger
       navigation_stack: 2
-      init_timeout_sec: 30
+      # Visual SLAM needs a first camera/odometry update before it can publish
+      # map -> base_footprint. Do not discard an otherwise healthy robot while
+      # that initial map is coming online.
+      init_timeout_sec: 120
       initial_map: L1
       map_frame: map
       robot_frame: base_footprint

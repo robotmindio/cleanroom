@@ -1,12 +1,15 @@
 """Checks for ROS image decoding used by the odometry-scale utility."""
 import importlib.util
+import math
 import pathlib
+import types
 
 import numpy as np
 import pytest
 
 cv2 = pytest.importorskip("cv2")
 pytest.importorskip("rclpy")
+from geometry_msgs.msg import Twist
 from sensor_msgs.msg import Image
 
 
@@ -62,3 +65,46 @@ def test_bad_frame_clears_previously_captured_image():
     node.on_image(message)
 
     assert node.frame is None
+
+
+def test_non_finite_odometry_is_not_accepted_as_motion_feedback():
+    node = odom_scale.OdomScale.__new__(odom_scale.OdomScale)
+    node.odom = (1.0, 2.0, 3.0)
+    node.odom_stamp = 1.0
+    node.get_logger = lambda: type("Logger", (), {"warn": lambda *_: None})()
+    pose = types.SimpleNamespace(
+        position=types.SimpleNamespace(x=math.nan, y=0.0, z=0.0),
+        orientation=types.SimpleNamespace(x=0.0, y=0.0, z=0.0, w=1.0),
+    )
+    vector = types.SimpleNamespace(x=0.0, y=0.0, z=0.0)
+    message = types.SimpleNamespace(
+        pose=types.SimpleNamespace(pose=pose),
+        twist=types.SimpleNamespace(
+            twist=types.SimpleNamespace(linear=vector, angular=vector)
+        ),
+    )
+
+    node.on_odom(message)
+
+    assert node.odom is None
+    assert node.odom_stamp is None
+
+
+def test_stale_odometry_stops_calibration_before_motion(monkeypatch):
+    published = []
+    node = odom_scale.OdomScale.__new__(odom_scale.OdomScale)
+    node.cmd_pub = types.SimpleNamespace(publish=published.append)
+    node.odom_is_fresh = lambda: False
+    monkeypatch.setattr(odom_scale.rclpy, "ok", lambda: True)
+
+    with pytest.raises(RuntimeError, match="motion stopped"):
+        node.drive_sampling(Twist(), 1.0, [])
+
+    assert len(published) == 1
+    assert published[0].linear.x == 0.0
+
+
+def test_motion_utilities_publish_only_to_manual_source_topic():
+    teleop = SCRIPT.parent / "teleop.py"
+    assert 'create_publisher(Twist, "/cmd_vel_manual", 10)' in SCRIPT.read_text()
+    assert 'create_publisher(Twist, "/cmd_vel_manual", 10)' in teleop.read_text()

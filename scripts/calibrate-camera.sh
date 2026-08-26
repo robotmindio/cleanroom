@@ -1,27 +1,48 @@
 #!/usr/bin/env bash
-# Calibrate the local front camera and save the result for the real-robot stack.
+# Calibrate a local camera and save the result for the real-robot stack.
 # Usage: scripts/calibrate-camera.sh [output-yaml]
+#        scripts/calibrate-camera.sh --wrist [output-yaml]
 # The calibration belongs to the machine the camera is plugged into. Stop that
 # machine's camera publisher first (the lekiwi-cameras service, or
 # scripts/ros-cameras.sh) -- it holds the device and this script opens it too.
 set -Eeuo pipefail
 
 cd "$(dirname "$0")/.."
-CALIBRATION="${1:-${LEKIWI_CAMERA_INFO:-$HOME/.ros/camera_info/lekiwi_front.yaml}}"
-
-set +u
-# shellcheck source=/dev/null
-source scripts/setup.bash
-set -u
-
 first_match() {
   set -- $1
   [ -e "$1" ] && printf '%s' "$1"
   return 0
 }
 
-FRONT="${LEKIWI_FRONT:-$(first_match '/dev/v4l/by-id/*WEBCAM*-video-index0')}"
-[ -n "$FRONT" ] || { echo "$0: no front camera found -- set LEKIWI_FRONT" >&2; exit 1; }
+target=front
+case "${1:-}" in
+  --wrist) target=wrist; shift ;;
+  --front) shift ;;
+esac
+[ "$#" -le 1 ] || { echo "usage: $0 [--wrist] [output-yaml]" >&2; exit 2; }
+
+if [ "$target" = wrist ]; then
+  CALIBRATION="${1:-${LEKIWI_WRIST_CAMERA_INFO:-$HOME/.ros/camera_info/lekiwi_wrist.yaml}}"
+  DEVICE="${LEKIWI_WRIST:-$(first_match '/dev/v4l/by-id/*JYU2C*-video-index0')}"
+  CAMERA=lekiwi_wrist
+  NAMESPACE=/camera/wrist
+  FRAME=wrist_camera_optical_frame
+  SIZE='[352, 288]'
+else
+  CALIBRATION="${1:-${LEKIWI_CAMERA_INFO:-$HOME/.ros/camera_info/lekiwi_front.yaml}}"
+  DEVICE="${LEKIWI_FRONT:-$(first_match '/dev/v4l/by-id/*WEBCAM*-video-index0')}"
+  CAMERA=lekiwi_front
+  NAMESPACE=/camera/front
+  FRAME=front_camera_optical_frame
+  SIZE='[640, 480]'
+fi
+
+set +u
+# shellcheck source=/dev/null
+source scripts/setup.bash
+set -u
+
+[ -n "$DEVICE" ] || { echo "$0: no $target camera found -- set LEKIWI_${target^^}" >&2; exit 1; }
 [ ! -e "$CALIBRATION" ] || [ -w "$CALIBRATION" ] || {
   echo "$0: cannot write $CALIBRATION" >&2
   exit 1
@@ -32,39 +53,37 @@ mkdir -p "$(dirname "$CALIBRATION")"
 # Reuse only a very recent one: this is recovery for an interrupted calibration, not a
 # substitute for deliberately calibrating a different camera later.
 archive=/tmp/calibrationdata.tar.gz
+archive_matches_camera() {
+  tar -xOf "$archive" ost.yaml 2>/dev/null | grep -qE "^camera_name:[[:space:]]*$CAMERA$"
+}
 if [ -s "$archive" ] && find "$archive" -mmin -60 -print -quit | grep -q . \
-  && tar -tzf "$archive" | grep -qx 'ost.yaml'; then
+  && tar -tzf "$archive" | grep -qx 'ost.yaml' && archive_matches_camera; then
   tar -xOf "$archive" ost.yaml > "$CALIBRATION.tmp"
   mv "$CALIBRATION.tmp" "$CALIBRATION"
   echo "Recovered the recently saved camera calibration to $CALIBRATION"
   exit 0
 fi
 
-if fuser -s "$(readlink -f "$FRONT")"; then
-  echo "$0: front camera is already in use: $FRONT" >&2
+if fuser -s "$(readlink -f "$DEVICE")"; then
+  echo "$0: $target camera is already in use: $DEVICE" >&2
   echo "Stop the existing stack before calibrating." >&2
   exit 1
 fi
 
-echo "Starting the front camera at 640x480 for calibration."
+echo "Starting the $target camera at $SIZE for calibration."
 echo "In the calibration window, collect samples, click Calibrate, then Save."
 echo "Do not click Commit: v4l2_camera does not provide the set_camera_info service."
-echo "After Save reports success, close the window with q or Escape."
+echo "After Save reports success, this script closes the window and saves the YAML."
 echo "The result will be saved to $CALIBRATION."
 
 # camera_calibration's Save button writes this archive. Its Commit button instead calls
 # a set_camera_info service, which v4l2_camera intentionally does not implement.
 calibration_stamp=$(mktemp)
 
-ros2 run v4l2_camera v4l2_camera_node --ros-args \
-  -r __node:=front_camera -r __ns:=/camera/front \
-  -p video_device:="$FRONT" \
-  -p camera_info_url:="file://$CALIBRATION" \
-  -p camera_frame_id:=front_camera_optical_frame \
-  -p camera_name:=lekiwi_front \
-  -p pixel_format:=YUYV \
-  -p output_encoding:=rgb8 \
-  -p image_size:='[640, 480]' &
+scripts/camera-supervisor.sh \
+  --device "$DEVICE" --name "${target}_camera" --namespace "$NAMESPACE" \
+  --camera-name "$CAMERA" --frame "$FRAME" --size "$SIZE" \
+  --camera-info-url "file://$CALIBRATION" &
 camera_pid=$!
 cleanup() {
   kill -INT "$camera_pid" 2>/dev/null || true
@@ -74,28 +93,48 @@ cleanup() {
 trap cleanup EXIT
 
 for _ in {1..20}; do
-  ros2 topic info /camera/front/image_raw >/dev/null 2>&1 && break
+  ros2 topic info "$NAMESPACE/image_raw" >/dev/null 2>&1 && break
   sleep 1
 done
-ros2 topic info /camera/front/image_raw >/dev/null 2>&1 || {
-  echo "$0: camera did not publish /camera/front/image_raw" >&2
+ros2 topic info "$NAMESPACE/image_raw" >/dev/null 2>&1 || {
+  echo "$0: camera did not publish $NAMESPACE/image_raw" >&2
   exit 1
 }
 
-set +e
 ros2 run camera_calibration cameracalibrator \
-  --size 8x6 --square 0.025 --camera_name lekiwi_front --no-service-check \
-  --ros-args --remap image:=/camera/front/image_raw --remap camera:=/camera/front
-calibrator_status=$?
-set -e
+  --size 8x6 --square 0.025 --camera_name "$CAMERA" --no-service-check \
+  --ros-args --remap image:="$NAMESPACE/image_raw" --remap camera:="$NAMESPACE" &
+calibrator_pid=$!
 
-[ -s "$archive" ] && [ "$archive" -nt "$calibration_stamp" ] || {
+stop_process_tree() { # stop_process_tree <signal> <pid>
+  local signal=$1 pid=$2 descendant
+  for descendant in $(pgrep -P "$pid" 2>/dev/null || true); do
+    stop_process_tree "$signal" "$descendant"
+  done
+  kill "-$signal" "$pid" 2>/dev/null || true
+}
+
+# Save writes a complete archive immediately. Commit tries to call a
+# set_camera_info service that v4l2_camera does not provide and can leave the
+# GUI stuck forever, so make Save the single terminal action.
+saved=0
+while kill -0 "$calibrator_pid" 2>/dev/null; do
+  if [ -s "$archive" ] && [ "$archive" -nt "$calibration_stamp" ] && archive_matches_camera; then
+    saved=1
+    echo "Calibration Save detected; closing the calibration window."
+    stop_process_tree TERM "$calibrator_pid"
+    sleep 1
+    stop_process_tree KILL "$calibrator_pid"
+    break
+  fi
+  sleep 1
+done
+wait "$calibrator_pid" 2>/dev/null || true
+
+[ "$saved" = 1 ] || { [ -s "$archive" ] && [ "$archive" -nt "$calibration_stamp" ] && archive_matches_camera; } || {
   echo "$0: no calibration was saved; run it again and click Save after Calibrate." >&2
   exit 1
 }
 tar -xOf "$archive" ost.yaml > "$CALIBRATION.tmp"
 mv "$CALIBRATION.tmp" "$CALIBRATION"
 echo "Saved camera calibration to $CALIBRATION"
-if [ "$calibrator_status" -ne 0 ]; then
-  echo "Calibration UI exited after saving; continuing with the saved result."
-fi

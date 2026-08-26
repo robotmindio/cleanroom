@@ -87,8 +87,9 @@ run_host() {
   fi
   # A dropped motor-bus packet used to terminate the host permanently and leave ROS
   # connected to an empty ZMQ port. Keep this small supervisor alive instead. Each new
-  # connection starts disarmed; the ROS driver independently requires safety/arm after
-  # telemetry returns, so reconnecting cannot resume motion unexpectedly.
+  # initial startup may arm after telemetry, but a ROS driver that has observed a
+  # link loss requires an explicit safety/arm call after telemetry returns. A host
+  # reconnect can therefore never resume motion unexpectedly.
   trap 'exit 0' INT TERM HUP
   while true; do
     if run_host_once "$1"; then
@@ -130,9 +131,10 @@ case "${1:-}" in
         exit 1
       }
     fi
-    # Always expose both cameras: this is the one complete host entrypoint for ROS,
-    # teleoperation, and dataset recording.
-    require FRONT WRIST
+    # The known wrist camera is auto-detected. Set LEKIWI_WRIST=none to leave it
+    # out of a direct LeRobot host (e.g. when conserving USB bandwidth).
+    require FRONT
+    [ "$WRIST" = none ] || require WRIST
     run_host "$CAMERAS"
     ;;
   *)

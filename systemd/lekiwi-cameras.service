@@ -24,6 +24,7 @@ ExecStart=@PROJECT_ROOT@/scripts/ros-cameras.sh
 Restart=on-failure
 RestartSec=10s
 TimeoutStopSec=20s
+KillMode=control-group
 
 [Install]
 WantedBy=multi-user.target

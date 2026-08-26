@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Bring up the full ROS stack against the real robot.
 # Usage: scripts/ros-start.sh [extra launch args...]
-#   scripts/ros-start.sh                                    # mapping, RMF and rosbridge on
+#   scripts/ros-start.sh                                    # local mapping/navigation only
 #   scripts/ros-start.sh slam_mode:=localization            # drive a map you already built
 #   scripts/ros-start.sh start_rmf:=false                   # Nav2 only
 # Override per machine: LEKIWI_FRONT, LEKIWI_WS
@@ -9,6 +9,13 @@
 set -Eeuo pipefail
 
 cd "$(dirname "$0")/.."
+# Leave a precise ownership record for ros-stop.sh. This remains valid across
+# exec because the launcher replaces this shell in the same PID; systemd and
+# up.sh may supply a tighter runtime directory explicitly.
+runtime_dir="${LEKIWI_RUNTIME_DIR:-${LEKIWI_LOGS:-$HOME/.ros/lekiwi}/runtime}"
+mkdir -p "$runtime_dir"
+chmod 700 "$runtime_dir"
+printf '%s\n' "$$" > "$runtime_dir/stack.pid"
 # ROS's own setup.bash reads unset variables (AMENT_TRACE_SETUP_FILES and friends),
 # so `set -u` has to stand down for the sourcing.
 set +u
@@ -41,6 +48,29 @@ camera_calibration_valid() {
     && grep -A3 '^camera_matrix:' "$calibration" | grep -qE '^[[:space:]]*data:.*[1-9]'
 }
 
+# Geometry and odometry measurements are machine-local, not source-controlled. The
+# calibration tools write only numeric KEY=VALUE lines; reject anything malformed rather
+# than sourcing a user file into this launcher.
+calibration_args=()
+has_launch_arg() { # has_launch_arg <key>
+  local key=$1 arg
+  for arg in "$@"; do [[ $arg == "$key":=* ]] && return 0; done
+  return 1
+}
+load_launch_calibration() {
+  local file="${LEKIWI_LAUNCH_CALIBRATION:-$HOME/.ros/lekiwi_launch_calibration.conf}"
+  local key value
+  [ -r "$file" ] || return 0
+  while IFS='=' read -r key value; do
+    case "$key" in camera_height|camera_pitch|xy_velocity_scale|yaw_velocity_scale) ;;
+      *) continue ;;
+    esac
+    [[ $value =~ ^[0-9]+([.][0-9]+)?$ ]] || continue
+    has_launch_arg "$key" "$@" || calibration_args+=("$key:=$value")
+  done < "$file"
+}
+load_launch_calibration "$@"
+
 require_camera_calibration() {
   local calibration="${LEKIWI_CAMERA_INFO:-$HOME/.ros/camera_info/lekiwi_front.yaml}"
   if ! camera_calibration_valid; then
@@ -65,5 +95,10 @@ else
   WRIST=none
 fi
 
+front_camera_info="file://${LEKIWI_CAMERA_INFO:-$HOME/.ros/camera_info/lekiwi_front.yaml}"
+wrist_camera_info="file://${LEKIWI_WRIST_CAMERA_INFO:-$HOME/.ros/camera_info/lekiwi_wrist.yaml}"
+
 exec ros2 launch lekiwi_rmf bringup.launch.py mode:=real \
-  camera_source:="$camera_source" camera_device:="$FRONT" wrist_camera_device:="${WRIST:-none}" "$@"
+  camera_source:="$camera_source" camera_device:="$FRONT" wrist_camera_device:="${WRIST:-none}" \
+  camera_info_url:="$front_camera_info" wrist_camera_info_url:="$wrist_camera_info" \
+  "${calibration_args[@]}" "$@"

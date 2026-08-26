@@ -106,18 +106,34 @@ package_share="$(ros2 pkg prefix lekiwi_rmf)/share/lekiwi_rmf"
 robot_description="$(xacro "$package_share/urdf/lekiwi.urdf.xacro" sim:=false)"
 robot_description_semantic="$(< "$package_share/config/lekiwi.srdf")"
 
-# The Planning panel's interactive markers solve IK inside RViz, which loads the solver
-# from this parameter; a plain -p cannot carry a nested map, so it goes through a
-# generated params file instead.
+# The Planning panel gets its robot model, planned-path markers, and IK solver all through
+# ROS parameters. A plain -p cannot carry these: the nested kinematics map defeats it, and
+# the expanded URDF/SRDF are multi-line XML whose spaces and apostrophes (e.g. the
+# gripper's comment) an override rule cannot tolerate. So everything goes through a
+# generated params file instead, with the XML as YAML literal blocks.
 run_params="${LEKIWI_LOGS:-$HOME/.ros/lekiwi}/rviz-moveit-params.yaml"
+velocity_scale="$(awk '$1 == "default_velocity_scaling_factor:" { print $2; exit }' "$package_share/config/joint_limits.yaml")"
+acceleration_scale="$(awk '$1 == "default_acceleration_scaling_factor:" { print $2; exit }' "$package_share/config/joint_limits.yaml")"
 {
-  printf '/**:\n  ros__parameters:\n    robot_description_kinematics:\n'
+  printf '/**:\n  ros__parameters:\n'
+  printf '    robot_description: |-\n'
+  printf '%s\n' "$robot_description" | sed 's/^/      /'
+  printf '    robot_description_semantic: |-\n'
+  printf '%s\n' "$robot_description_semantic" | sed 's/^/      /'
+  printf '    robot_description_kinematics:\n'
   sed 's/^/      /' "$package_share/config/kinematics.yaml"
+  # The Motion Planning panel is its own ROS node.  It reads these defaults from
+  # its *own* parameters (not move_group's), otherwise it silently falls back to
+  # 0.1 for both controls even when joint_limits.yaml says otherwise.
+  printf '    robot_description_planning:\n'
+  sed 's/^/      /' "$package_share/config/joint_limits.yaml"
 } > "$run_params"
 
 # Do not let the startup lock leak into RViz itself.
 exec 9>&-
-exec rviz2 -d "$run_config" "$@" --ros-args \
-  -p "robot_description:=$robot_description" \
-  -p "robot_description_semantic:=$robot_description_semantic" \
-  --params-file "$run_params"
+# MoveIt's panel queries these names before it loads the rest of its configuration.
+# Supply them as explicit process overrides as well as in the generated YAML; the
+# RViz node then has them declared when MotionPlanningFrame reads them.
+exec rviz2 -d "$run_config" "$@" --ros-args --params-file "$run_params" \
+  -p "robot_description_planning.default_velocity_scaling_factor:=$velocity_scale" \
+  -p "robot_description_planning.default_acceleration_scaling_factor:=$acceleration_scale"

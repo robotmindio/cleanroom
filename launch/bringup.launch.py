@@ -1,8 +1,9 @@
 import os
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, ExecuteProcess, IncludeLaunchDescription, TimerAction
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, IncludeLaunchDescription, LogInfo, RegisterEventHandler
 from launch.conditions import IfCondition
+from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import Command, EnvironmentVariable, LaunchConfiguration, PathJoinSubstitution, PythonExpression
 from launch_ros.actions import Node
@@ -10,8 +11,32 @@ from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
 
+def _lidar_serial_present():
+    # /dev/ttyUSB0 is only a kernel-assigned slot: it can just as easily be a
+    # console cable or another USB-UART.  Auto mode is deliberately conservative.
+    return any(os.path.exists(path) for path in [
+        "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if0-port0",
+    ])
+
+
+def _after_success(stage, actions):
+    """Start dependent launch actions only when a readiness gate succeeded.
+
+    A gate normally waits forever for an unavailable dependency.  This explicit
+    exit-status check also keeps an invalid parameter, import error, or other
+    gate crash from being treated as readiness by ``OnProcessExit``.
+    """
+    def on_exit(event, _context):
+        if event.returncode == 0:
+            return actions
+        return [LogInfo(msg=f"ERROR: {stage} readiness gate exited with {event.returncode}; dependents remain stopped")]
+
+    return on_exit
+
+
 def generate_launch_description():
     package = FindPackageShare("lekiwi_rmf")
+    camera_supervisor = PathJoinSubstitution([package, "scripts", "camera-supervisor.sh"])
     # ponytail: LeRobot pins numpy>=2 while ROS's C extensions are built against 1.26.
     # Mixing them segfaults rmf_adapter, so LeRobot lives in its own venv and only the
     # driver runs there -- its `#!/usr/bin/env python3` picks up whichever PATH we give it.
@@ -32,6 +57,7 @@ def generate_launch_description():
     slam_mode = LaunchConfiguration("slam_mode")
     publish_camera = LaunchConfiguration("publish_camera")
     camera_info_url = LaunchConfiguration("camera_info_url")
+    wrist_camera_info_url = LaunchConfiguration("wrist_camera_info_url")
     camera_device = LaunchConfiguration("camera_device")
     camera_source = LaunchConfiguration("camera_source")
     wrist_device = LaunchConfiguration("wrist_camera_device")
@@ -59,23 +85,100 @@ def generate_launch_description():
     # supplied, RTAB-Map's own grid when the robot is left to draw one.
     rtabmap_map_topic = PythonExpression([
         "'/rtabmap/map' if '", static_map, "' == 'true' else '/map'"])
+    lidar_detected = _lidar_serial_present()
     # Whoever owns /scan, owns what Nav2 dodges: a real LD06 on the mast, the
     # front camera's floor-geometry trick, or nobody at all. In sim Gazebo
     # always publishes /scan itself and none of this runs.
     laser_source = LaunchConfiguration("laser_source")
     lidar_port = LaunchConfiguration("lidar_port")
+    # Gazebo supplies /scan in sim.  RTAB-Map must subscribe to it there too;
+    # otherwise mono RGB plus odometry has no range data from which to make a grid.
     lidar_on = PythonExpression(["'", laser_source, "' != 'none'"])
     camera_laser = PythonExpression([
-        "'", laser_source, "' == 'camera' and ", real])
+        "('", laser_source, "' == 'camera' or ('", laser_source, "' == 'auto' and not ",
+        repr(lidar_detected), ")) and ", real])
     ld06 = PythonExpression([
-        "'", laser_source, "' == 'ld06' and ", real])
-    nav2_share = FindPackageShare("nav2_bringup")
+        "('", laser_source, "' == 'ld06' or ('", laser_source, "' == 'auto' and ",
+        repr(lidar_detected), ")) and ", real])
     map_file = PathJoinSubstitution([package, "maps", "cleanroom.yaml"])
-    params_file = PathJoinSubstitution([nav2_share, "params", "nav2_params.yaml"])
+    nav2_share = FindPackageShare("nav2_bringup")
+    # Never inherit the upstream TurtleBot/DiffDrive tuning.  This is installed
+    # with the package so a launch from an overlay and a source checkout agree.
+    params_file = PathJoinSubstitution([package, "config", "nav2_params.yaml"])
     robot_description = ParameterValue(
         Command(["xacro ", PathJoinSubstitution([package, "urdf", "lekiwi.urdf.xacro"]), " sim:=", sim]),
         value_type=str,
     )
+
+    # Dependency gates replace fixed launch delays. Each one exits only after a
+    # real message/action server is available, then starts its dependent stage.
+    # A failed camera, driver, or mapper therefore leaves downstream motion and
+    # fleet components stopped instead of launching a noisy degraded stack.
+    camera_ready_gate = Node(
+        package="lekiwi_rmf", executable="readiness_gate", name="wait_for_camera",
+        parameters=[{"kind": "topic", "topic": "/camera/front/image_raw", "topic_type": "image"}],
+        condition=IfCondition(visual_slam), output="screen",
+    )
+    odom_ready_gate = Node(
+        package="lekiwi_rmf", executable="readiness_gate", name="wait_for_odom",
+        parameters=[{"kind": "topic", "topic": "/odom", "topic_type": "odom"}], output="screen",
+    )
+    map_ready_gate = Node(
+        package="lekiwi_rmf", executable="readiness_gate", name="wait_for_map",
+        parameters=[{"kind": "topic", "topic": "/map", "topic_type": "map"}], output="screen",
+    )
+    nav_ready_gate = Node(
+        package="lekiwi_rmf", executable="readiness_gate", name="wait_for_nav2",
+        parameters=[{"kind": "navigate_to_pose_action", "action": "/navigate_to_pose"}],
+        condition=IfCondition(start_rmf), output="screen",
+    )
+    rtabmap_node = Node(
+        package="rtabmap_slam", executable="rtabmap", name="rtabmap",
+        parameters=[{
+            "use_sim_time": ParameterValue(sim, value_type=bool),
+            "frame_id": "base_footprint", "map_frame_id": "map", "odom_frame_id": "odom",
+            "database_path": rtabmap_database, "subscribe_rgb": True, "subscribe_depth": False,
+            "subscribe_rgbd": False, "subscribe_scan": ParameterValue(lidar_on, value_type=bool),
+            "subscribe_odom_info": False, "approx_sync": True, "publish_tf": True,
+            "qos_image": 1, "qos_camera_info": 1, "qos_scan": 1, "qos_odom": 1,
+            "Rtabmap/MemoryThr": ParameterValue(LaunchConfiguration("rtabmap_wm_nodes"), value_type=str),
+            "Mem/IncrementalMemory": ParameterValue(slam_mapping, value_type=str),
+            "Mem/InitWMWithAllNodes": ParameterValue(slam_localization, value_type=str),
+            "RGBD/NeighborLinkRefining": "true", "RGBD/ProximityBySpace": "true",
+            "Reg/Force3DoF": "true", "Grid/Sensor": "0", "Grid/RangeMax": "3.0",
+            "Grid/CellSize": "0.05", "sync_queue_size": 20, "topic_queue_size": 20,
+        }],
+        remappings=[
+            ("rgb/image", "/camera/front/image_raw"), ("rgb/camera_info", camera_info_topic),
+            ("odom", "/odom"), ("scan", "/scan"), ("map", rtabmap_map_topic),
+            ("grid_map", "/rtabmap/grid_map"),
+        ],
+        condition=IfCondition(visual_slam), output="screen",
+    )
+    navigation_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(PathJoinSubstitution([nav2_share, "launch", "navigation_launch.py"])),
+        launch_arguments={"params_file": params_file, "use_sim_time": sim}.items(),
+    )
+    initial_pose = ExecuteProcess(
+        cmd=[
+            "ros2", "topic", "pub", "--once", "/initialpose", "geometry_msgs/msg/PoseWithCovarianceStamped",
+            "{header: {frame_id: map}, pose: {pose: {position: {x: -4.0, y: -2.5}, orientation: {w: 1.0}}, covariance: [0.25, 0, 0, 0, 0, 0, 0, 0.25, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.07]}}",
+        ], condition=IfCondition(amcl),
+    )
+    rmf_actions = [
+        ExecuteProcess(
+            cmd=["zenoh-bridge-ros2dds", "-c", PathJoinSubstitution([package, "config", "zenoh_bridge.json5"])],
+            output="screen",
+        ),
+        Node(package="rmf_traffic_ros2", executable="rmf_traffic_schedule", name="rmf_traffic_schedule_primary", additional_env={"ROS_DOMAIN_ID": rmf_domain}, output="screen"),
+        Node(package="rmf_traffic_ros2", executable="rmf_traffic_blockade", additional_env={"ROS_DOMAIN_ID": rmf_domain}, output="screen"),
+        Node(package="rmf_task_ros2", executable="rmf_task_dispatcher", parameters=[{"bidding_time_window": 2.0}], additional_env={"ROS_DOMAIN_ID": rmf_domain}, output="screen"),
+        Node(
+            package="free_fleet_adapter", executable="fleet_adapter.py",
+            arguments=["-c", PathJoinSubstitution([package, "config", "fleet_config.yaml"]), "-n", PathJoinSubstitution([package, "maps", "nav_graph.yaml"])],
+            additional_env={"ROS_DOMAIN_ID": rmf_domain}, output="screen",
+        ),
+    ]
 
     return LaunchDescription(
         [
@@ -85,10 +188,20 @@ def generate_launch_description():
             # display. Pass headless:=false to open Gazebo's own GUI.
             DeclareLaunchArgument("headless", default_value="true", choices=["true", "false"]),
             DeclareLaunchArgument("remote_ip", default_value="127.0.0.1"),
-            DeclareLaunchArgument("start_rmf", default_value="true"),
-            DeclareLaunchArgument("rmf_domain", default_value="55"),
+            # Fleet bridging makes the ROS graph discoverable off-host. Keep it
+            # opt-in; a local robot can navigate without an external route.
+            DeclareLaunchArgument("start_rmf", default_value="false"),
+            # The fleet adapter must read this robot's map->base_footprint TF
+            # and Nav2 actions. Those live on the primary ROS graph (domain 0),
+            # so domain 55 isolates RMF from the robot and prevents initialization.
+            DeclareLaunchArgument("rmf_domain", default_value="0"),
+            # Rosbridge is the default LAN integration endpoint. It has no built-in
+            # authentication; deploy it only on a trusted, access-controlled network.
             DeclareLaunchArgument("start_rosbridge", default_value="true"),
-            DeclareLaunchArgument("start_moveit", default_value="true"),
+            # MoveIt is optional for mobile navigation and is too expensive to
+            # co-run with RTAB-Map on the 4 GB robot computer. Enable it only
+            # for an arm task, preferably from the workstation.
+            DeclareLaunchArgument("start_moveit", default_value="false"),
             DeclareLaunchArgument("rosbridge_address", default_value="0.0.0.0"),
             DeclareLaunchArgument("rosbridge_port", default_value="9090"),
             DeclareLaunchArgument("rosbridge_domain", default_value="0"),
@@ -114,6 +227,10 @@ def generate_launch_description():
                 default_value=["file://", EnvironmentVariable("HOME"), "/.ros/camera_info/lekiwi_front.yaml"],
             ),
             DeclareLaunchArgument(
+                "wrist_camera_info_url",
+                default_value=["file://", EnvironmentVariable("HOME"), "/.ros/camera_info/lekiwi_wrist.yaml"],
+            ),
+            DeclareLaunchArgument(
                 "rtabmap_database",
                 default_value=[EnvironmentVariable("HOME"), "/.ros/lekiwi_rtabmap.db"],
             ),
@@ -130,17 +247,23 @@ def generate_launch_description():
             # (default, needs no extra hardware), an LDROBOT LD06 on the mast, or none.
             # In sim this is ignored -- Gazebo publishes /scan from its own lidar model.
             DeclareLaunchArgument(
-                "laser_source", default_value="camera", choices=["camera", "ld06", "none"]
+                "laser_source", default_value="auto", choices=["auto", "camera", "ld06", "none"]
             ),
             # Prefer a /dev/serial/by-id/... path for the same reason as camera_device.
-            DeclareLaunchArgument("lidar_port", default_value="/dev/ttyUSB0"),
+            DeclareLaunchArgument(
+                "lidar_port",
+                default_value="/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if0-port0",
+            ),
             # Camera-as-laser obstacle detection, and the geometry it stands on.
-            DeclareLaunchArgument("camera_height", default_value="0.093"),
             # Measured with the checkerboard on the floor, not taken from the URDF: the
             # camera sits 9.3 cm up and all but level, which is why it sees a chair leg at
             # 20 cm. Re-measure after touching the mount.
             DeclareLaunchArgument("camera_height", default_value="0.093"),
             DeclareLaunchArgument("camera_pitch", default_value="0.031"),
+            DeclareLaunchArgument("camera_offset_x", default_value="0.03"),
+            DeclareLaunchArgument("camera_offset_y", default_value="0.0"),
+            DeclareLaunchArgument("camera_yaw", default_value="0.0"),
+            DeclareLaunchArgument("camera_roll", default_value="0.0"),
             Node(
                 package="robot_state_publisher",
                 executable="robot_state_publisher",
@@ -185,6 +308,10 @@ def generate_launch_description():
                     "/camera/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo",
                 ],
                 remappings=[
+                    # This remaps only parameter_bridge's ROS endpoint. Gazebo
+                    # still receives its native /cmd_vel transport topic, while
+                    # ROS simulation consumes the same guarded output as hardware.
+                    ("/cmd_vel", "/cmd_vel_safe"),
                     ("/camera/front", "/camera/front/image_raw"),
                     ("/camera/camera_info", "/camera/front/camera_info"),
                 ],
@@ -195,48 +322,40 @@ def generate_launch_description():
             # LeRobot host: the host aborts the whole robot -- motor control included --
             # when a camera frame arrives half a second late, which a USB webcam does. Off
             # the critical path, a stalled camera costs frames instead of the robot.
-            Node(
-                package="v4l2_camera",
-                executable="v4l2_camera_node",
-                name="front_camera",
+            ExecuteProcess(
+                cmd=[
+                    camera_supervisor,
+                    "--device", camera_device, "--name", "front_camera",
+                    "--namespace", "/camera/front", "--camera-name", "lekiwi_front",
+                    # RTAB-Map's detection rate is 1 Hz and the safety scan runs
+                    # at 5 Hz; 320x240 preserves calibrated geometry while keeping
+                    # the local RGB pipeline inside the Pi's CPU/RAM budget.
+                    "--frame", "front_camera_optical_frame", "--size", "[320, 240]",
+                    "--camera-info-url", camera_info_url,
+                ],
                 # A namespace rather than remappings: image_transport builds its extra
                 # transport topics from the unremapped base name, so remapping image_raw
                 # leaves compressed advertised at /image_raw/compressed.
-                namespace="/camera/front",
-                parameters=[{
-                    "video_device": camera_device,
-                    "camera_info_url": camera_info_url,
-                    "camera_frame_id": "front_camera_optical_frame",
-                    "camera_name": "lekiwi_front",
-                    "pixel_format": "YUYV",
-                    "output_encoding": "rgb8",
-                    "image_size": [640, 480],
-                }],
                 condition=IfCondition(PythonExpression([camera_here, " and ", real])),
                 output="screen",
             ),
-            # The wrist camera is for watching the gripper, not for SLAM: nothing subscribes
-            # to it and it carries no calibration. camera_frame_id is the arm's tool link
-            # rather than an optical frame, since the mount has never been measured.
-            Node(
-                package="v4l2_camera",
-                executable="v4l2_camera_node",
-                name="wrist_camera",
-                namespace="/camera/wrist",
-                parameters=[{
-                    "video_device": wrist_device,
-                    "camera_frame_id": "tool",
-                    "camera_name": "lekiwi_wrist",
+            # The wrist camera is for watching the gripper, not for SLAM. Its CAD-backed
+            # mount now has a dedicated optical frame; it must never inherit the generic
+            # tool frame because that makes RViz show the image in the wrong pose.
+            ExecuteProcess(
+                cmd=[
+                    camera_supervisor,
+                    "--device", wrist_device, "--name", "wrist_camera",
+                    "--namespace", "/camera/wrist", "--camera-name", "lekiwi_wrist",
+                    "--frame", "wrist_camera_optical_frame", "--size", "[352, 288]",
+                    "--camera-info-url", wrist_camera_info_url,
+                ],
                     # v4l2_camera has no JPEG decoder -- ask it for MJPG and it aborts on the
                     # first frame, so this is uncompressed and has to stay small: both cameras
                     # share one USB 2.0 hub, and a second 640x480 YUYV feed starves the front
                     # camera into solid green frames. This camera's smallest native YUYV mode
                     # is 352x288; requesting 160x120 can succeed at format negotiation but
                     # then produce no frames on this UVC device.
-                    "pixel_format": "YUYV",
-                    "output_encoding": "rgb8",
-                    "image_size": [352, 288],
-                }],
                 condition=IfCondition(PythonExpression([wrist_here, " and ", real])),
                 output="screen",
             ),
@@ -262,22 +381,17 @@ def generate_launch_description():
             # checkerboard; `free_space.py --ros-args -p calibrate:=true` prints it again,
             # and wrong numbers put phantom walls in the costmap.
             Node(
-                package="lekiwi_rmf",
-                executable="free_space.py",
-                name="free_space",
+                package="lekiwi_rmf", executable="free_space.py", name="free_space",
                 parameters=[{
-                    "camera_height": ParameterValue(
-                        LaunchConfiguration("camera_height"), value_type=float),
-                    "camera_pitch": ParameterValue(
-                        LaunchConfiguration("camera_pitch"), value_type=float),
+                    "camera_height": ParameterValue(LaunchConfiguration("camera_height"), value_type=float),
+                    "camera_pitch": ParameterValue(LaunchConfiguration("camera_pitch"), value_type=float),
+                    "camera_offset_x": ParameterValue(LaunchConfiguration("camera_offset_x"), value_type=float),
+                    "camera_offset_y": ParameterValue(LaunchConfiguration("camera_offset_y"), value_type=float),
+                    "camera_yaw": ParameterValue(LaunchConfiguration("camera_yaw"), value_type=float),
+                    "camera_roll": ParameterValue(LaunchConfiguration("camera_roll"), value_type=float),
                 }],
-                remappings=[
-                    ("image", "/camera/front/image_raw"),
-                    ("camera_info", camera_info_topic),
-                    ("scan", "/scan"),
-                ],
-                condition=IfCondition(camera_laser),
-                output="screen",
+                remappings=[("image", "/camera/front/image_raw"), ("camera_info", camera_info_topic), ("scan", "/scan")],
+                condition=IfCondition(camera_laser), output="screen",
             ),
             # laser_source:=ld06: a real LDROBOT LD06 on the mast. frame_id is the
             # URDF's `laser` link (8 cm up the mast), so robot_state_publisher already
@@ -322,6 +436,16 @@ def generate_launch_description():
                 additional_env=lerobot_env,
                 output="screen",
             ),
+            # Join Nav2's smoothed stream and the manually requested stream
+            # before collision monitoring. The mux is intentionally live before
+            # Nav2 lifecycle activation, so an early controller command cannot
+            # bypass the guard while a node is still coming up.
+            Node(
+                package="lekiwi_rmf",
+                executable="cmd_vel_mux",
+                name="cmd_vel_mux",
+                output="screen",
+            ),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(PathJoinSubstitution([nav2_share, "launch", "localization_launch.py"])),
                 launch_arguments={"map": map_file, "params_file": params_file, "use_sim_time": sim}.items(),
@@ -343,68 +467,27 @@ def generate_launch_description():
                 condition=IfCondition(canned_map),
                 output="screen",
             ),
-            Node(
-                package="rtabmap_slam",
-                executable="rtabmap",
-                name="rtabmap",
-                parameters=[{
-                    "use_sim_time": ParameterValue(sim, value_type=bool),
-                    "frame_id": "base_footprint",
-                    "map_frame_id": "map",
-                    "odom_frame_id": "odom",
-                    "database_path": rtabmap_database,
-                    "subscribe_rgb": True,
-                    "subscribe_depth": False,
-                    "subscribe_rgbd": False,
-                    "subscribe_scan": ParameterValue(lidar_on, value_type=bool),
-                    "subscribe_odom_info": False,
-                    "approx_sync": True,
-                    "publish_tf": True,
-                    "qos_image": 2,
-                    "qos_camera_info": 2,
-                    "qos_scan": 2,
-                    "qos_odom": 1,
-                    "Rtabmap/MemoryThr": ParameterValue(
-                        LaunchConfiguration("rtabmap_wm_nodes"), value_type=str
-                    ),
-                    "Mem/IncrementalMemory": ParameterValue(slam_mapping, value_type=str),
-                    "Mem/InitWMWithAllNodes": ParameterValue(slam_localization, value_type=str),
-                    "RGBD/NeighborLinkRefining": "true",
-                    "RGBD/ProximityBySpace": "true",
-                    "Reg/Force3DoF": "true",
-                    # Build the occupancy grid from the scan alone: a single RGB camera
-                    # contributes no depth, so there is nothing else to fill it with.
-                    "Grid/Sensor": "0",
-                    "Grid/RangeMax": "3.0",
-                    "Grid/CellSize": "0.05",
-                }],
-                remappings=[
-                    ("rgb/image", "/camera/front/image_raw"),
-                    ("rgb/camera_info", camera_info_topic),
-                    ("odom", "/odom"),
-                    ("scan", "/scan"),
-                    ("map", rtabmap_map_topic),
-                    ("grid_map", "/rtabmap/grid_map"),
-                ],
-                condition=IfCondition(visual_slam),
-                output="screen",
-            ),
-            IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(PathJoinSubstitution([nav2_share, "launch", "navigation_launch.py"])),
-                launch_arguments={"params_file": params_file, "use_sim_time": sim}.items(),
-            ),
-            TimerAction(
-                period=3.0,
-                condition=IfCondition(amcl),
-                actions=[
-                    ExecuteProcess(
-                        cmd=[
-                            "ros2", "topic", "pub", "--once", "/initialpose", "geometry_msgs/msg/PoseWithCovarianceStamped",
-                            "{header: {frame_id: map}, pose: {pose: {position: {x: -4.0, y: -2.5}, orientation: {w: 1.0}}, covariance: [0.25, 0, 0, 0, 0, 0, 0, 0.25, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.07]}}",
-                        ]
-                    )
-                ],
-            ),
+            # RTAB-Map starts only after an actual camera frame. Nav2 then
+            # waits for odometry and the resulting map; fixed delays made both
+            # components race slow cameras and telemetry reconnects.
+            camera_ready_gate,
+            RegisterEventHandler(OnProcessExit(
+                target_action=camera_ready_gate,
+                on_exit=_after_success("camera", [rtabmap_node]),
+            )),
+            odom_ready_gate,
+            RegisterEventHandler(OnProcessExit(
+                target_action=odom_ready_gate,
+                on_exit=_after_success("odometry", [map_ready_gate]),
+            )),
+            RegisterEventHandler(OnProcessExit(
+                target_action=map_ready_gate,
+                on_exit=_after_success("map", [initial_pose, navigation_launch, nav_ready_gate]),
+            )),
+            RegisterEventHandler(OnProcessExit(
+                target_action=nav_ready_gate,
+                on_exit=_after_success("Nav2", rmf_actions),
+            )),
             Node(
                 package="rosbridge_server",
                 executable="rosbridge_websocket",
@@ -423,45 +506,6 @@ def generate_launch_description():
                 name="rosapi",
                 condition=IfCondition(start_rosbridge),
                 additional_env={"ROS_DOMAIN_ID": rosbridge_domain},
-                output="screen",
-            ),
-            ExecuteProcess(
-                cmd=["zenoh-bridge-ros2dds", "-c", PathJoinSubstitution([package, "config", "zenoh_bridge.json5"])],
-                condition=IfCondition(start_rmf),
-                output="screen",
-            ),
-            Node(
-                package="rmf_traffic_ros2",
-                executable="rmf_traffic_schedule",
-                name="rmf_traffic_schedule_primary",
-                condition=IfCondition(start_rmf),
-                additional_env={"ROS_DOMAIN_ID": rmf_domain},
-                output="screen",
-            ),
-            Node(
-                package="rmf_traffic_ros2",
-                executable="rmf_traffic_blockade",
-                condition=IfCondition(start_rmf),
-                additional_env={"ROS_DOMAIN_ID": rmf_domain},
-                output="screen",
-            ),
-            Node(
-                package="rmf_task_ros2",
-                executable="rmf_task_dispatcher",
-                parameters=[{"bidding_time_window": 2.0}],
-                condition=IfCondition(start_rmf),
-                additional_env={"ROS_DOMAIN_ID": rmf_domain},
-                output="screen",
-            ),
-            Node(
-                package="free_fleet_adapter",
-                executable="fleet_adapter.py",
-                arguments=[
-                    "-c", PathJoinSubstitution([package, "config", "fleet_config.yaml"]),
-                    "-n", PathJoinSubstitution([package, "maps", "nav_graph.yaml"]),
-                ],
-                condition=IfCondition(start_rmf),
-                additional_env={"ROS_DOMAIN_ID": rmf_domain},
                 output="screen",
             ),
         ]

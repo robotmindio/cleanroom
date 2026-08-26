@@ -31,6 +31,7 @@ with the printed 8x6 checkerboard lying flat on the floor in view. It prints the
 height and pitch to pass back in.
 """
 import math
+import os
 import signal
 
 import cv2
@@ -39,10 +40,34 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from sensor_msgs.msg import CameraInfo, Image, LaserScan
+from std_msgs.msg import String
 
 BOARD = (8, 6)  # inner corners of scripts/checkerboard.py
 SQUARE = 0.025  # m
 FAIL_SAFE_HALF_FOV = math.radians(30)
+
+
+def save_launch_calibration(**values):
+    """Atomically retain measured launch parameters without trusting executable config."""
+    path = os.environ.get("LEKIWI_LAUNCH_CALIBRATION", os.path.expanduser("~/.ros/lekiwi_launch_calibration.conf"))
+    saved = {}
+    try:
+        with open(path) as source:
+            for line in source:
+                key, separator, value = line.strip().partition("=")
+                if separator and key in {"camera_height", "camera_pitch", "xy_velocity_scale", "yaw_velocity_scale"}:
+                    saved[key] = value
+    except FileNotFoundError:
+        pass
+    saved.update({key: f"{value:.6f}" for key, value in values.items()})
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    temporary = f"{path}.tmp"
+    with open(temporary, "w") as output:
+        for key in ("camera_height", "camera_pitch", "xy_velocity_scale", "yaw_velocity_scale"):
+            if key in saved:
+                output.write(f"{key}={saved[key]}\n")
+    os.replace(temporary, path)
+    print(f"Saved launch calibration to {path}", flush=True)
 
 
 class FreeSpace(Node):
@@ -51,6 +76,9 @@ class FreeSpace(Node):
         self.declare_parameter("camera_height", 0.20)
         self.declare_parameter("camera_pitch", 0.30)  # rad, positive tips the lens down
         self.declare_parameter("camera_offset_x", 0.03)  # lens ahead of base_footprint
+        self.declare_parameter("camera_offset_y", 0.0)  # lens left of base_footprint
+        self.declare_parameter("camera_yaw", 0.0)  # rad, positive turns optical axis left
+        self.declare_parameter("camera_roll", 0.0)  # rad, positive rolls image clockwise
         self.declare_parameter("frame_id", "base_footprint")
         self.declare_parameter("range_min", 0.10)
         self.declare_parameter("range_max", 3.0)
@@ -58,24 +86,43 @@ class FreeSpace(Node):
         # How far a pixel may drift from the floor's colour before it counts as an
         # obstacle, in Lab units. Lower is twitchier.
         self.declare_parameter("floor_tolerance", 14.0)
-        self.declare_parameter("scan_timeout", 0.5)
+        # A full camera-floor inference can take nearly half a second on the robot
+        # while RTAB-Map is also using the CPU.  0.5 s made the watchdog publish a
+        # false 11 cm obstacle between otherwise valid scans, permanently blocking
+        # Nav2.  This still fails safe promptly when camera input actually stops.
+        self.declare_parameter("scan_timeout", 1.5)
         self.declare_parameter("calibrate", False)
 
         self.k = None
         self.d = None
         self.last_intrinsics_warn = 0
-        self.create_subscription(CameraInfo, "camera_info", self.on_info, qos_profile_sensor_data)
-        self.create_subscription(Image, "image", self.on_image, qos_profile_sensor_data)
+        # The local v4l2 driver publishes these canonical raw topics reliably.  A
+        # best-effort subscriber can be starved under image load even while other
+        # reliable subscribers receive every frame, leaving the safety watchdog to
+        # fence the robot in.  camera_relay publishes the same canonical contract.
+        camera_qos = QoSProfile(depth=5, reliability=ReliabilityPolicy.RELIABLE)
+        self.create_subscription(CameraInfo, "camera_info", self.on_info, camera_qos)
+        self.create_subscription(Image, "image", self.on_image, camera_qos)
         # Nav2's obstacle layer requests reliable scan delivery. A reliable publisher is
         # compatible with both that subscriber and best-effort visualizers; publishing
         # sensor-data (best effort) here silently left Nav2 with no safety scan at all.
         self.scan_pub = self.create_publisher(
             LaserScan, "scan", QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE)
         )
+        # A small reliable heartbeat lets service supervision distinguish an
+        # alive-but-blocked safety scan from a dead Python process without
+        # subscribing to the high-bandwidth camera topic.
+        self.health_pub = self.create_publisher(
+            String, "free_space/health", QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE)
+        )
         self.calibrated = False
         self.last_scan = 0
         self.last_valid_scan = 0
+        self.last_image = 0
+        self.last_scan_failure = "no image received"
+        self.last_blocked_warn = 0
         self.create_timer(0.2, self.watchdog)
+        self.create_timer(1.0, self.publish_health)
 
     # -- geometry ---------------------------------------------------------------
 
@@ -106,13 +153,17 @@ class FreeSpace(Node):
         """
         h = self.get_parameter("camera_height").value
         pitch = self.get_parameter("camera_pitch").value
-        fx, fy = self.k[0, 0], self.k[1, 1]
-        cx, cy = self.k[0, 2], self.k[1, 2]
-
         u, v = np.meshgrid(cols.astype(np.float64), rows.astype(np.float64))
+        # Use the calibrated distortion model before treating pixels as rays.
+        # Projecting raw distorted pixels with K alone underestimates/overestimates
+        # ranges toward lens edges and can place an obstacle in the wrong beam.
+        pixels = np.column_stack((u.ravel(), v.ravel())).reshape(-1, 1, 2)
+        normalized = cv2.undistortPoints(pixels, self.k, self.d).reshape(u.shape + (2,))
         # ray in camera frame: x right, y down, z forward
-        x = (u - cx) / fx
-        y = (v - cy) / fy
+        x = normalized[..., 0]
+        y = normalized[..., 1]
+        roll = self.get_parameter("camera_roll").value
+        x, y = x * math.cos(roll) - y * math.sin(roll), x * math.sin(roll) + y * math.cos(roll)
         # rotate by the pitch so that y is measured against a level floor
         cos_p, sin_p = math.cos(pitch), math.sin(pitch)
         down = y * cos_p + sin_p
@@ -172,7 +223,9 @@ class FreeSpace(Node):
         self.get_logger().info(
             f"camera_height:={height:.3f} camera_pitch:={pitch:.3f}  "
             f"(pitch {math.degrees(pitch):.1f} degrees below level)")
+        save_launch_calibration(camera_height=height, camera_pitch=pitch)
         self.calibrated = True
+
 
     # -- detection --------------------------------------------------------------
 
@@ -190,10 +243,13 @@ class FreeSpace(Node):
         return cv2.cvtColor(image, cv2.COLOR_RGB2BGR) if msg.encoding == "rgb8" else image
 
     def on_image(self, msg):
+        self.last_image = self.get_clock().now().nanoseconds
         if self.k is None:
+            self.last_scan_failure = "waiting for valid camera intrinsics"
             return
         bgr = self.bgr_image(msg)
         if bgr is None:
+            self.last_scan_failure = "unsupported or malformed camera image"
             return
         if self.get_parameter("calibrate").value:
             if not self.calibrated:
@@ -209,11 +265,36 @@ class FreeSpace(Node):
         if scan is not None:
             self.scan_pub.publish(scan)
             self.last_valid_scan = now
+            self.last_scan_failure = ""
+        else:
+            self.last_scan_failure = "floor projection found no safe scan"
 
     def watchdog(self):
         now = self.get_clock().now()
         if now.nanoseconds - self.last_valid_scan > self.get_parameter("scan_timeout").value * 1e9:
+            if now.nanoseconds - self.last_blocked_warn > 5e9:
+                self.last_blocked_warn = now.nanoseconds
+                image_age = (now.nanoseconds - self.last_image) / 1e9 if self.last_image else float("inf")
+                self.get_logger().warn(
+                    f"publishing blocked scan: {self.last_scan_failure}; "
+                    f"last image {image_age:.2f}s ago")
             self.scan_pub.publish(self.blocked_scan(now.to_msg()))
+
+    def publish_health(self):
+        """Publish a bounded-rate liveness/status signal for watchdog consumers."""
+        now = self.get_clock().now().nanoseconds
+        timeout_ns = int(self.get_parameter("scan_timeout").value * 1e9)
+        image_age = (now - self.last_image) / 1e9 if self.last_image else float("inf")
+        scan_age = (now - self.last_valid_scan) / 1e9 if self.last_valid_scan else float("inf")
+        if self.last_valid_scan and now - self.last_valid_scan <= timeout_ns:
+            state = "OK"
+        elif self.last_image:
+            state = "DEGRADED"
+        else:
+            state = "NO_CAMERA"
+        msg = String()
+        msg.data = f"state={state};image_age_s={image_age:.2f};scan_age_s={scan_age:.2f};reason={self.last_scan_failure}"
+        self.health_pub.publish(msg)
 
     def blocked_scan(self, stamp):
         beams = max(2, int(self.get_parameter("beams").value))
@@ -261,8 +342,15 @@ class FreeSpace(Node):
         # Transform the floor intersections from the camera frame into the scan frame.
         # A LaserScan's bearing and range are both relative to header.frame_id; adding
         # the camera offset to an already computed range is only correct on centreline.
-        scan_fwd = fwd + offset
+        scan_fwd = fwd
         scan_left = left
+        yaw = self.get_parameter("camera_yaw").value
+        scan_fwd, scan_left = (
+            scan_fwd * math.cos(yaw) - scan_left * math.sin(yaw),
+            scan_fwd * math.sin(yaw) + scan_left * math.cos(yaw),
+        )
+        scan_fwd += offset
+        scan_left += self.get_parameter("camera_offset_y").value
         scan_bearing = np.arctan2(scan_left, scan_fwd)
         scan_distance = np.hypot(scan_fwd, scan_left)
 

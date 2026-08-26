@@ -1,17 +1,26 @@
-default_velocity_scaling_factor: 0.1
-default_acceleration_scaling_factor: 0.1
+# These are the values presented by the MoveIt RViz panel at startup.  0.1 made
+# every plan unnecessarily slow and encouraged users to drag the sliders per
+# session.  Keep a sensible, smooth default while retaining the panel controls
+# for delicate work.
+default_velocity_scaling_factor: 0.5
+default_acceleration_scaling_factor: 0.4
 # AddTimeOptimalParameterization refuses to time-stamp a trajectory unless every
 # active joint of the group bounds BOTH velocity and acceleration (it exits with
 # "No acceleration limit was defined"), so has_acceleration_limits is mandatory here.
 # The URDF <limit> elements carry no acceleration attribute either, which makes these
 # overrides the only source. Values are conservative servo guesses, not measurements.
 joint_limits:
-  arm_shoulder_pan: {has_velocity_limits: true, max_velocity: 2.0, has_acceleration_limits: true, max_acceleration: 3.0}
-  arm_shoulder_lift: {has_velocity_limits: true, max_velocity: 2.0, has_acceleration_limits: true, max_acceleration: 3.0}
-  arm_elbow_flex: {has_velocity_limits: true, max_velocity: 2.0, has_acceleration_limits: true, max_acceleration: 3.0}
-  arm_wrist_flex: {has_velocity_limits: true, max_velocity: 3.0, has_acceleration_limits: true, max_acceleration: 5.0}
-  # wrist_roll is continuous in the real URDF, so this file is also its only velocity limit.
-  arm_wrist_roll: {has_velocity_limits: true, max_velocity: 3.0, has_acceleration_limits: true, max_acceleration: 5.0}
+  # The CAD export labels servos continuous, but the driver correctly enforces
+  # these conservative physical travel limits. Mirror them here so OMPL cannot
+  # generate a trajectory that the hardware action server must reject.
+  arm_shoulder_pan: {has_position_limits: true, min_position: -1.92, max_position: 1.92, has_velocity_limits: true, max_velocity: 2.0, has_acceleration_limits: true, max_acceleration: 3.0}
+  arm_shoulder_lift: {has_position_limits: true, min_position: -1.75, max_position: 1.75, has_velocity_limits: true, max_velocity: 2.0, has_acceleration_limits: true, max_acceleration: 3.0}
+  arm_elbow_flex: {has_position_limits: true, min_position: -1.75, max_position: 1.75, has_velocity_limits: true, max_velocity: 2.0, has_acceleration_limits: true, max_acceleration: 3.0}
+  arm_wrist_flex: {has_position_limits: true, min_position: -1.75, max_position: 1.75, has_velocity_limits: true, max_velocity: 3.0, has_acceleration_limits: true, max_acceleration: 5.0}
+  # The CAD export calls wrist roll continuous, but the physical wiring must
+  # not be subjected to arbitrary multi-turn trajectories. This matches the
+  # driver-side envelope exactly.
+  arm_wrist_roll: {has_position_limits: true, min_position: -3.14159265359, max_position: 3.14159265359, has_velocity_limits: true, max_velocity: 3.0, has_acceleration_limits: true, max_acceleration: 5.0}
   # Needed once the SRDF's gripper group can be planned: TOTG parameterizes every
   # planned group, not just "arm". Velocity matches the URDF <limit>.
-  arm_gripper: {has_velocity_limits: true, max_velocity: 2.0, has_acceleration_limits: true, max_acceleration: 3.0}
+  arm_gripper: {has_position_limits: true, min_position: 0.0, max_position: 1.57, has_velocity_limits: true, max_velocity: 2.0, has_acceleration_limits: true, max_acceleration: 3.0}

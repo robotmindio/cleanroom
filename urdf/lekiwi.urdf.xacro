@@ -1,100 +1,114 @@
 <?xml version="1.0"?>
+<!-- ROS description wrapper for the physical LeKiwi CAD model. -->
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="lekiwi">
   <xacro:arg name="sim" default="false"/>
-  <!-- Nothing actuates the arm in Gazebo, so revolute joints let it collapse under gravity
-       into the lidar plane, where the collision monitor sees it and refuses to drive.
-       RMF does not schedule arm trajectories here, so the sim arm is rigid. -->
-  <!-- .lower(): the launch passes sim:=True (PythonExpression stringifies a Python bool). -->
+  <!-- Gazebo has no arm actuator in this stack. Keep its arm rigid in sim,
+       matching the previous model, while the real description stays movable. -->
   <xacro:property name="arm_joint" value="${'fixed' if '$(arg sim)'.lower() == 'true' else 'revolute'}"/>
   <xacro:property name="roll_joint" value="${'fixed' if '$(arg sim)'.lower() == 'true' else 'continuous'}"/>
-  <material name="black"><color rgba="0.04 0.04 0.04 1"/></material>
-  <material name="white"><color rgba="0.9 0.9 0.9 1"/></material>
-  <material name="orange"><color rgba="1.0 0.32 0.02 1"/></material>
+  <!-- Vendored from robotmindio/LeKiwi at efa608d; see urdf/README.md. -->
+  <xacro:include filename="lekiwi_cad.urdf"/>
 
+  <!-- CAD's root is the lower base plate. Its +Y is the physical forward
+       direction, so yaw -90 degrees aligns it with REP-103 +X forward. -->
   <link name="base_footprint"/>
-  <joint name="base_joint" type="fixed">
-    <parent link="base_footprint"/><child link="base_link"/><origin xyz="0 0 0.10"/>
-  </joint>
   <link name="base_link">
-    <visual><geometry><cylinder radius="0.18" length="0.08"/></geometry><material name="white"/></visual>
-    <collision><geometry><cylinder radius="0.18" length="0.08"/></geometry></collision>
-    <inertial><mass value="5"/><inertia ixx="0.03" ixy="0" ixz="0" iyy="0.03" iyz="0" izz="0.06"/></inertial>
+    <!-- Conservative planning proxy; CAD meshes are visual-only. -->
+    <collision><geometry><cylinder radius="0.145" length="0.090"/></geometry></collision>
   </link>
-
-  <xacro:macro name="wheel" params="name x y yaw">
-    <joint name="${name}_joint" type="fixed">
-      <parent link="base_link"/><child link="${name}_link"/><origin xyz="${x} ${y} -0.04" rpy="1.5708 0 ${yaw}"/>
-    </joint>
-    <link name="${name}_link">
-      <visual><geometry><cylinder radius="0.05" length="0.025"/></geometry><material name="black"/></visual>
-      <collision><geometry><cylinder radius="0.05" length="0.025"/></geometry></collision>
-    </link>
-  </xacro:macro>
-  <xacro:wheel name="left_wheel" x="-0.108" y="0.108" yaw="-0.7854"/>
-  <xacro:wheel name="back_wheel" x="-0.108" y="-0.108" yaw="0.7854"/>
-  <xacro:wheel name="right_wheel" x="0.145" y="0" yaw="1.5708"/>
-
-  <joint name="mast_joint" type="fixed">
-    <parent link="base_link"/><child link="mast"/><origin xyz="0 0 0.22"/>
+  <joint name="base_footprint_to_base_link" type="fixed">
+    <parent link="base_footprint"/><child link="base_link"/>
+    <origin xyz="0 0 0.093" rpy="0 0 0"/>
   </joint>
-  <link name="mast">
-    <visual><geometry><box size="0.05 0.05 0.36"/></geometry><material name="orange"/></visual>
-    <collision><geometry><box size="0.05 0.05 0.36"/></geometry></collision>
-  </link>
-
-  <xacro:macro name="arm_link" params="name length radius:=0.025">
-    <link name="${name}">
-      <visual><origin xyz="0 0 ${length/2}"/><geometry><cylinder radius="${radius}" length="${length}"/></geometry><material name="orange"/></visual>
-      <collision><origin xyz="0 0 ${length/2}"/><geometry><cylinder radius="${radius}" length="${length}"/></geometry></collision>
-      <inertial><origin xyz="0 0 ${length/2}"/><mass value="0.12"/><inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/></inertial>
-    </link>
-  </xacro:macro>
-  <xacro:arm_link name="shoulder" length="0.10"/>
-  <xacro:arm_link name="upper_arm" length="0.12"/>
-  <xacro:arm_link name="forearm" length="0.12"/>
-  <xacro:arm_link name="wrist" length="0.06"/>
-  <xacro:arm_link name="tool" length="0.05" radius="0.018"/>
-  <xacro:arm_link name="gripper" length="0.07" radius="0.012"/>
-
-  <joint name="arm_shoulder_pan" type="${arm_joint}">
-    <parent link="mast"/><child link="shoulder"/><origin xyz="0 0 0.18"/><axis xyz="0 0 1"/><limit lower="-1.92" upper="1.92" effort="4" velocity="2"/>
-  </joint>
-  <joint name="arm_shoulder_lift" type="${arm_joint}">
-    <parent link="shoulder"/><child link="upper_arm"/><origin xyz="0 0 0.10"/><axis xyz="0 1 0"/><limit lower="-1.75" upper="1.75" effort="4" velocity="2"/>
-  </joint>
-  <joint name="arm_elbow_flex" type="${arm_joint}">
-    <parent link="upper_arm"/><child link="forearm"/><origin xyz="0 0 0.12"/><axis xyz="0 1 0"/><limit lower="-1.75" upper="1.75" effort="4" velocity="2"/>
-  </joint>
-  <joint name="arm_wrist_flex" type="${arm_joint}">
-    <parent link="forearm"/><child link="wrist"/><origin xyz="0 0 0.12"/><axis xyz="0 1 0"/><limit lower="-1.75" upper="1.75" effort="2" velocity="3"/>
-  </joint>
-  <joint name="arm_wrist_roll" type="${roll_joint}">
-    <parent link="wrist"/><child link="tool"/><origin xyz="0 0 0.06"/><axis xyz="0 0 1"/><limit effort="2" velocity="3"/>
-  </joint>
-  <joint name="arm_gripper" type="${arm_joint}">
-    <parent link="tool"/><child link="gripper"/><origin xyz="0 0 0.05"/><axis xyz="0 1 0"/><limit lower="0" upper="1.57" effort="1" velocity="2"/>
+  <joint name="base_link_to_cad" type="fixed">
+    <parent link="base_link"/><child link="base_plate_layer1-v5"/>
+    <origin xyz="0 0 0" rpy="0 0 -1.57079632679"/>
   </joint>
 
-  <joint name="laser_joint" type="fixed">
-    <parent link="mast"/><child link="laser"/><origin xyz="0 0 0.08"/>
-  </joint>
-  <link name="laser">
-    <visual><geometry><cylinder radius="0.035" length="0.03"/></geometry><material name="black"/></visual>
-    <collision><geometry><cylinder radius="0.035" length="0.03"/></geometry></collision>
-  </link>
-
-  <joint name="front_camera_joint" type="fixed">
-    <parent link="mast"/><child link="front_camera_link"/><origin xyz="0.03 0 0.14"/>
-  </joint>
-  <link name="front_camera_link">
-    <visual><geometry><box size="0.035 0.07 0.035"/></geometry><material name="black"/></visual>
-    <collision><geometry><box size="0.035 0.07 0.035"/></geometry></collision>
-  </link>
-  <joint name="front_camera_optical_joint" type="fixed">
-    <parent link="front_camera_link"/><child link="front_camera_optical_frame"/><origin rpy="-1.5708 0 -1.5708"/>
+  <!-- Named ROS camera frames; CAD links locate the physical mounts. -->
+  <link name="front_camera_link"/>
+  <joint name="front_camera_mount" type="fixed">
+    <parent link="Camera-Model-v3"/><child link="front_camera_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
   <link name="front_camera_optical_frame"/>
+  <joint name="front_camera_optical" type="fixed">
+    <parent link="front_camera_link"/><child link="front_camera_optical_frame"/>
+    <origin xyz="0 0 0" rpy="-1.57079632679 0 -1.57079632679"/>
+  </joint>
+  <link name="wrist_camera_link"/>
+  <joint name="wrist_camera_mount" type="fixed">
+    <parent link="Camera-Model-v3-1"/><child link="wrist_camera_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+  <link name="wrist_camera_optical_frame"/>
+  <joint name="wrist_camera_optical" type="fixed">
+    <parent link="wrist_camera_link"/><child link="wrist_camera_optical_frame"/>
+    <origin xyz="0 0 0" rpy="-1.57079632679 0 -1.57079632679"/>
+  </joint>
 
+  <!-- Tool frame before the independently planned gripper joint. -->
+  <link name="tool0">
+    <collision><geometry><sphere radius="0.025"/></geometry></collision>
+  </link>
+  <joint name="tool0_mount" type="fixed">
+    <parent link="Wrist_Roll_08c-v1"/><child link="tool0"/>
+    <origin xyz="0 0.040 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Low-poly self-collision proxies. These are deliberately attached to the
+       CAD links, so their kinematics remain exact while planning stays
+       real-time.  The dimensions below enclose the vendored mesh bounding
+       vertices with a further 4 mm clearance; they are not substitute visual
+       geometry.  A capsule is a cylinder along local Z with a sphere on each
+       end, which covers a complete arm link instead of just its joint centre. -->
+  <xacro:macro name="collision_sphere_proxy" params="name parent xyz radius">
+    <link name="${name}"><collision><geometry><sphere radius="${radius}"/></geometry></collision></link>
+    <joint name="${name}_mount" type="fixed">
+      <parent link="${parent}"/><child link="${name}"/><origin xyz="${xyz}" rpy="0 0 0"/>
+    </joint>
+  </xacro:macro>
+  <xacro:macro name="collision_capsule_proxy" params="name parent xyz rpy radius cylinder_length">
+    <link name="${name}">
+      <collision><geometry><cylinder radius="${radius}" length="${cylinder_length}"/></geometry></collision>
+      <collision><origin xyz="0 0 ${cylinder_length / 2.0}"/><geometry><sphere radius="${radius}"/></geometry></collision>
+      <collision><origin xyz="0 0 ${-cylinder_length / 2.0}"/><geometry><sphere radius="${radius}"/></geometry></collision>
+    </link>
+    <joint name="${name}_mount" type="fixed">
+      <parent link="${parent}"/><child link="${name}"/><origin xyz="${xyz}" rpy="${rpy}"/>
+    </joint>
+  </xacro:macro>
+
+  <!-- Pedestal and camera are part of the manipulator's swept volume. -->
+  <xacro:collision_sphere_proxy name="arm_pedestal_collision_proxy" parent="Base_08q-v1" xyz="-0.0400 -0.0330 0.0358" radius="0.0783"/>
+  <xacro:collision_sphere_proxy name="front_camera_collision_proxy" parent="Camera-Model-v3" xyz="-0.0158 0.0114 -0.0114" radius="0.0332"/>
+
+  <!-- CAD-derived arm shell envelopes. -->
+  <xacro:collision_capsule_proxy name="shoulder_collision_proxy" parent="Rotation_Pitch_08i-v1" xyz="-0.0008 -0.0145 0.0041" rpy="0.0762 -0.3162 -1.5708" radius="0.0500" cylinder_length="0.0062"/>
+  <xacro:collision_capsule_proxy name="upper_arm_collision_proxy" parent="SO_ARM100_08k_116_Square-v1" xyz="-0.0218 -0.0590 -0.0044" rpy="3.1344 1.4654 1.5708" radius="0.0427" cylinder_length="0.0653"/>
+  <xacro:collision_capsule_proxy name="forearm_collision_proxy" parent="SO_ARM100_08k_Mirror-v1" xyz="-0.0218 0.0522 0.0113" rpy="3.1103 1.3717 1.5708" radius="0.0421" cylinder_length="0.0565"/>
+  <xacro:collision_sphere_proxy name="wrist_collision_proxy" parent="Wrist_Roll_Pitch_08i-v1" xyz="-0.0114 0.0081 -0.0179" radius="0.0564"/>
+  <xacro:collision_capsule_proxy name="roll_collision_proxy" parent="Wrist_Roll_08c-v1" xyz="0.0141 0.0209 -0.0445" rpy="0.2026 0.4555 -1.5708" radius="0.0431" cylinder_length="0.0307"/>
+  <xacro:collision_capsule_proxy name="gripper_collision_proxy" parent="Moving_Jaw_08d-v1" xyz="0.0007 0.0335 -0.0247" rpy="2.9993 -0.4467 1.5708" radius="0.0328" cylinder_length="0.0355"/>
+
+  <!-- Servo housings protrude beyond the link shells and need their own
+       envelopes to prevent a plan passing through a motor body. -->
+  <xacro:collision_sphere_proxy name="shoulder_pan_servo_collision_proxy" parent="STS3215_03a-v1" xyz="-0.0102 0.0163 -0.0203" radius="0.0337"/>
+  <xacro:collision_sphere_proxy name="shoulder_lift_servo_collision_proxy" parent="STS3215_03a-v1-1" xyz="0.0163 0.0103 -0.0203" radius="0.0337"/>
+  <xacro:collision_sphere_proxy name="elbow_servo_collision_proxy" parent="STS3215_03a-v1-2" xyz="0.0163 -0.0119 0.0193" radius="0.0337"/>
+  <xacro:collision_sphere_proxy name="wrist_flex_servo_collision_proxy" parent="STS3215_03a-v1-3" xyz="0.0163 -0.0217 0.0067" radius="0.0337"/>
+  <xacro:collision_sphere_proxy name="wrist_roll_servo_collision_proxy" parent="STS3215_03a_Wrist_Roll-v1" xyz="-0.0165 0.0160 -0.0101" radius="0.0335"/>
+  <xacro:collision_sphere_proxy name="gripper_servo_collision_proxy" parent="STS3215_03a-v1-4" xyz="-0.0203 -0.0160 0.0101" radius="0.0335"/>
+
+  <!-- LD06 is an optional add-on, not part of the upstream CAD. -->
+  <link name="laser"/>
+  <joint name="laser_mount" type="fixed">
+    <parent link="base_link"/><child link="laser"/>
+    <origin xyz="0 0 0.220" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Preserve the original Gazebo mobile-base, lidar, and front-camera
+       functionality. References use the normalized ROS wrapper frames. -->
   <xacro:if value="$(arg sim)">
     <gazebo>
       <plugin filename="gz-sim-velocity-control-system" name="gz::sim::systems::VelocityControl">
@@ -113,13 +127,8 @@
     </gazebo>
     <gazebo reference="front_camera_link">
       <sensor name="front_camera" type="camera">
-        <topic>/camera/front</topic><gz_frame_id>front_camera_optical_frame</gz_frame_id>
-        <update_rate>20</update_rate><always_on>true</always_on>
-        <camera>
-          <horizontal_fov>1.0472</horizontal_fov>
-          <image><width>640</width><height>480</height><format>R8G8B8</format></image>
-          <clip><near>0.05</near><far>20</far></clip>
-        </camera>
+        <topic>/camera/front</topic><gz_frame_id>front_camera_optical_frame</gz_frame_id><update_rate>20</update_rate><always_on>true</always_on>
+        <camera><horizontal_fov>1.0472</horizontal_fov><image><width>640</width><height>480</height><format>R8G8B8</format></image><clip><near>0.05</near><far>20</far></clip></camera>
       </sensor>
     </gazebo>
   </xacro:if>

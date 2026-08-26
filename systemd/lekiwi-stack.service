@@ -21,9 +21,8 @@
 #     driver then republishes the host's front JPEG as if it were local.
 #
 # Either way the stack may come up before the other half of the robot does.
-# Restart=always with no rate limit lets it keep trying at a calm cadence:
-# the robot computer can boot long after this one, over wifi that drops.
-# Explicit `systemctl stop` still stops it for good.
+# Bound restart attempts so a missing device cannot fill journald forever; a
+# successful host readiness gate makes each attempt meaningful.
 [Unit]
 Description=LeKiwi ROS 2 stack (bringup.launch.py)
 Documentation=file://@PROJECT_ROOT@/README.md
@@ -31,7 +30,8 @@ Requires=lekiwi-host.service
 PartOf=lekiwi-host.service
 After=network-online.target lekiwi-host.service
 Wants=network-online.target
-StartLimitIntervalSec=0
+StartLimitIntervalSec=600
+StartLimitBurst=8
 
 [Service]
 Type=simple
@@ -42,10 +42,11 @@ WorkingDirectory=@PROJECT_ROOT@
 Environment=LEKIWI_STACK_ARGS=
 EnvironmentFile=-/etc/default/lekiwi-stack
 ExecStart=@PROJECT_ROOT@/scripts/ros-start.sh $LEKIWI_STACK_ARGS
-Restart=always
+Restart=on-failure
 RestartSec=15s
 # Nav2's lifecycle teardown alone takes ~15 s (see scripts/ros-stop.sh).
 TimeoutStopSec=45s
+KillMode=control-group
 
 [Install]
 WantedBy=multi-user.target

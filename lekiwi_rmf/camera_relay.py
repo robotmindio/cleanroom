@@ -12,19 +12,23 @@ import rclpy
 from cv_bridge import CvBridge
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from sensor_msgs.msg import CameraInfo, CompressedImage, Image
 
 
 class CameraRelay(Node):
-    # (camera name, has calibration): the wrist camera carries no calibration,
-    # and inventing one would be worse than publishing none.
-    CAMERAS = [("front", True), ("wrist", False)]
+    # Both cameras may now be calibrated. If the optional wrist calibration has
+    # not been captured yet, its v4l2 node still publishes a zero CameraInfo;
+    # consumers must opt in to using it for geometry.
+    CAMERAS = [("front", True), ("wrist", True)]
 
     def __init__(self):
         super().__init__("camera_relay")
         self.bridge = CvBridge()
         self.last_info = {}
+        # Canonical raw camera topics are consumed by the floor scan and RTAB-Map.
+        # Keep their delivery contract identical to the local v4l2 camera path.
+        self.raw_qos = QoSProfile(depth=5, reliability=ReliabilityPolicy.RELIABLE)
         for name, with_info in self.CAMERAS:
             self.create_subscription(
                 CompressedImage, f"/pi/camera/{name}/image_raw/compressed",
@@ -35,8 +39,8 @@ class CameraRelay(Node):
                     self.make_info_callback(name), qos_profile_sensor_data)
 
     def make_image_callback(self, name, with_info):
-        pub = self.create_publisher(Image, f"/camera/{name}/image_raw", qos_profile_sensor_data)
-        info_pub = self.create_publisher(CameraInfo, f"/camera/{name}/camera_info", 10) if with_info else None
+        pub = self.create_publisher(Image, f"/camera/{name}/image_raw", self.raw_qos)
+        info_pub = self.create_publisher(CameraInfo, f"/camera/{name}/camera_info", self.raw_qos) if with_info else None
 
         def on_image(msg):
             try:

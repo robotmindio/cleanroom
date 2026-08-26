@@ -14,18 +14,20 @@ back into /camera/front/image_raw. camera_info is a few hundred bytes and is rea
     ros2 launch pi_cameras.launch.py front_device:=/dev/v4l/by-id/usb-...-video-index0
 """
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, ExecuteProcess
 from launch.conditions import UnlessCondition
-from launch.substitutions import EnvironmentVariable, LaunchConfiguration, PythonExpression
-from launch_ros.actions import Node
-from launch_ros.parameter_descriptions import ParameterValue
+from launch.substitutions import EnvironmentVariable, LaunchConfiguration, PathJoinSubstitution, PythonExpression
+from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
+    package = FindPackageShare("lekiwi_rmf")
+    camera_supervisor = PathJoinSubstitution([package, "scripts", "camera-supervisor.sh"])
     front_device = LaunchConfiguration("front_device")
     wrist_device = LaunchConfiguration("wrist_device")
     camera_info_url = LaunchConfiguration("camera_info_url")
-    jpeg_quality = ParameterValue(LaunchConfiguration("jpeg_quality"), value_type=int)
+    wrist_camera_info_url = LaunchConfiguration("wrist_camera_info_url")
+    jpeg_quality = LaunchConfiguration("jpeg_quality")
     no_wrist = PythonExpression(["'", wrist_device, "' == 'none'"])
 
     return LaunchDescription(
@@ -38,44 +40,32 @@ def generate_launch_description():
                 "camera_info_url",
                 default_value=["file://", EnvironmentVariable("HOME"), "/.ros/camera_info/lekiwi_front.yaml"],
             ),
+            DeclareLaunchArgument(
+                "wrist_camera_info_url",
+                default_value=["file://", EnvironmentVariable("HOME"), "/.ros/camera_info/lekiwi_wrist.yaml"],
+            ),
             DeclareLaunchArgument("jpeg_quality", default_value="50"),
-            Node(
-                package="v4l2_camera",
-                executable="v4l2_camera_node",
-                name="front_camera",
-                parameters=[{
-                    "video_device": front_device,
-                    "camera_info_url": camera_info_url,
-                    "camera_frame_id": "front_camera_optical_frame",
-                    "camera_name": "lekiwi_front",
-                    "pixel_format": "YUYV",
-                    "output_encoding": "rgb8",
-                    "image_size": [640, 480],
-                    # Default quality 95 costs ~90 KB a frame, 18 Mbit/s at 25 Hz. RTAB-Map
+            ExecuteProcess(
+                cmd=[
+                    camera_supervisor,
+                    "--device", front_device, "--name", "front_camera",
+                    "--namespace", "/pi/camera/front", "--camera-name", "lekiwi_front",
+                    "--frame", "front_camera_optical_frame", "--size", "[640, 480]",
+                    "--camera-info-url", camera_info_url,
+                    # Default quality 50 keeps a 25 Hz stream inside robot Wi-Fi bandwidth.
                     # matches features, not pixels, and does not need the last 45 KB.
-                    # The leading dot is image_transport's own naming, taken from the
-                    # resolved topic; without it the parameter is silently ignored.
-                    ".image_raw.compressed.jpeg_quality": jpeg_quality,
-                }],
-                # A namespace rather than remappings: image_transport builds its extra
-                # transport topics from the unremapped base name, so remapping image_raw
-                # leaves compressed advertised at /image_raw/compressed.
-                namespace="/pi/camera/front",
+                    "--jpeg-quality", jpeg_quality,
+                ],
                 output="screen",
             ),
-            Node(
-                package="v4l2_camera",
-                executable="v4l2_camera_node",
-                name="wrist_camera",
-                parameters=[{
-                    "video_device": wrist_device,
-                    "camera_frame_id": "wrist_camera_optical_frame",
-                    "camera_name": "lekiwi_wrist",
-                    "pixel_format": "YUYV",
-                    "output_encoding": "rgb8",
-                    "image_size": [640, 480],
-                }],
-                namespace="/pi/camera/wrist",
+            ExecuteProcess(
+                cmd=[
+                    camera_supervisor,
+                    "--device", wrist_device, "--name", "wrist_camera",
+                    "--namespace", "/pi/camera/wrist", "--camera-name", "lekiwi_wrist",
+                    "--frame", "wrist_camera_optical_frame", "--size", "[352, 288]",
+                    "--camera-info-url", wrist_camera_info_url,
+                ],
                 condition=UnlessCondition(no_wrist),
                 output="screen",
             ),

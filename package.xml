@@ -10,6 +10,7 @@
   <buildtool_depend>ament_cmake_python</buildtool_depend>
 
   <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>builtin_interfaces</exec_depend>
   <exec_depend>camera_calibration</exec_depend>
   <exec_depend>cv_bridge</exec_depend>
   <exec_depend>control_msgs</exec_depend>
@@ -24,11 +25,13 @@
   <exec_depend>nav2_map_server</exec_depend>
   <exec_depend>nav_msgs</exec_depend>
   <exec_depend>nav2_msgs</exec_depend>
+  <exec_depend>action_msgs</exec_depend>
   <exec_depend>moveit_configs_utils</exec_depend>
   <exec_depend>moveit_ros_move_group</exec_depend>
   <exec_depend>moveit_planners_ompl</exec_depend>
   <exec_depend>moveit_ros_visualization</exec_depend>
   <exec_depend>python3-opencv</exec_depend>
+  <exec_depend>python3-matplotlib</exec_depend>
   <exec_depend>rclpy</exec_depend>
   <exec_depend>robot_state_publisher</exec_depend>
   <exec_depend>rosbridge_server</exec_depend>
@@ -42,6 +45,7 @@
   <exec_depend>rmf_task_ros2</exec_depend>
   <exec_depend>rmf_traffic_ros2</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>trajectory_msgs</exec_depend>
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>std_srvs</exec_depend>
   <exec_depend>tf2_ros</exec_depend>

@@ -13,9 +13,10 @@ _NODE.bases = []
 _NODE.body = [
     item for item in _NODE.body
     if getattr(item, "name", None) in (
-        "observation_is_fresh", "observation_is_valid", "set_disarmed", "update",
-        "validate_motion_parameters",
-        "publish_safety",
+        "arm", "clamp_planar", "observation_is_fresh", "observation_is_valid",
+        "arm_after_startup_telemetry", "on_command", "publish_safety", "publish_state",
+        "set_disarmed", "trajectory_time",
+        "twist_is_finite", "update", "validate_motion_parameters",
     )
 ]
 driver = types.ModuleType("driver_under_test")
@@ -46,9 +47,11 @@ def test_mutated_cached_observation_is_fresh():
 
 def test_incomplete_or_non_finite_telemetry_is_rejected():
     driver.ARM_JOINTS = ("joint",)
-    assert driver.LeKiwiDriver.observation_is_valid({"joint.pos": 0.0})
-    assert not driver.LeKiwiDriver.observation_is_valid({"joint.pos": float("nan")})
-    assert not driver.LeKiwiDriver.observation_is_valid({"other.pos": 0.0})
+    complete = {"joint.pos": 0.0, "x.vel": 0.0, "y.vel": 0.0, "theta.vel": 0.0}
+    assert driver.LeKiwiDriver.observation_is_valid(complete)
+    assert not driver.LeKiwiDriver.observation_is_valid({**complete, "joint.pos": math.nan})
+    assert not driver.LeKiwiDriver.observation_is_valid({**complete, "x.vel": math.inf})
+    assert not driver.LeKiwiDriver.observation_is_valid({"joint.pos": 0.0})
 
 
 def test_invalid_motion_scale_is_rejected():
@@ -57,7 +60,10 @@ def test_invalid_motion_scale_is_rejected():
     node.yaw_scale = 1.0
     node.command_timeout = node.link_timeout = 1.0
     node.trajectory_tolerance = node.trajectory_timeout = 1.0
+    node.odom_xy_stddev = node.odom_yaw_stddev = 1.0
+    node.twist_xy_stddev = node.twist_yaw_stddev = 1.0
     node.max_linear = node.max_angular = 1.0
+    node.cmd_vel_topic = "/cmd_vel_safe"
 
     try:
         node.validate_motion_parameters()
@@ -65,6 +71,130 @@ def test_invalid_motion_scale_is_rejected():
         assert "xy_velocity_scale" in str(error)
     else:
         raise AssertionError("zero xy_velocity_scale was accepted")
+
+
+def test_guarded_command_topic_is_the_default_and_must_not_be_empty():
+    assert 'declare_parameter("cmd_vel_topic", "/cmd_vel_safe")' in _SOURCE
+    node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
+    node.xy_scale = node.yaw_scale = 1.0
+    node.command_timeout = node.link_timeout = 1.0
+    node.trajectory_tolerance = node.trajectory_timeout = 1.0
+    node.odom_xy_stddev = node.odom_yaw_stddev = 1.0
+    node.twist_xy_stddev = node.twist_yaw_stddev = 1.0
+    node.max_linear = node.max_angular = 1.0
+    node.cmd_vel_topic = ""
+
+    try:
+        node.validate_motion_parameters()
+    except ValueError as error:
+        assert "cmd_vel_topic" in str(error)
+    else:
+        raise AssertionError("empty cmd_vel_topic was accepted")
+
+
+def test_initial_healthy_telemetry_arms_once_but_link_recovery_does_not():
+    node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
+    node.auto_arm_pending = True
+    node.link_lost = False
+    node.armed = False
+    node.state_lock = threading.Lock()
+    node.get_clock = lambda: types.SimpleNamespace(now=lambda: object())
+    node.publish_safety = lambda state: setattr(node, "safety", state)
+    node.get_logger = lambda: type("Logger", (), {"info": lambda *_: None})()
+    driver.Twist = object
+
+    assert node.arm_after_startup_telemetry() is True
+    assert node.armed is True
+    assert node.auto_arm_pending is False
+    assert node.safety == "ARMED"
+    assert node.arm_after_startup_telemetry() is False
+
+    node.auto_arm_pending = True
+    node.link_lost = True
+    node.armed = False
+    assert node.arm_after_startup_telemetry() is False
+    assert node.armed is False
+
+
+def test_manual_arm_rejects_telemetry_older_than_link_timeout():
+    class Now:
+        def __sub__(self, other):
+            return types.SimpleNamespace(nanoseconds=2_000_000_000)
+
+    node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
+    node.get_clock = lambda: types.SimpleNamespace(now=lambda: Now())
+    node.last_fresh = object()
+    node.link_timeout = 1.0
+    node.link_lost = False
+    node.last_observation = {"complete": True}
+    node.state_lock = threading.Lock()
+    response = types.SimpleNamespace()
+
+    assert node.arm(None, response) is response
+    assert response.success is False
+    assert "fresh" in response.message
+
+
+def test_planar_velocity_is_clamped_by_vector_magnitude():
+    x, y = driver.LeKiwiDriver.clamp_planar(0.3, 0.4, 0.25)
+    assert math.isclose(math.hypot(x, y), 0.25)
+    assert math.isclose(x / y, 0.3 / 0.4)
+
+
+def test_odometry_covariance_never_claims_perfect_pose_or_twist():
+    def pose():
+        return types.SimpleNamespace(
+            position=types.SimpleNamespace(), orientation=types.SimpleNamespace()
+        )
+
+    class Odometry:
+        def __init__(self):
+            self.header = types.SimpleNamespace()
+            self.pose = types.SimpleNamespace(pose=pose())
+            self.twist = types.SimpleNamespace(twist=types.SimpleNamespace(
+                linear=types.SimpleNamespace(), angular=types.SimpleNamespace()
+            ))
+
+    driver.Odometry = Odometry
+    driver.TransformStamped = lambda: types.SimpleNamespace(
+        transform=types.SimpleNamespace(
+            translation=types.SimpleNamespace(), rotation=types.SimpleNamespace()
+        )
+    )
+    driver.JointState = lambda: types.SimpleNamespace(header=types.SimpleNamespace())
+    driver.ARM_JOINTS = ("joint",)
+    odometry, transform, joints = [], [], []
+    node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
+    node.pose = (1.0, 2.0, 0.0)
+    node.odom_xy_stddev, node.odom_yaw_stddev = 0.05, 0.10
+    node.twist_xy_stddev, node.twist_yaw_stddev = 0.10, 0.20
+    node.odom_pub = types.SimpleNamespace(publish=odometry.append)
+    node.tf = types.SimpleNamespace(sendTransform=transform.append)
+    node.arm_positions = {"joint": 0.0}
+    node.joint_pub = types.SimpleNamespace(publish=joints.append)
+
+    node.publish_state(object(), {}, (0.0, 0.0, 0.0))
+
+    assert odometry[0].pose.covariance[0] == 0.05 ** 2
+    assert odometry[0].pose.covariance[35] == 0.10 ** 2
+    assert odometry[0].twist.covariance[0] == 0.10 ** 2
+    assert odometry[0].twist.covariance[35] == 0.20 ** 2
+    assert odometry[0].pose.covariance[14] == 1e6
+
+
+def test_non_finite_twist_is_rejected_and_disarms():
+    node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
+    node.state_lock = threading.Lock()
+    node.armed = True
+    node.auto_arm_pending = True
+    node.get_logger = lambda: type("Logger", (), {"error": lambda *_: None})()
+    node.set_disarmed = lambda state: setattr(node, "disarmed_as", state)
+    vector = lambda **values: types.SimpleNamespace(x=values.get("x", 0.0), y=0.0, z=0.0)
+    message = types.SimpleNamespace(linear=vector(x=math.nan), angular=vector())
+
+    node.on_command(message)
+
+    assert node.disarmed_as == "DISARMED"
 
 
 def test_disarm_queues_a_stop():
@@ -80,6 +210,7 @@ def test_disarm_queues_a_stop():
     node.set_disarmed("DISARMED")
 
     assert node.stop_pending is True
+    assert node.auto_arm_pending is False
     assert node.outcome == "safety disarmed"
     assert node.safety == "DISARMED"
 
@@ -101,14 +232,18 @@ def test_disarmed_driver_sends_zero_velocity_once():
     node.last_update = Stamp()
     node.get_clock = lambda: type("Clock", (), {"now": lambda _: Stamp()})()
     node.robot = type("Robot", (), {
-        "get_observation": lambda _: {"joint.pos": 0.0},
+        "get_observation": lambda _: {
+            "joint.pos": 0.0, "x.vel": 0.0, "y.vel": 0.0, "theta.vel": 0.0,
+        },
         "send_action": lambda _, action: sent.append(action),
     })()
     node.last_observation = None
     node.last_fresh = Stamp()
     node.link_lost = False
     node.armed = False
+    node.auto_arm_pending = False
     node.stop_pending = True
+    node.state_lock = threading.Lock()
     node.arm_zero_positions = {}
     node.arm_directions = {}
     node.trajectory_lock = threading.Lock()

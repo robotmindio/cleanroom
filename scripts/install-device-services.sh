@@ -54,9 +54,23 @@ if [[ -f /etc/default/lekiwi-host ]]; then
   as_root rm -f /etc/default/lekiwi-host
 fi
 
-log "Installing lekiwi-cameras.service"
-install_unit lekiwi-cameras.service
-if [ -z "$(first_match '/dev/v4l/by-id/*WEBCAM*-video-index0')" ]; then
+camera_ros_available=false
+if command -v ros2 >/dev/null 2>&1 && ros2 pkg prefix v4l2_camera >/dev/null 2>&1; then
+  camera_ros_available=true
+fi
+if [[ $camera_ros_available == true ]]; then
+  log "Installing lekiwi-cameras.service"
+  install_unit lekiwi-cameras.service
+else
+  # Trixie/Raspberry Pi OS has no ROS apt packages. Do not enable a service
+  # whose ExecStart cannot exist, and clean up an older attempted install.
+  log "ROS v4l2_camera is unavailable; skipping lekiwi-cameras.service"
+  if [[ -f $UNIT_DIR/lekiwi-cameras.service ]]; then
+    as_root systemctl disable --now lekiwi-cameras.service 2>/dev/null || true
+    as_root rm -f "$UNIT_DIR/lekiwi-cameras.service"
+  fi
+fi
+if [[ $camera_ros_available == true && -z "$(first_match '/dev/v4l/by-id/*WEBCAM*-video-index0')" ]]; then
   log "warning: no front camera found -- lekiwi-cameras will keep failing"
   log "until one is attached (set LEKIWI_FRONT in ros-cameras.sh for odd hardware)."
 fi
@@ -69,7 +83,11 @@ fi
 
 log "Reloading systemd and enabling services"
 as_root systemctl daemon-reload
-as_root systemctl enable --now lekiwi-host.service lekiwi-cameras.service
+if [[ $camera_ros_available == true ]]; then
+  as_root systemctl enable --now lekiwi-host.service lekiwi-cameras.service
+else
+  as_root systemctl enable --now lekiwi-host.service
+fi
 
 if [[ -f $UNIT_DIR/lekiwi-stack.service ]]; then
   log "A ROS stack service is also installed here -- re-run"

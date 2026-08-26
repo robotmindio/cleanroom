@@ -73,8 +73,8 @@ Group membership only takes effect after a fresh login, so log out and back in
 before running the motor commands below.
 
 Then continue from [§1 Find the motor bus port](#1-find-the-motor-bus-port),
-running those commands **on the Pi**. The camera calibration and mapping steps in
-the main README stay on the workstation.
+running those commands **on the Pi**. Camera calibration also runs on the machine
+that physically owns each camera (normally the Pi); mapping runs on the workstation.
 
 ## What the installer already gives you
 
@@ -251,8 +251,9 @@ Defaults: command socket `5555/tcp`, observations `5556/tcp`, watchdog 500 ms,
 loop 30 Hz. The watchdog stops the base when commands stop arriving. It is not
 an E-stop.
 
-By default the host carries motors and both cameras, so its ZMQ clients can
-use images for teleoperation and dataset recording. Under ROS this mode is an
+By default the direct host auto-detects both known cameras; set `LEKIWI_WRIST=none`
+to leave the wrist feed out when USB bandwidth is tight. Its ZMQ clients can use
+images for teleoperation and dataset recording. Under ROS this mode is an
 exclusive alternative: ROS reads cameras through its own nodes on whichever
 machine they are plugged into, one reader per device, and a stalled frame must
 not be able to abort the motor host. So when ROS runs against this machine,
@@ -320,7 +321,7 @@ in `~/.cache/huggingface/lerobot/{repo-id}`.
 ## 8. Mount the LD06 lidar (optional)
 
 The LDROBOT LD06 replaces the camera-as-laser obstacle scan (`laser_source:=ld06`
-instead of the default `camera`). It mounts partway up the mast: the URDF puts
+instead of the default `auto` selection). It mounts partway up the mast: the URDF puts
 its `laser` frame 8 cm above the mast's origin -- about 30 cm off the base
 plate, level and facing forward -- so any bracket holding it there needs no TF
 work, only screws.
@@ -393,8 +394,9 @@ all.
 ros2 launch lekiwi_rmf bringup.launch.py mode:=real remote_ip:=192.168.1.50
 ```
 
-Continue with camera calibration in [README](README.md) §Real robot, step 2.
-The driver reads only the `front` camera and ignores `wrist`.
+Calibrate each camera on the machine it is plugged into with
+`scripts/calibrate.sh camera` or `scripts/calibrate.sh wrist`. The workstation
+relays both feeds; navigation and RTAB-Map use only the front camera.
 
 ## Safety
 

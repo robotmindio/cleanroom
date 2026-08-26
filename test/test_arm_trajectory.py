@@ -3,7 +3,13 @@ import math
 
 import pytest
 
-from lekiwi_rmf.arm_trajectory import action_positions, interpolate_positions, joint_positions, load_calibration
+from lekiwi_rmf.arm_trajectory import (
+    action_positions,
+    interpolate_positions,
+    joint_positions,
+    load_calibration,
+    validate_trajectory,
+)
 
 
 def test_action_positions_converts_ros_radians_to_lerobot_units():
@@ -18,6 +24,41 @@ def test_action_positions_rejects_invalid_joint_lists():
         action_positions(("arm_shoulder_pan", "unknown"), (0.0, 0.0))
     with pytest.raises(ValueError):
         action_positions(("arm_shoulder_pan",), (2.0,))
+    with pytest.raises(ValueError, match="joint limits"):
+        action_positions(("arm_wrist_roll",), (math.pi + 0.01,))
+    with pytest.raises(ValueError, match="finite"):
+        action_positions(("arm_wrist_roll",), (math.nan,))
+
+
+def test_trajectory_timing_and_reported_velocities_are_bounded():
+    start = {"arm_shoulder_pan": 0.0}
+    validate_trajectory(
+        ("arm_shoulder_pan",),
+        [(0.5, (1.0,), (2.0,)), (1.0, (0.0,), ())],
+        start,
+    )
+
+    with pytest.raises(ValueError, match="timing"):
+        validate_trajectory(
+            ("arm_shoulder_pan",), [(0.1, (1.0,), ())], start
+        )
+    with pytest.raises(ValueError, match="velocity exceeds"):
+        validate_trajectory(
+            ("arm_shoulder_pan",), [(1.0, (1.0,), (2.1,))], start
+        )
+
+
+@pytest.mark.parametrize("value", [math.nan, math.inf, -math.inf])
+def test_trajectory_rejects_non_finite_positions_and_velocities(value):
+    start = {"arm_shoulder_pan": 0.0}
+    with pytest.raises(ValueError, match="finite"):
+        validate_trajectory(
+            ("arm_shoulder_pan",), [(1.0, (value,), ())], start
+        )
+    with pytest.raises(ValueError, match="finite"):
+        validate_trajectory(
+            ("arm_shoulder_pan",), [(1.0, (0.0,), (value,))], start
+        )
 
 
 def test_interpolate_positions_reaches_waypoints_on_time():
