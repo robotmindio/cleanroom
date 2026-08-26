@@ -19,38 +19,10 @@ export LEKIWI_RUNTIME_DIR="$RUNTIME_DIR"
 # per launch, but dated crash copies and host logs otherwise accumulate forever.
 find "$LOGS" -type f \( -name '*.log.*' -o -name '*.log-*' \) -mtime +14 -delete 2>/dev/null || true
 
-# Interrupted or incompatible RTAB-Map runs are archived rather than deleted so
-# they can be inspected or recovered. Retain a short diagnostic window, then
-# remove only our dated archives; an unbounded collection previously consumed GB.
-find "$HOME/.ros" -maxdepth 1 -type f \( -name 'lekiwi_rtabmap.db.stale-*' -o -name 'lekiwi_rtabmap.db.corrupt-*' \) -mtime +14 -delete 2>/dev/null || true
-
-# RTAB-Map keeps its working database indefinitely.  A database from an aborted
-# run can grow past RAM, take minutes to reopen, and prevent the first /map TF
-# from appearing.  Preserve it for diagnosis, but start a fresh mapping session
-# once the *default* database is implausibly large.  An explicitly supplied
-# rtabmap_database:=... is always respected: it may be an intentional map archive.
-rtabmap_database="$HOME/.ros/lekiwi_rtabmap.db"
-rtabmap_database_explicit=0
-for launch_arg in "$@"; do
-  case "$launch_arg" in
-    rtabmap_database:=*)
-      rtabmap_database="${launch_arg#rtabmap_database:=}"
-      rtabmap_database_explicit=1
-      ;;
-  esac
-done
-rtabmap_max_bytes="${LEKIWI_RTABMAP_MAX_BYTES:-536870912}" # 512 MiB
-if [[ "$rtabmap_max_bytes" =~ ^[0-9]+$ ]] && (( ! rtabmap_database_explicit )) \
-  && [ -f "$rtabmap_database" ] && (( $(stat -c %s "$rtabmap_database") > rtabmap_max_bytes )); then
-  archived_database="${rtabmap_database}.stale-$(date +%Y%m%d-%H%M%S)"
-  mv -- "$rtabmap_database" "$archived_database"
-  # Keep SQLite sidecars with the archived database. Leaving a WAL beside a
-  # fresh database can make SQLite replay pages from the old mapping session.
-  for suffix in -wal -shm -journal; do
-    [ ! -e "${rtabmap_database}${suffix}" ] || mv -- "${rtabmap_database}${suffix}" "${archived_database}${suffix}"
-  done
-  echo "Archived oversized RTAB-Map database to $archived_database; starting a fresh map."
-fi
+# RTAB-Map database rotation and bounded archive retention also run from
+# ros-start.sh, the path systemd uses. Keep this wrapper so direct `up.sh`
+# launches get exactly the same policy.
+scripts/rtabmap-db-maintenance.py "$@"
 
 # A launch takes a few seconds to appear in pgrep. Serialize this whole startup window so
 # two near-simultaneous invocations cannot both pass the "no stack" check and bind the
@@ -74,6 +46,10 @@ wait_for() { # wait_for <seconds> <command...>
 # More importantly, never adopt a manually launched host just because a broad pgrep
 # happens to find one: it may belong to another robot sharing this workstation.
 host_port_listening() {
+  ss -tln | grep -q ':5555' && ss -tln | grep -q ':5557'
+}
+
+motion_port_listening() {
   ss -tln | grep -q ':5555'
 }
 
@@ -84,7 +60,7 @@ recorded_host_up() {
   [[ $host_pid =~ ^[1-9][0-9]*$ ]] || return 1
   [ -r "/proc/$host_pid/cmdline" ] || return 1
   host_command=$(tr '\0' ' ' < "/proc/$host_pid/cmdline")
-  [[ $host_command == *"robot-host.sh"* || $host_command == *"lerobot.robots.lekiwi.lekiwi_host"* ]] \
+  [[ $host_command == *"robot-host.sh"* || $host_command == *"torque-host.py"* || $host_command == *"lerobot.robots.lekiwi.lekiwi_host"* ]] \
     && host_port_listening
 }
 
@@ -184,9 +160,9 @@ stop_stack_started_here() {
 # recorded process group or to the repository-managed systemd service.
 if host_up; then
   echo "host: already running"
-elif host_port_listening; then
-  echo "refusing to use an unowned ZMQ host on TCP 5555" >&2
-  echo "stop that process, or start the repository-managed lekiwi-host.service." >&2
+elif motion_port_listening; then
+  echo "host on TCP 5555 lacks the required torque-safety endpoint on TCP 5557" >&2
+  echo "restart it from this repository (or restart lekiwi-host.service) before launching ROS." >&2
   exit 1
 else
   # ROS reads the local cameras directly. Keeping them out of the LeRobot host avoids
