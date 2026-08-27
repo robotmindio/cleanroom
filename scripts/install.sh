@@ -45,8 +45,17 @@ SUDO=()
 
 log "Installing Ubuntu and ROS repository prerequisites"
 "${SUDO[@]}" apt-get update
-"${SUDO[@]}" apt-get install -y curl git locales python3-pip python3-venv software-properties-common unzip
+"${SUDO[@]}" apt-get install -y software-properties-common
 "${SUDO[@]}" add-apt-repository -y universe
+"${SUDO[@]}" apt-get update
+"${SUDO[@]}" apt-get install -y \
+  curl \
+  git \
+  locales \
+  python3-pip \
+  python3-venv \
+  shellcheck \
+  unzip
 
 legacy_ros_source=/etc/apt/sources.list.d/ros2.list
 modern_ros_source=/etc/apt/sources.list.d/ros2.sources
@@ -95,7 +104,18 @@ fi
   "ros-$ROS_DISTRO-rviz2" \
   "ros-$ROS_DISTRO-v4l2-camera" \
   python3-matplotlib \
-  python3-opencv
+  python3-opencv \
+  python3-yaml \
+  python3-zmq \
+  psmisc \
+  v4l-utils
+
+# Qualification invokes these through the system interpreter and PATH.  Check
+# that exact contract now so an incomplete deployment image fails during
+# installation rather than silently omitting the three ZMQ-dependent tests or
+# the shell validation step later.
+command -v shellcheck >/dev/null || die "ShellCheck was not installed"
+python3 -c 'import zmq' || die "python3-zmq was not installed for the system Python"
 
 if [[ ! -e /etc/ros/rosdep/sources.list.d/20-default.list ]]; then
   "${SUDO[@]}" rosdep init

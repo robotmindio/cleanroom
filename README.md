@@ -16,7 +16,8 @@ The package includes:
 - a Gazebo cleanroom and LeKiwi model;
 - a metric Nav2 occupancy map and matching RMF navigation graph;
 - a LeRobot-to-ROS driver for velocity, odometry, arm joints, and the front camera;
-- MoveIt planning and execution for the five-joint arm on real hardware;
+- MoveIt planning and execution for the five-joint arm on real hardware and
+  the physics-actuated Gazebo arm;
 - RTAB-Map monocular place recognition and loop closure using metric wheel odometry;
 - a Free Fleet adapter connecting Nav2 to Open-RMF;
 - optional rosbridge WebSocket access for browsers and external applications;
@@ -89,8 +90,8 @@ the LeRobot motor/camera environment:
 ```
 
 The server still needs a GPU whose driver exposes OpenGL 3.3 or newer to
-headless EGL. See [SERVER-HANDOFF.md](SERVER-HANDOFF.md) for the validation
-sequence after it is provisioned.
+headless EGL. See [DEFERRED.md](DEFERRED.md#qualified-simulation-server-acceptance)
+for the validation sequence after it is provisioned.
 
 ## Simulation quick start
 
@@ -106,6 +107,20 @@ Launch Gazebo, visual SLAM, and Nav2 through the managed renderer preflight:
 scripts/sim-up.sh
 ```
 
+The drivetrain, wheel-derived odometry, and simulated arm action also have a
+renderer-free Gazebo acceptance test. It is safe to run on a headless Jazzy
+builder after building the package:
+
+```bash
+ctest --test-dir build/lekiwi_rmf \
+  -R '^test_test_simulation_physics_launch.py$' --output-on-failure
+```
+
+That test launches physics, spawns the same launch-time anisotropic-contact
+SDF used by bringup, drives through `/cmd_vel_safe`, checks encoder odometry,
+and completes an arm/gripper `FollowJointTrajectory` goal. Camera, depth, and
+lidar rendering remain in the GPU-qualified acceptance below.
+
 It refuses a host that cannot create a headless OpenGL 3.3 context, records
 only its own process group, and writes `~/.ros/lekiwi/sim-stack.log`. Stop it
 with `scripts/ros-stop.sh`; that script escalates only within the recorded
@@ -119,12 +134,14 @@ ros2 action send_goal /navigate_to_pose nav2_msgs/action/NavigateToPose \
   '{pose: {header: {frame_id: map}, pose: {position: {x: 0.3, y: 0.0}, orientation: {w: 1.0}}}}'
 ```
 
-RMF is opt-in because it connects the robot to the configured fleet graph. To
-run it, start the managed simulation initially with `start_rmf:=true`, then
-dispatch an RMF patrol from another sourced terminal:
+RMF is opt-in because it connects the robot to a fleet graph. It is only valid
+in `slam_mode:=localization` with an approved map bundle; the checked-in
+synthetic development bundle cannot start RMF. After installing a surveyed
+bundle, start the managed simulation with its manifest:
 
 ```bash
-scripts/sim-up.sh start_rmf:=true
+scripts/sim-up.sh slam_mode:=localization start_rmf:=true \
+  map_bundle:=/absolute/path/to/site-v1.yaml
 ```
 
 ```bash
@@ -146,7 +163,7 @@ scripts/sim-up.sh slam_mode:=localization \
 | `mode` | `sim`, `real` | `sim` | Select Gazebo or the LeRobot hardware bridge |
 | `headless` | `true`, `false` | `true` | Run Gazebo server-only with offscreen rendering; set false to open its GUI |
 | `localization` | `visual_slam`, `amcl` | `visual_slam` | Select the sole `map -> odom` provider |
-| `slam_mode` | `mapping`, `localization` | `mapping` | Extend or reuse the RTAB-Map database |
+| `slam_mode` | `mapping`, `localization` | sim: `mapping`; real: `localization` | Extend or reuse the RTAB-Map database |
 | `remote_ip` | IPv4/hostname | `127.0.0.1` | Address of the LeKiwi ZMQ host |
 | `rtabmap_database` | file path | sim: `~/.ros/lekiwi_rtabmap_sim.db`; real: `~/.ros/lekiwi_rtabmap.db` | Visual map database |
 | `camera_info_url` | ROS camera URL | `file://~/.ros/camera_info/lekiwi_front.yaml` | Real front-camera calibration |
@@ -160,10 +177,10 @@ scripts/sim-up.sh slam_mode:=localization \
 | `xy_velocity_scale` | float | `1.0` | Correction for reported and commanded translation |
 | `yaw_velocity_scale` | float | `0.90` | Correction for reported and commanded rotation |
 | `start_rmf` | `true`, `false` | `false` | Start Zenoh, RMF schedule, dispatcher, and fleet adapter |
-| `rmf_domain` | integer | `0` | DDS domain used by RMF processes; must match the robot graph unless a cross-domain bridge is configured |
-| `start_rosbridge` | `true`, `false` | `true` | Start rosbridge WebSocket and ROS API nodes |
-| `start_moveit` | `true`, `false` | `false` | Start MoveIt arm planning and execution (real hardware only) |
-| `rosbridge_address` | bind address | `0.0.0.0` | Interface exposed by rosbridge |
+| `rmf_domain` | integer | `0` | DDS domain used by RMF processes; validation currently requires `0` because no tracked cross-domain bridge is configured |
+| `start_rosbridge` | `true`, `false` | `false` | Start rosbridge WebSocket and ROS API nodes |
+| `start_moveit` | `true`, `false` | `false` | Start MoveIt arm planning and execution against the real or simulated action server |
+| `rosbridge_address` | bind address | `127.0.0.1` | Interface exposed by rosbridge; keep loopback unless protected separately |
 | `rosbridge_port` | TCP port | `9090` | WebSocket listening port |
 | `rosbridge_domain` | integer | `0` | ROS graph exposed through rosbridge |
 
@@ -171,15 +188,22 @@ Only one localization mode should run. `visual_slam` publishes `map -> odom` thr
 
 ### Arm planning
 
-Start MoveIt with the real robot. RViz opens with the **MotionPlanning** display;
-select the `arm` group, then plan and execute normally:
+Start MoveIt with either robot mode. Open RViz separately when visual planning
+is needed; `bringup.launch.py` does not start a desktop session. The following
+starts the real arm action server, but does not move the robot:
 
 ```bash
-ros2 launch lekiwi_rmf bringup.launch.py mode:=real
+# terminal 1
+ros2 launch lekiwi_rmf bringup.launch.py mode:=real start_moveit:=true
+# terminal 2, after the stack is running
+scripts/rviz.sh
 ```
 
-MoveIt executes through `/arm_controller/follow_joint_trajectory`. Gazebo keeps
-the unactuated arm rigid, so arm execution is deliberately unavailable in `mode:=sim`.
+MoveIt executes through `/arm_controller/follow_joint_trajectory` in both
+modes. In simulation, Gazebo's six-joint physics controller supplies actual
+joint feedback and the adapter enforces the same trajectory limits and
+tolerances as the hardware boundary. To exercise it, launch with
+`mode:=sim start_moveit:=true`; the delayed depth cloud feeds MoveIt's octomap.
 The host uses five motor read retries while the arm moves; override only after validating
 your bus with `LEKIWI_READ_RETRIES`.
 
@@ -206,24 +230,61 @@ joint's `directions` value between `1` and `-1`, then restart.
 
 ### Recovery after motor power loss
 
-The driver automatically arms once at startup, but only after it receives complete, fresh motor
-telemetry. It begins with a zero command, so arming alone does not make the robot move.
-After stale or failed telemetry it keeps publishing measured joint state, cancels the interrupted
-trajectory, and remains disarmed after recovery. An operator must inspect the robot and explicitly
-arm it before sending a new motion command:
+Real hardware is default-deny. The driver does not auto-arm at startup, and a
+host or ROS restart never restores torque or an interrupted command. It must
+receive complete, fresh telemetry and permission from the continuous safety
+supervisor before an operator can explicitly arm it. After stale or failed
+telemetry it keeps publishing measured joint state, cancels the interrupted
+trajectory, and remains disarmed after recovery. Inspect the robot and then:
 
 ```bash
 ros2 service call /safety/arm std_srvs/srv/Trigger '{}'
 ```
 
-`/safety/state` reports `DISARMED`, `ARMED`, or `LINK_LOST`. A power-loss recovery always needs
-a fresh navigation or MoveIt command; an interrupted trajectory is aborted and is never replayed.
-`safety/disarm` stops ROS commands, but cannot remove servo torque: LeRobot's ZMQ client does not
-expose torque control, so use the physical emergency stop for that.
+`/safety/state` reports the driver's `DISARMED`, `ARMED`, or `LINK_LOST` state.
+The supervisor publishes `safety/supervisor_state`,
+`safety/base_motion_permitted`, and `safety/arm_motion_permitted`, and latches
+runtime faults until `/safety/reset_fault` is called while the driver is
+disarmed and all inputs are healthy. `/safety/disarm` stops ROS commands and
+waits for the motor host to confirm that it cut torque on all nine servos.
+The host always restarts torque-off. `/safety/arm` holds each arm joint at its
+measured position, sends zero wheel velocity, and requires an explicit fresh
+arm request. The physical E-stop remains mandatory for any electrical,
+mechanical, or process failure.
+
+### Production safety prerequisites
+
+Real mode loads `config/safety_production.yaml`. It denies base and arm motion
+until the following current, stamped inputs are present and healthy:
+
+| Input | Topic | Purpose |
+| --- | --- | --- |
+| Driver state | `safety/driver_state` | Motor-link and torque state |
+| Full scan | `/scan` | Obstacle coverage and freshness |
+| Depth | `/camera/depth/points` | Arm-workspace obstacles |
+| Odometry | `/odom` | Base state |
+| IMU | `/imu/data` | Base dynamics |
+| Joint state | `/joint_states` | Arm feedback and stow interlock |
+| Bumper | `safety/bumper_active` | Contact stop |
+| E-stop | `safety/estop_active` | Independent emergency stop state |
+| Battery | `/battery_state` | Voltage and charge limits |
+| Motor health | `/hardware/diagnostics` | Servo/bus faults |
+| Arm collision gate | `/safety/arm_workspace_clear` | Live MoveIt scene/state validity |
+
+The repository ships `config/safety_acceptance.yaml` with `validated: false`.
+It is an acceptance template, not proof of safety. A qualified hardware
+procedure must record all-direction stopping trials, fault responses, software
+revision, sensor configuration, and the measured stow pose before setting it
+true. No physical stopping, E-stop, depth, or full production sensor acceptance
+is implied by a passing software test.
 
 ### Where the camera comes from
 
-The cameras are read by `v4l2_camera` nodes on whichever machine they are plugged into, not relayed through the LeRobot host. The host aborts the whole robot — motor control included — when a camera frame arrives more than half a second late, and USB webcams do that regularly.
+The cameras are read by `v4l2_camera` nodes on whichever machine they are
+plugged into, not relayed through the LeRobot host in ROS mode. The repository
+host is started camera-less for ROS, so a delayed camera frame cannot take the
+motor bus down. Direct LeRobot dataset/teleoperation mode may still be
+camera-sensitive and should not be used as the ROS motor service.
 
 With a Pi on the robot, `ros-cameras.sh` reads each USB camera there and publishes a
 compressed `/pi/camera/...` stream. The workstation relays and expands it onto the
@@ -248,17 +309,20 @@ It drives a short leg and compares the distance the calibrated camera sees again
 
 ## WebSocket access with rosbridge
 
-Rosbridge is separate from Zenoh: Zenoh remains the transport required by Free Fleet, while rosbridge exposes one ROS graph as JSON over WebSocket. It starts by default and binds on every IPv4 interface (`0.0.0.0`).
+Rosbridge is separate from Zenoh: Zenoh remains the transport required by Free Fleet, while rosbridge exposes one ROS graph as JSON over WebSocket. It is disabled by default and binds to loopback when explicitly enabled.
 
 ```bash
-scripts/sim-up.sh start_rosbridge:=true
+scripts/sim-up.sh start_rosbridge:=true rosbridge_address:=127.0.0.1
 ```
 
-Connect a rosbridge-compatible client such as roslibjs to the robot's address:
+For a local client, connect to loopback:
 
 ```text
-ws://ROBOT_IP:9090
+ws://127.0.0.1:9090
 ```
+
+`ws://ROBOT_IP:9090` is only appropriate when a separately managed
+authenticated proxy deliberately exposes that endpoint.
 
 Minimal roslibjs connection:
 
@@ -271,14 +335,16 @@ ros.on("error", console.error);
 The default `rosbridge_domain:=0` exposes LeKiwi, camera, SLAM, and Nav2. To expose the separate RMF graph instead:
 
 ```bash
-scripts/sim-up.sh rosbridge_domain:=55
+scripts/sim-up.sh start_rosbridge:=true rosbridge_address:=127.0.0.1 \
+  rosbridge_domain:=55
 ```
 
-Rosbridge has no authentication, authorization, or TLS. Any network client that can reach port
-9090 can publish to
-`/cmd_vel_manual`, which reaches the collision-monitor path and can cause motion
-once the driver has armed. Use this configuration only on a trusted, access-controlled LAN. For
-an untrusted network, put an authenticated TLS proxy and firewall policy in front of port 9090.
+Rosbridge has no authentication, authorization, or TLS. Keep it on loopback
+for local tools. Do not bind it to a LAN address until it is behind a separately
+managed authenticated TLS proxy and firewall policy. A client must use the
+documented `/cmd_vel_manual` or navigation action; publishing directly to
+`/cmd_vel_safe` bypasses the intended guard and is an unsafe protocol violation.
+Rosbridge access is not a safety boundary.
 
 ### Driving the robot from Fiber
 
@@ -311,7 +377,11 @@ scripts/up.sh
 ```
 
 It starts the LeRobot host, waits for the nine servos to answer, and brings up the
-ROS navigation stack; logs land in `~/.ros/lekiwi`. On the 4 GB robot computer,
+ROS navigation stack; logs land in `~/.ros/lekiwi`. Real mode remains motion-
+denied until the production safety supervisor has current healthy inputs and
+`config/safety_acceptance.yaml` has been replaced by a validated physical
+acceptance record. A successful launch alone does not mean the robot is safe
+to move. On the 4 GB robot computer,
 MoveIt and RViz are intentionally opt-in so they cannot starve camera safety. Run
 `scripts/rviz.sh` from a workstation when visualisation is needed, and pass
 `start_moveit:=true` only for an arm task. `scripts/ros-stop.sh` stops all of it.
@@ -341,8 +411,55 @@ scripts/install-device-services.sh          # where motors and cameras plug in
 scripts/install-compute-services.sh         # where the ROS stack should run
 ```
 
+Both installers require a non-root service account. When run through `sudo`,
+the invoking account is selected; a direct root invocation must name it. Use
+these explicit options when the workspace or virtual environment is not under
+the account's default paths:
+
+```bash
+sudo scripts/install-device-services.sh \
+  --service-user "$USER" --workspace "$HOME/lekiwi_ws" \
+  --lerobot-venv "$HOME/lekiwi_ws/.venv-lerobot"
+sudo scripts/install-compute-services.sh \
+  --service-user "$USER" --workspace "$HOME/lekiwi_ws"
+```
+
+For a split device/compute deployment, install the device unit on the motor
+machine, then configure the compute machine with:
+
+```bash
+sudo scripts/install-compute-services.sh --service-user "$USER" \
+  --workspace "$HOME/lekiwi_ws" --remote DEVICE_IP
+```
+
+The motor and torque endpoints bind to loopback (`127.0.0.1`) by default. The
+installer accepts `--bind-address` only for an explicit interface address, and
+the host refuses an unauthenticated non-loopback bind. Do not expose ports
+5555, 5556, or 5557 directly to an untrusted network. Remote control requires
+the repository's authenticated ZMQ deployment (CURVE credentials and firewall
+rules) to be configured before using a non-loopback address.
+
+Generate the server, health, and driver identities once as the device service
+account, then install both halves with a protected key directory. Copy the
+driver secret and server public key to the compute host only through an
+approved secret-transfer process:
+
+```bash
+"$HOME/lekiwi_ws/.venv-lerobot/bin/python" scripts/generate-zmq-keys.py \
+  "$HOME/.ros/lekiwi/curve"
+sudo scripts/install-device-services.sh --bind-address DEVICE_IP \
+  --curve-dir "$HOME/.ros/lekiwi/curve"
+sudo scripts/install-compute-services.sh --remote DEVICE_IP \
+  --curve-dir "$HOME/.ros/lekiwi/curve"
+```
+
+The last command is run on the compute host only after its key directory has
+`clients/driver.key_secret` and `server.key`. CURVE protects ZMQ endpoints; it
+does not configure a firewall or authenticate ROS 2 DDS.
+
 The device side installs two units: `lekiwi-host.service` (the motor bus,
-served on `5555/tcp`) and `lekiwi-cameras.service` (the cameras, published by
+served on `5555/tcp` with observations on `5556/tcp` and torque safety on
+`5557/tcp`) and `lekiwi-cameras.service` (the cameras, published by
 `v4l2_camera` right where they are plugged in — never read by the motor host:
 one reader per device, so a stalled camera frame cannot abort the motor bus).
 The compute side installs `lekiwi-stack.service`:
@@ -364,6 +481,13 @@ retrying until the device half appears, however long the other machine takes
 to boot; stop services with `systemctl`, not `scripts/ros-stop.sh`, which the
 restart policy would simply undo. RViz is deliberately not a service — it
 needs a desktop session — so run `scripts/rviz.sh` when you sit down at it.
+
+All three units run as the selected non-root service account with no new
+privileges, a private temporary directory, a read-only system tree, kernel and
+control-group protection, and restrictive file creation permissions. Their
+HOME remains writable for repository-managed ROS databases, logs, calibration,
+and key material; serial and V4L2 devices remain visible because their dynamic
+device paths are required by the host/camera services.
 
 The two halves can also mix ownership: keep the device services running and
 drive the stack by hand whenever you feel like it —
@@ -395,8 +519,10 @@ To drive the base by hand:
 scripts/teleop.sh
 ```
 
-Keys go to the terminal running it, and only while that terminal has focus. Teleoperation
-and Nav2 both write `/cmd_vel`, so drive or send goals, not both at once.
+Keys go to the terminal running it, and only while that terminal has focus.
+Teleoperation publishes `/cmd_vel_manual`; Nav2 publishes `/cmd_vel_smoothed`.
+The mux arbitrates them before collision monitoring, but drive or send goals,
+not both at once.
 
 Arrows drive: up and down for forward and back, left and right to strafe, `1` and `2`
 to turn, space to stop, `9` and `0` for slower and faster. Those keys send the same
@@ -446,9 +572,10 @@ preferably by its stable `/dev/serial/by-id` name:
 scripts/up.sh laser_source:=ld06 lidar_port:=/dev/serial/by-id/usb-...-if00-port0
 ```
 
-Its 12 m range makes the camera trick redundant, which is why the two are mutually
-exclusive: pick one, or `laser_source:=none` to run without obstacle detection (RViz still
-shows everything else; Nav2 just plans against walls it cannot see).
+Its 12 m range makes the camera trick redundant, which is why the two are
+mutually exclusive. `laser_source:=none` is rejected in real mode: production
+navigation must retain either camera or LD06 obstacle sensing. It is useful
+only for non-motion diagnosis where the real driver is not launched.
 
 The rest of this section walks through bringing up the real robot and the
 calibration each piece depends on.
@@ -467,7 +594,15 @@ It needs a 64-bit image with Python 3.12+. Use Ubuntu 24.04 when the Pi publishe
 scripts/pi-up.sh
 ```
 
-Keep the host watchdog enabled. Ports `5555/tcp` and `5556/tcp` must be reachable from the ROS computer; do not expose them to an untrusted network.
+Keep the host watchdog enabled. Ports `5555/tcp`, `5556/tcp`, and `5557/tcp`
+must be reachable from the ROS computer only through the configured protected
+control interface; do not expose them to an untrusted network. Check the
+repository health handshake before starting ROS:
+
+```bash
+"$HOME/lekiwi_ws/.venv-lerobot/bin/python" scripts/host-health-check.py \
+  --host 127.0.0.1
+```
 
 ### 2. Calibrate the front camera
 
@@ -478,6 +613,8 @@ Start the bridge without RMF. AMCL may wait for `/scan` during this calibration-
 ```bash
 ros2 launch lekiwi_rmf bringup.launch.py \
   mode:=real remote_ip:=192.168.1.50 \
+  curve_client_secret_key_file:=/secure/path/driver.key_secret \
+  curve_server_public_key_file:=/secure/path/server.key \
   localization:=amcl publish_camera:=true start_rmf:=false
 ```
 
@@ -522,9 +659,16 @@ Use a new database filename for the first mapping run:
 ```bash
 ros2 launch lekiwi_rmf bringup.launch.py \
   mode:=real remote_ip:=192.168.1.50 \
+  curve_client_secret_key_file:=/secure/path/driver.key_secret \
+  curve_server_public_key_file:=/secure/path/server.key \
   localization:=visual_slam slam_mode:=mapping \
   rtabmap_database:=$HOME/.ros/lekiwi_cleanroom.db
 ```
+
+This is the mapping procedure, not a safety bypass: the current production
+profile still denies motion until its required health inputs and physical
+acceptance record are installed. Do not weaken the supervisor just to map;
+use a reviewed mapping configuration and retain the hardwired E-stop.
 
 Drive slowly around the complete route and return to previously viewed areas from similar angles so RTAB-Map can close loops. Avoid motion blur, blank walls, changing illumination, and moving the arm through the front camera view.
 
@@ -537,6 +681,8 @@ Start from the charger pose and switch RTAB-Map to localization mode:
 ```bash
 ros2 launch lekiwi_rmf bringup.launch.py \
   mode:=real remote_ip:=192.168.1.50 \
+  curve_client_secret_key_file:=/secure/path/driver.key_secret \
+  curve_server_public_key_file:=/secure/path/server.key \
   localization:=visual_slam slam_mode:=localization \
   rtabmap_database:=$HOME/.ros/lekiwi_cleanroom.db
 ```
@@ -551,18 +697,64 @@ map -> odom -> base_footprint -> mast -> front_camera_link -> front_camera_optic
 
 | Interface | Producer | Consumer |
 | --- | --- | --- |
-| `/cmd_vel` | Nav2 | Gazebo or `lekiwi_driver` |
-| `/odom`, `odom -> base_footprint` | Gazebo or `lekiwi_driver` | RTAB-Map and Nav2 |
+| `/cmd_vel_manual` | Teleop or approved external client | `cmd_vel_mux` |
+| `/cmd_vel_smoothed` | Nav2 | `cmd_vel_mux` |
+| `/cmd_vel_safe` | Collision monitor (intended sole guarded output) | Gazebo or `lekiwi_driver` |
+| `/wheel/odometry`, `/odom`, `odom -> base_footprint` | Driver and robot-localization EKF | RTAB-Map and Nav2 |
 | `/camera/front/image_raw` | Gazebo, local `v4l2_camera`, or the remote-camera relay | RTAB-Map |
 | `/camera/front/camera_info` | Gazebo, calibrated `v4l2_camera`, or the relay | RTAB-Map |
 | `/scan` | Gazebo, `free_space.py`, or the LD06 driver (`laser_source`) | Nav2 and RTAB-Map |
 | `map -> odom` | RTAB-Map or AMCL | Nav2 and Free Fleet |
 | `/navigate_to_pose` | Nav2 action server | Free Fleet through Zenoh |
-| `ws://ROBOT_IP:9090` | rosbridge | Browser/external clients |
+| `safety/driver_state` | `lekiwi_driver` | Safety supervisor |
+| `safety/supervisor_state` | Safety supervisor | Operator/automation |
+| `safety/base_motion_permitted` | Safety supervisor | Mux and driver interlock |
+| `safety/arm_motion_permitted` | Safety supervisor | Driver/arm interlock |
+| `/safety/arm`, `/safety/disarm`, `/safety/reset_fault` | Driver / supervisor | Explicit operator control |
+| `ws://127.0.0.1:9090` | rosbridge when explicitly enabled | Local browser/external client |
 
 By default nothing serves the checked-in PGM: RTAB-Map publishes `/map` itself, drawing the occupancy grid from the camera-derived `/scan` while its visual place database corrects pose drift. The robot starts at the origin of a map it has not seen yet, and the grid grows as it drives. `static_map:=true` puts the checked-in floor plan back on `/map` instead, and moves RTAB-Map's own grid to `/rtabmap/map`.
 
 A live map and the checked-in RMF navigation graph do not agree on coordinates: the graph names points in the PGM's frame. Keep `start_rmf:=false` while mapping, or regenerate the graph against the map the robot draws.
+
+### Immutable map bundles
+
+RMF operation must use an approved bundle under `maps/bundles/`. A bundle pins
+the occupancy YAML and image, navigation graph, and fleet configuration by
+SHA-256. Validation also fits the RMF/robot reference coordinates, checks the
+fleet footprint, and proves every graph vertex and lane has the configured
+footprint of free, known map space. The checked-in
+`maps/bundles/cleanroom-development.yaml` is intentionally a synthetic,
+unapproved example and cannot start RMF.
+
+Inspect a development bundle without treating it as deployable:
+
+```bash
+PYTHONPATH=. python3 scripts/validate-map-bundle.py \
+  maps/bundles/cleanroom-development.yaml --allow-unapproved
+```
+
+The command still enforces map resolution, checksums, graph geometry, and
+free-space consistency. It currently fails for the demonstration bundle's
+0.5 m resolution; that is expected. An approved surveyed bundle must contain
+`validated: true` and a SHA-256-pinned `artifacts.validation_report`. Launch
+selects the map, graph, and fleet from that manifest; do not provide separate
+artifact paths that disagree with it:
+
+```bash
+ros2 launch lekiwi_rmf bringup.launch.py mode:=real \
+  slam_mode:=localization start_rmf:=true \
+  map_bundle:=/absolute/path/to/maps/bundles/site-v1.yaml
+```
+
+Mapping is a separate, bounded activity. The session guard includes the
+database and SQLite sidecars (`-wal`, `-shm`, and `-journal`) and exits with a
+quota status when `rtabmap_mapping_max_bytes` or
+`rtabmap_mapping_max_seconds` is reached. The launch then shuts down RTAB-Map
+so the closed database can be archived safely. Do not rename an active SQLite
+database. The repository-managed default database is rotated at startup;
+explicit map databases are retained for export and must be managed by the
+map-bundle workflow.
 
 ## Troubleshooting
 
@@ -659,7 +851,9 @@ ros2 node list | grep -E 'rosapi|rosbridge'
 ss -ltn | grep ':9090'
 ```
 
-Remote clients require an explicitly permitted firewall rule for TCP 9090.
+Remote clients require an explicitly permitted firewall rule for TCP 9090 and
+an authenticated proxy; a raw unauthenticated WebSocket is not supported for
+robot control.
 
 ### Localization jumps or closes false loops
 
@@ -667,10 +861,63 @@ Recalibrate the camera and wheel scale first. Then remap with slower motion and 
 
 ## Safety and current limits
 
-- Use a physical emergency stop and supervise every first hardware run.
-- Rosbridge is disabled by default. If enabled, it has no authentication or TLS and must remain loopback-only unless a separately managed authenticated proxy restricts access.
-- The LeRobot watchdog stops the base when commands cease; this is not a substitute for an E-stop.
-- Gazebo uses native planar velocity control. Omniwheels are visual geometry, not roller-contact physics.
-- Monocular floor segmentation is a conservative supplemental obstacle source, not a substitute for lidar/depth sensing; it cannot see floor-coloured or overhanging obstacles.
-- Battery drain is disabled because stock LeKiwi does not report battery state.
-- RMF schedules mobile-base patrol and delivery. It does not schedule arm trajectories in this package.
+- Real mode uses a default-deny, continuously evaluated safety supervisor. A
+  one-shot readiness message is not a motion permit. Missing or stale required
+  inputs deny motion; a runtime fault latches until the driver is disarmed and
+  `/safety/reset_fault` is explicitly called.
+- Keep a hardwired physical E-stop reachable and supervise every hardware run.
+  The ROS E-stop topic and software torque cut are status/control interfaces,
+  not substitutes for removing actuator energy independently of ROS.
+- The production profile requires `/scan`, `/camera/depth/points`, `/odom`,
+  `/imu/data`, `/joint_states`, `/battery_state`,
+  `/hardware/diagnostics`, `safety/bumper_active`, and
+  `safety/estop_active`, plus `safety/driver_state`. The supplied
+  `config/safety_acceptance.yaml` is deliberately unvalidated; physical
+  stopping and fault trials must populate it before production arming.
+- The acceptance record is schema version 2. It remains invalid until it has
+  reviewed limits, at least 30 trials in every translation/rotation direction,
+  worst-case distances plus uncertainty, stop latency, traceable
+  software/sensor/payload/surface details, and every fault test marked true.
+  This includes independent E-stop behavior, unauthorized ZMQ rejection, and
+  DDS/rosbridge isolation or authentication. At startup, the supervisor also
+  requires the accepted footprint and padding to match both tracked Nav2
+  costmaps and proves the enabled StopZone leaves at least the measured worst
+  stopping distance plus uncertainty around that footprint.
+- The driver never auto-arms and does not restore torque after host or ROS
+  restart. `/safety/arm` is an explicit operator action after inspection;
+  `/safety/disarm` cuts torque through the motor host and aborts arm motion.
+- Rosbridge is disabled by default and loopback-bound when enabled. It has no
+  authentication or TLS. Keep it on loopback, or put a separately managed
+  authenticated proxy and firewall in front of it. The motor command and
+  torque endpoints also default to loopback; the host refuses unauthenticated
+  non-loopback control binds.
+- This repository does not configure DDS security. ROS 2 discovery and the
+  control graph are residual network exposure unless the deployment supplies
+  DDS security or network isolation; neither rosbridge nor CURVE secures DDS.
+- The motor-host watchdog cuts and verifies all servo torque when commands
+  cease; authenticated telemetry makes the ROS driver observe that cut and
+  require an explicit re-arm. This software mechanism is not a
+  substitute for an E-stop. A front monocular floor scan is supplemental and
+  cannot see all side/rear, floor-coloured, low, or overhanging obstacles.
+- Production MoveIt now has an execution-time arm-workspace gate. It requires
+  fresh complete joint state, a freshly stamped octomap and repeated successful
+  `/check_state_validity` responses; collision, timeout or perception failure
+  withdraws the arm lease. Its discrete check and software stop still require
+  measured physical latency/intrusion acceptance, and the CAD collision matrix
+  needs a measured collision-free calibration pose.
+- Gazebo drives three wheel joints at the CAD-derived 120-degree layout. The
+  launch-time `sim_sdf` conversion adds anisotropic `fdir1` contact friction,
+  and encoder joint positions—not model ground truth—produce `/odom`.
+  Commands have velocity, acceleration, jerk, wheel-rate, and ROS watchdog
+  limits. A Gazebo-native 250 ms failsafe now owns the final actuator topics:
+  stale wheel traffic is forced to zero, and loss of the arm adapter heartbeat
+  interrupts an active native trajectory with a measured-position hold. This
+  is simulation fault containment, not a physical safety mechanism or E-stop.
+- The simulator actuates all six arm/gripper joints and publishes a Gaussian-
+  noisy depth cloud through a seeded latency/dropout stage. It still does not
+  model the physical E-stop, bumpers, battery, motor thermal/current behavior,
+  detailed omni rollers, or measured hardware braking. Physical and full
+  rendered simulation acceptance remain separate test activities.
+- Battery drain is disabled until a real battery state source and charging
+  workflow have passed acceptance. RMF schedules mobile-base patrol and
+  delivery; it does not schedule arm trajectories in this package.

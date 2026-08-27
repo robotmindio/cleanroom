@@ -13,7 +13,17 @@ jobs:
       - name: Install build and validation tools
         run: |
           apt-get update
-          apt-get install -y python3-pip python3-opencv shellcheck ros-jazzy-xacro
+          apt-get install -y \
+            libxml2-utils \
+            python3-coverage \
+            python3-opencv \
+            python3-pip \
+            python3-pytest \
+            python3-yaml \
+            python3-zmq \
+            shellcheck \
+            ros-jazzy-launch-testing-ament-cmake \
+            ros-jazzy-xacro
           rosdep update
           # Free Fleet is pinned and built by the repository installer; it is
           # not an apt/rosdep package and is not needed to compile this package.
@@ -28,10 +38,48 @@ jobs:
           . install/setup.sh
           colcon test --event-handlers console_cohesion+
           colcon test-result --verbose
-      - name: Expand representative robot description
+      - name: Static repository validation
         run: |
           . /opt/ros/jazzy/setup.sh
+          set -euo pipefail
           xacro urdf/lekiwi.urdf.xacro sim:=true >/tmp/lekiwi.urdf
+          xacro urdf/lekiwi.urdf.xacro sim:=false >/tmp/lekiwi-real.urdf
           test -s /tmp/lekiwi.urdf
-      - name: Shell validation
-        run: shellcheck scripts/install.sh scripts/install-pi.sh scripts/install-device-services.sh
+          test -s /tmp/lekiwi-real.urdf
+          check_urdf /tmp/lekiwi.urdf
+          check_urdf /tmp/lekiwi-real.urdf
+          xmllint --noout package.xml
+          python3 - <<'PY'
+          from pathlib import Path
+          import yaml
+
+          for path in sorted((*Path('config').glob('*.yaml'), *Path('maps').rglob('*.yaml'))):
+              with path.open(encoding='utf-8') as stream:
+                  yaml.safe_load(stream)
+          PY
+          python3 -m compileall -q lekiwi_rmf scripts test
+          ament_flake8 --config config/flake8.ini lekiwi_rmf scripts test
+          non_executable=$(find scripts -maxdepth 1 -type f \
+            \( -name '*.py' -o -name '*.sh' -o -name '*.bash' \) \
+            ! -perm /111 -print -quit)
+          if [ -n "$non_executable" ]; then
+            echo "installed script source is not executable: $non_executable" >&2
+            exit 1
+          fi
+          find scripts -maxdepth 1 -type f \( -name '*.sh' -o -name '*.bash' \) -print0 |
+            xargs -0 -r shellcheck
+      - name: Python coverage report
+        env:
+          # Cyclone DDS uses domain IDs in its UDP port calculation; 238
+          # exceeds the valid port range. Keep coverage isolated from the
+          # CTest domains (180-205) while remaining valid for Cyclone DDS.
+          ROS_DOMAIN_ID: 206
+        run: |
+          . /opt/ros/jazzy/setup.sh
+          set -euo pipefail
+          mapfile -t unit_tests < <(
+            find test -maxdepth 1 -type f -name 'test_*.py' ! -name '*_launch.py' -print | sort
+          )
+          PYTHONPATH="$GITHUB_WORKSPACE${PYTHONPATH:+:$PYTHONPATH}" \
+            python3 -m coverage run --source=lekiwi_rmf -m pytest -q "${unit_tests[@]}"
+          python3 -m coverage report

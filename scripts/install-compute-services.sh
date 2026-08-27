@@ -5,6 +5,7 @@
 # device half (motors + cameras) can sit on either one.
 #
 # Usage: scripts/install-compute-services.sh [--remote DEVICE_ADDR]
+#        [--service-user USER] [--workspace PATH] [--curve-dir PATH]
 #   no --remote : the device side runs on this machine too; the stack is
 #                 ordered after lekiwi-host.service and starts once its ZMQ
 #                 port answers (camera_source:=local).
@@ -23,6 +24,9 @@ die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 trap 'printf "error: installer failed at line %s\n" "$LINENO" >&2' ERR
 
 REMOTE=""
+SERVICE_USER_ARG=""
+WORKSPACE_ARG=""
+CURVE_DIR_ARG=""
 while [[ $# -gt 0 ]]; do
   case $1 in
     --remote)
@@ -30,13 +34,26 @@ while [[ $# -gt 0 ]]; do
       REMOTE=$2
       shift 2
       ;;
-    *) die "unknown argument: $1 (usage: $0 [--remote DEVICE_ADDR])" ;;
+    --service-user)
+      [[ $# -ge 2 ]] || die "--service-user needs a user name"
+      SERVICE_USER_ARG=$2
+      shift 2
+      ;;
+    --workspace)
+      [[ $# -ge 2 ]] || die "--workspace needs an absolute path"
+      WORKSPACE_ARG=$2
+      shift 2
+      ;;
+    --curve-dir)
+      [[ $# -ge 2 ]] || die "--curve-dir needs an absolute key directory"
+      CURVE_DIR_ARG=$2
+      shift 2
+      ;;
+    *) die "unknown argument: $1 (usage: $0 [--remote DEVICE_ADDR] [--service-user USER] [--workspace PATH] [--curve-dir PATH])" ;;
   esac
 done
-[[ -z $REMOTE || $REMOTE != -* ]] || die "--remote looks like a flag: $REMOTE"
-
-WORKSPACE="${LEKIWI_WS:-$HOME/lekiwi_ws}"
-[[ -d $WORKSPACE/install ]] || die "no ROS workspace at $WORKSPACE -- run scripts/install.sh on this machine first"
+[[ -z $REMOTE || $REMOTE =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || \
+  die "--remote must be a hostname or IPv4 address without whitespace"
 
 SUDO=()
 [[ $EUID -eq 0 ]] || SUDO=(sudo)
@@ -45,10 +62,12 @@ as_root() { # as_root <command...>
   "${SUDO[@]}" "$@"
 }
 
-install_unit() { # install_unit <name>
-  sed -e "s|@PROJECT_ROOT@|$PROJECT_ROOT|g" -e "s|@SERVICE_USER@|$(id -un)|g" \
-    "$PROJECT_ROOT/systemd/$1" | as_root tee "$UNIT_DIR/$1" >/dev/null
-}
+# shellcheck source=service-install-common.sh
+source "$PROJECT_ROOT/scripts/service-install-common.sh"
+resolve_service_user "$SERVICE_USER_ARG"
+resolve_service_paths "$WORKSPACE_ARG" "" true false
+
+install_unit() { render_systemd_unit "$PROJECT_ROOT/systemd/$1" "$UNIT_DIR/$1"; }
 
 host_unit="$UNIT_DIR/lekiwi-host.service"
 cameras_unit="$UNIT_DIR/lekiwi-cameras.service"
@@ -67,7 +86,14 @@ if [[ -n $REMOTE ]]; then
     log "warning: device services are also installed on this machine -- an"
     log "unusual split. If the devices are actually here, drop --remote."
   fi
-  STACK_ARGS="camera_source:=remote remote_ip:=$REMOTE"
+  curve_dir=${CURVE_DIR_ARG:-"$LEKIWI_SERVICE_HOME/.ros/lekiwi/curve"}
+  [[ $curve_dir == /* && $curve_dir != *[[:space:]]* ]] || \
+    die "--curve-dir must be an absolute path without whitespace"
+  curve_client_secret="$curve_dir/clients/driver.key_secret"
+  curve_server_public="$curve_dir/server.key"
+  [[ -f $curve_client_secret ]] || die "missing CURVE client certificate: $curve_client_secret"
+  [[ -f $curve_server_public ]] || die "missing CURVE server certificate: $curve_server_public"
+  STACK_ARGS="camera_source:=remote remote_ip:=$REMOTE curve_client_secret_key_file:=$curve_client_secret curve_server_public_key_file:=$curve_server_public"
 else
   # All-in-one: restore the base dependency set in case a previous remote
   # configuration left the drop-in behind.
@@ -91,6 +117,15 @@ else
     fi
     STACK_ARGS=""
   fi
+  if [[ -n $CURVE_DIR_ARG ]]; then
+    [[ $CURVE_DIR_ARG == /* && $CURVE_DIR_ARG != *[[:space:]]* ]] || \
+      die "--curve-dir must be an absolute path without whitespace"
+    curve_client_secret="$CURVE_DIR_ARG/clients/driver.key_secret"
+    curve_server_public="$CURVE_DIR_ARG/server.key"
+    [[ -f $curve_client_secret && -f $curve_server_public ]] || \
+      die "--curve-dir does not contain clients/driver.key_secret and server.key"
+    STACK_ARGS="${STACK_ARGS:+$STACK_ARGS }curve_client_secret_key_file:=$curve_client_secret curve_server_public_key_file:=$curve_server_public"
+  fi
 fi
 
 if [[ -n $REMOTE ]]; then
@@ -101,6 +136,8 @@ else
   log "Installing lekiwi-stack.service (local cameras)"
 fi
 install_unit lekiwi-stack.service
+log "Validating rendered systemd unit"
+verify_systemd_units lekiwi-stack.service
 
 stack_env=/etc/default/lekiwi-stack
 printf '# Written by scripts/install-compute-services.sh.\nLEKIWI_STACK_ARGS=%s\n' \

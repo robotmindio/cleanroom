@@ -4,13 +4,45 @@
 # Override per machine: LEKIWI_PORT, LEKIWI_FRONT, LEKIWI_WRIST, LEKIWI_ID
 set -Eeuo pipefail
 
-# install.sh puts the venv in the workspace; install-pi.sh puts it in ~/lerobot-venv,
-# because the Pi has no ROS workspace. Take whichever exists.
-BIN="${LEKIWI_WS:-$HOME/lekiwi_ws}/.venv-lerobot/bin"
-[ -x "$BIN/python" ] || BIN="${LEKIWI_LEROBOT_VENV:-$HOME/lerobot-venv}/bin"
+cd "$(dirname "$0")/.."
+export PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}"
+
+# Systemd supplies LEKIWI_LEROBOT_VENV explicitly.  Interactive use retains
+# the two documented defaults, but failure to find either is configuration
+# failure, not a reason to enter the motor-bus reconnect loop.
+if [[ -n ${LEKIWI_LEROBOT_VENV:-} ]]; then
+  BIN="$LEKIWI_LEROBOT_VENV/bin"
+else
+  BIN="${LEKIWI_WS:-$HOME/lekiwi_ws}/.venv-lerobot/bin"
+  [[ -x "$BIN/python" ]] || BIN="$HOME/lerobot-venv/bin"
+fi
+[[ -x "$BIN/python" ]] || {
+  echo "$0: LeRobot Python is missing: $BIN/python" >&2
+  echo "Set LEKIWI_LEROBOT_VENV or install the documented virtual environment." >&2
+  exit 78
+}
+[[ -x "$BIN/lerobot-calibrate" ]] || {
+  echo "$0: LeRobot calibration executable is missing: $BIN/lerobot-calibrate" >&2
+  exit 78
+}
 ID="${LEKIWI_ID:-lekiwi_1}"
 READ_RETRIES="${LEKIWI_READ_RETRIES:-5}"
 RESTART_DELAY="${LEKIWI_HOST_RESTART_DELAY:-3}"
+BIND_ADDRESS="${LEKIWI_BIND_ADDRESS:-127.0.0.1}"
+CURVE_SERVER_SECRET="${LEKIWI_CURVE_SERVER_SECRET:-}"
+CURVE_AUTHORIZED_CLIENTS="${LEKIWI_CURVE_AUTHORIZED_CLIENTS:-}"
+if [[ -n $CURVE_SERVER_SECRET || -n $CURVE_AUTHORIZED_CLIENTS ]]; then
+  [[ -n $CURVE_SERVER_SECRET && -n $CURVE_AUTHORIZED_CLIENTS ]] || {
+    echo "$0: both LEKIWI_CURVE_SERVER_SECRET and LEKIWI_CURVE_AUTHORIZED_CLIENTS are required" >&2
+    exit 78
+  }
+  CURVE_ARGS=(
+    --curve.server_secret_key_file="$CURVE_SERVER_SECRET"
+    --curve.authorized_clients_dir="$CURVE_AUTHORIZED_CLIENTS"
+  )
+else
+  CURVE_ARGS=()
+fi
 
 # This mirrors LeRobot's default calibration location. Keep the environment overrides
 # so a machine using a shared/custom Hugging Face cache gets the same behaviour.
@@ -70,9 +102,11 @@ run_host_once() {
   # The servos lose their calibration registers on every power cycle, so connect() stops
   # to ask whether to reuse ~/.cache/.../lekiwi_1.json. Empty answer = reuse it. Without
   # this the host dies on EOFError whenever it runs without a terminal.
-  printf '\n' | "$BIN/python" -m lerobot.robots.lekiwi.lekiwi_host \
+  printf '\n' | "$BIN/python" scripts/torque-host.py \
     --robot.id="$ID" --robot.port="$PORT" --robot.cameras="$1" \
     --robot.num_read_retries="$READ_RETRIES" \
+    --safety.bind_address="$BIND_ADDRESS" \
+    "${CURVE_ARGS[@]}" \
     --host.connection_time_s=86400
 }
 

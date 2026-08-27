@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<!-- Renderer-free world for deterministic drivetrain / arm CI. It deliberately
+     omits the Sensors system: cleanroom.sdf remains the perception test. -->
+<sdf version="1.10">
+  <world name="physics_smoke">
+    <physics name="lekiwi_physics" type="ignored">
+      <max_step_size>0.002</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+    <model name="floor">
+      <static>true</static><pose>0 0 -0.05 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>6 6 0.1</size></box></geometry>
+          <surface><friction><ode><mu>1.0</mu><mu2>1.0</mu2></ode></friction></surface>
+        </collision>
+      </link>
+    </model>
+  </world>
+</sdf>

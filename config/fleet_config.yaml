@@ -4,8 +4,10 @@ rmf_fleet:
     linear: [0.3, 0.5]
     angular: [1.0, 1.5]
   profile:
-    footprint: 0.22
-    vicinity: 0.35
+    # Circular envelope must contain the 0.44 m square Nav2 footprint; its
+    # corners are 0.311 m from the base origin.
+    footprint: 0.32
+    vicinity: 0.45
   reversible: true
   battery_system:
     voltage: 12.0

@@ -9,9 +9,13 @@ starting a degraded control stack after an arbitrary delay.
 
 from __future__ import annotations
 
+import math
 from typing import Optional
 
 import rclpy
+from control_msgs.action import FollowJointTrajectory
+from lifecycle_msgs.msg import State
+from lifecycle_msgs.srv import GetState
 from nav2_msgs.action import NavigateToPose
 from nav_msgs.msg import OccupancyGrid, Odometry
 from rclpy.action import ActionClient
@@ -55,6 +59,7 @@ class ReadinessGate(Node):
         self.declare_parameter("topic", "")
         self.declare_parameter("topic_type", "")
         self.declare_parameter("action", "")
+        self.declare_parameter("lifecycle_node", "/bt_navigator")
         self._ready = False
         kind = str(self.get_parameter("kind").value)
 
@@ -65,22 +70,78 @@ class ReadinessGate(Node):
                 raise ValueError("topic readiness requires topic and a supported topic_type")
             self.create_subscription(TOPIC_TYPES[topic_type], topic, self._on_message, topic_qos(topic_type))
             self.get_logger().info(f"waiting for {topic_type} message on {topic}")
-        elif kind == "navigate_to_pose_action":
+        elif kind in ("navigate_to_pose_action", "follow_joint_trajectory_action"):
             action = str(self.get_parameter("action").value)
             if not action:
                 raise ValueError("action readiness requires action")
-            self._action_client = ActionClient(self, NavigateToPose, action)
+            action_type = (
+                NavigateToPose if kind == "navigate_to_pose_action"
+                else FollowJointTrajectory
+            )
+            self._action_client = ActionClient(self, action_type, action)
+            self._lifecycle_client = None
+            self._lifecycle_future = None
+            if kind == "navigate_to_pose_action":
+                lifecycle_node = str(self.get_parameter("lifecycle_node").value).rstrip("/")
+                if not lifecycle_node:
+                    raise ValueError("Nav2 readiness requires a lifecycle_node")
+                self._lifecycle_client = self.create_client(
+                    GetState, f"{lifecycle_node}/get_state"
+                )
             self._timer = self.create_timer(0.2, self._check_action)
-            self.get_logger().info(f"waiting for NavigateToPose action server {action}")
+            self.get_logger().info(f"waiting for active action server {action}")
         else:
             raise ValueError(f"unsupported readiness kind: {kind}")
 
-    def _on_message(self, _message: Image | Odometry | OccupancyGrid) -> None:
-        self._ready = True
+    def _on_message(self, message: Image | Odometry | OccupancyGrid) -> None:
+        if isinstance(message, Image):
+            self._ready = (
+                message.width > 0 and message.height > 0 and message.step > 0
+                and bool(message.encoding) and bool(message.data)
+            )
+        elif isinstance(message, OccupancyGrid):
+            expected = message.info.width * message.info.height
+            self._ready = (
+                message.info.resolution > 0.0 and expected > 0
+                and len(message.data) == expected
+                and any(value >= 0 for value in message.data)
+            )
+        else:
+            values = (
+                message.pose.pose.position.x, message.pose.pose.position.y,
+                message.pose.pose.orientation.z, message.pose.pose.orientation.w,
+                message.twist.twist.linear.x, message.twist.twist.linear.y,
+                message.twist.twist.angular.z,
+            )
+            self._ready = bool(message.child_frame_id) and all(
+                math.isfinite(value) for value in values
+            )
 
     def _check_action(self) -> None:
-        if self._action_client.wait_for_server(timeout_sec=0.0):
+        if not self._action_client.wait_for_server(timeout_sec=0.0):
+            return
+        if self._lifecycle_client is None:
             self._ready = True
+            return
+        if self._lifecycle_future is None:
+            if self._lifecycle_client.wait_for_service(timeout_sec=0.0):
+                self._lifecycle_future = self._lifecycle_client.call_async(
+                    GetState.Request()
+                )
+            return
+        if not self._lifecycle_future.done():
+            return
+        try:
+            response = self._lifecycle_future.result()
+            self._ready = (
+                response is not None
+                and response.current_state.id == State.PRIMARY_STATE_ACTIVE
+            )
+        except Exception:
+            self._ready = False
+        finally:
+            if not self._ready:
+                self._lifecycle_future = None
 
 
 def main(args: Optional[list[str]] = None) -> None:

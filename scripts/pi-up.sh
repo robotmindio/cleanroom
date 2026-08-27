@@ -22,13 +22,17 @@ wait_for() { # wait_for <seconds> <command...>
   done
 }
 
-host_up() { ss -tln | grep -q ':5555'; }
+host_up() { ss -tln | grep -q ':5555' && ss -tln | grep -q ':5557'; }
+motion_host_up() { ss -tln | grep -q ':5555'; }
 cameras_up() { pgrep -f '[v]4l2_camera_node' >/dev/null; }
 
 # Motors and cameras are separate processes on purpose: one reader per USB
 # device, and a stalled camera frame must never abort the motor host.
 if host_up; then
   echo "host: already running"
+elif motion_host_up; then
+  echo "host on TCP 5555 lacks torque safety on TCP 5557; restart it from this repository first" >&2
+  exit 1
 else
   setsid scripts/robot-host.sh --no-cameras >"$LOGS/host.log" 2>&1 &
   wait_for 90 host_up || {

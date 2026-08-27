@@ -58,6 +58,14 @@ first_match() { # first existing path matching a glob, empty if none
 
 host_up() {
   ss -tln 2>/dev/null | grep -q ':5555' \
+    && ss -tln 2>/dev/null | grep -q ':5557' \
+    && pgrep -f '[t]orque-host\.py|[l]erobot\.robots\.lekiwi\.lekiwi_host' >/dev/null
+}
+
+legacy_host_up() {
+  # Detect an older stock host only so calibration tears it down before it
+  # tries to own the serial bus. It is never accepted as a safety-capable host.
+  ss -tln 2>/dev/null | grep -q ':5555' \
     && pgrep -f '[l]erobot\.robots\.lekiwi\.lekiwi_host' >/dev/null
 }
 
@@ -68,7 +76,7 @@ stack_up() {
 # The host and the ROS stack both hold the motor bus; stop whichever is up so the
 # next step can have the port and the pose capture gets a clean driver.
 calibrating() {
-  host_up || stack_up
+  host_up || legacy_host_up || stack_up
 }
 
 wait_for() { # wait_for <seconds> <command...>
@@ -117,7 +125,7 @@ port_owned() { # the motor bus has an owner: a serial fd holder or a live LeRobo
   fuser -s "$(readlink -f "$port")" 2>/dev/null && return 0
   # A LeRobot host may not hold the serial fd open yet (mid-handshake); fuser alone
   # would miss it, and lerobot-calibrate would then fight it for the bus.
-  pgrep -f '[l]erobot\.robots\.lekiwi\.lekiwi_host' >/dev/null
+  pgrep -f '[t]orque-host\.py|[l]erobot\.robots\.lekiwi\.lekiwi_host' >/dev/null
 }
 
 stop_stack_if_running() {

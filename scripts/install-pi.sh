@@ -132,7 +132,10 @@ http://packages.ros.org/ros2/ubuntu $codename main" |
     "ros-$pi_ros_distro-ros-base" \
     "ros-$pi_ros_distro-v4l2-camera" \
     "ros-$pi_ros_distro-image-transport-plugins" \
-    "ros-$pi_ros_distro-rmw-cyclonedds-cpp"
+    "ros-$pi_ros_distro-rmw-cyclonedds-cpp" \
+    python3-yaml \
+    psmisc \
+    v4l-utils
 else
   printf 'not Ubuntu 24.04 -- skipping ROS; this Pi can run the LeRobot host but\n'
   printf 'not publish cameras to ROS. Reimage with Ubuntu Server 24.04 arm64 for that.\n'

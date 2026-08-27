@@ -123,8 +123,13 @@ local_costmap:
       width: 3
       height: 3
       resolution: 0.05
-      footprint: "[[0.155, 0.155], [0.155, -0.155], [-0.155, -0.155], [-0.155, 0.155]]"
-      footprint_padding: 0.02
+      # Complete measured stowed-robot envelope, not only the base plate. The
+      # safety supervisor independently requires the arm to remain in stow.
+      footprint: "[[0.22, 0.22], [0.22, -0.22], [-0.22, -0.22], [-0.22, 0.22]]"
+      # The 0.32 m RMF/map-bundle circle encloses this 0.44 m square
+      # (corner radius ~= 0.311 m). Extra Nav2 padding would make the live
+      # envelope exceed the immutable map/RMF reservation envelope.
+      footprint_padding: 0.0
       transform_tolerance: 0.3
       plugins: [obstacle_layer, inflation_layer]
       obstacle_layer:
@@ -152,8 +157,10 @@ global_costmap:
       robot_base_frame: base_footprint
       resolution: 0.05
       track_unknown_space: true
-      footprint: "[[0.155, 0.155], [0.155, -0.155], [-0.155, -0.155], [-0.155, 0.155]]"
-      footprint_padding: 0.02
+      footprint: "[[0.22, 0.22], [0.22, -0.22], [-0.22, -0.22], [-0.22, 0.22]]"
+      # See local_costmap: the tracked 0.32 m envelope includes this complete
+      # 0.44 m square footprint without additional Nav2 padding.
+      footprint_padding: 0.0
       transform_tolerance: 0.5
       plugins: [static_layer, obstacle_layer, inflation_layer]
       static_layer:
@@ -251,15 +258,27 @@ collision_monitor:
     source_timeout: 0.75
     stop_pub_timeout: 1.0
     base_shift_correction: true
-    polygons: [StopZone]
+    polygons: [StopZone, SlowdownZone]
     StopZone:
       type: polygon
-      # CAD collision cylinder radius 0.145 m plus 2 cm margin.
-      points: "[[0.165, 0.165], [0.165, -0.165], [-0.165, -0.165], [-0.165, 0.165]]"
+      # Initial conservative test value: 0.22 m stowed envelope + 0.075 m
+      # ideal braking distance at 0.30 m/s and 0.60 m/s^2. This value must be
+      # increased to include measured sensor/control latency and uncertainty
+      # before physical acceptance; it must never be tuned only in RViz.
+      points: "[[0.30, 0.30], [0.30, -0.30], [-0.30, -0.30], [-0.30, 0.30]]"
       action_type: stop
       min_points: 1
       visualize: true
       polygon_pub_topic: collision_stop_zone
+      enabled: true
+    SlowdownZone:
+      type: polygon
+      points: "[[0.45, 0.45], [0.45, -0.45], [-0.45, -0.45], [-0.45, 0.45]]"
+      action_type: slowdown
+      slowdown_ratio: 0.35
+      min_points: 1
+      visualize: true
+      polygon_pub_topic: collision_slowdown_zone
       enabled: true
     observation_sources: [scan]
     scan:

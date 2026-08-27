@@ -10,15 +10,20 @@ The main [README](README.md) picks up from the end of this document.
 
 | Machine | Runs | Installer |
 | --- | --- | --- |
-| Robot's Raspberry Pi | LeRobot host (Feetech bus, ZMQ server, and cameras) | `scripts/install-pi.sh` |
+| Robot's Raspberry Pi | LeRobot host (Feetech bus, ZMQ server); optional ROS camera service | `scripts/install-pi.sh` |
 | Workstation | ROS 2, Nav2, RTAB-Map, Open-RMF, and the LeRobot *client* | `scripts/install.sh` |
 
-Motor commands, joint state, and camera frames travel over the LeRobot ZMQ ports
-`5555/tcp` and `5556/tcp`.
+Motor commands travel over LeRobot ZMQ `5555/tcp`; observations and joint state
+travel over `5556/tcp`. The repository-owned torque safety endpoint is
+`5557/tcp`. These are control-plane interfaces: keep them loopback-bound unless
+the authenticated ZMQ deployment and firewall policy are configured. CURVE
+protects only the ZMQ sockets; it does not secure ROS 2 DDS, which remains a
+separate exposure unless the deployment isolates it or enables DDS security.
 
-The workstation driver republishes the host's front frame as `/camera/front/image_raw`
-for ROS. A stalled camera must still be investigated because it also affects host
-observations.
+In ROS operation the motor host is started camera-less (`--no-cameras`). A
+separate `v4l2_camera` service owns each USB camera and publishes the front and
+wrist streams; camera frames do not pass through the motor host. This isolates
+camera stalls from actuator control.
 
 The Pi normally runs the LeRobot host. The full stack belongs on the workstation. A Pi 5
 can also run `scripts/install.sh` for occasional self-contained debugging, but Nav2 and
@@ -247,9 +252,10 @@ laptop for the wired LeKiwi variant:
 scripts/robot-host.sh
 ```
 
-Defaults: command socket `5555/tcp`, observations `5556/tcp`, watchdog 500 ms,
-loop 30 Hz. The watchdog stops the base when commands stop arriving. It is not
-an E-stop.
+Defaults: command socket `5555/tcp`, observations `5556/tcp`, torque safety
+`5557/tcp`, watchdog 500 ms, loop 30 Hz. The watchdog stops the base when
+commands stop arriving. It is not an E-stop. The repository host starts
+torque-off and only changes servo torque through the separate safety endpoint.
 
 By default the direct host auto-detects both known cameras; set `LEKIWI_WRIST=none`
 to leave the wrist feed out when USB bandwidth is tight. Its ZMQ clients can use
@@ -279,6 +285,36 @@ workstation:
 scripts/pi-up.sh
 ```
 
+### Optional boot services
+
+For unattended startup, install the device services on the machine that owns
+the serial adapter and USB cameras. Install the compute service where the ROS
+workspace runs:
+
+```bash
+sudo scripts/install-device-services.sh \
+  --service-user "$USER" --workspace "$HOME/lekiwi_ws" \
+  --lerobot-venv "$HOME/lekiwi_ws/.venv-lerobot" \
+  --bind-address 127.0.0.1
+sudo scripts/install-compute-services.sh \
+  --service-user "$USER" --workspace "$HOME/lekiwi_ws"
+```
+
+For a separate ROS workstation, use `--remote DEVICE_IP` on the compute
+installer. A direct root invocation must include `--service-user USER`; when
+run through `sudo`, the invoking non-root account is selected. Both installers
+fail early if the selected workspace or LeRobot Python is missing. They render,
+verify, reload, and enable the units; inspect them with:
+
+```bash
+systemctl status lekiwi-host.service lekiwi-cameras.service lekiwi-stack.service
+journalctl -u lekiwi-host.service -f
+```
+
+The host service runs camera-less and always starts torque-off. A host or ROS
+restart is never permission to energize the servos. Motion requires fresh
+telemetry, healthy safety inputs, and an explicit `/safety/arm` request.
+
 At the default `jpeg_quality:=50` a 640x480 frame measures about 14 KB, so
 30 Hz costs roughly 3 Mbit/s; the same frame at the library default of 95
 costs 70–90 KB, or 18 Mbit/s. Raise it if RTAB-Map starts losing loop
@@ -304,7 +340,10 @@ Speed modes are 0.4 / 0.25 / 0.1 m/s with 90 / 60 / 30 deg/s rotation.
 
 This script drives the **arm from a leader arm** and the base from the keyboard.
 Without a leader arm built it will fail at connect; drive the base only by
-constructing a `LeKiwiClient` and sending `x.vel`, `y.vel`, `theta.vel` directly.
+the ROS teleoperation path after the production safety prerequisites are met.
+Do not inject `x.vel`, `y.vel`, or `theta.vel` directly into the repository
+motor host: it starts torque-off and its guarded ROS control path is the
+supported interface for physical motion.
 
 ## 7. Record a dataset (optional)
 
@@ -379,21 +418,29 @@ no wrist frames. Pass the same `--robot.cameras` override to both.
 
 ### Host reachable but nothing moves
 
-Check both ports, not just 5555:
+Check all three host endpoints, not just 5555:
 
 ```bash
-ss -ltn | grep -E '5555|5556'
+ss -ltn | grep -E '5555|5556|5557'
+"$HOME/lekiwi_ws/.venv-lerobot/bin/python" scripts/host-health-check.py --host 127.0.0.1
 ```
+
+The health check performs a read-only TCP/5555 connection and a `state`
+request on the torque endpoint. It is a better service check than matching a
+listening port owned by an unrelated process.
 
 ## Moving on to ROS
 
 Once teleoperation works, leave the host running and start the ROS side against
 it. The ROS driver (`lekiwi_rmf/driver.py`) is a pure ZMQ `LeKiwiClient` — it
 never touches USB, so the ROS machine needs no serial or camera permissions at
-all.
+all. A non-loopback host requires CURVE; use the service installer above or
+supply the client secret and pinned server public key explicitly:
 
 ```bash
-ros2 launch lekiwi_rmf bringup.launch.py mode:=real remote_ip:=192.168.1.50
+ros2 launch lekiwi_rmf bringup.launch.py mode:=real remote_ip:=192.168.1.50 \
+  curve_client_secret_key_file:=/secure/path/driver.key_secret \
+  curve_server_public_key_file:=/secure/path/server.key
 ```
 
 Calibrate each camera on the machine it is plugged into with
@@ -402,6 +449,42 @@ relays both feeds; navigation and RTAB-Map use only the front camera.
 
 ## Safety
 
-Use a physical emergency stop. Supervise every first run. The arm can reach
-across the base footprint, so keep the workspace clear before the first
-teleoperation attempt.
+The ROS production profile is default-deny. It requires current, stamped
+feedback for the motor host, full scan, depth point cloud, odometry, IMU, joint
+states, battery, motor diagnostics, bumper, and E-stop inputs before granting
+base or arm permission. The arm must also be inside the configured stow pose
+for base motion. These interfaces are:
+
+```text
+safety/driver_state             motor-link and torque state
+/scan                           obstacle coverage
+/camera/depth/points            arm-workspace obstacles
+/odom, /imu/data                base state
+/joint_states                   arm feedback and stow interlock
+/battery_state                  voltage and charge limits
+/hardware/diagnostics           servo and bus health
+safety/arm_workspace_clear      live MoveIt scene/state validity
+safety/bumper_active            contact stop
+safety/estop_active             E-stop state
+```
+
+`config/safety_acceptance.yaml` is a schema-version-2 template shipped with
+`validated: false`; it is not a claim that the robot has passed physical
+stopping tests. A qualified hardware procedure must record reviewed acceptance
+limits, at least 30 trials in every translation/rotation direction, independent
+E-stop and fault-response tests, the software revision, sensor configuration,
+payload, surface, stop latency, and measured worst-case stopping distances plus
+measurement uncertainty before enabling it. Required fault tests include
+unauthorised ZMQ rejection and DDS/rosbridge isolation or authentication; do
+not mark them true merely because a local software launch succeeded. The
+accepted footprint and padding must match both tracked Nav2 costmaps, the
+collision-monitor obstacle-stop trial must pass, and its StopZone must leave at
+least the measured worst stopping distance plus uncertainty around that exact
+footprint; the supervisor checks those relationships at every startup.
+
+The driver never auto-arms, and host or ROS restart always leaves the servos
+torque-off. An operator must inspect the robot and call `/safety/arm`; after a
+fault, call `/safety/reset_fault` only once the driver is disarmed and every
+required input is healthy. Keep a hardwired physical E-stop reachable: ROS
+topics and software torque control cannot remove energy after a process,
+electrical, or mechanical failure.

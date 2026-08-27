@@ -5,8 +5,11 @@ import pathlib
 import types
 
 from rclpy.qos import DurabilityPolicy
+from lifecycle_msgs.msg import State
+from nav_msgs.msg import OccupancyGrid, Odometry
+from sensor_msgs.msg import Image
 
-from lekiwi_rmf.readiness_gate import TOPIC_TYPES, topic_qos
+from lekiwi_rmf.readiness_gate import ReadinessGate, TOPIC_TYPES, topic_qos
 
 
 ROOT = pathlib.Path(__file__).parents[1]
@@ -16,9 +19,69 @@ def test_readiness_gate_supports_the_bringup_dependencies():
     assert set(TOPIC_TYPES) == {"image", "odom", "map"}
 
 
+def test_topic_gate_requires_semantically_usable_messages():
+    gate = ReadinessGate.__new__(ReadinessGate)
+    image = Image()
+    gate._on_message(image)
+    assert not gate._ready
+    image.width, image.height, image.step, image.encoding, image.data = 1, 1, 3, "rgb8", [0, 0, 0]
+    gate._on_message(image)
+    assert gate._ready
+
+    grid = OccupancyGrid()
+    gate._on_message(grid)
+    assert not gate._ready
+    grid.info.width = grid.info.height = 1
+    grid.info.resolution = 0.05
+    grid.data = [0]
+    gate._on_message(grid)
+    assert gate._ready
+
+    odom = Odometry()
+    gate._on_message(odom)
+    assert not gate._ready
+    odom.child_frame_id = "base_footprint"
+    odom.pose.pose.orientation.w = 1.0
+    gate._on_message(odom)
+    assert gate._ready
+
+
 def test_map_readiness_receives_rtabmaps_latched_grid():
     assert topic_qos("map").durability == DurabilityPolicy.TRANSIENT_LOCAL
     assert topic_qos("image").durability == DurabilityPolicy.VOLATILE
+
+
+def test_nav_action_is_not_ready_until_lifecycle_node_is_active():
+    class Future:
+        def __init__(self, state):
+            self.state = state
+
+        def done(self):
+            return True
+
+        def result(self):
+            return types.SimpleNamespace(
+                current_state=types.SimpleNamespace(id=self.state)
+            )
+
+    gate = ReadinessGate.__new__(ReadinessGate)
+    gate._ready = False
+    gate._action_client = types.SimpleNamespace(wait_for_server=lambda **_: True)
+    gate._lifecycle_client = types.SimpleNamespace(
+        wait_for_service=lambda **_: True,
+        call_async=lambda _request: Future(State.PRIMARY_STATE_INACTIVE),
+    )
+    gate._lifecycle_future = None
+    gate._check_action()
+    gate._check_action()
+    assert not gate._ready
+
+    gate._lifecycle_client.call_async = lambda _request: Future(
+        State.PRIMARY_STATE_ACTIVE
+    )
+    gate._check_action()
+    gate._check_action()
+    assert gate._ready
 
 
 def test_failed_gate_does_not_start_its_dependents():
@@ -49,9 +112,12 @@ def test_shutdown_gate_does_not_start_dependents():
     ) == []
 
 
-def test_simulation_bridge_consumes_only_the_guarded_velocity_topic():
+def test_simulation_base_controller_consumes_only_the_guarded_velocity_topic():
     source = (ROOT / "launch" / "bringup.launch.py").read_text()
-    assert '("/cmd_vel", "/cmd_vel_safe")' in source
+    controller = (ROOT / "lekiwi_rmf" / "sim_omni_controller.py").read_text()
+    assert '"/cmd_vel_safe"' in controller
+    assert '"/cmd_vel"' not in controller
+    assert "/sim/sim_base_left_wheel/cmd_vel" in source
     assert 'package="topic_tools"' not in source
 
 

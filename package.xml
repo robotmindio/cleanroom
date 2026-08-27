@@ -8,16 +8,22 @@
 
   <buildtool_depend>ament_cmake</buildtool_depend>
   <buildtool_depend>ament_cmake_python</buildtool_depend>
+  <!-- Gazebo Sim 8's exported CMake package is named gz-sim8, while the
+       ROS/Jazzy rosdep key is the vendor package below. -->
+  <build_depend>gz_sim_vendor</build_depend>
 
   <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
   <exec_depend>builtin_interfaces</exec_depend>
   <exec_depend>camera_calibration</exec_depend>
   <exec_depend>cv_bridge</exec_depend>
   <exec_depend>control_msgs</exec_depend>
+  <exec_depend>diagnostic_msgs</exec_depend>
   <exec_depend>free_fleet_adapter</exec_depend>
   <exec_depend>image_transport</exec_depend>
   <exec_depend>image_transport_plugins</exec_depend>
   <exec_depend>joint_state_publisher</exec_depend>
+  <exec_depend>lifecycle_msgs</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>ldlidar_stl_ros2</exec_depend>
   <exec_depend>nav2_bringup</exec_depend>
@@ -28,12 +34,18 @@
   <exec_depend>action_msgs</exec_depend>
   <exec_depend>moveit_configs_utils</exec_depend>
   <exec_depend>moveit_ros_move_group</exec_depend>
+  <exec_depend>moveit_ros_perception</exec_depend>
   <exec_depend>moveit_planners_ompl</exec_depend>
   <exec_depend>moveit_ros_visualization</exec_depend>
+  <exec_depend>moveit_msgs</exec_depend>
   <exec_depend>python3-opencv</exec_depend>
   <exec_depend>python3-matplotlib</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>python3-zmq</exec_depend>
   <exec_depend>rclpy</exec_depend>
   <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>robot_localization</exec_depend>
   <exec_depend>rosbridge_server</exec_depend>
   <exec_depend>rosapi</exec_depend>
   <exec_depend>rtabmap_slam</exec_depend>
@@ -41,6 +53,7 @@
   <exec_depend>v4l2_camera</exec_depend>
   <exec_depend>ros_gz_bridge</exec_depend>
   <exec_depend>ros_gz_sim</exec_depend>
+  <exec_depend>gz_sim_vendor</exec_depend>
   <exec_depend>rosgraph_msgs</exec_depend>
   <exec_depend>rmf_task_ros2</exec_depend>
   <exec_depend>rmf_traffic_ros2</exec_depend>
@@ -52,8 +65,11 @@
   <exec_depend>tf2_msgs</exec_depend>
   <exec_depend>xacro</exec_depend>
   <exec_depend>visualization_msgs</exec_depend>
+  <exec_depend>v4l-utils</exec_depend>
 
   <test_depend>ament_cmake_pytest</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>launch_testing_ament_cmake</test_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

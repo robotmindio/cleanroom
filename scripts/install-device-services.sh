@@ -3,7 +3,7 @@
 # devices are plugged into -- a Raspberry Pi, a NUC, anything with the
 # hardware. The names follow the hardware, not the board:
 #
-#   lekiwi-host.service     the LeRobot motor bus, served on ZMQ :5555
+#   lekiwi-host.service     the LeRobot motor bus, motion on :5555 and torque safety on :5557
 #   lekiwi-cameras.service  v4l2_camera publishers for this machine's cameras
 #
 # Cameras are read here by ROS nodes and never by the motor host: one reader
@@ -13,7 +13,9 @@
 # one (hostname -I).
 #
 # Re-run any time; both installers are idempotent.
-# Usage: scripts/install-device-services.sh
+# Usage: scripts/install-device-services.sh [--service-user USER]
+#        [--workspace PATH] [--lerobot-venv PATH] [--bind-address IPV4]
+#        [--curve-dir PATH]
 set -Eeuo pipefail
 
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
@@ -23,8 +25,30 @@ log() { printf '\n==> %s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 trap 'printf "error: installer failed at line %s\n" "$LINENO" >&2' ERR
 
-for arg in "$@"; do
-  die "unknown argument: $arg (usage: $0)"
+SERVICE_USER_ARG=""
+WORKSPACE_ARG=""
+LEROBOT_VENV_ARG=""
+HOST_BIND_ADDRESS_ARG=""
+CURVE_DIR_ARG=""
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --service-user)
+      [[ $# -ge 2 ]] || die "--service-user needs a user name"
+      SERVICE_USER_ARG=$2; shift 2 ;;
+    --workspace)
+      [[ $# -ge 2 ]] || die "--workspace needs an absolute path"
+      WORKSPACE_ARG=$2; shift 2 ;;
+    --lerobot-venv)
+      [[ $# -ge 2 ]] || die "--lerobot-venv needs an absolute path"
+      LEROBOT_VENV_ARG=$2; shift 2 ;;
+    --bind-address)
+      [[ $# -ge 2 ]] || die "--bind-address needs an explicit IPv4 interface address"
+      HOST_BIND_ADDRESS_ARG=$2; shift 2 ;;
+    --curve-dir)
+      [[ $# -ge 2 ]] || die "--curve-dir needs an absolute key directory"
+      CURVE_DIR_ARG=$2; shift 2 ;;
+    *) die "unknown argument: $1 (usage: $0 [--service-user USER] [--workspace PATH] [--lerobot-venv PATH] [--bind-address IPV4] [--curve-dir PATH])" ;;
+  esac
 done
 
 SUDO=()
@@ -34,10 +58,41 @@ as_root() { # as_root <command...>
   "${SUDO[@]}" "$@"
 }
 
-install_unit() { # install_unit <name>
-  sed -e "s|@PROJECT_ROOT@|$PROJECT_ROOT|g" -e "s|@SERVICE_USER@|$(id -un)|g" \
-    "$PROJECT_ROOT/systemd/$1" | as_root tee "$UNIT_DIR/$1" >/dev/null
-}
+# shellcheck source=service-install-common.sh
+source "$PROJECT_ROOT/scripts/service-install-common.sh"
+resolve_service_user "$SERVICE_USER_ARG"
+resolve_service_paths "$WORKSPACE_ARG" "$LEROBOT_VENV_ARG" false
+LEKIWI_HOST_BIND_ADDRESS=${HOST_BIND_ADDRESS_ARG:-127.0.0.1}
+LEKIWI_HOST_BIND_ADDRESS=$(python3 -c '
+import ipaddress, sys
+address = ipaddress.IPv4Address(sys.argv[1])
+if address.is_unspecified or address.is_multicast:
+    raise SystemExit(2)
+print(address)
+' "$LEKIWI_HOST_BIND_ADDRESS") || \
+  die "--bind-address must be an explicit unicast IPv4 address (wildcards are forbidden)"
+export LEKIWI_HOST_BIND_ADDRESS
+LEKIWI_CURVE_SERVER_SECRET=""
+LEKIWI_CURVE_SERVER_PUBLIC=""
+LEKIWI_CURVE_AUTHORIZED_CLIENTS=""
+LEKIWI_CURVE_HEALTH_CLIENT_SECRET=""
+if [[ -n $CURVE_DIR_ARG || $LEKIWI_HOST_BIND_ADDRESS != 127.* ]]; then
+  curve_dir=${CURVE_DIR_ARG:-"$LEKIWI_SERVICE_HOME/.ros/lekiwi/curve"}
+  [[ $curve_dir == /* && $curve_dir != *[[:space:]]* ]] || \
+    die "--curve-dir must be an absolute path without whitespace"
+  LEKIWI_CURVE_SERVER_SECRET="$curve_dir/server.key_secret"
+  LEKIWI_CURVE_SERVER_PUBLIC="$curve_dir/server.key"
+  LEKIWI_CURVE_AUTHORIZED_CLIENTS="$curve_dir/authorized_clients"
+  LEKIWI_CURVE_HEALTH_CLIENT_SECRET="$curve_dir/clients/health.key_secret"
+  for key_path in "$LEKIWI_CURVE_SERVER_SECRET" "$LEKIWI_CURVE_SERVER_PUBLIC" "$LEKIWI_CURVE_HEALTH_CLIENT_SECRET"; do
+    [[ -f $key_path ]] || die "missing CURVE certificate: $key_path (run $LEKIWI_SERVICE_LEROBOT_VENV/bin/python $PROJECT_ROOT/scripts/generate-zmq-keys.py $curve_dir as $LEKIWI_SERVICE_USER)"
+  done
+  [[ -d $LEKIWI_CURVE_AUTHORIZED_CLIENTS ]] || die "missing authorized-client directory: $LEKIWI_CURVE_AUTHORIZED_CLIENTS"
+fi
+export LEKIWI_CURVE_SERVER_SECRET LEKIWI_CURVE_SERVER_PUBLIC
+export LEKIWI_CURVE_AUTHORIZED_CLIENTS LEKIWI_CURVE_HEALTH_CLIENT_SECRET
+
+install_unit() { render_systemd_unit "$PROJECT_ROOT/systemd/$1" "$UNIT_DIR/$1"; }
 
 first_match() { # first existing path matching a glob, empty if none
   set -- $1
@@ -74,11 +129,19 @@ if [[ $camera_ros_available == true && -z "$(first_match '/dev/v4l/by-id/*WEBCAM
   log "warning: no front camera found -- lekiwi-cameras will keep failing"
   log "until one is attached (set LEKIWI_FRONT in ros-cameras.sh for odd hardware)."
 fi
-calibration="${LEKIWI_CAMERA_INFO:-$HOME/.ros/camera_info/lekiwi_front.yaml}"
+calibration="${LEKIWI_CAMERA_INFO:-$LEKIWI_SERVICE_HOME/.ros/camera_info/lekiwi_front.yaml}"
 if ! grep -qE '^image_width:[[:space:]]*[1-9][0-9]*' "$calibration" 2>/dev/null; then
   log "warning: front-camera calibration missing or invalid: $(printf %q "$calibration")"
   log "The cameras service refuses to start without it."
   log "Run scripts/calibrate-camera.sh on this machine first (stop its service while calibrating)."
+fi
+
+if [[ $camera_ros_available == true ]]; then
+  log "Validating rendered systemd units"
+  verify_systemd_units lekiwi-host.service lekiwi-cameras.service
+else
+  log "Validating rendered systemd unit"
+  verify_systemd_units lekiwi-host.service
 fi
 
 log "Reloading systemd and enabling services"
@@ -101,8 +164,8 @@ Done. Check on them with:
   systemctl status lekiwi-host.service lekiwi-cameras.service
   journalctl -u lekiwi-host.service -f
 
-The host binds :5555 once every servo answers; that socket is what the
-compute side waits for.
+The host binds :5555 (motion) and :5557 (physical torque safety) once every
+servo answers; the compute side requires both before it arms.
 
 If the ROS stack will live on another machine, give it this one's address:
   $(hostname -I 2>/dev/null | awk '{print $1}')

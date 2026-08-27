@@ -1,0 +1,28 @@
+schema_version: 1
+map_id: cleanroom-development
+# This is the repository's synthetic demonstration room, not a surveyed
+# deployment map. RMF operation deliberately refuses bundles not marked as
+# validated after the acceptance workflow has produced its report.
+validated: false
+created_at: "2026-08-27T00:00:00Z"
+frame_id: map
+robot_footprint_radius: 0.32
+artifacts:
+  occupancy_yaml:
+    path: ../cleanroom.yaml
+    sha256: ea9005f0fbccc6fee53a6c99db48a35a6c11a94489932055184a73367c2e62af
+  occupancy_image:
+    path: ../cleanroom.pgm
+    sha256: f160fa915429c4a53c65b6e75c8459d96d9bc4577752e55e152b7229c7ec6088
+  navigation_graph:
+    path: ../nav_graph.yaml
+    sha256: a321972916fb74daf90883e940decf9f4859c7c246a47a420bc39f2c938df08c
+  fleet_config:
+    path: ../../config/fleet_config.yaml
+    sha256: 446bde605c497d19c49d469501fdd4c8730c628de9522c78a99267b8c343cd65
+  nav2_params:
+    path: ../../config/nav2_params.yaml
+    sha256: d4d2fa1eb454a30a112fa2d3b816ff7b5ad1d856417c832ca8b8d19c343ae120
+validation:
+  maximum_resolution: 0.05
+  maximum_reference_residual: 0.02

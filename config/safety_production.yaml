@@ -1,0 +1,59 @@
+safety_supervisor:
+  ros__parameters:
+    publish_frequency: 20.0
+    sensor_timeout: 0.50
+    state_timeout: 0.75
+    permission_timeout: 0.5
+    battery_timeout: 2.0
+    require_driver_state: true
+    require_acceptance: true
+    require_scan: true
+    require_full_scan: true
+    minimum_scan_coverage: 6.0
+    minimum_scan_valid_fraction: 0.05
+    require_depth: true
+    minimum_depth_valid_points: 16
+    minimum_depth_valid_fraction: 0.01
+    minimum_depth_range: 0.05
+    maximum_depth_range: 10.0
+    require_bumper: true
+    require_estop: true
+    require_battery: true
+    require_motor_health: true
+    require_odometry: true
+    require_imu: true
+    require_joint_states: true
+    # Arm motion remains denied until the execution-time MoveIt collision gate
+    # is running. Because this requirement is arm-only, omitting MoveIt still
+    # permits the independently healthy base scope to finish startup.
+    require_arm_workspace: true
+    arm_workspace_topic: /safety/arm_workspace_clear
+    minimum_battery_voltage: 10.5
+    minimum_battery_percentage: 0.15
+    stow_tolerance: 0.08
+    stow_joint_names:
+      - arm_shoulder_pan
+      - arm_shoulder_lift
+      - arm_elbow_flex
+      - arm_wrist_flex
+      - arm_wrist_roll
+      - arm_gripper
+    # This must be replaced with the measured, collision-checked physical stow
+    # pose before production motion is enabled.
+    stow_joint_positions: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+arm_workspace_monitor:
+  ros__parameters:
+    group_name: arm
+    joint_names:
+      - arm_shoulder_pan
+      - arm_shoulder_lift
+      - arm_elbow_flex
+      - arm_wrist_flex
+      - arm_wrist_roll
+      - arm_gripper
+    check_frequency: 30.0
+    joint_timeout: 0.25
+    planning_scene_timeout: 0.50
+    validity_timeout: 0.15
+    service_timeout: 0.10

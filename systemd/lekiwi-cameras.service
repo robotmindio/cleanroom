@@ -18,9 +18,24 @@ StartLimitBurst=8
 [Service]
 Type=simple
 User=@SERVICE_USER@
+Environment=HOME=@SERVICE_HOME@
+Environment=LEKIWI_WS=@WORKSPACE@
+Environment=LEKIWI_LEROBOT_VENV=@LEROBOT_VENV@
 WorkingDirectory=@PROJECT_ROOT@
 ExecStartPre=-/usr/bin/udevadm settle --timeout=15
 ExecStart=@PROJECT_ROOT@/scripts/ros-cameras.sh
+# Camera calibration and ROS logs live under the service HOME, and v4l2 device
+# names are dynamic, so do not use ProtectHome or private device namespaces.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectControlGroups=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+LockPersonality=true
+RestrictSUIDSGID=true
+UMask=0077
 Restart=on-failure
 RestartSec=10s
 TimeoutStopSec=20s

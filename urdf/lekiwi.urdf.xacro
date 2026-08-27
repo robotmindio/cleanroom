@@ -2,10 +2,13 @@
 <!-- ROS description wrapper for the physical LeKiwi CAD model. -->
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="lekiwi">
   <xacro:arg name="sim" default="false"/>
-  <!-- Gazebo has no arm actuator in this stack. Keep its arm rigid in sim,
-       matching the previous model, while the real description stays movable. -->
-  <xacro:property name="arm_joint" value="${'fixed' if '$(arg sim)'.lower() == 'true' else 'revolute'}"/>
-  <xacro:property name="roll_joint" value="${'fixed' if '$(arg sim)'.lower() == 'true' else 'continuous'}"/>
+  <!-- The simulator now drives the same six bounded joints as the hardware.
+       Keep the joint type identical in both descriptions so a plan validated
+       in Gazebo has the same kinematic constraints on the physical robot. -->
+  <xacro:property name="arm_joint" value="revolute"/>
+  <!-- The physical wrist cable and servo have a bounded safe travel envelope.
+       Declaring it continuous makes MoveIt discard the configured bounds. -->
+  <xacro:property name="roll_joint" value="revolute"/>
   <!-- Vendored from robotmindio/LeKiwi at efa608d; see urdf/README.md. -->
   <xacro:include filename="lekiwi_cad.urdf"/>
 
@@ -107,16 +110,88 @@
     <origin xyz="0 0 0.220" rpy="0 0 0"/>
   </joint>
 
-  <!-- Preserve the original Gazebo mobile-base, lidar, and front-camera
-       functionality. References use the normalized ROS wrapper frames. -->
+  <!-- Gazebo-only contact and actuator model.  The CAD wheel meshes and their
+       measured mass remain vendored and untouched.  These small invisible
+       spheres supply the roller contact that the visual-only CAD lacks.  Each
+       axle is radial; positive rotation therefore drives tangentially in the
+       same [240, 0, 120]-90 degree convention as LeRobot's kinematics. -->
   <xacro:if value="$(arg sim)">
+    <xacro:macro name="sim_omni_wheel" params="name xyz axis">
+      <link name="${name}_contact">
+        <inertial>
+          <mass value="0.005"/>
+          <inertia ixx="0.000005" ixy="0" ixz="0" iyy="0.000005" iyz="0" izz="0.000005"/>
+        </inertial>
+        <collision name="contact">
+          <geometry><sphere radius="0.050"/></geometry>
+        </collision>
+      </link>
+      <joint name="${name}_joint" type="continuous">
+        <parent link="base_link"/><child link="${name}_contact"/>
+        <origin xyz="${xyz}" rpy="0 0 0"/>
+        <axis xyz="${axis}"/>
+        <dynamics damping="0.02" friction="0.01"/>
+        <limit effort="1.2" velocity="12.0"/>
+      </joint>
+      <gazebo>
+        <plugin filename="gz-sim-joint-controller-system" name="gz::sim::systems::JointController">
+          <joint_name>${name}_joint</joint_name>
+          <!-- The model-local watchdog is the only writer to the native
+               controller.  The public topic remains bridge-compatible. -->
+          <topic>/sim/${name}/native_cmd_vel</topic>
+          <!-- The ROS-side controller ramps every target with measured
+               acceleration and jerk limits. Gazebo then constrains that wheel
+               rate through contact; applying another PID here produced a
+               drivetrain-dependent hidden ramp and asymmetric tracking. -->
+        </plugin>
+      </gazebo>
+    </xacro:macro>
+
+    <!-- Wheel centres use the 0.125 m radius assumed by the hardware firmware.
+         z=-0.043 puts the 50 mm contact radius on z=0 when base_link is 93 mm
+         above base_footprint. -->
+    <xacro:sim_omni_wheel name="sim_base_left_wheel" xyz="0.0625 0.108253 -0.043" axis="-0.5 -0.866025 0"/>
+    <xacro:sim_omni_wheel name="sim_base_back_wheel" xyz="-0.125 0 -0.043" axis="1 0 0"/>
+    <xacro:sim_omni_wheel name="sim_base_right_wheel" xyz="0.0625 -0.108253 -0.043" axis="-0.5 0.866025 0"/>
+
     <gazebo>
-      <plugin filename="gz-sim-velocity-control-system" name="gz::sim::systems::VelocityControl">
-        <topic>/cmd_vel</topic>
+      <!-- Gazebo-native fail-safe: public bridge topics are forwarded only
+           while fresh. If ros_gz_bridge or either ROS adapter disappears,
+           it actively zeros wheel demand and interrupts the native arm
+           trajectory with a current-position hold. -->
+      <plugin filename="liblekiwi_sim_native_failsafe.so" name="lekiwi_rmf::SimNativeFailsafe"/>
+      <plugin filename="gz-sim-joint-state-publisher-system" name="gz::sim::systems::JointStatePublisher">
+        <topic>/sim/joint_states</topic><update_rate>50</update_rate>
+        <joint_name>sim_base_left_wheel_joint</joint_name>
+        <joint_name>sim_base_back_wheel_joint</joint_name>
+        <joint_name>sim_base_right_wheel_joint</joint_name>
+        <joint_name>arm_shoulder_pan</joint_name>
+        <joint_name>arm_shoulder_lift</joint_name>
+        <joint_name>arm_elbow_flex</joint_name>
+        <joint_name>arm_wrist_flex</joint_name>
+        <joint_name>arm_wrist_roll</joint_name>
+        <joint_name>arm_gripper</joint_name>
       </plugin>
-      <plugin filename="gz-sim-odometry-publisher-system" name="gz::sim::systems::OdometryPublisher">
-        <odom_frame>odom</odom_frame><robot_base_frame>base_footprint</robot_base_frame>
-        <odom_topic>/odom</odom_topic><tf_topic>/tf</tf_topic><dimensions>2</dimensions>
+      <plugin filename="gz-sim-joint-trajectory-controller-system" name="gz::sim::systems::JointTrajectoryController">
+        <topic>/sim/arm/native_joint_trajectory</topic>
+        <joint_name>arm_shoulder_pan</joint_name><initial_position>0</initial_position>
+        <position_p_gain>18</position_p_gain><position_i_gain>0.2</position_i_gain><position_d_gain>0.8</position_d_gain>
+        <position_cmd_min>-4</position_cmd_min><position_cmd_max>4</position_cmd_max>
+        <joint_name>arm_shoulder_lift</joint_name><initial_position>0</initial_position>
+        <position_p_gain>70</position_p_gain><position_i_gain>0.3</position_i_gain><position_d_gain>2.0</position_d_gain>
+        <position_cmd_min>-4</position_cmd_min><position_cmd_max>4</position_cmd_max>
+        <joint_name>arm_elbow_flex</joint_name><initial_position>0</initial_position>
+        <position_p_gain>70</position_p_gain><position_i_gain>0.3</position_i_gain><position_d_gain>2.0</position_d_gain>
+        <position_cmd_min>-4</position_cmd_min><position_cmd_max>4</position_cmd_max>
+        <joint_name>arm_wrist_flex</joint_name><initial_position>0</initial_position>
+        <position_p_gain>12</position_p_gain><position_i_gain>0.1</position_i_gain><position_d_gain>0.4</position_d_gain>
+        <position_cmd_min>-2</position_cmd_min><position_cmd_max>2</position_cmd_max>
+        <joint_name>arm_wrist_roll</joint_name><initial_position>0</initial_position>
+        <position_p_gain>12</position_p_gain><position_i_gain>0.1</position_i_gain><position_d_gain>0.4</position_d_gain>
+        <position_cmd_min>-2</position_cmd_min><position_cmd_max>2</position_cmd_max>
+        <joint_name>arm_gripper</joint_name><initial_position>0</initial_position>
+        <position_p_gain>8</position_p_gain><position_i_gain>0.05</position_i_gain><position_d_gain>0.25</position_d_gain>
+        <position_cmd_min>-1</position_cmd_min><position_cmd_max>1</position_cmd_max>
       </plugin>
     </gazebo>
     <gazebo reference="laser">
@@ -128,7 +203,14 @@
     <gazebo reference="front_camera_link">
       <sensor name="front_camera" type="camera">
         <topic>/camera/front</topic><gz_frame_id>front_camera_optical_frame</gz_frame_id><update_rate>20</update_rate><always_on>true</always_on>
-        <camera><horizontal_fov>1.0472</horizontal_fov><image><width>640</width><height>480</height><format>R8G8B8</format></image><clip><near>0.05</near><far>20</far></clip></camera>
+        <camera><horizontal_fov>1.0472</horizontal_fov><image><width>640</width><height>480</height><format>R8G8B8</format></image><clip><near>0.05</near><far>20</far></clip><noise><type>gaussian</type><mean>0</mean><stddev>0.007</stddev></noise></camera>
+      </sensor>
+      <!-- The depth stream is deliberately lower-rate and noisier than RGB.
+           launch/bringup adds a seeded delay/dropout stage before exposing its
+           point cloud to MoveIt's occupancy-map monitor. -->
+      <sensor name="front_depth" type="depth_camera">
+        <topic>/camera/depth</topic><gz_frame_id>front_camera_optical_frame</gz_frame_id><update_rate>10</update_rate><always_on>true</always_on>
+        <camera><horizontal_fov>1.0472</horizontal_fov><image><width>320</width><height>240</height><format>R_FLOAT32</format></image><clip><near>0.10</near><far>3.0</far></clip><noise><type>gaussian</type><mean>0</mean><stddev>0.012</stddev></noise></camera>
       </sensor>
     </gazebo>
   </xacro:if>

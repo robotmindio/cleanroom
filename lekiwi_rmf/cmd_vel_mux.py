@@ -16,6 +16,7 @@ manual and autonomous commands to use exactly the same final collision path.
 from __future__ import annotations
 
 import math
+import time
 from dataclasses import dataclass
 from typing import Optional
 
@@ -23,6 +24,8 @@ import rclpy
 from geometry_msgs.msg import Twist
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile
+from std_msgs.msg import Bool
 
 
 @dataclass(frozen=True)
@@ -63,9 +66,15 @@ class CmdVelMux(Node):
         self.declare_parameter("manual_timeout", 0.25)
         self.declare_parameter("navigation_timeout", 0.50)
         self.declare_parameter("publish_frequency", 20.0)
+        self.declare_parameter("permission_topic", "/safety/base_motion_permitted")
+        # Bool has no source timestamp.  A transient-local sample is only a
+        # restart convenience, never a permission lease: stop accepting motion
+        # when the supervisor stops refreshing its decision.
+        self.declare_parameter("permission_timeout", 0.5)
 
         self._manual_timeout_ns = self._positive_seconds("manual_timeout")
         self._navigation_timeout_ns = self._positive_seconds("navigation_timeout")
+        self._permission_timeout_ns = self._positive_seconds("permission_timeout")
         publish_frequency = float(self.get_parameter("publish_frequency").value)
         if not math.isfinite(publish_frequency) or publish_frequency <= 0.0:
             raise ValueError("publish_frequency must be finite and positive")
@@ -73,6 +82,10 @@ class CmdVelMux(Node):
         self._manual: Optional[_Command] = None
         self._navigation: Optional[_Command] = None
         self._last_source = "none"
+        # Permission is deliberately default-deny. A transient-local supervisor
+        # sample restores the latest decision when this node restarts.
+        self._motion_permitted = False
+        self._permission_received_at_ns: Optional[int] = None
         self._publisher = self.create_publisher(
             Twist, str(self.get_parameter("output_topic").value), 10
         )
@@ -88,6 +101,13 @@ class CmdVelMux(Node):
             self._navigation_callback,
             10,
         )
+        permission_qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        self.create_subscription(
+            Bool,
+            str(self.get_parameter("permission_topic").value),
+            self._permission_callback,
+            permission_qos,
+        )
         self.create_timer(1.0 / publish_frequency, self._publish_selected)
 
     def _positive_seconds(self, name: str) -> int:
@@ -98,11 +118,26 @@ class CmdVelMux(Node):
 
     def _manual_callback(self, message: Twist) -> None:
         if self._accept(message, "manual"):
-            self._manual = _Command(message, self.get_clock().now().nanoseconds)
+            self._manual = _Command(message, time.monotonic_ns())
 
     def _navigation_callback(self, message: Twist) -> None:
         if self._accept(message, "navigation"):
-            self._navigation = _Command(message, self.get_clock().now().nanoseconds)
+            self._navigation = _Command(message, time.monotonic_ns())
+
+    def _permission_callback(self, message: Bool) -> None:
+        self._motion_permitted = bool(message.data)
+        self._permission_received_at_ns = time.monotonic_ns()
+
+    @staticmethod
+    def _permission_is_fresh(
+        received_at_ns: Optional[int], timeout_ns: int, now_ns: Optional[int] = None
+    ) -> bool:
+        """Require a recent decision even when DDS replays a latched sample."""
+        if received_at_ns is None:
+            return False
+        current = time.monotonic_ns() if now_ns is None else now_ns
+        age = current - received_at_ns
+        return 0 <= age <= timeout_ns
 
     def _accept(self, message: Twist, source: str) -> bool:
         if _finite_twist(message):
@@ -114,12 +149,25 @@ class CmdVelMux(Node):
 
     @staticmethod
     def _fresh(command: Optional[_Command], now: int, timeout_ns: int) -> bool:
-        return command is not None and now - command.received_at <= timeout_ns
+        if command is None:
+            return False
+        age = now - command.received_at
+        return 0 <= age <= timeout_ns
 
-    def selected_command(self, now: Optional[int] = None) -> tuple[Twist, str]:
+    def selected_command(
+        self, now: Optional[int] = None, permission_now: Optional[int] = None
+    ) -> tuple[Twist, str]:
         """Return a current command; stale inputs always become an explicit stop."""
 
-        current_time = self.get_clock().now().nanoseconds if now is None else now
+        current_time = time.monotonic_ns() if now is None else now
+        permission_fresh = self._permission_is_fresh(
+            self._permission_received_at_ns, self._permission_timeout_ns, permission_now
+        )
+        if not self._motion_permitted or not permission_fresh:
+            # Drop the cached true state as well as the selected command.  A
+            # later supervisor callback may deliberately refresh it.
+            self._motion_permitted = False
+            return _zero_twist(), "interlock"
         if self._fresh(self._manual, current_time, self._manual_timeout_ns):
             assert self._manual is not None
             return self._manual.message, "manual"

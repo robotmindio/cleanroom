@@ -36,12 +36,27 @@ StartLimitBurst=8
 [Service]
 Type=simple
 User=@SERVICE_USER@
+Environment=HOME=@SERVICE_HOME@
+Environment=LEKIWI_WS=@WORKSPACE@
 WorkingDirectory=@PROJECT_ROOT@
 # Extra launch arguments, e.g. slam_mode:=localization. In the remote
 # topology the installer also puts camera_source:=remote remote_ip:=... here.
 Environment=LEKIWI_STACK_ARGS=
 EnvironmentFile=-/etc/default/lekiwi-stack
 ExecStart=@PROJECT_ROOT@/scripts/ros-start.sh $LEKIWI_STACK_ARGS
+# The ROS graph and RTAB-Map database write beneath the service HOME. Keep
+# that path writable; device isolation is not safe because a local deployment
+# can launch camera nodes directly.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectControlGroups=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+LockPersonality=true
+RestrictSUIDSGID=true
+UMask=0077
 Restart=on-failure
 RestartSec=15s
 # Nav2's lifecycle teardown alone takes ~15 s (see scripts/ros-stop.sh).

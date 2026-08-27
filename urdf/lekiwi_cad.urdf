@@ -786,6 +786,7 @@
         <parent link="STS3215_03a_Wrist_Roll-v1" />
         <child link="Wrist_Roll_08c-v1" />
         <axis xyz="0.0 0.42261799999999994 -0.9063079999999999" />
+        <limit lower="-3.14159265359" upper="3.14159265359" effort="2" velocity="3" />
     </joint>
     <joint name="Wrist_Roll_08c-v1_Rigid-56" type="fixed">
         <origin xyz="0.012999999999999998 0.019942129999999985 -0.004906820000000014" rpy="1.5707963267948966 -0.0 0.0" />

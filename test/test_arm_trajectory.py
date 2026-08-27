@@ -1,15 +1,27 @@
 import json
 import math
+import pathlib
+import types
 
 import pytest
+import yaml
 
 from lekiwi_rmf.arm_trajectory import (
+    JOINT_ACCELERATION_LIMITS,
+    JOINT_LIMITS,
+    JOINT_VELOCITY_LIMITS,
     action_positions,
     interpolate_positions,
     joint_positions,
     load_calibration,
+    position_tolerances,
+    prepare_trajectory,
+    sample_trajectory,
     validate_trajectory,
 )
+
+
+ROOT = pathlib.Path(__file__).parents[1]
 
 
 def test_action_positions_converts_ros_radians_to_lerobot_units():
@@ -34,11 +46,11 @@ def test_trajectory_timing_and_reported_velocities_are_bounded():
     start = {"arm_shoulder_pan": 0.0}
     validate_trajectory(
         ("arm_shoulder_pan",),
-        [(0.5, (1.0,), (2.0,)), (1.0, (0.0,), ())],
+        [(1.5, (1.0,), (0.0,)), (4.0, (0.0,), (0.0,))],
         start,
     )
 
-    with pytest.raises(ValueError, match="timing"):
+    with pytest.raises(ValueError, match="velocity limits"):
         validate_trajectory(
             ("arm_shoulder_pan",), [(0.1, (1.0,), ())], start
         )
@@ -65,6 +77,94 @@ def test_interpolate_positions_reaches_waypoints_on_time():
     points = [(1.0, {"arm_shoulder_pan": 1.0}), (2.0, {"arm_shoulder_pan": 0.0})]
     assert interpolate_positions({"arm_shoulder_pan": 0.0}, points, 0.5) == {"arm_shoulder_pan": 0.5}
     assert interpolate_positions({"arm_shoulder_pan": 0.0}, points, 1.5) == {"arm_shoulder_pan": 0.5}
+
+
+def test_supplied_derivatives_select_cubic_and_quintic_interpolation():
+    names = ("arm_shoulder_pan",)
+    start = {"arm_shoulder_pan": 0.0}
+    cubic = prepare_trajectory(names, [(2.0, (1.0,), (0.0,))], start)
+    position, velocity, acceleration = sample_trajectory(names, start, cubic, 1.0)
+    assert position["arm_shoulder_pan"] == pytest.approx(0.5)
+    assert velocity["arm_shoulder_pan"] == pytest.approx(0.75)
+    assert acceleration["arm_shoulder_pan"] == pytest.approx(0.0)
+
+    quintic = prepare_trajectory(
+        names, [(2.0, (1.0,), (0.0,), (0.0,), ())], start
+    )
+    position, velocity, acceleration = sample_trajectory(names, start, quintic, 1.0)
+    assert position["arm_shoulder_pan"] == pytest.approx(0.5)
+    assert velocity["arm_shoulder_pan"] == pytest.approx(0.9375)
+    assert acceleration["arm_shoulder_pan"] == pytest.approx(0.0)
+
+
+def test_trajectory_rejects_acceleration_and_interpolated_limit_violations():
+    names = ("arm_shoulder_pan",)
+    with pytest.raises(ValueError, match="acceleration exceeds"):
+        prepare_trajectory(
+            names,
+            [(2.0, (0.1,), (0.0,), (3.1,), ())],
+            {"arm_shoulder_pan": 0.0},
+        )
+    with pytest.raises(ValueError, match="interpolation exceeds.*position"):
+        prepare_trajectory(
+            names,
+            [(0.5, (1.8,), (-2.0,))],
+            {"arm_shoulder_pan": 1.8},
+        )
+    with pytest.raises(ValueError, match="end at zero velocity"):
+        prepare_trajectory(
+            names,
+            [(2.0, (0.1,), (0.1,))],
+            {"arm_shoulder_pan": 0.0},
+        )
+    with pytest.raises(ValueError, match="supplied consistently"):
+        prepare_trajectory(
+            names,
+            [(1.0, (0.1,), (0.1,)), (2.0, (0.2,), ())],
+            {"arm_shoulder_pan": 0.0},
+        )
+
+
+def test_bounded_terminal_acceleration_is_allowed_but_terminal_velocity_is_not():
+    names = ("arm_shoulder_pan",)
+    start = {"arm_shoulder_pan": 0.0}
+    # MoveIt's time parameterization may carry a finite final acceleration.
+    # The validator still bounds it, while requiring the actuator to stop.
+    prepare_trajectory(names, [(2.0, (0.1,), (0.0,), (0.2,), ())], start)
+    with pytest.raises(ValueError, match="end at zero velocity"):
+        prepare_trajectory(names, [(2.0, (0.1,), (0.1,), (0.2,), ())], start)
+
+
+def test_requested_position_tolerances_override_disable_and_validate():
+    names = ("arm_shoulder_pan", "arm_elbow_flex")
+    tolerance = lambda **values: types.SimpleNamespace(
+        name=values["name"], position=values.get("position", 0.0),
+        velocity=values.get("velocity", 0.0), acceleration=values.get("acceleration", 0.0),
+    )
+    resolved = position_tolerances(
+        names,
+        [tolerance(name="arm_shoulder_pan", position=0.02),
+         tolerance(name="arm_elbow_flex", position=-1.0)],
+        dict.fromkeys(names, 0.05),
+    )
+    assert resolved == {"arm_shoulder_pan": 0.02}
+    with pytest.raises(ValueError, match="unsupported joint"):
+        position_tolerances(names, [tolerance(name="unknown", position=0.1)])
+    with pytest.raises(ValueError, match="measured derivatives"):
+        position_tolerances(names, [tolerance(name="arm_shoulder_pan", velocity=0.1)])
+
+
+def test_driver_limits_match_moveit_configuration():
+    configured = yaml.safe_load((ROOT / "config" / "joint_limits.yaml").read_text())[
+        "joint_limits"
+    ]
+    for name, (lower, upper) in JOINT_LIMITS.items():
+        assert configured[name]["min_position"] == pytest.approx(lower)
+        assert configured[name]["max_position"] == pytest.approx(upper)
+        assert configured[name]["max_velocity"] == pytest.approx(JOINT_VELOCITY_LIMITS[name])
+        assert configured[name]["max_acceleration"] == pytest.approx(
+            JOINT_ACCELERATION_LIMITS[name]
+        )
 
 
 def test_calibration_maps_urdf_zero_to_the_lerobot_position(tmp_path):

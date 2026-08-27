@@ -1,0 +1,14 @@
+# Environmental collision input for MoveIt's occupancy-map monitor. The topic
+# is a contract for the future calibrated depth pipeline; production arm motion
+# remains denied by safety_production.yaml until fresh clouds are present.
+sensors:
+  - point_cloud
+point_cloud:
+  sensor_plugin: occupancy_map_monitor/PointCloudOctomapUpdater
+  point_cloud_topic: /camera/depth/points
+  max_range: 3.0
+  point_subsample: 1
+  padding_offset: 0.03
+  padding_scale: 1.0
+  max_update_rate: 5.0
+  filtered_cloud_topic: /moveit/filtered_cloud

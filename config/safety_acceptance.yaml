@@ -1,0 +1,60 @@
+schema_version: 2
+robot_id: lekiwi_1
+# Set true only after the controlled hardware procedure has populated all
+# measurements below and the configured collision zones have been updated from
+# the measured worst case plus uncertainty.
+validated: false
+software_revision: null
+sensor_configuration: null
+payload_kg: null
+surface: null
+validated_at: null
+# Must exactly match both tracked Nav2 costmap footprints. The supervisor also
+# checks that the collision StopZone encloses this polygon plus the measured
+# worst stopping distance and uncertainty.
+expected_base_footprint:
+  - [-0.22, -0.22]
+  - [0.22, -0.22]
+  - [0.22, 0.22]
+  - [-0.22, 0.22]
+expected_footprint_padding_m: 0.0
+# Must exactly match safety_production.yaml. This binds measured clearance and
+# stopping trials to the physical arm configuration used for base motion.
+accepted_stow_joint_positions:
+  arm_shoulder_pan: 0.0
+  arm_shoulder_lift: 0.0
+  arm_elbow_flex: 0.0
+  arm_wrist_flex: 0.0
+  arm_wrist_roll: 0.0
+  arm_gripper: 0.0
+minimum_trials_per_direction: 30
+maximum_command_stop_latency_s: null
+# Acceptance limits must be set from the reviewed safety case before testing;
+# measured results cannot define their own passing threshold afterward.
+maximum_allowed_command_stop_latency_s: null
+maximum_allowed_stopping_distance_m: null
+measurement_uncertainty_m: null
+directions:
+  forward: {trials: 0, worst_stopping_distance_m: null}
+  reverse: {trials: 0, worst_stopping_distance_m: null}
+  left: {trials: 0, worst_stopping_distance_m: null}
+  right: {trials: 0, worst_stopping_distance_m: null}
+  rotation_cw: {trials: 0, worst_stopping_distance_m: null}
+  rotation_ccw: {trials: 0, worst_stopping_distance_m: null}
+fault_tests:
+  scan_disconnect: false
+  depth_disconnect: false
+  imu_disconnect: false
+  battery_low_or_disconnect: false
+  motor_diagnostic_fault: false
+  bumper: false
+  estop_independent_of_ros: false
+  telemetry_loss: false
+  telemetry_replay_or_duplicate: false
+  host_restart_stays_disarmed: false
+  ros_restart_stays_disarmed: false
+  zmq_unauthorized_client_rejected: false
+  dds_control_plane_isolated_or_authenticated: false
+  rosbridge_disabled_or_authenticated: false
+  collision_monitor_obstacle_stop: false
+  arm_workspace_intrusion_stop: false

@@ -15,7 +15,7 @@ pid_matches() { # pid_matches <pid> <stack|host|rviz>
   command=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)
   case "$kind" in
     stack) [[ $command == *"ros2 launch lekiwi_rmf"* || $command == *"bringup.launch.py"* ]] ;;
-    host) [[ $command == *"robot-host.sh"* || $command == *"lerobot.robots.lekiwi.lekiwi_host"* ]] ;;
+    host) [[ $command == *"robot-host.sh"* || $command == *"torque-host.py"* || $command == *"lerobot.robots.lekiwi.lekiwi_host"* ]] ;;
     rviz) [[ $command == *"rviz2"* ]] ;;
   esac
 }

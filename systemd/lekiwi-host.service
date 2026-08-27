@@ -16,11 +16,11 @@
 # robot-host.sh already supervises the LeRobot process and reconnects the
 # motor bus after a dropped packet, so systemd here only backs up the outer
 # script. The ExecStartPost gate is the wait pi-up.sh performs by hand: the
-# host binds :5555 only after connect() has found all nine servos, so a unit
+# host binds :5555/:5557 only after connect() has found all nine servos, so a unit
 # ordered After=this one starts against a host that can actually talk. A host
 # that never binds marks the unit failed instead of active-but-useless.
 [Unit]
-Description=LeKiwi motor host (Feetech bus + ZMQ :5555)
+Description=LeKiwi motor host (Feetech bus + ZMQ :5555/:5557)
 Documentation=file://@PROJECT_ROOT@/HARDWARE.md
 # The /dev/serial/by-id glob only resolves after udev has settled; without
 # this a slow boot can race the first enumeration.
@@ -31,10 +31,31 @@ StartLimitBurst=8
 [Service]
 Type=simple
 User=@SERVICE_USER@
+Environment=HOME=@SERVICE_HOME@
+Environment=LEKIWI_WS=@WORKSPACE@
+Environment=LEKIWI_LEROBOT_VENV=@LEROBOT_VENV@
+Environment=PYTHONPATH=@PROJECT_ROOT@
+Environment=LEKIWI_BIND_ADDRESS=@HOST_BIND_ADDRESS@
+Environment=LEKIWI_CURVE_SERVER_SECRET=@CURVE_SERVER_SECRET@
+Environment=LEKIWI_CURVE_AUTHORIZED_CLIENTS=@CURVE_AUTHORIZED_CLIENTS@
 WorkingDirectory=@PROJECT_ROOT@
 ExecStartPre=-/usr/bin/udevadm settle --timeout=15
+ExecStartPre=/usr/bin/test -x @LEROBOT_PYTHON@
 ExecStart=@PROJECT_ROOT@/scripts/robot-host.sh --no-cameras
-ExecStartPost=/bin/sh -c 'for i in $(seq 120); do ss -tln | grep -q ":5555 " && exit 0; sleep 1; done; echo "host never bound :5555" >&2; exit 1'
+ExecStartPost=/bin/sh -c 'for i in $(seq 120); do @LEROBOT_PYTHON@ @PROJECT_ROOT@/scripts/host-health-check.py --host @HOST_BIND_ADDRESS@ --timeout 1 --client-secret-key-file "@CURVE_HEALTH_CLIENT_SECRET@" --server-public-key-file "@CURVE_SERVER_PUBLIC@" && exit 0; sleep 1; done; echo "host never passed protocol health check" >&2; exit 1'
+# Keep the service user able to write its ROS/calibration state under HOME and
+# retain access to the dynamic serial device.  Stronger home/device isolation
+# would break those repository-owned requirements.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectControlGroups=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+LockPersonality=true
+RestrictSUIDSGID=true
+UMask=0077
 Restart=on-failure
 RestartSec=10s
 # robot-host.sh exits cleanly on SIGTERM (it traps INT TERM HUP); the cgroup
