@@ -75,13 +75,12 @@ topology_dir="$UNIT_DIR/lekiwi-stack.service.d"
 topology_conf="$topology_dir/topology.conf"
 
 if [[ -n $REMOTE ]]; then
-  # There is no local host to depend on: clear the base unit's Requires,
-  # PartOf and After so systemd does not wait for (or try to pull in) a unit
-  # that may not even exist here.
+  # There is no local host to depend on. The base unit is remote-safe; remove
+  # any local-topology dependency left by an earlier installation.
   log "Remote topology: stack reaches the host at $REMOTE over the network"
-  as_root mkdir -p "$topology_dir"
-  printf '%s\n' "[Unit]" "Requires=" "PartOf=" "After=" |
-    as_root tee "$topology_conf" >/dev/null
+  if [[ -e $topology_conf ]]; then
+    as_root rm -f "$topology_conf"
+  fi
   if [[ -f $host_unit ]]; then
     log "warning: device services are also installed on this machine -- an"
     log "unusual split. If the devices are actually here, drop --remote."
@@ -97,12 +96,12 @@ if [[ -n $REMOTE ]]; then
     STACK_ARGS="$STACK_ARGS curve_client_secret_key_file:=$curve_client_secret curve_server_public_key_file:=$curve_server_public"
   fi
 else
-  # All-in-one: restore the base dependency set in case a previous remote
-  # configuration left the drop-in behind.
-  if [[ -e $topology_conf ]]; then
-    log "Removing stale topology override $(printf %q "$topology_conf")"
-    as_root rm -f "$topology_conf"
-  fi
+  # All-in-one: add the local motor host dependency. systemd dependencies
+  # cannot be removed by an empty drop-in, so the base unit has none.
+  as_root mkdir -p "$topology_dir"
+  printf '%s\n' "[Unit]" "Requires=lekiwi-host.service" \
+    "PartOf=lekiwi-host.service" "After=lekiwi-host.service" |
+    as_root tee "$topology_conf" >/dev/null
   if [[ -f $cameras_unit ]]; then
     # The camera publisher service owns this machine's USB cameras. Letting the
     # stack open them again would fight it for the devices (v4l2 allows one

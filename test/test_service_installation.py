@@ -131,3 +131,12 @@ def test_service_installers_support_an_unauthenticated_split_zmq_transport():
 
     assert 'if [[ -n $CURVE_DIR_ARG ]]; then' in device
     assert 'STACK_ARGS="camera_source:=remote remote_ip:=$REMOTE"' in compute
+
+
+def test_compute_service_keeps_local_dependencies_out_of_remote_topology():
+    installer = (ROOT / "scripts" / "install-compute-services.sh").read_text(encoding="utf-8")
+    unit = (ROOT / "systemd" / "lekiwi-stack.service").read_text(encoding="utf-8")
+
+    assert "Requires=lekiwi-host.service" not in unit
+    assert '"Requires=lekiwi-host.service"' in installer
+    assert 'as_root rm -f "$topology_conf"' in installer
