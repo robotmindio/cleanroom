@@ -43,12 +43,24 @@ command -v sudo >/dev/null || [[ $EUID -eq 0 ]] || die "sudo is required"
 SUDO=()
 [[ $EUID -eq 0 ]] || SUDO=(sudo)
 
+apt_get() {
+  local attempt
+  for attempt in 1 2 3; do
+    if "${SUDO[@]}" apt-get "$@"; then
+      return
+    fi
+    [[ $attempt -lt 3 ]] || die "apt-get $* failed after 3 attempts"
+    log "apt-get failed; retrying in 10 seconds"
+    sleep 10
+  done
+}
+
 log "Installing Ubuntu and ROS repository prerequisites"
-"${SUDO[@]}" apt-get update
-"${SUDO[@]}" apt-get install -y software-properties-common
+apt_get update
+apt_get install -y curl git locales python3-pip python3-venv software-properties-common unzip
 "${SUDO[@]}" add-apt-repository -y universe
-"${SUDO[@]}" apt-get update
-"${SUDO[@]}" apt-get install -y \
+apt_get update
+apt_get install -y \
   curl \
   git \
   locales \
@@ -81,11 +93,11 @@ if [[ ! -e $modern_ros_source ]]; then
 fi
 
 log "Installing ROS 2 ${ROS_DISTRO}, Nav2, Gazebo, RTAB-Map, and Open-RMF"
-"${SUDO[@]}" apt-get update
+apt_get update
 if dpkg-query -W -f='${Status}' python3-paraview 2>/dev/null | grep -q 'ok installed'; then
   die "Ubuntu ParaView conflicts with RTAB-Map's python3-vtk9; remove it first: sudo apt-get remove paraview python3-paraview"
 fi
-"${SUDO[@]}" apt-get install -y \
+apt_get install -y \
   ros-dev-tools \
   "ros-$ROS_DISTRO-camera-calibration" \
   "ros-$ROS_DISTRO-nav2-bringup" \
