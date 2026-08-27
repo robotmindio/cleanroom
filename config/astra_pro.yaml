@@ -1,0 +1,42 @@
+/**:
+  ros__parameters:
+    # The legacy Astra Pro uses OpenNI plus a separate UVC colour stream.
+    # Keep the two streams at the same modest rate so RGB-D SLAM can pair them
+    # without filling the robot computer's USB/CPU budget.
+    camera_name: camera
+    color_width: 640
+    color_height: 480
+    color_fps: 15
+    depth_width: 640
+    depth_height: 480
+    depth_fps: 15
+    enable_color: true
+    enable_depth: true
+    enable_ir: false
+    use_uvc_camera: true
+    uvc_vendor_id: 0x2bc5
+    uvc_product_id: 0x0501
+    uvc_camera_format: mjpeg
+    uvc_retry_count: 100
+
+    # Registered, synchronized depth is required by RTAB-Map's RGB-D input.
+    # It also makes the cloud suitable for MoveIt's octomap updater.
+    depth_registration: true
+    color_depth_synchronization: true
+    enable_point_cloud: true
+    enable_colored_point_cloud: false
+    color_qos: SENSOR_DATA
+    color_camera_info_qos: SENSOR_DATA
+    depth_qos: SENSOR_DATA
+    depth_camera_info_qos: SENSOR_DATA
+    point_cloud_qos: SENSOR_DATA
+
+    # robot_state_publisher owns the separately calibrated Astra mount
+    # transform. Giving the driver these frames avoids a competing camera TF
+    # tree and lets its registered depth/cloud land in the robot frame.
+    publish_tf: false
+    camera_link_frame_id: astra_camera_link
+    color_frame_id: astra_camera_link
+    depth_frame_id: astra_camera_link
+    color_optical_frame_id: astra_camera_optical_frame
+    depth_optical_frame_id: astra_camera_optical_frame

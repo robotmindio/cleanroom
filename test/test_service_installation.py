@@ -114,3 +114,12 @@ def test_installer_reapplies_the_pinned_free_fleet_patch_on_rerun():
     assert patch.is_file()
     assert 'apply_pinned_patch "$free_fleet_source" "$free_fleet_patch"' in installer
     assert '"$free_fleet_source" "$FREE_FLEET_REV" "$free_fleet_patch"' in installer
+
+
+def test_simulation_installer_excludes_astra_hardware_setup():
+    installer = (ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
+
+    assert 'if [[ $install_mode == full ]]; then\n  log "Fetching the pinned Orbbec Astra Pro ROS 2 driver"' in installer
+    assert 'extra_source_paths+=("$astra_source")' in installer
+    assert 'extra_packages+=(astra_camera astra_camera_msgs)' in installer
+    assert 'Simulation-only installation: skipping Astra driver and udev setup' in installer

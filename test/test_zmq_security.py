@@ -32,6 +32,18 @@ def test_unauthenticated_server_is_limited_to_loopback():
         LeKiwiZmqClient("192.0.2.10", 5555, 5556, ("x.vel",))
 
 
+def test_test_fixtures_can_explicitly_allow_an_insecure_zmq_transport():
+    security = CurveServerSecurity(
+        _Context(), "192.0.2.10", allow_insecure_test_bind=True
+    )
+    assert security.enabled is False
+    security.close()
+    LeKiwiZmqClient(
+        "192.0.2.10", 5555, 5556, ("x.vel",),
+        allow_insecure_test_connection=True,
+    )
+
+
 def test_partial_curve_configuration_fails_closed(tmp_path):
     public = tmp_path / "server.key"
     public.write_text("public", encoding="ascii")

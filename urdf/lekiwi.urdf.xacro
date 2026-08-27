@@ -39,6 +39,19 @@
     <parent link="front_camera_link"/><child link="front_camera_optical_frame"/>
     <origin xyz="0 0 0" rpy="-1.57079632679 0 -1.57079632679"/>
   </joint>
+  <!-- Astra Pro is a third camera beside the existing front and wrist cameras.
+       Replace this measured mounting offset when its bracket is finalized;
+       camera drivers must not publish a competing runtime mount TF. -->
+  <link name="astra_camera_link"/>
+  <joint name="astra_camera_mount" type="fixed">
+    <parent link="front_camera_link"/><child link="astra_camera_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+  <link name="astra_camera_optical_frame"/>
+  <joint name="astra_camera_optical" type="fixed">
+    <parent link="astra_camera_link"/><child link="astra_camera_optical_frame"/>
+    <origin xyz="0 0 0" rpy="-1.57079632679 0 -1.57079632679"/>
+  </joint>
   <link name="wrist_camera_link"/>
   <joint name="wrist_camera_mount" type="fixed">
     <parent link="Camera-Model-v3-1"/><child link="wrist_camera_link"/>

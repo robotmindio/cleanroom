@@ -9,6 +9,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 import math
+from pathlib import Path
+
+import yaml
 
 from lekiwi_rmf.zmq_security import is_loopback_address
 
@@ -28,6 +31,8 @@ ARGUMENT_NAMES = (
     "localization",
     "slam_mode",
     "publish_camera",
+    "publish_astra",
+    "hardware_config",
     "camera_source",
     "laser_source",
     "xy_velocity_scale",
@@ -88,6 +93,29 @@ def _positive_int(value: object, name: str) -> int:
     return number
 
 
+def astra_serial_from_hardware_config(path: str | Path, *, required: bool) -> str:
+    """Read the deployment-pinned Astra identity from tracked YAML."""
+    config_path = Path(path).expanduser()
+    try:
+        data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as error:
+        raise ValueError(f"cannot read hardware configuration {config_path}: {error}") from error
+    try:
+        serial = data["astra"]["serial_number"]
+    except (KeyError, TypeError) as error:
+        raise ValueError(
+            "hardware configuration must contain astra.serial_number"
+        ) from error
+    if not isinstance(serial, str):
+        raise ValueError("hardware configuration astra.serial_number must be a string")
+    serial = serial.strip()
+    if required and not serial:
+        raise ValueError(
+            "real local Astra RGB-D requires a non-empty tracked astra.serial_number"
+        )
+    return serial
+
+
 def validate_launch_arguments(arguments: Mapping[str, object]) -> None:
     """Raise ``ValueError`` unless resolved bringup arguments are coherent."""
     missing = [name for name in ARGUMENT_NAMES if name not in arguments]
@@ -120,6 +148,7 @@ def validate_launch_arguments(arguments: Mapping[str, object]) -> None:
     start_rosbridge = _bool(arguments["start_rosbridge"], "start_rosbridge")
     rosbridge_address = str(arguments["rosbridge_address"]).strip()
     publish_camera = _bool(arguments["publish_camera"], "publish_camera")
+    _bool(arguments["publish_astra"], "publish_astra")
     static_map = _bool(arguments["static_map"], "static_map")
     _port(arguments["rosbridge_port"], "rosbridge_port")
     rmf_domain = _nonnegative_int(arguments["rmf_domain"], "rmf_domain", maximum=232)
@@ -139,7 +168,16 @@ def validate_launch_arguments(arguments: Mapping[str, object]) -> None:
         raise ValueError("rtabmap_database must be non-empty")
     if not map_bundle:
         raise ValueError("map_bundle must be non-empty")
-    if start_rosbridge and rosbridge_address not in {"127.0.0.1", "::1"}:
+    if not str(arguments["hardware_config"]).strip():
+        raise ValueError("hardware_config must be non-empty")
+    # Simulation is a disposable test topology: its ZMQ clients and rosbridge
+    # endpoint may be reached by the integration-test runner. Real robot
+    # deployments remain loopback-only unless separately authenticated.
+    if (
+        mode == "real"
+        and start_rosbridge
+        and rosbridge_address not in {"127.0.0.1", "::1"}
+    ):
         raise ValueError("rosbridge may bind only to loopback until authenticated TLS is configured")
 
     if localization == "visual_slam" and not publish_camera:
@@ -183,23 +221,32 @@ def validate_context(context, *_args, **_kwargs):
         str(values["curve_client_secret_key_file"]),
         str(values["curve_server_public_key_file"]),
     ).validate()
+    astra_required = (
+        str(values["mode"]) == "real"
+        and _bool(values["publish_camera"], "publish_camera")
+        and str(values["camera_source"]) == "local"
+        and _bool(values["publish_astra"], "publish_astra")
+    )
+    astra_serial = astra_serial_from_hardware_config(
+        str(values["hardware_config"]), required=astra_required
+    )
+    from launch.actions import SetLaunchConfiguration
+
+    selected = [SetLaunchConfiguration("astra_serial", astra_serial)]
     uses_bundle = (
         _bool(values["start_rmf"], "start_rmf")
         or str(values["localization"]) == "amcl"
         or _bool(values["static_map"], "static_map")
     )
     if uses_bundle:
-        from launch.actions import SetLaunchConfiguration
         from lekiwi_rmf.map_bundle import validate_map_bundle
 
         bundle = validate_map_bundle(str(values["map_bundle"]), require_approved=True)
-        selected = [
-            SetLaunchConfiguration("selected_map", str(bundle.occupancy_yaml)),
-        ]
+        selected.append(SetLaunchConfiguration("selected_map", str(bundle.occupancy_yaml)))
         if _bool(values["start_rmf"], "start_rmf"):
             selected.extend([
             SetLaunchConfiguration("selected_nav_graph", str(bundle.navigation_graph)),
             SetLaunchConfiguration("selected_fleet_config", str(bundle.fleet_config)),
             ])
         return selected
-    return []
+    return selected

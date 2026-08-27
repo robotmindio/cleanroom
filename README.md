@@ -166,10 +166,12 @@ scripts/sim-up.sh slam_mode:=localization \
 | `slam_mode` | `mapping`, `localization` | sim: `mapping`; real: `localization` | Extend or reuse the RTAB-Map database |
 | `remote_ip` | IPv4/hostname | `127.0.0.1` | Address of the LeKiwi ZMQ host |
 | `rtabmap_database` | file path | sim: `~/.ros/lekiwi_rtabmap_sim.db`; real: `~/.ros/lekiwi_rtabmap.db` | Visual map database |
-| `camera_info_url` | ROS camera URL | `file://~/.ros/camera_info/lekiwi_front.yaml` | Real front-camera calibration |
+| `publish_astra` | `true`, `false` | `true` | Start the tracked local Astra Pro as registered RGB-D; otherwise SLAM uses the front RGB camera plus scan |
+| `hardware_config` | YAML path | `config/hardware.yaml` | Tracked hardware identities, including the required Astra serial when RGB-D is enabled |
+| `camera_info_url` | ROS camera URL | `file://~/.ros/camera_info/lekiwi_front.yaml` | V4L2 front-camera calibration (not used by Astra Pro) |
 | `wrist_camera_info_url` | ROS camera URL | `file://~/.ros/camera_info/lekiwi_wrist.yaml` | Optional wrist-camera calibration |
 | `camera_source` | `local`, `remote` | `local` | Read the camera here, or decompress what the robot's Pi publishes |
-| `camera_device` | V4L2 path | `/dev/video0` | Front camera when `camera_source:=local` |
+| `camera_device` | V4L2 path | `/dev/video0` | Existing front V4L2 camera |
 | `laser_source` | `auto`, `camera`, `ld06`, `none` | `auto` | Select camera fallback or LD06 on real hardware; Gazebo supplies `/scan` in sim |
 | `lidar_port` | serial path | CP2102 `/dev/serial/by-id/...` | LD06 device when `laser_source:=ld06` |
 | `camera_height`, `camera_offset_x`, `camera_offset_y` | metres | `0.093`, `0.03`, `0.0` | Front-camera pose used by the camera scan |
@@ -280,18 +282,40 @@ is implied by a passing software test.
 
 ### Where the camera comes from
 
-The cameras are read by `v4l2_camera` nodes on whichever machine they are
-plugged into, not relayed through the LeRobot host in ROS mode. The repository
-host is started camera-less for ROS, so a delayed camera frame cannot take the
-motor bus down. Direct LeRobot dataset/teleoperation mode may still be
-camera-sensitive and should not be used as the ROS motor service.
+The local real robot has three cameras: the existing front V4L2 camera, the
+existing wrist V4L2 camera, and an ORBBEC Astra Pro. The Astra's pinned
+OpenNI/UVC driver publishes synchronized, depth-registered RGB-D under
+`/camera/astra/...`; its cloud is additionally exposed at
+`/camera/depth/points` for MoveIt. RTAB-Map uses the Astra RGB-D pair when it
+is enabled; otherwise it uses the front RGB camera plus `/scan`, which keeps
+the remote-camera topology usable. Set the physical serial in the tracked
+`config/hardware.yaml` before enabling Astra: an empty serial is rejected
+instead of allowing the driver to claim an arbitrary compatible USB camera.
+The full hardware installer also installs the camera's udev rule, so this
+works from the managed service without an interactive permission fix.
+
+The driver uses `astra_camera_optical_frame`; keep its physical mount
+transform/calibration in `urdf/lekiwi.urdf.xacro` when the Astra mount is
+measured, rather than adding a runtime TF. The checked-in zero offset is a
+mounting placeholder and must be replaced with the measured Astra bracket
+offset. Verify the depth cloud frame and its overlay in RViz before enabling
+arm motion.
+
+The repository host is started camera-less for ROS, so a delayed camera frame
+cannot take the motor bus down. Direct LeRobot dataset/teleoperation mode may
+still be camera-sensitive and should not be used as the ROS motor service.
+
+The front/wrist V4L2 cameras are also the supported remote-camera topology:
+frames are read by `v4l2_camera` on the machine where they are plugged in, then
+relayed as below. Astra is local-only in this launch configuration.
 
 With a Pi on the robot, `ros-cameras.sh` reads each USB camera there and publishes a
 compressed `/pi/camera/...` stream. The workstation relays and expands it onto the
 canonical `/camera/...` topics when `camera_source:=remote`; camera frames never pass
 through the LeRobot motor host.
 
-On the wired variant everything is local, so `camera_source:=local` with `camera_device` pointing at a `/dev/v4l/by-id/...` path.
+On a wired robot, use the default `camera_source:=local`; the existing
+`camera_device` continues to identify the front V4L2 camera.
 
 The known JYU2C wrist camera is auto-detected unless `LEKIWI_WRIST=none`. It publishes on `/camera/wrist/image_raw` for watching the gripper. Run `scripts/calibrate.sh wrist` **on the machine the wrist camera is plugged into** before using its `camera_info` for calibrated perception; navigation and RTAB-Map use only the front camera. In remote mode the camera node publishes its compressed wrist stream to the workstation. Both cameras share one USB 2.0 hub, so the wrist feed stays small.
 
@@ -345,6 +369,10 @@ managed authenticated TLS proxy and firewall policy. A client must use the
 documented `/cmd_vel_manual` or navigation action; publishing directly to
 `/cmd_vel_safe` bypasses the intended guard and is an unsafe protocol violation.
 Rosbridge access is not a safety boundary.
+
+The disposable `mode:=sim` test topology deliberately permits an unprotected
+rosbridge endpoint and unauthenticated ZMQ test fixtures. This exception never
+applies to `mode:=real`, which retains the loopback/CURVE requirements.
 
 ### Driving the robot from Fiber
 

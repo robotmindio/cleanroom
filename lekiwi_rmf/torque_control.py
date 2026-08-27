@@ -99,6 +99,7 @@ class TorqueControlClient:
     def __init__(
         self, host: str, port: int = 5557, timeout_ms: int = 1000, zmq_module=None,
         client_secret_key_file: str = "", server_public_key_file: str = "",
+        *, allow_insecure_test_connection: bool = False,
     ):
         if not isinstance(host, str) or not host.strip():
             raise ValueError("torque-control host must be a non-empty string")
@@ -113,7 +114,11 @@ class TorqueControlClient:
         self.curve = CurveClientCredentials(
             client_secret_key_file, server_public_key_file
         ).validate()
-        if not is_loopback_address(host) and not self.curve.enabled:
+        if (
+            not is_loopback_address(host)
+            and not self.curve.enabled
+            and not allow_insecure_test_connection
+        ):
             raise CurveConfigurationError(
                 "refusing unauthenticated torque connection to a non-loopback host"
             )

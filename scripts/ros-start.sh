@@ -4,7 +4,8 @@
 #   scripts/ros-start.sh                                    # local mapping/navigation only
 #   scripts/ros-start.sh slam_mode:=localization            # drive a map you already built
 #   scripts/ros-start.sh start_rmf:=false                   # Nav2 only
-# Override per machine: LEKIWI_FRONT, LEKIWI_WS
+# Override per machine: LEKIWI_FRONT, LEKIWI_WS. The Astra serial is pinned
+# in config/hardware.yaml so the safety camera cannot be selected ad hoc.
 # The LeRobot host must already be running -- `scripts/robot-host.sh` on the robot.
 set -Eeuo pipefail
 
@@ -31,6 +32,7 @@ scripts/rtabmap-db-maintenance.py "$@"
 # webcam, so resolve the front camera by its device name -- same glob as robot-host.sh.
 # A workstation using a remote LeKiwi host has no local camera at all.
 first_match() { # first existing path matching a glob, empty if none
+  # shellcheck disable=SC2086 # Deliberately expand the caller-supplied glob.
   set -- $1
   [ -e "$1" ] && printf '%s' "$1"
   return 0
@@ -103,6 +105,7 @@ front_camera_info="file://${LEKIWI_CAMERA_INFO:-$HOME/.ros/camera_info/lekiwi_fr
 wrist_camera_info="file://${LEKIWI_WRIST_CAMERA_INFO:-$HOME/.ros/camera_info/lekiwi_wrist.yaml}"
 
 exec ros2 launch lekiwi_rmf bringup.launch.py mode:=real \
-  camera_source:="$camera_source" camera_device:="$FRONT" wrist_camera_device:="${WRIST:-none}" \
+  camera_source:="$camera_source" \
+  camera_device:="$FRONT" wrist_camera_device:="${WRIST:-none}" \
   camera_info_url:="$front_camera_info" wrist_camera_info_url:="$wrist_camera_info" \
   "${calibration_args[@]}" "$@"

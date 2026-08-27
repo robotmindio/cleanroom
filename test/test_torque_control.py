@@ -88,6 +88,14 @@ def test_torque_client_refuses_unauthenticated_remote_host():
         TorqueControlClient("192.0.2.10", zmq_module=_Zmq({}))
 
 
+def test_torque_client_allows_an_explicit_insecure_test_fixture():
+    client = TorqueControlClient(
+        "192.0.2.10", zmq_module=_Zmq({}),
+        allow_insecure_test_connection=True,
+    )
+    assert client.host == "192.0.2.10"
+
+
 def test_driver_and_host_wire_disarm_to_the_serial_bus_owner():
     root = pathlib.Path(__file__).parents[1]
     driver = (root / "lekiwi_rmf" / "driver.py").read_text()

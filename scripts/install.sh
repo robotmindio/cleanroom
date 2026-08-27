@@ -8,6 +8,7 @@ RMF_DEMOS_REV=2.3.0
 # LDROBOT LD06 lidar driver, tag v3.0.3. Not released into the ROS apt repos;
 # thirdparty/ldlidar_stl_ros2/ carries a build fix applied after this clone.
 LIDLIDAR_STL_REV=cac5d3d4c15522c6126ef65cfa8a65b08531a66b
+ASTRA_CAMERA_REV=f7e71d9ce806e788cb48d8580aac2c778fba4214
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 WORKSPACE=${LEKIWI_WS:-"$HOME/lekiwi_ws"}
 
@@ -115,6 +116,8 @@ apt_get install -y \
   "ros-$ROS_DISTRO-rtabmap-ros" \
   "ros-$ROS_DISTRO-rviz2" \
   "ros-$ROS_DISTRO-v4l2-camera" \
+  libgoogle-glog-dev \
+  libuvc-dev \
   python3-matplotlib \
   python3-opencv \
   python3-yaml \
@@ -182,6 +185,29 @@ ldlidar_source="$WORKSPACE/src/ldlidar_stl_ros2"
 ldlidar_patch="$PROJECT_ROOT/thirdparty/ldlidar_stl_ros2/0001-linux-build-fixes.patch"
 apply_pinned_patch "$ldlidar_source" "$ldlidar_patch" "the LDROBOT Linux build fixes"
 
+extra_source_paths=()
+extra_packages=()
+if [[ $install_mode == full ]]; then
+  log "Fetching the pinned Orbbec Astra Pro ROS 2 driver"
+  astra_source="$WORKSPACE/src/ros2_astra_camera"
+  astra_patch="$PROJECT_ROOT/thirdparty/ros2_astra_camera/0001-jazzy-image-geometry-and-parameter-callback.patch"
+  checkout https://github.com/orbbec/ros2_astra_camera.git \
+    "$astra_source" "$ASTRA_CAMERA_REV" "$astra_patch"
+  apply_pinned_patch "$astra_source" "$astra_patch" "the Astra ROS 2 Jazzy compatibility fixes"
+  # The OpenNI driver opens the Astra Pro's depth interface directly; without
+  # this tracked udev rule a normal service user sees the colour UVC device but
+  # cannot read depth after a reboot.
+  "${SUDO[@]}" install -m 0644 \
+    "$astra_source/astra_camera/scripts/56-orbbec-usb.rules" \
+    /etc/udev/rules.d/56-orbbec-usb.rules
+  "${SUDO[@]}" udevadm control --reload-rules
+  "${SUDO[@]}" udevadm trigger --subsystem-match=usb
+  extra_source_paths+=("$astra_source")
+  extra_packages+=(astra_camera astra_camera_msgs)
+else
+  log "Simulation-only installation: skipping Astra driver and udev setup"
+fi
+
 log "Installing the Zenoh ROS 2 bridge"
 zenoh_zip="zenoh-plugin-ros2dds-${ZENOH_VERSION}-${ZENOH_ARCH}-standalone.zip"
 tmp_dir=$(mktemp -d)
@@ -239,6 +265,7 @@ rosdep install --from-paths \
   "$WORKSPACE/src/free_fleet" \
   "$WORKSPACE/src/ldlidar_stl_ros2" \
   "$WORKSPACE/src/rmf_demos/rmf_demos_tasks" \
+  "${extra_source_paths[@]}" \
   --ignore-src --rosdistro "$ROS_DISTRO" -yr
 # colcon reuses each package's CMake cache. If this repository was previously built from
 # another worktree, CMake refuses the reused cache before it can regenerate anything.
@@ -254,18 +281,22 @@ fi
 # A Pi-sized machine can exhaust itself here: five packages building in parallel
 # while everything else runs is how oomd ended up killing a whole session
 # (2026-08-23). On small RAM, cap packages-in-flight and compiler jobs per
-# package; CMAKE_BUILD_PARALLEL_LEVEL is what make/ninja actually read.
+# package.  colcon otherwise derives its own `-j<N>` make arguments from the
+# CPU count; MAKEFLAGS is the supported way to suppress those arguments.
 mem_total_mb=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
 parallel_args=()
 if (( mem_total_mb < 8000 )); then
   log "Low memory (${mem_total_mb} MB): capping build parallelism"
-  parallel_args=(--parallel-workers 2)
-  export CMAKE_BUILD_PARALLEL_LEVEL=2
+  # Astra's OpenNI/OpenCV translation units exceed 1 GB each on arm64; two
+  # simultaneous compiler instances can make the kernel kill cc1plus on the
+  # 4 GB robot computer.
+  parallel_args=(--parallel-workers 1)
+  export MAKEFLAGS=-j1
 fi
 colcon --log-base "$WORKSPACE/log" build \
   --base-paths "$PROJECT_ROOT" "$WORKSPACE/src/free_fleet" \
-    "$WORKSPACE/src/ldlidar_stl_ros2" "$WORKSPACE/src/rmf_demos/rmf_demos_tasks" \
-  --packages-select lekiwi_rmf free_fleet free_fleet_adapter ldlidar_stl_ros2 rmf_demos_tasks \
+    "$WORKSPACE/src/ldlidar_stl_ros2" "$WORKSPACE/src/rmf_demos/rmf_demos_tasks" "${extra_source_paths[@]}" \
+  --packages-select lekiwi_rmf free_fleet free_fleet_adapter ldlidar_stl_ros2 rmf_demos_tasks "${extra_packages[@]}" \
   --build-base "$WORKSPACE/build" \
   --install-base "$WORKSPACE/install" \
   "${parallel_args[@]}" \
@@ -285,6 +316,10 @@ for exe in \
 do
   [[ -x $exe ]] || missing+=("$exe")
 done
+if [[ $install_mode == full ]]; then
+  [[ -x "$WORKSPACE/install/astra_camera/lib/astra_camera/astra_camera_node" ]] \
+    || missing+=("$WORKSPACE/install/astra_camera/lib/astra_camera/astra_camera_node")
+fi
 if (( ${#missing[@]} )); then
   die "build finished but these executables are missing: ${missing[*]}
        (a killed or interrupted build leaves stub installs behind; delete the
@@ -302,6 +337,7 @@ install_shell_setup() {
   {
     printf '\n%s\n' "$setup_marker"
     printf '# Added by LeKiwi installer. Remove this block to disable automatic ROS setup.\n'
+    # shellcheck disable=SC2016 # Write the literal expansion for the user's future shell.
     printf 'if [ -z "${LEKIWI_WS:-}" ]; then export LEKIWI_WS=%q; fi\n' "$WORKSPACE"
     printf 'if [ -f %q ]; then\n  . %q\nfi\n' "$setup_file" "$setup_file"
     printf '# <<< lekiwi setup <<<\n'

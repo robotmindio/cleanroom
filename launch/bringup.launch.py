@@ -83,6 +83,8 @@ def generate_launch_description():
     camera_info_url = LaunchConfiguration("camera_info_url")
     wrist_camera_info_url = LaunchConfiguration("wrist_camera_info_url")
     camera_device = LaunchConfiguration("camera_device")
+    publish_astra = LaunchConfiguration("publish_astra")
+    astra_serial = LaunchConfiguration("astra_serial")
     camera_source = LaunchConfiguration("camera_source")
     wrist_device = LaunchConfiguration("wrist_camera_device")
     xy_velocity_scale = LaunchConfiguration("xy_velocity_scale")
@@ -96,6 +98,18 @@ def generate_launch_description():
     slam_localization = PythonExpression(["'", slam_mode, "' == 'localization'"])
     camera_on = PythonExpression(["'", publish_camera, "' == 'true'"])
     camera_here = PythonExpression([camera_on, " and '", camera_source, "' == 'local'"])
+    astra_here = PythonExpression([
+        camera_here, " and ", real, " and '", publish_astra, "' == 'true'"
+    ])
+    astra_rgbd = astra_here
+    slam_rgb_topic = PythonExpression([
+        "'/camera/astra/color/image_raw' if ", astra_here,
+        " else '/camera/front/image_raw'"
+    ])
+    slam_camera_info_topic = PythonExpression([
+        "'/camera/astra/color/camera_info' if ", astra_here,
+        " else '/camera/front/camera_info'"
+    ])
     wrist_here = PythonExpression([camera_here, " and '", wrist_device, "' != 'none'"])
     remote_camera = PythonExpression([camera_on, " and ", real, " and '", camera_source, "' == 'remote'"])
     # The canonical camera topics, wherever the frames were read: a local v4l2_camera
@@ -156,7 +170,7 @@ def generate_launch_description():
     # fleet components stopped instead of launching a noisy degraded stack.
     camera_ready_gate = Node(
         package="lekiwi_rmf", executable="readiness_gate", name="wait_for_camera",
-        parameters=[{"kind": "topic", "topic": "/camera/front/image_raw", "topic_type": "image"}],
+        parameters=[{"kind": "topic", "topic": slam_rgb_topic, "topic_type": "image"}],
         condition=IfCondition(visual_slam), output="screen",
     )
     odom_ready_gate = Node(
@@ -190,7 +204,8 @@ def generate_launch_description():
         parameters=[{
             "use_sim_time": ParameterValue(sim, value_type=bool),
             "frame_id": "base_footprint", "map_frame_id": "map", "odom_frame_id": "odom",
-            "database_path": rtabmap_database, "subscribe_rgb": True, "subscribe_depth": False,
+            "database_path": rtabmap_database, "subscribe_rgb": True,
+            "subscribe_depth": ParameterValue(astra_rgbd, value_type=bool),
             "subscribe_rgbd": False, "subscribe_scan": ParameterValue(lidar_on, value_type=bool),
             "subscribe_odom_info": False, "approx_sync": True, "publish_tf": True,
             "qos_image": 1, "qos_camera_info": 1, "qos_scan": 1, "qos_odom": 1,
@@ -202,7 +217,9 @@ def generate_launch_description():
             "Grid/CellSize": "0.05", "sync_queue_size": 20, "topic_queue_size": 20,
         }],
         remappings=[
-            ("rgb/image", "/camera/front/image_raw"), ("rgb/camera_info", camera_info_topic),
+            ("rgb/image", slam_rgb_topic), ("rgb/camera_info", slam_camera_info_topic),
+            ("depth/image", "/camera/astra/depth/image_raw"),
+            ("depth/camera_info", "/camera/astra/depth/camera_info"),
             ("odom", "/odom"), ("scan", "/scan"), ("map", rtabmap_map_topic),
             ("grid_map", "/rtabmap/grid_map"),
         ],
@@ -291,8 +308,17 @@ def generate_launch_description():
                 choices=["mapping", "localization"],
             ),
             DeclareLaunchArgument("publish_camera", default_value="true"),
-            # Prefer a /dev/v4l/by-id/... path: /dev/videoN is reassigned on every USB
-            # re-enumeration, and on a laptop video0 is usually the built-in webcam.
+            # The Astra Pro is an additional third camera. Existing front and
+            # wrist V4L2 cameras continue to publish unchanged.
+            DeclareLaunchArgument("publish_astra", default_value="true", choices=["true", "false"]),
+            # A serial is deliberately read from this tracked deployment file,
+            # not an environment variable or a one-off launch command. An
+            # empty value fails before the Astra node can pick an arbitrary
+            # compatible camera.
+            DeclareLaunchArgument(
+                "hardware_config",
+                default_value=PathJoinSubstitution([package, "config", "hardware.yaml"]),
+            ),
             DeclareLaunchArgument("camera_device", default_value="/dev/video0"),
             DeclareLaunchArgument(
                 "camera_source", default_value="local", choices=["local", "remote"]
@@ -469,7 +495,27 @@ def generate_launch_description():
                 condition=IfCondition(sim),
                 output="screen",
             ),
-            # The front camera is read straight off V4L2 rather than relayed through the
+            # The Astra Pro is read through its OpenNI/UVC ROS driver, rather than relayed
+            # through the LeRobot host. Registered RGB-D supplies RTAB-Map and the MoveIt
+            # octomap on their canonical topics; its frame IDs are pinned in astra_pro.yaml.
+            Node(
+                package="astra_camera", executable="astra_camera_node", name="astra_pro",
+                parameters=[PathJoinSubstitution([package, "config", "astra_pro.yaml"]), {
+                    "serial_number": astra_serial,
+                }],
+                remappings=[
+                    # astra_camera publishes these at the root namespace. Keep
+                    # the source names accurate: remapping /camera/... here
+                    # silently creates no canonical RGB-D topics.
+                    ("/color/image_raw", "/camera/astra/color/image_raw"),
+                    ("/color/camera_info", "/camera/astra/color/camera_info"),
+                    ("/depth/image_raw", "/camera/astra/depth/image_raw"),
+                    ("/depth/camera_info", "/camera/astra/depth/camera_info"),
+                    ("/depth/points", "/camera/depth/points"),
+                ],
+                condition=IfCondition(astra_here), output="screen",
+            ),
+            # A V4L2 front camera is read straight off the device rather than relayed through the
             # LeRobot host: the host aborts the whole robot -- motor control included --
             # when a camera frame arrives half a second late, which a USB webcam does. Off
             # the critical path, a stalled camera costs frames instead of the robot.

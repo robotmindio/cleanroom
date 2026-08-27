@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from lekiwi_rmf.launch_validation import validate_launch_arguments
+from lekiwi_rmf.launch_validation import astra_serial_from_hardware_config, validate_launch_arguments
 
 
 def valid_arguments(**overrides):
@@ -21,6 +21,8 @@ def valid_arguments(**overrides):
         "localization": "visual_slam",
         "slam_mode": "mapping",
         "publish_camera": "true",
+        "publish_astra": "true",
+        "hardware_config": "/tmp/hardware.yaml",
         "camera_source": "local",
         "laser_source": "camera",
         "xy_velocity_scale": "1.0",
@@ -73,8 +75,28 @@ def test_requires_all_semantic_inputs():
         validate_launch_arguments(arguments)
 
 
+def test_hardware_config_requires_a_pinned_astra_serial_when_rgbd_is_enabled(tmp_path):
+    config = tmp_path / "hardware.yaml"
+    config.write_text("astra:\n  serial_number: ''\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="non-empty tracked astra.serial_number"):
+        astra_serial_from_hardware_config(config, required=True)
+
+
+def test_hardware_config_allows_front_camera_fallback_without_astra(tmp_path):
+    config = tmp_path / "hardware.yaml"
+    config.write_text("astra:\n  serial_number: ''\n", encoding="utf-8")
+    assert astra_serial_from_hardware_config(config, required=False) == ""
+
+
 def test_simulation_accepts_moveit_with_the_physics_arm_controller():
     validate_launch_arguments(valid_arguments(mode="sim", start_moveit="true"))
+
+
+def test_simulation_allows_insecure_test_transports():
+    validate_launch_arguments(valid_arguments(
+        mode="sim", curve_client_secret_key_file="", curve_server_public_key_file="",
+        remote_ip="192.0.2.10", start_rosbridge="true", rosbridge_address="0.0.0.0",
+    ))
 
 
 def test_rmf_rejects_mutable_visual_slam_even_in_localization_mode():

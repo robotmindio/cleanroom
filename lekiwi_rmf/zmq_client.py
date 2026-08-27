@@ -28,6 +28,7 @@ class LeKiwiZmqClient:
         connect_timeout_s: int = 5,
         command_timeout_ms: int = 100,
         require_metadata: bool = True,
+        allow_insecure_test_connection: bool = False,
         zmq_module=None,
     ):
         if not isinstance(remote_ip, str) or not remote_ip.strip():
@@ -39,7 +40,11 @@ class LeKiwiZmqClient:
         self.curve_credentials = (
             curve_credentials or CurveClientCredentials()
         ).validate()
-        if not is_loopback_address(remote_ip) and not self.curve_credentials.enabled:
+        if (
+            not is_loopback_address(remote_ip)
+            and not self.curve_credentials.enabled
+            and not allow_insecure_test_connection
+        ):
             raise CurveConfigurationError(
                 "refusing unauthenticated LeKiwi connection to a non-loopback host"
             )
