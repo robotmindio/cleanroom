@@ -299,8 +299,11 @@ colcon --log-base "$WORKSPACE/log" build \
   --packages-select lekiwi_rmf free_fleet free_fleet_adapter ldlidar_stl_ros2 rmf_demos_tasks "${extra_packages[@]}" \
   --build-base "$WORKSPACE/build" \
   --install-base "$WORKSPACE/install" \
+  --cmake-clean-cache \
   "${parallel_args[@]}" \
-  --cmake-args -DCMAKE_BUILD_TYPE=Release
+  --cmake-args -DCMAKE_BUILD_TYPE=Release \
+    "-DCMAKE_IGNORE_PREFIX_PATH=$HOME/.local" \
+    -DProtobuf_PROTOC_EXECUTABLE=/usr/bin/protoc
 
 # colcon prints "Finished" per package it reached, and an interrupted run can
 # still leave a plausible-looking install tree with share/ metadata but no
