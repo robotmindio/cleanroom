@@ -371,8 +371,8 @@ documented `/cmd_vel_manual` or navigation action; publishing directly to
 Rosbridge access is not a safety boundary.
 
 The disposable `mode:=sim` test topology deliberately permits an unprotected
-rosbridge endpoint and unauthenticated ZMQ test fixtures. This exception never
-applies to `mode:=real`, which retains the loopback/CURVE requirements.
+rosbridge endpoint. ZMQ is also permitted without CURVE for trusted device-LAN
+deployments; CURVE remains available when that network cannot be trusted.
 
 ### Driving the robot from Fiber
 
@@ -460,12 +460,11 @@ sudo scripts/install-compute-services.sh --service-user "$USER" \
   --workspace "$HOME/lekiwi_ws" --remote DEVICE_IP
 ```
 
-The motor and torque endpoints bind to loopback (`127.0.0.1`) by default. The
-installer accepts `--bind-address` only for an explicit interface address, and
-the host refuses an unauthenticated non-loopback bind. Do not expose ports
-5555, 5556, or 5557 directly to an untrusted network. Remote control requires
-the repository's authenticated ZMQ deployment (CURVE credentials and firewall
-rules) to be configured before using a non-loopback address.
+The motor and torque endpoints bind to loopback (`127.0.0.1`) by default. For
+a split deployment, install the device service with its explicit device-LAN
+address; unauthenticated ZMQ is supported and is the default. Do not expose
+ports 5555, 5556, or 5557 outside a trusted robot network: an unauthenticated
+client can command the robot. CURVE remains an opt-in hardening layer.
 
 Generate the server, health, and driver identities once as the device service
 account, then install both halves with a protected key directory. Copy the
@@ -482,8 +481,9 @@ sudo scripts/install-compute-services.sh --remote DEVICE_IP \
 ```
 
 The last command is run on the compute host only after its key directory has
-`clients/driver.key_secret` and `server.key`. CURVE protects ZMQ endpoints; it
-does not configure a firewall or authenticate ROS 2 DDS.
+`clients/driver.key_secret` and `server.key`. Omit both `--curve-dir` options
+to use the enabled unauthenticated transport. CURVE does not configure a
+firewall or authenticate ROS 2 DDS.
 
 The device side installs two units: `lekiwi-host.service` (the motor bus,
 served on `5555/tcp` with observations on `5556/tcp` and torque safety on
@@ -917,8 +917,8 @@ Recalibrate the camera and wheel scale first. Then remap with slower motion and 
 - Rosbridge is disabled by default and loopback-bound when enabled. It has no
   authentication or TLS. Keep it on loopback, or put a separately managed
   authenticated proxy and firewall in front of it. The motor command and
-  torque endpoints also default to loopback; the host refuses unauthenticated
-  non-loopback control binds.
+  torque endpoints also default to loopback, but support the explicitly
+  configured unauthenticated device LAN transport.
 - This repository does not configure DDS security. ROS 2 discovery and the
   control graph are residual network exposure unless the deployment supplies
   DDS security or network isolation; neither rosbridge nor CURVE secures DDS.

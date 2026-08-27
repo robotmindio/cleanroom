@@ -58,7 +58,7 @@ as_root() { # as_root <command...>
   "${SUDO[@]}" "$@"
 }
 
-# shellcheck source=service-install-common.sh
+# shellcheck disable=SC1091 # PROJECT_ROOT is resolved above, not a fixed source path.
 source "$PROJECT_ROOT/scripts/service-install-common.sh"
 resolve_service_user "$SERVICE_USER_ARG"
 resolve_service_paths "$WORKSPACE_ARG" "$LEROBOT_VENV_ARG" false
@@ -76,7 +76,7 @@ LEKIWI_CURVE_SERVER_SECRET=""
 LEKIWI_CURVE_SERVER_PUBLIC=""
 LEKIWI_CURVE_AUTHORIZED_CLIENTS=""
 LEKIWI_CURVE_HEALTH_CLIENT_SECRET=""
-if [[ -n $CURVE_DIR_ARG || $LEKIWI_HOST_BIND_ADDRESS != 127.* ]]; then
+if [[ -n $CURVE_DIR_ARG ]]; then
   curve_dir=${CURVE_DIR_ARG:-"$LEKIWI_SERVICE_HOME/.ros/lekiwi/curve"}
   [[ $curve_dir == /* && $curve_dir != *[[:space:]]* ]] || \
     die "--curve-dir must be an absolute path without whitespace"
@@ -95,6 +95,7 @@ export LEKIWI_CURVE_AUTHORIZED_CLIENTS LEKIWI_CURVE_HEALTH_CLIENT_SECRET
 install_unit() { render_systemd_unit "$PROJECT_ROOT/systemd/$1" "$UNIT_DIR/$1"; }
 
 first_match() { # first existing path matching a glob, empty if none
+  # shellcheck disable=SC2086 # Deliberately expand the caller-supplied glob.
   set -- $1
   [ -e "$1" ] && printf '%s' "$1"
   return 0

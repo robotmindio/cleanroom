@@ -434,8 +434,9 @@ listening port owned by an unrelated process.
 Once teleoperation works, leave the host running and start the ROS side against
 it. The ROS driver (`lekiwi_rmf/driver.py`) is a pure ZMQ `LeKiwiClient` — it
 never touches USB, so the ROS machine needs no serial or camera permissions at
-all. A non-loopback host requires CURVE; use the service installer above or
-supply the client secret and pinned server public key explicitly:
+all. A non-loopback host supports unauthenticated ZMQ on a trusted robot LAN.
+Use the service installer above without `--curve-dir`, or opt into CURVE by
+supplying the client secret and pinned server public key explicitly:
 
 ```bash
 ros2 launch lekiwi_rmf bringup.launch.py mode:=real remote_ip:=192.168.1.50 \

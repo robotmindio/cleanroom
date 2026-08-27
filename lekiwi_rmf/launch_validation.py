@@ -13,9 +13,6 @@ from pathlib import Path
 
 import yaml
 
-from lekiwi_rmf.zmq_security import is_loopback_address
-
-
 ARGUMENT_NAMES = (
     "mode",
     "remote_ip",
@@ -162,8 +159,6 @@ def validate_launch_arguments(arguments: Mapping[str, object]) -> None:
         raise ValueError("remote_ip must be non-empty")
     if bool(curve_client_secret) != bool(curve_server_public):
         raise ValueError("both CURVE client secret and server public key paths are required")
-    if mode == "real" and not is_loopback_address(remote_ip) and not curve_client_secret:
-        raise ValueError("non-loopback robot connections require CURVE authentication")
     if not rtabmap_database:
         raise ValueError("rtabmap_database must be non-empty")
     if not map_bundle:

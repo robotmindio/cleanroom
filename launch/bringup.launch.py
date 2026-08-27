@@ -101,15 +101,12 @@ def generate_launch_description():
     astra_here = PythonExpression([
         camera_here, " and ", real, " and '", publish_astra, "' == 'true'"
     ])
-    astra_rgbd = astra_here
-    slam_rgb_topic = PythonExpression([
-        "'/camera/astra/color/image_raw' if ", astra_here,
-        " else '/camera/front/image_raw'"
-    ])
-    slam_camera_info_topic = PythonExpression([
-        "'/camera/astra/color/camera_info' if ", astra_here,
-        " else '/camera/front/camera_info'"
-    ])
+    # Navigation must retain a working RGB-plus-scan path when the optional
+    # Astra loses USB power or its UVC interface fails. Astra depth remains
+    # available to consumers such as MoveIt when it is healthy, but it is not
+    # a bringup dependency.
+    slam_rgb_topic = "/camera/front/image_raw"
+    slam_camera_info_topic = "/camera/front/camera_info"
     wrist_here = PythonExpression([camera_here, " and '", wrist_device, "' != 'none'"])
     remote_camera = PythonExpression([camera_on, " and ", real, " and '", camera_source, "' == 'remote'"])
     # The canonical camera topics, wherever the frames were read: a local v4l2_camera
@@ -205,7 +202,7 @@ def generate_launch_description():
             "use_sim_time": ParameterValue(sim, value_type=bool),
             "frame_id": "base_footprint", "map_frame_id": "map", "odom_frame_id": "odom",
             "database_path": rtabmap_database, "subscribe_rgb": True,
-            "subscribe_depth": ParameterValue(astra_rgbd, value_type=bool),
+            "subscribe_depth": False,
             "subscribe_rgbd": False, "subscribe_scan": ParameterValue(lidar_on, value_type=bool),
             "subscribe_odom_info": False, "approx_sync": True, "publish_tf": True,
             "qos_image": 1, "qos_camera_info": 1, "qos_scan": 1, "qos_odom": 1,

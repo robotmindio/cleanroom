@@ -55,6 +55,7 @@ CALIBRATION_FILE="$CALIBRATION_DIR/robots/lekiwi/$ID.json"
 # cable moves the motor bus to ttyACM1 and shifts both cameras. by-id names follow the
 # device. Adjust the globs for your own hardware, or set LEKIWI_PORT/FRONT/WRIST.
 first_match() { # first existing path matching a glob, empty if none
+  # shellcheck disable=SC2086 # Deliberately expand the caller-supplied glob.
   set -- $1
   [ -e "$1" ] && printf '%s' "$1"
   return 0 # a miss is not an error here; require() reports it with the variable name

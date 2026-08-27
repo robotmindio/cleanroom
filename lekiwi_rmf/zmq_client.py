@@ -11,7 +11,7 @@ import math
 
 from lekiwi_rmf.odometry import TelemetrySequenceTracker, accept_validated_telemetry
 from lekiwi_rmf.zmq_security import (
-    CurveClientCredentials, CurveConfigurationError, is_loopback_address,
+    CurveClientCredentials,
 )
 
 
@@ -40,14 +40,6 @@ class LeKiwiZmqClient:
         self.curve_credentials = (
             curve_credentials or CurveClientCredentials()
         ).validate()
-        if (
-            not is_loopback_address(remote_ip)
-            and not self.curve_credentials.enabled
-            and not allow_insecure_test_connection
-        ):
-            raise CurveConfigurationError(
-                "refusing unauthenticated LeKiwi connection to a non-loopback host"
-            )
         self.polling_timeout_ms = polling_timeout_ms
         self.connect_timeout_s = connect_timeout_s
         if (

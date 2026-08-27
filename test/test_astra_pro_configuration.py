@@ -17,7 +17,7 @@ def test_astra_pro_publishes_registered_rgbd_in_the_robot_camera_frame():
     assert parameters["depth_optical_frame_id"] == "astra_camera_optical_frame"
 
 
-def test_real_bringup_remaps_astra_rgb_and_uses_depth_for_rtabmap():
+def test_real_bringup_keeps_navigation_on_the_front_camera_when_astra_fails():
     source = (ROOT / "launch" / "bringup.launch.py").read_text()
 
     assert 'package="astra_camera", executable="astra_camera_node"' in source
@@ -25,8 +25,8 @@ def test_real_bringup_remaps_astra_rgb_and_uses_depth_for_rtabmap():
     assert '("/depth/image_raw", "/camera/astra/depth/image_raw")' in source
     assert '"--namespace", "/camera/front"' in source
     assert '"--namespace", "/camera/wrist"' in source
-    assert "else '/camera/front/image_raw'" in source
-    assert "else '/camera/front/camera_info'" in source
+    assert 'slam_rgb_topic = "/camera/front/image_raw"' in source
+    assert '"subscribe_depth": False' in source
 
 
 def test_astra_identity_is_pinned_in_tracked_hardware_configuration():

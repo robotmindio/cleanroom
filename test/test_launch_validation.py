@@ -59,7 +59,6 @@ def test_accepts_a_coherent_real_mapping_configuration():
         ({"rtabmap_mapping_max_bytes": "1.5"}, "non-negative integer"),
         ({"remote_ip": ""}, "must be non-empty"),
         ({"curve_client_secret_key_file": ""}, "both CURVE"),
-        ({"curve_client_secret_key_file": "", "curve_server_public_key_file": ""}, "require CURVE"),
         ({"start_rosbridge": "true", "rosbridge_address": "0.0.0.0"}, "only to loopback"),
     ],
 )
@@ -96,6 +95,12 @@ def test_simulation_allows_insecure_test_transports():
     validate_launch_arguments(valid_arguments(
         mode="sim", curve_client_secret_key_file="", curve_server_public_key_file="",
         remote_ip="192.0.2.10", start_rosbridge="true", rosbridge_address="0.0.0.0",
+    ))
+
+
+def test_real_remote_host_allows_an_unauthenticated_zmq_transport():
+    validate_launch_arguments(valid_arguments(
+        curve_client_secret_key_file="", curve_server_public_key_file="",
     ))
 
 

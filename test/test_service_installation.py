@@ -123,3 +123,11 @@ def test_simulation_installer_excludes_astra_hardware_setup():
     assert 'extra_source_paths+=("$astra_source")' in installer
     assert 'extra_packages+=(astra_camera astra_camera_msgs)' in installer
     assert 'Simulation-only installation: skipping Astra driver and udev setup' in installer
+
+
+def test_service_installers_support_an_unauthenticated_split_zmq_transport():
+    device = (ROOT / "scripts" / "install-device-services.sh").read_text(encoding="utf-8")
+    compute = (ROOT / "scripts" / "install-compute-services.sh").read_text(encoding="utf-8")
+
+    assert 'if [[ -n $CURVE_DIR_ARG ]]; then' in device
+    assert 'STACK_ARGS="camera_source:=remote remote_ip:=$REMOTE"' in compute

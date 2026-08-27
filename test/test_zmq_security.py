@@ -22,14 +22,14 @@ class _Context:
     pass
 
 
-def test_unauthenticated_server_is_limited_to_loopback():
+def test_unauthenticated_transport_is_supported_for_the_deployment():
     security = CurveServerSecurity(_Context(), "127.0.0.1")
     assert security.enabled is False
     security.close()
-    with pytest.raises(CurveConfigurationError, match="non-loopback"):
-        CurveServerSecurity(_Context(), "192.0.2.10")
-    with pytest.raises(CurveConfigurationError, match="unauthenticated"):
-        LeKiwiZmqClient("192.0.2.10", 5555, 5556, ("x.vel",))
+    remote = CurveServerSecurity(_Context(), "192.0.2.10")
+    assert remote.enabled is False
+    remote.close()
+    LeKiwiZmqClient("192.0.2.10", 5555, 5556, ("x.vel",))
 
 
 def test_test_fixtures_can_explicitly_allow_an_insecure_zmq_transport():

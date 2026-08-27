@@ -83,9 +83,9 @@ def test_client_rejects_a_missing_or_wrong_confirmation():
         TorqueControlClient("127.0.0.1", zmq_module=_Zmq({"ok": False, "error": "bus failure"})).set_enabled(True)
 
 
-def test_torque_client_refuses_unauthenticated_remote_host():
-    with pytest.raises(ValueError, match="unauthenticated"):
-        TorqueControlClient("192.0.2.10", zmq_module=_Zmq({}))
+def test_torque_client_supports_an_unauthenticated_remote_host():
+    client = TorqueControlClient("192.0.2.10", zmq_module=_Zmq({}))
+    assert client.host == "192.0.2.10"
 
 
 def test_torque_client_allows_an_explicit_insecure_test_fixture():

@@ -7,7 +7,7 @@ import json
 import math
 
 from lekiwi_rmf.zmq_security import (
-    CurveClientCredentials, CurveConfigurationError, is_loopback_address,
+    CurveClientCredentials,
 )
 
 
@@ -114,14 +114,6 @@ class TorqueControlClient:
         self.curve = CurveClientCredentials(
             client_secret_key_file, server_public_key_file
         ).validate()
-        if (
-            not is_loopback_address(host)
-            and not self.curve.enabled
-            and not allow_insecure_test_connection
-        ):
-            raise CurveConfigurationError(
-                "refusing unauthenticated torque connection to a non-loopback host"
-            )
 
     def _zmq(self):
         if self._zmq_module is None:

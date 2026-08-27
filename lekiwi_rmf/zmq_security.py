@@ -98,10 +98,6 @@ class CurveServerSecurity:
             )
         self.enabled = all(configured)
         if not self.enabled:
-            if not is_loopback_address(bind_address) and not allow_insecure_test_bind:
-                raise CurveConfigurationError(
-                    "refusing unauthenticated LeKiwi host bind on a non-loopback address"
-                )
             self._authenticator = None
             self._server_public = None
             self._server_secret = None

@@ -62,7 +62,7 @@ as_root() { # as_root <command...>
   "${SUDO[@]}" "$@"
 }
 
-# shellcheck source=service-install-common.sh
+# shellcheck disable=SC1091 # PROJECT_ROOT is resolved above, not a fixed source path.
 source "$PROJECT_ROOT/scripts/service-install-common.sh"
 resolve_service_user "$SERVICE_USER_ARG"
 resolve_service_paths "$WORKSPACE_ARG" "" true false
@@ -86,14 +86,16 @@ if [[ -n $REMOTE ]]; then
     log "warning: device services are also installed on this machine -- an"
     log "unusual split. If the devices are actually here, drop --remote."
   fi
-  curve_dir=${CURVE_DIR_ARG:-"$LEKIWI_SERVICE_HOME/.ros/lekiwi/curve"}
-  [[ $curve_dir == /* && $curve_dir != *[[:space:]]* ]] || \
-    die "--curve-dir must be an absolute path without whitespace"
-  curve_client_secret="$curve_dir/clients/driver.key_secret"
-  curve_server_public="$curve_dir/server.key"
-  [[ -f $curve_client_secret ]] || die "missing CURVE client certificate: $curve_client_secret"
-  [[ -f $curve_server_public ]] || die "missing CURVE server certificate: $curve_server_public"
-  STACK_ARGS="camera_source:=remote remote_ip:=$REMOTE curve_client_secret_key_file:=$curve_client_secret curve_server_public_key_file:=$curve_server_public"
+  STACK_ARGS="camera_source:=remote remote_ip:=$REMOTE"
+  if [[ -n $CURVE_DIR_ARG ]]; then
+    [[ $CURVE_DIR_ARG == /* && $CURVE_DIR_ARG != *[[:space:]]* ]] || \
+      die "--curve-dir must be an absolute path without whitespace"
+    curve_client_secret="$CURVE_DIR_ARG/clients/driver.key_secret"
+    curve_server_public="$CURVE_DIR_ARG/server.key"
+    [[ -f $curve_client_secret && -f $curve_server_public ]] || \
+      die "--curve-dir does not contain clients/driver.key_secret and server.key"
+    STACK_ARGS="$STACK_ARGS curve_client_secret_key_file:=$curve_client_secret curve_server_public_key_file:=$curve_server_public"
+  fi
 else
   # All-in-one: restore the base dependency set in case a previous remote
   # configuration left the drop-in behind.
