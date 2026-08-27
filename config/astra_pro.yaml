@@ -9,7 +9,7 @@
     color_fps: 15
     depth_width: 640
     depth_height: 480
-    depth_fps: 15
+    depth_fps: 30
     enable_color: true
     enable_depth: true
     enable_ir: false

@@ -2,4 +2,4 @@
 # control with the robot deployment: an empty serial intentionally prevents an
 # RGB-D launch from binding an arbitrary compatible USB camera.
 astra:
-  serial_number: ""
+  serial_number: "17121112937"
