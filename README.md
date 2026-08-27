@@ -460,11 +460,10 @@ sudo scripts/install-compute-services.sh --service-user "$USER" \
   --workspace "$HOME/lekiwi_ws" --remote DEVICE_IP
 ```
 
-The motor and torque endpoints bind to loopback (`127.0.0.1`) by default. For
-a split deployment, install the device service with its explicit device-LAN
-address; unauthenticated ZMQ is supported and is the default. Do not expose
-ports 5555, 5556, or 5557 outside a trusted robot network: an unauthenticated
-client can command the robot. CURVE remains an opt-in hardening layer.
+The motor and torque endpoints bind to all interfaces (`0.0.0.0`) by default,
+so any reachable server can use unauthenticated ZMQ. Do not expose ports 5555,
+5556, or 5557 outside a trusted robot network: an unauthenticated client can
+command the robot. CURVE remains an opt-in hardening layer.
 
 Generate the server, health, and driver identities once as the device service
 account, then install both halves with a protected key directory. Copy the

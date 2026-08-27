@@ -46,7 +46,7 @@ ACTION_KEYS = tuple(f"{joint}.pos" for joint in ARM_JOINTS) + (
 class TorqueSafetyConfig:
     port_zmq: int = 5557
     state_file: str = "~/.ros/lekiwi/servo_torque_state"
-    bind_address: str = "127.0.0.1"
+    bind_address: str = "0.0.0.0"
 
 
 @dataclass

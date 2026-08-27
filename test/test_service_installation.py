@@ -20,7 +20,7 @@ LEKIWI_SERVICE_USER=robot
 LEKIWI_SERVICE_HOME=/srv/robot
 LEKIWI_SERVICE_WORKSPACE=/srv/robot/lekiwi_ws
 LEKIWI_SERVICE_LEROBOT_VENV=/srv/robot/lerobot-venv
-LEKIWI_HOST_BIND_ADDRESS=127.0.0.1
+LEKIWI_HOST_BIND_ADDRESS=0.0.0.0
 LEKIWI_CURVE_SERVER_SECRET=
 LEKIWI_CURVE_SERVER_PUBLIC=
 LEKIWI_CURVE_AUTHORIZED_CLIENTS=
@@ -49,7 +49,7 @@ done
         assert "Environment=HOME=/srv/robot" in text
         assert "WorkingDirectory=" + str(ROOT) in text
     host = (tmp_path / "lekiwi-host.service").read_text(encoding="utf-8")
-    assert "LEKIWI_BIND_ADDRESS=127.0.0.1" in host
+    assert "LEKIWI_BIND_ADDRESS=0.0.0.0" in host
     assert "host-health-check.py --host 127.0.0.1" in host
     for unit in tmp_path.glob("*.service"):
         rendered = unit.read_text(encoding="utf-8")

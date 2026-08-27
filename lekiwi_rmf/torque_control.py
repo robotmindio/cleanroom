@@ -72,13 +72,13 @@ def enable_with_rollback(enable_steps, rollback_steps):
 
 
 def validated_bind_address(value: str) -> str:
-    """Require one explicit IPv4 control interface; never accept a wildcard."""
+    """Accept an IPv4 control interface, including the all-interface bind."""
     try:
         address = ipaddress.IPv4Address(value)
     except ipaddress.AddressValueError as error:
         raise ValueError("bind address must be an explicit IPv4 address") from error
-    if address.is_unspecified or address.is_multicast:
-        raise ValueError("bind address may not be wildcard or multicast")
+    if address.is_multicast:
+        raise ValueError("bind address may not be multicast")
     return str(address)
 
 

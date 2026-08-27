@@ -42,7 +42,7 @@ WorkingDirectory=@PROJECT_ROOT@
 ExecStartPre=-/usr/bin/udevadm settle --timeout=15
 ExecStartPre=/usr/bin/test -x @LEROBOT_PYTHON@
 ExecStart=@PROJECT_ROOT@/scripts/robot-host.sh --no-cameras
-ExecStartPost=/bin/sh -c 'for i in $(seq 120); do @LEROBOT_PYTHON@ @PROJECT_ROOT@/scripts/host-health-check.py --host @HOST_BIND_ADDRESS@ --timeout 1 --client-secret-key-file "@CURVE_HEALTH_CLIENT_SECRET@" --server-public-key-file "@CURVE_SERVER_PUBLIC@" && exit 0; sleep 1; done; echo "host never passed protocol health check" >&2; exit 1'
+ExecStartPost=/bin/sh -c 'for i in $(seq 120); do @LEROBOT_PYTHON@ @PROJECT_ROOT@/scripts/host-health-check.py --host 127.0.0.1 --timeout 1 --client-secret-key-file "@CURVE_HEALTH_CLIENT_SECRET@" --server-public-key-file "@CURVE_SERVER_PUBLIC@" && exit 0; sleep 1; done; echo "host never passed protocol health check" >&2; exit 1'
 # Keep the service user able to write its ROS/calibration state under HOME and
 # retain access to the dynamic serial device.  Stronger home/device isolation
 # would break those repository-owned requirements.

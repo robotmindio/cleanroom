@@ -62,15 +62,15 @@ as_root() { # as_root <command...>
 source "$PROJECT_ROOT/scripts/service-install-common.sh"
 resolve_service_user "$SERVICE_USER_ARG"
 resolve_service_paths "$WORKSPACE_ARG" "$LEROBOT_VENV_ARG" false
-LEKIWI_HOST_BIND_ADDRESS=${HOST_BIND_ADDRESS_ARG:-127.0.0.1}
+LEKIWI_HOST_BIND_ADDRESS=${HOST_BIND_ADDRESS_ARG:-0.0.0.0}
 LEKIWI_HOST_BIND_ADDRESS=$(python3 -c '
 import ipaddress, sys
 address = ipaddress.IPv4Address(sys.argv[1])
-if address.is_unspecified or address.is_multicast:
+if address.is_multicast:
     raise SystemExit(2)
 print(address)
 ' "$LEKIWI_HOST_BIND_ADDRESS") || \
-  die "--bind-address must be an explicit unicast IPv4 address (wildcards are forbidden)"
+  die "--bind-address must be an IPv4 address (multicast is forbidden)"
 export LEKIWI_HOST_BIND_ADDRESS
 LEKIWI_CURVE_SERVER_SECRET=""
 LEKIWI_CURVE_SERVER_PUBLIC=""

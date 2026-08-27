@@ -75,7 +75,7 @@ render_systemd_unit() {
   workspace=$(service_escape_sed "$LEKIWI_SERVICE_WORKSPACE")
   venv=$(service_escape_sed "$LEKIWI_SERVICE_LEROBOT_VENV")
   python=$(service_escape_sed "$LEKIWI_SERVICE_LEROBOT_VENV/bin/python")
-  bind_address=$(service_escape_sed "${LEKIWI_HOST_BIND_ADDRESS:-127.0.0.1}")
+  bind_address=$(service_escape_sed "${LEKIWI_HOST_BIND_ADDRESS:-0.0.0.0}")
   curve_server_secret=$(service_escape_sed "${LEKIWI_CURVE_SERVER_SECRET:-}")
   curve_server_public=$(service_escape_sed "${LEKIWI_CURVE_SERVER_PUBLIC:-}")
   curve_authorized=$(service_escape_sed "${LEKIWI_CURVE_AUTHORIZED_CLIENTS:-}")

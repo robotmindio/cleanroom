@@ -167,10 +167,11 @@ def test_enable_persistence_failure_rolls_physical_torque_back_off():
     ]
 
 
-def test_control_listener_requires_an_explicit_non_wildcard_interface():
+def test_control_listener_allows_the_all_interfaces_bind():
     assert validated_bind_address("127.0.0.1") == "127.0.0.1"
     assert validated_bind_address("192.0.2.20") == "192.0.2.20"
-    for address in ("0.0.0.0", "*", "robot.local", "224.0.0.1"):
+    assert validated_bind_address("0.0.0.0") == "0.0.0.0"
+    for address in ("*", "robot.local", "224.0.0.1"):
         with pytest.raises(ValueError):
             validated_bind_address(address)
 
