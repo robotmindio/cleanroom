@@ -105,3 +105,12 @@ def test_full_installer_includes_qualification_tooling_dependencies():
     universe_line = next(index for index, line in enumerate(lines) if "add-apt-repository -y universe" in line)
     shellcheck_line = next(index for index, line in enumerate(lines) if line.strip().startswith("shellcheck "))
     assert universe_line < shellcheck_line
+
+
+def test_installer_reapplies_the_pinned_free_fleet_patch_on_rerun():
+    installer = (ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
+    patch = ROOT / "thirdparty" / "free_fleet" / "0001-retry-nav2-goal-during-activation.patch"
+
+    assert patch.is_file()
+    assert 'apply_pinned_patch "$free_fleet_source" "$free_fleet_patch"' in installer
+    assert '"$free_fleet_source" "$FREE_FLEET_REV" "$free_fleet_patch"' in installer

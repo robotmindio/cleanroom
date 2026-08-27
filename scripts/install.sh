@@ -146,28 +146,29 @@ checkout() {
   git -C "$destination" checkout --detach FETCH_HEAD
 }
 
+apply_pinned_patch() {
+  local destination=$1 patch=$2 description=$3
+  if git -C "$destination" apply --check "$patch" 2>/dev/null; then
+    git -C "$destination" apply "$patch"
+  else
+    die "could not apply ${description}; upstream may have changed or the checkout has unexpected edits"
+  fi
+}
+
 log "Fetching pinned Free Fleet and RMF task tools"
-checkout https://github.com/open-rmf/free_fleet.git "$WORKSPACE/src/free_fleet" "$FREE_FLEET_REV"
+free_fleet_source="$WORKSPACE/src/free_fleet"
+free_fleet_patch="$PROJECT_ROOT/thirdparty/free_fleet/0001-retry-nav2-goal-during-activation.patch"
+checkout https://github.com/open-rmf/free_fleet.git "$free_fleet_source" "$FREE_FLEET_REV" "$free_fleet_patch"
+apply_pinned_patch "$free_fleet_source" "$free_fleet_patch" "the Free Fleet Nav2 activation retry patch"
 checkout https://github.com/open-rmf/rmf_demos.git "$WORKSPACE/src/rmf_demos" "$RMF_DEMOS_REV"
 
 log "Fetching the pinned LDROBOT LD06 driver"
 checkout https://github.com/ldrobotSensorTeam/ldlidar_stl_ros2.git \
   "$WORKSPACE/src/ldlidar_stl_ros2" "$LIDLIDAR_STL_REV" \
   "$PROJECT_ROOT/thirdparty/ldlidar_stl_ros2/0001-linux-build-fixes.patch"
-# The patch intentionally leaves this checkout dirty. On a rerun, checkout()
-# must therefore be able to recognize and discard exactly this known patch;
-# otherwise an otherwise-safe rerun aborts with "local changes". Checking the
-# whole patch also catches partial application (the old pthread-only check did
-# not).
 ldlidar_source="$WORKSPACE/src/ldlidar_stl_ros2"
 ldlidar_patch="$PROJECT_ROOT/thirdparty/ldlidar_stl_ros2/0001-linux-build-fixes.patch"
-if git -C "$ldlidar_source" apply --reverse --check "$ldlidar_patch" 2>/dev/null; then
-  git -C "$ldlidar_source" reset --hard HEAD >/dev/null
-elif git -C "$ldlidar_source" apply --check "$ldlidar_patch" 2>/dev/null; then
-  git -C "$ldlidar_source" apply "$ldlidar_patch"
-else
-  die "could not apply the Linux build fixes -- upstream may have changed or the checkout has unexpected edits"
-fi
+apply_pinned_patch "$ldlidar_source" "$ldlidar_patch" "the LDROBOT Linux build fixes"
 
 log "Installing the Zenoh ROS 2 bridge"
 zenoh_zip="zenoh-plugin-ros2dds-${ZENOH_VERSION}-${ZENOH_ARCH}-standalone.zip"

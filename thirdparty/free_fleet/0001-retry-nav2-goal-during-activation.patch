@@ -1,0 +1,48 @@
+diff --git a/free_fleet_adapter/free_fleet_adapter/nav2_robot_adapter.py b/free_fleet_adapter/free_fleet_adapter/nav2_robot_adapter.py
+index 978e42a..8601a29 100755
+--- a/free_fleet_adapter/free_fleet_adapter/nav2_robot_adapter.py
++++ b/free_fleet_adapter/free_fleet_adapter/nav2_robot_adapter.py
+@@ -15,6 +15,7 @@
+ # limitations under the License.
+ 
+ import importlib
++import time
+ from typing import Annotated
+ 
+ from free_fleet.convert import transform_stamped_to_ros2_msg
+@@ -459,11 +460,34 @@ class Nav2RobotAdapter(RobotAdapter):
+         action_name = self.nav_handle.get_action_name()
+ 
+         try:
+-            self.nav_handle.execute()
++            self._execute_nav(self.nav_handle, action_name)
+             self._setup_action_feedback_subscriber(action_name)
+         except RequestRejected:
+             self._trigger_replan()
+ 
++    def _execute_nav(self, nav_handle, action_name):
++        # bt_navigator rejects goals while its lifecycle manager is still
++        # activating it -- RMF can start commanding seconds before Nav2 finishes
++        # coming up (observed 1.6s early). A silent zenoh query (bridge not up
++        # yet) leaves no goal id either. Both recover within moments; retrying
++        # here avoids burning a fleet-level replan, which stalls on traffic
++        # planning and can leave the robot idle until it times out.
++        attempts = 5
++        for attempt in range(attempts):
++            try:
++                nav_handle.execute()
++                if nav_handle.get_goal_id() is not None:
++                    return
++            except RequestRejected:
++                pass
++            if attempt < attempts - 1:
++                self.node.get_logger().info(
++                    f'{action_name} goal not accepted yet; Nav2 may still be '
++                    f'activating -- retrying ({attempt + 1}/{attempts - 1})'
++                )
++                time.sleep(1.0)
++        raise RequestRejected
++
+     def _request_nav_stop(self):
+         nav_handle = self.nav_handle
+         if nav_handle:
