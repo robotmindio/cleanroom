@@ -4,7 +4,7 @@
 # robot's own computer and a separate desk machine are both fine, and the
 # device half (motors + cameras) can sit on either one.
 #
-# Usage: scripts/install-compute-services.sh [--remote DEVICE_ADDR]
+# Usage: scripts/install-compute-services.sh [--remote DEVICE_ADDR] [--rosbridge-tailnet]
 #        [--service-user USER] [--workspace PATH] [--curve-dir PATH]
 #   no --remote : the device side runs on this machine too; the stack is
 #                 ordered after lekiwi-host.service and starts once its ZMQ
@@ -27,6 +27,7 @@ REMOTE=""
 SERVICE_USER_ARG=""
 WORKSPACE_ARG=""
 CURVE_DIR_ARG=""
+ROSBRIDGE_TAILNET=false
 while [[ $# -gt 0 ]]; do
   case $1 in
     --remote)
@@ -49,7 +50,11 @@ while [[ $# -gt 0 ]]; do
       CURVE_DIR_ARG=$2
       shift 2
       ;;
-    *) die "unknown argument: $1 (usage: $0 [--remote DEVICE_ADDR] [--service-user USER] [--workspace PATH] [--curve-dir PATH])" ;;
+    --rosbridge-tailnet)
+      ROSBRIDGE_TAILNET=true
+      shift
+      ;;
+    *) die "unknown argument: $1 (usage: $0 [--remote DEVICE_ADDR] [--service-user USER] [--workspace PATH] [--curve-dir PATH] [--rosbridge-tailnet])" ;;
   esac
 done
 [[ -z $REMOTE || $REMOTE =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || \
@@ -127,6 +132,14 @@ else
       die "--curve-dir does not contain clients/driver.key_secret and server.key"
     STACK_ARGS="${STACK_ARGS:+$STACK_ARGS }curve_client_secret_key_file:=$curve_client_secret curve_server_public_key_file:=$curve_server_public"
   fi
+fi
+
+if [[ $ROSBRIDGE_TAILNET == true ]]; then
+  command -v tailscale >/dev/null || die "--rosbridge-tailnet requires tailscale"
+  tailnet_ip=$(tailscale ip -4)
+  [[ $tailnet_ip =~ ^[0-9]+([.][0-9]+){3}$ ]] || \
+    die "tailscale did not return one IPv4 address"
+  STACK_ARGS="${STACK_ARGS:+$STACK_ARGS }start_rosbridge:=true rosbridge_address:=$tailnet_ip"
 fi
 
 if [[ -n $REMOTE ]]; then

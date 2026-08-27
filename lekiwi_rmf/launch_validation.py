@@ -8,8 +8,10 @@ module ROS-free so the same rules have ordinary, fast unit tests.
 from __future__ import annotations
 
 from collections.abc import Mapping
+import ipaddress
 import math
 from pathlib import Path
+import subprocess
 
 import yaml
 
@@ -113,7 +115,11 @@ def astra_serial_from_hardware_config(path: str | Path, *, required: bool) -> st
     return serial
 
 
-def validate_launch_arguments(arguments: Mapping[str, object]) -> None:
+def validate_launch_arguments(
+    arguments: Mapping[str, object],
+    *,
+    trusted_rosbridge_addresses: frozenset[str] = frozenset(),
+) -> None:
     """Raise ``ValueError`` unless resolved bringup arguments are coherent."""
     missing = [name for name in ARGUMENT_NAMES if name not in arguments]
     if missing:
@@ -167,13 +173,14 @@ def validate_launch_arguments(arguments: Mapping[str, object]) -> None:
         raise ValueError("hardware_config must be non-empty")
     # Simulation is a disposable test topology: its ZMQ clients and rosbridge
     # endpoint may be reached by the integration-test runner. Real robot
-    # deployments remain loopback-only unless separately authenticated.
+    # deployments remain on loopback or an authenticated overlay interface.
     if (
         mode == "real"
         and start_rosbridge
         and rosbridge_address not in {"127.0.0.1", "::1"}
+        and rosbridge_address not in trusted_rosbridge_addresses
     ):
-        raise ValueError("rosbridge may bind only to loopback until authenticated TLS is configured")
+        raise ValueError("rosbridge may bind only to loopback or an assigned Tailscale address")
 
     if localization == "visual_slam" and not publish_camera:
         raise ValueError("visual_slam requires publish_camera:=true")
@@ -197,6 +204,28 @@ def validate_launch_arguments(arguments: Mapping[str, object]) -> None:
         validate_map_bundle(map_bundle, require_approved=True)
 
 
+def _tailscale_ipv4_addresses() -> frozenset[str]:
+    """Return IPv4 addresses assigned to the authenticated Tailscale interface."""
+    try:
+        result = subprocess.run(
+            ["ip", "-4", "-o", "address", "show", "dev", "tailscale0"],
+            check=False, capture_output=True, text=True,
+        )
+    except OSError:
+        return frozenset()
+    addresses = set()
+    for line in result.stdout.splitlines():
+        fields = line.split()
+        if "inet" not in fields:
+            continue
+        address = fields[fields.index("inet") + 1].split("/", 1)[0]
+        try:
+            addresses.add(str(ipaddress.IPv4Address(address)))
+        except ipaddress.AddressValueError:
+            continue
+    return frozenset(addresses)
+
+
 def validate_context(context, *_args, **_kwargs):
     """``launch.actions.OpaqueFunction`` adapter for ``bringup.launch.py``.
 
@@ -207,7 +236,7 @@ def validate_context(context, *_args, **_kwargs):
     from launch.substitutions import LaunchConfiguration
 
     values = {name: LaunchConfiguration(name).perform(context) for name in ARGUMENT_NAMES}
-    validate_launch_arguments(values)
+    validate_launch_arguments(values, trusted_rosbridge_addresses=_tailscale_ipv4_addresses())
     # Resolve key existence and secret-file permissions in the preflight
     # OpaqueFunction, before any camera, mapper, or driver process starts.
     from lekiwi_rmf.zmq_security import CurveClientCredentials

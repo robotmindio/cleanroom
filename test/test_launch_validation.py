@@ -98,6 +98,13 @@ def test_simulation_allows_insecure_test_transports():
     ))
 
 
+def test_real_robot_accepts_only_the_assigned_tailnet_rosbridge_address():
+    validate_launch_arguments(
+        valid_arguments(start_rosbridge="true", rosbridge_address="100.87.252.60"),
+        trusted_rosbridge_addresses=frozenset({"100.87.252.60"}),
+    )
+
+
 def test_real_remote_host_allows_an_unauthenticated_zmq_transport():
     validate_launch_arguments(valid_arguments(
         curve_client_secret_key_file="", curve_server_public_key_file="",

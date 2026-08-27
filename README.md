@@ -370,6 +370,10 @@ documented `/cmd_vel_manual` or navigation action; publishing directly to
 `/cmd_vel_safe` bypasses the intended guard and is an unsafe protocol violation.
 Rosbridge access is not a safety boundary.
 
+On a compute host shared with Fiber through Tailscale, install the service with
+`scripts/install-compute-services.sh --remote DEVICE_ADDR --rosbridge-tailnet`.
+This binds rosbridge only to that host's authenticated `tailscale0` address.
+
 The disposable `mode:=sim` test topology deliberately permits an unprotected
 rosbridge endpoint. ZMQ is also permitted without CURVE for trusted device-LAN
 deployments; CURVE remains available when that network cannot be trusted.
