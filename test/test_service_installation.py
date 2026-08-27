@@ -142,3 +142,4 @@ def test_compute_service_keeps_local_dependencies_out_of_remote_topology():
     assert 'as_root rm -f "$topology_conf"' in installer
     assert "--rosbridge-tailnet" in installer
     assert "start_rosbridge:=true rosbridge_address:=$tailnet_ip" in installer
+    assert "systemctl restart lekiwi-stack.service" in installer

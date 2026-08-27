@@ -157,9 +157,10 @@ stack_env=/etc/default/lekiwi-stack
 printf '# Written by scripts/install-compute-services.sh.\nLEKIWI_STACK_ARGS=%s\n' \
   "$STACK_ARGS" | as_root tee "$stack_env" >/dev/null
 
-log "Reloading systemd and enabling lekiwi-stack.service"
+log "Reloading systemd and enabling/restarting lekiwi-stack.service"
 as_root systemctl daemon-reload
-as_root systemctl enable --now lekiwi-stack.service
+as_root systemctl enable lekiwi-stack.service
+as_root systemctl restart lekiwi-stack.service
 
 cat <<EOF
 Done. Check on it with:
