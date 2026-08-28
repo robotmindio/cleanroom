@@ -620,6 +620,10 @@ def generate_launch_description():
                     "xy_velocity_scale": ParameterValue(xy_velocity_scale, value_type=float),
                     "yaw_velocity_scale": ParameterValue(yaw_velocity_scale, value_type=float),
                     "permission_timeout": 0.5,
+                    # The driver still requires current, explicit supervisor
+                    # permission and fresh host telemetry before energizing
+                    # servos; this only removes the manual arm RPC at startup.
+                    "auto_arm_on_startup": True,
                     "odom_topic": "/wheel/odometry",
                     "publish_odom_tf": False,
                 }],

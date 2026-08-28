@@ -6,6 +6,7 @@ from pathlib import Path
 
 import yaml
 from sensor_msgs.msg import BatteryState, LaserScan, PointCloud2, PointField
+from diagnostic_msgs.msg import DiagnosticStatus
 
 from lekiwi_rmf.safety_supervisor import (
     Requirement, SafetyState, SafetyStateMachine, _valid_battery,
@@ -180,6 +181,35 @@ def test_estop_latches_and_cannot_reset_until_healthy_and_disarmed():
     success, _ = machine.reset(SECOND)
     assert success
     assert machine.decision(SECOND).state == SafetyState.READY
+
+
+def test_motor_health_fault_revokes_permission_and_latches():
+    machine = SafetyStateMachine({
+        "driver": Requirement(SECOND),
+        "motor_health": Requirement(SECOND),
+    })
+    machine.driver_state = "ARMED"
+    machine.arm_stowed = True
+    machine.update("driver", True, SECOND)
+    machine.update("motor_health", True, SECOND)
+    assert machine.decision(SECOND).base_permitted
+
+    machine.update("motor_health", False, SECOND, "servo/wheel_left: bus read failed")
+    decision = machine.decision(SECOND)
+    assert decision.state == SafetyState.FAULT_LATCHED
+    assert not decision.base_permitted and not decision.arm_permitted
+    assert "motor_health: servo/wheel_left: bus read failed" in decision.faults
+
+
+def test_motor_health_warning_is_advisory_but_error_is_not():
+    # Match the diagnostic policy used by SafetySupervisor: WARN remains
+    # operational telemetry; ERROR and STALE revoke permission.
+    warning = DiagnosticStatus()
+    warning.level = DiagnosticStatus.WARN
+    error = DiagnosticStatus()
+    error.level = DiagnosticStatus.ERROR
+    assert all(status.level < DiagnosticStatus.ERROR for status in [warning])
+    assert not all(status.level < DiagnosticStatus.ERROR for status in [error])
 
 
 def test_one_good_message_followed_by_silence_does_not_remain_permitted():

@@ -35,6 +35,7 @@ from lekiwi_rmf.odometry import (
     TELEMETRY_SESSION_KEY,
     TELEMETRY_TORQUE_ENABLED_KEY,
 )
+from lekiwi_rmf.motor_health import healthy_snapshot
 
 
 LEKIWI_STATE_KEYS = (
@@ -85,6 +86,7 @@ class FakeLeKiwiHost:
     torque_port: int = 0
     context: zmq.Context | None = None
     state: dict[str, float] = field(default_factory=lambda: {key: 0.0 for key in LEKIWI_STATE_KEYS})
+    motor_health: dict | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.bind_host, str) or not self.bind_host:
@@ -126,6 +128,13 @@ class FakeLeKiwiHost:
         self._camera_frames: dict[str, bytes] = {}
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._motor_names = (
+            "arm_shoulder_pan", "arm_shoulder_lift", "arm_elbow_flex", "arm_wrist_flex",
+            "arm_wrist_roll", "arm_gripper", "wheel_left", "wheel_right", "wheel_back",
+        )
+        self._motor_health_injected = self.motor_health is not None
+        if self.motor_health is None:
+            self.motor_health = healthy_snapshot(self._motor_names, False)
 
     @property
     def session(self) -> str:
@@ -204,11 +213,20 @@ class FakeLeKiwiHost:
             copied[name] = frame
         self._camera_frames = copied
 
+    def set_motor_health(self, snapshot: Mapping) -> None:
+        """Set an arbitrary diagnostic snapshot for wire/fault-injection tests."""
+        if not isinstance(snapshot, Mapping):
+            raise TypeError("motor health snapshot must be a mapping")
+        self.motor_health = dict(snapshot)
+        self._motor_health_injected = True
+
     def _next_fault(self) -> ObservationFault:
         return self._faults.popleft() if self._faults else ObservationFault.VALID
 
     def _valid_frames(self, *, stale_timestamp: bool = False) -> list[bytes]:
         with self._protocol_lock:
+            if not self._motor_health_injected:
+                self.motor_health = healthy_snapshot(self._motor_names, self.torque_enabled)
             sample_ns = self._last_sample_ns if stale_timestamp and self._last_sample_ns is not None else time.monotonic_ns()
             payload = {
                 "_cams": list(self._camera_frames),
@@ -218,6 +236,7 @@ class FakeLeKiwiHost:
                 TELEMETRY_SEQUENCE_KEY: self._sequence,
                 TELEMETRY_MONOTONIC_NS_KEY: sample_ns,
                 TELEMETRY_TORQUE_ENABLED_KEY: self.torque_enabled,
+                "_lekiwi_motor_health": self.motor_health,
             }
             self._sequence += 1
             self._last_sample_ns = sample_ns

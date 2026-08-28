@@ -10,6 +10,7 @@ import json
 import math
 
 from lekiwi_rmf.odometry import TelemetrySequenceTracker, accept_validated_telemetry
+from lekiwi_rmf.motor_health import MOTOR_HEALTH_KEY, parse_motor_health
 from lekiwi_rmf.zmq_security import (
     CurveClientCredentials,
 )
@@ -63,6 +64,7 @@ class LeKiwiZmqClient:
         self.observation_sample_monotonic_ns = None
         self.observation_session_changed = False
         self.observation_torque_enabled = None
+        self.observation_motor_health = None
         self.telemetry_sequences = TelemetrySequenceTracker()
 
     def connect(self):
@@ -162,6 +164,10 @@ class LeKiwiZmqClient:
             )
             if self.require_metadata and accepted.token[0] != "host":
                 raise ValueError("versioned telemetry metadata is required")
+            motor_health = (
+                parse_motor_health(payload.get(MOTOR_HEALTH_KEY))
+                if accepted.token[0] == "host" else None
+            )
             state = {key: float(payload[key]) for key in self.state_keys}
         except (TypeError, ValueError, OverflowError):
             return self.last_remote_state
@@ -170,6 +176,7 @@ class LeKiwiZmqClient:
         self.observation_sample_monotonic_ns = accepted.sample_monotonic_ns
         self.observation_session_changed = accepted.session_changed
         self.observation_torque_enabled = accepted.torque_enabled
+        self.observation_motor_health = motor_health
         self.last_remote_state = state
         return state
 

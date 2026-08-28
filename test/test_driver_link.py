@@ -19,7 +19,7 @@ _NODE.body = [
         "arm", "disarm", "clamp_planar", "observation_is_fresh", "observation_is_valid",
         "handle_host_session_change",
         "enforce_reported_torque_state",
-        "arm_after_startup_telemetry", "on_command", "publish_safety", "publish_state",
+        "arm_after_startup_telemetry", "on_command", "publish_safety", "publish_state", "publish_motor_health",
         "set_disarmed", "set_servo_torque", "trajectory_time",
         "_permission_is_fresh", "_permission_is_current",
         "_capability_permission_is_current", "enforce_permission_leases",
@@ -468,6 +468,38 @@ def test_odometry_covariance_never_claims_perfect_pose_or_twist():
     assert odometry[0].twist.covariance[0] == 0.10 ** 2
     assert odometry[0].twist.covariance[35] == 0.20 ** 2
     assert odometry[0].pose.covariance[14] == 1e6
+
+
+def test_validated_motor_health_is_published_as_diagnostics():
+    class DiagnosticArray:
+        def __init__(self):
+            self.header = types.SimpleNamespace()
+
+    class DiagnosticStatus:
+        def __init__(self):
+            self.values = []
+
+    class KeyValue:
+        pass
+
+    driver.DiagnosticArray = DiagnosticArray
+    driver.DiagnosticStatus = DiagnosticStatus
+    driver.KeyValue = KeyValue
+    published = []
+    node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
+    node.robot = types.SimpleNamespace(observation_motor_health=(
+        types.SimpleNamespace(
+            name="motor_bus", level=0, message="OK",
+            values=(("torque_enabled", "false"),),
+        ),
+    ))
+    node.motor_health_pub = types.SimpleNamespace(publish=published.append)
+
+    node.publish_motor_health("stamp")
+
+    assert published[0].header.stamp == "stamp"
+    assert published[0].status[0].name == "motor_bus"
+    assert published[0].status[0].values[0].key == "torque_enabled"
 
 
 def test_non_finite_twist_is_rejected_and_disarms():

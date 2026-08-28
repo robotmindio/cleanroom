@@ -67,6 +67,7 @@ if(BUILD_TESTING)
   # Never let a test discover a running robot or a parallel test. These are
   # distinct valid DDS domains, intentionally away from the live default (0).
   ament_add_pytest_test(test_odometry test/test_odometry.py ENV "${test_pythonpath};ROS_DOMAIN_ID=180")
+  ament_add_pytest_test(test_motor_health test/test_motor_health.py ENV "${test_pythonpath};ROS_DOMAIN_ID=216")
   ament_add_pytest_test(test_odom_scale test/test_odom_scale.py ENV "${test_pythonpath};ROS_DOMAIN_ID=181")
   ament_add_pytest_test(test_free_space test/test_free_space.py ENV "${test_pythonpath};ROS_DOMAIN_ID=182")
   ament_add_pytest_test(test_camera_relay test/test_camera_relay.py ENV "${test_pythonpath};ROS_DOMAIN_ID=183")

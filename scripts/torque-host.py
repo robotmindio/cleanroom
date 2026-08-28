@@ -8,6 +8,7 @@ ZMQ REP endpoint for the ROS driver's explicit arm/disarm transactions.
 
 import json
 import logging
+import math
 import os
 import signal
 import time
@@ -34,9 +35,11 @@ from lekiwi_rmf.odometry import (
     TELEMETRY_PROTOCOL_VERSION, TELEMETRY_SEQUENCE_KEY, TELEMETRY_SESSION_KEY,
     TELEMETRY_TORQUE_ENABLED_KEY,
 )
+from lekiwi_rmf.motor_health import fault_snapshot, healthy_snapshot
 
 
 TORQUE_RETRIES = 5
+HEALTH_PERIOD_S = 0.10
 ACTION_KEYS = tuple(f"{joint}.pos" for joint in ARM_JOINTS) + (
     "x.vel", "y.vel", "theta.vel",
 )
@@ -274,6 +277,126 @@ class TorqueControlServer:
             return None
 
 
+class MotorHealthCollector:
+    """Read only health collector run by the process that already owns the bus."""
+
+    def __init__(self, robot: SafetyLeKiwi):
+        self.motors = tuple(robot.bus.motors)
+        self._last_read = 0.0
+        self._snapshot = fault_snapshot(self.motors, "health read has not completed")
+        self._last_error = None
+        self._limits = None
+
+    def _read_limits(self, robot: SafetyLeKiwi) -> None:
+        """Read the servo-programmed protective limits once after connection."""
+        limits = {}
+        for register in ("Max_Temperature_Limit", "Min_Voltage_Limit", "Max_Voltage_Limit"):
+            values = robot.bus.sync_read(register, list(self.motors), normalize=False, num_retry=TORQUE_RETRIES)
+            if not isinstance(values, dict) or set(values) != set(self.motors):
+                raise RuntimeError(f"incomplete {register} readback")
+            limits[register] = {motor: int(values[motor]) for motor in self.motors}
+        self._limits = limits
+
+    def collect(self, robot: SafetyLeKiwi, torque_enabled: bool) -> dict:
+        """Return the last bounded-rate readback, failing closed on every error.
+
+        The STS3215 register names and units are supplied by the installed
+        LeRobot control table. Values that need a robot-specific operating
+        envelope remain advisory until bench-qualified.
+        """
+        now = time.monotonic()
+        if now - self._last_read < HEALTH_PERIOD_S:
+            return self._snapshot
+        self._last_read = now
+        try:
+            if self._limits is None:
+                self._read_limits(robot)
+            torque = robot.bus.sync_read(
+                "Torque_Enable", list(self.motors), normalize=False, num_retry=TORQUE_RETRIES,
+            )
+            positions = robot.bus.sync_read(
+                "Present_Position", list(self.motors), num_retry=TORQUE_RETRIES,
+            )
+            feedback = {
+                "Present_Load": robot.bus.sync_read("Present_Load", list(self.motors), normalize=False, num_retry=TORQUE_RETRIES),
+                "Present_Voltage": robot.bus.sync_read("Present_Voltage", list(self.motors), normalize=False, num_retry=TORQUE_RETRIES),
+                "Present_Temperature": robot.bus.sync_read("Present_Temperature", list(self.motors), normalize=False, num_retry=TORQUE_RETRIES),
+                "Status": robot.bus.sync_read("Status", list(self.motors), normalize=False, num_retry=TORQUE_RETRIES),
+                "Present_Current": robot.bus.sync_read("Present_Current", list(self.motors), normalize=False, num_retry=TORQUE_RETRIES),
+            }
+            all_readbacks = {"Torque_Enable": torque, "Present_Position": positions, **feedback}
+            for register, values in all_readbacks.items():
+                if not isinstance(values, dict) or set(values) != set(self.motors):
+                    raise RuntimeError(f"incomplete {register} readback")
+            details = {}
+            warnings = {}
+            for motor in self.motors:
+                reported_torque = torque[motor]
+                if isinstance(reported_torque, bool) or int(reported_torque) not in (0, 1):
+                    raise RuntimeError(f"invalid torque readback from {motor}")
+                if bool(reported_torque) != bool(torque_enabled):
+                    detail = "torque readback differs from safety latch"
+                    if detail != self._last_error:
+                        logging.warning("%s: %s", detail, motor)
+                        self._last_error = detail
+                    self._snapshot = fault_snapshot(
+                        self.motors, detail, failed_motor=motor,
+                    )
+                    return self._snapshot
+                position = float(positions[motor])
+                if not math.isfinite(position):
+                    raise RuntimeError(f"non-finite present position from {motor}")
+                load = float(feedback["Present_Load"][motor])
+                voltage_raw = int(feedback["Present_Voltage"][motor])
+                temperature = int(feedback["Present_Temperature"][motor])
+                current_raw = int(feedback["Present_Current"][motor])
+                status_raw = int(feedback["Status"][motor])
+                if not math.isfinite(load) or not 0 <= voltage_raw <= 255 or not 0 <= temperature <= 255:
+                    raise RuntimeError(f"invalid electrical feedback from {motor}")
+                if status_raw != 0:
+                    detail = f"servo Status register is nonzero ({status_raw})"
+                    if detail != self._last_error:
+                        logging.warning("%s: %s", detail, motor)
+                        self._last_error = detail
+                    self._snapshot = fault_snapshot(self.motors, detail, failed_motor=motor)
+                    return self._snapshot
+                minimum_voltage = self._limits["Min_Voltage_Limit"][motor] / 10.0
+                maximum_voltage = self._limits["Max_Voltage_Limit"][motor] / 10.0
+                voltage = voltage_raw / 10.0
+                maximum_temperature = self._limits["Max_Temperature_Limit"][motor]
+                if voltage <= minimum_voltage or voltage >= maximum_voltage:
+                    warnings[motor] = "supply voltage is at or beyond the configured servo limit"
+                elif temperature >= maximum_temperature:
+                    warnings[motor] = "temperature is at or beyond the configured servo limit"
+                details[motor] = {
+                    "present_position": position,
+                    "torque_enabled": bool(reported_torque),
+                    "present_load_raw": int(load),
+                    "present_load_duty_cycle": load / 1000.0,
+                    "present_voltage_v": voltage,
+                    "present_temperature_c": temperature,
+                    "present_current_raw": current_raw,
+                    "present_current_ma": current_raw * 6.5,
+                    "status_raw": status_raw,
+                    "minimum_voltage_v": minimum_voltage,
+                    "maximum_voltage_v": maximum_voltage,
+                    "maximum_temperature_c": maximum_temperature,
+                }
+            self._snapshot = healthy_snapshot(
+                self.motors, torque_enabled, detail=details, warnings=warnings,
+            )
+            if self._last_error is not None:
+                logging.info("Motor-health read recovered")
+                self._last_error = None
+        except Exception as error:
+            detail = f"motor-health read failed: {error}"
+            if detail != self._last_error:
+                logging.warning("%s", detail)
+                self._last_error = detail
+            self._snapshot = fault_snapshot(self.motors, detail)
+        return self._snapshot
+
+
 def _shutdown_signal(_signum, _frame):
     # LeRobot's stock main only runs its disconnect/finally path for a
     # KeyboardInterrupt. systemd uses SIGTERM, so translate it and guarantee
@@ -303,6 +426,7 @@ def main(cfg: TorqueHostConfig):
         control = TorqueControlServer(
             host.zmq_context, cfg.safety, latch, initial_torque, host.security
         )
+        health = MotorHealthCollector(robot)
         last_cmd_time = time.monotonic()
         watchdog_active = False
         next_watchdog_attempt = 0.0
@@ -351,6 +475,7 @@ def main(cfg: TorqueHostConfig):
 
             observation = robot.get_observation()
             sample_monotonic_ns = time.monotonic_ns()
+            motor_health = health.collect(robot, control.torque_enabled)
             camera_keys = list(robot.cameras.keys())
             jpeg_frames = []
             for camera_key in camera_keys:
@@ -367,6 +492,7 @@ def main(cfg: TorqueHostConfig):
                     TELEMETRY_SEQUENCE_KEY: telemetry_sequence,
                     TELEMETRY_MONOTONIC_NS_KEY: sample_monotonic_ns,
                     TELEMETRY_TORQUE_ENABLED_KEY: control.torque_enabled,
+                    "_lekiwi_motor_health": motor_health,
                 }
                 host.zmq_observation_socket.send_multipart(
                     [json.dumps(payload).encode()] + jpeg_frames,

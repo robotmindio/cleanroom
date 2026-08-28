@@ -16,6 +16,7 @@ from lekiwi_rmf.odometry import (
     TELEMETRY_SESSION_KEY,
     TELEMETRY_TORQUE_ENABLED_KEY,
 )
+from lekiwi_rmf.motor_health import ERROR, fault_snapshot
 
 
 @pytest.fixture
@@ -78,8 +79,18 @@ def test_fake_host_speaks_action_and_versioned_observation_protocol(host, contex
     assert payload[TELEMETRY_SESSION_KEY] == host.session
     assert payload[TELEMETRY_MONOTONIC_NS_KEY] > 0
     assert payload[TELEMETRY_TORQUE_ENABLED_KEY] is False
+    assert payload["_lekiwi_motor_health"]["statuses"]["motor_bus"]["level"] == 0
 
     command.close()
+    observation.close()
+
+
+def test_fake_host_can_inject_motor_health_fault(host, context):
+    observation = _pull(context, host.endpoints.observation)
+    host.set_motor_health(fault_snapshot(("wheel_left",), "injected bus failure"))
+    host.publish_observation()
+    payload = json.loads(_receive(observation)[0])
+    assert payload["_lekiwi_motor_health"]["statuses"]["motor_bus"]["level"] == ERROR
     observation.close()
 
 

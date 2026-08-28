@@ -23,6 +23,9 @@ The package includes:
 - optional rosbridge WebSocket access for browsers and external applications;
 - one installer for the supported development/runtime stack.
 
+Safety-input status, motor-health diagnostics, and the physical qualification
+procedure are documented in [docs/safety.md](docs/safety.md).
+
 ## Supported platform
 
 - Ubuntu 24.04, `amd64` or `arm64`

@@ -7,6 +7,7 @@ import time
 
 import rclpy
 from control_msgs.action import FollowJointTrajectory
+from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from geometry_msgs.msg import TransformStamped, Twist
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
@@ -69,7 +70,10 @@ class LeKiwiDriver(Node):
         self.cmd_vel_topic = self.declare_parameter("cmd_vel_topic", "/cmd_vel_safe").value
         self.odom_topic = self.declare_parameter("odom_topic", "/wheel/odometry").value
         self.publish_odom_tf = self.declare_parameter("publish_odom_tf", False).value
-        self.auto_arm_on_startup = self.declare_parameter("auto_arm_on_startup", False).value
+        self.auto_arm_on_startup = self.declare_parameter("auto_arm_on_startup", True).value
+        self.publish_motor_health_enabled = self.declare_parameter(
+            "publish_motor_health", True
+        ).value
         self.base_permission_topic = self.declare_parameter(
             "base_motion_permission_topic", "/safety/base_motion_permitted"
         ).value
@@ -155,6 +159,7 @@ class LeKiwiDriver(Node):
 
         self.odom_pub = self.create_publisher(Odometry, self.odom_topic, 10)
         self.joint_pub = self.create_publisher(JointState, "joint_states", 10)
+        self.motor_health_pub = self.create_publisher(DiagnosticArray, "/hardware/diagnostics", 10)
         safety_qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.safety_pub = self.create_publisher(String, "safety/state", safety_qos)
         self.safety_marker_pub = self.create_publisher(Marker, "safety/marker", safety_qos)
@@ -883,6 +888,7 @@ class LeKiwiDriver(Node):
             return
 
         self.last_fresh = now
+        self.publish_motor_health(now.to_msg())
         arm_positions = joint_positions(
             observation, self.arm_zero_positions, self.arm_directions
         )
@@ -1085,6 +1091,32 @@ class LeKiwiDriver(Node):
         joints.name = list(ARM_JOINTS)
         joints.position = [self.arm_positions[name] for name in ARM_JOINTS]
         self.joint_pub.publish(joints)
+
+    def publish_motor_health(self, stamp):
+        """Publish only the snapshot validated with this fresh host observation."""
+        if not getattr(self, "publish_motor_health_enabled", True):
+            return
+        statuses = getattr(self.robot, "observation_motor_health", None)
+        if not statuses:
+            # This path is defensive: the ZeroMQ client rejects absent or
+            # malformed health telemetry before a sample reaches ``update``.
+            return
+        message = DiagnosticArray()
+        message.header.stamp = stamp
+        message.status = []
+        for source in statuses:
+            status = DiagnosticStatus()
+            status.name = source.name
+            status.level = source.level
+            status.message = source.message
+            status.hardware_id = "lekiwi_servo_bus"
+            status.values = []
+            for key, value in source.values:
+                item = KeyValue()
+                item.key, item.value = key, value
+                status.values.append(item)
+            message.status.append(status)
+        self.motor_health_pub.publish(message)
 
     def destroy_node(self):
         try:
