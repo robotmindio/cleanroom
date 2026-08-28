@@ -131,3 +131,52 @@ def test_service_installers_support_an_unauthenticated_split_zmq_transport():
 
     assert 'if [[ -n $CURVE_DIR_ARG ]]; then' in device
     assert 'STACK_ARGS="camera_source:=remote remote_ip:=$REMOTE"' in compute
+
+
+def test_device_installer_finds_ros_packages_under_sudo_root_path():
+    installer = (ROOT / "scripts" / "install-device-services.sh").read_text(encoding="utf-8")
+
+    assert "source /opt/ros/jazzy/setup.bash" in installer
+    assert 'source "$LEKIWI_SERVICE_WORKSPACE/install/setup.bash"' in installer
+
+
+def test_deploy_order_fails_closed_around_the_device_restart():
+    deploy = (ROOT / "scripts" / "deploy-split.sh").read_text(encoding="utf-8")
+
+    disarm = deploy.index("\ndisarm\n")
+    stop_stack = deploy.index("stop lekiwi-stack.service", disarm)
+    stop_host = deploy.index("stop lekiwi-host.service", stop_stack)
+    start_host = deploy.index("start lekiwi-host.service", stop_host)
+    start_stack = deploy.index("start lekiwi-stack.service", start_host)
+    assert disarm < stop_stack < stop_host < start_host < start_stack
+    assert "git merge --ff-only" in deploy
+    assert "deploy-inhibit-auto-arm" in deploy
+    assert "reset --hard" not in deploy
+
+
+def test_deploy_sudoers_are_limited_by_machine_role():
+    script = ROOT / "scripts" / "install-deploy-sudoers.sh"
+    compute = subprocess.run(
+        ["bash", str(script), "compute", "--user", "nobody", "--print"],
+        check=True, text=True, capture_output=True,
+    ).stdout
+    device = subprocess.run(
+        ["bash", str(script), "device", "--user", "nobody", "--print"],
+        check=True, text=True, capture_output=True,
+    ).stdout
+
+    assert "lekiwi-stack.service" in compute
+    assert "lekiwi-host.service" not in compute
+    assert "lekiwi-host.service" in device
+    assert "lekiwi-cameras.service" in device
+    assert "lekiwi-stack.service" not in device
+    assert "NOPASSWD" in compute and "NOPASSWD" in device
+    assert "daemon-reload" not in compute + device
+
+
+def test_managed_build_prefers_system_cmake_and_starts_clean():
+    builder = (ROOT / "scripts" / "build-lekiwi.sh").read_text(encoding="utf-8")
+
+    assert "PATH=/usr/bin:/bin:$PATH" in builder
+    assert '-DCMAKE_IGNORE_PREFIX_PATH="$HOME/.local"' in builder
+    assert 'rm -rf -- "$workspace/build/lekiwi_rmf"' in builder

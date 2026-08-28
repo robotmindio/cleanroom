@@ -111,7 +111,18 @@ if [[ -f /etc/default/lekiwi-host ]]; then
 fi
 
 camera_ros_available=false
-if command -v ros2 >/dev/null 2>&1 && ros2 pkg prefix v4l2_camera >/dev/null 2>&1; then
+if (
+  set +u
+  # The documented sudo invocation has root's minimal PATH. Source ROS in a
+  # subshell before probing or an installed camera package is silently missed.
+  # shellcheck source=/dev/null
+  source /opt/ros/jazzy/setup.bash
+  if [[ -f $LEKIWI_SERVICE_WORKSPACE/install/setup.bash ]]; then
+    # shellcheck source=/dev/null
+    source "$LEKIWI_SERVICE_WORKSPACE/install/setup.bash"
+  fi
+  ros2 pkg prefix v4l2_camera >/dev/null 2>&1
+); then
   camera_ros_available=true
 fi
 if [[ $camera_ros_available == true ]]; then

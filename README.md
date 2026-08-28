@@ -518,6 +518,38 @@ HOME remains writable for repository-managed ROS databases, logs, calibration,
 and key material; serial and V4L2 devices remain visible because their dynamic
 device paths are required by the host/camera services.
 
+### Coordinated split deployment
+
+Install the deployment-only sudo rules once on each machine. They permit the
+selected account to start, stop, restart, and reset only its LeKiwi units; they
+do not grant arbitrary `systemctl`, installer, shell, or root access:
+
+```bash
+# Compute machine
+scripts/install-deploy-sudoers.sh compute
+
+# Device machine
+scripts/install-deploy-sudoers.sh device
+```
+
+Run the device and compute service installers once after changing a unit
+template or topology. Ordinary code/configuration deployments then run from
+the compute checkout with one command:
+
+```bash
+scripts/deploy-split.sh DEVICE_IP
+```
+
+The deployer fast-forwards both clean checkouts to the same pushed commit,
+confirms torque-off, stops the compute stack before the device host, rebuilds
+both service workspaces, and starts the host and cameras before the compute
+stack. A temporary auto-arm inhibit keeps the replacement driver disarmed
+until revision, motor-health, and camera checks pass. Any failure leaves the
+inhibit at `~/.ros/lekiwi/deploy-inhibit-auto-arm` and does not roll back or
+resume a partially deployed robot. Inspect the failure and rerun the deploy;
+remove that file manually only when abandoning the deployment after verifying
+the robot is safe.
+
 The two halves can also mix ownership: keep the device services running and
 drive the stack by hand whenever you feel like it —
 

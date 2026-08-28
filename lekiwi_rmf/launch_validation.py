@@ -32,6 +32,7 @@ ARGUMENT_NAMES = (
     "remote_ip",
     "curve_client_secret_key_file",
     "curve_server_public_key_file",
+    "auto_arm_on_startup",
     "start_rmf",
     "rmf_domain",
     "start_moveit",
@@ -155,6 +156,7 @@ def validate_launch_arguments(arguments: Mapping[str, object]) -> None:
         raise ValueError(f"laser_source must be auto, camera, ld06, or none, got {laser_source!r}")
 
     start_rmf = _bool(arguments["start_rmf"], "start_rmf")
+    _bool(arguments["auto_arm_on_startup"], "auto_arm_on_startup")
     start_moveit = _bool(arguments["start_moveit"], "start_moveit")
     start_rosbridge = _bool(arguments["start_rosbridge"], "start_rosbridge")
     rosbridge_address = str(arguments["rosbridge_address"]).strip()

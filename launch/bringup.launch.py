@@ -70,6 +70,7 @@ def generate_launch_description():
     remote_ip = LaunchConfiguration("remote_ip")
     curve_client_secret = LaunchConfiguration("curve_client_secret_key_file")
     curve_server_public = LaunchConfiguration("curve_server_public_key_file")
+    auto_arm_on_startup = LaunchConfiguration("auto_arm_on_startup")
     start_rmf = LaunchConfiguration("start_rmf")
     rmf_domain = LaunchConfiguration("rmf_domain")
     start_rosbridge = LaunchConfiguration("start_rosbridge")
@@ -305,6 +306,9 @@ def generate_launch_description():
                 choices=["mapping", "localization"],
             ),
             DeclareLaunchArgument("publish_camera", default_value="true"),
+            DeclareLaunchArgument(
+                "auto_arm_on_startup", default_value="true", choices=["true", "false"]
+            ),
             # The Astra Pro is an additional third camera. Existing front and
             # wrist V4L2 cameras continue to publish unchanged.
             DeclareLaunchArgument("publish_astra", default_value="true", choices=["true", "false"]),
@@ -623,7 +627,9 @@ def generate_launch_description():
                     # The driver still requires current, explicit supervisor
                     # permission and fresh host telemetry before energizing
                     # servos; this only removes the manual arm RPC at startup.
-                    "auto_arm_on_startup": True,
+                    "auto_arm_on_startup": ParameterValue(
+                        auto_arm_on_startup, value_type=bool
+                    ),
                     "odom_topic": "/wheel/odometry",
                     "publish_odom_tf": False,
                 }],

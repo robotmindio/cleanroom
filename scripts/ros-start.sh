@@ -58,6 +58,7 @@ camera_calibration_valid() {
 # calibration tools write only numeric KEY=VALUE lines; reject anything malformed rather
 # than sourcing a user file into this launcher.
 calibration_args=()
+maintenance_args=()
 has_launch_arg() { # has_launch_arg <key>
   local key=$1 arg
   for arg in "$@"; do [[ $arg == "$key":=* ]] && return 0; done
@@ -76,6 +77,15 @@ load_launch_calibration() {
   done < "$file"
 }
 load_launch_calibration "$@"
+
+# A coordinated deployment stops the stack before restarting the motor host.
+# Keep its replacement driver explicitly disarmed until the deploy script has
+# verified both machines and removed this latch. If deployment fails, a later
+# systemd retry also stays disarmed instead of unexpectedly resuming motion.
+deploy_disarm_latch="${LEKIWI_LOGS:-$HOME/.ros/lekiwi}/deploy-inhibit-auto-arm"
+if [[ -e $deploy_disarm_latch ]] && ! has_launch_arg auto_arm_on_startup "$@"; then
+  maintenance_args=(auto_arm_on_startup:=false)
+fi
 
 require_camera_calibration() {
   local calibration="${LEKIWI_CAMERA_INFO:-$HOME/.ros/camera_info/lekiwi_front.yaml}"
@@ -108,4 +118,4 @@ exec ros2 launch lekiwi_rmf bringup.launch.py mode:=real \
   camera_source:="$camera_source" \
   camera_device:="$FRONT" wrist_camera_device:="${WRIST:-none}" \
   camera_info_url:="$front_camera_info" wrist_camera_info_url:="$wrist_camera_info" \
-  "${calibration_args[@]}" "$@"
+  "${calibration_args[@]}" "${maintenance_args[@]}" "$@"

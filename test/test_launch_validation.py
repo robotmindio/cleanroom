@@ -11,6 +11,7 @@ def valid_arguments(**overrides):
         "remote_ip": "192.0.2.10",
         "curve_client_secret_key_file": "/tmp/client.key_secret",
         "curve_server_public_key_file": "/tmp/server.key",
+        "auto_arm_on_startup": "true",
         "start_rmf": "false",
         "rmf_domain": "0",
         "start_moveit": "false",
