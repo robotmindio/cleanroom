@@ -235,12 +235,11 @@ joint's `directions` value between `1` and `-1`, then restart.
 
 ### Recovery after motor power loss
 
-Real hardware is default-deny. The driver does not auto-arm at startup, and a
-host or ROS restart never restores torque or an interrupted command. It must
-receive complete, fresh telemetry and permission from the continuous safety
-supervisor before an operator can explicitly arm it. After stale or failed
-telemetry it keeps publishing measured joint state, cancels the interrupted
-trajectory, and remains disarmed after recovery. Inspect the robot and then:
+Real hardware is default-deny. Startup arming is guarded by complete, fresh
+telemetry and current permission from the continuous safety supervisor. A host
+session change, explicit disarm, or stale/failed telemetry cuts torque,
+cancels the interrupted trajectory, and remains disarmed after recovery.
+Inspect the robot and then:
 
 ```bash
 ros2 service call /safety/arm std_srvs/srv/Trigger '{}'
@@ -913,9 +912,11 @@ Recalibrate the camera and wheel scale first. Then remap with slower motion and 
   requires the accepted footprint and padding to match both tracked Nav2
   costmaps and proves the enabled StopZone leaves at least the measured worst
   stopping distance plus uncertainty around that footprint.
-- The driver never auto-arms and does not restore torque after host or ROS
-  restart. `/safety/arm` is an explicit operator action after inspection;
-  `/safety/disarm` cuts torque through the motor host and aborts arm motion.
+- The driver may arm only during guarded startup after receiving fresh healthy
+  telemetry and supervisor permission. A host session change, disarm, or link
+  loss never restores torque automatically; `/safety/arm` is then an explicit
+  operator action after inspection, while `/safety/disarm` cuts torque through
+  the motor host and aborts arm motion.
 - Rosbridge is disabled by default and loopback-bound when enabled. It has no
   authentication or TLS. Keep it on loopback, or put a separately managed
   authenticated proxy and firewall in front of it. The motor command and
