@@ -52,6 +52,11 @@ def generate_test_description():
             "arm_motion_permission_topic": "/test/driver/arm_permitted",
             "arm_calibration_file": "/test/intentionally-missing-calibration.json",
             "auto_arm_on_startup": False,
+            # The host/driver protocol is tested here. This development image's
+            # diagnostic_msgs C extension aborts while serializing any
+            # DiagnosticStatus (also reproducible outside this package), so
+            # publishing is disabled only for this unrelated launch fixture.
+            "publish_motor_health": False,
         }],
         remappings=[("safety/state", "/test/driver/state")],
         output="screen",

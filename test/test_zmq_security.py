@@ -16,6 +16,7 @@ from lekiwi_rmf.odometry import (
     TELEMETRY_TORQUE_ENABLED_KEY,
 )
 from lekiwi_rmf.zmq_client import LeKiwiZmqClient
+from lekiwi_rmf.motor_health import healthy_snapshot
 
 
 class _Context:
@@ -88,6 +89,7 @@ def _state_frames(sequence=0, value=1.25, torque_enabled=False):
         TELEMETRY_SEQUENCE_KEY: sequence,
         TELEMETRY_MONOTONIC_NS_KEY: 100 + sequence,
         TELEMETRY_TORQUE_ENABLED_KEY: torque_enabled,
+        "_lekiwi_motor_health": healthy_snapshot(("joint",), torque_enabled),
     }).encode("utf-8")]
 
 
@@ -270,6 +272,7 @@ def test_repository_client_speaks_authenticated_state_protocol(tmp_path):
         TELEMETRY_SEQUENCE_KEY: 0,
         TELEMETRY_MONOTONIC_NS_KEY: 123,
         TELEMETRY_TORQUE_ENABLED_KEY: False,
+        "_lekiwi_motor_health": healthy_snapshot(("joint",), False),
     }
     publisher = threading.Thread(
         target=observation.send_multipart,

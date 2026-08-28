@@ -831,11 +831,11 @@ class SafetySupervisor(Node):
 
     def _on_hardware_diagnostics(self, message: DiagnosticArray) -> None:
         healthy = self._source_stamp(message) > 0 and bool(message.status) and all(
-            status.level == DiagnosticStatus.OK for status in message.status
+            status.level < DiagnosticStatus.ERROR for status in message.status
         )
         detail = "; ".join(
             f"{status.name}: {status.message}"
-            for status in message.status if status.level != DiagnosticStatus.OK
+            for status in message.status if status.level >= DiagnosticStatus.ERROR
         ) or "no motor diagnostics"
         self._machine.update("motor_health", healthy, self._source_stamp(message) or self._now(), detail)
 
