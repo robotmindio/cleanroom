@@ -8,6 +8,7 @@ ZMQ REP endpoint for the ROS driver's explicit arm/disarm transactions.
 
 import json
 import logging
+import math
 import os
 import signal
 import time
