@@ -70,7 +70,7 @@ class LeKiwiDriver(Node):
         self.cmd_vel_topic = self.declare_parameter("cmd_vel_topic", "/cmd_vel_safe").value
         self.odom_topic = self.declare_parameter("odom_topic", "/wheel/odometry").value
         self.publish_odom_tf = self.declare_parameter("publish_odom_tf", False).value
-        self.auto_arm_on_startup = self.declare_parameter("auto_arm_on_startup", False).value
+        self.auto_arm_on_startup = self.declare_parameter("auto_arm_on_startup", True).value
         self.publish_motor_health_enabled = self.declare_parameter(
             "publish_motor_health", True
         ).value

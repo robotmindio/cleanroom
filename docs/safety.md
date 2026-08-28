@@ -28,6 +28,10 @@ current, and programmed minimum/maximum voltage and maximum-temperature limits.
 It sends this snapshot in authenticated observation telemetry; the ROS driver
 validates it and publishes `/hardware/diagnostics`.
 
+The driver requests a guarded arm automatically at startup. It cannot energize
+the servos until it has fresh host telemetry and current safety-supervisor
+permission; a failed or missing safety input still leaves it disarmed.
+
 The diagnostics use these units:
 
 | Value | Reported representation |
