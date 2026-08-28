@@ -625,6 +625,12 @@ def generate_launch_description():
                 }],
                 condition=IfCondition(real),
                 remappings=[("safety/state", "safety/driver_state")],
+                # A ZMQ connect() timing out against a host that is not yet
+                # publishing (e.g. right after the device side restarts) is a
+                # transient race, not a permanent failure -- respawn instead
+                # of leaving the stack running with /safety/arm gone forever.
+                respawn=True,
+                respawn_delay=2.0,
                 output="screen",
             ),
             arm_ready_gate,
@@ -639,6 +645,8 @@ def generate_launch_description():
                 parameters=[ekf_params_file],
                 remappings=[("odometry/filtered", "/odom")],
                 condition=IfCondition(real),
+                respawn=True,
+                respawn_delay=2.0,
                 output="screen",
             ),
             # Unlike the one-shot readiness gates, this authority continuously
@@ -657,6 +665,14 @@ def generate_launch_description():
                     # Nav2 footprint and collision-monitor StopZone.
                     "nav2_params_file": params_file,
                 }],
+                # This node is the one continuously-enforced source of motion
+                # permission; a crash here must not leave the driver believing
+                # its last-received permission is still current for good. It
+                # already fails safe (driver.py's permission leases expire
+                # and auto-disarm without fresh Bool messages), so restarting
+                # it is strictly a recovery, never a new risk.
+                respawn=True,
+                respawn_delay=2.0,
                 output="screen",
             ),
             Node(

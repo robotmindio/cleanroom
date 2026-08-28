@@ -104,6 +104,19 @@ def test_real_remote_host_allows_an_unauthenticated_zmq_transport():
     ))
 
 
+def test_real_mode_allows_rosbridge_on_a_tailnet_address():
+    validate_launch_arguments(valid_arguments(
+        start_rosbridge="true", rosbridge_address="100.87.252.60",
+    ))
+
+
+def test_real_mode_still_rejects_a_non_tailnet_non_loopback_address():
+    with pytest.raises(ValueError, match="only to loopback"):
+        validate_launch_arguments(valid_arguments(
+            start_rosbridge="true", rosbridge_address="192.0.2.55",
+        ))
+
+
 def test_rmf_rejects_mutable_visual_slam_even_in_localization_mode():
     with pytest.raises(ValueError, match="requires amcl"):
         validate_launch_arguments(valid_arguments(start_rmf="true", slam_mode="localization"))

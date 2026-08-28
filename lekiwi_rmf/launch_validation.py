@@ -8,10 +8,24 @@ module ROS-free so the same rules have ordinary, fast unit tests.
 from __future__ import annotations
 
 from collections.abc import Mapping
+import ipaddress
 import math
 from pathlib import Path
 
 import yaml
+
+# RFC 6598 CGNAT space, which Tailscale allocates every tailnet address from.
+# A rosbridge bound here is only reachable over the authenticated, encrypted
+# WireGuard mesh -- not the open network -- so it satisfies the same intent
+# as "authenticated TLS" without rosbridge having to speak TLS itself.
+_TAILSCALE_CGNAT_RANGE = ipaddress.ip_network("100.64.0.0/10")
+
+
+def _is_tailscale_address(address: str) -> bool:
+    try:
+        return ipaddress.ip_address(address) in _TAILSCALE_CGNAT_RANGE
+    except ValueError:
+        return False
 
 ARGUMENT_NAMES = (
     "mode",
@@ -167,13 +181,18 @@ def validate_launch_arguments(arguments: Mapping[str, object]) -> None:
         raise ValueError("hardware_config must be non-empty")
     # Simulation is a disposable test topology: its ZMQ clients and rosbridge
     # endpoint may be reached by the integration-test runner. Real robot
-    # deployments remain loopback-only unless separately authenticated.
+    # deployments remain loopback-only, or on this tailnet's own CGNAT
+    # address (already authenticated and encrypted by Tailscale), until
+    # rosbridge speaks TLS itself.
     if (
         mode == "real"
         and start_rosbridge
         and rosbridge_address not in {"127.0.0.1", "::1"}
+        and not _is_tailscale_address(rosbridge_address)
     ):
-        raise ValueError("rosbridge may bind only to loopback until authenticated TLS is configured")
+        raise ValueError(
+            "rosbridge may bind only to loopback or a tailnet address until authenticated TLS is configured"
+        )
 
     if localization == "visual_slam" and not publish_camera:
         raise ValueError("visual_slam requires publish_camera:=true")
