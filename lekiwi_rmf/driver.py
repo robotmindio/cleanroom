@@ -1107,7 +1107,7 @@ class LeKiwiDriver(Node):
         for source in statuses:
             status = DiagnosticStatus()
             status.name = source.name
-            status.level = source.level
+            status.level = bytes((source.level,))
             status.message = source.message
             status.hardware_id = "lekiwi_servo_bus"
             status.values = []

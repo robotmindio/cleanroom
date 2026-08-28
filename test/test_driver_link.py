@@ -499,6 +499,7 @@ def test_validated_motor_health_is_published_as_diagnostics():
 
     assert published[0].header.stamp == "stamp"
     assert published[0].status[0].name == "motor_bus"
+    assert published[0].status[0].level == b"\x00"
     assert published[0].status[0].values[0].key == "torque_enabled"
 
 
