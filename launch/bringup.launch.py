@@ -126,6 +126,7 @@ def generate_launch_description():
     # front camera's floor-geometry trick, or nobody at all. In sim Gazebo
     # always publishes /scan itself and none of this runs.
     laser_source = LaunchConfiguration("laser_source")
+    lidar_source = LaunchConfiguration("lidar_source")
     lidar_port = LaunchConfiguration("lidar_port")
     # Gazebo supplies /scan in sim.  RTAB-Map must subscribe to it there too;
     # otherwise mono RGB plus odometry has no range data from which to make a grid.
@@ -135,7 +136,9 @@ def generate_launch_description():
         repr(lidar_detected), ")) and ", real])
     ld06 = PythonExpression([
         "('", laser_source, "' == 'ld06' or ('", laser_source, "' == 'auto' and ",
-        repr(lidar_detected), ")) and ", real])
+        repr(lidar_detected), ")) and '", lidar_source, "' == 'local' and ", real])
+    remote_ld06 = PythonExpression([
+        "'", laser_source, "' == 'ld06' and '", lidar_source, "' == 'remote' and ", real])
     map_file = PathJoinSubstitution([package, "maps", "cleanroom.yaml"])
     selected_map = LaunchConfiguration("selected_map", default=map_file)
     selected_nav_graph = LaunchConfiguration(
@@ -375,6 +378,9 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "laser_source", default_value="auto", choices=["auto", "camera", "ld06", "none"]
             ),
+            DeclareLaunchArgument(
+                "lidar_source", default_value="local", choices=["local", "remote"]
+            ),
             # Prefer a /dev/serial/by-id/... path for the same reason as camera_device.
             DeclareLaunchArgument(
                 "lidar_port",
@@ -608,6 +614,14 @@ def generate_launch_description():
                     "port_baudrate": 230400,
                 }],
                 condition=IfCondition(ld06),
+                output="screen",
+            ),
+            Node(
+                package="topic_tools",
+                executable="relay",
+                name="remote_ld06_relay",
+                arguments=["/pi/lidar/scan", "/scan"],
+                condition=IfCondition(remote_ld06),
                 output="screen",
             ),
             Node(

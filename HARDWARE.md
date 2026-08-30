@@ -383,6 +383,11 @@ commissioning so a wrong USB adapter cannot silently select the camera fallback:
 scripts/up.sh laser_source:=ld06 lidar_port:=/dev/serial/by-id/usb-...-if00-port0
 ```
 
+If the USB cable is plugged into the robot's Pi, run
+`scripts/install-device-services.sh` there, then start the compute stack with
+`laser_source:=ld06 lidar_source:=remote`. The device service publishes only
+`/pi/lidar/scan`; the compute stack relays it to the canonical `/scan`.
+
 and check the scan against reality in RViz before trusting it: spin the robot by
 hand and watch a nearby wall stay put in the LaserScan display.
 

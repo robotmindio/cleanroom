@@ -176,6 +176,7 @@ scripts/sim-up.sh slam_mode:=localization \
 | `camera_source` | `local`, `remote` | `local` | Read the camera here, or decompress what the robot's Pi publishes |
 | `camera_device` | V4L2 path | `/dev/video0` | Existing front V4L2 camera |
 | `laser_source` | `auto`, `camera`, `ld06`, `none` | `auto` | Select camera fallback or LD06 on real hardware; Gazebo supplies `/scan` in sim |
+| `lidar_source` | `local`, `remote` | `local` | Machine that opens the LD06 serial port; remote relays `/pi/lidar/scan` |
 | `lidar_port` | serial path | CP2102 `/dev/serial/by-id/...` | LD06 device when `laser_source:=ld06` |
 | `camera_height`, `camera_offset_x`, `camera_offset_y` | metres | `0.093`, `0.03`, `0.0` | Front-camera pose used by the camera scan |
 | `camera_pitch`, `camera_yaw`, `camera_roll` | radians | `0.031`, `0.0`, `0.0` | Front-camera orientation used by the camera scan |
@@ -632,6 +633,10 @@ preferably by its stable `/dev/serial/by-id` name:
 ```bash
 scripts/up.sh laser_source:=ld06 lidar_port:=/dev/serial/by-id/usb-...-if00-port0
 ```
+
+When the LD06 is plugged into the robot's Pi, install `lekiwi-lidar.service` there
+and start the compute stack with `laser_source:=ld06 lidar_source:=remote`; it
+relays the private device scan as the sole `/scan` publisher.
 
 Its 12 m range makes the camera trick redundant, which is why the two are
 mutually exclusive. `laser_source:=none` is rejected in real mode: production

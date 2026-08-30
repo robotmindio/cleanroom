@@ -47,6 +47,7 @@ ARGUMENT_NAMES = (
     "hardware_config",
     "camera_source",
     "laser_source",
+    "lidar_source",
     "xy_velocity_scale",
     "yaw_velocity_scale",
     "rtabmap_database",
@@ -139,6 +140,7 @@ def validate_launch_arguments(arguments: Mapping[str, object]) -> None:
     slam_mode = str(arguments["slam_mode"])
     camera_source = str(arguments["camera_source"])
     laser_source = str(arguments["laser_source"])
+    lidar_source = str(arguments["lidar_source"])
     remote_ip = str(arguments["remote_ip"]).strip()
     curve_client_secret = str(arguments["curve_client_secret_key_file"]).strip()
     curve_server_public = str(arguments["curve_server_public_key_file"]).strip()
@@ -154,6 +156,8 @@ def validate_launch_arguments(arguments: Mapping[str, object]) -> None:
         raise ValueError(f"camera_source must be local or remote, got {camera_source!r}")
     if laser_source not in {"auto", "camera", "ld06", "none"}:
         raise ValueError(f"laser_source must be auto, camera, ld06, or none, got {laser_source!r}")
+    if lidar_source not in {"local", "remote"}:
+        raise ValueError(f"lidar_source must be local or remote, got {lidar_source!r}")
 
     start_rmf = _bool(arguments["start_rmf"], "start_rmf")
     _bool(arguments["auto_arm_on_startup"], "auto_arm_on_startup")
@@ -204,6 +208,8 @@ def validate_launch_arguments(arguments: Mapping[str, object]) -> None:
         raise ValueError("laser_source:=camera requires publish_camera:=true")
     if mode == "sim" and camera_source == "remote":
         raise ValueError("camera_source:=remote is unsupported in simulation")
+    if mode == "sim" and lidar_source == "remote":
+        raise ValueError("lidar_source:=remote is unsupported in simulation")
     if start_rmf and slam_mode == "mapping":
         raise ValueError("start_rmf:=true requires slam_mode:=localization and a validated map bundle")
     if start_rmf and localization != "amcl":

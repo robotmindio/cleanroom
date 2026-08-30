@@ -1,0 +1,34 @@
+# LD06 publisher on the device machine.  It deliberately publishes privately;
+# the compute-side launch owns the sole canonical /scan publisher.
+[Unit]
+Description=LeKiwi LD06 lidar publisher
+Documentation=file://@PROJECT_ROOT@/HARDWARE.md
+After=systemd-udevd.service
+StartLimitIntervalSec=600
+StartLimitBurst=8
+
+[Service]
+Type=simple
+User=@SERVICE_USER@
+Environment=HOME=@SERVICE_HOME@
+Environment=LEKIWI_WS=@WORKSPACE@
+WorkingDirectory=@PROJECT_ROOT@
+ExecStartPre=-/usr/bin/udevadm settle --timeout=15
+ExecStart=@PROJECT_ROOT@/scripts/ros-lidar.sh
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectControlGroups=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+LockPersonality=true
+RestrictSUIDSGID=true
+UMask=0077
+Restart=on-failure
+RestartSec=10s
+TimeoutStopSec=20s
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target

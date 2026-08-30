@@ -169,6 +169,7 @@ def test_deploy_sudoers_are_limited_by_machine_role():
     assert "lekiwi-host.service" not in compute
     assert "lekiwi-host.service" in device
     assert "lekiwi-cameras.service" in device
+    assert "lekiwi-lidar.service" in device
     assert "lekiwi-stack.service" not in device
     assert "NOPASSWD" in compute and "NOPASSWD" in device
     assert "daemon-reload" not in compute + device

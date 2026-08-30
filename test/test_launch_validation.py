@@ -26,6 +26,7 @@ def valid_arguments(**overrides):
         "hardware_config": "/tmp/hardware.yaml",
         "camera_source": "local",
         "laser_source": "camera",
+        "lidar_source": "local",
         "xy_velocity_scale": "1.0",
         "yaw_velocity_scale": "0.9",
         "rtabmap_database": "/tmp/lekiwi.db",
@@ -52,6 +53,7 @@ def test_accepts_a_coherent_real_mapping_configuration():
         ({"start_rmf": "true"}, "requires slam_mode:=localization"),
         ({"start_rmf": "true", "slam_mode": "localization", "localization": "amcl", "rmf_domain": "55"}, "rmf_domain must be 0"),
         ({"mode": "sim", "camera_source": "remote"}, "unsupported in simulation"),
+        ({"mode": "sim", "lidar_source": "remote"}, "unsupported in simulation"),
         ({"rosbridge_port": "0"}, "between 1 and 65535"),
         ({"xy_velocity_scale": "0"}, "finite and positive"),
         ({"yaw_velocity_scale": "inf"}, "finite and positive"),
@@ -103,6 +105,10 @@ def test_real_remote_host_allows_an_unauthenticated_zmq_transport():
     validate_launch_arguments(valid_arguments(
         curve_client_secret_key_file="", curve_server_public_key_file="",
     ))
+
+
+def test_real_stack_can_relay_the_device_ld06():
+    validate_launch_arguments(valid_arguments(laser_source="ld06", lidar_source="remote"))
 
 
 def test_real_mode_allows_rosbridge_on_a_tailnet_address():
