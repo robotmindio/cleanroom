@@ -631,12 +631,8 @@ back as nothing, and it measures where things touch the floor, so a table is as 
 its legs. Wrong height or pitch puts phantom walls in the costmap.
 
 `laser_source:=ld06` replaces all of that guesswork with a real LDROBOT LD06 on its
-RobotSkin base -- see HARDWARE.md for the mount, port and permissions. Give the bringup the serial device,
-preferably by its stable `/dev/serial/by-id` name:
-
-```bash
-scripts/up.sh laser_source:=ld06 lidar_port:=/dev/serial/by-id/usb-...-if00-port0
-```
+RobotSkin base -- see HARDWARE.md for the mount, port and permissions. The
+normal startup scripts detect its stable `/dev/serial/by-id` device themselves.
 
 The standard device installer starts `lekiwi-lidar.service` on the robot host,
 and the standard compute installer relays its private scan as the sole `/scan`

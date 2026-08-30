@@ -374,13 +374,11 @@ the same reason as with cameras:
 ls /dev/serial/by-id/    # e.g. usb-Silicon_Labs_CP2102N_...-if00-port0
 ```
 
-Nothing else is configurable: the LD06 speaks 230400 baud and the driver is
-launched with that fixed. The repository's `laser_source:=auto` already selects
-the known CP2102 by-id device when it is attached; force it explicitly while
-commissioning so a wrong USB adapter cannot silently select the camera fallback:
+Nothing else is configurable: the LD06 speaks 230400 baud and the default
+startup detects its known CP2102 by-id device automatically:
 
 ```bash
-scripts/up.sh laser_source:=ld06 lidar_port:=/dev/serial/by-id/usb-...-if00-port0
+scripts/up.sh
 ```
 
 The normal `scripts/install-device-services.sh` installation on the robot host
