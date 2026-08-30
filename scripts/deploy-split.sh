@@ -224,7 +224,8 @@ wait_for 30 sh -c "ros2 topic info /hardware/diagnostics | grep -Eq 'Publisher c
   die "updated driver is not publishing motor health"
 timeout 30 ros2 topic echo --once /pi/camera/front/image_raw/compressed >/dev/null || \
   die "device camera service is active but no front image reached compute"
-lidar_frame=$(timeout 30 ros2 topic echo --once --field header.frame_id /scan | tr -d "'[:space:]") || \
+lidar_frame=$(timeout 30 ros2 topic echo --once --field header.frame_id /scan | \
+  awk 'NF && $1 != "---" { print $1; exit }') || \
   die "device LD06 scan did not reach compute"
 [[ $lidar_frame == laser ]] || die "canonical /scan is not the LD06 frame: $lidar_frame"
 

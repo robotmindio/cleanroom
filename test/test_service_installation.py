@@ -205,6 +205,7 @@ def test_deploy_order_fails_closed_around_the_device_restart():
     assert ".lekiwi-source-revision" in deploy
     assert "expected_service_fingerprint" in deploy
     assert "canonical /scan is not the LD06 frame" in deploy
+    assert 'awk \'NF && $1 != "---" { print $1; exit }\'' in deploy
     assert "has_nopasswd_systemctl" in deploy
     assert 'compute_sudoers=$(sudo -n -l)' in deploy
     assert "git merge --ff-only" in deploy
