@@ -4,7 +4,7 @@
 # robot's own computer and a separate desk machine are both fine, and the
 # device half (motors + cameras) can sit on either one.
 #
-# Usage: scripts/install-compute-services.sh [--remote DEVICE_ADDR]
+# Usage: scripts/install-compute-services.sh [--remote DEVICE_ADDR] [--remote-lidar]
 #        [--service-user USER] [--workspace PATH] [--curve-dir PATH]
 #   no --remote : the device side runs on this machine too; the stack is
 #                 ordered after lekiwi-host.service and starts once its ZMQ
@@ -12,6 +12,8 @@
 #   --remote    : motors and cameras live on DEVICE_ADDR instead; compressed
 #                 frames stream from there and relays in the bringup expand
 #                 them into the same canonical topics (camera_source:=remote).
+#   --remote-lidar : the LD06 is attached to DEVICE_ADDR too; relay its private
+#                 ROS scan instead of starting the camera-as-laser fallback.
 #
 # Re-run any time the split changes; both installers are idempotent.
 set -Eeuo pipefail
@@ -24,6 +26,7 @@ die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 trap 'printf "error: installer failed at line %s\n" "$LINENO" >&2' ERR
 
 REMOTE=""
+REMOTE_LIDAR=false
 SERVICE_USER_ARG=""
 WORKSPACE_ARG=""
 CURVE_DIR_ARG=""
@@ -33,6 +36,10 @@ while [[ $# -gt 0 ]]; do
       [[ $# -ge 2 ]] || die "--remote needs a device address"
       REMOTE=$2
       shift 2
+      ;;
+    --remote-lidar)
+      REMOTE_LIDAR=true
+      shift
       ;;
     --service-user)
       [[ $# -ge 2 ]] || die "--service-user needs a user name"
@@ -49,11 +56,13 @@ while [[ $# -gt 0 ]]; do
       CURVE_DIR_ARG=$2
       shift 2
       ;;
-    *) die "unknown argument: $1 (usage: $0 [--remote DEVICE_ADDR] [--service-user USER] [--workspace PATH] [--curve-dir PATH])" ;;
+    *) die "unknown argument: $1 (usage: $0 [--remote DEVICE_ADDR] [--remote-lidar] [--service-user USER] [--workspace PATH] [--curve-dir PATH])" ;;
   esac
 done
 [[ -z $REMOTE || $REMOTE =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || \
   die "--remote must be a hostname or IPv4 address without whitespace"
+[[ $REMOTE_LIDAR == false || -n $REMOTE ]] || \
+  die "--remote-lidar requires --remote DEVICE_ADDR"
 
 SUDO=()
 [[ $EUID -eq 0 ]] || SUDO=(sudo)
@@ -87,6 +96,9 @@ if [[ -n $REMOTE ]]; then
     log "unusual split. If the devices are actually here, drop --remote."
   fi
   STACK_ARGS="camera_source:=remote remote_ip:=$REMOTE"
+  if [[ $REMOTE_LIDAR == true ]]; then
+    STACK_ARGS="$STACK_ARGS laser_source:=ld06 lidar_source:=remote"
+  fi
   if [[ -n $CURVE_DIR_ARG ]]; then
     [[ $CURVE_DIR_ARG == /* && $CURVE_DIR_ARG != *[[:space:]]* ]] || \
       die "--curve-dir must be an absolute path without whitespace"
@@ -130,7 +142,9 @@ else
   fi
 fi
 
-if [[ -n $REMOTE ]]; then
+if [[ -n $REMOTE && $REMOTE_LIDAR == true ]]; then
+  log "Installing lekiwi-stack.service (--remote $REMOTE, remote LD06)"
+elif [[ -n $REMOTE ]]; then
   log "Installing lekiwi-stack.service (--remote $REMOTE)"
 elif [[ $STACK_ARGS == *remote* ]]; then
   log "Installing lekiwi-stack.service (loopback camera_source:=remote)"

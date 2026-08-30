@@ -300,8 +300,8 @@ sudo scripts/install-compute-services.sh \
   --service-user "$USER" --workspace "$HOME/lekiwi_ws"
 ```
 
-For a separate ROS workstation, use `--remote DEVICE_IP` on the compute
-installer. A direct root invocation must include `--service-user USER`; when
+For a separate ROS workstation, use `--remote DEVICE_IP`; add `--remote-lidar`
+when the LD06 is attached to that device machine. A direct root invocation must include `--service-user USER`; when
 run through `sudo`, the invoking non-root account is selected. Both installers
 fail early if the selected workspace or LeRobot Python is missing. They render,
 verify, reload, and enable the units; inspect them with:
@@ -384,9 +384,15 @@ scripts/up.sh laser_source:=ld06 lidar_port:=/dev/serial/by-id/usb-...-if00-port
 ```
 
 If the USB cable is plugged into the robot's Pi, run
-`scripts/install-lidar-service.sh` there, then start the compute stack with
-`laser_source:=ld06 lidar_source:=remote`. The device service publishes only
+`scripts/install-lidar-service.sh` there, then configure the compute service
+with `--remote DEVICE_IP --remote-lidar` (or launch with
+`laser_source:=ld06 lidar_source:=remote`). The device service publishes only
 `/pi/lidar/scan`; the compute stack relays it to the canonical `/scan`.
+
+```bash
+sudo scripts/install-compute-services.sh --service-user "$USER" \
+  --workspace "$HOME/lekiwi_ws" --remote DEVICE_IP --remote-lidar
+```
 
 and check the scan against reality in RViz before trusting it: spin the robot by
 hand and watch a nearby wall stay put in the LaserScan display.

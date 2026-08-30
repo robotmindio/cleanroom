@@ -133,6 +133,13 @@ def test_service_installers_support_an_unauthenticated_split_zmq_transport():
     assert 'STACK_ARGS="camera_source:=remote remote_ip:=$REMOTE"' in compute
 
 
+def test_compute_installer_requires_an_explicit_remote_lidar_opt_in():
+    installer = (ROOT / "scripts" / "install-compute-services.sh").read_text(encoding="utf-8")
+
+    assert "--remote-lidar requires --remote DEVICE_ADDR" in installer
+    assert 'STACK_ARGS="$STACK_ARGS laser_source:=ld06 lidar_source:=remote"' in installer
+
+
 def test_device_installer_finds_ros_packages_under_sudo_root_path():
     installer = (ROOT / "scripts" / "install-device-services.sh").read_text(encoding="utf-8")
 

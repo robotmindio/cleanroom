@@ -502,7 +502,8 @@ The compute side installs `lekiwi-stack.service`:
 - with `--remote <device-address>` it reaches a host on another machine;
   compressed frames stream from the device machine and relays in the bringup
   expand them into the same canonical topics, so nothing downstream can tell
-  the topologies apart.
+  the topologies apart. Add `--remote-lidar` when the device machine also
+  owns the LD06; it relays `/pi/lidar/scan` as the sole `/scan` publisher.
 
 Both installers are re-runnable when the split changes; keep the machines'
 clocks roughly in sync (anything NTP-ish) since camera stamps now originate
