@@ -420,7 +420,7 @@ MoveIt and RViz are intentionally opt-in so they cannot starve camera safety. Ru
 With a robot computer holding the devices, its half runs there instead:
 
 ```bash
-scripts/pi-up.sh                         # on the robot computer (motor host + cameras)
+scripts/pi-up.sh                         # on the robot computer (motor host + cameras + LD06)
 scripts/workstation-up.sh <PI_IP>         # on the workstation
 ```
 
@@ -488,11 +488,13 @@ The last command is run on the compute host only after its key directory has
 to use the enabled unauthenticated transport. CURVE does not configure a
 firewall or authenticate ROS 2 DDS.
 
-The device side installs two units: `lekiwi-host.service` (the motor bus,
+The device side installs three units: `lekiwi-host.service` (the motor bus,
 served on `5555/tcp` with observations on `5556/tcp` and torque safety on
 `5557/tcp`) and `lekiwi-cameras.service` (the cameras, published by
 `v4l2_camera` right where they are plugged in — never read by the motor host:
 one reader per device, so a stalled camera frame cannot abort the motor bus).
+`lekiwi-lidar.service` owns the LD06 serial port and publishes the private
+device scan.
 The compute side installs `lekiwi-stack.service`:
 
 - without arguments it assumes the device side is this same machine and
@@ -503,8 +505,8 @@ The compute side installs `lekiwi-stack.service`:
 - with `--remote <device-address>` it reaches a host on another machine;
   compressed frames stream from the device machine and relays in the bringup
   expand them into the same canonical topics, so nothing downstream can tell
-  the topologies apart. Add `--remote-lidar` when the device machine also
-  owns the LD06; it relays `/pi/lidar/scan` as the sole `/scan` publisher.
+  the topologies apart. It also relays the device LD06's `/pi/lidar/scan` as
+  the sole `/scan` publisher by default.
 
 Both installers are re-runnable when the split changes; keep the machines'
 clocks roughly in sync (anything NTP-ish) since camera stamps now originate
@@ -636,9 +638,9 @@ preferably by its stable `/dev/serial/by-id` name:
 scripts/up.sh laser_source:=ld06 lidar_port:=/dev/serial/by-id/usb-...-if00-port0
 ```
 
-When the LD06 is plugged into the robot's Pi, install `lekiwi-lidar.service` there
-and start the compute stack with `laser_source:=ld06 lidar_source:=remote`; it
-relays the private device scan as the sole `/scan` publisher.
+The standard device installer starts `lekiwi-lidar.service` on the robot host,
+and the standard compute installer relays its private scan as the sole `/scan`
+publisher. No LD06-specific installation or launch flag is needed.
 
 Its 12 m range makes the camera trick redundant, which is why the two are
 mutually exclusive. `laser_source:=none` is rejected in real mode: production

@@ -95,6 +95,19 @@ export LEKIWI_CURVE_AUTHORIZED_CLIENTS LEKIWI_CURVE_HEALTH_CLIENT_SECRET
 
 install_unit() { render_systemd_unit "$PROJECT_ROOT/systemd/$1" "$UNIT_DIR/$1"; }
 
+if ! (
+  set +u
+  # shellcheck source=/dev/null
+  source /opt/ros/jazzy/setup.bash
+  if [[ -f $LEKIWI_SERVICE_WORKSPACE/install/setup.bash ]]; then
+    # shellcheck source=/dev/null
+    source "$LEKIWI_SERVICE_WORKSPACE/install/setup.bash"
+  fi
+  ros2 pkg prefix ldlidar_stl_ros2 >/dev/null 2>&1
+) ; then
+  die "ldlidar_stl_ros2 is unavailable; the standard device installation requires the LD06 driver"
+fi
+
 first_match() { # first existing path matching a glob, empty if none
   # shellcheck disable=SC2086 # Deliberately expand the caller-supplied glob.
   set -- $1
@@ -139,29 +152,8 @@ else
   fi
 fi
 
-lidar_ros_available=false
-if (
-  set +u
-  # shellcheck source=/dev/null
-  source /opt/ros/jazzy/setup.bash
-  if [[ -f $LEKIWI_SERVICE_WORKSPACE/install/setup.bash ]]; then
-    # shellcheck source=/dev/null
-    source "$LEKIWI_SERVICE_WORKSPACE/install/setup.bash"
-  fi
-  ros2 pkg prefix ldlidar_stl_ros2 >/dev/null 2>&1
-); then
-  lidar_ros_available=true
-fi
-if [[ $lidar_ros_available == true ]]; then
-  log "Installing lekiwi-lidar.service"
-  install_unit lekiwi-lidar.service
-else
-  log "LD06 ROS driver is unavailable; skipping lekiwi-lidar.service"
-  if [[ -f $UNIT_DIR/lekiwi-lidar.service ]]; then
-    as_root systemctl disable --now lekiwi-lidar.service 2>/dev/null || true
-    as_root rm -f "$UNIT_DIR/lekiwi-lidar.service"
-  fi
-fi
+log "Installing lekiwi-lidar.service"
+install_unit lekiwi-lidar.service
 if [[ $camera_ros_available == true && -z "$(first_match '/dev/v4l/by-id/*WEBCAM*-video-index0')" ]]; then
   log "warning: no front camera found -- lekiwi-cameras will keep failing"
   log "until one is attached (set LEKIWI_FRONT in ros-cameras.sh for odd hardware)."
@@ -173,9 +165,8 @@ if ! grep -qE '^image_width:[[:space:]]*[1-9][0-9]*' "$calibration" 2>/dev/null;
   log "Run scripts/calibrate-camera.sh on this machine first (stop its service while calibrating)."
 fi
 
-units=(lekiwi-host.service)
+units=(lekiwi-host.service lekiwi-lidar.service)
 [[ $camera_ros_available == true ]] && units+=(lekiwi-cameras.service)
-[[ $lidar_ros_available == true ]] && units+=(lekiwi-lidar.service)
 log "Validating rendered systemd units"
 verify_systemd_units "${units[@]}"
 
@@ -186,9 +177,7 @@ if [[ $camera_ros_available == true ]]; then
 else
   as_root systemctl enable --now lekiwi-host.service
 fi
-if [[ $lidar_ros_available == true ]]; then
-  as_root systemctl enable --now lekiwi-lidar.service
-fi
+as_root systemctl enable --now lekiwi-lidar.service
 
 if [[ -f $UNIT_DIR/lekiwi-stack.service ]]; then
   log "A ROS stack service is also installed here -- re-run"

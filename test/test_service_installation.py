@@ -130,14 +130,30 @@ def test_service_installers_support_an_unauthenticated_split_zmq_transport():
     compute = (ROOT / "scripts" / "install-compute-services.sh").read_text(encoding="utf-8")
 
     assert 'if [[ -n $CURVE_DIR_ARG ]]; then' in device
-    assert 'STACK_ARGS="camera_source:=remote remote_ip:=$REMOTE"' in compute
+    assert 'STACK_ARGS="camera_source:=remote remote_ip:=$REMOTE laser_source:=ld06 lidar_source:=remote"' in compute
 
 
-def test_compute_installer_requires_an_explicit_remote_lidar_opt_in():
+def test_standard_installers_start_and_relay_the_host_lidar_without_an_opt_in():
     installer = (ROOT / "scripts" / "install-compute-services.sh").read_text(encoding="utf-8")
+    device = (ROOT / "scripts" / "install-device-services.sh").read_text(encoding="utf-8")
 
-    assert "--remote-lidar requires --remote DEVICE_ADDR" in installer
-    assert 'STACK_ARGS="$STACK_ARGS laser_source:=ld06 lidar_source:=remote"' in installer
+    assert "--remote-lidar" not in installer
+    assert "units=(lekiwi-host.service lekiwi-lidar.service)" in device
+    assert "as_root systemctl enable --now lekiwi-lidar.service" in device
+    assert "ldlidar_stl_ros2 is unavailable; the standard device installation requires the LD06 driver" in device
+
+
+def test_pi_and_manual_split_startup_include_the_ld06():
+    pi_installer = (ROOT / "scripts" / "install-pi.sh").read_text(encoding="utf-8")
+    pi_up = (ROOT / "scripts" / "pi-up.sh").read_text(encoding="utf-8")
+    workstation_up = (ROOT / "scripts" / "workstation-up.sh").read_text(encoding="utf-8")
+    lidar = (ROOT / "scripts" / "ros-lidar.sh").read_text(encoding="utf-8")
+
+    assert "Installing the pinned LD06 ROS driver" in pi_installer
+    assert "ldlidar_stl_ros2_node" in pi_installer
+    assert "setsid scripts/ros-lidar.sh" in pi_up
+    assert "laser_source:=ld06 lidar_source:=remote" in workstation_up
+    assert "waiting for LD06 serial port" in lidar
 
 
 def test_device_installer_finds_ros_packages_under_sudo_root_path():

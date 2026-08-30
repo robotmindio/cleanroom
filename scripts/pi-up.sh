@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Start everything that runs on this device machine: the motor-bus host and
-# the camera publishers.
+# Start everything that runs on this device machine: the motor-bus host,
+# camera publishers, and LD06 scan publisher.
 # Usage: scripts/pi-up.sh
 set -Eeuo pipefail
 
@@ -25,6 +25,10 @@ wait_for() { # wait_for <seconds> <command...>
 host_up() { ss -tln | grep -q ':5555' && ss -tln | grep -q ':5557'; }
 motion_host_up() { ss -tln | grep -q ':5555'; }
 cameras_up() { pgrep -f '[v]4l2_camera_node' >/dev/null; }
+lidar_up() {
+  systemctl is-active --quiet lekiwi-lidar.service 2>/dev/null ||
+    pgrep -f '[r]os-lidar.sh|[l]dlidar_stl_ros2_node' >/dev/null
+}
 
 # Motors and cameras are separate processes on purpose: one reader per USB
 # device, and a stalled camera frame must never abort the motor host.
@@ -55,6 +59,13 @@ else
     exit 1
   }
   echo "cameras: up"
+fi
+
+if lidar_up; then
+  echo "lidar: already running"
+else
+  setsid scripts/ros-lidar.sh >"$LOGS/lidar.log" 2>&1 &
+  echo "lidar: starting (waits for the LD06 serial port)"
 fi
 
 flock -u 9

@@ -5,9 +5,13 @@
 set -Eeuo pipefail
 
 LEROBOT_VERSION=0.6.1
+# LDROBOT LD06 driver revision and local Jazzy build patch. Keep this aligned
+# with scripts/install.sh so the device service has the same serial driver.
+LIDLIDAR_STL_REV=cac5d3d4c15522c6126ef65cfa8a65b08531a66b
 VENV=${LEKIWI_LEROBOT_VENV:-"$HOME/lerobot-venv"}
 EXAMPLES=${LEKIWI_LEROBOT_SRC:-"$HOME/lerobot-src"}
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+WORKSPACE=${LEKIWI_WS:-"$HOME/lekiwi_ws"}
 
 log() { printf '\n==> %s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
@@ -125,7 +129,7 @@ http://packages.ros.org/ros2/ubuntu $codename main" |
       "${SUDO[@]}" tee /etc/apt/sources.list.d/ros2.list >/dev/null
     "${SUDO[@]}" apt-get update
   fi
-  need_root "install the ROS camera packages"
+  need_root "install the ROS device packages"
   # image-transport-plugins provides the compressed transport: raw 640x480 at 30 Hz is
   # 27 MB/s, which the robot's wifi cannot carry. cyclonedds matches the workstation.
   "${SUDO[@]}" apt-get install -y \
@@ -133,9 +137,38 @@ http://packages.ros.org/ros2/ubuntu $codename main" |
     "ros-$pi_ros_distro-v4l2-camera" \
     "ros-$pi_ros_distro-image-transport-plugins" \
     "ros-$pi_ros_distro-rmw-cyclonedds-cpp" \
+    ros-dev-tools \
     python3-yaml \
     psmisc \
     v4l-utils
+
+  log "Installing the pinned LD06 ROS driver"
+  lidar_source="$WORKSPACE/src/ldlidar_stl_ros2"
+  lidar_patch="$PROJECT_ROOT/thirdparty/ldlidar_stl_ros2/0001-linux-build-fixes.patch"
+  mkdir -p "$WORKSPACE/src"
+  if [[ ! -d $lidar_source/.git ]]; then
+    git clone --filter=blob:none https://github.com/ldrobotSensorTeam/ldlidar_stl_ros2.git "$lidar_source"
+  elif [[ -n $(git -C "$lidar_source" status --porcelain) ]]; then
+    if git -C "$lidar_source" apply --reverse --check "$lidar_patch" 2>/dev/null; then
+      git -C "$lidar_source" apply --reverse "$lidar_patch"
+    else
+      die "$lidar_source has local changes; preserve them before rerunning"
+    fi
+  fi
+  git -C "$lidar_source" fetch --depth 1 origin "$LIDLIDAR_STL_REV"
+  git -C "$lidar_source" checkout --detach FETCH_HEAD
+  git -C "$lidar_source" apply --check "$lidar_patch" || \
+    die "could not apply the LD06 Linux build fixes"
+  git -C "$lidar_source" apply "$lidar_patch"
+  set +u
+  # shellcheck source=/dev/null
+  source /opt/ros/jazzy/setup.bash
+  set -u
+  colcon --log-base "$WORKSPACE/log" build \
+    --base-paths "$lidar_source" --packages-select ldlidar_stl_ros2 \
+    --build-base "$WORKSPACE/build" --install-base "$WORKSPACE/install"
+  [[ -x $WORKSPACE/install/ldlidar_stl_ros2/lib/ldlidar_stl_ros2/ldlidar_stl_ros2_node ]] || \
+    die "LD06 ROS driver build did not install its node"
 else
   printf 'not Ubuntu 24.04 -- skipping ROS; this Pi can run the LeRobot host but\n'
   printf 'not publish cameras to ROS. Reimage with Ubuntu Server 24.04 arm64 for that.\n'
@@ -162,7 +195,7 @@ One-time motor setup (see HARDWARE.md for the full procedure):
   lerobot-find-port
   lerobot-setup-motors --robot.type=lekiwi --robot.port=/dev/ttyACM0
 
-Then start the Pi host and camera publisher. On its first run it guides you through
+Then start the Pi host, camera publisher, and LD06 publisher. On its first run it guides you through
 motor calibration automatically:
   $PROJECT_ROOT/scripts/pi-up.sh
 

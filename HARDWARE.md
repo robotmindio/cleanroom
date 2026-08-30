@@ -277,9 +277,9 @@ Find that path with `ls /dev/v4l/by-id/`. Use it rather than `/dev/video0`, whic
 reassigned whenever USB re-enumerates.
 
 For the normal two-computer setup, use the device launcher instead. It starts
-the camera-less motor host and the ROS camera publisher — v4l2_camera reads
-the sensors here, and only compressed frames cross the network to the
-workstation:
+the camera-less motor host, ROS camera publisher, and LD06 publisher —
+v4l2_camera reads the cameras here, and only compressed frames cross the
+network to the workstation:
 
 ```bash
 scripts/pi-up.sh
@@ -300,14 +300,14 @@ sudo scripts/install-compute-services.sh \
   --service-user "$USER" --workspace "$HOME/lekiwi_ws"
 ```
 
-For a separate ROS workstation, use `--remote DEVICE_IP`; add `--remote-lidar`
-when the LD06 is attached to that device machine. A direct root invocation must include `--service-user USER`; when
+For a separate ROS workstation, use `--remote DEVICE_IP`. The standard device
+service owns the LD06 and the compute installer relays it automatically. A direct root invocation must include `--service-user USER`; when
 run through `sudo`, the invoking non-root account is selected. Both installers
 fail early if the selected workspace or LeRobot Python is missing. They render,
 verify, reload, and enable the units; inspect them with:
 
 ```bash
-systemctl status lekiwi-host.service lekiwi-cameras.service lekiwi-stack.service
+systemctl status lekiwi-host.service lekiwi-cameras.service lekiwi-lidar.service lekiwi-stack.service
 journalctl -u lekiwi-host.service -f
 ```
 
@@ -357,7 +357,7 @@ python ~/lerobot-src/examples/lekiwi/record.py
 Adapt `remote_ip`, `repo_id`, `port`, and `task` inside the script. Datasets land
 in `~/.cache/huggingface/lerobot/{repo-id}`.
 
-## 8. Mount the LD06 lidar (optional)
+## 8. Mount the LD06 lidar
 
 The LDROBOT LD06 replaces the camera-as-laser obstacle scan (`laser_source:=ld06`
 instead of the default `auto` selection). It mounts on the RobotSkin base at the
@@ -383,15 +383,13 @@ commissioning so a wrong USB adapter cannot silently select the camera fallback:
 scripts/up.sh laser_source:=ld06 lidar_port:=/dev/serial/by-id/usb-...-if00-port0
 ```
 
-If the USB cable is plugged into the robot's Pi, run
-`scripts/install-lidar-service.sh` there, then configure the compute service
-with `--remote DEVICE_IP --remote-lidar` (or launch with
-`laser_source:=ld06 lidar_source:=remote`). The device service publishes only
-`/pi/lidar/scan`; the compute stack relays it to the canonical `/scan`.
+The normal `scripts/install-device-services.sh` installation on the robot host
+starts `lekiwi-lidar.service`; the normal compute installation relays its
+private `/pi/lidar/scan` to the canonical `/scan`.
 
 ```bash
 sudo scripts/install-compute-services.sh --service-user "$USER" \
-  --workspace "$HOME/lekiwi_ws" --remote DEVICE_IP --remote-lidar
+  --workspace "$HOME/lekiwi_ws" --remote DEVICE_IP
 ```
 
 and check the scan against reality in RViz before trusting it: spin the robot by

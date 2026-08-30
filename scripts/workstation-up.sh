@@ -33,7 +33,8 @@ if pgrep -f 'ros2 launch lekiwi_rmf' >/dev/null; then
   exit 1
 fi
 
-setsid scripts/ros-start.sh remote_ip:="$PI_IP" camera_source:=remote "$@" \
+setsid scripts/ros-start.sh remote_ip:="$PI_IP" camera_source:=remote \
+  laser_source:=ld06 lidar_source:=remote "$@" \
   >"$LOGS/stack.log" 2>&1 &
 wait_for 120 grep -q 'Connected to LeKiwi host' "$LOGS/stack.log" || {
   echo "driver never reached the Pi host -- see $LOGS/stack.log" >&2
