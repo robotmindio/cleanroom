@@ -100,6 +100,8 @@ verify_systemd_units() {
   local unit
   command -v systemd-analyze >/dev/null || die "systemd-analyze is required to validate installed units"
   for unit in "$@"; do
-    as_root systemd-analyze verify "$UNIT_DIR/$unit"
+    # Dependencies outside this installer can be absent by design (the remote
+    # topology has no local host) or unrelated and broken. Validate this unit.
+    as_root systemd-analyze verify --recursive-errors=no "$UNIT_DIR/$unit"
   done
 }

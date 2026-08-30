@@ -95,6 +95,12 @@ def test_installer_never_uses_effective_root_as_implicit_service_user():
     assert "refusing to install robot services as root" in helper
 
 
+def test_unit_validation_ignores_unrelated_systemd_units():
+    helper = (ROOT / "scripts" / "service-install-common.sh").read_text(encoding="utf-8")
+
+    assert 'systemd-analyze verify --recursive-errors=no "$UNIT_DIR/$unit"' in helper
+
+
 def test_full_installer_includes_qualification_tooling_dependencies():
     """A fresh deployment must not silently omit required qualification checks."""
     installer = (ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
