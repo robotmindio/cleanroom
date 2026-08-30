@@ -4,8 +4,10 @@ set -Eeuo pipefail
 
 cd "$(dirname "$0")/.."
 if [ -f "${LEKIWI_WS:-$HOME/lekiwi_ws}/install/setup.bash" ]; then
+  set +u
   # shellcheck source=/dev/null
   source scripts/setup.bash
+  set -u
 else
   # shellcheck source=/dev/null
   source scripts/setup-pi.bash
