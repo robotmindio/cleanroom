@@ -32,3 +32,7 @@ def test_auto_detection_keeps_the_legacy_interface_name_compatible():
 
     assert lidar._lidar_serial_present()
     assert lidar._lidar_default_port() == legacy
+
+
+def test_remote_relay_has_a_laserscan_type_before_the_pi_publisher_appears():
+    assert 'arguments=["/pi/lidar/scan", "/scan", "sensor_msgs/msg/LaserScan"]' in _SOURCE

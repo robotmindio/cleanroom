@@ -620,7 +620,10 @@ def generate_launch_description():
                 package="topic_tools",
                 executable="relay",
                 name="remote_ld06_relay",
-                arguments=["/pi/lidar/scan", "/scan"],
+                # Keep the relay alive if this compute host boots before the
+                # Pi's lidar publisher. Without the known type, topic_tools
+                # exits while trying to infer it from a not-yet-advertised topic.
+                arguments=["/pi/lidar/scan", "/scan", "sensor_msgs/msg/LaserScan"],
                 condition=IfCondition(remote_ld06),
                 output="screen",
             ),
