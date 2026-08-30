@@ -2,6 +2,12 @@
 <!-- ROS description wrapper for the physical LeKiwi CAD model. -->
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="lekiwi">
   <xacro:arg name="sim" default="false"/>
+  <!-- Measured correction from the CAD LD06 centre to the real scan centre.
+       Keep these at zero until an RViz wall-alignment check says otherwise. -->
+  <xacro:arg name="lidar_offset_x" default="0"/>
+  <xacro:arg name="lidar_offset_y" default="0"/>
+  <xacro:arg name="lidar_offset_z" default="0"/>
+  <xacro:arg name="lidar_offset_yaw" default="0"/>
   <!-- The simulator now drives the same six bounded joints as the hardware.
        Keep the joint type identical in both descriptions so a plan validated
        in Gazebo has the same kinematic constraints on the physical robot. -->
@@ -117,12 +123,17 @@
   <xacro:collision_sphere_proxy name="gripper_servo_collision_proxy" parent="STS3215_03a-v1-4" xyz="-0.0203 -0.0160 0.0101" radius="0.0335"/>
 
   <!-- LD06 scan plane: the RobotSkin base puts it 90 mm forward, 70 mm right,
-       and 31.5 mm above base_link.  Keep this frame on the CAD body so its
-       pose cannot diverge from the rendered physical mount. -->
-  <link name="laser"/>
-  <joint name="laser_mount" type="fixed">
-    <parent link="ld06_body"/><child link="laser"/>
+       and 31.5 mm above base_link. The nominal frame stays on the CAD body;
+       the child is the small measured correction used by the scan. -->
+  <link name="laser_nominal"/>
+  <joint name="laser_nominal_mount" type="fixed">
+    <parent link="ld06_body"/><child link="laser_nominal"/>
     <origin xyz="0 0 0.0195" rpy="0 0 0"/>
+  </joint>
+  <link name="laser"/>
+  <joint name="laser_calibration" type="fixed">
+    <parent link="laser_nominal"/><child link="laser"/>
+    <origin xyz="$(arg lidar_offset_x) $(arg lidar_offset_y) $(arg lidar_offset_z)" rpy="0 0 $(arg lidar_offset_yaw)"/>
   </joint>
 
   <link name="lidar_collision_proxy">

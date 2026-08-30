@@ -48,6 +48,10 @@ ARGUMENT_NAMES = (
     "camera_source",
     "laser_source",
     "lidar_source",
+    "lidar_offset_x",
+    "lidar_offset_y",
+    "lidar_offset_z",
+    "lidar_offset_yaw",
     "xy_velocity_scale",
     "yaw_velocity_scale",
     "rtabmap_database",
@@ -74,6 +78,16 @@ def _positive_float(value: object, name: str) -> float:
         raise ValueError(f"{name} must be a positive number, got {value!r}") from error
     if not math.isfinite(numeric) or numeric <= 0:
         raise ValueError(f"{name} must be finite and positive, got {value!r}")
+    return numeric
+
+
+def _finite_float(value: object, name: str) -> float:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{name} must be a finite number, got {value!r}") from error
+    if not math.isfinite(numeric):
+        raise ValueError(f"{name} must be finite, got {value!r}")
     return numeric
 
 
@@ -172,6 +186,8 @@ def validate_launch_arguments(arguments: Mapping[str, object]) -> None:
     _nonnegative_int(arguments["rosbridge_domain"], "rosbridge_domain", maximum=232)
     _positive_float(arguments["xy_velocity_scale"], "xy_velocity_scale")
     _positive_float(arguments["yaw_velocity_scale"], "yaw_velocity_scale")
+    for name in ("lidar_offset_x", "lidar_offset_y", "lidar_offset_z", "lidar_offset_yaw"):
+        _finite_float(arguments[name], name)
     _positive_int(arguments["rtabmap_wm_nodes"], "rtabmap_wm_nodes")
     _positive_int(arguments["rtabmap_mapping_max_bytes"], "rtabmap_mapping_max_bytes")
     _positive_float(arguments["rtabmap_mapping_max_seconds"], "rtabmap_mapping_max_seconds")

@@ -397,6 +397,11 @@ sudo scripts/install-compute-services.sh --service-user "$USER" \
 and check the scan against reality in RViz before trusting it: spin the robot by
 hand and watch a nearby wall stay put in the LaserScan display.
 
+If it is offset, keep the CAD nominal pose intact and supply the measured scan
+correction as `lidar_offset_x`, `lidar_offset_y`, `lidar_offset_z`, and
+`lidar_offset_yaw` (metres, metres, metres, radians) to the launch or
+`LEKIWI_STACK_ARGS`.
+
 ## Troubleshooting
 
 ### `/dev/ttyACM0` does not appear

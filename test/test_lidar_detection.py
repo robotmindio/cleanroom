@@ -6,6 +6,7 @@ import types
 
 
 _SOURCE = (pathlib.Path(__file__).parents[1] / "launch" / "bringup.launch.py").read_text()
+_URDF_SOURCE = (pathlib.Path(__file__).parents[1] / "urdf" / "lekiwi.urdf.xacro").read_text()
 _TREE = ast.parse(_SOURCE)
 _NAMES = {"LD06_SERIAL_PORTS", "_lidar_serial_present", "_lidar_default_port"}
 _NODES = [
@@ -36,3 +37,8 @@ def test_auto_detection_keeps_the_legacy_interface_name_compatible():
 
 def test_remote_relay_has_a_laserscan_type_before_the_pi_publisher_appears():
     assert 'arguments=["/pi/lidar/scan", "/scan", "sensor_msgs/msg/LaserScan"]' in _SOURCE
+
+
+def test_laser_frame_has_a_measured_correction_after_the_nominal_cad_pose():
+    assert '<joint name="laser_calibration" type="fixed">' in _URDF_SOURCE
+    assert '$(arg lidar_offset_x) $(arg lidar_offset_y) $(arg lidar_offset_z)' in _URDF_SOURCE
