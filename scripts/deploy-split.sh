@@ -89,7 +89,7 @@ device_units=(lekiwi-host.service lekiwi-cameras.service lekiwi-lidar.service)
 log "Preflighting source revisions and deployment permissions"
 require_clean "$project_root" "local repository"
 branch=$(git symbolic-ref --quiet --short HEAD) || die "local repository must be on a branch"
-git fetch --quiet origin
+timeout 30 git fetch --quiet origin || die "cannot fetch origin within 30 seconds"
 upstream=$(git rev-parse --verify '@{upstream}') || die "$branch has no upstream"
 before=$(git rev-parse HEAD)
 git merge --ff-only "$upstream"
@@ -107,7 +107,8 @@ target=$(git rev-parse HEAD)
 remote_branch=$("${ssh_command[@]}" git -C "$remote_repo" symbolic-ref --quiet --short HEAD) || \
   die "remote repository must be on a branch"
 [[ $remote_branch == "$branch" ]] || die "branch mismatch: local $branch, device $remote_branch"
-"${ssh_command[@]}" git -C "$remote_repo" fetch --quiet origin
+"${ssh_command[@]}" timeout 30 git -C "$remote_repo" fetch --quiet origin || \
+  die "device cannot fetch origin within 30 seconds"
 "${ssh_command[@]}" git -C "$remote_repo" merge --ff-only "$target"
 [[ $("${ssh_command[@]}" git -C "$remote_repo" rev-parse HEAD) == "$target" ]] || \
   die "device did not reach revision $target"
