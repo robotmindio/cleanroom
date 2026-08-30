@@ -140,6 +140,14 @@ def test_device_installer_finds_ros_packages_under_sudo_root_path():
     assert 'source "$LEKIWI_SERVICE_WORKSPACE/install/setup.bash"' in installer
 
 
+def test_lidar_installer_does_not_restart_motion_or_camera_services():
+    installer = (ROOT / "scripts" / "install-lidar-service.sh").read_text(encoding="utf-8")
+
+    assert "lekiwi-lidar.service" in installer
+    assert "lekiwi-host.service" not in installer
+    assert "lekiwi-cameras.service" not in installer
+
+
 def test_deploy_order_fails_closed_around_the_device_restart():
     deploy = (ROOT / "scripts" / "deploy-split.sh").read_text(encoding="utf-8")
 

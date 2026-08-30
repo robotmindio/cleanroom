@@ -384,7 +384,7 @@ scripts/up.sh laser_source:=ld06 lidar_port:=/dev/serial/by-id/usb-...-if00-port
 ```
 
 If the USB cable is plugged into the robot's Pi, run
-`scripts/install-device-services.sh` there, then start the compute stack with
+`scripts/install-lidar-service.sh` there, then start the compute stack with
 `laser_source:=ld06 lidar_source:=remote`. The device service publishes only
 `/pi/lidar/scan`; the compute stack relays it to the canonical `/scan`.
 
