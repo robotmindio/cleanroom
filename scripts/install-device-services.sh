@@ -183,7 +183,7 @@ as_root systemctl enable --now lekiwi-lidar.service
 
 log "Granting $LEKIWI_SERVICE_USER non-interactive deployment control"
 as_root "$PROJECT_ROOT/scripts/install-deploy-sudoers.sh" device --user "$LEKIWI_SERVICE_USER"
-record_service_fingerprint
+record_service_fingerprint device
 
 if [[ -f $UNIT_DIR/lekiwi-stack.service ]]; then
   log "A ROS stack service is also installed here -- re-run"

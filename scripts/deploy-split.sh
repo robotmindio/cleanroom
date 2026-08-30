@@ -136,12 +136,13 @@ for action in start stop reset-failed; do
   done
 done
 
-expected_service_fingerprint=$(service_fingerprint) || die "cannot calculate service configuration fingerprint"
-service_marker=$logs/service-fingerprint
-remote_service_marker=$remote_home/.ros/lekiwi/service-fingerprint
+expected_service_fingerprint=$(service_fingerprint compute) || die "cannot calculate service configuration fingerprint"
+service_marker=$logs/service-fingerprint-compute
+remote_service_marker=$remote_home/.ros/lekiwi/service-fingerprint-device
 [[ $(cat "$service_marker" 2>/dev/null || true) == "$expected_service_fingerprint" ]] || \
   die "compute service configuration is stale; rerun scripts/install-compute-services.sh"
-[[ $("${ssh_command[@]}" "cat '$remote_service_marker' 2>/dev/null || true") == "$expected_service_fingerprint" ]] || \
+expected_device_service_fingerprint=$(service_fingerprint device) || die "cannot calculate device service configuration fingerprint"
+[[ $("${ssh_command[@]}" "cat '$remote_service_marker' 2>/dev/null || true") == "$expected_device_service_fingerprint" ]] || \
   die "device service configuration is stale; rerun scripts/install-device-services.sh on $device"
 
 marker=$logs/deployed-revision

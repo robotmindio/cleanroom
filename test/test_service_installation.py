@@ -139,6 +139,17 @@ def test_service_installers_support_an_unauthenticated_split_zmq_transport():
     assert 'STACK_ARGS="camera_source:=remote remote_ip:=$REMOTE laser_source:=ld06 lidar_source:=remote"' in compute
 
 
+def test_remote_stack_has_no_local_host_dependency():
+    stack = (ROOT / "systemd" / "lekiwi-stack.service").read_text(encoding="utf-8")
+    compute = (ROOT / "scripts" / "install-compute-services.sh").read_text(encoding="utf-8")
+
+    assert "Requires=lekiwi-host.service" not in stack
+    assert "PartOf=lekiwi-host.service" not in stack
+    assert "After=network-online.target" in stack
+    assert '"Requires=lekiwi-host.service"' in compute
+    assert '"PartOf=lekiwi-host.service"' in compute
+
+
 def test_standard_installers_start_and_relay_the_host_lidar_without_an_opt_in():
     installer = (ROOT / "scripts" / "install-compute-services.sh").read_text(encoding="utf-8")
     device = (ROOT / "scripts" / "install-device-services.sh").read_text(encoding="utf-8")
@@ -149,7 +160,8 @@ def test_standard_installers_start_and_relay_the_host_lidar_without_an_opt_in():
     assert "ldlidar_stl_ros2 is unavailable; the standard device installation requires the LD06 driver" in device
     assert 'install-deploy-sudoers.sh" device --user "$LEKIWI_SERVICE_USER"' in device
     assert 'install-deploy-sudoers.sh" compute --user "$LEKIWI_SERVICE_USER"' in installer
-    assert "record_service_fingerprint" in device and "record_service_fingerprint" in installer
+    assert "record_service_fingerprint device" in device
+    assert "record_service_fingerprint compute" in installer
 
 
 def test_pi_and_manual_split_startup_include_the_ld06():
@@ -234,7 +246,8 @@ def test_service_fingerprint_covers_installed_service_behavior():
     revision = (ROOT / "scripts" / "service-install-revision.sh").read_text(encoding="utf-8")
 
     for source in (
-        "systemd/*.service",
+        "systemd/lekiwi-stack.service",
+        "systemd/lekiwi-lidar.service",
         "scripts/ros-lidar.sh",
         "scripts/service-install-common.sh",
         "scripts/install-deploy-sudoers.sh",

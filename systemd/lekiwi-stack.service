@@ -15,10 +15,10 @@
 #     points the stack at it over loopback: v4l2 allows one reader per
 #     camera, and the service already holds the devices.
 #
-#   devices elsewhere (--remote <addr>): the drop-in instead clears
-#     Requires/PartOf/After -- there is no local host to depend on -- and
-#     LEKIWI_STACK_ARGS carries camera_source:=remote remote_ip:=<addr>. The
-#     driver then republishes the host's front JPEG as if it were local.
+#   devices elsewhere (--remote <addr>): there is no topology drop-in, so the
+#     stack has no local host dependency. LEKIWI_STACK_ARGS carries
+#     camera_source:=remote remote_ip:=<addr>, and the driver republishes the
+#     host's front JPEG as if it were local.
 #
 # Either way the stack may come up before the other half of the robot does.
 # Bound restart attempts so a missing device cannot fill journald forever; a
@@ -26,9 +26,7 @@
 [Unit]
 Description=LeKiwi ROS 2 stack (bringup.launch.py)
 Documentation=file://@PROJECT_ROOT@/README.md
-Requires=lekiwi-host.service
-PartOf=lekiwi-host.service
-After=network-online.target lekiwi-host.service
+After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=600
 StartLimitBurst=8
