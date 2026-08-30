@@ -77,6 +77,10 @@ remote_unit_exists() {
 remote_unit_active() {
   "${ssh_command[@]}" /usr/bin/systemctl is-active --quiet "$1"
 }
+has_nopasswd_systemctl() { # has_nopasswd_systemctl <sudo -l output> <action> <unit>
+  local rules=$1 action=$2 unit=$3
+  [[ $rules == *"NOPASSWD:"*"/usr/bin/systemctl $action $unit"* ]]
+}
 device_units=(lekiwi-host.service lekiwi-cameras.service lekiwi-lidar.service)
 
 log "Preflighting source revisions and deployment permissions"
@@ -117,12 +121,15 @@ done
 grep -Fq 'laser_source:=ld06 lidar_source:=remote' /etc/default/lekiwi-stack || \
   die "lekiwi-stack.service is not configured for the device LD06; rerun scripts/install-compute-services.sh --remote $device"
 
+compute_sudoers=$(sudo -n -l) || die "compute sudoers grant is missing; rerun scripts/install-compute-services.sh"
+device_sudoers=$("${ssh_command[@]}" sudo -n -l) || \
+  die "device sudoers grant is missing; rerun scripts/install-device-services.sh on $device"
 for action in start stop reset-failed; do
-  sudo -n -l /usr/bin/systemctl "$action" lekiwi-stack.service >/dev/null 2>&1 || \
-    die "compute sudoers grant is missing; run scripts/install-deploy-sudoers.sh compute"
+  has_nopasswd_systemctl "$compute_sudoers" "$action" lekiwi-stack.service || \
+    die "compute sudoers grant is missing; rerun scripts/install-compute-services.sh"
   for unit in "${device_units[@]}"; do
-    "${ssh_command[@]}" sudo -n -l /usr/bin/systemctl "$action" "$unit" >/dev/null 2>&1 || \
-      die "device sudoers grant is missing; run scripts/install-deploy-sudoers.sh device on $device"
+    has_nopasswd_systemctl "$device_sudoers" "$action" "$unit" || \
+      die "device sudoers grant is missing; rerun scripts/install-device-services.sh on $device"
   done
 done
 

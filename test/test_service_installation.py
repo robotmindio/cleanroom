@@ -185,6 +185,8 @@ def test_deploy_order_fails_closed_around_the_device_restart():
     assert "lekiwi-lidar.service" in deploy
     assert ".lekiwi-source-revision" in deploy
     assert "canonical /scan is not the LD06 frame" in deploy
+    assert "has_nopasswd_systemctl" in deploy
+    assert 'compute_sudoers=$(sudo -n -l)' in deploy
     assert "git merge --ff-only" in deploy
     assert "deploy-inhibit-auto-arm" in deploy
     assert "reset --hard" not in deploy
