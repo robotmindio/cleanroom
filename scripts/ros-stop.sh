@@ -72,6 +72,10 @@ if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet lekiwi-ca
   echo "lekiwi-cameras.service is active -- left running; stop it with: sudo systemctl stop lekiwi-cameras.service"
 fi
 
+if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet lekiwi-lidar.service; then
+  echo "lekiwi-lidar.service is active -- left running; stop it with: sudo systemctl stop lekiwi-lidar.service"
+fi
+
 if (( stopped )); then
   echo "Recorded LeKiwi processes stopped."
 else

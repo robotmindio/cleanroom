@@ -77,6 +77,7 @@ remote_unit_exists() {
 remote_unit_active() {
   "${ssh_command[@]}" /usr/bin/systemctl is-active --quiet "$1"
 }
+device_units=(lekiwi-host.service lekiwi-cameras.service lekiwi-lidar.service)
 
 log "Preflighting source revisions and deployment permissions"
 require_clean "$project_root" "local repository"
@@ -109,13 +110,17 @@ remote_branch=$("${ssh_command[@]}" git -C "$remote_repo" symbolic-ref --quiet -
   die "device workspace is not installed: $remote_workspace"
 /usr/bin/systemctl cat lekiwi-stack.service >/dev/null 2>&1 || die "lekiwi-stack.service is not installed"
 remote_unit_exists lekiwi-host.service || die "lekiwi-host.service is not installed"
-remote_unit_exists lekiwi-cameras.service || \
-  die "lekiwi-cameras.service is not installed; rerun scripts/install-device-services.sh on $device"
+for unit in lekiwi-cameras.service lekiwi-lidar.service; do
+  remote_unit_exists "$unit" || \
+    die "$unit is not installed; rerun scripts/install-device-services.sh on $device"
+done
+grep -Fq 'laser_source:=ld06 lidar_source:=remote' /etc/default/lekiwi-stack || \
+  die "lekiwi-stack.service is not configured for the device LD06; rerun scripts/install-compute-services.sh --remote $device"
 
 for action in start stop reset-failed; do
   sudo -n -l /usr/bin/systemctl "$action" lekiwi-stack.service >/dev/null 2>&1 || \
     die "compute sudoers grant is missing; run scripts/install-deploy-sudoers.sh compute"
-  for unit in lekiwi-host.service lekiwi-cameras.service; do
+  for unit in "${device_units[@]}"; do
     "${ssh_command[@]}" sudo -n -l /usr/bin/systemctl "$action" "$unit" >/dev/null 2>&1 || \
       die "device sudoers grant is missing; run scripts/install-deploy-sudoers.sh device on $device"
   done
@@ -127,10 +132,27 @@ for previous in "$(cat "$marker" 2>/dev/null || true)" \
   "$("${ssh_command[@]}" "cat '$remote_marker' 2>/dev/null || true")"; do
   if [[ -n $previous ]] && git cat-file -e "$previous^{commit}" 2>/dev/null && \
     ! git diff --quiet "$previous" "$target" -- systemd scripts/install-device-services.sh \
-      scripts/install-compute-services.sh scripts/service-install-common.sh; then
+      scripts/install-compute-services.sh scripts/service-install-common.sh \
+      scripts/install-deploy-sudoers.sh scripts/ros-lidar.sh systemd/lekiwi-lidar.service; then
     die "service definitions changed since $previous; rerun both service installers before deploying"
   fi
 done
+
+workspace_revision() { cat "$1/install/lekiwi_rmf/.lekiwi-source-revision" 2>/dev/null || true; }
+remote_workspace_revision() {
+  "${ssh_command[@]}" "cat '$remote_workspace/install/lekiwi_rmf/.lekiwi-source-revision' 2>/dev/null || true"
+}
+if [[ $(cat "$marker" 2>/dev/null || true) == "$target" && \
+      $("${ssh_command[@]}" "cat '$remote_marker' 2>/dev/null || true") == "$target" && \
+      $(workspace_revision "$workspace") == "$target" && \
+      $(remote_workspace_revision) == "$target" ]] && \
+    /usr/bin/systemctl is-active --quiet lekiwi-stack.service && \
+    remote_unit_active lekiwi-host.service && \
+    remote_unit_active lekiwi-cameras.service && \
+    remote_unit_active lekiwi-lidar.service; then
+  echo "already deployed ${target:0:12}; services and both workspaces are current"
+  exit 0
+fi
 
 /usr/bin/systemctl is-active --quiet lekiwi-stack.service || die "lekiwi-stack.service must be running before deployment"
 remote_unit_active lekiwi-host.service || die "lekiwi-host.service must be running before deployment"
@@ -157,6 +179,9 @@ log "Stopping device services"
 if remote_unit_active lekiwi-cameras.service; then
   "${ssh_command[@]}" sudo -n /usr/bin/systemctl stop lekiwi-cameras.service
 fi
+if remote_unit_active lekiwi-lidar.service; then
+  "${ssh_command[@]}" sudo -n /usr/bin/systemctl stop lekiwi-lidar.service
+fi
 "${ssh_command[@]}" sudo -n /usr/bin/systemctl stop lekiwi-host.service
 
 log "Building revision ${target:0:12} on the device"
@@ -172,6 +197,9 @@ remote_unit_active lekiwi-host.service || die "lekiwi-host.service did not becom
 "${ssh_command[@]}" sudo -n /usr/bin/systemctl reset-failed lekiwi-cameras.service
 "${ssh_command[@]}" sudo -n /usr/bin/systemctl start lekiwi-cameras.service
 remote_unit_active lekiwi-cameras.service || die "lekiwi-cameras.service did not become active"
+"${ssh_command[@]}" sudo -n /usr/bin/systemctl reset-failed lekiwi-lidar.service
+"${ssh_command[@]}" sudo -n /usr/bin/systemctl start lekiwi-lidar.service
+remote_unit_active lekiwi-lidar.service || die "lekiwi-lidar.service did not become active"
 
 log "Starting the compute stack with auto-arm inhibited"
 sudo -n /usr/bin/systemctl reset-failed lekiwi-stack.service
@@ -187,6 +215,9 @@ wait_for 30 sh -c "ros2 topic info /hardware/diagnostics | grep -Eq 'Publisher c
   die "updated driver is not publishing motor health"
 timeout 30 ros2 topic echo --once /pi/camera/front/image_raw/compressed >/dev/null || \
   die "device camera service is active but no front image reached compute"
+lidar_frame=$(timeout 30 ros2 topic echo --once --field header.frame_id /scan | tr -d "'[:space:]") || \
+  die "device LD06 scan did not reach compute"
+[[ $lidar_frame == laser ]] || die "canonical /scan is not the LD06 frame: $lidar_frame"
 
 log "Recording the verified deployment revision"
 printf '%s\n' "$target" > "$marker"

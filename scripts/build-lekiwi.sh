@@ -41,3 +41,7 @@ if [[ ! -x $installed_driver ]] || ! cmp -s lekiwi_rmf/driver.py "$installed_dri
   echo "$0: build completed without installing the current driver" >&2
   exit 1
 fi
+
+# The split deployer can skip an otherwise disruptive rebuild when both
+# workspaces already contain this exact source revision.
+git -C "$project_root" rev-parse HEAD > "$workspace/install/lekiwi_rmf/.lekiwi-source-revision"

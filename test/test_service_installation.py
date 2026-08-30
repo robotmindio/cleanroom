@@ -141,6 +141,8 @@ def test_standard_installers_start_and_relay_the_host_lidar_without_an_opt_in():
     assert "units=(lekiwi-host.service lekiwi-lidar.service)" in device
     assert "as_root systemctl enable --now lekiwi-lidar.service" in device
     assert "ldlidar_stl_ros2 is unavailable; the standard device installation requires the LD06 driver" in device
+    assert 'install-deploy-sudoers.sh" device --user "$LEKIWI_SERVICE_USER"' in device
+    assert 'install-deploy-sudoers.sh" compute --user "$LEKIWI_SERVICE_USER"' in installer
 
 
 def test_pi_and_manual_split_startup_include_the_ld06():
@@ -180,6 +182,9 @@ def test_deploy_order_fails_closed_around_the_device_restart():
     start_host = deploy.index("start lekiwi-host.service", stop_host)
     start_stack = deploy.index("start lekiwi-stack.service", start_host)
     assert disarm < stop_stack < stop_host < start_host < start_stack
+    assert "lekiwi-lidar.service" in deploy
+    assert ".lekiwi-source-revision" in deploy
+    assert "canonical /scan is not the LD06 frame" in deploy
     assert "git merge --ff-only" in deploy
     assert "deploy-inhibit-auto-arm" in deploy
     assert "reset --hard" not in deploy
@@ -212,3 +217,4 @@ def test_managed_build_prefers_system_cmake_and_starts_clean():
     assert "PATH=/usr/bin:/bin:$PATH" in builder
     assert '-DCMAKE_IGNORE_PREFIX_PATH="$HOME/.local"' in builder
     assert 'rm -rf -- "$workspace/build/lekiwi_rmf"' in builder
+    assert '.lekiwi-source-revision' in builder

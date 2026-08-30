@@ -516,7 +516,7 @@ to boot; stop services with `systemctl`, not `scripts/ros-stop.sh`, which the
 restart policy would simply undo. RViz is deliberately not a service — it
 needs a desktop session — so run `scripts/rviz.sh` when you sit down at it.
 
-All three units run as the selected non-root service account with no new
+All four units run as the selected non-root service account with no new
 privileges, a private temporary directory, a read-only system tree, kernel and
 control-group protection, and restrictive file creation permissions. Their
 HOME remains writable for repository-managed ROS databases, logs, calibration,
@@ -525,30 +525,26 @@ device paths are required by the host/camera services.
 
 ### Coordinated split deployment
 
-Install the deployment-only sudo rules once on each machine. They permit the
-selected account to start, stop, restart, and reset only its LeKiwi units; they
-do not grant arbitrary `systemctl`, installer, shell, or root access:
-
-```bash
-# Compute machine
-scripts/install-deploy-sudoers.sh compute
-
-# Device machine
-scripts/install-deploy-sudoers.sh device
-```
-
-Run the device and compute service installers once after changing a unit
-template or topology. Ordinary code/configuration deployments then run from
-the compute checkout with one command:
+The normal device and compute service installers seed a least-privilege
+deployment sudo rule for their selected account. It permits only LeKiwi unit
+start, stop, restart, and reset; it does not grant an arbitrary shell or root
+commands. Run the service installers once after changing a unit template or
+topology. Ordinary code/configuration deployments then run from the compute
+checkout with one command and never prompt for a password:
 
 ```bash
 scripts/deploy-split.sh DEVICE_IP
 ```
 
-The deployer fast-forwards both clean checkouts to the same pushed commit,
-confirms torque-off, stops the compute stack before the device host, rebuilds
-both service workspaces, and starts the host and cameras before the compute
-stack. A temporary auto-arm inhibit keeps the replacement driver disarmed
+The initial service installation still needs an administrator authentication:
+creating a passwordless privilege rule without one would be a privilege-escalation path.
+
+The deployer first exits quickly when the requested revision, both built
+workspaces, and all services are already current. Otherwise it fast-forwards
+both clean checkouts to the same pushed commit, confirms torque-off, stops the
+compute stack before the device host, rebuilds both service workspaces, and
+starts the host, cameras, and LD06 before the compute stack. A temporary
+auto-arm inhibit keeps the replacement driver disarmed
 until revision, motor-health, and camera checks pass. Any failure leaves the
 inhibit at `~/.ros/lekiwi/deploy-inhibit-auto-arm` and does not roll back or
 resume a partially deployed robot. Inspect the failure and rerun the deploy;

@@ -153,6 +153,9 @@ log "Reloading systemd and enabling lekiwi-stack.service"
 as_root systemctl daemon-reload
 as_root systemctl enable --now lekiwi-stack.service
 
+log "Granting $LEKIWI_SERVICE_USER non-interactive deployment control"
+as_root "$PROJECT_ROOT/scripts/install-deploy-sudoers.sh" compute --user "$LEKIWI_SERVICE_USER"
+
 cat <<EOF
 Done. Check on it with:
   systemctl status lekiwi-stack.service

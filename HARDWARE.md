@@ -304,7 +304,9 @@ For a separate ROS workstation, use `--remote DEVICE_IP`. The standard device
 service owns the LD06 and the compute installer relays it automatically. A direct root invocation must include `--service-user USER`; when
 run through `sudo`, the invoking non-root account is selected. Both installers
 fail early if the selected workspace or LeRobot Python is missing. They render,
-verify, reload, and enable the units; inspect them with:
+verify, reload, and enable the units. They also install the narrow deployment
+sudo rule, so later `scripts/deploy-split.sh DEVICE_IP` runs without a password
+prompt on either host; inspect the units with:
 
 ```bash
 systemctl status lekiwi-host.service lekiwi-cameras.service lekiwi-lidar.service lekiwi-stack.service

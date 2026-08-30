@@ -179,6 +179,9 @@ else
 fi
 as_root systemctl enable --now lekiwi-lidar.service
 
+log "Granting $LEKIWI_SERVICE_USER non-interactive deployment control"
+as_root "$PROJECT_ROOT/scripts/install-deploy-sudoers.sh" device --user "$LEKIWI_SERVICE_USER"
+
 if [[ -f $UNIT_DIR/lekiwi-stack.service ]]; then
   log "A ROS stack service is also installed here -- re-run"
   log "scripts/install-compute-services.sh so it takes this machine's"
@@ -188,7 +191,7 @@ fi
 
 cat <<EOF
 Done. Check on them with:
-  systemctl status lekiwi-host.service lekiwi-cameras.service
+  systemctl status lekiwi-host.service lekiwi-cameras.service lekiwi-lidar.service
   journalctl -u lekiwi-host.service -f
 
 The host binds :5555 (motion) and :5557 (physical torque safety) once every
