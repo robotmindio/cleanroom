@@ -51,7 +51,10 @@
   <disable_collisions link1="wrist_camera_link" link2="wrist_camera_optical_frame" reason="Adjacent"/>
   <disable_collisions link1="Wrist_Roll_08c-v1" link2="tool0" reason="Adjacent"/>
   <disable_collisions link1="base_link" link2="base_plate_layer1-v5" reason="Adjacent"/>
-  <disable_collisions link1="base_link" link2="laser" reason="Adjacent"/>
+  <disable_collisions link1="base_plate_layer1-v5" link2="robotskin_lidar_mount" reason="Adjacent"/>
+  <disable_collisions link1="robotskin_lidar_mount" link2="ld06_body" reason="Adjacent"/>
+  <disable_collisions link1="ld06_body" link2="lidar_collision_proxy" reason="Adjacent"/>
+  <disable_collisions link1="ld06_body" link2="laser" reason="Adjacent"/>
   <!-- Mesh-enclosing proxies are only disabled against bolted neighbours.
        Every non-adjacent pair remains collision-checked by MoveIt. -->
   <disable_collisions link1="base_link" link2="arm_pedestal_collision_proxy" reason="Adjacent"/>

@@ -585,6 +585,22 @@
             </geometry>
         </visual>
     </link>
+    <link name="robotskin_lidar_mount">
+        <visual name="robotskin_lidar_mount_visual">
+            <origin xyz="0 0 0" rpy="0 0 0" />
+            <geometry>
+                <mesh filename="package://lekiwi_rmf/urdf/meshes/robotskin_lidar_mount.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </visual>
+    </link>
+    <link name="ld06_body">
+        <visual name="ld06_body_visual">
+            <origin xyz="0 0 0" rpy="0 0 0" />
+            <geometry>
+                <mesh filename="package://lekiwi_rmf/urdf/meshes/ld06_body.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </visual>
+    </link>
     <joint name="base_plate_layer1-v5_baseplate2bottom_mount" type="fixed">
         <origin xyz="-0.02 -0.1 0.0" rpy="3.141592653589793 -0.0 0.0" />
         <parent link="base_plate_layer1-v5" />
@@ -819,5 +835,15 @@
         <origin xyz="0.0015500000000000004 0.00712333000000001 0.06397354" rpy="1.5707963267948966 -0.0 2.181661564992912" />
         <parent link="Wrist-Camera-Mount-v11" />
         <child link="Camera-Model-v3-1" />
+    </joint>
+    <joint name="robotskin_lidar_mount" type="fixed">
+        <origin xyz="0.05 0.095 0" rpy="0 0 0" />
+        <parent link="base_plate_layer1-v5" />
+        <child link="robotskin_lidar_mount" />
+    </joint>
+    <joint name="ld06_body" type="fixed">
+        <origin xyz="0.02 -0.005 0.012" rpy="0 0 0" />
+        <parent link="robotskin_lidar_mount" />
+        <child link="ld06_body" />
     </joint>
 </robot>

@@ -116,11 +116,21 @@
   <xacro:collision_sphere_proxy name="wrist_roll_servo_collision_proxy" parent="STS3215_03a_Wrist_Roll-v1" xyz="-0.0165 0.0160 -0.0101" radius="0.0335"/>
   <xacro:collision_sphere_proxy name="gripper_servo_collision_proxy" parent="STS3215_03a-v1-4" xyz="-0.0203 -0.0160 0.0101" radius="0.0335"/>
 
-  <!-- LD06 is an optional add-on, not part of the upstream CAD. -->
+  <!-- LD06 scan plane: the RobotSkin base puts it 90 mm forward, 70 mm right,
+       and 31.5 mm above base_link.  Keep this frame on the CAD body so its
+       pose cannot diverge from the rendered physical mount. -->
   <link name="laser"/>
   <joint name="laser_mount" type="fixed">
-    <parent link="base_link"/><child link="laser"/>
-    <origin xyz="0 0 0.220" rpy="0 0 0"/>
+    <parent link="ld06_body"/><child link="laser"/>
+    <origin xyz="0 0 0.0195" rpy="0 0 0"/>
+  </joint>
+
+  <link name="lidar_collision_proxy">
+    <collision><origin xyz="0 0 0.0195" rpy="0 0 0"/><geometry><cylinder radius="0.0245" length="0.039"/></geometry></collision>
+  </link>
+  <joint name="lidar_collision_proxy_mount" type="fixed">
+    <parent link="ld06_body"/><child link="lidar_collision_proxy"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
 
   <!-- Gazebo-only contact and actuator model.  The CAD wheel meshes and their

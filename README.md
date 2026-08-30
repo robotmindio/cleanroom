@@ -625,8 +625,8 @@ hard shadows and reflections come back as obstacles, an object the colour of the
 back as nothing, and it measures where things touch the floor, so a table is as far away as
 its legs. Wrong height or pitch puts phantom walls in the costmap.
 
-`laser_source:=ld06` replaces all of that guesswork with a real LDROBOT LD06 on the mast --
-see HARDWARE.md for the mount, port and permissions. Give the bringup the serial device,
+`laser_source:=ld06` replaces all of that guesswork with a real LDROBOT LD06 on its
+RobotSkin base -- see HARDWARE.md for the mount, port and permissions. Give the bringup the serial device,
 preferably by its stable `/dev/serial/by-id` name:
 
 ```bash
@@ -753,7 +753,7 @@ Then dispatch Nav2 goals or RMF tasks with the same commands used in simulation.
 ## Frames and interfaces
 
 ```text
-map -> odom -> base_footprint -> mast -> front_camera_link -> front_camera_optical_frame
+map -> odom -> base_footprint -> base_link -> ld06_body -> laser
 ```
 
 | Interface | Producer | Consumer |

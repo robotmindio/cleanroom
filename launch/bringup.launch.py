@@ -122,7 +122,7 @@ def generate_launch_description():
     rtabmap_map_topic = PythonExpression([
         "'/rtabmap/map' if '", static_map, "' == 'true' else '/map'"])
     lidar_detected = _lidar_serial_present()
-    # Whoever owns /scan, owns what Nav2 dodges: a real LD06 on the mast, the
+    # Whoever owns /scan, owns what Nav2 dodges: a real LD06 on its RobotSkin base, the
     # front camera's floor-geometry trick, or nobody at all. In sim Gazebo
     # always publishes /scan itself and none of this runs.
     laser_source = LaunchConfiguration("laser_source")
@@ -370,7 +370,7 @@ def generate_launch_description():
             # nothing serves it and RTAB-Map draws the map itself from what the robot sees.
             DeclareLaunchArgument("static_map", default_value="false"),
             # What publishes /scan on the real robot: the camera-derived obstacle scan
-            # (default, needs no extra hardware), an LDROBOT LD06 on the mast, or none.
+            # (default, needs no extra hardware), an LDROBOT LD06 on its RobotSkin base, or none.
             # In sim this is ignored -- Gazebo publishes /scan from its own lidar model.
             DeclareLaunchArgument(
                 "laser_source", default_value="auto", choices=["auto", "camera", "ld06", "none"]
@@ -591,8 +591,8 @@ def generate_launch_description():
                 remappings=[("image", "/camera/front/image_raw"), ("camera_info", camera_info_topic), ("scan", "/scan")],
                 condition=IfCondition(camera_laser), output="screen",
             ),
-            # laser_source:=ld06: a real LDROBOT LD06 on the mast. frame_id is the
-            # URDF's `laser` link (8 cm up the mast), so robot_state_publisher already
+            # laser_source:=ld06: a real LDROBOT LD06 on the RobotSkin base. frame_id is the
+            # URDF's `laser` link, so robot_state_publisher already
             # provides its pose -- the stock upstream launch adds a static TF that
             # would fight it. The LD06's 12 m range dwarfs the camera trick; keep
             # both off Nav2 at once by never enabling them together.

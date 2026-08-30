@@ -360,10 +360,10 @@ in `~/.cache/huggingface/lerobot/{repo-id}`.
 ## 8. Mount the LD06 lidar (optional)
 
 The LDROBOT LD06 replaces the camera-as-laser obstacle scan (`laser_source:=ld06`
-instead of the default `auto` selection). It mounts partway up the mast: the URDF puts
-its `laser` frame 8 cm above the mast's origin -- about 30 cm off the base
-plate, level and facing forward -- so any bracket holding it there needs no TF
-work, only screws.
+instead of the default `auto` selection). It mounts on the RobotSkin base at the
+front-right of the lower plate. Its scan centre is 9 cm forward, 7 cm right, and
+3.15 cm above `base_link`; the tracked CAD model supplies that TF. Keep the unit
+level and facing forward, then verify the scan in RViz after any bracket change.
 
 It is a USB serial device (typically a CP2102 bridge), so it appears as
 `/dev/ttyUSB0`, owned `root:dialout` -- the same group the motor bus needs, and
