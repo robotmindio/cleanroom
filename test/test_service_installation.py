@@ -149,6 +149,7 @@ def test_standard_installers_start_and_relay_the_host_lidar_without_an_opt_in():
     assert "ldlidar_stl_ros2 is unavailable; the standard device installation requires the LD06 driver" in device
     assert 'install-deploy-sudoers.sh" device --user "$LEKIWI_SERVICE_USER"' in device
     assert 'install-deploy-sudoers.sh" compute --user "$LEKIWI_SERVICE_USER"' in installer
+    assert "record_service_fingerprint" in device and "record_service_fingerprint" in installer
 
 
 def test_pi_and_manual_split_startup_include_the_ld06():
@@ -190,6 +191,7 @@ def test_deploy_order_fails_closed_around_the_device_restart():
     assert disarm < stop_stack < stop_host < start_host < start_stack
     assert "lekiwi-lidar.service" in deploy
     assert ".lekiwi-source-revision" in deploy
+    assert "expected_service_fingerprint" in deploy
     assert "canonical /scan is not the LD06 frame" in deploy
     assert "has_nopasswd_systemctl" in deploy
     assert 'compute_sudoers=$(sudo -n -l)' in deploy
@@ -226,3 +228,15 @@ def test_managed_build_prefers_system_cmake_and_starts_clean():
     assert '-DCMAKE_IGNORE_PREFIX_PATH="$HOME/.local"' in builder
     assert 'rm -rf -- "$workspace/build/lekiwi_rmf"' in builder
     assert '.lekiwi-source-revision' in builder
+
+
+def test_service_fingerprint_covers_installed_service_behavior():
+    revision = (ROOT / "scripts" / "service-install-revision.sh").read_text(encoding="utf-8")
+
+    for source in (
+        "systemd/*.service",
+        "scripts/ros-lidar.sh",
+        "scripts/service-install-common.sh",
+        "scripts/install-deploy-sudoers.sh",
+    ):
+        assert source in revision

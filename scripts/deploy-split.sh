@@ -30,6 +30,9 @@ done
 
 cd "$(dirname "$0")/.."
 project_root=$PWD
+PROJECT_ROOT=$project_root
+# shellcheck disable=SC1091 # PROJECT_ROOT is resolved above, not a fixed source path.
+source "$PROJECT_ROOT/scripts/service-install-revision.sh"
 logs=${LEKIWI_LOGS:-$HOME/.ros/lekiwi}
 mkdir -p "$logs"
 if [[ ${LEKIWI_DEPLOY_LOCKED:-} != 1 ]]; then
@@ -133,18 +136,16 @@ for action in start stop reset-failed; do
   done
 done
 
+expected_service_fingerprint=$(service_fingerprint) || die "cannot calculate service configuration fingerprint"
+service_marker=$logs/service-fingerprint
+remote_service_marker=$remote_home/.ros/lekiwi/service-fingerprint
+[[ $(cat "$service_marker" 2>/dev/null || true) == "$expected_service_fingerprint" ]] || \
+  die "compute service configuration is stale; rerun scripts/install-compute-services.sh"
+[[ $("${ssh_command[@]}" "cat '$remote_service_marker' 2>/dev/null || true") == "$expected_service_fingerprint" ]] || \
+  die "device service configuration is stale; rerun scripts/install-device-services.sh on $device"
+
 marker=$logs/deployed-revision
 remote_marker=$remote_home/.ros/lekiwi/deployed-revision
-for previous in "$(cat "$marker" 2>/dev/null || true)" \
-  "$("${ssh_command[@]}" "cat '$remote_marker' 2>/dev/null || true")"; do
-  if [[ -n $previous ]] && git cat-file -e "$previous^{commit}" 2>/dev/null && \
-    ! git diff --quiet "$previous" "$target" -- systemd scripts/install-device-services.sh \
-      scripts/install-compute-services.sh scripts/service-install-common.sh \
-      scripts/install-deploy-sudoers.sh scripts/ros-lidar.sh systemd/lekiwi-lidar.service; then
-    die "service definitions changed since $previous; rerun both service installers before deploying"
-  fi
-done
-
 workspace_revision() { cat "$1/install/lekiwi_rmf/.lekiwi-source-revision" 2>/dev/null || true; }
 remote_workspace_revision() {
   "${ssh_command[@]}" "cat '$remote_workspace/install/lekiwi_rmf/.lekiwi-source-revision' 2>/dev/null || true"

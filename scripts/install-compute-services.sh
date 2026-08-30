@@ -65,6 +65,8 @@ as_root() { # as_root <command...>
 
 # shellcheck disable=SC1091 # PROJECT_ROOT is resolved above, not a fixed source path.
 source "$PROJECT_ROOT/scripts/service-install-common.sh"
+# shellcheck disable=SC1091 # PROJECT_ROOT is resolved above, not a fixed source path.
+source "$PROJECT_ROOT/scripts/service-install-revision.sh"
 resolve_service_user "$SERVICE_USER_ARG"
 resolve_service_paths "$WORKSPACE_ARG" "" true false
 
@@ -155,6 +157,7 @@ as_root systemctl enable --now lekiwi-stack.service
 
 log "Granting $LEKIWI_SERVICE_USER non-interactive deployment control"
 as_root "$PROJECT_ROOT/scripts/install-deploy-sudoers.sh" compute --user "$LEKIWI_SERVICE_USER"
+record_service_fingerprint
 
 cat <<EOF
 Done. Check on it with:

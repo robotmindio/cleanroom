@@ -61,6 +61,8 @@ as_root() { # as_root <command...>
 
 # shellcheck disable=SC1091 # PROJECT_ROOT is resolved above, not a fixed source path.
 source "$PROJECT_ROOT/scripts/service-install-common.sh"
+# shellcheck disable=SC1091 # PROJECT_ROOT is resolved above, not a fixed source path.
+source "$PROJECT_ROOT/scripts/service-install-revision.sh"
 resolve_service_user "$SERVICE_USER_ARG"
 resolve_service_paths "$WORKSPACE_ARG" "$LEROBOT_VENV_ARG" false
 LEKIWI_HOST_BIND_ADDRESS=${HOST_BIND_ADDRESS_ARG:-0.0.0.0}
@@ -181,6 +183,7 @@ as_root systemctl enable --now lekiwi-lidar.service
 
 log "Granting $LEKIWI_SERVICE_USER non-interactive deployment control"
 as_root "$PROJECT_ROOT/scripts/install-deploy-sudoers.sh" device --user "$LEKIWI_SERVICE_USER"
+record_service_fingerprint
 
 if [[ -f $UNIT_DIR/lekiwi-stack.service ]]; then
   log "A ROS stack service is also installed here -- re-run"
