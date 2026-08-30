@@ -460,6 +460,11 @@ For a split device/compute deployment, install the device unit on the motor
 machine, then configure the compute machine with:
 
 ```bash
+# From the compute machine: -t lets the device's sudo ask for the one-time
+# bootstrap password.
+ssh -t USER@DEVICE_IP 'cd /path/to/cleanroom && sudo ./scripts/install-device-services.sh'
+
+# On the compute machine.
 sudo scripts/install-compute-services.sh --service-user "$USER" \
   --workspace "$HOME/lekiwi_ws" --remote DEVICE_IP
 ```
