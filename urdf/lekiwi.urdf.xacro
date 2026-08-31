@@ -8,6 +8,10 @@
   <xacro:arg name="lidar_offset_y" default="0"/>
   <xacro:arg name="lidar_offset_z" default="0"/>
   <xacro:arg name="lidar_offset_yaw" default="0"/>
+  <!-- The wrist camera mount varies between SO-101 kits. Measure these two
+       transforms before using wrist images for geometric perception. -->
+  <xacro:arg name="wrist_camera_xyz" default="0 0 0"/>
+  <xacro:arg name="wrist_camera_rpy" default="0 0 0"/>
   <!-- The simulator now drives the same six bounded joints as the hardware.
        Keep the joint type identical in both descriptions so a plan validated
        in Gazebo has the same kinematic constraints on the physical robot. -->
@@ -15,7 +19,7 @@
   <!-- The physical wrist cable and servo have a bounded safe travel envelope.
        Declaring it continuous makes MoveIt discard the configured bounds. -->
   <xacro:property name="roll_joint" value="revolute"/>
-  <!-- Vendored from robotmindio/LeKiwi at efa608d; see urdf/README.md. -->
+  <!-- Complete model vendored from robotmindio/LeKiwi at 597e2da; see urdf/README.md. -->
   <xacro:include filename="lekiwi_cad.urdf"/>
 
   <!-- CAD's root is the lower base plate. Its +Y is the physical forward
@@ -60,8 +64,8 @@
   </joint>
   <link name="wrist_camera_link"/>
   <joint name="wrist_camera_mount" type="fixed">
-    <parent link="Camera-Model-v3-1"/><child link="wrist_camera_link"/>
-    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <parent link="so101_gripper_link"/><child link="wrist_camera_link"/>
+    <origin xyz="$(arg wrist_camera_xyz)" rpy="$(arg wrist_camera_rpy)"/>
   </joint>
   <link name="wrist_camera_optical_frame"/>
   <joint name="wrist_camera_optical" type="fixed">
@@ -74,8 +78,8 @@
     <collision><geometry><sphere radius="0.025"/></geometry></collision>
   </link>
   <joint name="tool0_mount" type="fixed">
-    <parent link="Wrist_Roll_08c-v1"/><child link="tool0"/>
-    <origin xyz="0 0.040 0" rpy="0 0 0"/>
+    <parent link="so101_gripper_frame_link"/><child link="tool0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
 
   <!-- Low-poly self-collision proxies. These are deliberately attached to the
@@ -102,25 +106,17 @@
   </xacro:macro>
 
   <!-- Pedestal and camera are part of the manipulator's swept volume. -->
-  <xacro:collision_sphere_proxy name="arm_pedestal_collision_proxy" parent="Base_08q-v1" xyz="-0.0400 -0.0330 0.0358" radius="0.0783"/>
+  <xacro:collision_sphere_proxy name="arm_pedestal_collision_proxy" parent="so101_base_link" xyz="0.0168 0 0.0336" radius="0.0857"/>
   <xacro:collision_sphere_proxy name="front_camera_collision_proxy" parent="Camera-Model-v3" xyz="-0.0158 0.0114 -0.0114" radius="0.0332"/>
 
-  <!-- CAD-derived arm shell envelopes. -->
-  <xacro:collision_capsule_proxy name="shoulder_collision_proxy" parent="Rotation_Pitch_08i-v1" xyz="-0.0008 -0.0145 0.0041" rpy="0.0762 -0.3162 -1.5708" radius="0.0500" cylinder_length="0.0062"/>
-  <xacro:collision_capsule_proxy name="upper_arm_collision_proxy" parent="SO_ARM100_08k_116_Square-v1" xyz="-0.0218 -0.0590 -0.0044" rpy="3.1344 1.4654 1.5708" radius="0.0427" cylinder_length="0.0653"/>
-  <xacro:collision_capsule_proxy name="forearm_collision_proxy" parent="SO_ARM100_08k_Mirror-v1" xyz="-0.0218 0.0522 0.0113" rpy="3.1103 1.3717 1.5708" radius="0.0421" cylinder_length="0.0565"/>
-  <xacro:collision_sphere_proxy name="wrist_collision_proxy" parent="Wrist_Roll_Pitch_08i-v1" xyz="-0.0114 0.0081 -0.0179" radius="0.0564"/>
-  <xacro:collision_capsule_proxy name="roll_collision_proxy" parent="Wrist_Roll_08c-v1" xyz="0.0141 0.0209 -0.0445" rpy="0.2026 0.4555 -1.5708" radius="0.0431" cylinder_length="0.0307"/>
-  <xacro:collision_capsule_proxy name="gripper_collision_proxy" parent="Moving_Jaw_08d-v1" xyz="0.0007 0.0335 -0.0247" rpy="2.9993 -0.4467 1.5708" radius="0.0328" cylinder_length="0.0355"/>
-
-  <!-- Servo housings protrude beyond the link shells and need their own
-       envelopes to prevent a plan passing through a motor body. -->
-  <xacro:collision_sphere_proxy name="shoulder_pan_servo_collision_proxy" parent="STS3215_03a-v1" xyz="-0.0102 0.0163 -0.0203" radius="0.0337"/>
-  <xacro:collision_sphere_proxy name="shoulder_lift_servo_collision_proxy" parent="STS3215_03a-v1-1" xyz="0.0163 0.0103 -0.0203" radius="0.0337"/>
-  <xacro:collision_sphere_proxy name="elbow_servo_collision_proxy" parent="STS3215_03a-v1-2" xyz="0.0163 -0.0119 0.0193" radius="0.0337"/>
-  <xacro:collision_sphere_proxy name="wrist_flex_servo_collision_proxy" parent="STS3215_03a-v1-3" xyz="0.0163 -0.0217 0.0067" radius="0.0337"/>
-  <xacro:collision_sphere_proxy name="wrist_roll_servo_collision_proxy" parent="STS3215_03a_Wrist_Roll-v1" xyz="-0.0165 0.0160 -0.0101" radius="0.0335"/>
-  <xacro:collision_sphere_proxy name="gripper_servo_collision_proxy" parent="STS3215_03a-v1-4" xyz="-0.0203 -0.0160 0.0101" radius="0.0335"/>
+  <!-- SO-101 aggregate links already contain their servo housings. These
+       CAD-bounds-derived envelopes therefore cover each complete moving link. -->
+  <xacro:collision_capsule_proxy name="shoulder_collision_proxy" parent="so101_shoulder_link" xyz="-0.0192 0.0012 -0.0091" rpy="0 0 0" radius="0.0458" cylinder_length="0.0190"/>
+  <xacro:collision_capsule_proxy name="upper_arm_collision_proxy" parent="so101_upper_arm_link" xyz="-0.0591 -0.0131 0.0202" rpy="0 1.5708 0" radius="0.0460" cylinder_length="0.0502"/>
+  <xacro:collision_capsule_proxy name="forearm_collision_proxy" parent="so101_lower_arm_link" xyz="-0.0666 0.0035 0.0202" rpy="0 1.5708 0" radius="0.0411" cylinder_length="0.0749"/>
+  <xacro:collision_sphere_proxy name="wrist_collision_proxy" parent="so101_wrist_link" xyz="-0.0022 -0.0269 0.0222" radius="0.0569"/>
+  <xacro:collision_capsule_proxy name="roll_collision_proxy" parent="so101_gripper_link" xyz="-0.0024 -0.0020 -0.0517" rpy="0 0 0" radius="0.0459" cylinder_length="0.0136"/>
+  <xacro:collision_capsule_proxy name="gripper_collision_proxy" parent="so101_moving_jaw_link" xyz="-0.0012 -0.0360 0.0189" rpy="1.5708 0 0" radius="0.0305" cylinder_length="0.0310"/>
 
   <!-- LD06 scan plane: the RobotSkin base puts it 90 mm forward, 70 mm right,
        and 31.5 mm above base_link. The nominal frame stays on the CAD body;

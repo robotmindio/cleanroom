@@ -23,10 +23,22 @@ ROOT = pathlib.Path(__file__).parents[1]
 
 
 def test_action_positions_converts_ros_radians_to_lerobot_units():
-    assert action_positions(("arm_shoulder_pan", "arm_gripper"), (math.pi / 2, math.pi / 4)) == {
-        "arm_shoulder_pan": 90.0,
-        "arm_gripper": 50.0,
-    }
+    gripper_midpoint = sum(JOINT_LIMITS["arm_gripper"]) / 2
+    converted = action_positions(
+        ("arm_shoulder_pan", "arm_gripper"), (math.pi / 2, gripper_midpoint)
+    )
+    assert converted == pytest.approx({"arm_shoulder_pan": 90.0, "arm_gripper": 50.0})
+
+
+def test_gripper_observation_maps_lerobot_endpoints_to_so101_angles():
+    zeros = dict.fromkeys(JOINT_LIMITS, 0.0)
+    directions = dict.fromkeys(JOINT_LIMITS, 1.0)
+    assert joint_positions({"arm_gripper.pos": 0}, zeros, directions)[
+        "arm_gripper"
+    ] == pytest.approx(JOINT_LIMITS["arm_gripper"][0])
+    assert joint_positions({"arm_gripper.pos": 100}, zeros, directions)[
+        "arm_gripper"
+    ] == pytest.approx(JOINT_LIMITS["arm_gripper"][1])
 
 
 def test_action_positions_rejects_invalid_joint_lists():
@@ -129,10 +141,11 @@ def test_bounded_terminal_acceleration_is_allowed_but_terminal_velocity_is_not()
 
 def test_requested_position_tolerances_override_disable_and_validate():
     names = ("arm_shoulder_pan", "arm_elbow_flex")
-    tolerance = lambda **values: types.SimpleNamespace(
-        name=values["name"], position=values.get("position", 0.0),
-        velocity=values.get("velocity", 0.0), acceleration=values.get("acceleration", 0.0),
-    )
+    def tolerance(**values):
+        return types.SimpleNamespace(
+            name=values["name"], position=values.get("position", 0.0),
+            velocity=values.get("velocity", 0.0), acceleration=values.get("acceleration", 0.0),
+        )
     resolved = position_tolerances(
         names,
         [tolerance(name="arm_shoulder_pan", position=0.02),

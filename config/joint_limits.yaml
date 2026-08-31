@@ -10,17 +10,16 @@ default_acceleration_scaling_factor: 0.4
 # The URDF <limit> elements carry no acceleration attribute either, which makes these
 # overrides the only source. Values are conservative servo guesses, not measurements.
 joint_limits:
-  # The CAD export labels servos continuous, but the driver correctly enforces
-  # these conservative physical travel limits. Mirror them here so OMPL cannot
-  # generate a trajectory that the hardware action server must reject.
-  arm_shoulder_pan: {has_position_limits: true, min_position: -1.92, max_position: 1.92, has_velocity_limits: true, max_velocity: 2.0, has_acceleration_limits: true, max_acceleration: 3.0}
-  arm_shoulder_lift: {has_position_limits: true, min_position: -1.75, max_position: 1.75, has_velocity_limits: true, max_velocity: 2.0, has_acceleration_limits: true, max_acceleration: 3.0}
-  arm_elbow_flex: {has_position_limits: true, min_position: -1.75, max_position: 1.75, has_velocity_limits: true, max_velocity: 2.0, has_acceleration_limits: true, max_acceleration: 3.0}
-  arm_wrist_flex: {has_position_limits: true, min_position: -1.75, max_position: 1.75, has_velocity_limits: true, max_velocity: 3.0, has_acceleration_limits: true, max_acceleration: 5.0}
+  # SO-101 position ranges come from the pinned upstream follower model. Keep
+  # the lower velocity and acceleration values until measured on this robot.
+  arm_shoulder_pan: {has_position_limits: true, min_position: -1.91986, max_position: 1.91986, has_velocity_limits: true, max_velocity: 2.0, has_acceleration_limits: true, max_acceleration: 3.0}
+  arm_shoulder_lift: {has_position_limits: true, min_position: -1.74533, max_position: 1.74533, has_velocity_limits: true, max_velocity: 2.0, has_acceleration_limits: true, max_acceleration: 3.0}
+  arm_elbow_flex: {has_position_limits: true, min_position: -1.69, max_position: 1.69, has_velocity_limits: true, max_velocity: 2.0, has_acceleration_limits: true, max_acceleration: 3.0}
+  arm_wrist_flex: {has_position_limits: true, min_position: -1.65806, max_position: 1.65806, has_velocity_limits: true, max_velocity: 3.0, has_acceleration_limits: true, max_acceleration: 5.0}
   # The wrapper makes wrist roll a bounded revolute joint because the physical
   # wiring must not be subjected to arbitrary multi-turn trajectories. This
   # mirrors the URDF and driver-side envelope exactly.
-  arm_wrist_roll: {has_position_limits: true, min_position: -3.14159265359, max_position: 3.14159265359, has_velocity_limits: true, max_velocity: 3.0, has_acceleration_limits: true, max_acceleration: 5.0}
+  arm_wrist_roll: {has_position_limits: true, min_position: -2.74385, max_position: 2.84121, has_velocity_limits: true, max_velocity: 3.0, has_acceleration_limits: true, max_acceleration: 5.0}
   # Needed once the SRDF's gripper group can be planned: TOTG parameterizes every
   # planned group, not just "arm". Velocity matches the URDF <limit>.
-  arm_gripper: {has_position_limits: true, min_position: 0.0, max_position: 1.57, has_velocity_limits: true, max_velocity: 2.0, has_acceleration_limits: true, max_acceleration: 3.0}
+  arm_gripper: {has_position_limits: true, min_position: -0.174533, max_position: 1.74533, has_velocity_limits: true, max_velocity: 2.0, has_acceleration_limits: true, max_acceleration: 3.0}

@@ -187,6 +187,10 @@ Wheel positions map to IDs 7, 8, 9 — see the
 [LeKiwi assembly guide](https://github.com/SIGRobotics-UIUC/LeKiwi/blob/main/Assembly.md)
 for which wheel is which.
 
+The LeRobot robot type remains `lekiwi` for an SO-101 arm: it already maps the
+six follower servos to IDs 1 through 6 with the stable `arm_*` names. There is
+no separate `lekiwi_so101` type.
+
 ## 3. Calibrate
 
 Only the arms need calibration; the wheels do not.
@@ -211,7 +215,7 @@ If you have a leader arm for teleoperation, calibrate it separately on the
 machine it is plugged into:
 
 ```bash
-lerobot-calibrate --teleop.type=so100_leader \
+lerobot-calibrate --teleop.type=so101_leader \
   --teleop.port=/dev/ttyACM1 --teleop.id=leader_1
 ```
 

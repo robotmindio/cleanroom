@@ -13,14 +13,15 @@ ARM_JOINTS = (
     "arm_gripper",
 )
 JOINT_LIMITS = {
-    "arm_shoulder_pan": (-1.92, 1.92),
-    "arm_shoulder_lift": (-1.75, 1.75),
-    "arm_elbow_flex": (-1.75, 1.75),
-    "arm_wrist_flex": (-1.75, 1.75),
-    # Bounded consistently with the real revolute URDF joint and its wiring.
-    "arm_wrist_roll": (-math.pi, math.pi),
-    "arm_gripper": (0.0, 1.57),
+    "arm_shoulder_pan": (-1.91986, 1.91986),
+    "arm_shoulder_lift": (-1.74533, 1.74533),
+    "arm_elbow_flex": (-1.69, 1.69),
+    "arm_wrist_flex": (-1.65806, 1.65806),
+    "arm_wrist_roll": (-2.74385, 2.84121),
+    "arm_gripper": (-0.174533, 1.74533),
 }
+GRIPPER_LOWER, GRIPPER_UPPER = JOINT_LIMITS["arm_gripper"]
+GRIPPER_RANGE = GRIPPER_UPPER - GRIPPER_LOWER
 JOINT_VELOCITY_LIMITS = {
     "arm_shoulder_pan": 2.0,
     "arm_shoulder_lift": 2.0,
@@ -76,7 +77,8 @@ def load_calibration(path):
 
 def joint_positions(observation, zero_positions, directions):
     raw = {
-        name: float(observation.get(f"{name}.pos", 0.0)) / 100.0 * math.pi / 2
+        name: GRIPPER_LOWER
+        + float(observation.get(f"{name}.pos", 0.0)) / 100.0 * GRIPPER_RANGE
         if name == "arm_gripper"
         else math.radians(float(observation.get(f"{name}.pos", 0.0)))
         for name in ARM_JOINTS
@@ -105,7 +107,9 @@ def action_positions(names, positions, zero_positions=None, directions=None):
         for name, position in zip(names, positions)
     }
     return {
-        name: position / (math.pi / 2) * 100 if name == "arm_gripper" else math.degrees(position)
+        name: (position - GRIPPER_LOWER) / GRIPPER_RANGE * 100
+        if name == "arm_gripper"
+        else math.degrees(position)
         for name, position in raw_positions.items()
     }
 

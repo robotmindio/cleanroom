@@ -38,12 +38,6 @@ def test_arm_has_complete_link_and_servo_collision_envelopes():
         "wrist_collision_proxy",
         "roll_collision_proxy",
         "gripper_collision_proxy",
-        "shoulder_pan_servo_collision_proxy",
-        "shoulder_lift_servo_collision_proxy",
-        "elbow_servo_collision_proxy",
-        "wrist_flex_servo_collision_proxy",
-        "wrist_roll_servo_collision_proxy",
-        "gripper_servo_collision_proxy",
     }
 
     assert expected <= links.keys()
@@ -60,7 +54,9 @@ def test_long_arm_sections_use_capsules_not_joint_center_spheres():
         "roll_collision_proxy",
         "gripper_collision_proxy",
     ):
-        geometries = [collision.find("geometry") for collision in links[name].findall("collision")]
+        geometries = [
+            collision.find("geometry") for collision in links[name].findall("collision")
+        ]
         assert any(geometry.find("cylinder") is not None for geometry in geometries)
         assert sum(geometry.find("sphere") is not None for geometry in geometries) == 2
 
@@ -81,8 +77,8 @@ def test_wrist_roll_is_bounded_identically_on_hardware_and_simulation():
     assert real_joint.attrib["type"] == "revolute"
     limit = real_joint.find("limit")
     assert limit is not None
-    assert float(limit.attrib["lower"]) == pytest.approx(-math.pi)
-    assert float(limit.attrib["upper"]) == pytest.approx(math.pi)
+    assert float(limit.attrib["lower"]) == pytest.approx(-2.74385)
+    assert float(limit.attrib["upper"]) == pytest.approx(2.84121)
     assert float(limit.attrib["velocity"]) == pytest.approx(3.0)
 
     sim_joint = _sim_robot().find("./joint[@name='arm_wrist_roll']")
@@ -90,8 +86,8 @@ def test_wrist_roll_is_bounded_identically_on_hardware_and_simulation():
     assert sim_joint.attrib["type"] == "revolute"
     sim_limit = sim_joint.find("limit")
     assert sim_limit is not None
-    assert float(sim_limit.attrib["lower"]) == pytest.approx(-math.pi)
-    assert float(sim_limit.attrib["upper"]) == pytest.approx(math.pi)
+    assert float(sim_limit.attrib["lower"]) == pytest.approx(-2.74385)
+    assert float(sim_limit.attrib["upper"]) == pytest.approx(2.84121)
 
 
 def test_rmf_circle_encloses_the_tracked_nav2_polygon():
@@ -120,7 +116,8 @@ def test_moveit_and_rviz_share_tracked_scaling_and_depth_defaults():
     limits = yaml.safe_load((ROOT / "config" / "joint_limits.yaml").read_text())
     rviz = yaml.safe_load((ROOT / "config" / "lekiwi.rviz").read_text())
     planning_display = next(
-        display for display in rviz["Visualization Manager"]["Displays"]
+        display
+        for display in rviz["Visualization Manager"]["Displays"]
         if display.get("Class") == "moveit_rviz_plugin/MotionPlanning"
     )
     sensors = yaml.safe_load((ROOT / "config" / "moveit_sensors.yaml").read_text())

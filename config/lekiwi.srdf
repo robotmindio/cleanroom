@@ -17,14 +17,14 @@
     <joint name="arm_wrist_roll" value="0"/>
   </group_state>
   <group_state name="open" group="gripper">
-    <joint name="arm_gripper" value="0"/>
+    <joint name="arm_gripper" value="1.74533"/>
   </group_state>
   <group_state name="closed" group="gripper">
-    <joint name="arm_gripper" value="1.57"/>
+    <joint name="arm_gripper" value="-0.174533"/>
   </group_state>
 
-  <!-- CAD exports each physical part as its own collision mesh. These pairs
-       are bolted or directly adjacent and cannot be external collisions. -->
+  <!-- These pairs are bolted or directly adjacent and cannot be external
+       collisions. The SO-101 model groups physical parts by moving link. -->
   <disable_collisions link1="base_plate_layer1-v5" link2="drive_motor_mount-v11-2" reason="Adjacent"/>
   <disable_collisions link1="base_plate_layer1-v5" link2="drive_motor_mount-v11-1" reason="Adjacent"/>
   <disable_collisions link1="base_plate_layer1-v5" link2="drive_motor_mount-v11" reason="Adjacent"/>
@@ -32,24 +32,17 @@
   <disable_collisions link1="Camera-Mount-v8" link2="Camera-Model-v3" reason="Adjacent"/>
   <disable_collisions link1="Camera-Model-v3" link2="front_camera_link" reason="Adjacent"/>
   <disable_collisions link1="front_camera_link" link2="front_camera_optical_frame" reason="Adjacent"/>
-  <disable_collisions link1="base_plate_layer2-v3" link2="Base_08q-v1" reason="Adjacent"/>
-  <disable_collisions link1="Base_08q-v1" link2="STS3215_03a-v1" reason="Adjacent"/>
-  <disable_collisions link1="STS3215_03a-v1" link2="Rotation_Pitch_08i-v1" reason="Adjacent"/>
-  <disable_collisions link1="Rotation_Pitch_08i-v1" link2="STS3215_03a-v1-1" reason="Adjacent"/>
-  <disable_collisions link1="STS3215_03a-v1-1" link2="SO_ARM100_08k_116_Square-v1" reason="Adjacent"/>
-  <disable_collisions link1="SO_ARM100_08k_116_Square-v1" link2="STS3215_03a-v1-2" reason="Adjacent"/>
-  <disable_collisions link1="STS3215_03a-v1-2" link2="SO_ARM100_08k_Mirror-v1" reason="Adjacent"/>
-  <disable_collisions link1="SO_ARM100_08k_Mirror-v1" link2="STS3215_03a-v1-3" reason="Adjacent"/>
-  <disable_collisions link1="STS3215_03a-v1-3" link2="Wrist_Roll_Pitch_08i-v1" reason="Adjacent"/>
-  <disable_collisions link1="Wrist_Roll_Pitch_08i-v1" link2="STS3215_03a_Wrist_Roll-v1" reason="Adjacent"/>
-  <disable_collisions link1="STS3215_03a_Wrist_Roll-v1" link2="Wrist_Roll_08c-v1" reason="Adjacent"/>
-  <disable_collisions link1="Wrist_Roll_08c-v1" link2="STS3215_03a-v1-4" reason="Adjacent"/>
-  <disable_collisions link1="STS3215_03a-v1-4" link2="Moving_Jaw_08d-v1" reason="Adjacent"/>
-  <disable_collisions link1="Wrist_Roll_08c-v1" link2="Wrist-Camera-Mount-v11" reason="Adjacent"/>
-  <disable_collisions link1="Wrist-Camera-Mount-v11" link2="Camera-Model-v3-1" reason="Adjacent"/>
-  <disable_collisions link1="Camera-Model-v3-1" link2="wrist_camera_link" reason="Adjacent"/>
+  <disable_collisions link1="base_plate_layer2-v3" link2="so101_base_link" reason="Adjacent"/>
+  <disable_collisions link1="so101_base_link" link2="so101_shoulder_link" reason="Adjacent"/>
+  <disable_collisions link1="so101_shoulder_link" link2="so101_upper_arm_link" reason="Adjacent"/>
+  <disable_collisions link1="so101_upper_arm_link" link2="so101_lower_arm_link" reason="Adjacent"/>
+  <disable_collisions link1="so101_lower_arm_link" link2="so101_wrist_link" reason="Adjacent"/>
+  <disable_collisions link1="so101_wrist_link" link2="so101_gripper_link" reason="Adjacent"/>
+  <disable_collisions link1="so101_gripper_link" link2="so101_moving_jaw_link" reason="Adjacent"/>
+  <disable_collisions link1="so101_gripper_link" link2="so101_gripper_frame_link" reason="Adjacent"/>
+  <disable_collisions link1="so101_gripper_link" link2="wrist_camera_link" reason="Adjacent"/>
   <disable_collisions link1="wrist_camera_link" link2="wrist_camera_optical_frame" reason="Adjacent"/>
-  <disable_collisions link1="Wrist_Roll_08c-v1" link2="tool0" reason="Adjacent"/>
+  <disable_collisions link1="so101_gripper_frame_link" link2="tool0" reason="Adjacent"/>
   <disable_collisions link1="base_link" link2="base_plate_layer1-v5" reason="Adjacent"/>
   <disable_collisions link1="base_plate_layer1-v5" link2="robotskin_lidar_mount" reason="Adjacent"/>
   <disable_collisions link1="robotskin_lidar_mount" link2="ld06_body" reason="Adjacent"/>
@@ -59,18 +52,12 @@
        Every non-adjacent pair remains collision-checked by MoveIt. -->
   <disable_collisions link1="base_link" link2="arm_pedestal_collision_proxy" reason="Adjacent"/>
   <disable_collisions link1="base_link" link2="front_camera_collision_proxy" reason="Adjacent"/>
-  <disable_collisions link1="arm_pedestal_collision_proxy" link2="shoulder_pan_servo_collision_proxy" reason="Adjacent"/>
-  <disable_collisions link1="shoulder_pan_servo_collision_proxy" link2="shoulder_collision_proxy" reason="Adjacent"/>
-  <disable_collisions link1="shoulder_collision_proxy" link2="shoulder_lift_servo_collision_proxy" reason="Adjacent"/>
-  <disable_collisions link1="shoulder_lift_servo_collision_proxy" link2="upper_arm_collision_proxy" reason="Adjacent"/>
-  <disable_collisions link1="upper_arm_collision_proxy" link2="elbow_servo_collision_proxy" reason="Adjacent"/>
-  <disable_collisions link1="elbow_servo_collision_proxy" link2="forearm_collision_proxy" reason="Adjacent"/>
-  <disable_collisions link1="forearm_collision_proxy" link2="wrist_flex_servo_collision_proxy" reason="Adjacent"/>
-  <disable_collisions link1="wrist_flex_servo_collision_proxy" link2="wrist_collision_proxy" reason="Adjacent"/>
-  <disable_collisions link1="wrist_collision_proxy" link2="wrist_roll_servo_collision_proxy" reason="Adjacent"/>
-  <disable_collisions link1="wrist_roll_servo_collision_proxy" link2="roll_collision_proxy" reason="Adjacent"/>
-  <disable_collisions link1="roll_collision_proxy" link2="gripper_servo_collision_proxy" reason="Adjacent"/>
-  <disable_collisions link1="gripper_servo_collision_proxy" link2="gripper_collision_proxy" reason="Adjacent"/>
+  <disable_collisions link1="arm_pedestal_collision_proxy" link2="shoulder_collision_proxy" reason="Adjacent"/>
+  <disable_collisions link1="shoulder_collision_proxy" link2="upper_arm_collision_proxy" reason="Adjacent"/>
+  <disable_collisions link1="upper_arm_collision_proxy" link2="forearm_collision_proxy" reason="Adjacent"/>
+  <disable_collisions link1="forearm_collision_proxy" link2="wrist_collision_proxy" reason="Adjacent"/>
+  <disable_collisions link1="wrist_collision_proxy" link2="roll_collision_proxy" reason="Adjacent"/>
+  <disable_collisions link1="roll_collision_proxy" link2="gripper_collision_proxy" reason="Adjacent"/>
   <disable_collisions link1="roll_collision_proxy" link2="tool0" reason="Adjacent"/>
   <!-- The folded factory home pose has these serial-chain envelope overlaps.
        They are verified as physically adjacent CAD components, not general

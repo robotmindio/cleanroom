@@ -50,40 +50,21 @@ TEST_ONLY_COLLISION_PAIRS = frozenset({
     frozenset(pair) for pair in (
         ("arm_pedestal_collision_proxy", "front_camera_collision_proxy"),
         ("arm_pedestal_collision_proxy", "shoulder_collision_proxy"),
-        ("arm_pedestal_collision_proxy", "shoulder_lift_servo_collision_proxy"),
         ("arm_pedestal_collision_proxy", "upper_arm_collision_proxy"),
         ("forearm_collision_proxy", "upper_arm_collision_proxy"),
         ("forearm_collision_proxy", "wrist_collision_proxy"),
-        ("forearm_collision_proxy", "wrist_roll_servo_collision_proxy"),
         ("gripper_collision_proxy", "tool0"),
         ("gripper_collision_proxy", "wrist_collision_proxy"),
-        ("gripper_servo_collision_proxy", "tool0"),
-        ("gripper_servo_collision_proxy", "wrist_collision_proxy"),
-        ("gripper_servo_collision_proxy", "wrist_roll_servo_collision_proxy"),
         ("roll_collision_proxy", "wrist_collision_proxy"),
         ("shoulder_collision_proxy", "upper_arm_collision_proxy"),
         ("tool0", "wrist_collision_proxy"),
-        ("tool0", "wrist_roll_servo_collision_proxy"),
-        ("wrist_flex_servo_collision_proxy", "wrist_roll_servo_collision_proxy"),
         # A packet-boundary variant of the same fake startup pose can retain
         # the host's all-zero feedback for one driver cycle.  These are the
         # exact additional contacts MoveIt reports in that case.
         ("arm_pedestal_collision_proxy", "base_link"),
-        ("arm_pedestal_collision_proxy", "shoulder_pan_servo_collision_proxy"),
         ("base_link", "front_camera_collision_proxy"),
-        ("elbow_servo_collision_proxy", "forearm_collision_proxy"),
-        ("elbow_servo_collision_proxy", "upper_arm_collision_proxy"),
-        ("forearm_collision_proxy", "wrist_flex_servo_collision_proxy"),
-        ("gripper_collision_proxy", "gripper_servo_collision_proxy"),
         ("gripper_collision_proxy", "roll_collision_proxy"),
-        ("gripper_servo_collision_proxy", "roll_collision_proxy"),
         ("roll_collision_proxy", "tool0"),
-        ("roll_collision_proxy", "wrist_roll_servo_collision_proxy"),
-        ("shoulder_collision_proxy", "shoulder_lift_servo_collision_proxy"),
-        ("shoulder_collision_proxy", "shoulder_pan_servo_collision_proxy"),
-        ("shoulder_lift_servo_collision_proxy", "upper_arm_collision_proxy"),
-        ("wrist_collision_proxy", "wrist_flex_servo_collision_proxy"),
-        ("wrist_collision_proxy", "wrist_roll_servo_collision_proxy"),
     )
 })
 
