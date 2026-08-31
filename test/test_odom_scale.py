@@ -112,7 +112,7 @@ def test_motion_utilities_publish_only_to_manual_source_topic():
 
 def test_launch_calibration_preserves_other_values(monkeypatch, tmp_path):
     path = tmp_path / "launch.conf"
-    path.write_text("camera_height=0.200000\n")
+    path.write_text("  camera_height=0.200000  \n")
     monkeypatch.setenv("LEKIWI_LAUNCH_CALIBRATION", str(path))
 
     odom_scale.save_launch_calibration("xy_velocity_scale", 1.25)
