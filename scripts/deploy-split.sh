@@ -31,6 +31,8 @@ done
 cd "$(dirname "$0")/.."
 project_root=$PWD
 PROJECT_ROOT=$project_root
+# shellcheck source=/dev/null
+source "$PROJECT_ROOT/scripts/runtime-common.sh"
 # shellcheck disable=SC1091 # PROJECT_ROOT is resolved above, not a fixed source path.
 source "$PROJECT_ROOT/scripts/service-install-revision.sh"
 logs=${LEKIWI_LOGS:-$HOME/.ros/lekiwi}
@@ -52,13 +54,6 @@ done
 require_clean() { # require_clean <repository> [description]
   local repository=$1 description=${2:-$1}
   [[ -z $(git -C "$repository" status --porcelain) ]] || die "$description has uncommitted or untracked files"
-}
-wait_for() { # wait_for <seconds> <command...>
-  local deadline=$((SECONDS + $1)); shift
-  until "$@" >/dev/null 2>&1; do
-    (( SECONDS < deadline )) || return 1
-    sleep 1
-  done
 }
 ros_setup() {
   export LEKIWI_WS=$workspace

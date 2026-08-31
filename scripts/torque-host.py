@@ -81,7 +81,7 @@ class BoundLeKiwiHost:
         self.zmq_observation_socket = None
         try:
             self.security = CurveServerSecurity(
-                self.zmq_context, address, curve.server_secret_key_file,
+                self.zmq_context, curve.server_secret_key_file,
                 curve.authorized_clients_dir,
             )
             self.zmq_cmd_socket = self.zmq_context.socket(zmq.PULL)

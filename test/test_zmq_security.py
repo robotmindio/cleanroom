@@ -24,25 +24,10 @@ class _Context:
 
 
 def test_unauthenticated_transport_is_supported_for_the_deployment():
-    security = CurveServerSecurity(_Context(), "127.0.0.1")
+    security = CurveServerSecurity(_Context())
     assert security.enabled is False
     security.close()
-    remote = CurveServerSecurity(_Context(), "192.0.2.10")
-    assert remote.enabled is False
-    remote.close()
     LeKiwiZmqClient("192.0.2.10", 5555, 5556, ("x.vel",))
-
-
-def test_test_fixtures_can_explicitly_allow_an_insecure_zmq_transport():
-    security = CurveServerSecurity(
-        _Context(), "192.0.2.10", allow_insecure_test_bind=True
-    )
-    assert security.enabled is False
-    security.close()
-    LeKiwiZmqClient(
-        "192.0.2.10", 5555, 5556, ("x.vel",),
-        allow_insecure_test_connection=True,
-    )
 
 
 def test_partial_curve_configuration_fails_closed(tmp_path):
@@ -51,7 +36,7 @@ def test_partial_curve_configuration_fails_closed(tmp_path):
     with pytest.raises(CurveConfigurationError, match="both client"):
         CurveClientCredentials(server_public_key_file=str(public)).validate()
     with pytest.raises(CurveConfigurationError, match="both server"):
-        CurveServerSecurity(_Context(), "127.0.0.1", "secret", "")
+        CurveServerSecurity(_Context(), "secret", "")
 
 
 def test_authenticated_server_requires_at_least_one_authorized_client(tmp_path):
@@ -65,7 +50,7 @@ def test_authenticated_server_requires_at_least_one_authorized_client(tmp_path):
     context = zmq.Context()
     try:
         with pytest.raises(CurveConfigurationError, match="no public"):
-            CurveServerSecurity(context, "127.0.0.1", secret, str(empty))
+            CurveServerSecurity(context, secret, str(empty))
     finally:
         context.term()
 
@@ -131,21 +116,14 @@ def test_repository_client_exposes_missing_state_without_zero_filling():
     assert client.observation_token is None
 
 
-def test_repository_client_requires_protocol_metadata_unless_explicitly_compatible():
-    legacy = [json.dumps({"_cams": [], "joint.pos": 1.0}).encode("utf-8")]
-    production = LeKiwiZmqClient("127.0.0.1", 5555, 5556, ("joint.pos",))
-    production.connected = True
-    production._poll_latest = lambda: legacy
-    assert production.get_observation() == {}
-    assert production.observation_token is None
-
-    compatibility = LeKiwiZmqClient(
-        "127.0.0.1", 5555, 5556, ("joint.pos",), require_metadata=False
-    )
-    compatibility.connected = True
-    compatibility._poll_latest = lambda: legacy
-    assert compatibility.get_observation() == {"joint.pos": 1.0}
-    assert compatibility.observation_token == ("legacy", 1)
+def test_repository_client_requires_protocol_metadata():
+    client = LeKiwiZmqClient("127.0.0.1", 5555, 5556, ("joint.pos",))
+    client.connected = True
+    client._poll_latest = lambda: [
+        json.dumps({"_cams": [], "joint.pos": 1.0}).encode("utf-8")
+    ]
+    assert client.get_observation() == {}
+    assert client.observation_token is None
 
 
 def test_repository_client_command_send_is_nonblocking_and_reports_backpressure():
@@ -207,9 +185,7 @@ def test_curve_allows_authorized_client_and_rejects_unknown_client(tmp_path):
     os.chmod(unknown_secret, 0o600)
 
     context = zmq.Context()
-    server_security = CurveServerSecurity(
-        context, "127.0.0.1", server_secret, str(clients)
-    )
+    server_security = CurveServerSecurity(context, server_secret, str(clients))
     server = context.socket(zmq.PULL)
     server.setsockopt(zmq.LINGER, 0)
     server_security.configure_socket(server)
@@ -256,7 +232,7 @@ def test_repository_client_speaks_authenticated_state_protocol(tmp_path):
     os.chmod(client_secret, 0o600)
 
     context = zmq.Context()
-    security = CurveServerSecurity(context, "127.0.0.1", server_secret, str(authorized))
+    security = CurveServerSecurity(context, server_secret, str(authorized))
     command = context.socket(zmq.PULL)
     observation = context.socket(zmq.PUSH)
     for socket in (command, observation):

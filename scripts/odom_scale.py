@@ -17,7 +17,6 @@ The robot moves. Keep the area clear and stay near the power switch.
 """
 import argparse
 import math
-import os
 import time
 
 import cv2
@@ -29,6 +28,8 @@ from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import CameraInfo, Image
 
+from lekiwi_rmf.launch_calibration import save_launch_calibration as _save_launch_calibration
+
 BOARD = (8, 6)
 CRITERIA = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
 ODOM_TIMEOUT = 0.5
@@ -38,24 +39,7 @@ MAX_CALIBRATION_SPEED = {"linear": 0.15, "angular": 0.8}
 def save_launch_calibration(key, value):
     if not math.isfinite(value) or value <= 0.0:
         raise ValueError(f"refusing to save invalid {key}: {value!r}")
-    path = os.environ.get("LEKIWI_LAUNCH_CALIBRATION", os.path.expanduser("~/.ros/lekiwi_launch_calibration.conf"))
-    saved = {}
-    try:
-        with open(path) as source:
-            for line in source:
-                name, separator, current = line.strip().partition("=")
-                if separator and name in {"camera_height", "camera_pitch", "xy_velocity_scale", "yaw_velocity_scale"}:
-                    saved[name] = current
-    except FileNotFoundError:
-        pass
-    saved[key] = f"{value:.6f}"
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    temporary = f"{path}.tmp"
-    with open(temporary, "w") as output:
-        for name in ("camera_height", "camera_pitch", "xy_velocity_scale", "yaw_velocity_scale"):
-            if name in saved:
-                output.write(f"{name}={saved[name]}\n")
-    os.replace(temporary, path)
+    path = _save_launch_calibration(**{key: value})
     print(f"Saved {key} for future launches in {path}")
 
 

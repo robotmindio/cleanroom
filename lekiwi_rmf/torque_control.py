@@ -99,7 +99,6 @@ class TorqueControlClient:
     def __init__(
         self, host: str, port: int = 5557, timeout_ms: int = 1000, zmq_module=None,
         client_secret_key_file: str = "", server_public_key_file: str = "",
-        *, allow_insecure_test_connection: bool = False,
     ):
         if not isinstance(host, str) or not host.strip():
             raise ValueError("torque-control host must be a non-empty string")

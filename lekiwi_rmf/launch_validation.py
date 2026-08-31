@@ -175,7 +175,7 @@ def validate_launch_arguments(arguments: Mapping[str, object]) -> None:
 
     start_rmf = _bool(arguments["start_rmf"], "start_rmf")
     _bool(arguments["auto_arm_on_startup"], "auto_arm_on_startup")
-    start_moveit = _bool(arguments["start_moveit"], "start_moveit")
+    _bool(arguments["start_moveit"], "start_moveit")
     start_rosbridge = _bool(arguments["start_rosbridge"], "start_rosbridge")
     rosbridge_address = str(arguments["rosbridge_address"]).strip()
     publish_camera = _bool(arguments["publish_camera"], "publish_camera")

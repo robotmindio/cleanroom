@@ -11,6 +11,8 @@
 set -Eeuo pipefail
 
 cd "$(dirname "$0")/.."
+# shellcheck source=/dev/null
+source scripts/runtime-common.sh
 
 # The Pi runs ros-base only (scripts/setup-pi.bash); a machine with a
 # workspace gets the same DDS settings through setup.bash. Either way the
@@ -25,11 +27,6 @@ else
   source scripts/setup-pi.bash
 fi
 
-first_match() { # first existing path matching a glob, empty if none
-  set -- $1
-  [ -e "$1" ] && printf '%s' "$1"
-  return 0
-}
 FRONT="${LEKIWI_FRONT:-$(first_match '/dev/v4l/by-id/*WEBCAM*-video-index0')}"
 [ -n "$FRONT" ] || { echo "$0: no front camera found -- set LEKIWI_FRONT" >&2; exit 1; }
 # The wrist camera is optional: unplugged or LEKIWI_WRIST=none runs without it.
@@ -39,9 +36,7 @@ WRIST="${LEKIWI_WRIST:-$(first_match '/dev/v4l/by-id/*JYU2C*-video-index0')}"
 # looks healthy but is useless to free_space and RTAB-Map. Fail before anyone
 # starts trusting those frames.
 calibration="${LEKIWI_CAMERA_INFO:-$HOME/.ros/camera_info/lekiwi_front.yaml}"
-[ -s "$calibration" ] \
-  && grep -qE '^image_width:[[:space:]]*[1-9][0-9]*' "$calibration" \
-  && grep -A3 '^camera_matrix:' "$calibration" | grep -qE '^[[:space:]]*data:.*[1-9]' || {
+camera_calibration_valid "$calibration" || {
     echo "$0: camera calibration is missing or invalid: $calibration" >&2
     echo "Run scripts/calibrate-camera.sh on this machine first." >&2
     exit 1

@@ -8,6 +8,8 @@
 set -Eeuo pipefail
 
 cd "$(dirname "$0")/.."
+# shellcheck source=/dev/null
+source scripts/runtime-common.sh
 LOGS="${LEKIWI_LOGS:-$HOME/.ros/lekiwi}"
 mkdir -p "$LOGS"
 RUNTIME_DIR="${LEKIWI_RUNTIME_DIR:-$LOGS/runtime}"
@@ -32,14 +34,6 @@ if ! flock -n 9; then
   echo "$0: startup is already in progress" >&2
   exit 0
 fi
-
-wait_for() { # wait_for <seconds> <command...>
-  local deadline=$((SECONDS + $1)); shift
-  until "$@" >/dev/null 2>&1; do
-    [ $SECONDS -lt $deadline ] || return 1
-    sleep 1
-  done
-}
 
 # A listening TCP port alone is not enough: a stale or unrelated process can bind it,
 # leaving the ROS driver to discover much later that no LeRobot host is available.
@@ -74,21 +68,7 @@ host_up() {
   recorded_host_up || service_host_up
 }
 
-first_match() { # first existing path matching a glob, empty if none
-  set -- $1
-  [ -e "$1" ] && printf '%s' "$1"
-  return 0
-}
 WRIST="${LEKIWI_WRIST:-$(first_match '/dev/v4l/by-id/*JYU2C*-video-index0')}"
-
-camera_calibration_valid() {
-  local calibration="${LEKIWI_CAMERA_INFO:-$HOME/.ros/camera_info/lekiwi_front.yaml}"
-  # A missing calibration makes v4l2_camera publish an all-zero CameraInfo message.
-  # That looks superficially healthy, but free_space and RTAB-Map cannot use it.
-  [ -s "$calibration" ] \
-    && grep -qE '^image_width:[[:space:]]*[1-9][0-9]*' "$calibration" \
-    && grep -A3 '^camera_matrix:' "$calibration" | grep -qE '^[[:space:]]*data:.*[1-9]'
-}
 
 require_camera_calibration() {
   local calibration="${LEKIWI_CAMERA_INFO:-$HOME/.ros/camera_info/lekiwi_front.yaml}"

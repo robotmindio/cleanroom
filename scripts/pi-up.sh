@@ -5,6 +5,8 @@
 set -Eeuo pipefail
 
 cd "$(dirname "$0")/.."
+# shellcheck source=/dev/null
+source scripts/runtime-common.sh
 LOGS="${LEKIWI_LOGS:-$HOME/.ros/lekiwi}"
 mkdir -p "$LOGS"
 
@@ -13,14 +15,6 @@ if ! flock -n 9; then
   echo "$0: startup is already in progress" >&2
   exit 0
 fi
-
-wait_for() { # wait_for <seconds> <command...>
-  local deadline=$((SECONDS + $1)); shift
-  until "$@" >/dev/null 2>&1; do
-    [ "$SECONDS" -lt "$deadline" ] || return 1
-    sleep 1
-  done
-}
 
 host_up() { ss -tln | grep -q ':5555' && ss -tln | grep -q ':5557'; }
 motion_host_up() { ss -tln | grep -q ':5555'; }

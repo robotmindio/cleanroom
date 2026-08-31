@@ -210,6 +210,34 @@ def _check_segment_limits(name, coefficients, duration):
             raise ValueError(f"trajectory interpolation exceeds {name} acceleration limits")
 
 
+def duration_seconds(duration):
+    if duration.sec < 0 or not 0 <= duration.nanosec < 1_000_000_000:
+        raise ValueError("duration is malformed")
+    value = float(duration.sec) + float(duration.nanosec) / 1e9
+    if not math.isfinite(value):
+        raise ValueError("duration must be finite")
+    return value
+
+
+def stamp_nanoseconds(stamp):
+    if stamp.sec < 0 or not 0 <= stamp.nanosec < 1_000_000_000:
+        raise ValueError("trajectory header timestamp is malformed")
+    return int(stamp.sec) * 1_000_000_000 + int(stamp.nanosec)
+
+
+def trajectory_rows(trajectory):
+    return [
+        (
+            duration_seconds(point.time_from_start),
+            tuple(point.positions),
+            tuple(point.velocities),
+            tuple(point.accelerations),
+            tuple(point.effort),
+        )
+        for point in trajectory.points
+    ]
+
+
 def prepare_trajectory(names, points, start_positions):
     """Validate and normalize raw FollowJointTrajectory points.
 
@@ -313,24 +341,6 @@ def prepare_trajectory(names, points, start_positions):
     # above; only non-zero terminal velocity is unsafe for this position
     # controller's stop contract.
     return normalized
-
-
-def validate_trajectory(names, points, start_positions):
-    """Validate a trajectory; retained as the public validation-only API."""
-    prepare_trajectory(names, points, start_positions)
-
-
-def interpolate_positions(start, points, elapsed):
-    """Linearly interpolate the legacy ``(time, position-dict)`` representation."""
-    previous_time, previous = 0.0, start
-    for point_time, point in points:
-        if elapsed <= point_time:
-            if point_time == previous_time:
-                return point.copy()
-            fraction = (elapsed - previous_time) / (point_time - previous_time)
-            return {name: previous[name] + fraction * (point[name] - previous[name]) for name in point}
-        previous_time, previous = point_time, point
-    return points[-1][1].copy()
 
 
 def sample_trajectory(names, start_positions, points, elapsed):

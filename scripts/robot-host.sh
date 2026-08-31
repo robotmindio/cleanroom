@@ -5,6 +5,8 @@
 set -Eeuo pipefail
 
 cd "$(dirname "$0")/.."
+# shellcheck source=/dev/null
+source scripts/runtime-common.sh
 export PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}"
 
 # Systemd supplies LEKIWI_LEROBOT_VENV explicitly.  Interactive use retains
@@ -54,12 +56,6 @@ CALIBRATION_FILE="$CALIBRATION_DIR/robots/lekiwi/$ID.json"
 # /dev/ttyACM0 and /dev/videoN are renumbered by every USB re-enumeration -- a bumped
 # cable moves the motor bus to ttyACM1 and shifts both cameras. by-id names follow the
 # device. Adjust the globs for your own hardware, or set LEKIWI_PORT/FRONT/WRIST.
-first_match() { # first existing path matching a glob, empty if none
-  # shellcheck disable=SC2086 # Deliberately expand the caller-supplied glob.
-  set -- $1
-  [ -e "$1" ] && printf '%s' "$1"
-  return 0 # a miss is not an error here; require() reports it with the variable name
-}
 PORT="${LEKIWI_PORT:-$(first_match '/dev/serial/by-id/*USB_Single_Serial*')}"
 FRONT="${LEKIWI_FRONT:-$(first_match '/dev/v4l/by-id/*WEBCAM*-video-index0')}"
 WRIST="${LEKIWI_WRIST:-$(first_match '/dev/v4l/by-id/*JYU2C*-video-index0')}"

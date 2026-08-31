@@ -17,7 +17,6 @@ import launch_ros.actions
 import launch_testing.actions
 import pytest
 import rclpy
-from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from std_msgs.msg import Bool
 

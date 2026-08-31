@@ -10,6 +10,22 @@ import subprocess
 ROOT = pathlib.Path(__file__).parents[1]
 
 
+def test_runtime_helpers_share_device_and_calibration_checks(tmp_path):
+    calibration = tmp_path / "camera.yaml"
+    calibration.write_text("image_width: 640\ncamera_matrix:\n  rows: 3\n  cols: 3\n  data: [1, 0, 0, 0, 1, 0, 0, 0, 1]\n")
+    script = r'''
+set -Eeuo pipefail
+source "$1/scripts/runtime-common.sh"
+[[ $(first_match "$2") == "$2" ]]
+camera_calibration_valid "$3"
+wait_for 1 test -s "$3"
+'''
+    subprocess.run(
+        ["bash", "-c", script, "runtime-test", str(ROOT), str(ROOT / "README.md"), str(calibration)],
+        check=True,
+    )
+
+
 def test_all_units_render_with_deterministic_non_root_paths(tmp_path):
     script = r'''
 set -Eeuo pipefail
@@ -252,6 +268,7 @@ def test_service_fingerprint_covers_installed_service_behavior():
         "systemd/lekiwi-lidar.service",
         "scripts/ros-lidar.sh",
         "scripts/service-install-common.sh",
+        "scripts/runtime-common.sh",
         "scripts/install-deploy-sudoers.sh",
     ):
         assert source in revision

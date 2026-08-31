@@ -8,11 +8,8 @@
 set -Eeuo pipefail
 
 cd "$(dirname "$0")/.."
-first_match() {
-  set -- $1
-  [ -e "$1" ] && printf '%s' "$1"
-  return 0
-}
+# shellcheck source=/dev/null
+source scripts/runtime-common.sh
 
 target=front
 case "${1:-}" in

@@ -18,7 +18,7 @@ from rclpy.action import ActionClient
 from sensor_msgs.msg import JointState
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
-from lekiwi_rmf.arm_trajectory import ARM_JOINTS, JOINT_LIMITS
+from lekiwi_rmf.arm_trajectory import JOINT_LIMITS
 
 
 ALIASES = {

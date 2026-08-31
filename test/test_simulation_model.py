@@ -12,9 +12,8 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
-from lekiwi_rmf.sim_arm_controller import (
-    SimArmController, duration_seconds, permission_is_fresh, stamp_nanoseconds,
-)
+from lekiwi_rmf.arm_trajectory import duration_seconds, stamp_nanoseconds
+from lekiwi_rmf.sim_arm_controller import SimArmController, permission_is_fresh
 from lekiwi_rmf.sim_omni_controller import (
     MotionLimiter,
     body_to_wheels,

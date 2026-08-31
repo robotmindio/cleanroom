@@ -31,43 +31,21 @@ with the printed 8x6 checkerboard lying flat on the floor in view. It prints the
 height and pitch to pass back in.
 """
 import math
-import os
 import signal
 
 import cv2
 import numpy as np
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
+from rclpy.qos import QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import CameraInfo, Image, LaserScan
 from std_msgs.msg import String
+
+from lekiwi_rmf.launch_calibration import save_launch_calibration
 
 BOARD = (8, 6)  # inner corners of scripts/checkerboard.py
 SQUARE = 0.025  # m
 FAIL_SAFE_HALF_FOV = math.radians(30)
-
-
-def save_launch_calibration(**values):
-    """Atomically retain measured launch parameters without trusting executable config."""
-    path = os.environ.get("LEKIWI_LAUNCH_CALIBRATION", os.path.expanduser("~/.ros/lekiwi_launch_calibration.conf"))
-    saved = {}
-    try:
-        with open(path) as source:
-            for line in source:
-                key, separator, value = line.strip().partition("=")
-                if separator and key in {"camera_height", "camera_pitch", "xy_velocity_scale", "yaw_velocity_scale"}:
-                    saved[key] = value
-    except FileNotFoundError:
-        pass
-    saved.update({key: f"{value:.6f}" for key, value in values.items()})
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    temporary = f"{path}.tmp"
-    with open(temporary, "w") as output:
-        for key in ("camera_height", "camera_pitch", "xy_velocity_scale", "yaw_velocity_scale"):
-            if key in saved:
-                output.write(f"{key}={saved[key]}\n")
-    os.replace(temporary, path)
-    print(f"Saved launch calibration to {path}", flush=True)
 
 
 class FreeSpace(Node):
@@ -228,7 +206,8 @@ class FreeSpace(Node):
         self.get_logger().info(
             f"camera_height:={height:.3f} camera_pitch:={pitch:.3f}  "
             f"(pitch {math.degrees(pitch):.1f} degrees below level)")
-        save_launch_calibration(camera_height=height, camera_pitch=pitch)
+        path = save_launch_calibration(camera_height=height, camera_pitch=pitch)
+        print(f"Saved launch calibration to {path}", flush=True)
         self.calibrated = True
 
 

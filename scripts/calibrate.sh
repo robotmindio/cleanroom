@@ -26,6 +26,8 @@
 set -Eeuo pipefail
 
 cd "$(dirname "$0")/.."
+# shellcheck source=/dev/null
+source scripts/runtime-common.sh
 
 set +u
 # shellcheck source=/dev/null
@@ -50,12 +52,6 @@ LEROBOT_HOME="${HF_LEROBOT_HOME:-$HF_CACHE/lerobot}"
 CALIBRATION_DIR="${HF_LEROBOT_CALIBRATION:-$LEROBOT_HOME/calibration}"
 MOTOR_FILE="$CALIBRATION_DIR/robots/lekiwi/$ID.json"
 
-first_match() { # first existing path matching a glob, empty if none
-  set -- $1
-  [ -e "$1" ] && printf '%s' "$1"
-  return 0
-}
-
 host_up() {
   ss -tln 2>/dev/null | grep -q ':5555' \
     && ss -tln 2>/dev/null | grep -q ':5557' \
@@ -77,21 +73,6 @@ stack_up() {
 # next step can have the port and the pose capture gets a clean driver.
 calibrating() {
   host_up || legacy_host_up || stack_up
-}
-
-wait_for() { # wait_for <seconds> <command...>
-  local deadline=$((SECONDS + $1)); shift
-  until "$@" >/dev/null 2>&1; do
-    [ $SECONDS -lt $deadline ] || return 1
-    sleep 1
-  done
-}
-
-camera_calibration_valid() {
-  local file="${1:-$CAMERA_FILE}"
-  [ -s "$file" ] \
-    && grep -qE '^image_width:[[:space:]]*[1-9][0-9]*' "$file" \
-    && grep -A6 '^camera_matrix:' "$file" | grep -qE '^[[:space:]]*data:.*[1-9]'
 }
 
 motor_calibration_valid() {

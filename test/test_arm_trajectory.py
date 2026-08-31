@@ -11,13 +11,11 @@ from lekiwi_rmf.arm_trajectory import (
     JOINT_LIMITS,
     JOINT_VELOCITY_LIMITS,
     action_positions,
-    interpolate_positions,
     joint_positions,
     load_calibration,
     position_tolerances,
     prepare_trajectory,
     sample_trajectory,
-    validate_trajectory,
 )
 
 
@@ -44,18 +42,18 @@ def test_action_positions_rejects_invalid_joint_lists():
 
 def test_trajectory_timing_and_reported_velocities_are_bounded():
     start = {"arm_shoulder_pan": 0.0}
-    validate_trajectory(
+    prepare_trajectory(
         ("arm_shoulder_pan",),
         [(1.5, (1.0,), (0.0,)), (4.0, (0.0,), (0.0,))],
         start,
     )
 
     with pytest.raises(ValueError, match="velocity limits"):
-        validate_trajectory(
+        prepare_trajectory(
             ("arm_shoulder_pan",), [(0.1, (1.0,), ())], start
         )
     with pytest.raises(ValueError, match="velocity exceeds"):
-        validate_trajectory(
+        prepare_trajectory(
             ("arm_shoulder_pan",), [(1.0, (1.0,), (2.1,))], start
         )
 
@@ -64,19 +62,13 @@ def test_trajectory_timing_and_reported_velocities_are_bounded():
 def test_trajectory_rejects_non_finite_positions_and_velocities(value):
     start = {"arm_shoulder_pan": 0.0}
     with pytest.raises(ValueError, match="finite"):
-        validate_trajectory(
+        prepare_trajectory(
             ("arm_shoulder_pan",), [(1.0, (value,), ())], start
         )
     with pytest.raises(ValueError, match="finite"):
-        validate_trajectory(
+        prepare_trajectory(
             ("arm_shoulder_pan",), [(1.0, (0.0,), (value,))], start
         )
-
-
-def test_interpolate_positions_reaches_waypoints_on_time():
-    points = [(1.0, {"arm_shoulder_pan": 1.0}), (2.0, {"arm_shoulder_pan": 0.0})]
-    assert interpolate_positions({"arm_shoulder_pan": 0.0}, points, 0.5) == {"arm_shoulder_pan": 0.5}
-    assert interpolate_positions({"arm_shoulder_pan": 0.0}, points, 1.5) == {"arm_shoulder_pan": 0.5}
 
 
 def test_supplied_derivatives_select_cubic_and_quintic_interpolation():

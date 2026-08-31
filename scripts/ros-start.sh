@@ -10,6 +10,8 @@
 set -Eeuo pipefail
 
 cd "$(dirname "$0")/.."
+# shellcheck source=/dev/null
+source scripts/runtime-common.sh
 # Leave a precise ownership record for ros-stop.sh. This remains valid across
 # exec because the launcher replaces this shell in the same PID; systemd and
 # up.sh may supply a tighter runtime directory explicitly.
@@ -31,12 +33,6 @@ scripts/rtabmap-db-maintenance.py "$@"
 # /dev/videoN shifts on every USB re-enumeration and on a laptop video0 is the built-in
 # webcam, so resolve the front camera by its device name -- same glob as robot-host.sh.
 # A workstation using a remote LeKiwi host has no local camera at all.
-first_match() { # first existing path matching a glob, empty if none
-  # shellcheck disable=SC2086 # Deliberately expand the caller-supplied glob.
-  set -- $1
-  [ -e "$1" ] && printf '%s' "$1"
-  return 0
-}
 camera_source=""
 for arg in "$@"; do
   case "$arg" in
@@ -46,13 +42,6 @@ for arg in "$@"; do
   esac
 done
 : "${camera_source:=local}"
-
-camera_calibration_valid() {
-  local calibration="${LEKIWI_CAMERA_INFO:-$HOME/.ros/camera_info/lekiwi_front.yaml}"
-  [ -s "$calibration" ] \
-    && grep -qE '^image_width:[[:space:]]*[1-9][0-9]*' "$calibration" \
-    && grep -A3 '^camera_matrix:' "$calibration" | grep -qE '^[[:space:]]*data:.*[1-9]'
-}
 
 # Geometry and odometry measurements are machine-local, not source-controlled. The
 # calibration tools write only numeric KEY=VALUE lines; reject anything malformed rather

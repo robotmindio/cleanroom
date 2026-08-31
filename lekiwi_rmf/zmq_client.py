@@ -28,8 +28,6 @@ class LeKiwiZmqClient:
         polling_timeout_ms: int = 15,
         connect_timeout_s: int = 5,
         command_timeout_ms: int = 100,
-        require_metadata: bool = True,
-        allow_insecure_test_connection: bool = False,
         zmq_module=None,
     ):
         if not isinstance(remote_ip, str) or not remote_ip.strip():
@@ -50,7 +48,6 @@ class LeKiwiZmqClient:
         ):
             raise ValueError("command_timeout_ms must be a positive integer")
         self.command_timeout_ms = command_timeout_ms
-        self.require_metadata = bool(require_metadata)
         self._provided_zmq = zmq_module
         self._zmq = None
         self.zmq_context = None
@@ -162,12 +159,7 @@ class LeKiwiZmqClient:
             accepted = accept_validated_telemetry(
                 self.telemetry_sequences, payload, self.state_keys
             )
-            if self.require_metadata and accepted.token[0] != "host":
-                raise ValueError("versioned telemetry metadata is required")
-            motor_health = (
-                parse_motor_health(payload.get(MOTOR_HEALTH_KEY))
-                if accepted.token[0] == "host" else None
-            )
+            motor_health = parse_motor_health(payload.get(MOTOR_HEALTH_KEY))
             state = {key: float(payload[key]) for key in self.state_keys}
         except (TypeError, ValueError, OverflowError):
             return self.last_remote_state

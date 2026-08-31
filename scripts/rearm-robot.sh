@@ -3,19 +3,13 @@
 set -Eeuo pipefail
 
 cd "$(dirname "$0")/.."
+# shellcheck source=/dev/null
+source scripts/runtime-common.sh
 # ROS's setup.bash reads unset variables, so disable nounset while sourcing it.
 set +u
 # shellcheck source=/dev/null
 source scripts/setup.bash
 set -u
-
-wait_for() { # wait_for <seconds> <command...>
-  local deadline=$((SECONDS + $1)); shift
-  until "$@" >/dev/null 2>&1; do
-    [ $SECONDS -lt $deadline ] || return 1
-    sleep 1
-  done
-}
 
 # ros2 service call has no built-in timeout and blocks forever if the driver
 # node is down. Fail loud within 30s instead -- that node's launch entry now

@@ -6,7 +6,6 @@ unit tests do not require the motor-host virtual environment.
 
 from __future__ import annotations
 
-import ipaddress
 import os
 import stat
 from dataclasses import dataclass
@@ -15,15 +14,6 @@ from pathlib import Path
 
 class CurveConfigurationError(ValueError):
     """CURVE key material is absent, incomplete, or unsafe to use."""
-
-
-def is_loopback_address(address: str) -> bool:
-    if isinstance(address, str) and address.strip().lower() in {"localhost", "ip6-localhost"}:
-        return True
-    try:
-        return ipaddress.ip_address(address.strip()).is_loopback
-    except ValueError:
-        return False
 
 
 def _existing_file(path: str, description: str, *, secret: bool = False) -> Path:
@@ -85,11 +75,8 @@ class CurveServerSecurity:
     def __init__(
         self,
         context,
-        bind_address: str,
         server_secret_key_file: str = "",
         authorized_clients_dir: str = "",
-        *,
-        allow_insecure_test_bind: bool = False,
     ):
         configured = bool(server_secret_key_file), bool(authorized_clients_dir)
         if any(configured) and not all(configured):

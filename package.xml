@@ -62,7 +62,6 @@
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>std_srvs</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
-  <exec_depend>tf2_msgs</exec_depend>
   <exec_depend>topic_tools</exec_depend>
   <exec_depend>xacro</exec_depend>
   <exec_depend>visualization_msgs</exec_depend>

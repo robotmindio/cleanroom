@@ -23,7 +23,8 @@ from visualization_msgs.msg import Marker
 
 from lekiwi_rmf.arm_trajectory import (
     ARM_JOINTS, action_positions, joint_positions, load_calibration,
-    position_tolerances, prepare_trajectory, sample_trajectory, validate_trajectory,
+    duration_seconds, position_tolerances, prepare_trajectory, sample_trajectory,
+    stamp_nanoseconds, trajectory_rows,
 )
 from lekiwi_rmf.odometry import (
     OdometrySampleClock, integrate_pose,
@@ -37,14 +38,12 @@ class LeKiwiDriver(Node):
     def __init__(self):
         super().__init__("lekiwi_driver")
         remote_ip = self.declare_parameter("remote_ip", "127.0.0.1").value
-        self.declare_parameter("robot_id", "lekiwi_1")  # Retained wire/config compatibility.
         command_port = self.declare_parameter("remote_command_port", 5555).value
         observation_port = self.declare_parameter("remote_observation_port", 5556).value
         torque_control_port = self.declare_parameter("torque_control_port", 5557).value
         torque_control_timeout_ms = self.declare_parameter("torque_control_timeout_ms", 1000).value
         curve_client_secret = self.declare_parameter("curve_client_secret_key_file", "").value
         curve_server_public = self.declare_parameter("curve_server_public_key_file", "").value
-        allow_legacy_telemetry = self.declare_parameter("allow_legacy_telemetry", False).value
         self.xy_scale = self.declare_parameter("xy_velocity_scale", 1.0).value
         self.yaw_scale = self.declare_parameter("yaw_velocity_scale", 1.0).value
         self.max_linear = self.declare_parameter("max_linear_speed", 0.3).value
@@ -106,7 +105,6 @@ class LeKiwiDriver(Node):
         self.robot = LeKiwiZmqClient(
             remote_ip, command_port, observation_port, state_keys,
             curve_credentials=curve_credentials,
-            require_metadata=not allow_legacy_telemetry,
         )
         self.robot.connect()
         self.torque = TorqueControlClient(
@@ -134,7 +132,6 @@ class LeKiwiDriver(Node):
         self.arm_motion_permitted = False
         self._base_permission_received_at_ns = None
         self._arm_permission_received_at_ns = None
-        self._base_permission_expired = False
         self._arm_permission_expired = False
         # Startup is allowed to arm only after a complete, fresh observation.  A link
         # loss or an explicit disarm clears this one-shot flag, so recovery can never
@@ -196,7 +193,6 @@ class LeKiwiDriver(Node):
         with self.state_lock:
             self.base_motion_permitted = permitted
             self._base_permission_received_at_ns = received_at_ns
-            self._base_permission_expired = not permitted
             if not permitted:
                 self.command = Twist()
                 self.command_stamp = self.get_clock().now()
@@ -280,9 +276,6 @@ class LeKiwiDriver(Node):
                     self.base_motion_permitted = False
                     self.command = Twist()
                     self.command_stamp = self.get_clock().now()
-                self._base_permission_expired = True
-            else:
-                self._base_permission_expired = False
 
             arm_current = self._permission_is_current(
                 getattr(self, "arm_motion_permitted", False),
@@ -561,20 +554,12 @@ class LeKiwiDriver(Node):
             )
             return GoalResponse.REJECT
         try:
-            points = [
-                (
-                    self.trajectory_time(point), point.positions, point.velocities,
-                    point.accelerations, point.effort,
-                )
-                for point in goal.trajectory.points
-            ]
+            points = trajectory_rows(goal.trajectory)
             with self.trajectory_lock:
                 start_positions = self.arm_positions.copy()
-            validate_trajectory(
-                goal.trajectory.joint_names, points, start_positions
-            )
+            prepare_trajectory(goal.trajectory.joint_names, points, start_positions)
             self.requested_tolerances(goal, goal.trajectory.joint_names)
-            self.trajectory_stamp_ns(goal.trajectory.header.stamp)
+            stamp_nanoseconds(goal.trajectory.header.stamp)
             if goal.multi_dof_trajectory.joint_names or goal.multi_dof_trajectory.points:
                 raise ValueError("multi-DOF trajectories are unsupported")
         except (IndexError, ValueError) as error:
@@ -584,17 +569,11 @@ class LeKiwiDriver(Node):
 
     def execute_trajectory(self, goal_handle):
         names = goal_handle.request.trajectory.joint_names
-        requested_points = [
-            (
-                self.trajectory_time(point), point.positions, point.velocities,
-                point.accelerations, point.effort,
-            )
-            for point in goal_handle.request.trajectory.points
-        ]
+        requested_points = trajectory_rows(goal_handle.request.trajectory)
         path_tolerances, goal_tolerances, goal_time_tolerance = self.requested_tolerances(
             goal_handle.request, names
         )
-        scheduled_ns = self.trajectory_stamp_ns(goal_handle.request.trajectory.header.stamp)
+        scheduled_ns = stamp_nanoseconds(goal_handle.request.trajectory.header.stamp)
         now_ns = self.get_clock().now().nanoseconds
         if scheduled_ns and scheduled_ns < now_ns - 100_000_000:
             goal_handle.abort()
@@ -672,7 +651,7 @@ class LeKiwiDriver(Node):
         path = position_tolerances(names, goal.path_tolerance, default_path)
         default_goal = dict.fromkeys(names, self.trajectory_tolerance)
         goal_tolerances = position_tolerances(names, goal.goal_tolerance, default_goal)
-        goal_time = self.duration_seconds(goal.goal_time_tolerance)
+        goal_time = duration_seconds(goal.goal_time_tolerance)
         return path, goal_tolerances, goal_time or self.trajectory_timeout
 
     def publish_trajectory_feedback(self, goal_handle, trajectory):
@@ -719,32 +698,6 @@ class LeKiwiDriver(Node):
             message.linear.x, message.linear.y, message.linear.z,
             message.angular.x, message.angular.y, message.angular.z,
         ))
-
-    @staticmethod
-    def trajectory_time(point):
-        seconds = point.time_from_start.sec
-        nanoseconds = point.time_from_start.nanosec
-        if seconds < 0 or not 0 <= nanoseconds < 1_000_000_000:
-            raise ValueError("trajectory time is malformed")
-        value = seconds + nanoseconds / 1e9
-        if not math.isfinite(value):
-            raise ValueError("trajectory time must be finite")
-        return value
-
-    @staticmethod
-    def duration_seconds(duration):
-        if duration.sec < 0 or not 0 <= duration.nanosec < 1_000_000_000:
-            raise ValueError("duration is malformed")
-        value = duration.sec + duration.nanosec / 1e9
-        if not math.isfinite(value):
-            raise ValueError("duration must be finite")
-        return value
-
-    @staticmethod
-    def trajectory_stamp_ns(stamp):
-        if stamp.sec < 0 or not 0 <= stamp.nanosec < 1_000_000_000:
-            raise ValueError("trajectory header timestamp is malformed")
-        return stamp.sec * 1_000_000_000 + stamp.nanosec
 
     def validate_motion_parameters(self):
         """Reject values that would make a command unsafe or undefined."""
@@ -821,7 +774,7 @@ class LeKiwiDriver(Node):
         """Keep logical arming synchronized with authenticated host readback."""
         reported = getattr(self.robot, "observation_torque_enabled", None)
         if reported is None:
-            # Explicit legacy compatibility has no physical-state field.
+            # No accepted telemetry has reported physical state yet.
             return False
         with self.state_lock:
             logical = self.armed

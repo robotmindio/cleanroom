@@ -30,15 +30,8 @@ class AcceptedTelemetry:
 
 
 def parse_telemetry_metadata(observation):
-    """Parse the repository protocol envelope, allowing legacy hosts.
-
-    A packet containing only part of the envelope is rejected rather than
-    silently downgraded to the legacy protocol.
-    """
-    present = tuple(key in observation for key in TELEMETRY_KEYS)
-    if not any(present):
-        return None
-    if not all(present):
+    """Parse the required repository protocol envelope."""
+    if any(key not in observation for key in TELEMETRY_KEYS):
         raise ValueError("incomplete LeKiwi telemetry metadata")
 
     protocol = observation[TELEMETRY_PROTOCOL_KEY]
@@ -70,7 +63,6 @@ class TelemetrySequenceTracker:
         self._session = None
         self._sequence = None
         self._sample_ns = None
-        self._legacy_sequence = 0
         # Returning to any earlier host identity is replay, not a restart. Keep
         # all identities for this client lifetime; if a broken/hostile peer
         # churns identities indefinitely, fail closed instead of evicting old
@@ -78,12 +70,7 @@ class TelemetrySequenceTracker:
         self._seen_sessions = set()
 
     def accept(self, observation):
-        metadata = parse_telemetry_metadata(observation)
-        if metadata is None:
-            self._legacy_sequence += 1
-            return AcceptedTelemetry(("legacy", self._legacy_sequence), None)
-
-        session, sequence, sample_ns, torque_enabled = metadata
+        session, sequence, sample_ns, torque_enabled = parse_telemetry_metadata(observation)
         session_changed = self._session is not None and session != self._session
         if session_changed and session in self._seen_sessions:
             raise ValueError("retired telemetry session was replayed")
@@ -135,7 +122,7 @@ class OdometrySampleClock:
 
     @staticmethod
     def _stream(token):
-        return token[:2] if token and token[0] == "host" else ("legacy",)
+        return token[:2]
 
     def accept(self, token, local_monotonic_ns, sample_monotonic_ns=None):
         self.discontinuity = None

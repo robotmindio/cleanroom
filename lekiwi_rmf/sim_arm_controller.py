@@ -25,38 +25,13 @@ from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
 from lekiwi_rmf.arm_trajectory import (
     ARM_JOINTS,
+    duration_seconds,
     position_tolerances,
     prepare_trajectory,
     sample_trajectory,
+    stamp_nanoseconds,
+    trajectory_rows,
 )
-
-
-def duration_seconds(duration) -> float:
-    if duration.sec < 0 or not 0 <= duration.nanosec < 1_000_000_000:
-        raise ValueError("duration is malformed")
-    value = float(duration.sec) + float(duration.nanosec) / 1e9
-    if not math.isfinite(value):
-        raise ValueError("duration must be finite")
-    return value
-
-
-def stamp_nanoseconds(stamp) -> int:
-    if stamp.sec < 0 or not 0 <= stamp.nanosec < 1_000_000_000:
-        raise ValueError("trajectory header timestamp is malformed")
-    return int(stamp.sec) * 1_000_000_000 + int(stamp.nanosec)
-
-
-def trajectory_rows(trajectory: JointTrajectory) -> list[tuple]:
-    return [
-        (
-            duration_seconds(point.time_from_start),
-            tuple(point.positions),
-            tuple(point.velocities),
-            tuple(point.accelerations),
-            tuple(point.effort),
-        )
-        for point in trajectory.points
-    ]
 
 
 def permission_is_fresh(

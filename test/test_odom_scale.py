@@ -108,3 +108,13 @@ def test_motion_utilities_publish_only_to_manual_source_topic():
     teleop = SCRIPT.parent / "teleop.py"
     assert 'create_publisher(Twist, "/cmd_vel_manual", 10)' in SCRIPT.read_text()
     assert 'create_publisher(Twist, "/cmd_vel_manual", 10)' in teleop.read_text()
+
+
+def test_launch_calibration_preserves_other_values(monkeypatch, tmp_path):
+    path = tmp_path / "launch.conf"
+    path.write_text("camera_height=0.200000\n")
+    monkeypatch.setenv("LEKIWI_LAUNCH_CALIBRATION", str(path))
+
+    odom_scale.save_launch_calibration("xy_velocity_scale", 1.25)
+
+    assert path.read_text() == "camera_height=0.200000\nxy_velocity_scale=1.250000\n"

@@ -1,7 +1,6 @@
 """Unit checks for the physical-torque request/reply contract."""
 
 import pathlib
-import types
 
 import pytest
 
@@ -85,14 +84,6 @@ def test_client_rejects_a_missing_or_wrong_confirmation():
 
 def test_torque_client_supports_an_unauthenticated_remote_host():
     client = TorqueControlClient("192.0.2.10", zmq_module=_Zmq({}))
-    assert client.host == "192.0.2.10"
-
-
-def test_torque_client_allows_an_explicit_insecure_test_fixture():
-    client = TorqueControlClient(
-        "192.0.2.10", zmq_module=_Zmq({}),
-        allow_insecure_test_connection=True,
-    )
     assert client.host == "192.0.2.10"
 
 

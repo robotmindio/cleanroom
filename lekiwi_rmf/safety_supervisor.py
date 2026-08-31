@@ -74,7 +74,6 @@ class SafetyStateMachine:
     arm_stowed: bool = False
     fault_latched: bool = False
     estop_latched: bool = False
-    ever_ready: bool = False
     base_ever_ready: bool = False
     arm_ever_ready: bool = False
 
@@ -138,7 +137,6 @@ class SafetyStateMachine:
 
         self.base_ever_ready = self.base_ever_ready or base_ready
         self.arm_ever_ready = self.arm_ever_ready or arm_ready
-        self.ever_ready = self.base_ever_ready or self.arm_ever_ready
         armed = self.driver_state == "ARMED"
         base_permitted = armed and base_ready and self.arm_stowed
         arm_permitted = armed and arm_ready
@@ -165,7 +163,6 @@ class SafetyStateMachine:
             return False, "; ".join(faults)
         self.fault_latched = False
         self.estop_latched = False
-        self.ever_ready = True
         self.base_ever_ready = True
         self.arm_ever_ready = True
         return True, "safety fault reset; robot remains disarmed"

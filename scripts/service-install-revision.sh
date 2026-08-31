@@ -7,12 +7,13 @@ service_fingerprint() {
   case $role in
     compute)
       sources=(systemd/lekiwi-stack.service scripts/service-install-common.sh \
-        scripts/install-deploy-sudoers.sh)
+        scripts/runtime-common.sh scripts/install-deploy-sudoers.sh)
       ;;
     device)
       sources=(systemd/lekiwi-host.service systemd/lekiwi-cameras.service \
         systemd/lekiwi-lidar.service scripts/ros-lidar.sh \
-        scripts/service-install-common.sh scripts/install-deploy-sudoers.sh)
+        scripts/service-install-common.sh scripts/runtime-common.sh \
+        scripts/install-deploy-sudoers.sh)
       ;;
     *) die "service fingerprint role must be compute or device" ;;
   esac

@@ -20,7 +20,7 @@ _NODE.body = [
         "handle_host_session_change",
         "enforce_reported_torque_state",
         "arm_after_startup_telemetry", "on_command", "publish_safety", "publish_state", "publish_motor_health",
-        "set_disarmed", "set_servo_torque", "trajectory_time",
+        "set_disarmed", "set_servo_torque",
         "_permission_is_fresh", "_permission_is_current",
         "_capability_permission_is_current", "enforce_permission_leases",
         "on_base_permission", "on_arm_permission",
@@ -92,7 +92,6 @@ def test_arm_permission_lease_expiry_disarms_and_base_expiry_zeros_command():
     node._arm_permission_received_at_ns = 1_000
     node._base_permission_received_at_ns = 1_000
     node._arm_permission_expired = False
-    node._base_permission_expired = False
     node.command = object()
     node.get_clock = lambda: types.SimpleNamespace(now=lambda: object())
     node.get_logger = lambda: types.SimpleNamespace(error=lambda *_: None)
@@ -175,7 +174,6 @@ def test_base_permission_lease_expiry_does_not_require_arm_disarm():
     node._arm_permission_received_at_ns = 1_050
     node._base_permission_received_at_ns = 1_000
     node._arm_permission_expired = False
-    node._base_permission_expired = False
     node.command = object()
     node.get_clock = lambda: types.SimpleNamespace(now=lambda: object())
     disarms = []

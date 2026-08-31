@@ -9,6 +9,8 @@ set -Eeuo pipefail
 }
 
 cd "$(dirname "$0")/.."
+# shellcheck source=/dev/null
+source scripts/runtime-common.sh
 PI_IP=$1
 shift
 LOGS="${LEKIWI_LOGS:-$HOME/.ros/lekiwi}"
@@ -19,14 +21,6 @@ if ! flock -n 9; then
   echo "$0: startup is already in progress" >&2
   exit 0
 fi
-
-wait_for() { # wait_for <seconds> <command...>
-  local deadline=$((SECONDS + $1)); shift
-  until "$@" >/dev/null 2>&1; do
-    [ "$SECONDS" -lt "$deadline" ] || return 1
-    sleep 1
-  done
-}
 
 if pgrep -f 'ros2 launch lekiwi_rmf' >/dev/null; then
   echo "$0: a ROS stack is already running -- scripts/ros-stop.sh first" >&2

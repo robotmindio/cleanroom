@@ -53,12 +53,13 @@ def test_authenticated_telemetry_carries_boolean_physical_torque_state():
         tracker.accept(metadata(session="invalid", torque=1))
 
 
-def test_partial_or_malformed_metadata_is_never_treated_as_legacy():
+def test_missing_partial_or_malformed_metadata_is_rejected():
     with pytest.raises(ValueError, match="incomplete"):
         parse_telemetry_metadata({TELEMETRY_SESSION_KEY: "boot-a"})
     with pytest.raises(ValueError, match="sequence"):
         parse_telemetry_metadata(metadata(sequence=True))
-    assert parse_telemetry_metadata({"x.vel": 0.0}) is None
+    with pytest.raises(ValueError, match="incomplete"):
+        parse_telemetry_metadata({"x.vel": 0.0})
 
 
 def test_invalid_state_does_not_consume_a_freshness_sequence():
@@ -70,12 +71,6 @@ def test_invalid_state_does_not_consume_a_freshness_sequence():
     packet["x.vel"] = 0.0
     accepted = accept_validated_telemetry(tracker, packet, ("x.vel",))
     assert accepted.token == ("host", "boot-a", 0)
-
-
-def test_legacy_decoded_packets_remain_backward_compatible():
-    tracker = TelemetrySequenceTracker()
-    assert tracker.accept({"x.vel": 0.0}).token == ("legacy", 1)
-    assert tracker.accept({"x.vel": 0.0}).token == ("legacy", 2)
 
 
 def test_odometry_uses_accepted_sample_time_not_timer_frequency():

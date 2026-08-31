@@ -21,6 +21,8 @@ set -Eeuo pipefail
 
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 UNIT_DIR=/etc/systemd/system
+# shellcheck source=/dev/null
+source "$PROJECT_ROOT/scripts/runtime-common.sh"
 
 log() { printf '\n==> %s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
@@ -109,13 +111,6 @@ if ! (
 ) ; then
   die "ldlidar_stl_ros2 is unavailable; the standard device installation requires the LD06 driver"
 fi
-
-first_match() { # first existing path matching a glob, empty if none
-  # shellcheck disable=SC2086 # Deliberately expand the caller-supplied glob.
-  set -- $1
-  [ -e "$1" ] && printf '%s' "$1"
-  return 0
-}
 
 log "Installing lekiwi-host.service"
 install_unit lekiwi-host.service
