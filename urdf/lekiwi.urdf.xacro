@@ -15,8 +15,31 @@
   <!-- The physical wrist cable and servo have a bounded safe travel envelope.
        Declaring it continuous makes MoveIt discard the configured bounds. -->
   <xacro:property name="roll_joint" value="revolute"/>
-  <!-- Vendored from robotmindio/LeKiwi at efa608d; see urdf/README.md. -->
+  <!-- Vendored from robotmindio/LeKiwi; see urdf/README.md. -->
   <xacro:include filename="lekiwi_cad.urdf"/>
+
+  <!-- The RobotSkin mount and LD06 body are repository-owned integration
+       geometry, not part of the upstream LeKiwi CAD export. -->
+  <link name="robotskin_lidar_mount">
+    <visual name="robotskin_lidar_mount_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="package://lekiwi_rmf/urdf/meshes/robotskin_lidar_mount.stl" scale="0.001 0.001 0.001"/></geometry>
+    </visual>
+  </link>
+  <link name="ld06_body">
+    <visual name="ld06_body_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="package://lekiwi_rmf/urdf/meshes/ld06_body.stl" scale="0.001 0.001 0.001"/></geometry>
+    </visual>
+  </link>
+  <joint name="robotskin_lidar_mount_joint" type="fixed">
+    <origin xyz="0.05 0.095 0" rpy="0 0 0"/>
+    <parent link="base_plate_layer1-v5"/><child link="robotskin_lidar_mount"/>
+  </joint>
+  <joint name="ld06_body_mount" type="fixed">
+    <origin xyz="0.02 -0.005 0.012" rpy="0 0 0"/>
+    <parent link="robotskin_lidar_mount"/><child link="ld06_body"/>
+  </joint>
 
   <!-- CAD's root is the lower base plate. Its +Y is the physical forward
        direction, so yaw -90 degrees aligns it with REP-103 +X forward. -->

@@ -17,6 +17,8 @@ from sensor_msgs.msg import LaserScan
 from std_msgs.msg import Bool, String
 from std_srvs.srv import Trigger
 
+from ros_test_utils import spin_until
+
 
 @pytest.mark.rostest
 def generate_test_description():
@@ -95,14 +97,6 @@ class TestSafetySupervisorGraph(unittest.TestCase):
     def tearDown(self):
         self.node.destroy_node()
 
-    def _until(self, predicate, timeout: float = 4.0) -> bool:
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            rclpy.spin_once(self.node, timeout_sec=0.04)
-            if predicate():
-                return True
-        return False
-
     def _publish_until(self, driver_state: str, predicate, timeout: float = 4.0) -> bool:
         """Survive normal best-effort discovery loss while reaching a test state."""
         deadline = time.monotonic() + timeout
@@ -134,16 +128,18 @@ class TestSafetySupervisorGraph(unittest.TestCase):
     def _reset(self):
         self.assertTrue(self.reset.wait_for_service(timeout_sec=2.0))
         future = self.reset.call_async(Trigger.Request())
-        self.assertTrue(self._until(future.done, timeout=2.0))
+        self.assertTrue(spin_until(self.node, future.done, timeout=2.0, period=0.04))
         return future.result()
 
     def test_stale_input_withdraws_permission_and_latches(self):
-        self.assertTrue(self._until(
+        self.assertTrue(spin_until(
+            self.node,
             lambda: self.driver.get_subscription_count() == 1
             and self.scan.get_subscription_count() == 1
             and bool(self.states)
             and bool(self.base)
-            and bool(self.arm)
+            and bool(self.arm),
+            period=0.04,
         ))
         self.assertEqual(self.states[-1], "BOOT")
         self.assertFalse(self.base[-1])
@@ -165,12 +161,14 @@ class TestSafetySupervisorGraph(unittest.TestCase):
             and self.states[-1] == "ARMED" and self.base[-1] and self.arm[-1],
         ))
 
-        self.assertTrue(self._until(
+        self.assertTrue(spin_until(
+            self.node,
             lambda: bool(self.states) and bool(self.arm) and bool(self.base)
             and self.states[-1] == "FAULT_LATCHED"
             and not self.base[-1]
             and not self.arm[-1],
             timeout=2.0,
+            period=0.04,
         ))
 
         self._driver("DISARMED")
@@ -179,9 +177,11 @@ class TestSafetySupervisorGraph(unittest.TestCase):
         self.assertEqual(self.states[-1], "FAULT_LATCHED")
         result = self._reset()
         self.assertTrue(result.success, result.message)
-        self.assertTrue(self._until(
+        self.assertTrue(spin_until(
+            self.node,
             lambda: bool(self.states) and bool(self.arm) and bool(self.base)
-            and self.states[-1] == "READY" and self.arm[-1] and self.base[-1]
+            and self.states[-1] == "READY" and self.arm[-1] and self.base[-1],
+            period=0.04,
         ))
 
 

@@ -30,18 +30,6 @@ if ! flock -n 9; then
   exit 0
 fi
 
-# A listening TCP port alone is not enough: a stale or unrelated process can bind it,
-# leaving the ROS driver to discover much later that no LeRobot host is available.
-# More importantly, never adopt a manually launched host just because a broad pgrep
-# happens to find one: it may belong to another robot sharing this workstation.
-host_port_listening() {
-  ss -tln | grep -q ':5555' && ss -tln | grep -q ':5557'
-}
-
-motion_port_listening() {
-  ss -tln | grep -q ':5555'
-}
-
 recorded_host_up() {
   local host_pid host_command
   [ -r "$RUNTIME_DIR/host.pid" ] || return 1
@@ -50,13 +38,13 @@ recorded_host_up() {
   [ -r "/proc/$host_pid/cmdline" ] || return 1
   host_command=$(tr '\0' ' ' < "/proc/$host_pid/cmdline")
   [[ $host_command == *"robot-host.sh"* || $host_command == *"torque-host.py"* || $host_command == *"lerobot.robots.lekiwi.lekiwi_host"* ]] \
-    && host_port_listening
+    && lekiwi_safety_ports_listening
 }
 
 service_host_up() {
   command -v systemctl >/dev/null 2>&1 \
     && systemctl is-active --quiet lekiwi-host.service \
-    && host_port_listening
+    && lekiwi_safety_ports_listening
 }
 
 host_up() {
@@ -122,7 +110,7 @@ stop_stack_started_here() {
 # recorded process group or to the repository-managed systemd service.
 if host_up; then
   echo "host: already running"
-elif motion_port_listening; then
+elif lekiwi_motion_port_listening; then
   echo "host on TCP 5555 lacks the required torque-safety endpoint on TCP 5557" >&2
   echo "restart it from this repository (or restart lekiwi-host.service) before launching ROS." >&2
   exit 1

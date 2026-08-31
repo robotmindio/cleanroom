@@ -5,9 +5,6 @@
 set -Eeuo pipefail
 
 LEROBOT_VERSION=0.6.1
-# LDROBOT LD06 driver revision and local Jazzy build patch. Keep this aligned
-# with scripts/install.sh so the device service has the same serial driver.
-LIDLIDAR_STL_REV=cac5d3d4c15522c6126ef65cfa8a65b08531a66b
 VENV=${LEKIWI_LEROBOT_VENV:-"$HOME/lerobot-venv"}
 EXAMPLES=${LEKIWI_LEROBOT_SRC:-"$HOME/lerobot-src"}
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
@@ -16,6 +13,8 @@ WORKSPACE=${LEKIWI_WS:-"$HOME/lekiwi_ws"}
 log() { printf '\n==> %s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 trap 'printf "error: installer failed at line %s\n" "$LINENO" >&2' ERR
+# shellcheck source=/dev/null
+source "$PROJECT_ROOT/scripts/thirdparty-common.sh"
 
 if [[ ${1:-} == --help ]]; then
   printf 'Usage: [LEKIWI_LEROBOT_VENV=/path] %s\n' "$0"
@@ -104,6 +103,7 @@ log "Installing the ROS camera stack"
 # ROS 2 ships binaries for Ubuntu noble/Jazzy only;
 # Raspberry Pi OS has no ROS packages, so any other image gets the LeRobot host and
 # nothing else. Must match the workstation's distro -- see scripts/install.sh.
+# shellcheck disable=SC1091 # Runtime OS metadata is intentionally host-provided.
 codename=$(. /etc/os-release && echo "${VERSION_CODENAME:-}")
 case $codename in
   noble) pi_ros_distro=jazzy ;;
@@ -146,20 +146,8 @@ http://packages.ros.org/ros2/ubuntu $codename main" |
   lidar_source="$WORKSPACE/src/ldlidar_stl_ros2"
   lidar_patch="$PROJECT_ROOT/thirdparty/ldlidar_stl_ros2/0001-linux-build-fixes.patch"
   mkdir -p "$WORKSPACE/src"
-  if [[ ! -d $lidar_source/.git ]]; then
-    git clone --filter=blob:none https://github.com/ldrobotSensorTeam/ldlidar_stl_ros2.git "$lidar_source"
-  elif [[ -n $(git -C "$lidar_source" status --porcelain) ]]; then
-    if git -C "$lidar_source" apply --reverse --check "$lidar_patch" 2>/dev/null; then
-      git -C "$lidar_source" apply --reverse "$lidar_patch"
-    else
-      die "$lidar_source has local changes; preserve them before rerunning"
-    fi
-  fi
-  git -C "$lidar_source" fetch --depth 1 origin "$LIDLIDAR_STL_REV"
-  git -C "$lidar_source" checkout --detach FETCH_HEAD
-  git -C "$lidar_source" apply --check "$lidar_patch" || \
-    die "could not apply the LD06 Linux build fixes"
-  git -C "$lidar_source" apply "$lidar_patch"
+  checkout_pinned "$LDLIDAR_STL_REPOSITORY" "$lidar_source" "$LDLIDAR_STL_REV" "$lidar_patch"
+  apply_pinned_patch "$lidar_source" "$lidar_patch" "the LD06 Linux build fixes"
   set +u
   # shellcheck source=/dev/null
   source /opt/ros/jazzy/setup.bash

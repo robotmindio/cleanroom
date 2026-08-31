@@ -10,6 +10,7 @@ from nav_msgs.msg import OccupancyGrid, Odometry
 from sensor_msgs.msg import Image
 
 from lekiwi_rmf.readiness_gate import ReadinessGate, TOPIC_TYPES, topic_qos
+from lekiwi_rmf.sim_topics import WHEEL_COMMAND_TOPICS
 
 
 ROOT = pathlib.Path(__file__).parents[1]
@@ -117,8 +118,8 @@ def test_simulation_base_controller_consumes_only_the_guarded_velocity_topic():
     controller = (ROOT / "lekiwi_rmf" / "sim_omni_controller.py").read_text()
     assert '"/cmd_vel_safe"' in controller
     assert '"/cmd_vel"' not in controller
-    assert "/sim/sim_base_left_wheel/cmd_vel" in source
-    assert 'package="topic_tools"' not in source
+    assert "SIM_ACTUATOR_BRIDGE_ARGUMENTS" in source
+    assert WHEEL_COMMAND_TOPICS[0] == "/sim/sim_base_left_wheel/cmd_vel"
 
 
 def test_simulation_uses_a_database_separate_from_the_real_robot():

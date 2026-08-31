@@ -100,6 +100,8 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_zmq_security test/test_zmq_security.py ENV "${test_pythonpath};ROS_DOMAIN_ID=201")
   ament_add_pytest_test(test_simulation_model test/test_simulation_model.py
     ENV "${test_pythonpath};ROS_DOMAIN_ID=203")
+  ament_add_pytest_test(test_vendor_lekiwi_cad test/test_vendor_lekiwi_cad.py
+    ENV "${test_pythonpath};ROS_DOMAIN_ID=217")
   ament_add_pytest_test(test_service_installation test/test_service_installation.py
     ENV "${test_pythonpath};ROS_DOMAIN_ID=200")
   add_launch_test(test/test_cmd_vel_mux_launch.py

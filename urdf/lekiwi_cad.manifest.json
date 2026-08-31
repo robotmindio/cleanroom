@@ -1,0 +1,13 @@
+{
+  "meshes": {
+    "count": 45,
+    "sha256": "2d730e98352b17187340215e076926497079234a4eb24f2628926a97660b1fce"
+  },
+  "schema_version": 1,
+  "snapshot_sha256": "fb4e6a1f5fb763c489b248e16abefbe0349265b85577a1a79c1deb93fb5f06fd",
+  "source": {
+    "repository": "https://github.com/robotmindio/LeKiwi.git",
+    "revision": "0cc9afa7eabf10f3a7ea0ec5f78929498efca1e4",
+    "urdf_sha256": "36e102375e1e6ffdc1ca2d343c7406284b3cabc77ae16bfc001a3da89fddc6e1"
+  }
+}

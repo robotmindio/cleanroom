@@ -19,6 +19,13 @@ source "$1/scripts/runtime-common.sh"
 [[ $(first_match "$2") == "$2" ]]
 camera_calibration_valid "$3"
 wait_for 1 test -s "$3"
+ss() { printf '%s\n' "$FAKE_LISTENERS"; }
+FAKE_LISTENERS=$'LISTEN 0 1 127.0.0.1:5555\nLISTEN 0 1 127.0.0.1:5557'
+lekiwi_motion_port_listening
+lekiwi_safety_ports_listening
+FAKE_LISTENERS='LISTEN 0 1 127.0.0.1:5555'
+lekiwi_motion_port_listening
+! lekiwi_safety_ports_listening
 '''
     subprocess.run(
         ["bash", "-c", script, "runtime-test", str(ROOT), str(ROOT / "README.md"), str(calibration)],
@@ -131,11 +138,24 @@ def test_full_installer_includes_qualification_tooling_dependencies():
 
 def test_installer_reapplies_the_pinned_free_fleet_patch_on_rerun():
     installer = (ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
+    common = (ROOT / "scripts" / "thirdparty-common.sh").read_text(encoding="utf-8")
     patch = ROOT / "thirdparty" / "free_fleet" / "0001-retry-nav2-goal-during-activation.patch"
 
     assert patch.is_file()
+    assert 'source "$PROJECT_ROOT/scripts/thirdparty-common.sh"' in installer
+    assert "checkout_pinned()" in common
+    assert "apply_pinned_patch()" in common
     assert 'apply_pinned_patch "$free_fleet_source" "$free_fleet_patch"' in installer
     assert '"$free_fleet_source" "$FREE_FLEET_REV" "$free_fleet_patch"' in installer
+
+
+def test_pi_and_workstation_share_the_pinned_ld06_checkout():
+    pi_installer = (ROOT / "scripts" / "install-pi.sh").read_text(encoding="utf-8")
+    common = (ROOT / "scripts" / "thirdparty-common.sh").read_text(encoding="utf-8")
+
+    assert 'source "$PROJECT_ROOT/scripts/thirdparty-common.sh"' in pi_installer
+    assert "LDLIDAR_STL_REV=" in common
+    assert 'checkout_pinned "$LDLIDAR_STL_REPOSITORY" "$lidar_source"' in pi_installer
 
 
 def test_simulation_installer_excludes_astra_hardware_setup():

@@ -15,6 +15,14 @@ wait_for() { # wait_for <seconds> <command...>
   done
 }
 
+lekiwi_motion_port_listening() {
+  ss -tln 2>/dev/null | grep -q ':5555'
+}
+
+lekiwi_safety_ports_listening() {
+  lekiwi_motion_port_listening && ss -tln 2>/dev/null | grep -q ':5557'
+}
+
 camera_calibration_valid() {
   local file="${1:-${LEKIWI_CAMERA_INFO:-$HOME/.ros/camera_info/lekiwi_front.yaml}}"
   [ -s "$file" ] \

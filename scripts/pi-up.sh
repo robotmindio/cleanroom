@@ -16,8 +16,6 @@ if ! flock -n 9; then
   exit 0
 fi
 
-host_up() { ss -tln | grep -q ':5555' && ss -tln | grep -q ':5557'; }
-motion_host_up() { ss -tln | grep -q ':5555'; }
 cameras_up() { pgrep -f '[v]4l2_camera_node' >/dev/null; }
 lidar_up() {
   systemctl is-active --quiet lekiwi-lidar.service 2>/dev/null ||
@@ -26,14 +24,14 @@ lidar_up() {
 
 # Motors and cameras are separate processes on purpose: one reader per USB
 # device, and a stalled camera frame must never abort the motor host.
-if host_up; then
+if lekiwi_safety_ports_listening; then
   echo "host: already running"
-elif motion_host_up; then
+elif lekiwi_motion_port_listening; then
   echo "host on TCP 5555 lacks torque safety on TCP 5557; restart it from this repository first" >&2
   exit 1
 else
   setsid scripts/robot-host.sh --no-cameras >"$LOGS/host.log" 2>&1 &
-  wait_for 90 host_up || {
+  wait_for 90 lekiwi_safety_ports_listening || {
     echo "host did not come up -- see $LOGS/host.log" >&2
     tail -5 "$LOGS/host.log" >&2
     exit 1
