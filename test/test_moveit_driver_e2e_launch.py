@@ -27,7 +27,6 @@ pytest.importorskip("zmq")
 
 import rclpy
 from action_msgs.msg import GoalStatus
-from moveit_configs_utils import MoveItConfigsBuilder
 from moveit_msgs.action import MoveGroup
 from moveit_msgs.msg import AllowedCollisionEntry, Constraints, JointConstraint, MoveItErrorCodes
 from moveit_msgs.srv import ApplyPlanningScene
@@ -39,6 +38,8 @@ from std_srvs.srv import Trigger
 
 from lekiwi_rmf.arm_trajectory import ARM_JOINTS
 from lekiwi_rmf.fake_host import FakeLeKiwiHost
+from lekiwi_rmf.moveit_config import moveit_config_builder
+from ros_test_utils import spin_until
 
 
 # At the deterministic fake pose below (pan/roll/gripper=0, lift=-55°, elbow=85°,
@@ -117,16 +118,7 @@ def generate_test_description():
     # This is the repository MoveIt configuration, except that perception is
     # omitted solely for this isolated test.  The local test image intentionally
     # lacks moveit_ros_perception; the production launch retains sensors_3d.
-    moveit_config = (
-        MoveItConfigsBuilder("lekiwi", package_name="lekiwi_rmf")
-        .robot_description(file_path="urdf/lekiwi.urdf.xacro", mappings={"sim": "false"})
-        .robot_description_semantic(file_path="config/lekiwi.srdf")
-        .robot_description_kinematics(file_path="config/kinematics.yaml")
-        .joint_limits(file_path="config/joint_limits.yaml")
-        .trajectory_execution(file_path="config/moveit_controllers.yaml")
-        .planning_pipelines(pipelines=["ompl"])
-        .to_moveit_configs()
-    )
+    moveit_config = moveit_config_builder("false").to_moveit_configs()
     moveit_parameters = moveit_config.to_dict()
     robot_links = tuple(
         link.attrib["name"] for link in ET.fromstring(moveit_parameters["robot_description"])
@@ -208,14 +200,6 @@ class TestMoveItDriverEndToEnd(unittest.TestCase):
         permission.data = True
         self.arm_permission.publish(permission)
 
-    def _until(self, predicate, timeout: float = 10.0) -> bool:
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            rclpy.spin_once(self.node, timeout_sec=0.05)
-            if predicate():
-                return True
-        return False
-
     def _spin_for(self, duration: float) -> None:
         deadline = time.monotonic() + duration
         while time.monotonic() < deadline:
@@ -227,7 +211,7 @@ class TestMoveItDriverEndToEnd(unittest.TestCase):
         # once the service call has succeeded.
         self._publish_permission()
         future = self.arm_client.call_async(Trigger.Request())
-        self.assertTrue(self._until(future.done, timeout=10.0))
+        self.assertTrue(spin_until(self.node, future.done, timeout=10.0))
         self.assertTrue(future.result().success, future.result().message)
 
     def _allow_test_only_self_collisions(self, robot_links):
@@ -248,16 +232,16 @@ class TestMoveItDriverEndToEnd(unittest.TestCase):
             for first in involved_links
         ]
         future = self.apply_scene.call_async(request)
-        self.assertTrue(self._until(future.done, timeout=10.0))
+        self.assertTrue(spin_until(self.node, future.done, timeout=10.0))
         self.assertTrue(future.result().success)
 
     def test_move_group_executes_joint_space_motion(self, fake_host, robot_links, success):
-        self.assertTrue(self._until(
+        self.assertTrue(spin_until(self.node,
             lambda: bool(self.joint_states)
             and self.arm_permission.get_subscription_count() == 1,
             timeout=15.0,
         ))
-        self.assertTrue(self._until(self.move_group.server_is_ready, timeout=15.0))
+        self.assertTrue(spin_until(self.node, self.move_group.server_is_ready, timeout=15.0))
         # The CAD-backed collision envelopes conservatively overlap in every
         # deterministic fake feedback pose.  Make only this test graph's
         # planning scene permissive so it exercises plan-to-controller
@@ -300,24 +284,24 @@ class TestMoveItDriverEndToEnd(unittest.TestCase):
         goal.planning_options.replan = False
 
         goal_future = self.move_group.send_goal_async(goal)
-        self.assertTrue(self._until(goal_future.done, timeout=15.0))
+        self.assertTrue(spin_until(self.node, goal_future.done, timeout=15.0))
         goal_handle = goal_future.result()
         self.assertTrue(goal_handle.accepted, "move_group rejected the plan-and-execute goal")
         result_future = goal_handle.get_result_async()
-        self.assertTrue(self._until(result_future.done, timeout=30.0))
+        self.assertTrue(spin_until(self.node, result_future.done, timeout=30.0))
         result = result_future.result()
         self.assertEqual(result.status, GoalStatus.STATUS_SUCCEEDED)
         self.assertEqual(result.result.error_code.val, MoveItErrorCodes.SUCCESS)
 
         target_degrees = math.degrees(0.12)
-        self.assertTrue(self._until(
+        self.assertTrue(spin_until(self.node,
             lambda: any(
                 action.get("arm_shoulder_pan.pos", 0.0) == pytest.approx(target_degrees, abs=1.0)
                 for action in fake_host.actions
             ),
             timeout=10.0,
         ))
-        self.assertTrue(self._until(
+        self.assertTrue(spin_until(self.node,
             lambda: any(
                 "arm_shoulder_pan" in state.name
                 and state.position[state.name.index("arm_shoulder_pan")] == pytest.approx(0.12, abs=0.03)

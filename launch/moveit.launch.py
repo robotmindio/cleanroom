@@ -3,19 +3,14 @@ from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
-from moveit_configs_utils import MoveItConfigsBuilder
+
+from lekiwi_rmf.moveit_config import moveit_config_builder
 
 
 def generate_launch_description():
     sim = LaunchConfiguration("sim")
     config = (
-        MoveItConfigsBuilder("lekiwi", package_name="lekiwi_rmf")
-        .robot_description(file_path="urdf/lekiwi.urdf.xacro", mappings={"sim": sim})
-        .robot_description_semantic(file_path="config/lekiwi.srdf")
-        .robot_description_kinematics(file_path="config/kinematics.yaml")
-        .joint_limits(file_path="config/joint_limits.yaml")
-        .trajectory_execution(file_path="config/moveit_controllers.yaml")
-        .planning_pipelines(pipelines=["ompl"])
+        moveit_config_builder(sim)
         .sensors_3d(file_path="config/moveit_sensors.yaml")
         .to_moveit_configs()
     )

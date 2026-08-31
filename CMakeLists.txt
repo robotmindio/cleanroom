@@ -53,7 +53,7 @@ if(BUILD_TESTING)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
   # Test the package under construction, not a similarly named package sourced
   # from another overlay workspace.
-  set(test_pythonpath "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}:$ENV{PYTHONPATH}")
+  set(test_pythonpath "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/test:${CMAKE_CURRENT_SOURCE_DIR}:$ENV{PYTHONPATH}")
   set(test_ament_prefix_path
     "AMENT_PREFIX_PATH=${CMAKE_INSTALL_PREFIX}:$ENV{AMENT_PREFIX_PATH}")
   set(test_launch_environment "${test_pythonpath};${test_ament_prefix_path}")

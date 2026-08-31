@@ -20,6 +20,8 @@ import rclpy
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from std_msgs.msg import Bool
 
+from ros_test_utils import spin_until
+
 
 @pytest.mark.rostest
 def generate_test_description():
@@ -69,14 +71,6 @@ class TestCmdVelMuxInterlock(unittest.TestCase):
     def tearDown(self):
         self.node.destroy_node()
 
-    def _until(self, predicate, timeout: float = 5.0) -> bool:
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            rclpy.spin_once(self.node, timeout_sec=0.05)
-            if predicate():
-                return True
-        return False
-
     def _publish_permission(self, allowed: bool) -> None:
         message = Bool()
         message.data = allowed
@@ -88,7 +82,7 @@ class TestCmdVelMuxInterlock(unittest.TestCase):
         self.navigation.publish(message)
 
     def test_permission_is_a_live_default_deny_interlock(self):
-        self.assertTrue(self._until(
+        self.assertTrue(spin_until(self.node,
             lambda: self.permission.get_subscription_count() == 1
             and self.navigation.get_subscription_count() == 1
             and self.node.count_publishers("/test/cmd_vel_muxed") == 1
@@ -99,13 +93,13 @@ class TestCmdVelMuxInterlock(unittest.TestCase):
             self._publish_navigation(0.2)
             time.sleep(0.03)
             rclpy.spin_once(self.node, timeout_sec=0.05)
-        self.assertTrue(self._until(lambda: bool(self.received)))
+        self.assertTrue(spin_until(self.node, lambda: bool(self.received)))
         self.assertTrue(all(message.linear.x == 0.0 for message in self.received))
 
         self.received.clear()
         self._publish_permission(True)
-        self.assertTrue(self._until(lambda: self.permission.get_subscription_count() == 1))
-        self.assertTrue(self._until(
+        self.assertTrue(spin_until(self.node, lambda: self.permission.get_subscription_count() == 1))
+        self.assertTrue(spin_until(self.node,
             lambda: self._publish_navigation(0.2) is None
             and any(message.linear.x == 0.2 for message in self.received)
         ))
@@ -113,13 +107,13 @@ class TestCmdVelMuxInterlock(unittest.TestCase):
         # A latched true value is not an unbounded authorization.  Stop
         # refreshing it and verify that the live mux expires to zero.
         self.received.clear()
-        self.assertTrue(self._until(
+        self.assertTrue(spin_until(self.node,
             lambda: any(message.linear.x == 0.0 for message in self.received),
             timeout=2.0,
         ))
 
         self.received.clear()
         self._publish_permission(False)
-        self.assertTrue(self._until(
+        self.assertTrue(spin_until(self.node,
             lambda: any(message.linear.x == 0.0 for message in self.received)
         ))
