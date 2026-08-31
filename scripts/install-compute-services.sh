@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Install the compute-side boot service (lekiwi-stack.service): the ROS
-# bringup -- Nav2, RTAB-Map, RMF, rosbridge -- wherever it should run. The
+# bringup -- Nav2, RTAB-Map, MoveIt, RMF, rosbridge -- wherever it should run. The
 # robot's own computer and a separate desk machine are both fine, and the
 # device half (motors + cameras) can sit on either one.
 #
@@ -88,7 +88,7 @@ if [[ -n $REMOTE ]]; then
     log "warning: device services are also installed on this machine -- an"
     log "unusual split. If the devices are actually here, drop --remote."
   fi
-  STACK_ARGS="camera_source:=remote remote_ip:=$REMOTE laser_source:=ld06 lidar_source:=remote"
+  STACK_ARGS="camera_source:=remote remote_ip:=$REMOTE laser_source:=ld06 lidar_source:=remote start_moveit:=true"
   if [[ -n $CURVE_DIR_ARG ]]; then
     [[ $CURVE_DIR_ARG == /* && $CURVE_DIR_ARG != *[[:space:]]* ]] || \
       die "--curve-dir must be an absolute path without whitespace"

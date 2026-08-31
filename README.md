@@ -413,10 +413,11 @@ ROS navigation stack; logs land in `~/.ros/lekiwi`. Real mode remains motion-
 denied until the production safety supervisor has current healthy inputs and
 `config/safety_acceptance.yaml` has been replaced by a validated physical
 acceptance record. A successful launch alone does not mean the robot is safe
-to move. On the 4 GB robot computer,
-MoveIt and RViz are intentionally opt-in so they cannot starve camera safety. Run
-`scripts/rviz.sh` from a workstation when visualisation is needed, and pass
-`start_moveit:=true` only for an arm task. `scripts/ros-stop.sh` stops all of it.
+to move. On the 4 GB robot computer, MoveIt and RViz are intentionally opt-in
+so they cannot starve camera safety. In a split deployment, the compute
+installer and `scripts/workstation-up.sh` enable MoveIt on the workstation by
+default. Run `scripts/rviz.sh` there when visualisation is needed.
+`scripts/ros-stop.sh` stops all of it.
 With a robot computer holding the devices, its half runs there instead:
 
 ```bash

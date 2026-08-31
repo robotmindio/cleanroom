@@ -147,12 +147,22 @@ def test_simulation_installer_excludes_astra_hardware_setup():
     assert 'Simulation-only installation: skipping Astra driver and udev setup' in installer
 
 
+def test_split_compute_installs_and_starts_moveit_by_default():
+    installer = (ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
+    compute = (ROOT / "scripts" / "install-compute-services.sh").read_text(encoding="utf-8")
+    workstation = (ROOT / "scripts" / "workstation-up.sh").read_text(encoding="utf-8")
+
+    assert '"ros-$ROS_DISTRO-moveit"' in installer
+    assert "start_moveit:=true" in compute
+    assert "start_moveit:=true" in workstation
+
+
 def test_service_installers_support_an_unauthenticated_split_zmq_transport():
     device = (ROOT / "scripts" / "install-device-services.sh").read_text(encoding="utf-8")
     compute = (ROOT / "scripts" / "install-compute-services.sh").read_text(encoding="utf-8")
 
     assert 'if [[ -n $CURVE_DIR_ARG ]]; then' in device
-    assert 'STACK_ARGS="camera_source:=remote remote_ip:=$REMOTE laser_source:=ld06 lidar_source:=remote"' in compute
+    assert 'STACK_ARGS="camera_source:=remote remote_ip:=$REMOTE laser_source:=ld06 lidar_source:=remote start_moveit:=true"' in compute
 
 
 def test_remote_stack_has_no_local_host_dependency():
@@ -190,6 +200,7 @@ def test_pi_and_manual_split_startup_include_the_ld06():
     assert "ldlidar_stl_ros2_node" in pi_installer
     assert "setsid scripts/ros-lidar.sh" in pi_up
     assert "laser_source:=ld06 lidar_source:=remote" in workstation_up
+    assert "start_moveit:=true" in workstation_up
     assert "waiting for LD06 serial port" in lidar
 
 
