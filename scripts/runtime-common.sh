@@ -21,3 +21,16 @@ camera_calibration_valid() {
     && grep -qE '^image_width:[[:space:]]*[1-9][0-9]*' "$file" \
     && grep -A3 '^camera_matrix:' "$file" | grep -qE '^[[:space:]]*data:.*[1-9]'
 }
+
+require_camera_calibration() {
+  local calibration="${LEKIWI_CAMERA_INFO:-$HOME/.ros/camera_info/lekiwi_front.yaml}"
+  if ! camera_calibration_valid "$calibration"; then
+    echo "$0: camera calibration is missing or invalid: $calibration" >&2
+    echo "Launching the calibration program now." >&2
+    scripts/calibrate-camera.sh "$calibration"
+  fi
+  if ! camera_calibration_valid "$calibration"; then
+    echo "$0: camera calibration was not saved or is invalid: $calibration" >&2
+    exit 1
+  fi
+}

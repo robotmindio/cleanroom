@@ -24,7 +24,7 @@ _NODE.body = [
         "_permission_is_fresh", "_permission_is_current",
         "_capability_permission_is_current", "enforce_permission_leases",
         "on_base_permission", "on_arm_permission",
-        "twist_is_finite", "update", "validate_motion_parameters",
+        "twist_is_finite", "record_link_loss", "update", "validate_motion_parameters",
     )
 ]
 driver = types.ModuleType("driver_under_test")
@@ -220,6 +220,22 @@ def test_incomplete_or_non_finite_telemetry_is_rejected():
     assert not driver.LeKiwiDriver.observation_is_valid({**complete, "joint.pos": math.nan})
     assert not driver.LeKiwiDriver.observation_is_valid({**complete, "x.vel": math.inf})
     assert not driver.LeKiwiDriver.observation_is_valid({"joint.pos": 0.0})
+
+
+def test_link_loss_is_logged_and_disarmed_once():
+    node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
+    node.link_lost = False
+    logs, resets, disarms = [], [], []
+    node.get_logger = lambda: types.SimpleNamespace(error=logs.append)
+    node.odom_samples = types.SimpleNamespace(reset=lambda: resets.append(True))
+    node.set_disarmed = disarms.append
+
+    node.record_link_loss("telemetry failed")
+    node.record_link_loss("telemetry failed again")
+
+    assert logs == ["telemetry failed"]
+    assert resets == [True]
+    assert disarms == ["LINK_LOST"]
 
 
 def test_invalid_motion_scale_is_rejected():

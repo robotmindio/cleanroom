@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
-# Shared, deliberately small helpers for the systemd installers.  This file is
-# sourced by installers that already provide log(), die(), and as_root().
+# Shared, deliberately small helpers for the systemd installers. This file is
+# sourced by installers that already provide log() and die().
+
+if ! declare -F as_root >/dev/null; then
+  SUDO=()
+  [[ $EUID -eq 0 ]] || SUDO=(sudo)
+  as_root() { # as_root <command...>
+    [[ $EUID -eq 0 ]] || command -v sudo >/dev/null || die "sudo is required to $1"
+    "${SUDO[@]}" "$@"
+  }
+fi
 
 service_escape_sed() {
   # Escape the replacement portion of our | delimited sed expressions.

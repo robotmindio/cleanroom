@@ -21,11 +21,6 @@ export LEKIWI_RUNTIME_DIR="$RUNTIME_DIR"
 # per launch, but dated crash copies and host logs otherwise accumulate forever.
 find "$LOGS" -type f \( -name '*.log.*' -o -name '*.log-*' \) -mtime +14 -delete 2>/dev/null || true
 
-# RTAB-Map database rotation and bounded archive retention also run from
-# ros-start.sh, the path systemd uses. Keep this wrapper so direct `up.sh`
-# launches get exactly the same policy.
-scripts/rtabmap-db-maintenance.py "$@"
-
 # A launch takes a few seconds to appear in pgrep. Serialize this whole startup window so
 # two near-simultaneous invocations cannot both pass the "no stack" check and bind the
 # same ROS/rosbridge resources.
@@ -69,19 +64,6 @@ host_up() {
 }
 
 WRIST="${LEKIWI_WRIST:-$(first_match '/dev/v4l/by-id/*JYU2C*-video-index0')}"
-
-require_camera_calibration() {
-  local calibration="${LEKIWI_CAMERA_INFO:-$HOME/.ros/camera_info/lekiwi_front.yaml}"
-  if ! camera_calibration_valid; then
-    echo "camera calibration is missing or invalid: $calibration" >&2
-    echo "Launching the calibration program now." >&2
-    scripts/calibrate-camera.sh "$calibration"
-  fi
-  if ! camera_calibration_valid; then
-    echo "camera calibration was not saved or is invalid: $calibration" >&2
-    exit 1
-  fi
-}
 
 require_free_cameras() {
   local front wrist

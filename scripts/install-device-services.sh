@@ -54,13 +54,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-SUDO=()
-[[ $EUID -eq 0 ]] || SUDO=(sudo)
-as_root() { # as_root <command...>
-  [[ $EUID -eq 0 ]] || command -v sudo >/dev/null || die "sudo is required to $1"
-  "${SUDO[@]}" "$@"
-}
-
 # shellcheck disable=SC1091 # PROJECT_ROOT is resolved above, not a fixed source path.
 source "$PROJECT_ROOT/scripts/service-install-common.sh"
 # shellcheck disable=SC1091 # PROJECT_ROOT is resolved above, not a fixed source path.
