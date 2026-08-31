@@ -48,9 +48,9 @@ fault_tests:
   battery_low_or_disconnect: false
   motor_diagnostic_fault: false
   bumper: false
-  # A labelled physical motor-power stop is installed. Record true only after
-  # a controlled test proves it removes actuator energy without ROS.
-  estop_independent_of_ros: false
+  # The labelled physical motor-power stop has been tested to remove actuator
+  # energy without ROS.
+  estop_independent_of_ros: true
   telemetry_loss: false
   telemetry_replay_or_duplicate: false
   host_restart_stays_disarmed: false
