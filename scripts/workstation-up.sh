@@ -1,18 +1,21 @@
 #!/usr/bin/env bash
 # Start everything that runs on the workstation for a robot Pi at the given address.
-# Usage: scripts/workstation-up.sh <pi-ip-or-hostname> [extra ROS launch args...]
+# Usage: scripts/workstation-up.sh [robot-host] [extra ROS launch args...]
 set -Eeuo pipefail
-
-[[ $# -ge 1 ]] || {
-  echo "usage: $0 <pi-ip-or-hostname> [extra ROS launch args...]" >&2
-  exit 2
-}
 
 cd "$(dirname "$0")/.."
 # shellcheck source=/dev/null
 source scripts/runtime-common.sh
-PI_IP=$1
-shift
+load_lekiwi_env
+ROBOT_HOST=${LEKIWI_ROBOT_HOST:-}
+if [[ ${1:-} != *:=* && -n ${1:-} ]]; then
+  ROBOT_HOST=$1
+  shift
+fi
+[[ -n $ROBOT_HOST ]] || {
+  echo "usage: $0 [robot-host] [extra ROS launch args...] (or set LEKIWI_ROBOT_HOST in .env)" >&2
+  exit 2
+}
 LOGS="${LEKIWI_LOGS:-$HOME/.ros/lekiwi}"
 mkdir -p "$LOGS"
 
@@ -27,7 +30,7 @@ if pgrep -f 'ros2 launch lekiwi_rmf' >/dev/null; then
   exit 1
 fi
 
-setsid scripts/ros-start.sh remote_ip:="$PI_IP" camera_source:=remote \
+setsid scripts/ros-start.sh remote_ip:="$ROBOT_HOST" camera_source:=remote \
   laser_source:=ld06 lidar_source:=remote "$@" \
   >"$LOGS/stack.log" 2>&1 &
 wait_for 120 grep -q 'Connected to LeKiwi host' "$LOGS/stack.log" || {

@@ -9,6 +9,7 @@ __pycache__/
 .venv/
 .pytest_cache/
 .benchmarks/
+.env
 
 # session tooling, never publish
 .memsearch/

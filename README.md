@@ -421,12 +421,14 @@ With a robot computer holding the devices, its half runs there instead:
 
 ```bash
 scripts/pi-up.sh                         # on the robot computer (motor host + cameras + LD06)
-scripts/workstation-up.sh <PI_IP>         # on the workstation
+cp .env.example .env                     # once, on the workstation; set LEKIWI_ROBOT_HOST
+scripts/workstation-up.sh                 # uses that host by default
 ```
 
 `workstation-up.sh` starts the remote ROS stack and RViz; any following arguments go
-to the ROS launch file, so
-`scripts/workstation-up.sh 192.168.1.50 slam_mode:=localization` works. The Pi host
+to the ROS launch file. A host passed as its first argument overrides the process
+environment and `.env`; `LEKIWI_ROBOT_HOST` in the process environment overrides `.env`.
+For example, `scripts/workstation-up.sh 192.168.1.50 slam_mode:=localization` works. The Pi host
 has to be up first — the driver gives up and exits if no host
 answers on `5555/tcp`. Stop everything with `Ctrl-C`, or `scripts/ros-stop.sh`
 from another terminal.
@@ -538,7 +540,7 @@ topology. Ordinary code/configuration deployments then run from the compute
 checkout with one command and never prompt for a password:
 
 ```bash
-scripts/deploy-split.sh DEVICE_IP
+scripts/deploy-split.sh                    # uses LEKIWI_ROBOT_HOST from .env
 ```
 
 The initial service installation still needs an administrator authentication:

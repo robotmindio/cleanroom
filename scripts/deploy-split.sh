@@ -3,18 +3,28 @@
 set -Eeuo pipefail
 
 usage() {
-  echo "usage: $0 [USER@]DEVICE [--remote-repo PATH] [--workspace PATH] [--remote-workspace PATH]" >&2
+  echo "usage: $0 [[USER@]DEVICE] [--remote-repo PATH] [--workspace PATH] [--remote-workspace PATH]" >&2
   exit 2
 }
 die() { echo "$0: $*" >&2; exit 1; }
 log() { printf '\n==> %s\n' "$*"; }
 
-[[ $# -ge 1 ]] || usage
 original_args=("$@")
-device=$1
-shift
+cd "$(dirname "$0")/.."
+project_root=$PWD
+PROJECT_ROOT=$project_root
+# shellcheck source=/dev/null
+source "$PROJECT_ROOT/scripts/runtime-common.sh"
+load_lekiwi_env "$PROJECT_ROOT/.env"
+device=${LEKIWI_ROBOT_HOST:-}
+if [[ ${1:-} != --* && -n ${1:-} ]]; then
+  device=$1
+  shift
+fi
+[[ -n $device ]] || usage
 [[ $device =~ ^([a-z_][a-z0-9_-]*@)?[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || \
   die "device must be a hostname or address, optionally prefixed by USER@"
+device_address=${device#*@}
 
 remote_repo=""
 workspace=${LEKIWI_WS:-$HOME/lekiwi_ws}
@@ -28,11 +38,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-cd "$(dirname "$0")/.."
-project_root=$PWD
-PROJECT_ROOT=$project_root
-# shellcheck source=/dev/null
-source "$PROJECT_ROOT/scripts/runtime-common.sh"
 # shellcheck disable=SC1091 # PROJECT_ROOT is resolved above, not a fixed source path.
 source "$PROJECT_ROOT/scripts/service-install-revision.sh"
 logs=${LEKIWI_LOGS:-$HOME/.ros/lekiwi}
@@ -117,8 +122,10 @@ for unit in lekiwi-cameras.service lekiwi-lidar.service; do
   remote_unit_exists "$unit" || \
     die "$unit is not installed; rerun scripts/install-device-services.sh on $device"
 done
-grep -Fq 'laser_source:=ld06 lidar_source:=remote' /etc/default/lekiwi-stack || \
-  die "lekiwi-stack.service is not configured for the device LD06; rerun scripts/install-compute-services.sh --remote $device"
+if ! grep -Fq "remote_ip:=$device_address" /etc/default/lekiwi-stack \
+  || ! grep -Fq 'laser_source:=ld06 lidar_source:=remote' /etc/default/lekiwi-stack; then
+  die "lekiwi-stack.service is not configured for $device_address; rerun scripts/install-compute-services.sh --remote $device_address"
+fi
 
 compute_sudoers=$(sudo -n -l) || die "compute sudoers grant is missing; rerun scripts/install-compute-services.sh"
 device_sudoers=$("${ssh_command[@]}" sudo -n -l) || \

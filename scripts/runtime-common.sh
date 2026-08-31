@@ -1,5 +1,25 @@
 #!/usr/bin/env bash
 
+load_lekiwi_env() {
+  local file=${1:-.env} line value
+  [ -r "$file" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    case $line in
+      LEKIWI_ROBOT_HOST=*)
+        value=${line#*=}
+        value=${value%$'\r'}
+        [[ $value =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || {
+          echo "$file: LEKIWI_ROBOT_HOST must be a hostname or IPv4 address" >&2
+          return 1
+        }
+        if [[ -z ${LEKIWI_ROBOT_HOST:-} ]]; then
+          export LEKIWI_ROBOT_HOST=$value
+        fi
+        ;;
+    esac
+  done < "$file"
+}
+
 first_match() { # first existing path matching a glob, empty if none
   # shellcheck disable=SC2086 # Deliberately expand the caller-supplied glob.
   set -- $1

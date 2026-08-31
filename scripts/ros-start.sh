@@ -12,6 +12,14 @@ set -Eeuo pipefail
 cd "$(dirname "$0")/.."
 # shellcheck source=/dev/null
 source scripts/runtime-common.sh
+load_lekiwi_env
+if [[ -n ${LEKIWI_ROBOT_HOST:-} ]]; then
+  use_env_host=true
+  for arg in "$@"; do
+    case $arg in remote_ip:=*|camera_source:=local) use_env_host=false ;; esac
+  done
+  $use_env_host && set -- "remote_ip:=$LEKIWI_ROBOT_HOST" "$@"
+fi
 # Leave a precise ownership record for ros-stop.sh. This remains valid across
 # exec because the launcher replaces this shell in the same PID; systemd and
 # up.sh may supply a tighter runtime directory explicitly.
