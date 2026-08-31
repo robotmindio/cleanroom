@@ -15,7 +15,7 @@ def save_launch_calibration(**values: float) -> Path:
     saved = {}
     try:
         for line in path.read_text().splitlines():
-            key, separator, value = line.partition("=")
+            key, separator, value = line.strip().partition("=")
             if separator and key in KEYS:
                 saved[key] = value
     except FileNotFoundError:
