@@ -150,10 +150,14 @@ def test_simulation_installer_excludes_astra_hardware_setup():
 def test_split_compute_installs_and_starts_moveit_by_default():
     installer = (ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
     compute = (ROOT / "scripts" / "install-compute-services.sh").read_text(encoding="utf-8")
+    reinstall = (ROOT / "scripts" / "reinstall-compute.sh").read_text(encoding="utf-8")
     workstation = (ROOT / "scripts" / "workstation-up.sh").read_text(encoding="utf-8")
 
     assert '"ros-$ROS_DISTRO-moveit"' in installer
     assert "start_moveit:=true" in compute
+    assert "LEKIWI_ROBOT_HOST" in reinstall
+    assert "install-compute-services.sh" in reinstall
+    assert "systemctl restart lekiwi-stack.service" in reinstall
     assert "start_moveit:=true" in workstation
 
 

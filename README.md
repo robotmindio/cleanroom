@@ -470,6 +470,9 @@ sudo scripts/install-compute-services.sh --service-user "$USER" \
   --workspace "$HOME/lekiwi_ws" --remote DEVICE_IP
 ```
 
+After setting `LEKIWI_ROBOT_HOST` in `.env`, reinstall and restart that compute
+service with `scripts/reinstall-compute.sh`.
+
 The motor and torque endpoints bind to all interfaces (`0.0.0.0`) by default,
 so any reachable server can use unauthenticated ZMQ. Do not expose ports 5555,
 5556, or 5557 outside a trusted robot network: an unauthenticated client can
