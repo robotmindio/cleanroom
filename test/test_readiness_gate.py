@@ -126,6 +126,11 @@ def test_simulation_uses_a_database_separate_from_the_real_robot():
     assert "lekiwi_rtabmap_sim.db" in source
 
 
+def test_moveit_receives_a_lowercase_sim_argument():
+    source = (ROOT / "launch" / "bringup.launch.py").read_text()
+    assert "\"'true' if '\", mode, \"' == 'sim' else 'false'\"" in source
+
+
 def test_simulation_exports_a_resource_path_for_vendored_cad_meshes():
     source = (ROOT / "launch" / "bringup.launch.py").read_text()
     assert "SetEnvironmentVariable" in source

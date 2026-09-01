@@ -206,7 +206,9 @@ def generate_launch_description():
     )
     moveit_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(PathJoinSubstitution([package, "launch", "moveit.launch.py"])),
-        launch_arguments={"sim": sim}.items(),
+        launch_arguments={"sim": PythonExpression([
+            "'true' if '", mode, "' == 'sim' else 'false'",
+        ])}.items(),
     )
     rtabmap_node = Node(
         package="rtabmap_slam", executable="rtabmap", name="rtabmap",
