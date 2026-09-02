@@ -667,12 +667,11 @@ def generate_launch_description():
                 }],
                 condition=IfCondition(real),
                 remappings=[("safety/state", "safety/driver_state")],
-                # A ZMQ connect() timing out against a host that is not yet
-                # publishing (e.g. right after the device side restarts) is a
-                # transient race, not a permanent failure -- respawn instead
-                # of leaving the stack running with /safety/arm gone forever.
+                # A ZMQ connect() timeout can be transient, but an offline
+                # robot host must not churn a driver process every few seconds.
+                # ponytail: fixed 60s backoff; use exponential backoff if host outages become frequent.
                 respawn=True,
-                respawn_delay=2.0,
+                respawn_delay=60.0,
                 output="screen",
             ),
             arm_ready_gate,

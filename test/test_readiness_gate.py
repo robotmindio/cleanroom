@@ -131,6 +131,13 @@ def test_moveit_receives_a_lowercase_sim_argument():
     assert "\"'true' if '\", mode, \"' == 'sim' else 'false'\"" in source
 
 
+def test_real_driver_restart_is_rate_limited():
+    source = (ROOT / "launch" / "bringup.launch.py").read_text()
+    start = source.index('executable="lekiwi_driver"')
+    driver = source[start:source.index("arm_ready_gate", start)]
+    assert "respawn_delay=60.0" in driver
+
+
 def test_simulation_exports_a_resource_path_for_vendored_cad_meshes():
     source = (ROOT / "launch" / "bringup.launch.py").read_text()
     assert "SetEnvironmentVariable" in source
