@@ -4,6 +4,7 @@
 # hardware. The names follow the hardware, not the board:
 #
 #   lekiwi-host.service     the LeRobot motor bus, motion on :5555 and torque safety on :5557
+#   lekiwi-astra.service    Astra Pro RGB-D publisher
 #   lekiwi-cameras.service  v4l2_camera publishers for this machine's cameras
 #   lekiwi-lidar.service    private LD06 scan publisher for the compute stack
 #
@@ -148,6 +149,25 @@ else
     as_root rm -f "$UNIT_DIR/lekiwi-cameras.service"
   fi
 fi
+astra_ros_available=false
+if (
+  set +u
+  # shellcheck source=/dev/null
+  source /opt/ros/jazzy/setup.bash
+  if [[ -f $LEKIWI_SERVICE_WORKSPACE/install/setup.bash ]]; then
+    # shellcheck source=/dev/null
+    source "$LEKIWI_SERVICE_WORKSPACE/install/setup.bash"
+  fi
+  ros2 pkg prefix astra_camera >/dev/null 2>&1
+); then
+  astra_ros_available=true
+fi
+if [[ $astra_ros_available == true ]]; then
+  log "Installing lekiwi-astra.service"
+  install_unit lekiwi-astra.service
+else
+  log "ROS astra_camera is unavailable; skipping lekiwi-astra.service"
+fi
 
 log "Installing lekiwi-lidar.service"
 install_unit lekiwi-lidar.service
@@ -163,14 +183,19 @@ if ! grep -qE '^image_width:[[:space:]]*[1-9][0-9]*' "$calibration" 2>/dev/null;
 fi
 
 units=(lekiwi-host.service lekiwi-lidar.service)
+[[ $astra_ros_available == true ]] && units+=(lekiwi-astra.service)
 [[ $camera_ros_available == true ]] && units+=(lekiwi-cameras.service)
 log "Validating rendered systemd units"
 verify_systemd_units "${units[@]}"
 
 log "Reloading systemd and enabling services"
 as_root systemctl daemon-reload
-if [[ $camera_ros_available == true ]]; then
+if [[ $camera_ros_available == true && $astra_ros_available == true ]]; then
+  as_root systemctl enable --now lekiwi-host.service lekiwi-astra.service lekiwi-cameras.service
+elif [[ $camera_ros_available == true ]]; then
   as_root systemctl enable --now lekiwi-host.service lekiwi-cameras.service
+elif [[ $astra_ros_available == true ]]; then
+  as_root systemctl enable --now lekiwi-host.service lekiwi-astra.service
 else
   as_root systemctl enable --now lekiwi-host.service
 fi

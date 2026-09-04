@@ -259,6 +259,7 @@ def test_deploy_sudoers_are_limited_by_machine_role():
     assert "lekiwi-stack.service" in compute
     assert "lekiwi-host.service" not in compute
     assert "lekiwi-host.service" in device
+    assert "lekiwi-astra.service" in device
     assert "lekiwi-cameras.service" in device
     assert "lekiwi-lidar.service" in device
     assert "lekiwi-stack.service" not in device
@@ -280,6 +281,8 @@ def test_service_fingerprint_covers_installed_service_behavior():
 
     for source in (
         "systemd/lekiwi-stack.service",
+        "systemd/lekiwi-astra.service",
+        "scripts/ros-astra.sh",
         "systemd/lekiwi-lidar.service",
         "scripts/ros-lidar.sh",
         "scripts/service-install-common.sh",

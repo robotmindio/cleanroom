@@ -79,7 +79,7 @@ has_nopasswd_systemctl() { # has_nopasswd_systemctl <sudo -l output> <action> <u
   local rules=$1 action=$2 unit=$3
   [[ $rules == *"NOPASSWD:"*"/usr/bin/systemctl $action $unit"* ]]
 }
-device_units=(lekiwi-host.service lekiwi-cameras.service lekiwi-lidar.service)
+device_units=(lekiwi-host.service lekiwi-astra.service lekiwi-cameras.service lekiwi-lidar.service)
 
 log "Preflighting source revisions and deployment permissions"
 require_clean "$project_root" "local repository"
@@ -113,7 +113,7 @@ remote_branch=$("${ssh_command[@]}" git -C "$remote_repo" symbolic-ref --quiet -
   die "device workspace is not installed: $remote_workspace"
 /usr/bin/systemctl cat lekiwi-stack.service >/dev/null 2>&1 || die "lekiwi-stack.service is not installed"
 remote_unit_exists lekiwi-host.service || die "lekiwi-host.service is not installed"
-for unit in lekiwi-cameras.service lekiwi-lidar.service; do
+for unit in lekiwi-astra.service lekiwi-cameras.service lekiwi-lidar.service; do
   remote_unit_exists "$unit" || \
     die "$unit is not installed; rerun scripts/install-device-services.sh on $device"
 done
@@ -153,6 +153,7 @@ if [[ $(cat "$marker" 2>/dev/null || true) == "$target" && \
       $(remote_workspace_revision) == "$target" ]] && \
     /usr/bin/systemctl is-active --quiet lekiwi-stack.service && \
     remote_unit_active lekiwi-host.service && \
+    remote_unit_active lekiwi-astra.service && \
     remote_unit_active lekiwi-cameras.service && \
     remote_unit_active lekiwi-lidar.service; then
   echo "already deployed ${target:0:12}; services and both workspaces are current"
@@ -199,6 +200,9 @@ log "Starting and validating device services"
 "${ssh_command[@]}" sudo -n /usr/bin/systemctl reset-failed lekiwi-host.service
 "${ssh_command[@]}" sudo -n /usr/bin/systemctl start lekiwi-host.service
 remote_unit_active lekiwi-host.service || die "lekiwi-host.service did not become active"
+"${ssh_command[@]}" sudo -n /usr/bin/systemctl reset-failed lekiwi-astra.service
+"${ssh_command[@]}" sudo -n /usr/bin/systemctl start lekiwi-astra.service
+remote_unit_active lekiwi-astra.service || die "lekiwi-astra.service did not become active"
 "${ssh_command[@]}" sudo -n /usr/bin/systemctl reset-failed lekiwi-cameras.service
 "${ssh_command[@]}" sudo -n /usr/bin/systemctl start lekiwi-cameras.service
 remote_unit_active lekiwi-cameras.service || die "lekiwi-cameras.service did not become active"
@@ -220,6 +224,8 @@ wait_for 30 sh -c "ros2 topic info /hardware/diagnostics | grep -Eq 'Publisher c
   die "updated driver is not publishing motor health"
 timeout 30 ros2 topic echo --once /pi/camera/front/image_raw/compressed >/dev/null || \
   die "device camera service is active but no front image reached compute"
+timeout 30 ros2 topic echo --once /camera/depth/points >/dev/null || \
+  die "device Astra point cloud did not reach compute"
 lidar_frame=$(timeout 30 ros2 topic echo --once --field header.frame_id /scan | \
   awk 'NF && $1 != "---" { print $1; exit }') || \
   die "device LD06 scan did not reach compute"
