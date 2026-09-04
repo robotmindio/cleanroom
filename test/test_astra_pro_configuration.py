@@ -76,3 +76,11 @@ def test_rviz_hides_the_duplicate_moveit_scene_robot_and_keeps_live_tf_model():
 
     assert "Robot Alpha: 0" in rviz
     assert "Name: Live RobotModel (TF)" in rviz
+
+
+def test_cyclonedds_keeps_rgbd_udp_datagrams_below_the_network_mtu():
+    cyclonedds = (ROOT / "config" / "cyclonedds.xml").read_text()
+
+    assert "<MaxMessageSize>1200B</MaxMessageSize>" in cyclonedds
+    assert "<FragmentSize>1192B</FragmentSize>" in cyclonedds
+    assert '<SocketReceiveBufferSize min="default" max="8MiB"/>' in cyclonedds

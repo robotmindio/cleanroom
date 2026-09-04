@@ -4,12 +4,26 @@
      past the tenth aborts with "Failed to find a free participant index". -->
 <CycloneDDS xmlns="https://cdds.io/config">
   <Domain id="any">
+    <General>
+      <!-- RGB-D frames are much larger than an Ethernet MTU.  The default
+           14,720 B UDP payload is IP-fragmented on the robot Wi-Fi link; one
+           lost IP fragment discards the whole DDS sample. -->
+      <MaxMessageSize>1200B</MaxMessageSize>
+      <FragmentSize>1192B</FragmentSize>
+    </General>
     <Discovery>
       <!-- "none" drops the participant index entirely: participants take ephemeral
            ports and find each other over multicast SPDP. Raising the index limit
-           instead makes discovery quadratic -- every participant probes every
+           instead makes discovery quadratic; every participant probes every
            allowed index of every peer, and `ros2 topic list` stops answering. -->
       <ParticipantIndex>none</ParticipantIndex>
     </Discovery>
+    <Internal>
+      <!-- Keep bursts of fragmented depth/cloud samples out of the kernel's
+           small default queues. "default" keeps startup compatible with
+           systems whose socket-buffer limit is lower than 8 MiB. -->
+      <SocketReceiveBufferSize min="default" max="8MiB"/>
+      <SocketSendBufferSize min="default" max="8MiB"/>
+    </Internal>
   </Domain>
 </CycloneDDS>
