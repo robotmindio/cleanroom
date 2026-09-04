@@ -48,7 +48,7 @@ def test_rviz_shows_astra_from_a_fixed_frame_available_without_odometry():
 
     assert "Fixed Frame: base_link" in rviz
     assert "Name: Astra RGB" in rviz
-    assert "Topic: /camera/astra/color" in rviz
+    assert "Value: /camera/astra/color/image_raw" in rviz
     assert "Value: /camera/front/image_raw" in rviz
     assert "Value: /camera/wrist/image_raw" in rviz
     assert "Value: /camera/depth/points" in rviz
