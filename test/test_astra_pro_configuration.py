@@ -40,3 +40,11 @@ def test_astra_has_its_own_tracked_robot_frame():
 
     assert 'link name="astra_camera_link"' in description
     assert 'link name="astra_camera_optical_frame"' in description
+
+
+def test_rviz_shows_astra_from_a_fixed_frame_available_without_odometry():
+    rviz = (ROOT / "config" / "lekiwi.rviz").read_text()
+
+    assert "Fixed Frame: base_link" in rviz
+    assert "Topic: /camera/astra/color/image_raw" in rviz
+    assert "Value: /camera/depth/points" in rviz

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # RViz on a running stack: map, costmaps, robot model, TF, plans, the goal/initial-pose
-# tools, and both camera panels.
+# tools, and live camera displays.
 # Usage: scripts/rviz.sh [extra rviz2 args...]
 set -Eeuo pipefail
 
@@ -97,7 +97,7 @@ for pid in "${old_rviz_pids[@]}"; do
   kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null || true
 done
 
-topics=$(grep -o '/camera/[a-z]*/image_raw' config/lekiwi.rviz | sort -u)
+topics=$(rg -o '/camera(?:/[a-z_]+)+/image_raw' config/lekiwi.rviz | sort -u)
 for topic in $topics; do
   for _ in $(seq 30); do
     # plain `... && break` ends the script under `set -e` on the first miss, and `grep -q`
