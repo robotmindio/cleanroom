@@ -1,0 +1,33 @@
+# Astra RGB-D publisher for the device that owns the camera's USB connection.
+[Unit]
+Description=LeKiwi Astra Pro RGB-D publisher
+Documentation=file://@PROJECT_ROOT@/README.md
+After=systemd-udevd.service
+StartLimitIntervalSec=600
+StartLimitBurst=8
+
+[Service]
+Type=simple
+User=@SERVICE_USER@
+Environment=HOME=@SERVICE_HOME@
+Environment=LEKIWI_WS=@WORKSPACE@
+WorkingDirectory=@PROJECT_ROOT@
+ExecStartPre=-/usr/bin/udevadm settle --timeout=15
+ExecStart=@PROJECT_ROOT@/scripts/ros-astra.sh
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectControlGroups=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+LockPersonality=true
+RestrictSUIDSGID=true
+UMask=0077
+Restart=on-failure
+RestartSec=10s
+TimeoutStopSec=20s
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target

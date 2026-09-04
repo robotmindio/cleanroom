@@ -36,7 +36,7 @@ install(PROGRAMS
   scripts/sim-scan-check.py
   scripts/generate-zmq-keys.py
   DESTINATION lib/${PROJECT_NAME})
-install(PROGRAMS scripts/camera-supervisor.sh scripts/service-install-common.sh scripts/ros-lidar.sh scripts/install-lidar-service.sh
+install(PROGRAMS scripts/camera-supervisor.sh scripts/service-install-common.sh scripts/ros-astra.sh scripts/ros-lidar.sh scripts/install-astra-service.sh scripts/install-lidar-service.sh
   DESTINATION share/${PROJECT_NAME}/scripts)
 install(FILES scripts/setup-pi.bash DESTINATION share/${PROJECT_NAME}/scripts)
 # MoveItConfigsBuilder reads this from the package share root to infer the
@@ -72,6 +72,7 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_free_space test/test_free_space.py ENV "${test_pythonpath};ROS_DOMAIN_ID=182")
   ament_add_pytest_test(test_camera_relay test/test_camera_relay.py ENV "${test_pythonpath};ROS_DOMAIN_ID=183")
   ament_add_pytest_test(test_astra_pro_configuration test/test_astra_pro_configuration.py ENV "${test_pythonpath};ROS_DOMAIN_ID=215")
+  ament_add_pytest_test(test_remote_astra_service test/test_remote_astra_service.py ENV "${test_pythonpath};ROS_DOMAIN_ID=217")
   ament_add_pytest_test(test_arm_trajectory test/test_arm_trajectory.py ENV "${test_pythonpath};ROS_DOMAIN_ID=184")
   ament_add_pytest_test(test_collision_model test/test_collision_model.py ENV "${test_pythonpath};ROS_DOMAIN_ID=185")
   ament_add_pytest_test(test_driver_link test/test_driver_link.py ENV "${test_pythonpath};ROS_DOMAIN_ID=186")
