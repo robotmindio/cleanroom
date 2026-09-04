@@ -237,6 +237,20 @@ Visualization Manager:
     Use Fixed Frame: true
     Use rainbow: true
     Value: true
+  - Class: rviz_default_plugins/Camera
+    Enabled: true
+    Image Rendering: background and overlay
+    Name: Astra RGB
+    Overlay Alpha: 1
+    Queue Size: 10
+    Topic: /camera/astra/color
+    Unreliable: true
+    Value: true
+    Visibility:
+      Grid: true
+      Image: true
+      Value: true
+    Zoom Factor: 1
   - Alpha: 1
     Autocompute Intensity Bounds: true
     Autocompute Value Bounds:

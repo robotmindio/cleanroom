@@ -97,15 +97,11 @@ for pid in "${old_rviz_pids[@]}"; do
   kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null || true
 done
 
-# The existing Front Camera panel has a stable, saved Qt dock. Reuse it for
-# Astra RGB when that is the live camera, rather than adding a third dock that
-# the saved layout cannot keep visible.
+# Wait for one camera before RViz restores the saved Front and Wrist camera docks.
 astra_topic=/camera/astra/color/image_raw
 front_topic=/camera/front/image_raw
-camera_topic=$front_topic
 for _ in $(seq 30); do
   if ros2 topic info "$astra_topic" 2>/dev/null | grep 'Publisher count: [1-9]' >/dev/null; then
-    camera_topic=$astra_topic
     break
   fi
   if ros2 topic info "$front_topic" 2>/dev/null | grep 'Publisher count: [1-9]' >/dev/null; then
@@ -119,9 +115,6 @@ done
 # every launch after -- which is exactly how they went missing. Run from a copy so the
 # checked-in file is the only source of truth and RViz's own saves land in the scratch one.
 cp config/lekiwi.rviz "$run_config"
-if [[ $camera_topic == "$astra_topic" ]]; then
-  sed -i "0,/Value: \/camera\/front\/image_raw/s//Value: \/camera\/astra\/color\/image_raw/" "$run_config"
-fi
 
 # The MoveIt RViz plugin is a separate ROS node. Unlike move_group it does not inherit
 # these parameters from the launch file, so give it the same generated URDF and SRDF.

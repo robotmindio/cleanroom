@@ -47,6 +47,9 @@ def test_rviz_shows_astra_from_a_fixed_frame_available_without_odometry():
     launcher = (ROOT / "scripts" / "rviz.sh").read_text()
 
     assert "Fixed Frame: base_link" in rviz
+    assert "Name: Astra RGB" in rviz
+    assert "Topic: /camera/astra/color" in rviz
+    assert "Value: /camera/front/image_raw" in rviz
+    assert "Value: /camera/wrist/image_raw" in rviz
     assert "Value: /camera/depth/points" in rviz
     assert "astra_topic=/camera/astra/color/image_raw" in launcher
-    assert "camera_topic=$astra_topic" in launcher
