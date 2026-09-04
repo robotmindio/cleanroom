@@ -69,9 +69,9 @@ Visualization Manager:
       Scene Alpha: 1
     Scene Robot:
       # The explicit RobotModel below is the authoritative live /joint_states
-      # view. Keep MoveIt's planning-scene copy faint so a planned/start state
-      # cannot be mistaken for the physical arm.
-      Robot Alpha: 0.15
+      # view. Hide MoveIt's planning-scene copy: it is the same CAD and makes
+      # the physical arm appear duplicated.
+      Robot Alpha: 0
     Value: true
   - Alpha: 1
     Class: rviz_default_plugins/RobotModel

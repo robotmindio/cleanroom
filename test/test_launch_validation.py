@@ -27,10 +27,6 @@ def valid_arguments(**overrides):
         "camera_source": "local",
         "laser_source": "camera",
         "lidar_source": "local",
-        "lidar_offset_x": "0.0",
-        "lidar_offset_y": "0.0",
-        "lidar_offset_z": "0.0",
-        "lidar_offset_yaw": "0.0",
         "xy_velocity_scale": "1.0",
         "yaw_velocity_scale": "0.9",
         "rtabmap_database": "/tmp/lekiwi.db",
@@ -61,7 +57,6 @@ def test_accepts_a_coherent_real_mapping_configuration():
         ({"rosbridge_port": "0"}, "between 1 and 65535"),
         ({"xy_velocity_scale": "0"}, "finite and positive"),
         ({"yaw_velocity_scale": "inf"}, "finite and positive"),
-        ({"lidar_offset_yaw": "nan"}, "lidar_offset_yaw must be finite"),
         ({"rtabmap_mapping_max_seconds": "nan"}, "finite and positive"),
         ({"rtabmap_wm_nodes": "0"}, "positive integer"),
         ({"rtabmap_mapping_max_bytes": "1.5"}, "non-negative integer"),
@@ -114,12 +109,6 @@ def test_real_remote_host_allows_an_unauthenticated_zmq_transport():
 
 def test_real_stack_can_relay_the_device_ld06():
     validate_launch_arguments(valid_arguments(laser_source="ld06", lidar_source="remote"))
-
-
-def test_lidar_scan_correction_accepts_signed_measurements():
-    validate_launch_arguments(valid_arguments(lidar_offset_x="-0.006", lidar_offset_yaw="0.012"))
-
-
 def test_real_mode_allows_rosbridge_on_a_tailnet_address():
     validate_launch_arguments(valid_arguments(
         start_rosbridge="true", rosbridge_address="100.87.252.60",

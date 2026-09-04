@@ -36,7 +36,8 @@ ProtectKernelLogs=true
 LockPersonality=true
 RestrictSUIDSGID=true
 UMask=0077
-Restart=on-failure
+# A USB reset can make ros2 launch exit cleanly even though a camera child died.
+Restart=always
 RestartSec=10s
 TimeoutStopSec=20s
 KillMode=control-group

@@ -75,6 +75,10 @@ remote_unit_exists() {
 remote_unit_active() {
   "${ssh_command[@]}" /usr/bin/systemctl is-active --quiet "$1"
 }
+# shellcheck disable=SC2016 # $device expands in the remote shell.
+remote_front_camera_present() {
+  "${ssh_command[@]}" 'for device in /dev/v4l/by-id/*WEBCAM*-video-index0; do [[ -e $device ]] && exit 0; done; exit 1'
+}
 has_nopasswd_systemctl() { # has_nopasswd_systemctl <sudo -l output> <action> <unit>
   local rules=$1 action=$2 unit=$3
   [[ $rules == *"NOPASSWD:"*"/usr/bin/systemctl $action $unit"* ]]
@@ -222,8 +226,12 @@ driver_state=$(timeout 10 ros2 topic echo --once /safety/driver_state --field da
 [[ $driver_state == DISARMED ]] || die "updated driver is not disarmed: $driver_state"
 wait_for 30 sh -c "ros2 topic info /hardware/diagnostics | grep -Eq 'Publisher count: [1-9]'" || \
   die "updated driver is not publishing motor health"
-timeout 30 ros2 topic echo --once /pi/camera/front/image_raw/compressed >/dev/null || \
-  die "device camera service is active but no front image reached compute"
+if remote_front_camera_present; then
+  timeout 30 ros2 topic echo --once /pi/camera/front/image_raw/compressed >/dev/null || \
+    die "attached front camera did not reach compute"
+else
+  log "No front camera is attached; its independent service remains waiting"
+fi
 timeout 30 ros2 topic echo --once /camera/depth/points >/dev/null || \
   die "device Astra point cloud did not reach compute"
 lidar_frame=$(timeout 30 ros2 topic echo --once --field header.frame_id /scan | \

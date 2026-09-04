@@ -172,13 +172,13 @@ fi
 log "Installing lekiwi-lidar.service"
 install_unit lekiwi-lidar.service
 if [[ $camera_ros_available == true && -z "$(first_match '/dev/v4l/by-id/*WEBCAM*-video-index0')" ]]; then
-  log "warning: no front camera found -- lekiwi-cameras will keep failing"
-  log "until one is attached (set LEKIWI_FRONT in ros-cameras.sh for odd hardware)."
+  log "no front camera found -- lekiwi-cameras will wait without affecting Astra"
+  log "(set LEKIWI_FRONT for other hardware)."
 fi
 calibration="${LEKIWI_CAMERA_INFO:-$LEKIWI_SERVICE_HOME/.ros/camera_info/lekiwi_front.yaml}"
 if ! grep -qE '^image_width:[[:space:]]*[1-9][0-9]*' "$calibration" 2>/dev/null; then
   log "warning: front-camera calibration missing or invalid: $(printf %q "$calibration")"
-  log "The cameras service refuses to start without it."
+  log "The cameras service will wait without it."
   log "Run scripts/calibrate-camera.sh on this machine first (stop its service while calibrating)."
 fi
 

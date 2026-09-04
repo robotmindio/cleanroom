@@ -27,23 +27,29 @@ else
   source scripts/setup-pi.bash
 fi
 
-FRONT="${LEKIWI_FRONT:-$(first_match '/dev/v4l/by-id/*WEBCAM*-video-index0')}"
-[ -n "$FRONT" ] || { echo "$0: no front camera found -- set LEKIWI_FRONT" >&2; exit 1; }
-# The wrist camera is optional: unplugged or LEKIWI_WRIST=none runs without it.
-WRIST="${LEKIWI_WRIST:-$(first_match '/dev/v4l/by-id/*JYU2C*-video-index0')}"
-
-# A missing calibration makes v4l2_camera publish an all-zero CameraInfo that
-# looks healthy but is useless to free_space and RTAB-Map. Fail before anyone
-# starts trusting those frames.
 calibration="${LEKIWI_CAMERA_INFO:-$HOME/.ros/camera_info/lekiwi_front.yaml}"
-camera_calibration_valid "$calibration" || {
-    echo "$0: camera calibration is missing or invalid: $calibration" >&2
-    echo "Run scripts/calibrate-camera.sh on this machine first." >&2
-    exit 1
-  }
-
 front_camera_info="file://${LEKIWI_CAMERA_INFO:-$HOME/.ros/camera_info/lekiwi_front.yaml}"
 wrist_camera_info="file://${LEKIWI_WRIST_CAMERA_INFO:-$HOME/.ros/camera_info/lekiwi_wrist.yaml}"
-exec ros2 launch launch/pi_cameras.launch.py \
-  front_device:="$FRONT" wrist_device:="${WRIST:-none}" \
-  camera_info_url:="$front_camera_info" wrist_camera_info_url:="$wrist_camera_info" "$@"
+
+# The optional 2D cameras must never make the independently owned Astra service
+# failed or unavailable. Wait here until a calibrated front camera exists; an
+# intentional service stop still stops the loop.
+while :; do
+  FRONT="${LEKIWI_FRONT:-$(first_match '/dev/v4l/by-id/*WEBCAM*-video-index0')}"
+  if [ -z "$FRONT" ]; then
+    echo "$0: waiting for front camera (set LEKIWI_FRONT for other hardware)" >&2
+    sleep 5
+    continue
+  fi
+  if ! camera_calibration_valid "$calibration"; then
+    echo "$0: waiting for valid front-camera calibration: $calibration" >&2
+    sleep 5
+    continue
+  fi
+  # The wrist camera is optional: unplugged or LEKIWI_WRIST=none runs without it.
+  WRIST="${LEKIWI_WRIST:-$(first_match '/dev/v4l/by-id/*JYU2C*-video-index0')}"
+  # shellcheck disable=SC2093 # ros2 launch becomes this service's main process.
+  exec ros2 launch launch/pi_cameras.launch.py \
+    front_device:="$FRONT" wrist_device:="${WRIST:-none}" \
+    camera_info_url:="$front_camera_info" wrist_camera_info_url:="$wrist_camera_info" "$@"
+done

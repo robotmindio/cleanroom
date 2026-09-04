@@ -12,7 +12,7 @@ service_fingerprint() {
     device)
       sources=(systemd/lekiwi-host.service systemd/lekiwi-astra.service \
         systemd/lekiwi-cameras.service systemd/lekiwi-lidar.service \
-        scripts/ros-astra.sh scripts/ros-lidar.sh \
+        scripts/ros-astra.sh scripts/ros-cameras.sh scripts/ros-lidar.sh \
         scripts/service-install-common.sh scripts/runtime-common.sh \
         scripts/install-deploy-sudoers.sh)
       ;;

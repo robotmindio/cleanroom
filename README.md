@@ -178,7 +178,7 @@ scripts/sim-up.sh slam_mode:=localization \
 | `laser_source` | `auto`, `camera`, `ld06`, `none` | `auto` | Select camera fallback or LD06 on real hardware; Gazebo supplies `/scan` in sim |
 | `lidar_source` | `local`, `remote` | `local` | Machine that opens the LD06 serial port; remote relays `/pi/lidar/scan` |
 | `lidar_port` | serial path | CP2102 `/dev/serial/by-id/...` | LD06 device when `laser_source:=ld06` |
-| `lidar_offset_x`, `lidar_offset_y`, `lidar_offset_z`, `lidar_offset_yaw` | metres, radians | `0.0` | Measured scan-frame correction from the CAD LD06 pose |
+| `urdf/lekiwi.urdf.xacro` sensor-calibration properties | metres, radians | `0.0` | Measured Astra, wrist, and LD06 mount corrections; one source shared by RViz, MoveIt, and robot_state_publisher |
 | `camera_height`, `camera_offset_x`, `camera_offset_y` | metres | `0.093`, `0.03`, `0.0` | Front-camera pose used by the camera scan |
 | `camera_pitch`, `camera_yaw`, `camera_roll` | radians | `0.031`, `0.0`, `0.0` | Front-camera orientation used by the camera scan |
 | `xy_velocity_scale` | float | `1.0` | Correction for reported and commanded translation |

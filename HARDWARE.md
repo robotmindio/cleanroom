@@ -399,10 +399,10 @@ sudo scripts/install-compute-services.sh --service-user "$USER" \
 and check the scan against reality in RViz before trusting it: spin the robot by
 hand and watch a nearby wall stay put in the LaserScan display.
 
-If it is offset, keep the CAD nominal pose intact and supply the measured scan
-correction as `lidar_offset_x`, `lidar_offset_y`, `lidar_offset_z`, and
-`lidar_offset_yaw` (metres, metres, metres, radians) to the launch or
-`LEKIWI_STACK_ARGS`.
+If it is offset, keep the CAD nominal pose intact and record the measured scan
+correction in the `lidar_offset_xyz` and `lidar_offset_yaw` properties in
+`urdf/lekiwi.urdf.xacro` (metres, metres, metres, radians). Rebuild before
+restarting the stack so RViz, MoveIt, and robot_state_publisher use it together.
 
 ## Troubleshooting
 

@@ -13,6 +13,19 @@ def test_remote_astra_service_publishes_the_canonical_cloud_without_other_hardwa
     assert '("/depth/points", "/camera/depth/points")' in launch
     assert "astra_serial_from_hardware_config" in launch
     assert "ExecStart=@PROJECT_ROOT@/scripts/ros-astra.sh" in service
+    assert "Restart=always" in service
     assert "lekiwi-host.service" not in service
     assert 'install_unit lekiwi-astra.service' in installer
     assert 'systemctl enable --now lekiwi-host.service lekiwi-astra.service' in installer
+
+
+def test_optional_2d_cameras_wait_without_blocking_the_independent_astra_service():
+    service = (ROOT / "systemd" / "lekiwi-cameras.service").read_text(encoding="utf-8")
+    cameras = (ROOT / "scripts" / "ros-cameras.sh").read_text(encoding="utf-8")
+    deploy = (ROOT / "scripts" / "deploy-split.sh").read_text(encoding="utf-8")
+
+    assert "Restart=always" in service
+    assert "while :; do" in cameras
+    assert "waiting for front camera" in cameras
+    assert "remote_front_camera_present" in deploy
+    assert "No front camera is attached" in deploy

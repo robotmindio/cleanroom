@@ -128,10 +128,6 @@ def generate_launch_description():
     laser_source = LaunchConfiguration("laser_source")
     lidar_source = LaunchConfiguration("lidar_source")
     lidar_port = LaunchConfiguration("lidar_port")
-    lidar_offset_x = LaunchConfiguration("lidar_offset_x")
-    lidar_offset_y = LaunchConfiguration("lidar_offset_y")
-    lidar_offset_z = LaunchConfiguration("lidar_offset_z")
-    lidar_offset_yaw = LaunchConfiguration("lidar_offset_yaw")
     # Gazebo supplies /scan in sim.  RTAB-Map must subscribe to it there too;
     # otherwise mono RGB plus odometry has no range data from which to make a grid.
     lidar_on = PythonExpression(["'", laser_source, "' != 'none'"])
@@ -167,8 +163,6 @@ def generate_launch_description():
     robot_description = ParameterValue(
         Command([
             "xacro ", PathJoinSubstitution([package, "urdf", "lekiwi.urdf.xacro"]), " sim:=", sim,
-            " lidar_offset_x:=", lidar_offset_x, " lidar_offset_y:=", lidar_offset_y,
-            " lidar_offset_z:=", lidar_offset_z, " lidar_offset_yaw:=", lidar_offset_yaw,
         ]),
         value_type=str,
     )
@@ -396,11 +390,6 @@ def generate_launch_description():
                 "lidar_port",
                 default_value=_lidar_default_port(),
             ),
-            # Measured scan-frame correction from the nominal CAD LD06 pose.
-            DeclareLaunchArgument("lidar_offset_x", default_value="0.0"),
-            DeclareLaunchArgument("lidar_offset_y", default_value="0.0"),
-            DeclareLaunchArgument("lidar_offset_z", default_value="0.0"),
-            DeclareLaunchArgument("lidar_offset_yaw", default_value="0.0"),
             # Camera-as-laser obstacle detection, and the geometry it stands on.
             # Measured with the checkerboard on the floor, not taken from the URDF: the
             # camera sits 9.3 cm up and all but level, which is why it sees a chair leg at

@@ -41,4 +41,4 @@ def test_remote_relay_has_a_laserscan_type_before_the_pi_publisher_appears():
 
 def test_laser_frame_has_a_measured_correction_after_the_nominal_cad_pose():
     assert '<joint name="laser_calibration" type="fixed">' in _URDF_SOURCE
-    assert '$(arg lidar_offset_x) $(arg lidar_offset_y) $(arg lidar_offset_z)' in _URDF_SOURCE
+    assert '${lidar_offset_xyz}' in _URDF_SOURCE

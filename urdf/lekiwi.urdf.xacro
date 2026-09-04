@@ -2,16 +2,15 @@
 <!-- ROS description wrapper for the physical LeKiwi CAD model. -->
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="lekiwi">
   <xacro:arg name="sim" default="false"/>
-  <!-- Measured correction from the CAD LD06 centre to the real scan centre.
-       Keep these at zero until an RViz wall-alignment check says otherwise. -->
-  <xacro:arg name="lidar_offset_x" default="0"/>
-  <xacro:arg name="lidar_offset_y" default="0"/>
-  <xacro:arg name="lidar_offset_z" default="0"/>
-  <xacro:arg name="lidar_offset_yaw" default="0"/>
-  <!-- The wrist camera mount varies between SO-101 kits. Measure these two
-       transforms before using wrist images for geometric perception. -->
-  <xacro:arg name="wrist_camera_xyz" default="0 0 0"/>
-  <xacro:arg name="wrist_camera_rpy" default="0 0 0"/>
+  <!-- The one tracked source for physical sensor calibration.  Every consumer
+       expands this Xacro (robot_state_publisher, MoveIt, and RViz), so changing
+       a measured value here cannot make their models disagree. -->
+  <xacro:property name="astra_mount_xyz" value="0 0 0"/>
+  <xacro:property name="astra_mount_rpy" value="0 0 0"/>
+  <xacro:property name="wrist_camera_xyz" value="0 0 0"/>
+  <xacro:property name="wrist_camera_rpy" value="0 0 0"/>
+  <xacro:property name="lidar_offset_xyz" value="0 0 0"/>
+  <xacro:property name="lidar_offset_yaw" value="0"/>
   <!-- The simulator now drives the same six bounded joints as the hardware.
        Keep the joint type identical in both descriptions so a plan validated
        in Gazebo has the same kinematic constraints on the physical robot. -->
@@ -49,13 +48,18 @@
     <parent link="front_camera_link"/><child link="front_camera_optical_frame"/>
     <origin xyz="0 0 0" rpy="-1.57079632679 0 -1.57079632679"/>
   </joint>
-  <!-- Astra Pro is a third camera beside the existing front and wrist cameras.
-       Replace this measured mounting offset when its bracket is finalized;
-       camera drivers must not publish a competing runtime mount TF. -->
-  <link name="astra_camera_link"/>
+  <!-- Astra Pro is distinct from the existing front and wrist cameras. Its
+       165 x 48 x 40 mm body is visual-only; mount calibration remains above. -->
+  <link name="astra_camera_link">
+    <visual>
+      <origin xyz="-0.020 0 0" rpy="0 0 0"/>
+      <geometry><box size="0.040 0.165 0.048"/></geometry>
+      <material name="astra_body"><color rgba="0.08 0.18 0.25 1"/></material>
+    </visual>
+  </link>
   <joint name="astra_camera_mount" type="fixed">
-    <parent link="front_camera_link"/><child link="astra_camera_link"/>
-    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <parent link="Camera-Model-v3"/><child link="astra_camera_link"/>
+    <origin xyz="${astra_mount_xyz}" rpy="${astra_mount_rpy}"/>
   </joint>
   <link name="astra_camera_optical_frame"/>
   <joint name="astra_camera_optical" type="fixed">
@@ -65,7 +69,7 @@
   <link name="wrist_camera_link"/>
   <joint name="wrist_camera_mount" type="fixed">
     <parent link="so101_gripper_link"/><child link="wrist_camera_link"/>
-    <origin xyz="$(arg wrist_camera_xyz)" rpy="$(arg wrist_camera_rpy)"/>
+    <origin xyz="${wrist_camera_xyz}" rpy="${wrist_camera_rpy}"/>
   </joint>
   <link name="wrist_camera_optical_frame"/>
   <joint name="wrist_camera_optical" type="fixed">
@@ -129,7 +133,7 @@
   <link name="laser"/>
   <joint name="laser_calibration" type="fixed">
     <parent link="laser_nominal"/><child link="laser"/>
-    <origin xyz="$(arg lidar_offset_x) $(arg lidar_offset_y) $(arg lidar_offset_z)" rpy="0 0 $(arg lidar_offset_yaw)"/>
+    <origin xyz="${lidar_offset_xyz}" rpy="0 0 ${lidar_offset_yaw}"/>
   </joint>
 
   <link name="lidar_collision_proxy">

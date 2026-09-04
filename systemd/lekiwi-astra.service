@@ -24,7 +24,9 @@ ProtectKernelLogs=true
 LockPersonality=true
 RestrictSUIDSGID=true
 UMask=0077
-Restart=on-failure
+# ros2 launch exits successfully when its Astra child dies after a USB reset.
+# Always restart so a re-enumerated RGB-D device recovers without intervention.
+Restart=always
 RestartSec=10s
 TimeoutStopSec=20s
 KillMode=control-group

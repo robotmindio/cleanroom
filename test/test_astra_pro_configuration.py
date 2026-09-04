@@ -40,6 +40,22 @@ def test_astra_has_its_own_tracked_robot_frame():
 
     assert 'link name="astra_camera_link"' in description
     assert 'link name="astra_camera_optical_frame"' in description
+    assert '<box size="0.040 0.165 0.048"/>' in description
+    assert '<parent link="Camera-Model-v3"/><child link="astra_camera_link"/>' in description
+
+
+def test_sensor_calibration_has_one_xacro_source_for_all_model_consumers():
+    description = (ROOT / "urdf" / "lekiwi.urdf.xacro").read_text()
+    bringup = (ROOT / "launch" / "bringup.launch.py").read_text()
+    rviz = (ROOT / "scripts" / "rviz.sh").read_text()
+    moveit = (ROOT / "launch" / "moveit.launch.py").read_text()
+
+    assert 'property name="astra_mount_xyz"' in description
+    assert 'property name="wrist_camera_xyz"' in description
+    assert 'property name="lidar_offset_xyz"' in description
+    assert "lidar_offset_x:=" not in bringup
+    assert 'xacro "$package_share/urdf/lekiwi.urdf.xacro" sim:=false' in rviz
+    assert 'file_path="urdf/lekiwi.urdf.xacro"' in moveit
 
 
 def test_rviz_shows_astra_from_a_fixed_frame_available_without_odometry():
@@ -53,3 +69,10 @@ def test_rviz_shows_astra_from_a_fixed_frame_available_without_odometry():
     assert "Value: /camera/wrist/image_raw" in rviz
     assert "Value: /camera/depth/points" in rviz
     assert "astra_topic=/camera/astra/color/image_raw" in launcher
+
+
+def test_rviz_hides_the_duplicate_moveit_scene_robot_and_keeps_live_tf_model():
+    rviz = (ROOT / "config" / "lekiwi.rviz").read_text()
+
+    assert "Robot Alpha: 0" in rviz
+    assert "Name: Live RobotModel (TF)" in rviz
