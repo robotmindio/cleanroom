@@ -341,12 +341,18 @@ It drives a short leg and compares the distance the calibrated camera sees again
 
 ## Foxglove dashboard
 
-Every normal bringup starts a local, read-only Foxglove Bridge at
-`ws://127.0.0.1:8765`. In Foxglove Desktop or the web app, open a **Foxglove
-WebSocket** connection to that address, then import
-[`config/foxglove-layout.json`](config/foxglove-layout.json) once through
-**Layouts → Import from file**. Save the imported layout and later opens show
-the dashboard immediately.
+`scripts/install.sh` installs Foxglove Desktop on the graphical workstation
+and the ROS 2 Foxglove Bridge. Every normal bringup starts the read-only bridge
+at `ws://127.0.0.1:8765`. On the same server where RViz runs, open the desktop
+app already connected to it with:
+
+```bash
+scripts/foxglove.sh
+```
+
+Import [`config/foxglove-layout.json`](config/foxglove-layout.json) once
+through **Layouts → Import from file**. Save the imported layout and later
+opens show the dashboard immediately.
 
 The layout has four views: **Overview** combines the robot, maps/costmaps,
 plans, depth, scan, front camera, and safety diagnostics; **Navigation** is a
