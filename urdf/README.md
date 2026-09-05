@@ -30,6 +30,26 @@ Refresh the snapshot only from a clean LeKiwi checkout:
 python3 scripts/vendor-lekiwi-model.py --source ../LeKiwi
 ```
 
+After editing CAD, first run `./scripts/verify_robot.sh` in LeKiwi and commit
+the regenerated model and meshes there. Vendoring copies that generated
+snapshot; it does not rebuild FreeCAD or OpenSCAD sources. Verify the copy with:
+
+```sh
+python3 scripts/vendor-lekiwi-model.py --source ../LeKiwi --check
+```
+
+Then run `scripts/build-lekiwi.sh` to install the ROS package into the managed
+workspace. Restart the model consumers through the repository launch/deploy
+scripts: robot_state_publisher, MoveIt, and RViz expand the installed wrapper
+at startup and retain that description in memory. Editing Xacro alone does
+not update already-running nodes. RViz subscribes with transient-local
+durability so it receives the description even when started after the publisher.
+
+The Astra saddle faces CAD +Y; its camera frame uses +X forward. The wrapper
+converts these axes before applying the saddle's 8-degree downward pitch.
+Body dimensions are an envelope, and the optical-centre translation still
+requires measurement against the physical camera.
+
 Do not replace CAD geometry or kinematic transforms with primitive stand-ins.
 If the physical build uses a different mount, adjust the named wrapper frame
 and record the measurement; never edit CAD joint origins to compensate for a

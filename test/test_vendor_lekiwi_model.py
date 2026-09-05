@@ -2,8 +2,10 @@
 
 import importlib.util
 from pathlib import Path
+import sys
 import xml.etree.ElementTree as ET
 
+import pytest
 
 ROOT = Path(__file__).parents[1]
 SPEC = importlib.util.spec_from_file_location(
@@ -43,3 +45,29 @@ def test_vendored_so101_mount_keeps_the_installed_plate_pose():
     assert mount.find("parent").get("link") == "base_plate_layer2-v3"
     assert mount.find("child").get("link") == "so101_base_link"
     assert mount.find("origin").attrib == {"xyz": "0.04 0.08 0.007", "rpy": "0 0 0"}
+
+
+def test_vendor_preflights_meshes_and_checks_snapshot_without_writing(tmp_path, monkeypatch):
+    source, output = tmp_path / "source", tmp_path / "output"
+    mesh = source / "URDF/meshes/reauthored/body.stl"
+    mesh.parent.mkdir(parents=True)
+    (source / VENDOR.SOURCE_MODEL).write_text(
+        '<robot name="test"><link name="body"><visual><geometry>'
+        '<mesh filename="${mesh_dir}/reauthored/body.stl"/>'
+        '</geometry></visual></link></robot>'
+    )
+    monkeypatch.setattr(VENDOR, "source_revision", lambda _: "test-revision")
+    args = ["vendor", "--source", str(source), "--output", str(output)]
+    monkeypatch.setattr(sys, "argv", args)
+    with pytest.raises(FileNotFoundError):
+        VENDOR.main()
+    assert not output.exists()
+    mesh.write_bytes(b"test mesh")
+    assert VENDOR.main() == 0
+    monkeypatch.setattr(sys, "argv", args + ["--check"])
+    assert VENDOR.main() == 0
+    vendored_mesh = output / "meshes/body.stl"
+    vendored_mesh.write_bytes(b"stale mesh")
+    with pytest.raises(SystemExit, match="stale vendored model: meshes/body.stl"):
+        VENDOR.main()
+    assert vendored_mesh.read_bytes() == b"stale mesh"

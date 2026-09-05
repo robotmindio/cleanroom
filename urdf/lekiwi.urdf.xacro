@@ -6,7 +6,9 @@
        Every consumer expands this Xacro (robot_state_publisher, MoveIt, and RViz),
        so its fixed placement and measured wrist/lidar corrections stay aligned. -->
   <xacro:property name="astra_mount_xyz" value="0 0 0.0155"/>
-  <xacro:property name="astra_mount_rpy" value="-0.13962634015954636 0 0"/>
+  <!-- The saddle faces CAD +Y. Convert the camera's REP-103 +X to +Y,
+       then apply the saddle's downward pitch (Rx(-pitch) * Rz(pi/2)). -->
+  <xacro:property name="astra_mount_rpy" value="0 0.13962634015954636 1.5707963267948966"/>
   <xacro:property name="wrist_camera_xyz" value="0 0 0"/>
   <xacro:property name="wrist_camera_rpy" value="0 0 0"/>
   <xacro:property name="lidar_offset_xyz" value="0 0 0"/>

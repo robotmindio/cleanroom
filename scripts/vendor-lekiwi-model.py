@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import io
 from pathlib import Path, PurePosixPath
-import shutil
 import subprocess
 import xml.etree.ElementTree as ET
 
@@ -105,25 +105,38 @@ def main() -> int:
     parser.add_argument(
         "--output", type=Path, default=Path(__file__).parents[1] / "urdf"
     )
+    parser.add_argument("--check", action="store_true", help="fail if the vendored model or meshes differ; write nothing")
     args = parser.parse_args()
     source, output = args.source.resolve(), args.output.resolve()
     root, meshes = transform(source / SOURCE_MODEL)
     revision = source_revision(source)
 
-    output.mkdir(parents=True, exist_ok=True)
     ET.indent(root, space="    ")
+    generated = io.BytesIO()
     ET.ElementTree(root).write(
-        output / "lekiwi_cad.urdf", encoding="utf-8", xml_declaration=True
+        generated, encoding="utf-8", xml_declaration=True
     )
     mesh_dir = output / "meshes"
-    expected = set()
+    # Read every input before changing the snapshot. A missing upstream mesh
+    # must not leave a new URDF pointing at an incomplete set of old assets.
+    files = {output / "lekiwi_cad.urdf": generated.getvalue()}
     for target, model_source in meshes.items():
-        destination = mesh_dir / target
+        files[mesh_dir / target] = (source / "URDF/meshes" / model_source).read_bytes()
+    if args.check:
+        different = [str(path.relative_to(output)) for path, content in files.items()
+                     if not path.is_file() or path.read_bytes() != content]
+        different.extend(str(path.relative_to(output)) for path in mesh_dir.rglob("*.stl")
+                         if path not in files)
+        if different:
+            raise SystemExit("stale vendored model: " + ", ".join(different))
+        print(f"vendored model matches LeKiwi {revision}")
+        return 0
+
+    for destination, content in files.items():
         destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source / "URDF/meshes" / model_source, destination)
-        expected.add(destination)
+        destination.write_bytes(content)
     for stale in mesh_dir.rglob("*.stl"):
-        if stale not in expected:
+        if stale not in files:
             stale.unlink()
     print(
         f"vendored LeKiwi {revision}: {len(root.findall('link'))} links, {len(meshes)} meshes"
