@@ -44,7 +44,13 @@ def test_astra_has_its_own_tracked_robot_frame():
 
     assert 'link name="astra_camera_link"' in description
     assert 'link name="astra_camera_optical_frame"' in description
-    assert '<box size="0.040 0.165 0.048"/>' in description
+    robot = ET.fromstring(subprocess.check_output(
+        ["xacro", str(ROOT / "urdf/lekiwi.urdf.xacro")], text=True
+    ))
+    camera = robot.find("link[@name='astra_camera_link']")
+    assert camera.find("visual/geometry/box").get("size") == "0.040 0.165 0.048"
+    assert camera.find("collision/geometry/box").attrib == camera.find("visual/geometry/box").attrib
+    assert camera.find("collision/origin").attrib == camera.find("visual/origin").attrib
     assert '<parent link="astra_pro_compact_mount"/><child link="astra_camera_link"/>' in description
     assert 'property name="astra_mount_xyz" value="0 0 0.0155"' in description
 

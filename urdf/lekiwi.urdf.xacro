@@ -12,6 +12,8 @@
   <!-- Nominal front-face centre of the body envelope; measure the optical
        centre on the installed camera and retain that correction here. -->
   <xacro:property name="astra_optical_xyz" value="0.020 0 0.024"/>
+  <xacro:property name="astra_body_xyz" value="0 0 0.024"/>
+  <xacro:property name="astra_body_size" value="0.040 0.165 0.048"/>
   <xacro:property name="wrist_camera_xyz" value="0 0 0"/>
   <xacro:property name="wrist_camera_rpy" value="0 0 0"/>
   <xacro:property name="lidar_offset_xyz" value="0 0 0"/>
@@ -54,13 +56,18 @@
     <origin xyz="0 0 0" rpy="-1.57079632679 0 -1.57079632679"/>
   </joint>
   <!-- Astra Pro is distinct from the existing front and wrist cameras. Its
-       compact CAD mount owns placement; this 165 x 48 x 40 mm body is visual-only. -->
+       compact CAD mount owns placement; the body envelope also participates
+       in planning so the arm cannot pass through the camera. -->
   <link name="astra_camera_link">
     <visual>
-      <origin xyz="0 0 0.024" rpy="0 0 0"/>
-      <geometry><box size="0.040 0.165 0.048"/></geometry>
+      <origin xyz="${astra_body_xyz}" rpy="0 0 0"/>
+      <geometry><box size="${astra_body_size}"/></geometry>
       <material name="astra_body"><color rgba="0.08 0.18 0.25 1"/></material>
     </visual>
+    <collision>
+      <origin xyz="${astra_body_xyz}" rpy="0 0 0"/>
+      <geometry><box size="${astra_body_size}"/></geometry>
+    </collision>
   </link>
   <joint name="astra_camera_mount" type="fixed">
     <parent link="astra_pro_compact_mount"/><child link="astra_camera_link"/>
@@ -83,9 +90,7 @@
   </joint>
 
   <!-- Tool frame before the independently planned gripper joint. -->
-  <link name="tool0">
-    <collision><geometry><sphere radius="0.025"/></geometry></collision>
-  </link>
+  <link name="tool0"/>
   <joint name="tool0_mount" type="fixed">
     <parent link="so101_gripper_frame_link"/><child link="tool0"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
@@ -123,7 +128,15 @@
   <xacro:collision_capsule_proxy name="shoulder_collision_proxy" parent="so101_shoulder_link" xyz="-0.0192 0.0012 -0.0091" rpy="0 0 0" radius="0.0458" cylinder_length="0.0190"/>
   <xacro:collision_capsule_proxy name="upper_arm_collision_proxy" parent="so101_upper_arm_link" xyz="-0.0591 -0.0131 0.0202" rpy="0 1.5708 0" radius="0.0460" cylinder_length="0.0502"/>
   <xacro:collision_capsule_proxy name="forearm_collision_proxy" parent="so101_lower_arm_link" xyz="-0.0666 0.0035 0.0202" rpy="0 1.5708 0" radius="0.0411" cylinder_length="0.0749"/>
-  <xacro:collision_sphere_proxy name="wrist_collision_proxy" parent="so101_wrist_link" xyz="-0.0022 -0.0269 0.0222" radius="0.0569"/>
+  <!-- Native wrist bounds plus 4 mm on each face. The old enclosing sphere
+       extended into the moving jaw even in the reference pose. -->
+  <link name="wrist_collision_proxy">
+    <collision><geometry><box size="0.04335 0.08584 0.07031"/></geometry></collision>
+  </link>
+  <joint name="wrist_collision_proxy_mount" type="fixed">
+    <parent link="so101_wrist_link"/><child link="wrist_collision_proxy"/>
+    <origin xyz="-0.00233 -0.026915 0.02215"/>
+  </joint>
   <xacro:collision_capsule_proxy name="roll_collision_proxy" parent="so101_gripper_link" xyz="-0.0024 -0.0020 -0.0517" rpy="0 0 0" radius="0.0459" cylinder_length="0.0136"/>
   <xacro:collision_capsule_proxy name="gripper_collision_proxy" parent="so101_moving_jaw_link" xyz="-0.0012 -0.0360 0.0189" rpy="1.5708 0 0" radius="0.0305" cylinder_length="0.0310"/>
 

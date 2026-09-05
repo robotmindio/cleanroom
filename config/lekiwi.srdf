@@ -44,25 +44,23 @@
   <disable_collisions link1="wrist_camera_link" link2="wrist_camera_optical_frame" reason="Adjacent"/>
   <disable_collisions link1="so101_gripper_frame_link" link2="tool0" reason="Adjacent"/>
   <disable_collisions link1="base_link" link2="base_plate_layer1-v5" reason="Adjacent"/>
-  <disable_collisions link1="base_plate_layer1-v5" link2="robotskin_lidar_mount" reason="Adjacent"/>
+  <disable_collisions link1="base_plate_layer2-v3" link2="robotskin_lidar_mount" reason="Adjacent"/>
   <disable_collisions link1="robotskin_lidar_mount" link2="ld06_body" reason="Adjacent"/>
   <disable_collisions link1="ld06_body" link2="lidar_collision_proxy" reason="Adjacent"/>
-  <disable_collisions link1="ld06_body" link2="laser" reason="Adjacent"/>
+  <disable_collisions link1="ld06_body" link2="laser_nominal" reason="Adjacent"/>
+  <disable_collisions link1="laser_nominal" link2="laser" reason="Adjacent"/>
   <!-- Mesh-enclosing proxies are only disabled against bolted neighbours.
        Every non-adjacent pair remains collision-checked by MoveIt. -->
   <disable_collisions link1="base_link" link2="arm_pedestal_collision_proxy" reason="Adjacent"/>
   <disable_collisions link1="base_link" link2="front_camera_collision_proxy" reason="Adjacent"/>
+  <!-- These oversized envelopes are on the same rigid chassis assembly;
+       their relative placement cannot change with any arm joint. -->
+  <disable_collisions link1="arm_pedestal_collision_proxy" link2="front_camera_collision_proxy" reason="Never"/>
+  <disable_collisions link1="arm_pedestal_collision_proxy" link2="lidar_collision_proxy" reason="Never"/>
   <disable_collisions link1="arm_pedestal_collision_proxy" link2="shoulder_collision_proxy" reason="Adjacent"/>
   <disable_collisions link1="shoulder_collision_proxy" link2="upper_arm_collision_proxy" reason="Adjacent"/>
   <disable_collisions link1="upper_arm_collision_proxy" link2="forearm_collision_proxy" reason="Adjacent"/>
   <disable_collisions link1="forearm_collision_proxy" link2="wrist_collision_proxy" reason="Adjacent"/>
   <disable_collisions link1="wrist_collision_proxy" link2="roll_collision_proxy" reason="Adjacent"/>
-  <disable_collisions link1="roll_collision_proxy" link2="gripper_collision_proxy" reason="Adjacent"/>
-  <disable_collisions link1="roll_collision_proxy" link2="tool0" reason="Adjacent"/>
-  <!-- The folded factory home pose has these serial-chain envelope overlaps.
-       They are verified as physically adjacent CAD components, not general
-       self-collision exemptions. -->
-  <disable_collisions link1="upper_arm_collision_proxy" link2="wrist_collision_proxy" reason="Adjacent"/>
-  <disable_collisions link1="upper_arm_collision_proxy" link2="roll_collision_proxy" reason="Adjacent"/>
   <disable_collisions link1="roll_collision_proxy" link2="gripper_collision_proxy" reason="Adjacent"/>
 </robot>

@@ -308,10 +308,12 @@ works from the managed service without an interactive permission fix.
 
 The driver uses `astra_camera_optical_frame`; keep its physical mount
 transform/calibration in `urdf/lekiwi.urdf.xacro` when the Astra mount is
-measured, rather than adding a runtime TF. The checked-in zero offset is a
-mounting placeholder and must be replaced with the measured Astra bracket
-offset. Verify the depth cloud frame and its overlay in RViz before enabling
-arm motion.
+measured, rather than adding a runtime TF. The checked-in contact pose follows
+the compact bracket, but its nominal chassis location and camera optical centre
+still need physical measurement. Collision checking currently reports overlaps
+with the lidar and shoulder envelope; do not exempt those moving-arm contacts.
+Correct the CAD placement, rebuild/vendor the model, and verify the depth cloud
+overlay in RViz before enabling arm motion.
 
 The repository host is started camera-less for ROS, so a delayed camera frame
 cannot take the motor bus down. Direct LeRobot dataset/teleoperation mode may

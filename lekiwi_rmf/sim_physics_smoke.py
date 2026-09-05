@@ -105,7 +105,7 @@ class PhysicsSmoke(Node):
             or response.status != GoalStatus.STATUS_SUCCEEDED
             or response.result.error_code != FollowJointTrajectory.Result.SUCCESSFUL
         ):
-            raise RuntimeError("simulated arm trajectory did not succeed")
+            raise RuntimeError(f"simulated arm trajectory did not succeed: {response}; joints={self.joints}")
         final = float(self.joints["arm_shoulder_pan"])
         gripper = float(self.joints["arm_gripper"])
         if not math.isclose(final, 0.25, abs_tol=0.08):

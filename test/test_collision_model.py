@@ -5,6 +5,7 @@ import pathlib
 import subprocess
 import xml.etree.ElementTree as ET
 
+import numpy as np
 import pytest
 import yaml
 
@@ -69,6 +70,33 @@ def test_srdf_collision_exemptions_reference_real_links_only():
     for exemption in srdf.findall("disable_collisions"):
         assert exemption.attrib["link1"] in links
         assert exemption.attrib["link2"] in links
+
+
+def test_native_wrist_box_encloses_visual_meshes_with_clearance():
+    robot = _real_robot()
+    box = robot.find("link[@name='wrist_collision_proxy']/collision/geometry/box")
+    mount = robot.find("joint[@name='wrist_collision_proxy_mount']/origin")
+    half_size = np.fromstring(box.get("size"), sep=" ") / 2
+    centre = np.fromstring(mount.get("xyz"), sep=" ")
+    for visual in robot.find("link[@name='so101_wrist_link']").findall("visual"):
+        mesh = visual.find("geometry/mesh")
+        data = (ROOT / mesh.get("filename").removeprefix("package://lekiwi_rmf/")).read_bytes()
+        assert len(data) == 84 + int.from_bytes(data[80:84], "little") * 50
+        vertices = np.frombuffer(data, offset=84, dtype=np.dtype([
+            ("normal", "<f4", (3,)), ("vertices", "<f4", (3, 3)), ("attr", "<u2")
+        ]))["vertices"].reshape(-1, 3)
+        origin = visual.find("origin")
+        r, p, y = np.fromstring(origin.get("rpy", "0 0 0"), sep=" ")
+        cr, cp, cy = np.cos([r, p, y])
+        sr, sp, sy = np.sin([r, p, y])
+        rotation = np.array([[cy*cp, cy*sp*sr-sy*cr, cy*sp*cr+sy*sr],
+                             [sy*cp, sy*sp*sr+cy*cr, sy*sp*cr-cy*sr],
+                             [-sp, cp*sr, cp*cr]])
+        vertices = vertices * np.fromstring(mesh.get("scale", "1 1 1"), sep=" ")
+        vertices = vertices @ rotation.T + np.fromstring(origin.get("xyz", "0 0 0"), sep=" ")
+        assert np.all(np.abs(vertices - centre) + 0.004 <= half_size)
+    # A coordinate frame is not an extra sphere of physical material.
+    assert robot.find("link[@name='tool0']/collision") is None
 
 
 def test_wrist_roll_is_bounded_identically_on_hardware_and_simulation():
