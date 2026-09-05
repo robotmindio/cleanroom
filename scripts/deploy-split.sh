@@ -91,6 +91,12 @@ has_nopasswd_systemctl() { # has_nopasswd_systemctl <sudo -l output> <action> <u
   local rules=$1 action=$2 unit=$3
   [[ $rules == *"NOPASSWD:"*"/usr/bin/systemctl $action $unit"* ]]
 }
+refresh_compute_service() {
+  log "Refreshing stale compute service configuration"
+  touch "$logs/deploy-inhibit-auto-arm"
+  LEKIWI_ROBOT_HOST=${device#*@} LEKIWI_WS=$workspace \
+    "$project_root/scripts/reinstall-compute.sh"
+}
 device_units=(lekiwi-host.service lekiwi-astra.service lekiwi-cameras.service lekiwi-lidar.service)
 
 log "Preflighting source revisions and deployment permissions"
@@ -129,8 +135,11 @@ for unit in lekiwi-astra.service lekiwi-cameras.service lekiwi-lidar.service; do
   remote_unit_exists "$unit" || \
     die "$unit is not installed; rerun scripts/install-device-services.sh on $device"
 done
+if ! grep -Fq 'laser_source:=ld06 lidar_source:=remote' /etc/default/lekiwi-stack; then
+  refresh_compute_service
+fi
 grep -Fq 'laser_source:=ld06 lidar_source:=remote' /etc/default/lekiwi-stack || \
-  die "lekiwi-stack.service is not configured for the device LD06; rerun scripts/install-compute-services.sh --remote $device"
+  die "compute service configuration did not refresh"
 
 compute_sudoers=$(sudo -n -l) || die "compute sudoers grant is missing; rerun scripts/install-compute-services.sh"
 device_sudoers=$("${ssh_command[@]}" sudo -n -l) || \
@@ -148,9 +157,7 @@ expected_service_fingerprint=$(service_fingerprint compute) || die "cannot calcu
 service_marker=$logs/service-fingerprint-compute
 remote_service_marker=$remote_home/.ros/lekiwi/service-fingerprint-device
 if [[ $(cat "$service_marker" 2>/dev/null || true) != "$expected_service_fingerprint" ]]; then
-  log "Refreshing stale compute service configuration"
-  LEKIWI_ROBOT_HOST=${device#*@} LEKIWI_WS=$workspace \
-    "$project_root/scripts/reinstall-compute.sh"
+  refresh_compute_service
 fi
 [[ $(cat "$service_marker" 2>/dev/null || true) == "$expected_service_fingerprint" ]] || \
   die "compute service configuration did not refresh"

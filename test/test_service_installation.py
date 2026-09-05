@@ -253,6 +253,7 @@ def test_deploy_order_fails_closed_around_the_device_restart():
     assert "configured_hosts" in deploy
     assert "Refreshing stale compute service configuration" in deploy
     assert "reinstall-compute.sh" in deploy
+    assert 'touch "$logs/deploy-inhibit-auto-arm"' in deploy
     assert "reset --hard" not in deploy
 
 
