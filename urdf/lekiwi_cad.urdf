@@ -483,7 +483,7 @@
         <child link="ld06_body" />
     </joint>
     <joint name="astra_pro_compact_mount_joint" type="fixed">
-        <origin xyz="0 0.08 0.007" rpy="0 0 0" />
+        <origin xyz="-0.1 0 0.007" rpy="0 0 1.5707963267948966" />
         <parent link="base_plate_layer2-v3" />
         <child link="astra_pro_compact_mount" />
     </joint>

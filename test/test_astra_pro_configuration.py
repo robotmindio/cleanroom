@@ -55,7 +55,7 @@ def test_astra_has_its_own_tracked_robot_frame():
     assert 'property name="astra_mount_xyz" value="0 0 0.0155"' in description
 
 
-def test_astra_optical_axis_faces_forward_and_down_in_the_complete_robot():
+def test_astra_optical_axis_faces_left_and_down_in_the_complete_robot():
     robot = ET.fromstring(subprocess.check_output(
         ["xacro", str(ROOT / "urdf/lekiwi.urdf.xacro")], text=True
     ))
@@ -69,7 +69,9 @@ def test_astra_optical_axis_faces_forward_and_down_in_the_complete_robot():
         x, z = math.cos(pitch) * x + math.sin(pitch) * z, -math.sin(pitch) * x + math.cos(pitch) * z
         axis = (math.cos(yaw) * x - math.sin(yaw) * y, math.sin(yaw) * x + math.cos(yaw) * y, z)
         frame = joint.find("parent").get("link")
-    assert axis == pytest.approx((math.cos(math.radians(8)), 0, -math.sin(math.radians(8))), abs=1e-9)
+    assert axis == pytest.approx((0, math.cos(math.radians(8)), -math.sin(math.radians(8))), abs=1e-9)
+    mount = robot.find("joint[@name='astra_pro_compact_mount_joint']/origin")
+    assert tuple(map(float, mount.get("xyz").split())) == (-0.1, 0, 0.007)
 
 
 def test_late_rviz_receives_the_latched_robot_description():

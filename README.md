@@ -308,12 +308,11 @@ works from the managed service without an interactive permission fix.
 
 The driver uses `astra_camera_optical_frame`; keep its physical mount
 transform/calibration in `urdf/lekiwi.urdf.xacro` when the Astra mount is
-measured, rather than adding a runtime TF. The checked-in contact pose follows
-the compact bracket, but its nominal chassis location and camera optical centre
-still need physical measurement. Collision checking currently reports overlaps
-with the lidar and shoulder envelope; do not exempt those moving-arm contacts.
-Correct the CAD placement, rebuild/vendor the model, and verify the depth cloud
-overlay in RViz before enabling arm motion.
+measured, rather than adding a runtime TF. The compact bracket uses the existing
+40 mm pair on the upper plate's left edge, as identified by the operator.
+The Astra faces left (ROS +Y), pitched 8 degrees down; forward (+X) remains
+the arm/fixed-camera side. Its optical-centre correction still needs measurement.
+Verify the depth cloud overlay in RViz before enabling arm motion.
 
 The repository host is started camera-less for ROS, so a delayed camera frame
 cannot take the motor bus down. Direct LeRobot dataset/teleoperation mode may
