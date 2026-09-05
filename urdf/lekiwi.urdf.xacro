@@ -140,7 +140,8 @@
   <xacro:collision_capsule_proxy name="roll_collision_proxy" parent="so101_gripper_link" xyz="-0.0024 -0.0020 -0.0517" rpy="0 0 0" radius="0.0459" cylinder_length="0.0136"/>
   <xacro:collision_capsule_proxy name="gripper_collision_proxy" parent="so101_moving_jaw_link" xyz="-0.0012 -0.0360 0.0189" rpy="1.5708 0 0" radius="0.0305" cylinder_length="0.0310"/>
 
-  <!-- LD06 scan plane: the RobotSkin base puts it 75 mm forward, 75 mm right,
+  <!-- LD06 scan plane: the rear Pi-hole-mounted RobotSkin base puts it
+       135 mm behind the origin, 5 mm left,
        and 88.5 mm above base_link. The nominal frame stays on the CAD body;
        the child is the small measured correction used by the scan. -->
   <link name="laser_nominal"/>

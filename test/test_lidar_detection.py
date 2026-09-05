@@ -51,9 +51,14 @@ def test_ld06_stays_on_its_robotskin_mount_at_the_installed_plate_pose():
     mount = joints["robotskin_lidar_mount_joint"]
     body = joints["ld06_body_mount"]
 
-    assert mount.find("parent").get("link") == "base_plate_layer1-v5"
+    assert mount.find("parent").get("link") == "base_plate_layer2-v3"
     assert mount.find("child").get("link") == "robotskin_lidar_mount"
-    assert mount.find("origin").attrib == {"xyz": "0.055 0.08 0", "rpy": "0 0 0"}
+    assert mount.find("origin").attrib == {
+        "xyz": "0.0 -0.115 0.007", "rpy": "0 0 -1.5707963267948966"
+    }
+    assert not {"Bottom-V2-v3", "Top-V2-v2"} & {
+        link.get("name") for link in _CAD.findall("link")
+    }
     assert body.find("parent").get("link") == "robotskin_lidar_mount"
     assert body.find("child").get("link") == "ld06_body"
     assert body.find("origin").attrib == {"xyz": "0.02 -0.005 0.012", "rpy": "0 0 0"}

@@ -48,10 +48,10 @@ def test_vendored_so101_mount_keeps_the_installed_plate_pose():
     # the legacy base-part origin displaced that axis by almost 79 mm.
     origin = mount.find("origin")
     assert list(map(float, origin.get("xyz").split())) == pytest.approx(
-        [0, 0.10598331, 0.007], abs=1e-7
+        [0, 0.02831271, 0.007], abs=1e-7
     )
     assert list(map(float, origin.get("rpy").split())) == pytest.approx(
-        [0, 0, -1.5707963267948966], abs=7e-6
+        [0, 0, 1.5707963267948966], abs=7e-6
     )
 
 

@@ -56,7 +56,6 @@
   <!-- These oversized envelopes are on the same rigid chassis assembly;
        their relative placement cannot change with any arm joint. -->
   <disable_collisions link1="arm_pedestal_collision_proxy" link2="front_camera_collision_proxy" reason="Never"/>
-  <disable_collisions link1="arm_pedestal_collision_proxy" link2="lidar_collision_proxy" reason="Never"/>
   <disable_collisions link1="arm_pedestal_collision_proxy" link2="shoulder_collision_proxy" reason="Adjacent"/>
   <disable_collisions link1="shoulder_collision_proxy" link2="upper_arm_collision_proxy" reason="Adjacent"/>
   <disable_collisions link1="upper_arm_collision_proxy" link2="forearm_collision_proxy" reason="Adjacent"/>

@@ -234,32 +234,6 @@
             </geometry>
         </visual>
     </link>
-    <link name="Bottom-V2-v3">
-        <inertial>
-            <origin xyz="0.021623799145011228 0.034248555702746215 0.002860022373659428" rpy="0.0 -0.0 0.0" />
-            <mass value="0.14588862570926195" />
-            <inertia ixx="5.861212367196979e-05" iyy="0.00012648590487769422" izz="0.0001820968398762769" ixy="1.504419769130789e-06" ixz="-2.5907710844293995e-06" iyz="7.708271472892277e-07" />
-        </inertial>
-        <visual name="Bottom-V2-v3_visual">
-            <origin xyz="0 0 0" rpy="0 0 0" />
-            <geometry>
-                <mesh filename="package://lekiwi_rmf/urdf/meshes/Bottom-V2-v3.stl" scale="0.001 0.001 0.001" />
-            </geometry>
-        </visual>
-    </link>
-    <link name="Top-V2-v2">
-        <inertial>
-            <origin xyz="0.00394392416615524 -0.00045096335632409 0.021552698750372336" rpy="0.0 -0.0 0.0" />
-            <mass value="0.1256590419653392" />
-            <inertia ixx="5.8982381320791524e-05" iyy="0.00013338786905954623" izz="0.00018586375094365218" ixy="-1.6170683703386755e-07" ixz="2.7949770042390678e-06" iyz="5.073018525688332e-07" />
-        </inertial>
-        <visual name="Top-V2-v2_visual">
-            <origin xyz="0 0 0" rpy="0 0 0" />
-            <geometry>
-                <mesh filename="package://lekiwi_rmf/urdf/meshes/Top-V2-v2.stl" scale="0.001 0.001 0.001" />
-            </geometry>
-        </visual>
-    </link>
     <link name="Camera-Mount-v8">
         <inertial>
             <origin xyz="-0.019889007343132665 0.003162253231103023 0.020248493842242046" rpy="0.0 -0.0 0.0" />
@@ -463,16 +437,6 @@
         <parent link="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff" />
         <child link="base_plate_layer2-v3" />
     </joint>
-    <joint name="base_plate_layer2-v3_Rigid-22" type="fixed">
-        <origin xyz="-0.02 -0.1 0.007000000000000002" rpy="0.0 -0.0 0.0" />
-        <parent link="base_plate_layer2-v3" />
-        <child link="Bottom-V2-v3" />
-    </joint>
-    <joint name="Bottom-V2-v3_Rigid-24" type="fixed">
-        <origin xyz="0.0197 0.036125 0.0025" rpy="0.0 -0.0 -2.465190328815662e-32" />
-        <parent link="Bottom-V2-v3" />
-        <child link="Top-V2-v2" />
-    </joint>
     <joint name="base_plate_layer1-v5_Rigid-28" type="fixed">
         <origin xyz="0.02 0.1 0.0" rpy="0.0 -0.0 0.0" />
         <parent link="base_plate_layer1-v5" />
@@ -509,7 +473,7 @@
         <child link="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-1" />
     </joint>
     <joint name="robotskin_lidar_mount_joint" type="fixed">
-        <origin xyz="0.055 0.08 0.007" rpy="0 0 0" />
+        <origin xyz="0.0 -0.115 0.007" rpy="0 0 -1.5707963267948966" />
         <parent link="base_plate_layer2-v3" />
         <child link="robotskin_lidar_mount" />
     </joint>
@@ -700,7 +664,7 @@
         </visual>
     </link>
     <joint name="so101_mount" type="fixed">
-        <origin xyz="8.90955446603e-08 0.10598331 0.00699999999992" rpy="-2.65358979335e-06 -7.04151787851e-12 -1.57080265359" />
+        <origin xyz="-8.90955448261e-08 0.0283127100002 0.00699999999992" rpy="-2.65358979335e-06 -7.04151787872e-12 1.57079" />
         <parent link="base_plate_layer2-v3" />
         <child link="so101_base_link" />
     </joint>
