@@ -12,8 +12,9 @@ Description=LeKiwi camera publisher (v4l2_camera on the device machine)
 Documentation=file://@PROJECT_ROOT@/README.md
 # The /dev/v4l/by-id globs only resolve after udev has settled.
 After=systemd-udevd.service
-StartLimitIntervalSec=600
-StartLimitBurst=8
+# The V4L2 supervisors wait safely for re-enumeration; do not turn repeated
+# USB resets into a permanently failed service.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple

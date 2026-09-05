@@ -3,8 +3,10 @@
 Description=LeKiwi Astra Pro RGB-D publisher
 Documentation=file://@PROJECT_ROOT@/README.md
 After=systemd-udevd.service
-StartLimitIntervalSec=600
-StartLimitBurst=8
+# A flaky USB hub can reset an RGB-D camera more than eight times in ten
+# minutes. Keep retrying with RestartSec below; an unavailable sensor must
+# not need a human to restart its independent service.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple

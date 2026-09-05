@@ -4,8 +4,9 @@
 Description=LeKiwi LD06 lidar publisher
 Documentation=file://@PROJECT_ROOT@/HARDWARE.md
 After=systemd-udevd.service
-StartLimitIntervalSec=600
-StartLimitBurst=8
+# The launcher waits for a missing serial device, so keep it retrying through
+# intermittent USB resets instead of exhausting systemd's restart budget.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -25,7 +26,9 @@ ProtectKernelLogs=true
 LockPersonality=true
 RestrictSUIDSGID=true
 UMask=0077
-Restart=on-failure
+# ros2 launch can exit successfully after its lidar child loses USB; restart
+# on either outcome and let ros-lidar.sh wait for the stable by-id device.
+Restart=always
 RestartSec=10s
 TimeoutStopSec=20s
 KillMode=control-group

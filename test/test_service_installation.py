@@ -194,6 +194,13 @@ def test_standard_installers_start_and_relay_the_host_lidar_without_an_opt_in():
     assert "record_service_fingerprint compute" in installer
 
 
+def test_sensor_services_keep_retrying_after_intermittent_usb_resets():
+    for name in ("lekiwi-astra.service", "lekiwi-cameras.service", "lekiwi-lidar.service"):
+        unit = (ROOT / "systemd" / name).read_text(encoding="utf-8")
+        assert "StartLimitIntervalSec=0" in unit
+        assert "Restart=always" in unit
+
+
 def test_pi_and_manual_split_startup_include_the_ld06():
     pi_installer = (ROOT / "scripts" / "install-pi.sh").read_text(encoding="utf-8")
     pi_up = (ROOT / "scripts" / "pi-up.sh").read_text(encoding="utf-8")
