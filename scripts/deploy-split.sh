@@ -147,8 +147,13 @@ done
 expected_service_fingerprint=$(service_fingerprint compute) || die "cannot calculate service configuration fingerprint"
 service_marker=$logs/service-fingerprint-compute
 remote_service_marker=$remote_home/.ros/lekiwi/service-fingerprint-device
+if [[ $(cat "$service_marker" 2>/dev/null || true) != "$expected_service_fingerprint" ]]; then
+  log "Refreshing stale compute service configuration"
+  LEKIWI_ROBOT_HOST=${device#*@} LEKIWI_WS=$workspace \
+    "$project_root/scripts/reinstall-compute.sh"
+fi
 [[ $(cat "$service_marker" 2>/dev/null || true) == "$expected_service_fingerprint" ]] || \
-  die "compute service configuration is stale; rerun scripts/install-compute-services.sh"
+  die "compute service configuration did not refresh"
 expected_device_service_fingerprint=$(service_fingerprint device) || die "cannot calculate device service configuration fingerprint"
 [[ $("${ssh_command[@]}" "cat '$remote_service_marker' 2>/dev/null || true") == "$expected_device_service_fingerprint" ]] || \
   die "device service configuration is stale; rerun scripts/install-device-services.sh on $device"

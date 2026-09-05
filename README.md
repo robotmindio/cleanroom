@@ -549,8 +549,9 @@ The initial service installation still needs an administrator authentication:
 creating a passwordless privilege rule without one would be a privilege-escalation path.
 
 The deployer first exits quickly when the requested revision, both built
-workspaces, and all services are already current. Otherwise it fast-forwards
-both clean checkouts to the same pushed commit, confirms torque-off, stops the
+workspaces, and all services are already current. Otherwise it refreshes stale
+compute service configuration, fast-forwards both clean checkouts to the same
+pushed commit, confirms torque-off, stops the
 compute stack before the device host, rebuilds both service workspaces, and
 starts the host, cameras, and LD06 before the compute stack. A temporary
 auto-arm inhibit keeps the replacement driver disarmed
