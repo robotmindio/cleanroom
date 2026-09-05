@@ -23,8 +23,14 @@ def generate_launch_description():
                 ("/color/camera_info", "/camera/astra/color/camera_info"),
                 ("/depth/image_raw", "/camera/astra/depth/image_raw"),
                 ("/depth/camera_info", "/camera/astra/depth/camera_info"),
-                ("/depth/points", "/camera/depth/points"),
+                # The full raster cloud is several MiB per frame. Keep it on
+                # the USB-owning machine and publish the compact result below.
+                ("/depth/points", "/camera/depth/points_raw"),
             ],
+            output="screen",
+        ),
+        Node(
+            package="lekiwi_rmf", executable="astra_cloud_filter", name="astra_cloud_filter",
             output="screen",
         ),
     ])

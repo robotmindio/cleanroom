@@ -10,7 +10,8 @@ def test_remote_astra_service_publishes_the_canonical_cloud_without_other_hardwa
     installer = (ROOT / "scripts" / "install-device-services.sh").read_text(encoding="utf-8")
 
     assert 'package="astra_camera", executable="astra_camera_node"' in launch
-    assert '("/depth/points", "/camera/depth/points")' in launch
+    assert '("/depth/points", "/camera/depth/points_raw")' in launch
+    assert 'package="lekiwi_rmf", executable="astra_cloud_filter"' in launch
     assert "astra_serial_from_hardware_config" in launch
     assert "ExecStart=@PROJECT_ROOT@/scripts/ros-astra.sh" in service
     assert "Restart=always" in service
