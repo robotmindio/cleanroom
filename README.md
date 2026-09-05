@@ -309,8 +309,10 @@ works from the managed service without an interactive permission fix.
 The driver uses `astra_camera_optical_frame`; keep its physical mount
 transform/calibration in `urdf/lekiwi.urdf.xacro` when the Astra mount is
 measured, rather than adding a runtime TF. The compact bracket uses the existing
-40 mm pair on the upper plate's left edge, as identified by the operator.
-The Astra faces left (ROS +Y), pitched 8 degrees down; forward (+X) remains
+diagonal pair nearest each fingernail in the operator's photo: CAD
+(-100, -20) and (-80, -60) mm, 44.721 mm apart. This places the bracket
+26.565 degrees counterclockwise from the previous left-facing mount.
+The Astra faces left/rear, pitched 8 degrees down; forward (+X) remains
 the arm/fixed-camera side. Its optical-centre correction still needs measurement.
 Verify the depth cloud overlay in RViz before enabling arm motion.
 
