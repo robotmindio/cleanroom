@@ -47,6 +47,7 @@
   <exec_depend>rclpy</exec_depend>
   <exec_depend>robot_state_publisher</exec_depend>
   <exec_depend>robot_localization</exec_depend>
+  <exec_depend>foxglove_bridge</exec_depend>
   <exec_depend>rosbridge_server</exec_depend>
   <exec_depend>rosapi</exec_depend>
   <exec_depend>rtabmap_slam</exec_depend>

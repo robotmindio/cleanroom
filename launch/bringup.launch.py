@@ -73,7 +73,10 @@ def generate_launch_description():
     auto_arm_on_startup = LaunchConfiguration("auto_arm_on_startup")
     start_rmf = LaunchConfiguration("start_rmf")
     rmf_domain = LaunchConfiguration("rmf_domain")
+    start_foxglove = LaunchConfiguration("start_foxglove")
     start_rosbridge = LaunchConfiguration("start_rosbridge")
+    foxglove_address = LaunchConfiguration("foxglove_address")
+    foxglove_port = LaunchConfiguration("foxglove_port")
     start_moveit = LaunchConfiguration("start_moveit")
     rosbridge_address = LaunchConfiguration("rosbridge_address")
     rosbridge_port = LaunchConfiguration("rosbridge_port")
@@ -296,6 +299,10 @@ def generate_launch_description():
             # Rosbridge is opt-in and loopback-bound by default. It has no built-in
             # authentication; do not expose it beyond a protected proxy/firewall.
             DeclareLaunchArgument("start_rosbridge", default_value="false"),
+            # Foxglove is the normal read-only observability endpoint. It sees the
+            # whole ROS graph but has neither client-publish nor service capability,
+            # so opening the dashboard cannot command this robot.
+            DeclareLaunchArgument("start_foxglove", default_value="true"),
             # MoveIt is optional for mobile navigation and is too expensive to
             # co-run with RTAB-Map on the 4 GB robot computer. Enable it only
             # for an arm task, preferably from the workstation.
@@ -303,6 +310,8 @@ def generate_launch_description():
             DeclareLaunchArgument("rosbridge_address", default_value="127.0.0.1"),
             DeclareLaunchArgument("rosbridge_port", default_value="9090"),
             DeclareLaunchArgument("rosbridge_domain", default_value="0"),
+            DeclareLaunchArgument("foxglove_address", default_value="127.0.0.1"),
+            DeclareLaunchArgument("foxglove_port", default_value="8765"),
             DeclareLaunchArgument("localization", default_value="visual_slam", choices=["amcl", "visual_slam"]),
             # Simulation starts a disposable mapping session. A real service
             # starts localization-only so an unattended boot cannot mutate an
@@ -782,6 +791,23 @@ def generate_launch_description():
                 target_action=rmf_owner_guard,
                 on_exit=_after_success("RMF ownership", [free_fleet_adapter]),
             )),
+            Node(
+                package="foxglove_bridge",
+                executable="foxglove_bridge",
+                name="foxglove_bridge",
+                parameters=[{
+                    "address": foxglove_address,
+                    "port": ParameterValue(foxglove_port, value_type=int),
+                    "use_sim_time": ParameterValue(sim, value_type=bool),
+                    # Read-only data plus package assets is enough for the live
+                    # robot model and every dashboard panel. Do not expose ROS
+                    # publishes, services, or parameters through a visualizer.
+                    "capabilities": ["connectionGraph", "assets"],
+                    "publish_client_count": True,
+                }],
+                condition=IfCondition(start_foxglove),
+                output="screen",
+            ),
             Node(
                 package="rosbridge_server",
                 executable="rosbridge_websocket",

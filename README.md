@@ -20,6 +20,7 @@ The package includes:
   the physics-actuated Gazebo arm;
 - RTAB-Map monocular place recognition and loop closure using metric wheel odometry;
 - a Free Fleet adapter connecting Nav2 to Open-RMF;
+- a read-only Foxglove dashboard for robot, navigation, sensor, and safety telemetry;
 - optional rosbridge WebSocket access for browsers and external applications;
 - one installer for the supported development/runtime stack.
 
@@ -185,6 +186,9 @@ scripts/sim-up.sh slam_mode:=localization \
 | `yaw_velocity_scale` | float | `0.90` | Correction for reported and commanded rotation |
 | `start_rmf` | `true`, `false` | `false` | Start Zenoh, RMF schedule, dispatcher, and fleet adapter |
 | `rmf_domain` | integer | `0` | DDS domain used by RMF processes; validation currently requires `0` because no tracked cross-domain bridge is configured |
+| `start_foxglove` | `true`, `false` | `true` | Start the read-only Foxglove WebSocket bridge |
+| `foxglove_address` | bind address | `127.0.0.1` | Interface exposed by Foxglove; loopback by default |
+| `foxglove_port` | TCP port | `8765` | Foxglove WebSocket listening port |
 | `start_rosbridge` | `true`, `false` | `false` | Start rosbridge WebSocket and ROS API nodes |
 | `start_moveit` | `true`, `false` | `false` | Start MoveIt arm planning and execution against the real or simulated action server |
 | `rosbridge_address` | bind address | `127.0.0.1` | Interface exposed by rosbridge; keep loopback unless protected separately |
@@ -334,6 +338,36 @@ ros2 run lekiwi_rmf odom_scale.py --axis linear
 ```
 
 It drives a short leg and compares the distance the calibrated camera sees against the distance odometry claims. Rotation is better derived from the wheel measurement above: estimating orientation from a flat target viewed head-on is unreliable at small angles.
+
+## Foxglove dashboard
+
+`scripts/install.sh` installs Foxglove Desktop on the graphical workstation
+and the ROS 2 Foxglove Bridge. Every normal bringup starts the read-only bridge
+at `ws://127.0.0.1:8765`. On the same server where RViz runs, open the desktop
+app already connected to it with:
+
+```bash
+scripts/foxglove.sh
+```
+
+Import [`config/foxglove-layout.json`](config/foxglove-layout.json) once
+through **Layouts → Import from file**. Save the imported layout and later
+opens show the dashboard immediately.
+
+The layout has four views: **Overview** combines the robot, maps/costmaps,
+plans, depth, scan, front camera, and safety diagnostics; **Navigation** is a
+top-down Nav2 view; **Perception** groups RGB cameras and depth; and
+**Telemetry & Health** shows diagnostics, safety permissions, battery,
+measured/commanded velocity, motor diagnostics, and joints. Optional sensors
+leave their panels empty rather than preventing the rest of the dashboard from
+opening.
+
+The bridge deliberately exposes no ROS client-publish or service capability,
+so Foxglove is observational only. It is loopback-bound by default. For a
+separate trusted workstation, configure `foxglove_address` to that machine's
+Tailscale address through the same tracked launch/deployment configuration;
+the launch validation rejects ordinary LAN exposure until authenticated TLS is
+configured.
 
 ## WebSocket access with rosbridge
 
