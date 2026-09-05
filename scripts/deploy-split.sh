@@ -3,16 +3,25 @@
 set -Eeuo pipefail
 
 usage() {
-  echo "usage: $0 [USER@]DEVICE [--remote-repo PATH] [--workspace PATH] [--remote-workspace PATH]" >&2
+  echo "usage: $0 [[USER@]DEVICE] [--remote-repo PATH] [--workspace PATH] [--remote-workspace PATH]" >&2
   exit 2
 }
 die() { echo "$0: $*" >&2; exit 1; }
 log() { printf '\n==> %s\n' "$*"; }
 
-[[ $# -ge 1 ]] || usage
 original_args=("$@")
-device=$1
-shift
+project_root=$(cd -- "$(dirname -- "$0")/.." && pwd)
+device=${LEKIWI_ROBOT_HOST:-}
+if [[ $# -gt 0 && $1 != --* ]]; then
+  device=$1
+  shift
+elif [[ -z $device && -r $project_root/.env ]]; then
+  mapfile -t configured_hosts < <(sed -n 's/^LEKIWI_ROBOT_HOST=//p' "$project_root/.env")
+  [[ ${#configured_hosts[@]} -eq 1 ]] ||
+    die ".env must contain exactly one LEKIWI_ROBOT_HOST"
+  device=${configured_hosts[0]}
+fi
+[[ -n $device ]] || die "set LEKIWI_ROBOT_HOST in $project_root/.env or pass [USER@]DEVICE"
 [[ $device =~ ^([a-z_][a-z0-9_-]*@)?[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || \
   die "device must be a hostname or address, optionally prefixed by USER@"
 
@@ -28,8 +37,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-cd "$(dirname "$0")/.."
-project_root=$PWD
+cd "$project_root"
 PROJECT_ROOT=$project_root
 # shellcheck source=/dev/null
 source "$PROJECT_ROOT/scripts/runtime-common.sh"

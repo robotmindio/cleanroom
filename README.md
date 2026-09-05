@@ -542,7 +542,7 @@ topology. Ordinary code/configuration deployments then run from the compute
 checkout with one command and never prompt for a password:
 
 ```bash
-scripts/deploy-split.sh DEVICE_IP
+scripts/deploy-split.sh
 ```
 
 The initial service installation still needs an administrator authentication:

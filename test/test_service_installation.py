@@ -249,6 +249,8 @@ def test_deploy_order_fails_closed_around_the_device_restart():
     assert "git merge --ff-only" in deploy
     assert "cannot fetch origin within 30 seconds" in deploy
     assert "deploy-inhibit-auto-arm" in deploy
+    assert "LEKIWI_ROBOT_HOST" in deploy
+    assert "configured_hosts" in deploy
     assert "reset --hard" not in deploy
 
 
