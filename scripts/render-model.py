@@ -79,8 +79,7 @@ def main():
             if name == "ld06_body" or name == "astra_camera_link":
                 color = "#263b48"
             if name.startswith("so101_"):
-                material = visual.find("material")
-                color = "#ded9c9" if material is not None and material.get("name") == "3d_printed" else "#3f4548"
+                color = "#ffcf1f"
             for axis in axes:
                 axis.add_collection3d(Poly3DCollection(triangles, facecolor=color, edgecolor="none"))
     points = np.asarray(all_vertices)

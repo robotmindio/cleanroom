@@ -493,6 +493,9 @@
     <material name="sts3215">
         <color rgba="0.1 0.1 0.1 1.0" />
     </material>
+    <material name="so101_yellow">
+        <color rgba="1.0 0.82 0.12 1.0" />
+    </material>
     <link name="so101_base_link">
         <inertial>
             <origin xyz="0.0137179 -5.19711e-05 0.0334843" rpy="0 0 0" />
@@ -504,28 +507,28 @@
             <geometry>
                 <mesh filename="package://lekiwi_rmf/urdf/meshes/so101/base_motor_holder_so101_v1.stl" />
             </geometry>
-            <material name="3d_printed" />
+            <material name="so101_yellow" />
         </visual>
         <visual>
             <origin xyz="-0.00636471 -8.97657e-09 -0.0024" rpy="1.5708 -2.78073e-29 1.5708" />
             <geometry>
                 <mesh filename="package://lekiwi_rmf/urdf/meshes/so101/base_so101_v2.stl" />
             </geometry>
-            <material name="3d_printed" />
+            <material name="so101_yellow" />
         </visual>
         <visual>
             <origin xyz="0.0263353 -8.97657e-09 0.0437" rpy="-8.21148e-16 7.84513e-18 1.249e-15" />
             <geometry>
                 <mesh filename="package://lekiwi_rmf/urdf/meshes/so101/sts3215_03a_v1.stl" />
             </geometry>
-            <material name="sts3215" />
+            <material name="so101_yellow" />
         </visual>
         <visual>
             <origin xyz="-0.0309827 -0.000199441 0.0474" rpy="1.5708 -1.35493e-14 1.5708" />
             <geometry>
                 <mesh filename="package://lekiwi_rmf/urdf/meshes/so101/waveshare_mounting_plate_so101_v2.stl" />
             </geometry>
-            <material name="3d_printed" />
+            <material name="so101_yellow" />
         </visual>
     </link>
     <link name="so101_shoulder_link">
@@ -539,21 +542,21 @@
             <geometry>
                 <mesh filename="package://lekiwi_rmf/urdf/meshes/so101/sts3215_03a_v1.stl" />
             </geometry>
-            <material name="sts3215" />
+            <material name="so101_yellow" />
         </visual>
         <visual>
             <origin xyz="-0.0675992 -0.000177759 0.0158499" rpy="1.5708 -1.5708 0" />
             <geometry>
                 <mesh filename="package://lekiwi_rmf/urdf/meshes/so101/motor_holder_so101_base_v1.stl" />
             </geometry>
-            <material name="3d_printed" />
+            <material name="so101_yellow" />
         </visual>
         <visual>
             <origin xyz="0.0122008 2.22413e-05 0.0464" rpy="-1.5708 2.35221e-33 0" />
             <geometry>
                 <mesh filename="package://lekiwi_rmf/urdf/meshes/so101/rotation_pitch_so101_v1.stl" />
             </geometry>
-            <material name="3d_printed" />
+            <material name="so101_yellow" />
         </visual>
     </link>
     <link name="so101_upper_arm_link">
@@ -567,14 +570,14 @@
             <geometry>
                 <mesh filename="package://lekiwi_rmf/urdf/meshes/so101/sts3215_03a_v1.stl" />
             </geometry>
-            <material name="sts3215" />
+            <material name="so101_yellow" />
         </visual>
         <visual>
             <origin xyz="-0.065085 0.012 0.0182" rpy="3.14159 -0 -1.30911e-30" />
             <geometry>
                 <mesh filename="package://lekiwi_rmf/urdf/meshes/so101/upper_arm_so101_v1.stl" />
             </geometry>
-            <material name="3d_printed" />
+            <material name="so101_yellow" />
         </visual>
     </link>
     <link name="so101_lower_arm_link">
@@ -588,21 +591,21 @@
             <geometry>
                 <mesh filename="package://lekiwi_rmf/urdf/meshes/so101/under_arm_so101_v1.stl" />
             </geometry>
-            <material name="3d_printed" />
+            <material name="so101_yellow" />
         </visual>
         <visual>
             <origin xyz="-0.0648499 -0.032 0.018" rpy="-3.14159 -2.55351e-15 -1.83387e-30" />
             <geometry>
                 <mesh filename="package://lekiwi_rmf/urdf/meshes/so101/motor_holder_so101_wrist_v1.stl" />
             </geometry>
-            <material name="3d_printed" />
+            <material name="so101_yellow" />
         </visual>
         <visual>
             <origin xyz="-0.1224 0.0052 0.0187" rpy="-3.14159 -7.88861e-31 -3.14159" />
             <geometry>
                 <mesh filename="package://lekiwi_rmf/urdf/meshes/so101/sts3215_03a_v1.stl" />
             </geometry>
-            <material name="sts3215" />
+            <material name="so101_yellow" />
         </visual>
     </link>
     <link name="so101_wrist_link">
@@ -616,14 +619,14 @@
             <geometry>
                 <mesh filename="package://lekiwi_rmf/urdf/meshes/so101/sts3215_03a_no_horn_v1.stl" />
             </geometry>
-            <material name="sts3215" />
+            <material name="so101_yellow" />
         </visual>
         <visual>
             <origin xyz="0 -0.028 0.0181" rpy="-1.5708 -1.5708 0" />
             <geometry>
                 <mesh filename="package://lekiwi_rmf/urdf/meshes/so101/native_wrist_flex.stl" />
             </geometry>
-            <material name="3d_printed" />
+            <material name="so101_yellow" />
         </visual>
     </link>
     <link name="so101_gripper_link">
@@ -637,14 +640,14 @@
             <geometry>
                 <mesh filename="package://lekiwi_rmf/urdf/meshes/so101/sts3215_03a_v1.stl" />
             </geometry>
-            <material name="sts3215" />
+            <material name="so101_yellow" />
         </visual>
         <visual>
             <origin xyz="8.32667e-17 -0.000218214 0.000949706" rpy="-3.14159 -5.55112e-17 0" />
             <geometry>
                 <mesh filename="package://lekiwi_rmf/urdf/meshes/so101/wrist_roll_follower_so101_v1.stl" />
             </geometry>
-            <material name="3d_printed" />
+            <material name="so101_yellow" />
         </visual>
     </link>
     <link name="so101_gripper_frame_link">
@@ -660,7 +663,7 @@
             <geometry>
                 <mesh filename="package://lekiwi_rmf/urdf/meshes/so101/moving_jaw_so101_v1.stl" />
             </geometry>
-            <material name="3d_printed" />
+            <material name="so101_yellow" />
         </visual>
     </link>
     <joint name="so101_mount" type="fixed">

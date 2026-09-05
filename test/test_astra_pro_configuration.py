@@ -55,6 +55,17 @@ def test_astra_has_its_own_tracked_robot_frame():
     assert 'property name="astra_mount_xyz" value="0 0 0.0155"' in description
 
 
+def test_so101_visuals_use_one_yellow_material():
+    robot = ET.fromstring(subprocess.check_output(
+        ["xacro", str(ROOT / "urdf/lekiwi.urdf.xacro")], text=True
+    ))
+    yellow = robot.find("material[@name='so101_yellow']/color")
+    assert yellow is not None and yellow.get("rgba") == "1.0 0.82 0.12 1.0"
+    assert all(visual.find("material").get("name") == "so101_yellow"
+               for link in robot.findall("link") if link.get("name").startswith("so101_")
+               for visual in link.findall("visual"))
+
+
 def test_astra_optical_axis_faces_left_rear_and_down_in_the_complete_robot():
     robot = ET.fromstring(subprocess.check_output(
         ["xacro", str(ROOT / "urdf/lekiwi.urdf.xacro")], text=True
