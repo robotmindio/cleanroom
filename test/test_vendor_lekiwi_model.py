@@ -2,6 +2,7 @@
 
 import importlib.util
 from pathlib import Path
+import xml.etree.ElementTree as ET
 
 
 ROOT = Path(__file__).parents[1]
@@ -33,3 +34,12 @@ def test_transform_replaces_existing_limits_without_duplicate_elements(tmp_path)
     assert joint.get("type") == "${roll_joint}"
     assert len(joint.findall("limit")) == 1
     assert joint.find("limit").get("lower") == VENDOR.ARM_LIMITS["arm_wrist_roll"][0]
+
+
+def test_vendored_so101_mount_keeps_the_installed_plate_pose():
+    root = ET.parse(ROOT / "urdf" / "lekiwi_cad.urdf").getroot()
+    mount = root.find("joint[@name='so101_mount']")
+
+    assert mount.find("parent").get("link") == "base_plate_layer2-v3"
+    assert mount.find("child").get("link") == "so101_base_link"
+    assert mount.find("origin").attrib == {"xyz": "0.04 0.08 0.007", "rpy": "0 0 0"}

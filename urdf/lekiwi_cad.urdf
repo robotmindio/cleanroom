@@ -367,6 +367,14 @@
             </geometry>
         </visual>
     </link>
+    <link name="astra_pro_compact_mount">
+        <visual name="astra_pro_compact_mount_visual">
+            <origin xyz="0 0 0" rpy="0 0 0" />
+            <geometry>
+                <mesh filename="package://lekiwi_rmf/urdf/meshes/astra_pro_compact_mount.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </visual>
+    </link>
     <joint name="base_plate_layer1-v5_baseplate2bottom_mount" type="fixed">
         <origin xyz="-0.02 -0.1 0.0" rpy="3.141592653589793 -0.0 0.0" />
         <parent link="base_plate_layer1-v5" />
@@ -501,7 +509,7 @@
         <child link="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-1" />
     </joint>
     <joint name="robotskin_lidar_mount_joint" type="fixed">
-        <origin xyz="0.05 0.095 0" rpy="0 0 0" />
+        <origin xyz="0.055 0.08 0" rpy="0 0 0" />
         <parent link="base_plate_layer1-v5" />
         <child link="robotskin_lidar_mount" />
     </joint>
@@ -509,6 +517,11 @@
         <origin xyz="0.02 -0.005 0.012" rpy="0 0 0" />
         <parent link="robotskin_lidar_mount" />
         <child link="ld06_body" />
+    </joint>
+    <joint name="astra_pro_compact_mount_joint" type="fixed">
+        <origin xyz="0 0.08 0" rpy="0 0 0" />
+        <parent link="base_plate_layer1-v5" />
+        <child link="astra_pro_compact_mount" />
     </joint>
     <material name="3d_printed">
         <color rgba="1.0 0.82 0.12 1.0" />
@@ -670,7 +683,8 @@
             <material name="3d_printed" />
         </visual>
     </link>
-    <link name="so101_gripper_frame_link" />
+    <link name="so101_gripper_frame_link">
+    </link>
     <link name="so101_moving_jaw_link">
         <inertial>
             <origin xyz="-0.00157495 -0.0300244 0.0192755" rpy="0 0 0" />
@@ -686,7 +700,7 @@
         </visual>
     </link>
     <joint name="so101_mount" type="fixed">
-        <origin xyz="0.0388353 0.06714801 0.007" rpy="0 0 3.14159" />
+        <origin xyz="0.04 0.08 0.007" rpy="0 0 0" />
         <parent link="base_plate_layer2-v3" />
         <child link="so101_base_link" />
     </joint>

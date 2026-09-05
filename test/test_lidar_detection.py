@@ -3,10 +3,12 @@
 import ast
 import pathlib
 import types
+import xml.etree.ElementTree as ET
 
 
 _SOURCE = (pathlib.Path(__file__).parents[1] / "launch" / "bringup.launch.py").read_text()
 _URDF_SOURCE = (pathlib.Path(__file__).parents[1] / "urdf" / "lekiwi.urdf.xacro").read_text()
+_CAD = ET.parse(pathlib.Path(__file__).parents[1] / "urdf" / "lekiwi_cad.urdf").getroot()
 _TREE = ast.parse(_SOURCE)
 _NAMES = {"LD06_SERIAL_PORTS", "_lidar_serial_present", "_lidar_default_port"}
 _NODES = [
@@ -42,3 +44,16 @@ def test_remote_relay_has_a_laserscan_type_before_the_pi_publisher_appears():
 def test_laser_frame_has_a_measured_correction_after_the_nominal_cad_pose():
     assert '<joint name="laser_calibration" type="fixed">' in _URDF_SOURCE
     assert '${lidar_offset_xyz}' in _URDF_SOURCE
+
+
+def test_ld06_stays_on_its_robotskin_mount_at_the_installed_plate_pose():
+    joints = {joint.get("name"): joint for joint in _CAD.findall("joint")}
+    mount = joints["robotskin_lidar_mount_joint"]
+    body = joints["ld06_body_mount"]
+
+    assert mount.find("parent").get("link") == "base_plate_layer1-v5"
+    assert mount.find("child").get("link") == "robotskin_lidar_mount"
+    assert mount.find("origin").attrib == {"xyz": "0.055 0.08 0", "rpy": "0 0 0"}
+    assert body.find("parent").get("link") == "robotskin_lidar_mount"
+    assert body.find("child").get("link") == "ld06_body"
+    assert body.find("origin").attrib == {"xyz": "0.02 -0.005 0.012", "rpy": "0 0 0"}

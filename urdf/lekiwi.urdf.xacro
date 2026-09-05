@@ -2,11 +2,11 @@
 <!-- ROS description wrapper for the physical LeKiwi CAD model. -->
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="lekiwi">
   <xacro:arg name="sim" default="false"/>
-  <!-- The one tracked source for physical sensor calibration.  Every consumer
-       expands this Xacro (robot_state_publisher, MoveIt, and RViz), so changing
-       a measured value here cannot make their models disagree. -->
-  <xacro:property name="astra_mount_xyz" value="0 0 0"/>
-  <xacro:property name="astra_mount_rpy" value="0 0 0"/>
+  <!-- The compact Astra mount's CAD contact plane is 15.5 mm high at -8 degrees.
+       Every consumer expands this Xacro (robot_state_publisher, MoveIt, and RViz),
+       so its fixed placement and measured wrist/lidar corrections stay aligned. -->
+  <xacro:property name="astra_mount_xyz" value="0 0 0.0155"/>
+  <xacro:property name="astra_mount_rpy" value="-0.13962634015954636 0 0"/>
   <xacro:property name="wrist_camera_xyz" value="0 0 0"/>
   <xacro:property name="wrist_camera_rpy" value="0 0 0"/>
   <xacro:property name="lidar_offset_xyz" value="0 0 0"/>
@@ -18,7 +18,7 @@
   <!-- The physical wrist cable and servo have a bounded safe travel envelope.
        Declaring it continuous makes MoveIt discard the configured bounds. -->
   <xacro:property name="roll_joint" value="revolute"/>
-  <!-- Complete model vendored from robotmindio/LeKiwi at 597e2da; see urdf/README.md. -->
+  <!-- Complete model vendored from robotmindio/LeKiwi at 0595140; see urdf/README.md. -->
   <xacro:include filename="lekiwi_cad.urdf"/>
 
   <!-- CAD's root is the lower base plate. Its +Y is the physical forward
@@ -49,7 +49,7 @@
     <origin xyz="0 0 0" rpy="-1.57079632679 0 -1.57079632679"/>
   </joint>
   <!-- Astra Pro is distinct from the existing front and wrist cameras. Its
-       165 x 48 x 40 mm body is visual-only; mount calibration remains above. -->
+       compact CAD mount owns placement; this 165 x 48 x 40 mm body is visual-only. -->
   <link name="astra_camera_link">
     <visual>
       <origin xyz="-0.020 0 0" rpy="0 0 0"/>
@@ -58,7 +58,7 @@
     </visual>
   </link>
   <joint name="astra_camera_mount" type="fixed">
-    <parent link="Camera-Model-v3"/><child link="astra_camera_link"/>
+    <parent link="astra_pro_compact_mount"/><child link="astra_camera_link"/>
     <origin xyz="${astra_mount_xyz}" rpy="${astra_mount_rpy}"/>
   </joint>
   <link name="astra_camera_optical_frame"/>
@@ -122,7 +122,7 @@
   <xacro:collision_capsule_proxy name="roll_collision_proxy" parent="so101_gripper_link" xyz="-0.0024 -0.0020 -0.0517" rpy="0 0 0" radius="0.0459" cylinder_length="0.0136"/>
   <xacro:collision_capsule_proxy name="gripper_collision_proxy" parent="so101_moving_jaw_link" xyz="-0.0012 -0.0360 0.0189" rpy="1.5708 0 0" radius="0.0305" cylinder_length="0.0310"/>
 
-  <!-- LD06 scan plane: the RobotSkin base puts it 90 mm forward, 70 mm right,
+  <!-- LD06 scan plane: the RobotSkin base puts it 75 mm forward, 75 mm right,
        and 31.5 mm above base_link. The nominal frame stays on the CAD body;
        the child is the small measured correction used by the scan. -->
   <link name="laser_nominal"/>

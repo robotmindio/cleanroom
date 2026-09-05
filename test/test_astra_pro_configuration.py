@@ -41,7 +41,9 @@ def test_astra_has_its_own_tracked_robot_frame():
     assert 'link name="astra_camera_link"' in description
     assert 'link name="astra_camera_optical_frame"' in description
     assert '<box size="0.040 0.165 0.048"/>' in description
-    assert '<parent link="Camera-Model-v3"/><child link="astra_camera_link"/>' in description
+    assert '<parent link="astra_pro_compact_mount"/><child link="astra_camera_link"/>' in description
+    assert 'property name="astra_mount_xyz" value="0 0 0.0155"' in description
+    assert 'property name="astra_mount_rpy" value="-0.13962634015954636 0 0"' in description
 
 
 def test_sensor_calibration_has_one_xacro_source_for_all_model_consumers():
