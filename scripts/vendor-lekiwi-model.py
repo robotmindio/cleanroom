@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import argparse
 import io
+import json
 from pathlib import Path, PurePosixPath
 import subprocess
+import sys
 import xml.etree.ElementTree as ET
 
 
@@ -74,6 +76,10 @@ def transform(path: Path) -> tuple[ET.Element, dict[Path, Path]]:
 
 
 def source_revision(source: Path) -> str:
+    subprocess.run(
+        [sys.executable, str(source / "scripts/model_manifest.py"), "--check"],
+        cwd=source, check=True,
+    )
     status = subprocess.run(
         [
             "git",
@@ -84,6 +90,8 @@ def source_revision(source: Path) -> str:
             "--",
             str(SOURCE_MODEL),
             "URDF/meshes",
+            "cad",
+            "scripts",
         ],
         check=True,
         capture_output=True,
@@ -120,6 +128,11 @@ def main() -> int:
     # Read every input before changing the snapshot. A missing upstream mesh
     # must not leave a new URDF pointing at an incomplete set of old assets.
     files = {output / "lekiwi_cad.urdf": generated.getvalue()}
+    files[output / "model-source.json"] = (json.dumps({
+        "repository": "https://github.com/robotmindio/LeKiwi",
+        "revision": revision,
+        "model": SOURCE_MODEL.as_posix(),
+    }, indent=2) + "\n").encode()
     for target, model_source in meshes.items():
         files[mesh_dir / target] = (source / "URDF/meshes" / model_source).read_bytes()
     if args.check:

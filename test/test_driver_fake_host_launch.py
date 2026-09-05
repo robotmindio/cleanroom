@@ -22,10 +22,12 @@ import rclpy
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from rclpy.qos import DurabilityPolicy, QoSProfile
+from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool, String
 from std_srvs.srv import Trigger
 
 from lekiwi_rmf.fake_host import FakeLeKiwiHost, ObservationFault
+from lekiwi_rmf.arm_trajectory import ARM_JOINTS
 
 
 @pytest.mark.rostest
@@ -80,6 +82,7 @@ class TestDriverFakeHostGraph(unittest.TestCase):
         self.node = rclpy.create_node("driver_fake_host_graph_client")
         self.odom: list[Odometry] = []
         self.states: list[str] = []
+        self.raw_states: list[JointState] = []
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.base_permission = self.node.create_publisher(
             Bool, "/test/driver/base_permitted", latched
@@ -95,6 +98,9 @@ class TestDriverFakeHostGraph(unittest.TestCase):
         )
         self.node.create_subscription(
             String, "/test/driver/state", lambda message: self.states.append(message.data), latched
+        )
+        self.node.create_subscription(
+            JointState, "/driver_integration/arm/raw_joint_states", self.raw_states.append, 10
         )
         self.arm_client = self.node.create_client(
             Trigger, "/driver_integration/safety/arm"
@@ -128,8 +134,12 @@ class TestDriverFakeHostGraph(unittest.TestCase):
             and self.base_permission.get_subscription_count() == 1
             and self.arm_permission.get_subscription_count() == 1
             and bool(self.odom)
+            and bool(self.raw_states)
             and "DISARMED" in self.states
         ))
+        self.assertEqual(self.raw_states[-1].name, list(ARM_JOINTS))
+        self.assertEqual(len(self.raw_states[-1].position), len(ARM_JOINTS))
+        self.assertGreater(self.raw_states[-1].header.stamp.sec, 0)
 
         denied = self._arm()
         self.assertFalse(denied.success)

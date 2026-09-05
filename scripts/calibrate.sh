@@ -7,7 +7,7 @@
 #
 #   scripts/calibrate.sh                     run whichever required calibrations are missing
 #   scripts/calibrate.sh motor               redo Lerobot's servo-range calibration
-#   scripts/calibrate.sh pose               redo the folded-CAD zero-pose capture
+#   scripts/calibrate.sh pose               capture the SO-101 new-calibration zero pose
 #   scripts/calibrate.sh camera             redo the front-camera intrinsics
 #   scripts/calibrate.sh wrist              redo the wrist-camera intrinsics
 #   scripts/calibrate.sh height             redo the laser height/pitch (free_space)
@@ -15,7 +15,7 @@
 #
 # What each step saves or produces:
 #   motor      Lerobot's cache  -> ~/.cache/huggingface/lerobot/calibration/robots/lekiwi/<id>.json
-#   pose       arm folded-CAD-zero mapping -> ~/.ros/lekiwi_arm_calibration.json
+#   pose       SO-101 zero mapping -> ~/.ros/lekiwi_arm_calibration.json
 #   camera     front intrinsics -> ~/.ros/camera_info/lekiwi_front.yaml
 #   wrist      wrist intrinsics -> ~/.ros/camera_info/lekiwi_wrist.yaml
 #   height     saves camera_height/camera_pitch to ~/.ros/lekiwi_launch_calibration.conf
@@ -82,19 +82,21 @@ motor_calibration_valid() {
 pose_calibration_valid() {
   python3 - "$POSE_FILE" <<'PY'
 import json
+import math
 import sys
 
 try:
     with open(sys.argv[1]) as source:
         calibration = json.load(source)
     zeroes = calibration["zero_positions"]
+    assert calibration.get("model") == "so101_new_calib"
     directions = calibration["directions"]
     required = {
         "arm_shoulder_pan", "arm_shoulder_lift", "arm_elbow_flex",
         "arm_wrist_flex", "arm_wrist_roll", "arm_gripper",
     }
     assert required <= set(zeroes) and required <= set(directions)
-    assert all(isinstance(zeroes[name], (int, float)) for name in required)
+    assert all(type(zeroes[name]) in (int, float) and math.isfinite(zeroes[name]) for name in required)
     assert all(directions[name] in (-1, 1) for name in required)
 except (OSError, ValueError, KeyError, TypeError, AssertionError):
     raise SystemExit(1)
@@ -172,34 +174,6 @@ service_restore_hint() {
   fi
 }
 
-start_host_and_driver() {
-  # The pose capture needs a LeKiwi host (motor values -> ZMQ) and the ROS driver
-  # (reads them -> /joint_states). No cameras, RMF, MoveIt, or rosbridge needed.
-  stop_host_service
-  echo "Starting the LeRobot host and a slim stack (no cameras, RMF, or MoveIt)."
-  if ! host_up; then
-    setsid scripts/robot-host.sh --no-cameras > "$LOGS/host.log" 2>&1 &
-    if ! wait_for 90 host_up; then
-      echo "$0: LeKiwi host did not come up:" >&2
-      tail -5 "$LOGS/host.log" >&2
-      exit 1
-    fi
-    echo "host: up"
-  else
-    echo "host: already up"
-  fi
-
-  rm -f "$LOGS/stack-calib.log"
-  setsid scripts/ros-start.sh camera_source:=remote start_rmf:=false \
-    start_rosbridge:=false start_moveit:=false > "$LOGS/stack-calib.log" 2>&1 &
-  if ! wait_for 120 grep -q "Connected to LeKiwi host" "$LOGS/stack-calib.log"; then
-    echo "$0: ROS driver did not connect to the LeKiwi host:" >&2
-    tail -10 "$LOGS/stack-calib.log" >&2
-    exit 1
-  fi
-  echo "driver: connected"
-}
-
 calibrate_motor() {
   stop_host_service
   if port_owned; then
@@ -223,31 +197,38 @@ calibrate_motor() {
 }
 
 calibrate_pose() {
-  local pose_backup=""
-  if [ -s "$POSE_FILE" ]; then
-    pose_backup="$POSE_FILE.bak"
-    mv "$POSE_FILE" "$pose_backup"
-    echo "Moved existing $POSE_FILE to $pose_backup."
+  # The live driver's raw topic works on both local and split deployments and
+  # is unaffected by its currently loaded pose calibration.
+  if ! ros2 topic info /arm/raw_joint_states 2>/dev/null | grep -q 'Publisher count: 1'; then
+    echo "$0: start the updated repository stack first; /arm/raw_joint_states needs one publisher." >&2
+    exit 1
   fi
-  start_host_and_driver
+  local pose_backup=""
+  local capture_args=()
 
   echo
-  echo "Support the arm in RViz's folded CAD home pose (all arm joints at zero),"
-  echo "with the gripper at its zero position. This is the vendor CAD's folded"
-  echo "rest pose, not an upright arm. Keep holding it aligned; press Enter when ready:"
+  echo "Disarm using the existing operator control before manually positioning the arm."
+  echo "Support it in the generated SO-101 new-calibration zero pose, including the gripper."
+  echo "Use the reference in urdf/README.md; the old folded pose is incorrect."
+  echo "Keep holding it aligned; press Enter when ready:"
   read -r _
 
+  if [ -s "$POSE_FILE" ]; then
+    pose_backup=$(mktemp "${POSE_FILE}.XXXXXX.bak")
+    mv "$POSE_FILE" "$pose_backup"
+    capture_args=(--directions-from "$pose_backup")
+    echo "Moved existing $POSE_FILE to $pose_backup."
+  fi
   echo "Capturing the held pose."
-  if ! ros2 run lekiwi_rmf arm_calibration.py > "$LOGS/pose.log" 2>&1; then
+  if ! ros2 run lekiwi_rmf arm_calibration.py "${capture_args[@]}" > "$LOGS/pose.log" 2>&1; then
     echo "$0: pose capture failed:" >&2
     cat "$LOGS/pose.log" >&2
     # A failed capture must not silently leave the robot using uncalibrated
-    # zeros.  Put the last known calibration back and release the slim stack.
+    # zeros. Put the last known calibration back.
     if [ -n "$pose_backup" ] && [ -s "$pose_backup" ]; then
       mv "$pose_backup" "$POSE_FILE"
       echo "Restored the previous arm calibration." >&2
     fi
-    scripts/ros-stop.sh
     exit 1
   fi
   [ -s "$POSE_FILE" ] || {
@@ -347,23 +328,9 @@ calibrate_wheels() {
 }
 
 finish_pose() {
-  if camera_calibration_valid; then
-    echo
-    echo "Stopping the slim calibration stack so the full stack can start clean."
-    scripts/ros-stop.sh
-    echo
-    echo "Starting the full stack (RViz opens) so MoveIt uses the new pose."
-    scripts/up.sh
-    echo
-    echo "If a joint moves opposite in RViz, flip that joint's directions value"
-    echo "in $POSE_FILE between 1 and -1, then scripts/up.sh again."
-  else
-    echo
-    echo "Front-camera calibration is missing, so the stack was not started."
-    echo "Run scripts/calibrate.sh camera first, then scripts/up.sh."
-    echo "Stopping the slim calibration stack so it cannot keep the motor port."
-    scripts/ros-stop.sh
-  fi
+  echo "Restart the driver through your repository launch/deploy workflow to apply $POSE_FILE."
+  echo "Then verify each joint's direction and several poses before executing a trajectory."
+  echo "Pose capture has not changed torque or restarted the running services."
 }
 
 case "$mode" in
@@ -383,7 +350,7 @@ case "$mode" in
       exit 0
     fi
 
-    if [[ "$need_motor" = 1 ]] || [[ "$need_camera" = 1 ]] || [[ "$need_pose" = 1 ]]; then
+    if [[ "$need_motor" = 1 ]] || [[ "$need_camera" = 1 ]]; then
       if calibrating; then
         echo "Stopping the running host and stack so calibration can hold the hardware clean."
         scripts/ros-stop.sh
@@ -399,13 +366,13 @@ case "$mode" in
     fi
 
     if [[ "$need_pose" = 1 ]]; then
-      echo; calibrate_pose
-      finish_pose
+      echo "Pose calibration needs the updated stack running and the arm held in its reference pose."
+      echo "Start the stack through your deployment workflow, then run: scripts/calibrate.sh pose"
     fi
 
     echo
     echo "The height and wheel tools need the stack running. Their results are saved to"
-    echo "~/.ros/lekiwi_launch_calibration.conf. When ready, once the stack is up:"
+    echo "$HOME/.ros/lekiwi_launch_calibration.conf. When ready, once the stack is up:"
     echo "  height:  ros2 run lekiwi_rmf free_space.py --ros-args -p calibrate:=true ..."
     echo "  linear:  ros2 run lekiwi_rmf odom_scale.py --axis linear"
     echo "  angular: ros2 run lekiwi_rmf odom_scale.py --axis angular"
@@ -427,10 +394,6 @@ case "$mode" in
     service_restore_hint
     ;;
   pose)
-    if calibrating; then
-      echo "Stopping the running host/stack for the pose capture."
-      scripts/ros-stop.sh
-    fi
     calibrate_pose
     finish_pose
     ;;

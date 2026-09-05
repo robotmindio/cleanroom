@@ -1,22 +1,21 @@
 # Robot description consistency
 
 Completed:
-- Corrected Astra orientation from its CAD +Y-facing saddle to the ROS +X camera convention (8 degrees downward).
-- Made RViz's robot-description subscription transient-local for late startup.
-- Added read-only vendor snapshot verification and preflight of all mesh inputs before overwriting outputs.
-- Documented the CAD export → committed snapshot → vendor → ROS build → consumer restart workflow.
+- Confirmed actual arm is SO-101. Corrected its base placement in LeKiwi by matching the original shoulder centre and physical pan/lift axes; reusing the SO-100 base origin displaced it ~79 mm sideways.
+- RobotSkin lidar mount is identical in pinned/standalone sources. Both sensor brackets now attach to the upper plate's top surface.
+- Connected the validated native wrist-flex part in the official mesh frame, converted from millimetres to metres.
+- Corrected Astra direction, body envelope and nominal optical centre; fixed RViz description durability.
+- Added source/output manifests to reject stale CAD exports; model-source.json records the source revision automatically.
+- Added raw arm state publication and fresh/finite capture independent of old offsets. Capture preserves directions and backs up calibration, without restarting services or changing torque.
+- Generated the three-view SO-101 zero-pose reference; removed legacy folded-pose instructions.
 
 Verified:
-- 33 focused model, sensor, simulation-description, and vendor tests passed; changed Python files passed repository lint.
-- Before changes, source, installed package, live robot_state_publisher, and RViz parameters all contained 58 links / 57 joints; all mesh paths resolved.
-- Vendored CAD matches LeKiwi commit 05951401134ebb789caf86aa192aa68f2ad8bffd byte for byte.
-- Live late-subscriber experiment received zero descriptions with volatile durability and one with transient-local durability.
-- Repository build script passed into the checkout-local install (managed `/home/nex/lekiwi_ws` install unchanged). Initial direct build hit stale user-local Protobuf cache; the repository script rebuilt successfully with its normal cache/tool isolation.
+- 84 focused Python tests, ROS package build, six installed CTest suites and the real-driver/fake-host test including raw joint publication.
+- Native wrist fidelity; shoulder centre/axis alignment and propagation of assembly edits; Xacro semantics; chassis/native/accessory/reference/manufacturing checks.
+- Source and checkout-local installed descriptions matched before the final axis correction; repeat on the managed install after deployment.
 
-Pending / next:
-- Confirm physical arm variant with user. Export unconditionally replaces the original LeKiwi arm with official SO-101, including a different base and gripper; do not select the hardware model from assumption.
-- Resolve calibration against the confirmed model. Live elbow was 5.364 rad (limits ±1.69), wrist flex -3.069 rad (limits ±1.65806). Saved zero offsets exist; do not hide errors by clamping displayed states or overwriting calibration from an unknown pose.
-- Measure/confirm sensor mounts. Current lidar is on the lower plate at CAD (75,75,12) mm; its cylinder extends to z=51 mm and the upper plate starts at z=50 mm. Photo appears to place it further outboard. Confirm plate and mounting holes before changing CAD source.
-- Astra visual is an approximate box whose origin is currently the saddle contact point; optical-centre translation and body placement need physical dimensions. Direction fix is verified, physical placement is not.
-- Install/deploy final model and inspect newly launched RViz and MoveIt after hardware choices/calibration are resolved. Running managed stack has not been restarted or reconfigured by this task.
-- Remove this file when the entire task is delivered.
+Next:
+- Install/restart and compare live publisher, MoveIt and RViz with the generated model. Managed startup has auto_arm_on_startup=false.
+- User must hold the disarmed arm in the reference pose for capture, then verify directions and multiple poses. Existing elbow/wrist offsets produce out-of-range readings; do not clamp them or overwrite calibration from an unknown pose.
+- Physically confirm sensor placement and measure Astra optical-centre correction; verify scan/cloud directions against known objects.
+- Remove this file when physical calibration/validation and final delivery are complete.

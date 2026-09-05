@@ -230,12 +230,18 @@ RViz joint sliders remain preview-only; they never command the physical arm.
 
 ### Arm pose calibration
 
-Run `scripts/calibrate.sh pose`. It starts the temporary host/driver needed to capture the
-physical arm in the vendor CAD's **folded home pose** (the all-zero RViz model), saves
-`~/.ros/lekiwi_arm_calibration.json`, tears that stack down, then starts the normal stack
-when camera calibration is available. Do not use an upright arm for this capture: upright
-is a nonzero CAD configuration. If a joint moves opposite in RViz, change only that
-joint's `directions` value between `1` and `-1`, then restart.
+With the updated stack running, run `scripts/calibrate.sh pose` on the compute
+machine that owns the ROS driver. It captures fresh `/arm/raw_joint_states`,
+independent of the driver's existing offsets, and backs up the previous calibration.
+Support the disarmed arm in the **SO-101 new-calibration zero pose** shown in
+[the model reference](urdf/README.md). The legacy folded-pose instructions do not
+apply to this model. Capture saves `~/.ros/lekiwi_arm_calibration.json` without
+changing torque or restarting services. Restart the driver through the same
+repository launch/deploy workflow to apply it, then verify individual joint
+directions and several poses before executing a trajectory. If a joint moves
+opposite in RViz, correct that joint's `directions` value and recapture the zero
+mapping as needed. Redo motor calibration first if encoder readings wrap or
+disagree with the measured travel range.
 
 ### Recovery after motor power loss
 

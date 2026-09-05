@@ -458,8 +458,13 @@ def test_odometry_covariance_never_claims_perfect_pose_or_twist():
     node.publish_odom_tf = True
     node.arm_positions = {"joint": 0.0}
     node.joint_pub = types.SimpleNamespace(publish=joints.append)
+    raw_joints = []
+    node.raw_joint_pub = types.SimpleNamespace(publish=raw_joints.append)
+    driver.raw_joint_positions = lambda observation: {"joint": 0.75}
 
     node.publish_state(object(), {}, (0.0, 0.0, 0.0))
+    assert raw_joints[0].position == [0.75]
+    assert joints[0].position == [0.0]
 
     assert odometry[0].pose.covariance[0] == 0.05 ** 2
     assert odometry[0].pose.covariance[35] == 0.10 ** 2

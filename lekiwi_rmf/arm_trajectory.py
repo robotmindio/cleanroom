@@ -75,14 +75,19 @@ def load_calibration(path):
     return zero_positions, directions
 
 
-def joint_positions(observation, zero_positions, directions):
-    raw = {
+def raw_joint_positions(observation):
+    """LeRobot observations in ROS units, before robot-specific pose offsets."""
+    return {
         name: GRIPPER_LOWER
         + float(observation.get(f"{name}.pos", 0.0)) / 100.0 * GRIPPER_RANGE
         if name == "arm_gripper"
         else math.radians(float(observation.get(f"{name}.pos", 0.0)))
         for name in ARM_JOINTS
     }
+
+
+def joint_positions(observation, zero_positions, directions):
+    raw = raw_joint_positions(observation)
     return {
         name: directions[name] * (raw[name] - zero_positions[name]) for name in ARM_JOINTS
     }

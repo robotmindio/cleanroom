@@ -9,6 +9,9 @@
   <!-- The saddle faces CAD +Y. Convert the camera's REP-103 +X to +Y,
        then apply the saddle's downward pitch (Rx(-pitch) * Rz(pi/2)). -->
   <xacro:property name="astra_mount_rpy" value="0 0.13962634015954636 1.5707963267948966"/>
+  <!-- Nominal front-face centre of the body envelope; measure the optical
+       centre on the installed camera and retain that correction here. -->
+  <xacro:property name="astra_optical_xyz" value="0.020 0 0.024"/>
   <xacro:property name="wrist_camera_xyz" value="0 0 0"/>
   <xacro:property name="wrist_camera_rpy" value="0 0 0"/>
   <xacro:property name="lidar_offset_xyz" value="0 0 0"/>
@@ -20,7 +23,7 @@
   <!-- The physical wrist cable and servo have a bounded safe travel envelope.
        Declaring it continuous makes MoveIt discard the configured bounds. -->
   <xacro:property name="roll_joint" value="revolute"/>
-  <!-- Complete model vendored from robotmindio/LeKiwi at 0595140; see urdf/README.md. -->
+  <!-- Complete model vendored from robotmindio/LeKiwi; see model-source.json. -->
   <xacro:include filename="lekiwi_cad.urdf"/>
 
   <!-- CAD's root is the lower base plate. Its +Y is the physical forward
@@ -54,7 +57,7 @@
        compact CAD mount owns placement; this 165 x 48 x 40 mm body is visual-only. -->
   <link name="astra_camera_link">
     <visual>
-      <origin xyz="-0.020 0 0" rpy="0 0 0"/>
+      <origin xyz="0 0 0.024" rpy="0 0 0"/>
       <geometry><box size="0.040 0.165 0.048"/></geometry>
       <material name="astra_body"><color rgba="0.08 0.18 0.25 1"/></material>
     </visual>
@@ -66,7 +69,7 @@
   <link name="astra_camera_optical_frame"/>
   <joint name="astra_camera_optical" type="fixed">
     <parent link="astra_camera_link"/><child link="astra_camera_optical_frame"/>
-    <origin xyz="0 0 0" rpy="-1.57079632679 0 -1.57079632679"/>
+    <origin xyz="${astra_optical_xyz}" rpy="-1.57079632679 0 -1.57079632679"/>
   </joint>
   <link name="wrist_camera_link"/>
   <joint name="wrist_camera_mount" type="fixed">
@@ -125,7 +128,7 @@
   <xacro:collision_capsule_proxy name="gripper_collision_proxy" parent="so101_moving_jaw_link" xyz="-0.0012 -0.0360 0.0189" rpy="1.5708 0 0" radius="0.0305" cylinder_length="0.0310"/>
 
   <!-- LD06 scan plane: the RobotSkin base puts it 75 mm forward, 75 mm right,
-       and 31.5 mm above base_link. The nominal frame stays on the CAD body;
+       and 88.5 mm above base_link. The nominal frame stays on the CAD body;
        the child is the small measured correction used by the scan. -->
   <link name="laser_nominal"/>
   <joint name="laser_nominal_mount" type="fixed">

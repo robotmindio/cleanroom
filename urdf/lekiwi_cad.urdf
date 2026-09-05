@@ -509,8 +509,8 @@
         <child link="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-1" />
     </joint>
     <joint name="robotskin_lidar_mount_joint" type="fixed">
-        <origin xyz="0.055 0.08 0" rpy="0 0 0" />
-        <parent link="base_plate_layer1-v5" />
+        <origin xyz="0.055 0.08 0.007" rpy="0 0 0" />
+        <parent link="base_plate_layer2-v3" />
         <child link="robotskin_lidar_mount" />
     </joint>
     <joint name="ld06_body_mount" type="fixed">
@@ -519,8 +519,8 @@
         <child link="ld06_body" />
     </joint>
     <joint name="astra_pro_compact_mount_joint" type="fixed">
-        <origin xyz="0 0.08 0" rpy="0 0 0" />
-        <parent link="base_plate_layer1-v5" />
+        <origin xyz="0 0.08 0.007" rpy="0 0 0" />
+        <parent link="base_plate_layer2-v3" />
         <child link="astra_pro_compact_mount" />
     </joint>
     <material name="3d_printed">
@@ -657,7 +657,7 @@
         <visual>
             <origin xyz="0 -0.028 0.0181" rpy="-1.5708 -1.5708 0" />
             <geometry>
-                <mesh filename="package://lekiwi_rmf/urdf/meshes/so101/wrist_roll_pitch_so101_v2.stl" />
+                <mesh filename="package://lekiwi_rmf/urdf/meshes/so101/native_wrist_flex.stl" />
             </geometry>
             <material name="3d_printed" />
         </visual>
@@ -700,7 +700,7 @@
         </visual>
     </link>
     <joint name="so101_mount" type="fixed">
-        <origin xyz="0.04 0.08 0.007" rpy="0 0 0" />
+        <origin xyz="8.90955446603e-08 0.10598331 0.00699999999992" rpy="-2.65358979335e-06 -7.04151787851e-12 -1.57080265359" />
         <parent link="base_plate_layer2-v3" />
         <child link="so101_base_link" />
     </joint>

@@ -22,7 +22,7 @@ from tf2_ros import TransformBroadcaster
 from visualization_msgs.msg import Marker
 
 from lekiwi_rmf.arm_trajectory import (
-    ARM_JOINTS, action_positions, joint_positions, load_calibration,
+    ARM_JOINTS, action_positions, joint_positions, raw_joint_positions, load_calibration,
     duration_seconds, position_tolerances, prepare_trajectory, sample_trajectory,
     stamp_nanoseconds, trajectory_rows,
 )
@@ -156,6 +156,7 @@ class LeKiwiDriver(Node):
 
         self.odom_pub = self.create_publisher(Odometry, self.odom_topic, 10)
         self.joint_pub = self.create_publisher(JointState, "joint_states", 10)
+        self.raw_joint_pub = self.create_publisher(JointState, "arm/raw_joint_states", 10)
         self.motor_health_pub = self.create_publisher(DiagnosticArray, "/hardware/diagnostics", 10)
         safety_qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.safety_pub = self.create_publisher(String, "safety/state", safety_qos)
@@ -1044,6 +1045,12 @@ class LeKiwiDriver(Node):
         joints.name = list(ARM_JOINTS)
         joints.position = [self.arm_positions[name] for name in ARM_JOINTS]
         self.joint_pub.publish(joints)
+        raw = JointState()
+        raw.header.stamp = stamp
+        raw.name = list(ARM_JOINTS)
+        positions = raw_joint_positions(observation)
+        raw.position = [positions[name] for name in ARM_JOINTS]
+        self.raw_joint_pub.publish(raw)
 
     def publish_motor_health(self, stamp):
         """Publish only the snapshot validated with this fresh host observation."""

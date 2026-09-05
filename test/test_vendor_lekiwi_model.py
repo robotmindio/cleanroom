@@ -44,7 +44,15 @@ def test_vendored_so101_mount_keeps_the_installed_plate_pose():
 
     assert mount.find("parent").get("link") == "base_plate_layer2-v3"
     assert mount.find("child").get("link") == "so101_base_link"
-    assert mount.find("origin").attrib == {"xyz": "0.04 0.08 0.007", "rpy": "0 0 0"}
+    # The official base origin is 38.8353 mm from its shoulder axis. Reusing
+    # the legacy base-part origin displaced that axis by almost 79 mm.
+    origin = mount.find("origin")
+    assert list(map(float, origin.get("xyz").split())) == pytest.approx(
+        [0, 0.10598331, 0.007], abs=1e-7
+    )
+    assert list(map(float, origin.get("rpy").split())) == pytest.approx(
+        [0, 0, -1.5707963267948966], abs=7e-6
+    )
 
 
 def test_vendor_preflights_meshes_and_checks_snapshot_without_writing(tmp_path, monkeypatch):

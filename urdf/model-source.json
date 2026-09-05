@@ -1,0 +1,5 @@
+{
+  "repository": "https://github.com/robotmindio/LeKiwi",
+  "revision": "3849a2ab9b63118df541829677b86e5761bc3053",
+  "model": "URDF/LeKiwi.urdf.xacro"
+}
