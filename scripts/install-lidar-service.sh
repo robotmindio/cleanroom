@@ -11,7 +11,7 @@ die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 log() { printf '\n==> %s\n' "$*"; }
 
 # shellcheck source=/dev/null
-source "$PROJECT_ROOT/scripts/service-install-common.sh"
+source "$PROJECT_ROOT/scripts/lib/service-install-common.sh"
 resolve_service_user "${1:-}"
 resolve_service_paths "" "" true false
 

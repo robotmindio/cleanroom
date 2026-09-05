@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+# Source-only runtime helpers; this is not a user command.
+
 first_match() { # first existing path matching a glob, empty if none
   # shellcheck disable=SC2086 # Deliberately expand the caller-supplied glob.
   set -- $1

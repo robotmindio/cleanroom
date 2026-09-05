@@ -15,7 +15,7 @@ def test_runtime_helpers_share_device_and_calibration_checks(tmp_path):
     calibration.write_text("image_width: 640\ncamera_matrix:\n  rows: 3\n  cols: 3\n  data: [1, 0, 0, 0, 1, 0, 0, 0, 1]\n")
     script = r'''
 set -Eeuo pipefail
-source "$1/scripts/runtime-common.sh"
+source "$1/scripts/lib/runtime-common.sh"
 [[ $(first_match "$2") == "$2" ]]
 camera_calibration_valid "$3"
 wait_for 1 test -s "$3"
@@ -43,7 +43,7 @@ LEKIWI_CURVE_AUTHORIZED_CLIENTS=
 LEKIWI_CURVE_HEALTH_CLIENT_SECRET=
 as_root() { "$@"; }
 die() { printf '%s\n' "$*" >&2; exit 1; }
-source "$PROJECT_ROOT/scripts/service-install-common.sh"
+source "$PROJECT_ROOT/scripts/lib/service-install-common.sh"
 for template in "$PROJECT_ROOT"/systemd/*.service; do
   render_systemd_unit "$template" "$output/$(basename "$template")"
 done
@@ -105,14 +105,14 @@ def test_missing_lerobot_environment_fails_once_as_configuration_error(tmp_path)
 
 
 def test_installer_never_uses_effective_root_as_implicit_service_user():
-    helper = (ROOT / "scripts" / "service-install-common.sh").read_text(encoding="utf-8")
+    helper = (ROOT / "scripts" / "lib" / "service-install-common.sh").read_text(encoding="utf-8")
     assert "SUDO_USER" in helper
     assert "running as root requires --service-user USER" in helper
     assert "refusing to install robot services as root" in helper
 
 
 def test_unit_validation_ignores_unrelated_systemd_units():
-    helper = (ROOT / "scripts" / "service-install-common.sh").read_text(encoding="utf-8")
+    helper = (ROOT / "scripts" / "lib" / "service-install-common.sh").read_text(encoding="utf-8")
 
     assert 'systemd-analyze verify --recursive-errors=no "$UNIT_DIR/$unit"' in helper
 
@@ -289,7 +289,7 @@ def test_managed_build_prefers_system_cmake_and_starts_clean():
 
 
 def test_service_fingerprint_covers_installed_service_behavior():
-    revision = (ROOT / "scripts" / "service-install-revision.sh").read_text(encoding="utf-8")
+    revision = (ROOT / "scripts" / "lib" / "service-install-revision.sh").read_text(encoding="utf-8")
 
     for source in (
         "systemd/lekiwi-stack.service",
@@ -297,8 +297,8 @@ def test_service_fingerprint_covers_installed_service_behavior():
         "scripts/ros-astra.sh",
         "systemd/lekiwi-lidar.service",
         "scripts/ros-lidar.sh",
-        "scripts/service-install-common.sh",
-        "scripts/runtime-common.sh",
+        "scripts/lib/service-install-common.sh",
+        "scripts/lib/runtime-common.sh",
         "scripts/install-deploy-sudoers.sh",
     ):
         assert source in revision

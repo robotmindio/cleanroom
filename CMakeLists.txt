@@ -37,8 +37,10 @@ install(PROGRAMS
   scripts/sim-scan-check.py
   scripts/generate-zmq-keys.py
   DESTINATION lib/${PROJECT_NAME})
-install(PROGRAMS scripts/camera-supervisor.sh scripts/service-install-common.sh scripts/ros-astra.sh scripts/ros-lidar.sh scripts/install-lidar-service.sh
+install(PROGRAMS scripts/camera-supervisor.sh scripts/ros-astra.sh scripts/ros-lidar.sh scripts/install-lidar-service.sh
   DESTINATION share/${PROJECT_NAME}/scripts)
+install(FILES scripts/lib/service-install-common.sh scripts/lib/runtime-common.sh
+  DESTINATION share/${PROJECT_NAME}/scripts/lib)
 install(FILES scripts/setup-pi.bash DESTINATION share/${PROJECT_NAME}/scripts)
 # MoveItConfigsBuilder reads this from the package share root to infer the
 # description files silently; see launch/moveit.launch.py.

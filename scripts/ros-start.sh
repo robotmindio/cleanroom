@@ -11,7 +11,7 @@ set -Eeuo pipefail
 
 cd "$(dirname "$0")/.."
 # shellcheck source=/dev/null
-source scripts/runtime-common.sh
+source scripts/lib/runtime-common.sh
 # Leave a precise ownership record for ros-stop.sh. This remains valid across
 # exec because the launcher replaces this shell in the same PID; systemd and
 # up.sh may supply a tighter runtime directory explicitly.

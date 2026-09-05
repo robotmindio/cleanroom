@@ -23,7 +23,7 @@ set -Eeuo pipefail
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 UNIT_DIR=/etc/systemd/system
 # shellcheck source=/dev/null
-source "$PROJECT_ROOT/scripts/runtime-common.sh"
+source "$PROJECT_ROOT/scripts/lib/runtime-common.sh"
 
 log() { printf '\n==> %s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
@@ -63,9 +63,9 @@ as_root() { # as_root <command...>
 }
 
 # shellcheck disable=SC1091 # PROJECT_ROOT is resolved above, not a fixed source path.
-source "$PROJECT_ROOT/scripts/service-install-common.sh"
+source "$PROJECT_ROOT/scripts/lib/service-install-common.sh"
 # shellcheck disable=SC1091 # PROJECT_ROOT is resolved above, not a fixed source path.
-source "$PROJECT_ROOT/scripts/service-install-revision.sh"
+source "$PROJECT_ROOT/scripts/lib/service-install-revision.sh"
 resolve_service_user "$SERVICE_USER_ARG"
 resolve_service_paths "$WORKSPACE_ARG" "$LEROBOT_VENV_ARG" false
 LEKIWI_HOST_BIND_ADDRESS=${HOST_BIND_ADDRESS_ARG:-0.0.0.0}

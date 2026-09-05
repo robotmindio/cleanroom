@@ -4,7 +4,7 @@ set -Eeuo pipefail
 
 cd "$(dirname "$0")/.."
 # shellcheck source=/dev/null
-source scripts/runtime-common.sh
+source scripts/lib/runtime-common.sh
 
 if [ -f "${LEKIWI_WS:-$HOME/lekiwi_ws}/install/setup.bash" ]; then
   set +u
