@@ -36,6 +36,9 @@ ARGUMENT_NAMES = (
     "start_rmf",
     "rmf_domain",
     "start_moveit",
+    "start_foxglove",
+    "foxglove_address",
+    "foxglove_port",
     "start_rosbridge",
     "rosbridge_address",
     "rosbridge_port",
@@ -172,11 +175,14 @@ def validate_launch_arguments(arguments: Mapping[str, object]) -> None:
     start_rmf = _bool(arguments["start_rmf"], "start_rmf")
     _bool(arguments["auto_arm_on_startup"], "auto_arm_on_startup")
     _bool(arguments["start_moveit"], "start_moveit")
+    start_foxglove = _bool(arguments["start_foxglove"], "start_foxglove")
+    foxglove_address = str(arguments["foxglove_address"]).strip()
     start_rosbridge = _bool(arguments["start_rosbridge"], "start_rosbridge")
     rosbridge_address = str(arguments["rosbridge_address"]).strip()
     publish_camera = _bool(arguments["publish_camera"], "publish_camera")
     _bool(arguments["publish_astra"], "publish_astra")
     static_map = _bool(arguments["static_map"], "static_map")
+    _port(arguments["foxglove_port"], "foxglove_port")
     _port(arguments["rosbridge_port"], "rosbridge_port")
     rmf_domain = _nonnegative_int(arguments["rmf_domain"], "rmf_domain", maximum=232)
     _nonnegative_int(arguments["rosbridge_domain"], "rosbridge_domain", maximum=232)
@@ -195,11 +201,20 @@ def validate_launch_arguments(arguments: Mapping[str, object]) -> None:
         raise ValueError("map_bundle must be non-empty")
     if not str(arguments["hardware_config"]).strip():
         raise ValueError("hardware_config must be non-empty")
-    # Simulation is a disposable test topology: its ZMQ clients and rosbridge
-    # endpoint may be reached by the integration-test runner. Real robot
+    # Simulation is a disposable test topology: its ZMQ clients and WebSocket
+    # endpoints may be reached by the integration-test runner. Real robot
     # deployments remain loopback-only, or on this tailnet's own CGNAT
-    # address (already authenticated and encrypted by Tailscale), until
-    # rosbridge speaks TLS itself.
+    # address (already authenticated and encrypted by Tailscale), until the
+    # bridge speaks TLS itself.
+    if (
+        mode == "real"
+        and start_foxglove
+        and foxglove_address not in {"127.0.0.1", "::1"}
+        and not _is_tailscale_address(foxglove_address)
+    ):
+        raise ValueError(
+            "foxglove may bind only to loopback or a tailnet address until authenticated TLS is configured"
+        )
     if (
         mode == "real"
         and start_rosbridge

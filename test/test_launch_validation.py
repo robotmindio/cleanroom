@@ -15,6 +15,9 @@ def valid_arguments(**overrides):
         "start_rmf": "false",
         "rmf_domain": "0",
         "start_moveit": "false",
+        "start_foxglove": "true",
+        "foxglove_address": "127.0.0.1",
+        "foxglove_port": "8765",
         "start_rosbridge": "false",
         "rosbridge_address": "127.0.0.1",
         "rosbridge_port": "9090",
@@ -54,6 +57,7 @@ def test_accepts_a_coherent_real_mapping_configuration():
         ({"start_rmf": "true", "slam_mode": "localization", "localization": "amcl", "rmf_domain": "55"}, "rmf_domain must be 0"),
         ({"mode": "sim", "camera_source": "remote"}, "unsupported in simulation"),
         ({"mode": "sim", "lidar_source": "remote"}, "unsupported in simulation"),
+        ({"foxglove_port": "0"}, "between 1 and 65535"),
         ({"rosbridge_port": "0"}, "between 1 and 65535"),
         ({"xy_velocity_scale": "0"}, "finite and positive"),
         ({"yaw_velocity_scale": "inf"}, "finite and positive"),
@@ -63,6 +67,7 @@ def test_accepts_a_coherent_real_mapping_configuration():
         ({"remote_ip": ""}, "must be non-empty"),
         ({"curve_client_secret_key_file": ""}, "both CURVE"),
         ({"start_rosbridge": "true", "rosbridge_address": "0.0.0.0"}, "only to loopback"),
+        ({"foxglove_address": "0.0.0.0"}, "only to loopback"),
     ],
 )
 def test_rejects_unsafe_or_incoherent_combinations(overrides, message):
