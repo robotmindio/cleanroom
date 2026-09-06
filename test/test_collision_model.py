@@ -9,6 +9,8 @@ import numpy as np
 import pytest
 import yaml
 
+from lekiwi_rmf.arm_trajectory import JOINT_LIMITS, JOINT_VELOCITY_LIMITS
+
 
 ROOT = pathlib.Path(__file__).parents[1]
 
@@ -116,6 +118,18 @@ def test_wrist_roll_is_bounded_identically_on_hardware_and_simulation():
     assert sim_limit is not None
     assert float(sim_limit.attrib["lower"]) == pytest.approx(-2.74385)
     assert float(sim_limit.attrib["upper"]) == pytest.approx(2.84121)
+
+
+def test_generated_arm_limits_match_the_runtime_configuration():
+    robot = _real_robot()
+    for name, (lower, upper) in JOINT_LIMITS.items():
+        limit = robot.find(f"./joint[@name='{name}']/limit")
+        assert limit is not None
+        assert float(limit.get("lower")) == pytest.approx(lower)
+        assert float(limit.get("upper")) == pytest.approx(upper)
+        assert float(limit.get("velocity")) == pytest.approx(
+            JOINT_VELOCITY_LIMITS[name]
+        )
 
 
 def test_rmf_circle_encloses_the_tracked_nav2_polygon():

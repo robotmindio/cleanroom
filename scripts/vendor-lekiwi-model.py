@@ -11,22 +11,33 @@ import subprocess
 import sys
 import xml.etree.ElementTree as ET
 
+from lekiwi_rmf.arm_trajectory import JOINT_LIMITS, JOINT_VELOCITY_LIMITS
+
 
 SOURCE_MODEL = Path("URDF/LeKiwi.urdf.xacro")
 MESH_PREFIX = "${mesh_dir}/"
 PACKAGE_PREFIX = "package://lekiwi_rmf/urdf/meshes/"
 WHEEL_JOINTS = {"base_left_wheel", "base_back_wheel", "base_right_wheel"}
-ARM_LIMITS = {
-    "arm_shoulder_pan": ("-1.91986", "1.91986", "4", "2"),
-    "arm_shoulder_lift": ("-1.74533", "1.74533", "4", "2"),
-    "arm_elbow_flex": ("-1.69", "1.69", "4", "2"),
-    "arm_wrist_flex": ("-1.65806", "1.65806", "2", "3"),
-    "arm_wrist_roll": ("-2.74385", "2.84121", "2", "3"),
-    "arm_gripper": ("-0.174533", "1.74533", "1", "2"),
+ARM_EFFORT_LIMITS = {
+    "arm_shoulder_pan": "4",
+    "arm_shoulder_lift": "4",
+    "arm_elbow_flex": "4",
+    "arm_wrist_flex": "2",
+    "arm_wrist_roll": "2",
+    "arm_gripper": "1",
 }
 
 
+def validate_xacro(path: Path) -> None:
+    result = subprocess.run(
+        ["xacro", str(path.resolve())], capture_output=True, text=True
+    )
+    if result.returncode:
+        raise ValueError(f"invalid LeKiwi source Xacro: {result.stderr.strip()}")
+
+
 def transform(path: Path) -> tuple[ET.Element, dict[Path, Path]]:
+    validate_xacro(path)
     root = ET.parse(path).getroot()
     for child in list(root):
         if child.tag.endswith("}property"):
@@ -58,19 +69,28 @@ def transform(path: Path) -> tuple[ET.Element, dict[Path, Path]]:
         name = joint.get("name")
         if name in WHEEL_JOINTS:
             joint.set("type", "fixed")
-        if name in ARM_LIMITS:
+        if name in JOINT_LIMITS:
             joint.set(
                 "type", "${roll_joint}" if name == "arm_wrist_roll" else "${arm_joint}"
             )
-            lower, upper, effort, velocity = ARM_LIMITS[name]
             limit = joint.find("limit")
-            if limit is None:
-                limit = ET.SubElement(joint, "limit")
+            if (
+                limit is None
+                or "lower" not in limit.attrib
+                or "upper" not in limit.attrib
+            ):
+                raise ValueError(f"{name}: source joint needs lower and upper limits")
+            expected = JOINT_LIMITS[name]
+            actual = tuple(float(limit.get(key)) for key in ("lower", "upper"))
+            if actual != expected:
+                raise ValueError(
+                    f"{name}: source limits {actual} do not match configured limits {expected}"
+                )
             limit.attrib = {
-                "lower": lower,
-                "upper": upper,
-                "effort": effort,
-                "velocity": velocity,
+                "lower": limit.get("lower"),
+                "upper": limit.get("upper"),
+                "effort": ARM_EFFORT_LIMITS[name],
+                "velocity": f"{JOINT_VELOCITY_LIMITS[name]:g}",
             }
     return root, meshes
 

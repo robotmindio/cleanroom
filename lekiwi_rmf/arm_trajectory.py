@@ -3,6 +3,8 @@ import math
 from dataclasses import dataclass
 from pathlib import Path
 
+import yaml
+
 
 ARM_JOINTS = (
     "arm_shoulder_pan",
@@ -12,32 +14,54 @@ ARM_JOINTS = (
     "arm_wrist_roll",
     "arm_gripper",
 )
-JOINT_LIMITS = {
-    "arm_shoulder_pan": (-1.91986, 1.91986),
-    "arm_shoulder_lift": (-1.74533, 1.74533),
-    "arm_elbow_flex": (-1.69, 1.69),
-    "arm_wrist_flex": (-1.65806, 1.65806),
-    "arm_wrist_roll": (-2.74385, 2.84121),
-    "arm_gripper": (-0.174533, 1.74533),
-}
+
+
+def _configured_limits():
+    path = Path(__file__).parents[1] / "config/joint_limits.yaml"
+    if not path.is_file():
+        from ament_index_python.packages import get_package_share_directory
+
+        path = (
+            Path(get_package_share_directory("lekiwi_rmf"))
+            / "config/joint_limits.yaml"
+        )
+    try:
+        configured = yaml.safe_load(path.read_text())["joint_limits"]
+        positions = {
+            name: (
+                float(configured[name]["min_position"]),
+                float(configured[name]["max_position"]),
+            )
+            for name in ARM_JOINTS
+        }
+        velocities = {
+            name: float(configured[name]["max_velocity"]) for name in ARM_JOINTS
+        }
+        accelerations = {
+            name: float(configured[name]["max_acceleration"])
+            for name in ARM_JOINTS
+        }
+    except (KeyError, OSError, TypeError, ValueError, yaml.YAMLError) as error:
+        raise RuntimeError(f"invalid arm limits in {path}: {error}") from error
+    if any(
+        not all(
+            map(
+                math.isfinite,
+                (*positions[name], velocities[name], accelerations[name]),
+            )
+        )
+        or positions[name][0] >= positions[name][1]
+        or velocities[name] <= 0
+        or accelerations[name] <= 0
+        for name in ARM_JOINTS
+    ):
+        raise RuntimeError(f"invalid arm limits in {path}")
+    return positions, velocities, accelerations
+
+
+JOINT_LIMITS, JOINT_VELOCITY_LIMITS, JOINT_ACCELERATION_LIMITS = _configured_limits()
 GRIPPER_LOWER, GRIPPER_UPPER = JOINT_LIMITS["arm_gripper"]
 GRIPPER_RANGE = GRIPPER_UPPER - GRIPPER_LOWER
-JOINT_VELOCITY_LIMITS = {
-    "arm_shoulder_pan": 2.0,
-    "arm_shoulder_lift": 2.0,
-    "arm_elbow_flex": 2.0,
-    "arm_wrist_flex": 3.0,
-    "arm_wrist_roll": 3.0,
-    "arm_gripper": 2.0,
-}
-JOINT_ACCELERATION_LIMITS = {
-    "arm_shoulder_pan": 3.0,
-    "arm_shoulder_lift": 3.0,
-    "arm_elbow_flex": 3.0,
-    "arm_wrist_flex": 5.0,
-    "arm_wrist_roll": 5.0,
-    "arm_gripper": 3.0,
-}
 
 
 @dataclass(frozen=True)

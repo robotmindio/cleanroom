@@ -20,8 +20,12 @@ def test_transform_replaces_existing_limits_without_duplicate_elements(tmp_path)
     source.write_text(
         """<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
   <xacro:property name="mesh_dir" value="meshes"/>
-  <link name="arm"><visual><geometry><mesh filename="${mesh_dir}/so101/arm.stl"/></geometry></visual><collision/></link>
-  <joint name="arm_wrist_roll" type="revolute"><limit lower="0" upper="0"/></joint>
+  <link name="arm"><visual><geometry>
+    <mesh filename="${mesh_dir}/so101/arm.stl"/>
+  </geometry></visual><collision/></link>
+  <joint name="arm_wrist_roll" type="revolute">
+    <limit lower="-2.74385" upper="2.84121"/>
+  </joint>
 </robot>"""
     )
 
@@ -35,7 +39,26 @@ def test_transform_replaces_existing_limits_without_duplicate_elements(tmp_path)
     joint = root.find("joint")
     assert joint.get("type") == "${roll_joint}"
     assert len(joint.findall("limit")) == 1
-    assert joint.find("limit").get("lower") == VENDOR.ARM_LIMITS["arm_wrist_roll"][0]
+    assert float(joint.find("limit").get("lower")) == VENDOR.JOINT_LIMITS[
+        "arm_wrist_roll"
+    ][0]
+    assert float(joint.find("limit").get("velocity")) == (
+        VENDOR.JOINT_VELOCITY_LIMITS["arm_wrist_roll"]
+    )
+
+
+def test_transform_rejects_a_source_that_xacro_cannot_expand(tmp_path):
+    source = tmp_path / "model.xacro"
+    source.write_text(
+        '<robot xmlns:ns0="http://www.ros.org/wiki/xacro">'
+        '<ns0:property name="mesh_dir" value="meshes"/>'
+        '<link name="body"><visual><geometry>'
+        '<mesh filename="${mesh_dir}/body.stl"/>'
+        '</geometry></visual></link></robot>'
+    )
+
+    with pytest.raises(ValueError, match="invalid LeKiwi source Xacro"):
+        VENDOR.transform(source)
 
 
 def test_vendored_so101_mount_keeps_the_installed_plate_pose():
@@ -60,7 +83,9 @@ def test_vendor_preflights_meshes_and_checks_snapshot_without_writing(tmp_path, 
     mesh = source / "URDF/meshes/reauthored/body.stl"
     mesh.parent.mkdir(parents=True)
     (source / VENDOR.SOURCE_MODEL).write_text(
-        '<robot name="test"><link name="body"><visual><geometry>'
+        '<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="test">'
+        '<xacro:property name="mesh_dir" value="meshes"/>'
+        '<link name="body"><visual><geometry>'
         '<mesh filename="${mesh_dir}/reauthored/body.stl"/>'
         '</geometry></visual></link></robot>'
     )
