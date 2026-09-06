@@ -35,6 +35,8 @@ def urdf_to_sdf(urdf: str) -> str:
             capture_output=True,
             check=True,
         )
+        if result.stderr.strip():
+            raise RuntimeError(f"gz sdf emitted diagnostics:\n{result.stderr.strip()}")
     return result.stdout
 
 

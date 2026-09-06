@@ -45,11 +45,15 @@ def generate_test_description():
             "/sim/sim_base_left_wheel/cmd_vel@std_msgs/msg/Float64]gz.msgs.Double",
             "/sim/sim_base_back_wheel/cmd_vel@std_msgs/msg/Float64]gz.msgs.Double",
             "/sim/sim_base_right_wheel/cmd_vel@std_msgs/msg/Float64]gz.msgs.Double",
-            "/sim/arm/joint_trajectory@trajectory_msgs/msg/JointTrajectory]gz.msgs.JointTrajectory",
-            "/sim/arm/trajectory_heartbeat@std_msgs/msg/Bool]gz.msgs.Boolean",
         ],
         remappings=[("/sim/joint_states", "/joint_states")],
         output="screen",
+    )
+    arm_bridge = Node(
+        package="ros_gz_bridge", executable="parameter_bridge",
+        arguments=[
+            "/sim/arm/joint_positions@trajectory_msgs/msg/JointTrajectory]gz.msgs.JointTrajectory"
+        ], output="screen",
     )
     base = ExecuteProcess(
         cmd=["python3", "-m", "lekiwi_rmf.sim_omni_controller", "--ros-args", "-p", "use_sim_time:=true"],
@@ -75,7 +79,8 @@ def generate_test_description():
             gz_resources,
         ),
         SetEnvironmentVariable("GZ_SIM_SYSTEM_PLUGIN_PATH", gz_plugins),
-        gz, spawn, bridge, base, arm, smoke, launch_testing.actions.ReadyToTest(),
+        gz, spawn, bridge, arm_bridge, base, arm, smoke,
+        launch_testing.actions.ReadyToTest(),
     ])
     return description, {"smoke": smoke}
 

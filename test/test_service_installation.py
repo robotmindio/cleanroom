@@ -117,6 +117,11 @@ def test_unit_validation_ignores_unrelated_systemd_units():
     assert 'systemd-analyze verify --recursive-errors=no "$UNIT_DIR/$unit"' in helper
 
 
+def test_ros_start_reports_an_active_deployment_inhibit():
+    launcher = (ROOT / "scripts" / "ros-start.sh").read_text()
+    assert "deployment inhibit active; forcing auto_arm_on_startup:=false" in launcher
+
+
 def test_full_installer_includes_qualification_tooling_dependencies():
     """A fresh deployment must not silently omit required qualification checks."""
     installer = (ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")

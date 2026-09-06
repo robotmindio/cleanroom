@@ -51,7 +51,7 @@ def test_simulated_arm_stale_feedback_abort_still_publishes_cached_hold():
         now=lambda: types.SimpleNamespace(nanoseconds=1_000_000_000)
     )
     published = []
-    node._trajectory_publisher = types.SimpleNamespace(publish=published.append)
+    node._position_publisher = types.SimpleNamespace(publish=published.append)
 
     assert node._fresh_positions(("joint",)) is None
     node._hold(("joint",))
@@ -61,10 +61,10 @@ def test_simulated_arm_stale_feedback_abort_still_publishes_cached_hold():
     assert list(published[0].points[0].positions) == [0.25]
 
 
-def test_simulated_arm_publishes_native_watchdog_heartbeat_while_executing():
+def test_simulated_arm_streams_positions_through_native_watchdog():
     controller = (ROOT / "lekiwi_rmf" / "sim_arm_controller.py").read_text()
-    assert '"/sim/arm/trajectory_heartbeat"' in controller
-    assert "self._trajectory_heartbeat.publish(Bool(data=True))" in controller
+    assert 'JointTrajectory, "/sim/arm/joint_positions"' in controller
+    assert "self._publish_positions(desired)" in controller
 
 
 def description(sim: bool) -> ET.Element:
@@ -117,6 +117,7 @@ def test_real_description_is_untouched_by_simulation_extensions():
 
 def test_simulation_has_physical_wheels_arm_actuator_and_depth():
     robot = description(True)
+    assert robot.find(".//gz_frame_id") is None
     for name in (
         "sim_base_left_wheel_joint",
         "sim_base_back_wheel_joint",
@@ -126,16 +127,15 @@ def test_simulation_has_physical_wheels_arm_actuator_and_depth():
         assert joint is not None and joint.attrib["type"] == "continuous"
         assert math.isclose(float(joint.find("limit").attrib["effort"]), 1.2)
     assert robot.find("./gazebo/plugin[@filename='gz-sim-velocity-control-system']") is None
-    trajectory = robot.find(
-        "./gazebo/plugin[@filename='gz-sim-joint-trajectory-controller-system']"
+    position_controllers = robot.findall(
+        "./gazebo/plugin[@filename='gz-sim-joint-position-controller-system']"
     )
-    assert trajectory is not None
-    assert trajectory.findtext("topic") == "/sim/arm/native_joint_trajectory"
+    assert len(position_controllers) == 6
     failsafe = robot.find(
         "./gazebo/plugin[@filename='liblekiwi_sim_native_failsafe.so']"
     )
     assert failsafe is not None
-    assert [element.text for element in trajectory.findall("joint_name")] == [
+    assert [controller.findtext("joint_name") for controller in position_controllers] == [
         "arm_shoulder_pan",
         "arm_shoulder_lift",
         "arm_elbow_flex",
@@ -154,11 +154,18 @@ def test_native_failsafe_owns_the_actual_actuator_topics():
     source = (ROOT / "src" / "sim_native_failsafe.cpp").read_text()
     assert '"/sim/sim_base_left_wheel/cmd_vel"' in source
     assert '"/sim/sim_base_left_wheel/native_cmd_vel"' in source
-    assert '"/sim/arm/joint_trajectory"' in source
-    assert '"/sim/arm/native_joint_trajectory"' in source
-    assert '"/sim/arm/trajectory_heartbeat"' in source
+    assert '"/sim/arm/joint_positions"' in source
+    assert '"/sim/arm/arm_shoulder_pan/native_cmd_pos"' in source
     assert "std::chrono::milliseconds(250)" in source
-    assert "HoldTrajectory" in source
+    assert "hold.set_data(this->armHold[i])" in source
+
+
+def test_simulation_bridge_pins_ros_sensor_frames():
+    source = (ROOT / "launch" / "bringup.launch.py").read_text()
+    assert 'name="sim_lidar_bridge"' in source
+    assert 'parameters=[{"override_frame_id": "laser"}]' in source
+    assert 'name="sim_camera_bridge"' in source
+    assert 'parameters=[{"override_frame_id": "front_camera_optical_frame"}]' in source
 
 
 def test_simulation_urdf_converts_to_valid_sdf():

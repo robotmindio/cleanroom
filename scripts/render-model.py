@@ -33,6 +33,20 @@ def main():
         return matrix
 
     parents = {joint.find("child").get("link"): joint for joint in robot.findall("joint")}
+    materials = {
+        material.get("name"): tuple(map(float, material.find("color").get("rgba").split()))
+        for material in robot.findall("material")
+        if material.find("color") is not None
+    }
+
+    def visual_color(visual):
+        material = visual.find("material")
+        if material is None:
+            return "#ddd8c9"
+        color = material.find("color")
+        if color is not None:
+            return tuple(map(float, color.get("rgba").split()))
+        return materials.get(material.get("name"), "#ddd8c9")
 
     def placement(frame):
         result = np.eye(4)
@@ -71,15 +85,7 @@ def main():
             transform = placement(name) @ origin(visual.find("origin"))
             triangles = triangles @ transform[:3, :3].T + transform[:3, 3]
             all_vertices.extend(triangles.reshape(-1, 3))
-            color = "#ddd8c9"
-            if "Servo" in name or "STS" in name or "Wheel" in name:
-                color = "#444b50"
-            if "lidar_mount" in name:
-                color = "#70b655"
-            if name == "ld06_body" or name == "astra_camera_link":
-                color = "#263b48"
-            if name.startswith("so101_"):
-                color = "#ffcf1f"
+            color = visual_color(visual)
             for axis in axes:
                 axis.add_collection3d(Poly3DCollection(triangles, facecolor=color, edgecolor="none"))
     points = np.asarray(all_vertices)

@@ -31,7 +31,7 @@ def generate_test_description():
                    "-string", Command(["python3 -m lekiwi_rmf.sim_sdf"])],
         output="screen",
     )
-    bridge = Node(
+    base_bridge = Node(
         package="ros_gz_bridge", executable="parameter_bridge",
         arguments=[
             "/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock",
@@ -39,10 +39,15 @@ def generate_test_description():
             "/sim/sim_base_left_wheel/cmd_vel@std_msgs/msg/Float64]gz.msgs.Double",
             "/sim/sim_base_back_wheel/cmd_vel@std_msgs/msg/Float64]gz.msgs.Double",
             "/sim/sim_base_right_wheel/cmd_vel@std_msgs/msg/Float64]gz.msgs.Double",
-            "/sim/arm/joint_trajectory@trajectory_msgs/msg/JointTrajectory]gz.msgs.JointTrajectory",
-            "/sim/arm/trajectory_heartbeat@std_msgs/msg/Bool]gz.msgs.Boolean",
         ],
         remappings=[("/sim/joint_states", "/joint_states")], output="screen",
+    )
+    arm_bridge = Node(
+        package="ros_gz_bridge", executable="parameter_bridge",
+        arguments=[
+            "/sim/arm/joint_positions@trajectory_msgs/msg/JointTrajectory]gz.msgs.JointTrajectory",
+        ],
+        output="screen",
     )
     smoke = ExecuteProcess(
         cmd=["python3", "-m", "lekiwi_rmf.sim_native_failsafe_smoke",
@@ -60,7 +65,8 @@ def generate_test_description():
             "GZ_SIM_SYSTEM_PLUGIN_PATH",
             PathJoinSubstitution([package, "..", "..", "lib", "lekiwi_rmf"]),
         ),
-        gz, spawn, bridge, smoke, launch_testing.actions.ReadyToTest(),
+        gz, spawn, base_bridge, arm_bridge, smoke,
+        launch_testing.actions.ReadyToTest(),
     ]), {"smoke": smoke}
 
 

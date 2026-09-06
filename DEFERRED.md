@@ -55,8 +55,8 @@ cleared.
   exactly.
 - Find and record a physically collision-free calibration pose, then review
   the production CAD/SRDF collision matrix against the assembled robot. The
-  loopback MoveIt test uses narrowly scoped test-only contact exemptions and is
-  not evidence that the production matrix is correct.
+  loopback MoveIt test uses that production matrix, but simulated clearance is
+  not evidence that it matches the assembled robot.
 - With the real depth updater installed, verify that a new obstacle produces a
   freshly stamped octomap, causes `/safety/arm_workspace_clear` to become
   false, and stops a guarded physical trajectory within the predeclared limit.

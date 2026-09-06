@@ -73,6 +73,7 @@ load_launch_calibration "$@"
 # systemd retry also stays disarmed instead of unexpectedly resuming motion.
 deploy_disarm_latch="${LEKIWI_LOGS:-$HOME/.ros/lekiwi}/deploy-inhibit-auto-arm"
 if [[ -e $deploy_disarm_latch ]] && ! has_launch_arg auto_arm_on_startup "$@"; then
+  echo "$0: deployment inhibit active; forcing auto_arm_on_startup:=false ($deploy_disarm_latch)" >&2
   maintenance_args=(auto_arm_on_startup:=false)
 fi
 

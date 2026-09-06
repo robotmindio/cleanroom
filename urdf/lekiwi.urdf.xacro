@@ -48,7 +48,9 @@
   <link name="front_camera_link"/>
   <joint name="front_camera_mount" type="fixed">
     <parent link="Camera-Model-v3"/><child link="front_camera_link"/>
-    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <!-- The CAD camera PCB faces local +Y; make that the ROS camera-link +X
+         while retaining the board's measured roll around the lens axis. -->
+    <origin xyz="0 0 0" rpy="1.57079632679 0 1.57079632679"/>
   </joint>
   <link name="front_camera_optical_frame"/>
   <joint name="front_camera_optical" type="fixed">
@@ -210,8 +212,8 @@
     <gazebo>
       <!-- Gazebo-native fail-safe: public bridge topics are forwarded only
            while fresh. If ros_gz_bridge or either ROS adapter disappears,
-           it actively zeros wheel demand and interrupts the native arm
-           trajectory with a current-position hold. -->
+           it actively zeros wheel demand and holds the arm at its current
+           position. -->
       <plugin filename="liblekiwi_sim_native_failsafe.so" name="lekiwi_rmf::SimNativeFailsafe"/>
       <plugin filename="gz-sim-joint-state-publisher-system" name="gz::sim::systems::JointStatePublisher">
         <topic>/sim/joint_states</topic><update_rate>50</update_rate>
@@ -225,44 +227,47 @@
         <joint_name>arm_wrist_roll</joint_name>
         <joint_name>arm_gripper</joint_name>
       </plugin>
-      <plugin filename="gz-sim-joint-trajectory-controller-system" name="gz::sim::systems::JointTrajectoryController">
-        <topic>/sim/arm/native_joint_trajectory</topic>
-        <joint_name>arm_shoulder_pan</joint_name><initial_position>0</initial_position>
-        <position_p_gain>18</position_p_gain><position_i_gain>0.2</position_i_gain><position_d_gain>0.8</position_d_gain>
-        <position_cmd_min>-4</position_cmd_min><position_cmd_max>4</position_cmd_max>
-        <joint_name>arm_shoulder_lift</joint_name><initial_position>0</initial_position>
-        <position_p_gain>70</position_p_gain><position_i_gain>0.3</position_i_gain><position_d_gain>2.0</position_d_gain>
-        <position_cmd_min>-4</position_cmd_min><position_cmd_max>4</position_cmd_max>
-        <joint_name>arm_elbow_flex</joint_name><initial_position>0</initial_position>
-        <position_p_gain>70</position_p_gain><position_i_gain>0.3</position_i_gain><position_d_gain>2.0</position_d_gain>
-        <position_cmd_min>-4</position_cmd_min><position_cmd_max>4</position_cmd_max>
-        <joint_name>arm_wrist_flex</joint_name><initial_position>0</initial_position>
-        <position_p_gain>12</position_p_gain><position_i_gain>0.1</position_i_gain><position_d_gain>0.4</position_d_gain>
-        <position_cmd_min>-2</position_cmd_min><position_cmd_max>2</position_cmd_max>
-        <joint_name>arm_wrist_roll</joint_name><initial_position>0</initial_position>
-        <position_p_gain>12</position_p_gain><position_i_gain>0.1</position_i_gain><position_d_gain>0.4</position_d_gain>
-        <position_cmd_min>-2</position_cmd_min><position_cmd_max>2</position_cmd_max>
-        <joint_name>arm_gripper</joint_name><initial_position>0</initial_position>
-        <position_p_gain>8</position_p_gain><position_i_gain>0.05</position_i_gain><position_d_gain>0.25</position_d_gain>
-        <position_cmd_min>-1</position_cmd_min><position_cmd_max>1</position_cmd_max>
+      <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
+        <joint_name>arm_shoulder_pan</joint_name><topic>/sim/arm/arm_shoulder_pan/native_cmd_pos</topic><initial_position>0</initial_position>
+        <p_gain>18</p_gain><i_gain>0.2</i_gain><d_gain>0.8</d_gain><cmd_min>-4</cmd_min><cmd_max>4</cmd_max>
+      </plugin>
+      <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
+        <joint_name>arm_shoulder_lift</joint_name><topic>/sim/arm/arm_shoulder_lift/native_cmd_pos</topic><initial_position>0</initial_position>
+        <p_gain>70</p_gain><i_gain>0.3</i_gain><d_gain>2.0</d_gain><cmd_min>-4</cmd_min><cmd_max>4</cmd_max>
+      </plugin>
+      <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
+        <joint_name>arm_elbow_flex</joint_name><topic>/sim/arm/arm_elbow_flex/native_cmd_pos</topic><initial_position>0</initial_position>
+        <p_gain>70</p_gain><i_gain>0.3</i_gain><d_gain>2.0</d_gain><cmd_min>-4</cmd_min><cmd_max>4</cmd_max>
+      </plugin>
+      <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
+        <joint_name>arm_wrist_flex</joint_name><topic>/sim/arm/arm_wrist_flex/native_cmd_pos</topic><initial_position>0</initial_position>
+        <p_gain>12</p_gain><i_gain>0.1</i_gain><d_gain>0.4</d_gain><cmd_min>-2</cmd_min><cmd_max>2</cmd_max>
+      </plugin>
+      <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
+        <joint_name>arm_wrist_roll</joint_name><topic>/sim/arm/arm_wrist_roll/native_cmd_pos</topic><initial_position>0</initial_position>
+        <p_gain>12</p_gain><i_gain>0.1</i_gain><d_gain>0.4</d_gain><cmd_min>-2</cmd_min><cmd_max>2</cmd_max>
+      </plugin>
+      <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
+        <joint_name>arm_gripper</joint_name><topic>/sim/arm/arm_gripper/native_cmd_pos</topic><initial_position>0</initial_position>
+        <p_gain>8</p_gain><i_gain>0.05</i_gain><d_gain>0.25</d_gain><cmd_min>-1</cmd_min><cmd_max>1</cmd_max>
       </plugin>
     </gazebo>
     <gazebo reference="laser">
       <sensor name="lidar" type="gpu_lidar">
-        <topic>/scan</topic><gz_frame_id>laser</gz_frame_id><update_rate>10</update_rate><always_on>true</always_on>
+        <topic>/scan</topic><update_rate>10</update_rate><always_on>true</always_on>
         <lidar><scan><horizontal><samples>360</samples><resolution>1</resolution><min_angle>-3.14159</min_angle><max_angle>3.14159</max_angle></horizontal></scan><range><min>0.08</min><max>12</max><resolution>0.01</resolution></range></lidar>
       </sensor>
     </gazebo>
     <gazebo reference="front_camera_link">
       <sensor name="front_camera" type="camera">
-        <topic>/camera/front</topic><gz_frame_id>front_camera_optical_frame</gz_frame_id><update_rate>20</update_rate><always_on>true</always_on>
+        <topic>/camera/front</topic><update_rate>20</update_rate><always_on>true</always_on>
         <camera><horizontal_fov>1.0472</horizontal_fov><image><width>640</width><height>480</height><format>R8G8B8</format></image><clip><near>0.05</near><far>20</far></clip><noise><type>gaussian</type><mean>0</mean><stddev>0.007</stddev></noise></camera>
       </sensor>
       <!-- The depth stream is deliberately lower-rate and noisier than RGB.
            launch/bringup adds a seeded delay/dropout stage before exposing its
            point cloud to MoveIt's occupancy-map monitor. -->
       <sensor name="front_depth" type="depth_camera">
-        <topic>/camera/depth</topic><gz_frame_id>front_camera_optical_frame</gz_frame_id><update_rate>10</update_rate><always_on>true</always_on>
+        <topic>/camera/depth</topic><update_rate>10</update_rate><always_on>true</always_on>
         <camera><horizontal_fov>1.0472</horizontal_fov><image><width>320</width><height>240</height><format>R_FLOAT32</format></image><clip><near>0.10</near><far>3.0</far></clip><noise><type>gaussian</type><mean>0</mean><stddev>0.012</stddev></noise></camera>
       </sensor>
     </gazebo>

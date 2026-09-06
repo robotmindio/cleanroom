@@ -2,17 +2,15 @@
 //
 // The ROS controllers deliberately publish to public /sim/* topics.  This
 // system is the sole forwarder to the native Gazebo controllers, so that a
-// dead ROS process or a dead ros_gz_bridge cannot leave the last velocity or
-// an autonomous JointTrajectoryController trajectory running indefinitely.
+// dead ROS process or a dead ros_gz_bridge cannot leave the last actuator
+// command running indefinitely.
 
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <functional>
 #include <mutex>
 #include <string>
-#include <vector>
-
-#include <gz/msgs/boolean.pb.h>
 #include <gz/msgs/double.pb.h>
 #include <gz/msgs/joint_trajectory.pb.h>
 #include <gz/plugin/Register.hh>
@@ -57,22 +55,40 @@ class SimNativeFailsafe final : public gz::sim::System,
             ++this->wheelGeneration[i];
           }));
     }
-    this->armPublisher = this->node.Advertise<gz::msgs::JointTrajectory>(
-        "/sim/arm/native_joint_trajectory");
-    this->node.Subscribe<gz::msgs::JointTrajectory>("/sim/arm/joint_trajectory",
-        std::function<void(const gz::msgs::JointTrajectory &)>([this](const gz::msgs::JointTrajectory &_msg)
+    for (size_t i = 0; i < this->armJointNames.size(); ++i)
+    {
+      this->armPublisher[i] = this->node.Advertise<gz::msgs::Double>(
+          this->armNative[i]);
+    }
+    this->node.Subscribe<gz::msgs::JointTrajectory>("/sim/arm/joint_positions",
+        std::function<void(const gz::msgs::JointTrajectory &)>([this](
+            const gz::msgs::JointTrajectory &_msg)
         {
-          std::lock_guard<std::mutex> lock(this->mutex);
-          this->armPending = _msg;
-          ++this->armGeneration;
-        }));
-    this->node.Subscribe<gz::msgs::Boolean>("/sim/arm/trajectory_heartbeat",
-        std::function<void(const gz::msgs::Boolean &)>([this](const gz::msgs::Boolean &_msg)
-        {
-          if (_msg.data())
+          if (_msg.points_size() != 1 ||
+              _msg.points(0).positions_size() != _msg.joint_names_size())
+            return;
+          std::array<double, 6> positions{};
+          std::array<bool, 6> present{};
+          for (int j = 0; j < _msg.joint_names_size(); ++j)
           {
-            std::lock_guard<std::mutex> lock(this->mutex);
-            ++this->heartbeatGeneration;
+            size_t i = 0;
+            while (i < this->armJointNames.size() &&
+                   this->armJointNames[i] != _msg.joint_names(j))
+              ++i;
+            const auto position = _msg.points(0).positions(j);
+            if (i == this->armJointNames.size() || present[i] ||
+                !std::isfinite(position))
+              return;
+            positions[i] = position;
+            present[i] = true;
+          }
+          std::lock_guard<std::mutex> lock(this->mutex);
+          for (size_t i = 0; i < present.size(); ++i)
+          {
+            if (!present[i])
+              continue;
+            this->armPending[i].set_data(positions[i]);
+            ++this->armGeneration[i];
           }
         }));
   }
@@ -82,20 +98,21 @@ class SimNativeFailsafe final : public gz::sim::System,
   {
     if (_info.paused)
       return;
-    const auto now = _info.simTime;
+    // ROS publishers and transport loss are wall-clock events. Gazebo can run
+    // faster or slower than real time, so simulation time is not a safe lease.
+    const auto now = std::chrono::steady_clock::now().time_since_epoch();
     std::array<gz::msgs::Double, 3> wheels;
-    gz::msgs::JointTrajectory arm;
     uint64_t wheelGeneration[3];
-    uint64_t armGeneration;
-    uint64_t heartbeatGeneration;
+    std::array<gz::msgs::Double, 6> arm;
+    uint64_t armGeneration[6];
     {
       std::lock_guard<std::mutex> lock(this->mutex);
       wheels = this->wheelPending;
-      arm = this->armPending;
       for (size_t i = 0; i < 3; ++i)
         wheelGeneration[i] = this->wheelGeneration[i];
-      armGeneration = this->armGeneration;
-      heartbeatGeneration = this->heartbeatGeneration;
+      arm = this->armPending;
+      for (size_t i = 0; i < 6; ++i)
+        armGeneration[i] = this->armGeneration[i];
     }
     for (size_t i = 0; i < 3; ++i)
     {
@@ -115,49 +132,33 @@ class SimNativeFailsafe final : public gz::sim::System,
         this->wheelPublisher[i].Publish(stop);
       }
     }
-    if (armGeneration != this->seenArmGeneration)
+    for (size_t i = 0; i < 6; ++i)
     {
-      this->armPublisher.Publish(arm);
-      this->seenArmGeneration = armGeneration;
-      this->armActive = true;
-      this->lastArmHeartbeat = now;
-    }
-    if (heartbeatGeneration != this->seenHeartbeatGeneration)
-    {
-      this->seenHeartbeatGeneration = heartbeatGeneration;
-      this->lastArmHeartbeat = now;
-    }
-    if (this->armActive && now - this->lastArmHeartbeat > this->timeout)
-    {
-      auto hold = this->HoldTrajectory(_ecm);
-      if (hold.joint_names_size() == static_cast<int>(this->armJointNames.size()))
+      if (armGeneration[i] != this->seenArmGeneration[i])
       {
-        this->armPublisher.Publish(hold);
-        this->armActive = false;
+        this->armPublisher[i].Publish(arm[i]);
+        this->seenArmGeneration[i] = armGeneration[i];
+        this->lastArm[i] = now;
+        this->armSeen[i] = true;
+        this->armHolding[i] = false;
+      }
+      else if (this->armSeen[i] && now - this->lastArm[i] > this->timeout)
+      {
+        const auto joint = this->model.JointByName(_ecm, this->armJointNames[i]);
+        const auto *position = _ecm.Component<gz::sim::components::JointPosition>(joint);
+        if (position && !position->Data().empty())
+        {
+          if (!this->armHolding[i])
+          {
+            this->armHold[i] = position->Data().front();
+            this->armHolding[i] = true;
+          }
+          gz::msgs::Double hold;
+          hold.set_data(this->armHold[i]);
+          this->armPublisher[i].Publish(hold);
+        }
       }
     }
-  }
-
-  private: gz::msgs::JointTrajectory HoldTrajectory(
-      gz::sim::EntityComponentManager &_ecm) const
-  {
-    gz::msgs::JointTrajectory hold;
-    auto *point = hold.add_points();
-    point->mutable_time_from_start()->set_nsec(100000000);
-    for (const auto &name : this->armJointNames)
-    {
-      const auto joint = this->model.JointByName(_ecm, name);
-      const auto *position = _ecm.Component<gz::sim::components::JointPosition>(joint);
-      if (!position || position->Data().empty())
-      {
-        hold.clear_joint_names();
-        hold.clear_points();
-        return hold;
-      }
-      hold.add_joint_names(name);
-      point->add_positions(position->Data().front());
-    }
-    return hold;
   }
 
   private: const std::chrono::steady_clock::duration timeout{
@@ -171,23 +172,27 @@ class SimNativeFailsafe final : public gz::sim::System,
   private: const std::array<std::string, 3> wheelNative{{
       "/sim/sim_base_left_wheel/native_cmd_vel", "/sim/sim_base_back_wheel/native_cmd_vel",
       "/sim/sim_base_right_wheel/native_cmd_vel"}};
-  private: const std::vector<std::string> armJointNames{
+  private: const std::array<std::string, 6> armJointNames{{
       "arm_shoulder_pan", "arm_shoulder_lift", "arm_elbow_flex",
-      "arm_wrist_flex", "arm_wrist_roll", "arm_gripper"};
+      "arm_wrist_flex", "arm_wrist_roll", "arm_gripper"}};
+  private: const std::array<std::string, 6> armNative{{
+      "/sim/arm/arm_shoulder_pan/native_cmd_pos", "/sim/arm/arm_shoulder_lift/native_cmd_pos",
+      "/sim/arm/arm_elbow_flex/native_cmd_pos", "/sim/arm/arm_wrist_flex/native_cmd_pos",
+      "/sim/arm/arm_wrist_roll/native_cmd_pos", "/sim/arm/arm_gripper/native_cmd_pos"}};
   private: std::array<gz::transport::Node::Publisher, 3> wheelPublisher;
-  private: gz::transport::Node::Publisher armPublisher;
+  private: std::array<gz::transport::Node::Publisher, 6> armPublisher;
   private: std::array<gz::msgs::Double, 3> wheelPending;
-  private: gz::msgs::JointTrajectory armPending;
+  private: std::array<gz::msgs::Double, 6> armPending;
   private: std::array<uint64_t, 3> wheelGeneration{};
   private: std::array<uint64_t, 3> seenWheelGeneration{};
   private: std::array<std::chrono::steady_clock::duration, 3> lastWheel{};
   private: std::array<bool, 3> wheelSeen{};
-  private: uint64_t armGeneration{};
-  private: uint64_t seenArmGeneration{};
-  private: uint64_t heartbeatGeneration{};
-  private: uint64_t seenHeartbeatGeneration{};
-  private: std::chrono::steady_clock::duration lastArmHeartbeat{};
-  private: bool armActive{false};
+  private: std::array<uint64_t, 6> armGeneration{};
+  private: std::array<uint64_t, 6> seenArmGeneration{};
+  private: std::array<std::chrono::steady_clock::duration, 6> lastArm{};
+  private: std::array<bool, 6> armSeen{};
+  private: std::array<bool, 6> armHolding{};
+  private: std::array<double, 6> armHold{};
 };
 }
 

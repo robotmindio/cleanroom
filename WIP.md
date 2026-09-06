@@ -1,21 +1,22 @@
 # Robot description consistency
 
 Completed:
-- Vendored LeKiwi `b9bcd7e`, whose generated Xacro now expands correctly.
-- The vendor rejects source Xacros that cannot be expanded.
-- Arm position, velocity, and acceleration limits now come from
-  `config/joint_limits.yaml`; vendoring verifies the upstream position ranges.
+- Vendored LeKiwi `88f5cb7`; its generated Xacro and mount manifest agree.
+- The fixed camera optical frame points along `base_link` +X.
+- Gazebo streams interruptible arm setpoints through a native watchdog.
+- Simulated sensor frames use bridge-supported frame overrides.
+- CTest owns one isolated Python/ROS environment helper.
+- Stale RViz cameras, readiness assertions, and safety documentation were corrected.
 
 Verified:
-- 38 focused model, vendor, trajectory, and camera tests.
-- Real and simulation Xacro expansion and URDF parsing.
-- Vendored model and meshes match the recorded LeKiwi revision.
+- All 41 CTests pass, including physical Gazebo arm, watchdog, sensor-frame,
+  MoveIt, model, vendor, trajectory, and camera coverage.
+- Simulation SDF renders without parser warnings.
+- The reference image is generated from URDF materials.
 
-Pending:
-- Verify the fixed-camera optical axis against its physical CAD geometry.
-- Reproduce the intermittent Gazebo arm-command delivery failure.
-- Complete physical sensor placement and arm calibration when robot-1 is online.
+Pending hardware work:
+- Confirm Astra, fixed-camera, and LIDAR alignment and complete arm calibration
+  when robot-1 is online.
 
 Next:
-- Investigate the fixed-camera frame without changing the established +X forward
-  convention.
+- Run the physical calibration checklist before enabling movement on robot-1.

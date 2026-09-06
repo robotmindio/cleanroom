@@ -56,59 +56,62 @@ if(BUILD_TESTING)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
   # Test the package under construction, not a similarly named package sourced
   # from another overlay workspace.
-  set(test_pythonpath "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}:$ENV{PYTHONPATH}")
+  set(test_python_environment
+    "PYTHONNOUSERSITE=1;PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}:$ENV{PYTHONPATH}")
   set(test_ament_prefix_path
     "AMENT_PREFIX_PATH=${CMAKE_INSTALL_PREFIX}:$ENV{AMENT_PREFIX_PATH}")
-  set(test_launch_environment "${test_pythonpath};${test_ament_prefix_path}")
+  set(test_launch_environment "${test_python_environment};${test_ament_prefix_path}")
   # pyzmq is an intentional runtime dependency on the robot, but some minimal
   # ROS development hosts omit it.  Do not register tests that cannot collect:
   # pytest's module-level skip otherwise becomes a misleading CTest failure.
   execute_process(
-    COMMAND "${Python3_EXECUTABLE}" -c "import zmq"
+    COMMAND "${CMAKE_COMMAND}" -E env PYTHONNOUSERSITE=1
+      "${Python3_EXECUTABLE}" -c "import zmq"
     RESULT_VARIABLE test_python_has_zmq
     OUTPUT_QUIET ERROR_QUIET)
+  function(add_lekiwi_pytest name)
+    set(test_environment "${test_launch_environment}")
+    if(ARGC GREATER 1)
+      list(APPEND test_environment "ROS_DOMAIN_ID=${ARGV1}")
+    endif()
+    ament_add_pytest_test(${name} test/${name}.py ENV "${test_environment}")
+  endfunction()
   # Never let a test discover a running robot or a parallel test. These are
   # distinct valid DDS domains, intentionally away from the live default (0).
-  ament_add_pytest_test(test_odometry test/test_odometry.py ENV "${test_pythonpath};ROS_DOMAIN_ID=180")
-  ament_add_pytest_test(test_motor_health test/test_motor_health.py ENV "${test_pythonpath};ROS_DOMAIN_ID=216")
-  ament_add_pytest_test(test_odom_scale test/test_odom_scale.py ENV "${test_pythonpath};ROS_DOMAIN_ID=181")
-  ament_add_pytest_test(test_free_space test/test_free_space.py ENV "${test_pythonpath};ROS_DOMAIN_ID=182")
-  ament_add_pytest_test(test_camera_relay test/test_camera_relay.py ENV "${test_pythonpath};ROS_DOMAIN_ID=183")
-  ament_add_pytest_test(test_astra_pro_configuration test/test_astra_pro_configuration.py ENV "${test_pythonpath};ROS_DOMAIN_ID=215")
-  ament_add_pytest_test(test_astra_cloud_filter test/test_astra_cloud_filter.py ENV "${test_pythonpath};ROS_DOMAIN_ID=218")
-  ament_add_pytest_test(test_remote_astra_service test/test_remote_astra_service.py ENV "${test_pythonpath};ROS_DOMAIN_ID=217")
-  ament_add_pytest_test(test_arm_trajectory test/test_arm_trajectory.py ENV "${test_pythonpath};ROS_DOMAIN_ID=184")
-  ament_add_pytest_test(test_arm_calibration test/test_arm_calibration.py ENV "${test_pythonpath}")
-  ament_add_pytest_test(test_collision_model test/test_collision_model.py ENV "${test_pythonpath};ROS_DOMAIN_ID=185")
-  ament_add_pytest_test(test_vendor_lekiwi_model test/test_vendor_lekiwi_model.py ENV "${test_pythonpath}")
-  ament_add_pytest_test(test_driver_link test/test_driver_link.py ENV "${test_pythonpath};ROS_DOMAIN_ID=186")
-  ament_add_pytest_test(test_cmd_vel_mux test/test_cmd_vel_mux.py ENV "${test_pythonpath};ROS_DOMAIN_ID=187")
-  ament_add_pytest_test(test_teleop test/test_teleop.py ENV "${test_pythonpath};ROS_DOMAIN_ID=188")
-  ament_add_pytest_test(test_readiness_gate test/test_readiness_gate.py ENV "${test_pythonpath};ROS_DOMAIN_ID=189")
-  ament_add_pytest_test(test_sim_host_tools test/test_sim_host_tools.py ENV "${test_pythonpath};ROS_DOMAIN_ID=190")
-  ament_add_pytest_test(test_rtabmap_db_maintenance test/test_rtabmap_db_maintenance.py ENV "${test_pythonpath};ROS_DOMAIN_ID=191")
-  ament_add_pytest_test(test_torque_control test/test_torque_control.py ENV "${test_pythonpath};ROS_DOMAIN_ID=192")
-  ament_add_pytest_test(test_lidar_detection test/test_lidar_detection.py ENV "${test_pythonpath};ROS_DOMAIN_ID=193")
-  ament_add_pytest_test(test_safety_supervisor test/test_safety_supervisor.py ENV "${test_pythonpath};ROS_DOMAIN_ID=194")
-  ament_add_pytest_test(test_arm_workspace_monitor test/test_arm_workspace_monitor.py ENV "${test_pythonpath};ROS_DOMAIN_ID=209")
-  ament_add_pytest_test(test_map_bundle test/test_map_bundle.py ENV "${test_pythonpath};ROS_DOMAIN_ID=195")
-  ament_add_pytest_test(test_launch_validation test/test_launch_validation.py ENV "${test_pythonpath};ROS_DOMAIN_ID=196")
-  ament_add_pytest_test(test_rtabmap_session_guard test/test_rtabmap_session_guard.py ENV "${test_pythonpath};ROS_DOMAIN_ID=197")
-  ament_add_pytest_test(test_rmf_owner_guard test/test_rmf_owner_guard.py
-    ENV "${test_pythonpath};ROS_DOMAIN_ID=211")
-  ament_add_pytest_test(test_moveit_shutdown_probe test/test_moveit_shutdown_probe.py
-    ENV "${test_pythonpath};ROS_DOMAIN_ID=213")
-  ament_add_pytest_test(test_sim_qualification test/test_sim_qualification.py
-    ENV "${test_pythonpath};ROS_DOMAIN_ID=214")
+  add_lekiwi_pytest(test_odometry 180)
+  add_lekiwi_pytest(test_motor_health 216)
+  add_lekiwi_pytest(test_odom_scale 181)
+  add_lekiwi_pytest(test_free_space 182)
+  add_lekiwi_pytest(test_camera_relay 183)
+  add_lekiwi_pytest(test_astra_pro_configuration 215)
+  add_lekiwi_pytest(test_astra_cloud_filter 218)
+  add_lekiwi_pytest(test_remote_astra_service 217)
+  add_lekiwi_pytest(test_arm_trajectory 184)
+  add_lekiwi_pytest(test_arm_calibration)
+  add_lekiwi_pytest(test_collision_model 185)
+  add_lekiwi_pytest(test_vendor_lekiwi_model)
+  add_lekiwi_pytest(test_driver_link 186)
+  add_lekiwi_pytest(test_cmd_vel_mux 187)
+  add_lekiwi_pytest(test_teleop 188)
+  add_lekiwi_pytest(test_readiness_gate 189)
+  add_lekiwi_pytest(test_sim_host_tools 190)
+  add_lekiwi_pytest(test_rtabmap_db_maintenance 191)
+  add_lekiwi_pytest(test_torque_control 192)
+  add_lekiwi_pytest(test_lidar_detection 193)
+  add_lekiwi_pytest(test_safety_supervisor 194)
+  add_lekiwi_pytest(test_arm_workspace_monitor 209)
+  add_lekiwi_pytest(test_map_bundle 195)
+  add_lekiwi_pytest(test_launch_validation 196)
+  add_lekiwi_pytest(test_rtabmap_session_guard 197)
+  add_lekiwi_pytest(test_rmf_owner_guard 211)
+  add_lekiwi_pytest(test_moveit_shutdown_probe 213)
+  add_lekiwi_pytest(test_sim_qualification 214)
   if(test_python_has_zmq EQUAL 0)
-    ament_add_pytest_test(test_fake_host test/test_fake_host.py
-      ENV "${test_pythonpath};ROS_DOMAIN_ID=198")
+    add_lekiwi_pytest(test_fake_host 198)
   endif()
-  ament_add_pytest_test(test_zmq_security test/test_zmq_security.py ENV "${test_pythonpath};ROS_DOMAIN_ID=201")
-  ament_add_pytest_test(test_simulation_model test/test_simulation_model.py
-    ENV "${test_pythonpath};ROS_DOMAIN_ID=203")
-  ament_add_pytest_test(test_service_installation test/test_service_installation.py
-    ENV "${test_pythonpath};ROS_DOMAIN_ID=200")
+  add_lekiwi_pytest(test_zmq_security 201)
+  add_lekiwi_pytest(test_simulation_model 203)
+  add_lekiwi_pytest(test_service_installation 200)
   add_launch_test(test/test_cmd_vel_mux_launch.py
     TIMEOUT 30
     ENV "${test_launch_environment};ROS_DOMAIN_ID=199")
@@ -129,6 +132,9 @@ if(BUILD_TESTING)
   add_launch_test(test/test_sim_native_failsafe_launch.py
     TIMEOUT 45
     ENV "${test_launch_environment};ROS_DOMAIN_ID=206")
+  add_launch_test(test/test_sim_sensor_frames_launch.py
+    TIMEOUT 35
+    ENV "${test_launch_environment};ROS_DOMAIN_ID=219")
   # Both tests own a Gazebo server and make assertions against simulated-time
   # progress. Running the two servers concurrently on a small host can starve
   # physics updates and produce false motion/failsafe failures even though DDS

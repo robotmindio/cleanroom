@@ -467,21 +467,45 @@ def generate_launch_description():
                 executable="parameter_bridge",
                 arguments=[
                     "/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock",
-                    "/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan",
                     "/sim/joint_states@sensor_msgs/msg/JointState[gz.msgs.Model",
                     "/sim/sim_base_left_wheel/cmd_vel@std_msgs/msg/Float64]gz.msgs.Double",
                     "/sim/sim_base_back_wheel/cmd_vel@std_msgs/msg/Float64]gz.msgs.Double",
                     "/sim/sim_base_right_wheel/cmd_vel@std_msgs/msg/Float64]gz.msgs.Double",
-                    "/sim/arm/joint_trajectory@trajectory_msgs/msg/JointTrajectory]gz.msgs.JointTrajectory",
-                    "/sim/arm/trajectory_heartbeat@std_msgs/msg/Bool]gz.msgs.Boolean",
-                    # gz publishes the image on <topic> itself and derives the info topic from
-                    # the parent namespace, so <topic>/camera/front gives /camera/camera_info.
+                ],
+                remappings=[("/sim/joint_states", "/joint_states")],
+                condition=IfCondition(sim),
+                output="screen",
+            ),
+            Node(
+                package="ros_gz_bridge", executable="parameter_bridge",
+                name="sim_arm_position_bridge",
+                arguments=[
+                    "/sim/arm/joint_positions@trajectory_msgs/msg/JointTrajectory]gz.msgs.JointTrajectory"
+                ],
+                condition=IfCondition(sim), output="screen",
+            ),
+            Node(
+                package="ros_gz_bridge",
+                executable="parameter_bridge",
+                name="sim_lidar_bridge",
+                arguments=["/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan"],
+                parameters=[{"override_frame_id": "laser"}],
+                condition=IfCondition(sim),
+                output="screen",
+            ),
+            Node(
+                package="ros_gz_bridge",
+                executable="parameter_bridge",
+                name="sim_camera_bridge",
+                # gz derives CameraInfo from the parent namespace. All three
+                # streams originate at the same optical frame.
+                arguments=[
                     "/camera/front@sensor_msgs/msg/Image[gz.msgs.Image",
                     "/camera/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo",
                     "/camera/depth/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked",
                 ],
+                parameters=[{"override_frame_id": "front_camera_optical_frame"}],
                 remappings=[
-                    ("/sim/joint_states", "/joint_states"),
                     ("/camera/front", "/camera/front/image_raw"),
                     ("/camera/camera_info", "/camera/front/camera_info"),
                     # Preserve the acquisition stamp while adding seeded

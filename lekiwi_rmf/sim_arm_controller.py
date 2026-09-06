@@ -1,9 +1,8 @@
-"""FollowJointTrajectory facade for Gazebo's native joint controller.
+"""FollowJointTrajectory facade for Gazebo's native joint controllers.
 
-The native Gazebo controller consumes ``trajectory_msgs/JointTrajectory`` but
-MoveIt requires the standard action contract.  This adapter validates every
-segment with the same library as the hardware driver, forwards the command,
-and evaluates feedback and tolerances against physics-produced joint states.
+MoveIt requires the standard action contract. This adapter validates every
+segment with the same library as the hardware driver, streams sampled position
+setpoints, and evaluates tolerances against physics-produced joint states.
 """
 
 from __future__ import annotations
@@ -69,14 +68,8 @@ class SimArmController(Node):
         self._permission_lock = threading.RLock()
         self._reservation = threading.Lock()
         self._goal_reserved = False
-        self._trajectory_publisher = self.create_publisher(
-            JointTrajectory, "/sim/arm/joint_trajectory", 10
-        )
-        # The native Gazebo watchdog owns the final actuator topics. It only
-        # permits an autonomous native trajectory to continue while this
-        # action facade is alive and actively supervising it.
-        self._trajectory_heartbeat = self.create_publisher(
-            Bool, "/sim/arm/trajectory_heartbeat", 10
+        self._position_publisher = self.create_publisher(
+            JointTrajectory, "/sim/arm/joint_positions", 10
         )
         self.create_subscription(JointState, "/joint_states", self._joint_state, 20)
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
@@ -164,20 +157,20 @@ class SimArmController(Node):
 
     def _hold(self, names: tuple[str, ...]) -> None:
         # A feedback timeout is itself a stop condition, so requiring fresh
-        # feedback here would leave Gazebo's previously published trajectory
-        # active. The last finite position is safer than allowing that motion
-        # to continue open-loop.
+        # feedback here would leave Gazebo's last position command active. The
+        # last finite position is safer than allowing that motion to continue.
         with self._state_lock:
             if any(name not in self._positions for name in names):
                 return
             positions = {name: self._positions[name] for name in names}
-        command = JointTrajectory()
-        command.joint_names = list(names)
-        point = JointTrajectoryPoint()
-        point.positions = [positions[name] for name in names]
-        point.time_from_start.nanosec = 100_000_000
-        command.points = [point]
-        self._trajectory_publisher.publish(command)
+        self._publish_positions(positions)
+
+    def _publish_positions(self, positions: dict[str, float]) -> None:
+        names = list(positions)
+        point = JointTrajectoryPoint(positions=[positions[name] for name in names])
+        self._position_publisher.publish(
+            JointTrajectory(joint_names=names, points=[point])
+        )
 
     def _feedback(
         self,
@@ -204,13 +197,14 @@ class SimArmController(Node):
         with self._reservation:
             self._active_names = names
         try:
-            start = self._fresh_positions(names)
-            if start is None:
+            all_start = self._fresh_positions(tuple(ARM_JOINTS))
+            if all_start is None:
                 goal_handle.abort()
                 return self._result(
                     FollowJointTrajectory.Result.INVALID_GOAL,
                     "simulated joint feedback is incomplete or stale",
                 )
+            start = {name: all_start[name] for name in names}
             if not self._permission_fresh():
                 goal_handle.abort()
                 return self._result(
@@ -247,9 +241,6 @@ class SimArmController(Node):
                     return self._result(FollowJointTrajectory.Result.INVALID_GOAL, "trajectory canceled before start")
                 time.sleep(0.01)
 
-            command = goal_handle.request.trajectory
-            command.header.stamp.sec = 0
-            command.header.stamp.nanosec = 0
             with self._permission_lock:
                 if goal_handle.is_cancel_requested or not self._permission_fresh():
                     self._hold(names)
@@ -261,15 +252,12 @@ class SimArmController(Node):
                         FollowJointTrajectory.Result.INVALID_GOAL,
                         "trajectory canceled or safety permission withdrawn before dispatch",
                     )
-                self._trajectory_publisher.publish(command)
-                self._trajectory_heartbeat.publish(Bool(data=True))
             execution_start_ns = self.get_clock().now().nanoseconds
             final_time = points[-1].time
             if goal_time <= 0.0:
                 goal_time = self.default_goal_time
 
             while True:
-                self._trajectory_heartbeat.publish(Bool(data=True))
                 now_ns = self.get_clock().now().nanoseconds
                 elapsed = max(0.0, (now_ns - execution_start_ns) / 1e9)
                 actual = self._fresh_positions(names)
@@ -285,6 +273,7 @@ class SimArmController(Node):
                         "safety permission expired/withdrawn or joint feedback stale",
                     )
                 desired, velocity, acceleration = sample_trajectory(names, start, points, elapsed)
+                self._publish_positions(desired)
                 goal_handle.publish_feedback(
                     self._feedback(names, desired, velocity, acceleration, actual)
                 )
