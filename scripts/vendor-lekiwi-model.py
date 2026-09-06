@@ -107,6 +107,7 @@ def source_revision(source: Path) -> str:
             str(source),
             "status",
             "--porcelain",
+            "--untracked-files=no",
             "--",
             str(SOURCE_MODEL),
             "URDF/meshes",

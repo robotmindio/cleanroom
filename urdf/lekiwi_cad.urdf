@@ -473,7 +473,7 @@
         <child link="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-1" />
     </joint>
     <joint name="robotskin_lidar_mount_joint" type="fixed">
-        <origin xyz="0.0 -0.115 0.007" rpy="0 0 -1.5707963267948966" />
+        <origin xyz="0.0 -0.115 0.007" rpy="0.0 0.0 -1.5707963267948966" />
         <parent link="base_plate_layer2-v3" />
         <child link="robotskin_lidar_mount" />
     </joint>
@@ -483,7 +483,7 @@
         <child link="ld06_body" />
     </joint>
     <joint name="astra_pro_compact_mount_joint" type="fixed">
-        <origin xyz="-0.09 -0.04 0.007" rpy="0 0 2.0344439357957027" />
+        <origin xyz="-0.09 -0.04 0.007" rpy="0.0 0.0 2.0344439357957027" />
         <parent link="base_plate_layer2-v3" />
         <child link="astra_pro_compact_mount" />
     </joint>

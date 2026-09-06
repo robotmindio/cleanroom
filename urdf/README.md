@@ -26,24 +26,25 @@ by launch and MoveIt. The wrapper intentionally owns only ROS integration:
 - normalized front/wrist/Astra camera optical frames;
 - LD06 scan calibration and the `tool0` frame.
 
-Refresh the snapshot only from a clean LeKiwi checkout:
+Regenerate and validate the source model, refresh this snapshot and reference
+image, build the ROS package, and run all tests with one command from this
+repository:
 
 ```sh
-python3 scripts/vendor-lekiwi-model.py --source ../LeKiwi
+./scripts/rebuild-all.sh
 ```
 
-After editing CAD, first run `./scripts/verify_robot.sh` in LeKiwi and commit
-the regenerated model and meshes there. Vendoring copies that generated
-snapshot; it does not rebuild FreeCAD or OpenSCAD sources.
-The vendor first checks LeKiwi's input/output manifest, so committing a source
-change without regenerating its meshes is rejected as stale. Verify the copy with:
+The command expects a clean, committed sibling checkout at `../LeKiwi`; set
+`LEKIWI_SOURCE` only when it lives elsewhere. It stops before vendoring if the
+source manifest is stale or has local model changes, so `model-source.json`
+always names the exact source commit. Verify an existing copy without rebuilding
+with:
 
 ```sh
 python3 scripts/vendor-lekiwi-model.py --source ../LeKiwi --check
 ```
 
-Then run `scripts/build-lekiwi.sh` to install the ROS package into the managed
-workspace. Restart the model consumers through the repository launch/deploy
+Restart the model consumers through the repository launch/deploy
 scripts: robot_state_publisher, MoveIt, and RViz expand the installed wrapper
 at startup and retain that description in memory. Editing Xacro alone does
 not update already-running nodes. RViz subscribes with transient-local
