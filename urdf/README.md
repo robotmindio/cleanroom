@@ -26,9 +26,9 @@ by launch and MoveIt. The wrapper intentionally owns only ROS integration:
 - normalized front/wrist/Astra camera optical frames;
 - LD06 scan calibration and the `tool0` frame.
 
-Regenerate and validate the source model, refresh this snapshot and reference
-image, build the ROS package, and run all tests with one command from this
-repository:
+Regenerate and validate the source model in a temporary build directory, refresh
+this snapshot and reference image, build the ROS package, and run all tests with
+one command from this repository:
 
 ```sh
 ./scripts/rebuild-all.sh

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Regenerate the source model, vendor it, render it, build ROS, and run its tests.
+# Verify the generated source model, vendor it, render it, build ROS, and run its tests.
 set -Eeuo pipefail
 
 cd "$(dirname "$0")/.."
@@ -22,13 +22,7 @@ model_paths=(URDF/LeKiwi.urdf.xacro URDF/model-manifest.json URDF/meshes cad scr
   exit 1
 }
 source_head=$(git -C "$lekiwi_source" rev-parse HEAD)
-cleanup_source() {
-  git -C "$lekiwi_source" restore --worktree -- "${model_paths[@]}"
-}
-trap cleanup_source EXIT
 (cd "$lekiwi_source" && ./scripts/verify_robot.sh)
-cleanup_source
-trap - EXIT
 [[ $(git -C "$lekiwi_source" rev-parse HEAD) == "$source_head" ]] || {
   echo "$0: LeKiwi HEAD changed during validation; run again" >&2
   exit 1
