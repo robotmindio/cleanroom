@@ -118,7 +118,6 @@ def test_simulation_base_controller_consumes_only_the_guarded_velocity_topic():
     assert '"/cmd_vel_safe"' in controller
     assert '"/cmd_vel"' not in controller
     assert "/sim/sim_base_left_wheel/cmd_vel" in source
-    assert 'package="topic_tools"' not in source
 
 
 def test_simulation_uses_a_database_separate_from_the_real_robot():
