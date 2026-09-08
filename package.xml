@@ -38,6 +38,7 @@
   <exec_depend>moveit_ros_perception</exec_depend>
   <exec_depend>moveit_planners_ompl</exec_depend>
   <exec_depend>moveit_ros_visualization</exec_depend>
+  <exec_depend>moveit_simple_controller_manager</exec_depend>
   <exec_depend>moveit_msgs</exec_depend>
   <exec_depend>python3-opencv</exec_depend>
   <exec_depend>python3-matplotlib</exec_depend>
@@ -47,6 +48,7 @@
   <exec_depend>rclpy</exec_depend>
   <exec_depend>robot_state_publisher</exec_depend>
   <exec_depend>robot_localization</exec_depend>
+  <exec_depend>foxglove_bridge</exec_depend>
   <exec_depend>rosbridge_server</exec_depend>
   <exec_depend>rosapi</exec_depend>
   <exec_depend>rtabmap_slam</exec_depend>

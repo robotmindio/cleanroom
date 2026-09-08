@@ -42,30 +42,38 @@ stop_recorded() { # stop_recorded <file> <kind>
     sleep 1
   done
   if (( grouped )); then
-    kill -0 -- "-$pid" 2>/dev/null && kill -TERM -- "-$pid" 2>/dev/null || true
+    if kill -0 -- "-$pid" 2>/dev/null; then
+      kill -TERM -- "-$pid" 2>/dev/null || true
+    fi
   else
-    kill -0 "$pid" 2>/dev/null && kill -TERM "$pid" 2>/dev/null || true
+    if kill -0 "$pid" 2>/dev/null; then
+      kill -TERM "$pid" 2>/dev/null || true
+    fi
   fi
   sleep 3
   if (( grouped )); then
-    kill -0 -- "-$pid" 2>/dev/null && kill -KILL -- "-$pid" 2>/dev/null || true
+    if kill -0 -- "-$pid" 2>/dev/null; then
+      kill -KILL -- "-$pid" 2>/dev/null || true
+    fi
   else
-    kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null || true
+    if kill -0 "$pid" 2>/dev/null; then
+      kill -KILL "$pid" 2>/dev/null || true
+    fi
   fi
   rm -f -- "$file"
   return 0
 }
 
 stopped=0
-stop_recorded "$runtime_dir/rviz.pid" rviz && stopped=1 || true
-stop_recorded "$runtime_dir/stack.pid" stack && stopped=1 || true
+if stop_recorded "$runtime_dir/rviz.pid" rviz; then stopped=1; fi
+if stop_recorded "$runtime_dir/stack.pid" stack; then stopped=1; fi
 
 # A systemd unit owns its cgroup and restart policy; do not fight it with raw
 # signals. The explicit command below keeps the ownership boundary visible.
 if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet lekiwi-host.service; then
   echo "lekiwi-host.service is active -- left running; stop it with: sudo systemctl stop lekiwi-host.service"
 else
-  stop_recorded "$runtime_dir/host.pid" host && stopped=1 || true
+  if stop_recorded "$runtime_dir/host.pid" host; then stopped=1; fi
 fi
 
 if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet lekiwi-cameras.service; then

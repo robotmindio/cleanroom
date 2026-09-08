@@ -5,6 +5,7 @@
 # `colcon build` on the same checkout instead of silently launching an older
 # ~/lekiwi_ws overlay. LEKIWI_WS remains an explicit deployment override.
 if [ -n "${ZSH_VERSION:-}" ]; then
+  # shellcheck disable=SC2296 # This branch is parsed by zsh, where this expands to the sourced file.
   _lekiwi_setup_file="${(%):-%x}"
 else
   _lekiwi_setup_file="${BASH_SOURCE[0]}"
@@ -35,6 +36,7 @@ if [ ! -f "/opt/ros/jazzy/setup.$_lekiwi_shell" ] ||
   printf 'LeKiwi stack is not installed. Run scripts/install.sh first.\n' >&2
   unset _lekiwi_venv_workspace _lekiwi_workspace _lekiwi_repo_workspace _lekiwi_setup_file _lekiwi_shell
   return 1 2>/dev/null
+  # shellcheck disable=SC2317 # Only reached if this source-only file is run directly.
   exit 1
 fi
 

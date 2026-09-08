@@ -94,7 +94,9 @@ for _ in $(seq 25); do
   sleep 0.2
 done
 for pid in "${old_rviz_pids[@]}"; do
-  kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null || true
+  if kill -0 "$pid" 2>/dev/null; then
+    kill -KILL "$pid" 2>/dev/null || true
+  fi
 done
 
 # Wait for one camera before RViz restores the saved Front and Wrist camera docks.

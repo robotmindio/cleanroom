@@ -65,6 +65,11 @@ TEST_ONLY_COLLISION_PAIRS = frozenset({
         ("base_link", "front_camera_collision_proxy"),
         ("gripper_collision_proxy", "roll_collision_proxy"),
         ("roll_collision_proxy", "tool0"),
+        ("arm_pedestal_collision_proxy", "lidar_collision_proxy"),
+        ("base_link", "lidar_collision_proxy"),
+        ("forearm_collision_proxy", "shoulder_collision_proxy"),
+        ("shoulder_collision_proxy", "wrist_collision_proxy"),
+        ("upper_arm_collision_proxy", "wrist_collision_proxy"),
     )
 })
 

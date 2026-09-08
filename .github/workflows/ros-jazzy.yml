@@ -8,6 +8,9 @@ jobs:
   build-test-lint:
     runs-on: ubuntu-24.04
     container: ros:jazzy-ros-base
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - name: Install build and validation tools
@@ -25,10 +28,11 @@ jobs:
             ros-jazzy-launch-testing-ament-cmake \
             ros-jazzy-xacro
           rosdep update
-          # Free Fleet is pinned and built by the repository installer; it is
-          # not an apt/rosdep package and is not needed to compile this package.
+          # Free Fleet, Astra, and the LD06 driver are pinned and built by the
+          # repository installer; none is an apt/rosdep package or needed to
+          # compile this package.
           rosdep install --from-paths . --ignore-src --rosdistro jazzy -y \
-            --skip-keys free_fleet_adapter
+            --skip-keys "free_fleet_adapter astra_camera ldlidar_stl_ros2"
       - name: Build and test
         env:
           ROS_DOMAIN_ID: 237

@@ -1,0 +1,407 @@
+{
+  "configById": {
+    "Tab!lekiwi": {
+      "activeTabIdx": 0,
+      "tabs": [
+        {
+          "title": "Overview",
+          "layout": {
+            "first": "3D!overview",
+            "second": {
+              "first": "Image!front",
+              "second": {
+                "first": "DiagnosticSummary!overview",
+                "second": "RawMessages!safety_summary",
+                "direction": "column",
+                "splitPercentage": 66
+              },
+              "direction": "column",
+              "splitPercentage": 48
+            },
+            "direction": "row",
+            "splitPercentage": 70
+          }
+        },
+        {
+          "title": "Navigation",
+          "layout": {
+            "first": "3D!navigation",
+            "second": {
+              "first": "RawMessages!global_plan",
+              "second": "RawMessages!collision_monitor",
+              "direction": "column",
+              "splitPercentage": 50
+            },
+            "direction": "row",
+            "splitPercentage": 76
+          }
+        },
+        {
+          "title": "Perception",
+          "layout": {
+            "first": "3D!perception",
+            "second": {
+              "first": "Image!astra",
+              "second": {
+                "first": "Image!front_perception",
+                "second": "Image!wrist",
+                "direction": "column",
+                "splitPercentage": 50
+              },
+              "direction": "column",
+              "splitPercentage": 50
+            },
+            "direction": "row",
+            "splitPercentage": 66
+          }
+        },
+        {
+          "title": "Telemetry & Health",
+          "layout": {
+            "first": {
+              "first": "DiagnosticSummary!health",
+              "second": {
+                "first": "Indicator!base_permission",
+                "second": "Indicator!arm_permission",
+                "direction": "row",
+                "splitPercentage": 50
+              },
+              "direction": "column",
+              "splitPercentage": 76
+            },
+            "second": {
+              "first": {
+                "first": "Plot!power",
+                "second": "Plot!motion",
+                "direction": "column",
+                "splitPercentage": 50
+              },
+              "second": {
+                "first": "RawMessages!battery",
+                "second": {
+                  "first": "RawMessages!hardware",
+                  "second": {
+                    "first": "RawMessages!driver_state",
+                    "second": "RawMessages!joint_states",
+                    "direction": "column",
+                    "splitPercentage": 50
+                  },
+                  "direction": "column",
+                  "splitPercentage": 50
+                },
+                "direction": "column",
+                "splitPercentage": 30
+              },
+              "direction": "row",
+              "splitPercentage": 62
+            },
+            "direction": "row",
+            "splitPercentage": 32
+          }
+        }
+      ]
+    },
+    "3D!overview": {
+      "foxglovePanelTitle": "Robot, navigation, and safety",
+      "layers": {
+        "a1cb1c68-0cae-4a34-9082-25ce2c0fd000": {
+          "visible": true,
+          "frameLocked": true,
+          "label": "Ground grid",
+          "instanceId": "a1cb1c68-0cae-4a34-9082-25ce2c0fd000",
+          "layerId": "foxglove.Grid",
+          "size": 12,
+          "divisions": 12,
+          "lineWidth": 1,
+          "color": "#555b66",
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0],
+          "order": 1
+        },
+        "37185550-02ce-47bd-a2e4-2cf1aae56d03": {
+          "visible": true,
+          "frameLocked": true,
+          "label": "LeKiwi",
+          "instanceId": "37185550-02ce-47bd-a2e4-2cf1aae56d03",
+          "layerId": "foxglove.Urdf",
+          "sourceType": "topic",
+          "url": "",
+          "filePath": "",
+          "parameter": "",
+          "topic": "/robot_description",
+          "framePrefix": "",
+          "displayMode": "visual",
+          "fallbackColor": "#d6d9df",
+          "order": 2
+        }
+      },
+      "cameraState": {
+        "perspective": true,
+        "distance": 5.5,
+        "phi": 48,
+        "thetaOffset": 48,
+        "targetOffset": [0, 0, 0],
+        "target": [0, 0, 0],
+        "targetOrientation": [0, 0, 0, 1],
+        "fovy": 45,
+        "near": 0.05,
+        "far": 5000
+      },
+      "followMode": "follow-pose",
+      "followTf": "base_footprint",
+      "fixedFrame": "map",
+      "scene": {},
+      "transforms": {
+        "frame:map": {"visible": false},
+        "frame:odom": {"visible": false},
+        "frame:base_footprint": {"visible": false},
+        "frame:base_link": {"visible": false}
+      },
+      "topics": {
+        "/map": {"visible": true, "colorMode": "map", "alpha": 0.5},
+        "/global_costmap/costmap": {"visible": true, "colorMode": "costmap", "alpha": 0.25},
+        "/local_costmap/costmap": {"visible": true, "colorMode": "costmap", "alpha": 0.5},
+        "/scan": {"visible": true, "colorField": "_auto_distance", "colorMode": "colormap", "colorMap": "turbo", "pointSize": 3},
+        "/camera/depth/points": {"visible": true, "colorField": "_auto_distance", "colorMode": "colormap", "colorMap": "turbo", "pointSize": 1, "explicitAlpha": 0.8},
+        "/plan": {"visible": true, "type": "line", "lineWidth": 0.08, "gradient": ["#4de0ffff", "#4de0ff80"]},
+        "/local_plan": {"visible": true, "type": "line", "lineWidth": 0.1, "gradient": ["#ffb020ff", "#ffb02080"]},
+        "/goal_pose": {"visible": true, "type": "arrow", "color": "#28e87bff"},
+        "/safety/marker": {"visible": true, "showOutlines": true},
+        "/collision_stop_zone": {"visible": true},
+        "/collision_slowdown_zone": {"visible": true},
+        "/waypoints": {"visible": true}
+      },
+      "imageMode": {}
+    },
+    "3D!navigation": {
+      "foxglovePanelTitle": "Nav2 map, costmaps, plans, and safety zones",
+      "layers": {
+        "2c281154-d77c-4e82-9dac-6185f3c27c17": {
+          "visible": true,
+          "frameLocked": true,
+          "label": "Ground grid",
+          "instanceId": "2c281154-d77c-4e82-9dac-6185f3c27c17",
+          "layerId": "foxglove.Grid",
+          "size": 12,
+          "divisions": 12,
+          "lineWidth": 1,
+          "color": "#555b66",
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0],
+          "order": 1
+        },
+        "e9899288-8d8d-4a15-9e8c-ca343a5b60f0": {
+          "visible": true,
+          "frameLocked": true,
+          "label": "LeKiwi",
+          "instanceId": "e9899288-8d8d-4a15-9e8c-ca343a5b60f0",
+          "layerId": "foxglove.Urdf",
+          "sourceType": "topic",
+          "url": "",
+          "filePath": "",
+          "parameter": "",
+          "topic": "/robot_description",
+          "framePrefix": "",
+          "displayMode": "visual",
+          "fallbackColor": "#d6d9df",
+          "order": 2
+        }
+      },
+      "cameraState": {
+        "perspective": false,
+        "distance": 7,
+        "phi": 0,
+        "thetaOffset": 0,
+        "targetOffset": [0, 0, 0],
+        "target": [0, 0, 0],
+        "targetOrientation": [0, 0, 0, 1],
+        "fovy": 45,
+        "near": 0.05,
+        "far": 5000
+      },
+      "followMode": "follow-pose",
+      "followTf": "base_footprint",
+      "fixedFrame": "map",
+      "scene": {},
+      "transforms": {
+        "frame:map": {"visible": true},
+        "frame:odom": {"visible": true},
+        "frame:base_footprint": {"visible": true}
+      },
+      "topics": {
+        "/map": {"visible": true, "colorMode": "map", "alpha": 0.55},
+        "/global_costmap/costmap": {"visible": true, "colorMode": "costmap", "alpha": 0.3},
+        "/local_costmap/costmap": {"visible": true, "colorMode": "costmap", "alpha": 0.65},
+        "/global_costmap/published_footprint": {"visible": true},
+        "/local_costmap/published_footprint": {"visible": true},
+        "/scan": {"visible": true, "colorField": "_auto_distance", "colorMode": "colormap", "colorMap": "turbo", "pointSize": 3},
+        "/plan": {"visible": true, "type": "line", "lineWidth": 0.1, "gradient": ["#4de0ffff", "#4de0ff80"]},
+        "/local_plan": {"visible": true, "type": "line", "lineWidth": 0.12, "gradient": ["#ffb020ff", "#ffb02080"]},
+        "/goal_pose": {"visible": true, "type": "arrow", "color": "#28e87bff"},
+        "/safety/marker": {"visible": true, "showOutlines": true},
+        "/collision_stop_zone": {"visible": true},
+        "/collision_slowdown_zone": {"visible": true},
+        "/waypoints": {"visible": true}
+      },
+      "imageMode": {}
+    },
+    "3D!perception": {
+      "foxglovePanelTitle": "Depth cloud, scan, and robot frame",
+      "layers": {
+        "721c87fc-89bd-4d3c-a4a2-09ff1f3d48f1": {
+          "visible": true,
+          "frameLocked": true,
+          "label": "LeKiwi",
+          "instanceId": "721c87fc-89bd-4d3c-a4a2-09ff1f3d48f1",
+          "layerId": "foxglove.Urdf",
+          "sourceType": "topic",
+          "url": "",
+          "filePath": "",
+          "parameter": "",
+          "topic": "/robot_description",
+          "framePrefix": "",
+          "displayMode": "visual",
+          "fallbackColor": "#d6d9df",
+          "order": 1
+        }
+      },
+      "cameraState": {
+        "perspective": true,
+        "distance": 3,
+        "phi": 52,
+        "thetaOffset": 22,
+        "targetOffset": [0.2, 0, 0.2],
+        "target": [0, 0, 0],
+        "targetOrientation": [0, 0, 0, 1],
+        "fovy": 45,
+        "near": 0.02,
+        "far": 50
+      },
+      "followMode": "follow-pose",
+      "followTf": "base_footprint",
+      "fixedFrame": "base_footprint",
+      "scene": {},
+      "transforms": {
+        "frame:base_link": {"visible": true},
+        "frame:base_scan": {"visible": true},
+        "frame:camera_depth_frame": {"visible": true},
+        "frame:camera_depth_optical_frame": {"visible": false},
+        "frame:astra_camera_link": {"visible": true},
+        "frame:astra_camera_optical_frame": {"visible": false}
+      },
+      "topics": {
+        "/scan": {"visible": true, "colorField": "_auto_distance", "colorMode": "colormap", "colorMap": "turbo", "pointSize": 3},
+        "/camera/depth/points": {"visible": true, "colorField": "_auto_distance", "colorMode": "colormap", "colorMap": "turbo", "pointSize": 1, "explicitAlpha": 0.85},
+        "/mobile_base/sensors/bumper_pointcloud": {"visible": true, "colorField": "_auto_distance", "colorMode": "colormap", "colorMap": "turbo", "pointSize": 4}
+      },
+      "imageMode": {}
+    },
+    "Image!front": {
+      "imageMode": {
+        "imageTopic": "/camera/front/image_raw",
+        "calibrationTopic": "/camera/front/camera_info"
+      },
+      "foxglovePanelTitle": "Front camera"
+    },
+    "Image!astra": {
+      "imageMode": {
+        "imageTopic": "/camera/astra/color/image_raw",
+        "calibrationTopic": "/camera/astra/color/camera_info"
+      },
+      "foxglovePanelTitle": "Astra RGB"
+    },
+    "Image!front_perception": {
+      "imageMode": {
+        "imageTopic": "/camera/front/image_raw",
+        "calibrationTopic": "/camera/front/camera_info"
+      },
+      "foxglovePanelTitle": "Front camera"
+    },
+    "Image!wrist": {
+      "imageMode": {
+        "imageTopic": "/camera/wrist/image_raw",
+        "calibrationTopic": "/camera/wrist/camera_info"
+      },
+      "foxglovePanelTitle": "Wrist camera"
+    },
+    "DiagnosticSummary!overview": {
+      "minLevel": 0,
+      "pinnedIds": [],
+      "hardwareIdFilter": "",
+      "topicToRender": "/diagnostics",
+      "sortByLevel": true,
+      "foxglovePanelTitle": "Safety diagnostics"
+    },
+    "DiagnosticSummary!health": {
+      "minLevel": 0,
+      "pinnedIds": [],
+      "hardwareIdFilter": "",
+      "topicToRender": "/diagnostics",
+      "sortByLevel": true,
+      "foxglovePanelTitle": "All diagnostics"
+    },
+    "Indicator!base_permission": {
+      "path": "/safety/base_motion_permitted.data",
+      "style": "bulb",
+      "fontSize": 36,
+      "fallbackColor": "#a0a0a0",
+      "fallbackLabel": "Unknown",
+      "rules": [
+        {"operator": "=", "rawValue": "true", "color": "#68e24a", "label": "Allowed"},
+        {"operator": "=", "rawValue": "false", "color": "#e5534b", "label": "Blocked"}
+      ],
+      "foxglovePanelTitle": "Base motion"
+    },
+    "Indicator!arm_permission": {
+      "path": "/safety/arm_motion_permitted.data",
+      "style": "bulb",
+      "fontSize": 36,
+      "fallbackColor": "#a0a0a0",
+      "fallbackLabel": "Unknown",
+      "rules": [
+        {"operator": "=", "rawValue": "true", "color": "#68e24a", "label": "Allowed"},
+        {"operator": "=", "rawValue": "false", "color": "#e5534b", "label": "Blocked"}
+      ],
+      "foxglovePanelTitle": "Arm motion"
+    },
+    "Plot!power": {
+      "paths": [
+        {"timestampMethod": "receiveTime", "value": "/battery_state.voltage", "enabled": true, "color": "#f7df71", "label": "Voltage (V)"},
+        {"timestampMethod": "receiveTime", "value": "/battery_state.current", "enabled": true, "color": "#f5774d", "label": "Current (A)"},
+        {"timestampMethod": "receiveTime", "value": "/battery_state.percentage", "enabled": true, "color": "#5cd6a9", "label": "Charge (0-1)"}
+      ],
+      "xAxisVal": "timestamp",
+      "axisScalesMode": "independent",
+      "timeRange": "latest",
+      "timeWindowMode": "sliding",
+      "followingViewWidth": 60,
+      "foxglovePanelTitle": "Battery telemetry"
+    },
+    "Plot!motion": {
+      "paths": [
+        {"timestampMethod": "receiveTime", "value": "/odom.twist.twist.linear.x", "enabled": true, "color": "#4de0ff", "label": "Odom vx (m/s)"},
+        {"timestampMethod": "receiveTime", "value": "/odom.twist.twist.linear.y", "enabled": true, "color": "#d795ff", "label": "Odom vy (m/s)"},
+        {"timestampMethod": "receiveTime", "value": "/odom.twist.twist.angular.z", "enabled": true, "color": "#ffb020", "label": "Odom yaw rate (rad/s)"},
+        {"timestampMethod": "receiveTime", "value": "/cmd_vel_safe.linear.x", "enabled": true, "color": "#68e24a", "label": "Safe command vx (m/s)"},
+        {"timestampMethod": "receiveTime", "value": "/cmd_vel_safe.angular.z", "enabled": true, "color": "#e5534b", "label": "Safe command yaw rate (rad/s)"}
+      ],
+      "xAxisVal": "timestamp",
+      "axisScalesMode": "independent",
+      "timeRange": "latest",
+      "timeWindowMode": "sliding",
+      "followingViewWidth": 60,
+      "foxglovePanelTitle": "Velocity: measured and commanded"
+    },
+    "RawMessages!safety_summary": {"topicPath": "/safety/supervisor_state", "diffEnabled": false, "defaultExpanded": false, "foxglovePanelTitle": "Safety supervisor"},
+    "RawMessages!global_plan": {"topicPath": "/plan", "diffEnabled": false, "defaultExpanded": false, "foxglovePanelTitle": "Global plan"},
+    "RawMessages!collision_monitor": {"topicPath": "/collision_monitor_state", "diffEnabled": false, "defaultExpanded": false, "foxglovePanelTitle": "Collision monitor"},
+    "RawMessages!battery": {"topicPath": "/battery_state", "diffEnabled": false, "defaultExpanded": false, "foxglovePanelTitle": "Battery message"},
+    "RawMessages!hardware": {"topicPath": "/hardware/diagnostics", "diffEnabled": false, "defaultExpanded": false, "foxglovePanelTitle": "Motor and bus diagnostics"},
+    "RawMessages!driver_state": {"topicPath": "/safety/state", "diffEnabled": false, "defaultExpanded": false, "foxglovePanelTitle": "Driver state"},
+    "RawMessages!joint_states": {"topicPath": "/joint_states", "diffEnabled": false, "defaultExpanded": false, "foxglovePanelTitle": "Joint states"}
+  },
+  "globalVariables": {},
+  "userNodes": {},
+  "playbackConfig": {"speed": 1},
+  "layout": "Tab!lekiwi"
+}
