@@ -84,6 +84,20 @@ extensions are built against numpy 1.26, and mixing them segfaults `rmf_adapter`
 `bringup.launch.py` runs the hardware driver against `.venv-lerobot` on its own.
 See [HARDWARE.md](HARDWARE.md).
 
+### Rebuild the complete robot model
+
+From the `cleanroom` checkout, one command validates the sibling `LeKiwi` CAD
+sources, refreshes the vendored Xacro and meshes, renders the reference image,
+builds the ROS package, and runs every CTest:
+
+```bash
+./scripts/rebuild-all.sh
+```
+
+Set `LEKIWI_SOURCE` only when the source checkout is somewhere other than
+`../LeKiwi`. The separate LeKiwi manufacturing audit covers recovery files that
+do not feed the robot Xacro.
+
 ### Headless simulation server
 
 Use the repository's simulation-only installer on a remote brain/server. It
