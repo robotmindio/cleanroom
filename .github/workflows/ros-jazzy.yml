@@ -8,6 +8,9 @@ jobs:
   build-test-lint:
     runs-on: ubuntu-24.04
     container: ros:jazzy-ros-base
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - name: Install build and validation tools
