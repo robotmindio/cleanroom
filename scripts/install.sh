@@ -300,7 +300,7 @@ colcon --log-base "$WORKSPACE/log" build \
   --build-base "$WORKSPACE/build" \
   --install-base "$WORKSPACE/install" \
   "${parallel_args[@]}" \
-  --cmake-args -DCMAKE_BUILD_TYPE=Release
+  --cmake-args -DCMAKE_BUILD_TYPE=Release -DPython3_EXECUTABLE=/usr/bin/python3
 
 # colcon prints "Finished" per package it reached, and an interrupted run can
 # still leave a plausible-looking install tree with share/ metadata but no

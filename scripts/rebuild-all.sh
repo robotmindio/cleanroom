@@ -6,6 +6,8 @@ cd "$(dirname "$0")/.."
 project_root=$PWD
 lekiwi_source=${LEKIWI_SOURCE:-$project_root/../LeKiwi}
 workspace=${LEKIWI_WS:-$HOME/lekiwi_ws}
+PATH=/usr/bin:/bin:$PATH
+export PATH PYTHONNOUSERSITE=1
 
 git -C "$lekiwi_source" rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
   echo "$0: LeKiwi source repository not found: $lekiwi_source" >&2

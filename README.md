@@ -564,13 +564,11 @@ workspaces, and all services are already current. Otherwise it refreshes stale
 or misconfigured compute service configuration, fast-forwards both clean checkouts to the same
 pushed commit, confirms torque-off, stops the
 compute stack before the device host, rebuilds both service workspaces, and
-starts the host, cameras, and LD06 before the compute stack. A temporary
-auto-arm inhibit keeps the replacement driver disarmed
-until revision, motor-health, and camera checks pass. Any failure leaves the
-inhibit at `~/.ros/lekiwi/deploy-inhibit-auto-arm` and does not roll back or
-resume a partially deployed robot. Inspect the failure and rerun the deploy;
-remove that file manually only when abandoning the deployment after verifying
-the robot is safe.
+starts the host, cameras, and LD06 before the compute stack. The tracked launch
+default keeps every replacement driver disarmed; the deployer verifies that
+state along with revision, motor health, and cameras. Any failure does not roll
+back or resume a partially deployed robot. Inspect the failure and rerun the
+deploy.
 
 The two halves can also mix ownership: keep the device services running and
 drive the stack by hand whenever you feel like it —

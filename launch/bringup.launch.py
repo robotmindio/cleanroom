@@ -314,7 +314,7 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument("publish_camera", default_value="true"),
             DeclareLaunchArgument(
-                "auto_arm_on_startup", default_value="true", choices=["true", "false"]
+                "auto_arm_on_startup", default_value="false", choices=["true", "false"]
             ),
             # The Astra Pro is an additional third camera. Existing front and
             # wrist V4L2 cameras continue to publish unchanged.

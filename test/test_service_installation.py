@@ -117,9 +117,11 @@ def test_unit_validation_ignores_unrelated_systemd_units():
     assert 'systemd-analyze verify --recursive-errors=no "$UNIT_DIR/$unit"' in helper
 
 
-def test_ros_start_reports_an_active_deployment_inhibit():
+def test_startup_disarm_is_tracked_in_the_launch_default():
+    launch = (ROOT / "launch" / "bringup.launch.py").read_text()
     launcher = (ROOT / "scripts" / "ros-start.sh").read_text()
-    assert "deployment inhibit active; forcing auto_arm_on_startup:=false" in launcher
+    assert '"auto_arm_on_startup", default_value="false"' in launch
+    assert "deploy-inhibit-auto-arm" not in launcher
 
 
 def test_full_installer_includes_qualification_tooling_dependencies():
@@ -253,12 +255,11 @@ def test_deploy_order_fails_closed_around_the_device_restart():
     assert 'compute_sudoers=$(sudo -n -l)' in deploy
     assert "git merge --ff-only" in deploy
     assert "cannot fetch origin within 30 seconds" in deploy
-    assert "deploy-inhibit-auto-arm" in deploy
+    assert "deploy-inhibit-auto-arm" not in deploy
     assert "LEKIWI_ROBOT_HOST" in deploy
     assert "configured_hosts" in deploy
     assert "Refreshing stale compute service configuration" in deploy
     assert "reinstall-compute.sh" in deploy
-    assert 'touch "$logs/deploy-inhibit-auto-arm"' in deploy
     assert "reset --hard" not in deploy
 
 

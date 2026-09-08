@@ -93,7 +93,6 @@ has_nopasswd_systemctl() { # has_nopasswd_systemctl <sudo -l output> <action> <u
 }
 refresh_compute_service() {
   log "Refreshing stale compute service configuration"
-  touch "$logs/deploy-inhibit-auto-arm"
   LEKIWI_ROBOT_HOST=${device#*@} LEKIWI_WS=$workspace \
     "$project_root/scripts/reinstall-compute.sh"
 }
@@ -187,15 +186,9 @@ fi
 /usr/bin/systemctl is-active --quiet lekiwi-stack.service || die "lekiwi-stack.service must be running before deployment"
 remote_unit_active lekiwi-host.service || die "lekiwi-host.service must be running before deployment"
 
-deploy_inhibit=$logs/deploy-inhibit-auto-arm
-touch "$deploy_inhibit"
-completed=false
 on_exit() {
   local code=$?
-  if [[ $completed != true ]]; then
-    echo "$0: deployment stopped safely; services are not automatically rolled back or resumed" >&2
-    echo "$0: auto-arm remains inhibited by $deploy_inhibit" >&2
-  fi
+  echo "$0: deployment stopped safely; services are not automatically rolled back or resumed" >&2
   return "$code"
 }
 trap on_exit EXIT
@@ -234,7 +227,7 @@ remote_unit_active lekiwi-cameras.service || die "lekiwi-cameras.service did not
 "${ssh_command[@]}" sudo -n /usr/bin/systemctl start lekiwi-lidar.service
 remote_unit_active lekiwi-lidar.service || die "lekiwi-lidar.service did not become active"
 
-log "Starting the compute stack with auto-arm inhibited"
+log "Starting the compute stack disarmed"
 sudo -n /usr/bin/systemctl reset-failed lekiwi-stack.service
 sudo -n /usr/bin/systemctl start lekiwi-stack.service
 wait_for 120 /usr/bin/systemctl is-active --quiet lekiwi-stack.service || \
@@ -264,7 +257,5 @@ printf '%s\n' "$target" > "$marker"
 "${ssh_command[@]}" "mkdir -p '$remote_home/.ros/lekiwi' && printf '%s\\n' '$target' > '$remote_marker'"
 [[ $("${ssh_command[@]}" git -C "$remote_repo" rev-parse HEAD) == "$target" ]] || \
   die "device revision changed during deployment"
-rm -f -- "$deploy_inhibit"
-completed=true
 trap - EXIT
 echo "deployed ${target:0:12} to compute and $device; robot remains disarmed"
