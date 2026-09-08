@@ -350,12 +350,12 @@
         </visual>
     </link>
     <joint name="base_plate_layer1-v5_baseplate2bottom_mount" type="fixed">
-        <origin xyz="-0.02 -0.1 0.0" rpy="3.141592653589793 -0.0 0.0" />
+        <origin xyz="0.02375 -0.06895 0" rpy="1.57079632679 0 -1.57079632679" />
         <parent link="base_plate_layer1-v5" />
         <child link="drive_motor_mount-v11-2" />
     </joint>
     <joint name="drive_motor_mount-v11-2_Rigid-2" type="fixed">
-        <origin xyz="-0.01214 -0.015999999999999997 -0.0076100000000000004" rpy="3.141592653589793 1.5707963267948966 0" />
+        <origin xyz="0.00555000019073 0.0429865544308 0.0339999998126" rpy="-1.57079632679 1.57079632679 0" />
         <parent link="drive_motor_mount-v11-2" />
         <child link="ST3215_Servo_Motor-v1-2" />
     </joint>
@@ -371,12 +371,12 @@
         <axis xyz="0.0 0.0 -1.0" />
     </joint>
     <joint name="base_plate_layer1-v5_baseplate2right_mount" type="fixed">
-        <origin xyz="0.07928203 0.022679490000000004 0.0" rpy="0.0 -0.0 0.0" />
+        <origin xyz="0.0478374515909 0.0550431033399 0" rpy="1.57079632679 0 0.523598775598" />
         <parent link="base_plate_layer1-v5" />
         <child link="drive_motor_mount-v11-1" />
     </joint>
     <joint name="drive_motor_mount-v11-1_Rigid-35" type="fixed">
-        <origin xyz="-0.007786400000000002 -0.018513550000000004 0.0076100000000000004" rpy="-7.401486830834375e-17 -1.5707963267948966 0" />
+        <origin xyz="0.00555000203031 0.0429865595601 0.0339999998126" rpy="-3.66519142919 1.57079632679 0" />
         <parent link="drive_motor_mount-v11-1" />
         <child link="ST3215_Servo_Motor-v1-1" />
     </joint>
@@ -392,12 +392,12 @@
         <child link="4-Omni-Directional-Wheel_Single_Body-v1-1" />
     </joint>
     <joint name="base_plate_layer1-v5_baseplate2left_mount" type="fixed">
-        <origin xyz="-0.05928203 0.057320510000000005 0.0" rpy="3.141592653589793 -0.0 0.0" />
+        <origin xyz="-0.0715874515909 0.0139068966601 0" rpy="1.57079632679 2.77555756156e-17 2.61799387799" />
         <parent link="base_plate_layer1-v5" />
         <child link="drive_motor_mount-v11" />
     </joint>
     <joint name="drive_motor_mount-v11_Rigid-39" type="fixed">
-        <origin xyz="0.019926399999999997 -0.0025135499999999933 -0.0076100000000000004" rpy="3.141592653589793 1.5707963267948966 0" />
+        <origin xyz="0.00555000555268 0.0429865554023 0.0339999998126" rpy="-5.75958653158 1.57079632679 0" />
         <parent link="drive_motor_mount-v11" />
         <child link="ST3215_Servo_Motor-v1" />
     </joint>
@@ -428,12 +428,12 @@
         <child link="Battery---Battery-5.2-Ah-DC5521-Plug-v2" />
     </joint>
     <joint name="base_plate_layer1-v5_Rigid-20" type="fixed">
-        <origin xyz="0.0 0.0 0.0" rpy="3.141592653589793 -0.0 0.0" />
+        <origin xyz="-0.06 0.08 0" rpy="3.141592653589793 -0.0 0.0" />
         <parent link="base_plate_layer1-v5" />
         <child link="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff" />
     </joint>
     <joint name="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff_Rigid-21" type="fixed">
-        <origin xyz="0.0 0.0 -0.05" rpy="3.141592653589793 -0.0 0.0" />
+        <origin xyz="0.06 0.08 -0.05" rpy="3.141592653589793 -0.0 0.0" />
         <parent link="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff" />
         <child link="base_plate_layer2-v3" />
     </joint>
@@ -448,27 +448,27 @@
         <child link="Camera-Model-v3" />
     </joint>
     <joint name="base_plate_layer1-v5_Rigid-30" type="fixed">
-        <origin xyz="0.02 -0.1 0.0" rpy="3.141592653589793 -0.0 0.0" />
+        <origin xyz="0.06 -0.08 0" rpy="3.141592653589793 -0.0 0.0" />
         <parent link="base_plate_layer1-v5" />
         <child link="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-5" />
     </joint>
     <joint name="base_plate_layer1-v5_Rigid-31" type="fixed">
-        <origin xyz="0.07660254 0.06732051 0.0" rpy="3.141592653589793 -0.0 0.0" />
+        <origin xyz="0.06 0.08 0" rpy="3.141592653589793 -0.0 0.0" />
         <parent link="base_plate_layer1-v5" />
         <child link="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-4" />
     </joint>
     <joint name="base_plate_layer1-v5_Rigid-32" type="fixed">
-        <origin xyz="-0.09660254 0.032679490000000005 0.0" rpy="3.141592653589793 -0.0 0.0" />
+        <origin xyz="-0.06 -0.08 0" rpy="3.141592653589793 -0.0 0.0" />
         <parent link="base_plate_layer1-v5" />
         <child link="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-3" />
     </joint>
     <joint name="base_plate_layer1-v5_Rigid-69" type="fixed">
-        <origin xyz="0.1 -0.02 0.0" rpy="3.141592653589793 -0.0 0.0" />
+        <origin xyz="0.1 0 0" rpy="3.141592653589793 -0.0 0.0" />
         <parent link="base_plate_layer1-v5" />
         <child link="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-2" />
     </joint>
     <joint name="base_plate_layer1-v5_Rigid-70" type="fixed">
-        <origin xyz="-0.1 -0.02 0.0" rpy="3.141592653589793 -0.0 0.0" />
+        <origin xyz="-0.1 0 0" rpy="3.141592653589793 -0.0 0.0" />
         <parent link="base_plate_layer1-v5" />
         <child link="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-1" />
     </joint>

@@ -57,13 +57,31 @@ class PhysicsSmoke(Node):
             if (
                 self.odom is not None
                 and "arm_shoulder_pan" in self.joints
+                and self.command.get_subscription_count() > 0
                 and self.arm.wait_for_server(timeout_sec=0.0)
             ):
                 return
         raise RuntimeError("simulation did not produce odometry, joints and arm action")
 
+    def wait_drivetrain(self, timeout: float = 15.0) -> None:
+        """Prime discovery through the complete ROS, bridge and Gazebo path."""
+        initial_x = self.odom.pose.pose.position.x
+        initial_y = self.odom.pose.pose.position.y
+        command = Twist()
+        command.linear.x = 0.05
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            self.pump(0.1, command)
+            dx = self.odom.pose.pose.position.x - initial_x
+            dy = self.odom.pose.pose.position.y - initial_y
+            if math.hypot(dx, dy) >= 0.005:
+                self.pump(1.0, Twist())
+                return
+        raise RuntimeError("simulated drivetrain command path did not become ready")
+
     def run(self) -> None:
         self.wait_ready()
+        self.wait_drivetrain()
         initial_x = self.odom.pose.pose.position.x
         initial_y = self.odom.pose.pose.position.y
         drive = Twist()

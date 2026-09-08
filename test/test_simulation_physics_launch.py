@@ -8,7 +8,8 @@ import launch
 import launch_testing.actions
 import launch_testing.asserts
 import pytest
-from launch.actions import ExecuteProcess, SetEnvironmentVariable
+from launch.actions import ExecuteProcess, RegisterEventHandler, SetEnvironmentVariable, TimerAction
+from launch.event_handlers import OnProcessExit
 from launch.substitutions import Command, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
@@ -79,7 +80,21 @@ def generate_test_description():
             gz_resources,
         ),
         SetEnvironmentVariable("GZ_SIM_SYSTEM_PLUGIN_PATH", gz_plugins),
-        gz, spawn, bridge, arm_bridge, base, arm, smoke,
+        gz,
+        spawn,
+        RegisterEventHandler(OnProcessExit(
+            target_action=spawn,
+            on_exit=[TimerAction(
+                period=1.0,
+                actions=[
+                    bridge,
+                    arm_bridge,
+                    base,
+                    arm,
+                    TimerAction(period=2.0, actions=[smoke]),
+                ],
+            )],
+        )),
         launch_testing.actions.ReadyToTest(),
     ])
     return description, {"smoke": smoke}
@@ -91,7 +106,7 @@ class TestPhysicsSmoke(unittest.TestCase):
             "simulation physics smoke passed",
             process=smoke,
             stream="stdout",
-            timeout=45,
+            timeout=60,
         )
 
 

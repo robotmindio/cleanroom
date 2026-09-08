@@ -10,11 +10,13 @@ wheel positions.  It intentionally never publishes ground-truth model pose as
 from __future__ import annotations
 
 import math
+import time
 from dataclasses import dataclass
 
 import rclpy
 from geometry_msgs.msg import TransformStamped, Twist
 from nav_msgs.msg import Odometry
+from rclpy.clock import Clock, ClockType
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Float64
@@ -149,7 +151,8 @@ class SimOmniController(Node):
         self._last_wheels: tuple[float, float, float] | None = None
         self._last_wheel_stamp_ns: int | None = None
         self._x = self._y = self._yaw = 0.0
-        self.create_timer(0.02, self._control)
+        self._steady_clock = Clock(clock_type=ClockType.STEADY_TIME)
+        self.create_timer(0.02, self._control, clock=self._steady_clock)
 
     def _command(self, message: Twist) -> None:
         values = (message.linear.x, message.linear.y, message.angular.z)
@@ -161,10 +164,10 @@ class SimOmniController(Node):
             max(-self.max_linear, min(self.max_linear, values[1])),
             max(-self.max_angular, min(self.max_angular, values[2])),
         )
-        self._last_command_ns = self.get_clock().now().nanoseconds
+        self._last_command_ns = time.monotonic_ns()
 
     def _control(self) -> None:
-        now_ns = self.get_clock().now().nanoseconds
+        now_ns = time.monotonic_ns()
         if self._last_control_ns is None:
             self._last_control_ns = now_ns
             return

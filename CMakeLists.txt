@@ -54,6 +54,14 @@ if(BUILD_TESTING)
   find_package(ament_cmake_pytest REQUIRED)
   find_package(launch_testing_ament_cmake REQUIRED)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  execute_process(
+    COMMAND "${Python3_EXECUTABLE}" -c
+      "import numpy; raise SystemExit(int(numpy.__version__.split('.')[0]) >= 2)"
+    RESULT_VARIABLE test_python_numpy_incompatible)
+  if(NOT test_python_numpy_incompatible EQUAL 0)
+    message(FATAL_ERROR
+      "${Python3_EXECUTABLE} must use NumPy 1.x with ROS Jazzy compiled extensions; rerun scripts/install.sh")
+  endif()
   # Test the package under construction, not a similarly named package sourced
   # from another overlay workspace.
   set(test_python_environment
