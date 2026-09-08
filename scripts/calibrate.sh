@@ -405,7 +405,7 @@ case "$mode" in
 
     echo
     echo "The height and wheel tools need the stack running. Their results are saved to"
-    echo "~/.ros/lekiwi_launch_calibration.conf. When ready, once the stack is up:"
+    echo "$HOME/.ros/lekiwi_launch_calibration.conf. When ready, once the stack is up:"
     echo "  height:  ros2 run lekiwi_rmf free_space.py --ros-args -p calibrate:=true ..."
     echo "  linear:  ros2 run lekiwi_rmf odom_scale.py --axis linear"
     echo "  angular: ros2 run lekiwi_rmf odom_scale.py --axis angular"

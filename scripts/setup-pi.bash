@@ -5,6 +5,7 @@
 if [ ! -f /opt/ros/jazzy/setup.bash ]; then
   printf 'ROS is not installed on this Pi. Run scripts/install-pi.sh on Ubuntu 24.04.\n' >&2
   return 1 2>/dev/null
+  # shellcheck disable=SC2317 # Only reached if this source-only file is run directly.
   exit 1
 fi
 
@@ -13,4 +14,6 @@ fi
 export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 # Same DDS settings as the workstation: without a matching participant policy the two
 # machines discover each other inconsistently.
-export CYCLONEDDS_URI="file://$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/config/cyclonedds.xml"
+_lekiwi_pi_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" || exit 1
+export CYCLONEDDS_URI="file://$_lekiwi_pi_root/config/cyclonedds.xml"
+unset _lekiwi_pi_root

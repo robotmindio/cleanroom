@@ -104,7 +104,11 @@ log "Installing the ROS camera stack"
 # ROS 2 ships binaries for Ubuntu noble/Jazzy only;
 # Raspberry Pi OS has no ROS packages, so any other image gets the LeRobot host and
 # nothing else. Must match the workstation's distro -- see scripts/install.sh.
-codename=$(. /etc/os-release && echo "${VERSION_CODENAME:-}")
+# shellcheck disable=SC1091 # /etc/os-release is provided by every supported Linux host.
+codename=$(
+  . /etc/os-release
+  printf '%s\n' "${VERSION_CODENAME:-}"
+)
 case $codename in
   noble) pi_ros_distro=jazzy ;;
   *) pi_ros_distro="" ;;
