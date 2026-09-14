@@ -117,6 +117,13 @@ def test_unit_validation_ignores_unrelated_systemd_units():
     assert 'systemd-analyze verify --recursive-errors=no "$UNIT_DIR/$unit"' in helper
 
 
+def test_stack_limits_journal_output_from_a_log_flood():
+    stack = (ROOT / "systemd" / "lekiwi-stack.service").read_text(encoding="utf-8")
+
+    assert "LogRateLimitIntervalSec=30s" in stack
+    assert "LogRateLimitBurst=1000" in stack
+
+
 def test_full_installer_includes_qualification_tooling_dependencies():
     """A fresh deployment must not silently omit required qualification checks."""
     installer = (ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
