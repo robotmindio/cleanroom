@@ -900,6 +900,12 @@ kept. The same policy runs from both `scripts/up.sh` and the systemd `scripts/ro
 If the stack is already running, `scripts/rtabmap-db-maintenance.py --prune-only` safely applies
 only the automatic-archive retention policy; it never opens or moves the active database.
 
+### ROS logs consume disk
+
+The service installers enable `lekiwi-ros-logrotate.timer`. Every five minutes it rotates
+ROS logs above 100 MiB with `copytruncate`, keeps twelve archives, and compresses older
+ones. Re-run the relevant service installer after pulling this change.
+
 ### Installer reports a ParaView/VTK conflict
 
 Ubuntu's `python3-paraview` conflicts with the `python3-vtk9` package required by RTAB-Map through PCL. If you do not need the existing ParaView installation, remove it and rerun the installer:
