@@ -16,6 +16,9 @@ Environment=LEKIWI_WS=@WORKSPACE@
 WorkingDirectory=@PROJECT_ROOT@
 ExecStartPre=-/usr/bin/udevadm settle --timeout=15
 ExecStart=@PROJECT_ROOT@/scripts/ros-lidar.sh
+# A broken DDS peer must not fill journald/rsyslog before this sensor recovers.
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=1000
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
