@@ -4,7 +4,7 @@
 # robot's own computer and a separate desk machine are both fine, and the
 # device half (motors + cameras) can sit on either one.
 #
-# Usage: scripts/install-compute-services.sh [--remote DEVICE_ADDR]
+# Usage: scripts/install-compute-services.sh [--remote DEVICE_ADDR] [--rosbridge-tailnet]
 #        [--service-user USER] [--workspace PATH] [--curve-dir PATH]
 #   no --remote and no LEKIWI_ROBOT_HOST in .env: the device side runs here too; the stack is
 #                 ordered after lekiwi-host.service and starts once its ZMQ
@@ -20,7 +20,7 @@ set -Eeuo pipefail
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 UNIT_DIR=/etc/systemd/system
 # shellcheck disable=SC1091 # PROJECT_ROOT is resolved above, not a fixed source path.
-source "$PROJECT_ROOT/scripts/runtime-common.sh"
+source "$PROJECT_ROOT/scripts/lib/runtime-common.sh"
 load_lekiwi_env "$PROJECT_ROOT/.env"
 
 log() { printf '\n==> %s\n' "$*"; }
@@ -31,6 +31,7 @@ REMOTE=${LEKIWI_ROBOT_HOST:-}
 SERVICE_USER_ARG=""
 WORKSPACE_ARG=""
 CURVE_DIR_ARG=""
+ROSBRIDGE_TAILNET=false
 while [[ $# -gt 0 ]]; do
   case $1 in
     --remote)
@@ -53,7 +54,11 @@ while [[ $# -gt 0 ]]; do
       CURVE_DIR_ARG=$2
       shift 2
       ;;
-    *) die "unknown argument: $1 (usage: $0 [--remote DEVICE_ADDR] [--service-user USER] [--workspace PATH] [--curve-dir PATH])" ;;
+    --rosbridge-tailnet)
+      ROSBRIDGE_TAILNET=true
+      shift
+      ;;
+    *) die "unknown argument: $1 (usage: $0 [--remote DEVICE_ADDR] [--service-user USER] [--workspace PATH] [--curve-dir PATH] [--rosbridge-tailnet])" ;;
   esac
 done
 [[ -z $REMOTE || $REMOTE =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || \
@@ -82,7 +87,8 @@ topology_dir="$UNIT_DIR/lekiwi-stack.service.d"
 topology_conf="$topology_dir/topology.conf"
 
 if [[ -n $REMOTE ]]; then
-  # There is no local host to depend on in this topology.
+  # There is no local host to depend on. The base unit is remote-safe; remove
+  # any local-topology dependency left by an earlier installation.
   log "Remote topology: stack reaches the host at $REMOTE over the network"
   if [[ -e $topology_conf ]]; then
     as_root rm -f "$topology_conf"
@@ -102,7 +108,8 @@ if [[ -n $REMOTE ]]; then
     STACK_ARGS="$STACK_ARGS curve_client_secret_key_file:=$curve_client_secret curve_server_public_key_file:=$curve_server_public"
   fi
 else
-  # All-in-one: make the host and stack one lifecycle group.
+  # All-in-one: add the local motor host dependency. systemd dependencies
+  # cannot be removed by an empty drop-in, so the base unit has none.
   as_root mkdir -p "$topology_dir"
   printf '%s\n' "[Unit]" "Requires=lekiwi-host.service" \
     "PartOf=lekiwi-host.service" "After=lekiwi-host.service" |
@@ -136,6 +143,14 @@ else
   fi
 fi
 
+if [[ $ROSBRIDGE_TAILNET == true ]]; then
+  command -v tailscale >/dev/null || die "--rosbridge-tailnet requires tailscale"
+  tailnet_ip=$(tailscale ip -4)
+  [[ $tailnet_ip =~ ^[0-9]+([.][0-9]+){3}$ ]] || \
+    die "tailscale did not return one IPv4 address"
+  STACK_ARGS="${STACK_ARGS:+$STACK_ARGS }start_rosbridge:=true rosbridge_address:=$tailnet_ip"
+fi
+
 if [[ -n $REMOTE ]]; then
   log "Installing lekiwi-stack.service (--remote $REMOTE, device LD06)"
 elif [[ $STACK_ARGS == *remote* ]]; then
@@ -154,9 +169,10 @@ stack_env=/etc/default/lekiwi-stack
 printf '# Written by scripts/install-compute-services.sh.\nLEKIWI_STACK_ARGS=%s\n' \
   "$STACK_ARGS" | as_root tee "$stack_env" >/dev/null
 
-log "Reloading systemd and enabling lekiwi-stack.service"
+log "Reloading systemd and enabling/restarting lekiwi-stack.service"
 as_root systemctl daemon-reload
-as_root systemctl enable --now lekiwi-stack.service
+as_root systemctl enable lekiwi-stack.service
+as_root systemctl restart lekiwi-stack.service
 as_root systemctl enable --now lekiwi-ros-logrotate.timer
 
 log "Granting $LEKIWI_SERVICE_USER non-interactive deployment control"

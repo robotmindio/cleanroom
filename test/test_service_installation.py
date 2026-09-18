@@ -360,3 +360,15 @@ def test_ros_log_rotation_is_installed_for_device_and_compute_roles():
     for installer in (device, compute):
         assert "install_log_rotation" in installer
         assert "enable --now lekiwi-ros-logrotate.timer" in installer
+
+
+def test_compute_service_supports_an_assigned_tailnet_rosbridge_address():
+    installer = (ROOT / "scripts" / "install-compute-services.sh").read_text(encoding="utf-8")
+    unit = (ROOT / "systemd" / "lekiwi-stack.service").read_text(encoding="utf-8")
+
+    assert "Requires=lekiwi-host.service" not in unit
+    assert '"Requires=lekiwi-host.service"' in installer
+    assert 'as_root rm -f "$topology_conf"' in installer
+    assert "--rosbridge-tailnet" in installer
+    assert "start_rosbridge:=true rosbridge_address:=$tailnet_ip" in installer
+    assert "systemctl restart lekiwi-stack.service" in installer
