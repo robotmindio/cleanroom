@@ -13,6 +13,8 @@ from launch.substitutions import Command, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
+from lekiwi_rmf.sim_topics import SIM_ACTUATOR_BRIDGE_ARGUMENTS
+
 
 @pytest.mark.launch_test
 def generate_test_description():
@@ -36,11 +38,7 @@ def generate_test_description():
         arguments=[
             "/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock",
             "/sim/joint_states@sensor_msgs/msg/JointState[gz.msgs.Model",
-            "/sim/sim_base_left_wheel/cmd_vel@std_msgs/msg/Float64]gz.msgs.Double",
-            "/sim/sim_base_back_wheel/cmd_vel@std_msgs/msg/Float64]gz.msgs.Double",
-            "/sim/sim_base_right_wheel/cmd_vel@std_msgs/msg/Float64]gz.msgs.Double",
-            "/sim/arm/joint_trajectory@trajectory_msgs/msg/JointTrajectory]gz.msgs.JointTrajectory",
-            "/sim/arm/trajectory_heartbeat@std_msgs/msg/Bool]gz.msgs.Boolean",
+            *SIM_ACTUATOR_BRIDGE_ARGUMENTS,
         ],
         remappings=[("/sim/joint_states", "/joint_states")], output="screen",
     )

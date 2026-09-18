@@ -21,6 +21,7 @@ from lekiwi_rmf.sim_omni_controller import (
     wheels_to_body,
 )
 from lekiwi_rmf.sim_sdf import GZ_XML_NAMESPACE, render_simulation_sdf
+from lekiwi_rmf.sim_topics import ARM_TRAJECTORY_HEARTBEAT_TOPIC
 
 
 ROOT = pathlib.Path(__file__).parents[1]
@@ -63,7 +64,8 @@ def test_simulated_arm_stale_feedback_abort_still_publishes_cached_hold():
 
 def test_simulated_arm_publishes_native_watchdog_heartbeat_while_executing():
     controller = (ROOT / "lekiwi_rmf" / "sim_arm_controller.py").read_text()
-    assert '"/sim/arm/trajectory_heartbeat"' in controller
+    assert "ARM_TRAJECTORY_HEARTBEAT_TOPIC" in controller
+    assert ARM_TRAJECTORY_HEARTBEAT_TOPIC == "/sim/arm/trajectory_heartbeat"
     assert "self._trajectory_heartbeat.publish(Bool(data=True))" in controller
 
 

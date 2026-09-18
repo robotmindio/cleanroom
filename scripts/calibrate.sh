@@ -53,15 +53,14 @@ CALIBRATION_DIR="${HF_LEROBOT_CALIBRATION:-$LEROBOT_HOME/calibration}"
 MOTOR_FILE="$CALIBRATION_DIR/robots/lekiwi/$ID.json"
 
 host_up() {
-  ss -tln 2>/dev/null | grep -q ':5555' \
-    && ss -tln 2>/dev/null | grep -q ':5557' \
+  lekiwi_safety_ports_listening \
     && pgrep -f '[t]orque-host\.py|[l]erobot\.robots\.lekiwi\.lekiwi_host' >/dev/null
 }
 
 legacy_host_up() {
   # Detect an older stock host only so calibration tears it down before it
   # tries to own the serial bus. It is never accepted as a safety-capable host.
-  ss -tln 2>/dev/null | grep -q ':5555' \
+  lekiwi_motion_port_listening \
     && pgrep -f '[l]erobot\.robots\.lekiwi\.lekiwi_host' >/dev/null
 }
 

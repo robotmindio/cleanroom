@@ -20,20 +20,12 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import Float64
 from tf2_ros import TransformBroadcaster
 
+from lekiwi_rmf.sim_topics import WHEEL_COMMAND_TOPICS, WHEEL_JOINTS
+
 
 WHEEL_RADIUS = 0.050
 BASE_RADIUS = 0.125
 SQRT3 = math.sqrt(3.0)
-WHEEL_JOINTS = (
-    "sim_base_left_wheel_joint",
-    "sim_base_back_wheel_joint",
-    "sim_base_right_wheel_joint",
-)
-WHEEL_COMMAND_TOPICS = (
-    "/sim/sim_base_left_wheel/cmd_vel",
-    "/sim/sim_base_back_wheel/cmd_vel",
-    "/sim/sim_base_right_wheel/cmd_vel",
-)
 
 
 def body_to_wheels(x: float, y: float, yaw: float) -> tuple[float, float, float]:

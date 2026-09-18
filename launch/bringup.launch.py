@@ -12,6 +12,7 @@ from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackagePrefix, FindPackageShare
 
 from lekiwi_rmf.launch_validation import validate_context
+from lekiwi_rmf.sim_topics import SIM_ACTUATOR_BRIDGE_ARGUMENTS
 
 
 LD06_SERIAL_PORTS = (
@@ -478,11 +479,7 @@ def generate_launch_description():
                     "/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock",
                     "/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan",
                     "/sim/joint_states@sensor_msgs/msg/JointState[gz.msgs.Model",
-                    "/sim/sim_base_left_wheel/cmd_vel@std_msgs/msg/Float64]gz.msgs.Double",
-                    "/sim/sim_base_back_wheel/cmd_vel@std_msgs/msg/Float64]gz.msgs.Double",
-                    "/sim/sim_base_right_wheel/cmd_vel@std_msgs/msg/Float64]gz.msgs.Double",
-                    "/sim/arm/joint_trajectory@trajectory_msgs/msg/JointTrajectory]gz.msgs.JointTrajectory",
-                    "/sim/arm/trajectory_heartbeat@std_msgs/msg/Bool]gz.msgs.Boolean",
+                    *SIM_ACTUATOR_BRIDGE_ARGUMENTS,
                     # gz publishes the image on <topic> itself and derives the info topic from
                     # the parent namespace, so <topic>/camera/front gives /camera/camera_info.
                     "/camera/front@sensor_msgs/msg/Image[gz.msgs.Image",

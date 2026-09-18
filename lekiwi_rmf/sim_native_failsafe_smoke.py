@@ -10,11 +10,10 @@ from std_msgs.msg import Bool, Float64
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from rclpy.node import Node
 
-
-WHEEL_TOPICS = (
-    "/sim/sim_base_left_wheel/cmd_vel",
-    "/sim/sim_base_back_wheel/cmd_vel",
-    "/sim/sim_base_right_wheel/cmd_vel",
+from lekiwi_rmf.sim_topics import (
+    ARM_TRAJECTORY_HEARTBEAT_TOPIC,
+    ARM_TRAJECTORY_TOPIC,
+    WHEEL_COMMAND_TOPICS,
 )
 
 
@@ -23,9 +22,9 @@ class NativeFailsafeSmoke(Node):
         super().__init__("sim_native_failsafe_smoke")
         self.joints: dict[str, float] = {}
         self.create_subscription(JointState, "/joint_states", self._joints, 20)
-        self.wheels = [self.create_publisher(Float64, topic, 10) for topic in WHEEL_TOPICS]
-        self.arm = self.create_publisher(JointTrajectory, "/sim/arm/joint_trajectory", 10)
-        self.heartbeat = self.create_publisher(Bool, "/sim/arm/trajectory_heartbeat", 10)
+        self.wheels = [self.create_publisher(Float64, topic, 10) for topic in WHEEL_COMMAND_TOPICS]
+        self.arm = self.create_publisher(JointTrajectory, ARM_TRAJECTORY_TOPIC, 10)
+        self.heartbeat = self.create_publisher(Bool, ARM_TRAJECTORY_HEARTBEAT_TOPIC, 10)
 
     def _joints(self, message: JointState) -> None:
         self.joints.update(zip(message.name, message.position))

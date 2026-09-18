@@ -17,6 +17,8 @@ safety_supervisor:
     minimum_depth_range: 0.05
     maximum_depth_range: 10.0
     require_bumper: true
+    # The labelled physical motor-power stop must also report its real state
+    # on safety/estop_active; absence or staleness denies motion.
     require_estop: true
     require_battery: true
     require_motor_health: true

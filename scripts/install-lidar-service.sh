@@ -4,9 +4,6 @@ set -Eeuo pipefail
 
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 UNIT_DIR=/etc/systemd/system
-SUDO=()
-[[ $EUID -eq 0 ]] || SUDO=(sudo)
-as_root() { "${SUDO[@]}" "$@"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 log() { printf '\n==> %s\n' "$*"; }
 

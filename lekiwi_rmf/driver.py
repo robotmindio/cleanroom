@@ -801,6 +801,14 @@ class LeKiwiDriver(Node):
         except (KeyError, TypeError, ValueError):
             return False
 
+    def record_link_loss(self, reason):
+        if self.link_lost:
+            return
+        self.get_logger().error(reason)
+        self.link_lost = True
+        self.odom_samples.reset()
+        self.set_disarmed("LINK_LOST")
+
     def update(self):
         # Run before telemetry polling so a silent supervisor still revokes
         # arm torque even when the motor host is returning cached data.
@@ -809,35 +817,23 @@ class LeKiwiDriver(Node):
         try:
             observation = self.robot.get_observation()
         except Exception as error:
-            if not self.link_lost:
-                self.get_logger().error(f"LeKiwi telemetry failed: {error}")
-                self.link_lost = True
-                self.odom_samples.reset()
-                self.set_disarmed("LINK_LOST")
+            self.record_link_loss(f"LeKiwi telemetry failed: {error}")
             return
 
         missing_state_keys = getattr(self.robot, "missing_state_keys", ())
         if not self.observation_is_valid(observation, missing_state_keys):
-            if not self.link_lost:
-                reason = "LeKiwi telemetry is incomplete or non-finite"
-                if missing_state_keys:
-                    reason = f"LeKiwi telemetry is missing: {', '.join(missing_state_keys)}"
-                self.get_logger().error(reason)
-                self.link_lost = True
-                self.odom_samples.reset()
-                self.set_disarmed("LINK_LOST")
+            reason = "LeKiwi telemetry is incomplete or non-finite"
+            if missing_state_keys:
+                reason = f"LeKiwi telemetry is missing: {', '.join(missing_state_keys)}"
+            self.record_link_loss(reason)
             return
 
         if not self.observation_is_fresh(observation):
             quiet = (now - self.last_fresh).nanoseconds / 1e9
             if quiet > self.link_timeout:
-                if not self.link_lost:
-                    self.get_logger().error(
-                        f"No fresh LeKiwi telemetry for {quiet:.1f}s; waiting for recovery"
-                    )
-                    self.link_lost = True
-                    self.odom_samples.reset()
-                    self.set_disarmed("LINK_LOST")
+                self.record_link_loss(
+                    f"No fresh LeKiwi telemetry for {quiet:.1f}s; waiting for recovery"
+                )
             return
 
         self.last_fresh = now

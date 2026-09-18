@@ -21,11 +21,6 @@ export LEKIWI_RUNTIME_DIR="$RUNTIME_DIR"
 # per launch, but dated crash copies and host logs otherwise accumulate forever.
 find "$LOGS" -type f \( -name '*.log.*' -o -name '*.log-*' \) -mtime +14 -delete 2>/dev/null || true
 
-# RTAB-Map database rotation and bounded archive retention also run from
-# ros-start.sh, the path systemd uses. Keep this wrapper so direct `up.sh`
-# launches get exactly the same policy.
-scripts/rtabmap-db-maintenance.py "$@"
-
 # A launch takes a few seconds to appear in pgrep. Serialize this whole startup window so
 # two near-simultaneous invocations cannot both pass the "no stack" check and bind the
 # same ROS/rosbridge resources.
@@ -35,18 +30,6 @@ if ! flock -n 9; then
   exit 0
 fi
 
-# A listening TCP port alone is not enough: a stale or unrelated process can bind it,
-# leaving the ROS driver to discover much later that no LeRobot host is available.
-# More importantly, never adopt a manually launched host just because a broad pgrep
-# happens to find one: it may belong to another robot sharing this workstation.
-host_port_listening() {
-  ss -tln | grep -q ':5555' && ss -tln | grep -q ':5557'
-}
-
-motion_port_listening() {
-  ss -tln | grep -q ':5555'
-}
-
 recorded_host_up() {
   local host_pid host_command
   [ -r "$RUNTIME_DIR/host.pid" ] || return 1
@@ -55,13 +38,13 @@ recorded_host_up() {
   [ -r "/proc/$host_pid/cmdline" ] || return 1
   host_command=$(tr '\0' ' ' < "/proc/$host_pid/cmdline")
   [[ $host_command == *"robot-host.sh"* || $host_command == *"torque-host.py"* || $host_command == *"lerobot.robots.lekiwi.lekiwi_host"* ]] \
-    && host_port_listening
+    && lekiwi_safety_ports_listening
 }
 
 service_host_up() {
   command -v systemctl >/dev/null 2>&1 \
     && systemctl is-active --quiet lekiwi-host.service \
-    && host_port_listening
+    && lekiwi_safety_ports_listening
 }
 
 host_up() {
@@ -69,19 +52,6 @@ host_up() {
 }
 
 WRIST="${LEKIWI_WRIST:-$(first_match '/dev/v4l/by-id/*JYU2C*-video-index0')}"
-
-require_camera_calibration() {
-  local calibration="${LEKIWI_CAMERA_INFO:-$HOME/.ros/camera_info/lekiwi_front.yaml}"
-  if ! camera_calibration_valid; then
-    echo "camera calibration is missing or invalid: $calibration" >&2
-    echo "Launching the calibration program now." >&2
-    scripts/calibrate-camera.sh "$calibration"
-  fi
-  if ! camera_calibration_valid; then
-    echo "camera calibration was not saved or is invalid: $calibration" >&2
-    exit 1
-  fi
-}
 
 require_free_cameras() {
   local front wrist
@@ -140,7 +110,7 @@ stop_stack_started_here() {
 # recorded process group or to the repository-managed systemd service.
 if host_up; then
   echo "host: already running"
-elif motion_port_listening; then
+elif lekiwi_motion_port_listening; then
   echo "host on TCP 5555 lacks the required torque-safety endpoint on TCP 5557" >&2
   echo "restart it from this repository (or restart lekiwi-host.service) before launching ROS." >&2
   exit 1

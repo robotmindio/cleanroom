@@ -32,6 +32,7 @@ from lekiwi_rmf.arm_trajectory import (
     stamp_nanoseconds,
     trajectory_rows,
 )
+from lekiwi_rmf.sim_topics import ARM_TRAJECTORY_HEARTBEAT_TOPIC, ARM_TRAJECTORY_TOPIC
 
 
 def permission_is_fresh(
@@ -70,13 +71,13 @@ class SimArmController(Node):
         self._reservation = threading.Lock()
         self._goal_reserved = False
         self._trajectory_publisher = self.create_publisher(
-            JointTrajectory, "/sim/arm/joint_trajectory", 10
+            JointTrajectory, ARM_TRAJECTORY_TOPIC, 10
         )
         # The native Gazebo watchdog owns the final actuator topics. It only
         # permits an autonomous native trajectory to continue while this
         # action facade is alive and actively supervising it.
         self._trajectory_heartbeat = self.create_publisher(
-            Bool, "/sim/arm/trajectory_heartbeat", 10
+            Bool, ARM_TRAJECTORY_HEARTBEAT_TOPIC, 10
         )
         self.create_subscription(JointState, "/joint_states", self._joint_state, 20)
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)

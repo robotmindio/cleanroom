@@ -351,22 +351,6 @@
             </geometry>
         </visual>
     </link>
-    <link name="robotskin_lidar_mount">
-        <visual name="robotskin_lidar_mount_visual">
-            <origin xyz="0 0 0" rpy="0 0 0" />
-            <geometry>
-                <mesh filename="package://lekiwi_rmf/urdf/meshes/robotskin_lidar_mount.stl" scale="0.001 0.001 0.001" />
-            </geometry>
-        </visual>
-    </link>
-    <link name="ld06_body">
-        <visual name="ld06_body_visual">
-            <origin xyz="0 0 0" rpy="0 0 0" />
-            <geometry>
-                <mesh filename="package://lekiwi_rmf/urdf/meshes/ld06_body.stl" scale="0.001 0.001 0.001" />
-            </geometry>
-        </visual>
-    </link>
     <link name="astra_pro_compact_mount">
         <visual name="astra_pro_compact_mount_visual">
             <origin xyz="0 0 0" rpy="0 0 0" />
@@ -507,16 +491,6 @@
         <origin xyz="-0.1 -0.02 0.0" rpy="3.141592653589793 -0.0 0.0" />
         <parent link="base_plate_layer1-v5" />
         <child link="94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-1" />
-    </joint>
-    <joint name="robotskin_lidar_mount_joint" type="fixed">
-        <origin xyz="0.055 0.08 0" rpy="0 0 0" />
-        <parent link="base_plate_layer1-v5" />
-        <child link="robotskin_lidar_mount" />
-    </joint>
-    <joint name="ld06_body_mount" type="fixed">
-        <origin xyz="0.02 -0.005 0.012" rpy="0 0 0" />
-        <parent link="robotskin_lidar_mount" />
-        <child link="ld06_body" />
     </joint>
     <joint name="astra_pro_compact_mount_joint" type="fixed">
         <origin xyz="0 0.08 0" rpy="0 0 0" />
