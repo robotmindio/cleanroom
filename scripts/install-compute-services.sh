@@ -6,7 +6,7 @@
 #
 # Usage: scripts/install-compute-services.sh [--remote DEVICE_ADDR]
 #        [--service-user USER] [--workspace PATH] [--curve-dir PATH]
-#   no --remote : the device side runs on this machine too; the stack is
+#   no --remote and no LEKIWI_ROBOT_HOST in .env: the device side runs here too; the stack is
 #                 ordered after lekiwi-host.service and starts once its ZMQ
 #                 port answers (camera_source:=local).
 #   --remote    : motors and cameras live on DEVICE_ADDR instead; compressed
@@ -19,12 +19,15 @@ set -Eeuo pipefail
 
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 UNIT_DIR=/etc/systemd/system
+# shellcheck disable=SC1091 # PROJECT_ROOT is resolved above, not a fixed source path.
+source "$PROJECT_ROOT/scripts/runtime-common.sh"
+load_lekiwi_env "$PROJECT_ROOT/.env"
 
 log() { printf '\n==> %s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 trap 'printf "error: installer failed at line %s\n" "$LINENO" >&2' ERR
 
-REMOTE=""
+REMOTE=${LEKIWI_ROBOT_HOST:-}
 SERVICE_USER_ARG=""
 WORKSPACE_ARG=""
 CURVE_DIR_ARG=""

@@ -11,19 +11,19 @@ log() { printf '\n==> %s\n' "$*"; }
 
 original_args=("$@")
 project_root=$(cd -- "$(dirname -- "$0")/.." && pwd)
+PROJECT_ROOT=$project_root
+# shellcheck source=/dev/null
+source "$PROJECT_ROOT/scripts/lib/runtime-common.sh"
+load_lekiwi_env "$PROJECT_ROOT/.env"
 device=${LEKIWI_ROBOT_HOST:-}
-if [[ $# -gt 0 && $1 != --* ]]; then
+if [[ ${1:-} != --* && -n ${1:-} ]]; then
   device=$1
   shift
-elif [[ -z $device && -r $project_root/.env ]]; then
-  mapfile -t configured_hosts < <(sed -n 's/^LEKIWI_ROBOT_HOST=//p' "$project_root/.env")
-  [[ ${#configured_hosts[@]} -eq 1 ]] ||
-    die ".env must contain exactly one LEKIWI_ROBOT_HOST"
-  device=${configured_hosts[0]}
 fi
 [[ -n $device ]] || die "set LEKIWI_ROBOT_HOST in $project_root/.env or pass [USER@]DEVICE"
 [[ $device =~ ^([a-z_][a-z0-9_-]*@)?[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || \
   die "device must be a hostname or address, optionally prefixed by USER@"
+device_address=${device#*@}
 
 remote_repo=""
 workspace=${LEKIWI_WS:-$HOME/lekiwi_ws}
@@ -37,10 +37,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-cd "$project_root"
-PROJECT_ROOT=$project_root
-# shellcheck source=/dev/null
-source "$PROJECT_ROOT/scripts/lib/runtime-common.sh"
 # shellcheck disable=SC1091 # PROJECT_ROOT is resolved above, not a fixed source path.
 source "$PROJECT_ROOT/scripts/lib/service-install-revision.sh"
 logs=${LEKIWI_LOGS:-$HOME/.ros/lekiwi}
@@ -135,11 +131,14 @@ for unit in lekiwi-astra.service lekiwi-cameras.service lekiwi-lidar.service; do
   remote_unit_exists "$unit" || \
     die "$unit is not installed; rerun scripts/install-device-services.sh on $device"
 done
-if ! grep -Fq 'laser_source:=ld06 lidar_source:=remote' /etc/default/lekiwi-stack; then
+if ! grep -Fq "remote_ip:=$device_address" /etc/default/lekiwi-stack \
+  || ! grep -Fq 'laser_source:=ld06 lidar_source:=remote' /etc/default/lekiwi-stack; then
   refresh_compute_service
 fi
-grep -Fq 'laser_source:=ld06 lidar_source:=remote' /etc/default/lekiwi-stack || \
+if ! grep -Fq "remote_ip:=$device_address" /etc/default/lekiwi-stack \
+  || ! grep -Fq 'laser_source:=ld06 lidar_source:=remote' /etc/default/lekiwi-stack; then
   die "compute service configuration did not refresh"
+fi
 
 compute_sudoers=$(sudo -n -l) || die "compute sudoers grant is missing; rerun scripts/install-compute-services.sh"
 device_sudoers=$("${ssh_command[@]}" sudo -n -l) || \

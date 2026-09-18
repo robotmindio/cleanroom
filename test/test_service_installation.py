@@ -12,7 +12,9 @@ ROOT = pathlib.Path(__file__).parents[1]
 
 def test_runtime_helpers_share_device_and_calibration_checks(tmp_path):
     calibration = tmp_path / "camera.yaml"
+    environment = tmp_path / ".env"
     calibration.write_text("image_width: 640\ncamera_matrix:\n  rows: 3\n  cols: 3\n  data: [1, 0, 0, 0, 1, 0, 0, 0, 1]\n")
+    environment.write_text("LEKIWI_ROBOT_HOST=robot-1\n")
     script = r'''
 set -Eeuo pipefail
 source "$1/scripts/lib/runtime-common.sh"
@@ -26,9 +28,18 @@ lekiwi_safety_ports_listening
 FAKE_LISTENERS='LISTEN 0 1 127.0.0.1:5555'
 lekiwi_motion_port_listening
 ! lekiwi_safety_ports_listening
+unset LEKIWI_ROBOT_HOST
+load_lekiwi_env "$4"
+[[ $LEKIWI_ROBOT_HOST == robot-1 ]]
+LEKIWI_ROBOT_HOST=explicit-host
+load_lekiwi_env "$4"
+[[ $LEKIWI_ROBOT_HOST == explicit-host ]]
+printf 'LEKIWI_ROBOT_HOST=bad host\n' > "$4"
+unset LEKIWI_ROBOT_HOST
+! load_lekiwi_env "$4" 2>/dev/null
 '''
     subprocess.run(
-        ["bash", "-c", script, "runtime-test", str(ROOT), str(ROOT / "README.md"), str(calibration)],
+        ["bash", "-c", script, "runtime-test", str(ROOT), str(ROOT / "README.md"), str(calibration), str(environment)],
         check=True,
     )
 
@@ -282,7 +293,8 @@ def test_deploy_order_fails_closed_around_the_device_restart():
     assert "cannot fetch origin within 30 seconds" in deploy
     assert "deploy-inhibit-auto-arm" in deploy
     assert "LEKIWI_ROBOT_HOST" in deploy
-    assert "configured_hosts" in deploy
+    assert "load_lekiwi_env" in deploy
+    assert 'device_address=${device#*@}' in deploy
     assert "Refreshing stale compute service configuration" in deploy
     assert "reinstall-compute.sh" in deploy
     assert 'touch "$logs/deploy-inhibit-auto-arm"' in deploy

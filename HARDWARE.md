@@ -72,7 +72,9 @@ It verifies the architecture and Python version up front, installs the system
 prerequisites, removes `brltty` if present (it claims CH34x adapters and steals
 the motor bus), adds you to `dialout` and `video`, builds the venv, installs
 `lerobot[lekiwi,hardware]==0.6.1`, and clones the `v0.6.1` examples. It prints the
-Pi's IP address at the end — that is the `remote_ip` the workstation needs.
+Pi's IP address at the end. Save that address as `LEKIWI_ROBOT_HOST` in the
+workstation checkout's `.env`; startup and deployment use it as `remote_ip`
+unless an explicit host is passed.
 
 Group membership only takes effect after a fresh login, so log out and back in
 before running the motor commands below.
