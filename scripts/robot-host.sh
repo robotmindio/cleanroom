@@ -6,7 +6,7 @@ set -Eeuo pipefail
 
 cd "$(dirname "$0")/.."
 # shellcheck source=/dev/null
-source scripts/runtime-common.sh
+source scripts/lib/runtime-common.sh
 export PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}"
 
 # Systemd supplies LEKIWI_LEROBOT_VENV explicitly.  Interactive use retains

@@ -12,7 +12,7 @@ set -Eeuo pipefail
 
 cd "$(dirname "$0")/.."
 # shellcheck source=/dev/null
-source scripts/runtime-common.sh
+source scripts/lib/runtime-common.sh
 
 # The Pi runs ros-base only (scripts/setup-pi.bash); a machine with a
 # workspace gets the same DDS settings through setup.bash. Either way the

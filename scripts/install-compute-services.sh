@@ -64,9 +64,9 @@ as_root() { # as_root <command...>
 }
 
 # shellcheck disable=SC1091 # PROJECT_ROOT is resolved above, not a fixed source path.
-source "$PROJECT_ROOT/scripts/service-install-common.sh"
+source "$PROJECT_ROOT/scripts/lib/service-install-common.sh"
 # shellcheck disable=SC1091 # PROJECT_ROOT is resolved above, not a fixed source path.
-source "$PROJECT_ROOT/scripts/service-install-revision.sh"
+source "$PROJECT_ROOT/scripts/lib/service-install-revision.sh"
 resolve_service_user "$SERVICE_USER_ARG"
 resolve_service_paths "$WORKSPACE_ARG" "" true false
 

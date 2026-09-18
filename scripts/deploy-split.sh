@@ -40,9 +40,9 @@ done
 cd "$project_root"
 PROJECT_ROOT=$project_root
 # shellcheck source=/dev/null
-source "$PROJECT_ROOT/scripts/runtime-common.sh"
+source "$PROJECT_ROOT/scripts/lib/runtime-common.sh"
 # shellcheck disable=SC1091 # PROJECT_ROOT is resolved above, not a fixed source path.
-source "$PROJECT_ROOT/scripts/service-install-revision.sh"
+source "$PROJECT_ROOT/scripts/lib/service-install-revision.sh"
 logs=${LEKIWI_LOGS:-$HOME/.ros/lekiwi}
 mkdir -p "$logs"
 if [[ ${LEKIWI_DEPLOY_LOCKED:-} != 1 ]]; then

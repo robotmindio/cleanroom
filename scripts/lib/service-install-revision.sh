@@ -7,8 +7,9 @@ service_fingerprint() {
   case $role in
     compute)
       sources=(systemd/lekiwi-stack.service systemd/lekiwi-ros-logrotate.conf \
-        systemd/lekiwi-ros-logrotate.service systemd/lekiwi-ros-logrotate.timer scripts/service-install-common.sh \
-        scripts/runtime-common.sh scripts/install-deploy-sudoers.sh)
+        systemd/lekiwi-ros-logrotate.service systemd/lekiwi-ros-logrotate.timer \
+        scripts/lib/service-install-common.sh scripts/lib/runtime-common.sh \
+        scripts/install-deploy-sudoers.sh)
       ;;
     device)
       sources=(systemd/lekiwi-host.service systemd/lekiwi-astra.service \
@@ -16,7 +17,7 @@ service_fingerprint() {
         systemd/lekiwi-ros-logrotate.conf systemd/lekiwi-ros-logrotate.service \
         systemd/lekiwi-ros-logrotate.timer \
         scripts/ros-astra.sh scripts/ros-cameras.sh scripts/ros-lidar.sh \
-        scripts/service-install-common.sh scripts/runtime-common.sh \
+        scripts/lib/service-install-common.sh scripts/lib/runtime-common.sh \
         scripts/install-deploy-sudoers.sh)
       ;;
     *) die "service fingerprint role must be compute or device" ;;

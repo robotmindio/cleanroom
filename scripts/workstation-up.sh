@@ -10,7 +10,7 @@ set -Eeuo pipefail
 
 cd "$(dirname "$0")/.."
 # shellcheck source=/dev/null
-source scripts/runtime-common.sh
+source scripts/lib/runtime-common.sh
 PI_IP=$1
 shift
 LOGS="${LEKIWI_LOGS:-$HOME/.ros/lekiwi}"
