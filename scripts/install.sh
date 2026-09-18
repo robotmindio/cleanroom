@@ -110,6 +110,7 @@ apt_get install -y \
   "ros-$ROS_DISTRO-topic-tools" \
   "ros-$ROS_DISTRO-ros-base" \
   "ros-$ROS_DISTRO-rosbridge-server" \
+  "ros-$ROS_DISTRO-foxglove-bridge" \
   "ros-$ROS_DISTRO-ros-gz" \
   "ros-$ROS_DISTRO-image-transport" \
   "ros-$ROS_DISTRO-image-transport-plugins" \
