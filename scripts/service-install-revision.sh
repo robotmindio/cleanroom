@@ -6,12 +6,15 @@ service_fingerprint() {
   local sources=()
   case $role in
     compute)
-      sources=(systemd/lekiwi-stack.service scripts/service-install-common.sh \
+      sources=(systemd/lekiwi-stack.service systemd/lekiwi-ros-logrotate.conf \
+        systemd/lekiwi-ros-logrotate.service systemd/lekiwi-ros-logrotate.timer scripts/service-install-common.sh \
         scripts/runtime-common.sh scripts/install-deploy-sudoers.sh)
       ;;
     device)
       sources=(systemd/lekiwi-host.service systemd/lekiwi-astra.service \
         systemd/lekiwi-cameras.service systemd/lekiwi-lidar.service \
+        systemd/lekiwi-ros-logrotate.conf systemd/lekiwi-ros-logrotate.service \
+        systemd/lekiwi-ros-logrotate.timer \
         scripts/ros-astra.sh scripts/ros-cameras.sh scripts/ros-lidar.sh \
         scripts/service-install-common.sh scripts/runtime-common.sh \
         scripts/install-deploy-sudoers.sh)

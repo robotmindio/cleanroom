@@ -117,6 +117,18 @@ def test_unit_validation_ignores_unrelated_systemd_units():
     assert 'systemd-analyze verify --recursive-errors=no "$UNIT_DIR/$unit"' in helper
 
 
+def test_stack_limits_journal_output_from_a_log_flood():
+    for name in (
+        "lekiwi-stack.service",
+        "lekiwi-astra.service",
+        "lekiwi-cameras.service",
+        "lekiwi-lidar.service",
+    ):
+        service = (ROOT / "systemd" / name).read_text(encoding="utf-8")
+        assert "LogRateLimitIntervalSec=30s" in service
+        assert "LogRateLimitBurst=1000" in service
+
+
 def test_full_installer_includes_qualification_tooling_dependencies():
     """A fresh deployment must not silently omit required qualification checks."""
     installer = (ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
@@ -302,3 +314,17 @@ def test_service_fingerprint_covers_installed_service_behavior():
         "scripts/install-deploy-sudoers.sh",
     ):
         assert source in revision
+
+
+def test_ros_log_rotation_is_installed_for_device_and_compute_roles():
+    rotation = (ROOT / "systemd" / "lekiwi-ros-logrotate.conf").read_text(encoding="utf-8")
+    timer = (ROOT / "systemd" / "lekiwi-ros-logrotate.timer").read_text(encoding="utf-8")
+    device = (ROOT / "scripts" / "install-device-services.sh").read_text(encoding="utf-8")
+    compute = (ROOT / "scripts" / "install-compute-services.sh").read_text(encoding="utf-8")
+
+    assert "maxsize 100M" in rotation
+    assert "copytruncate" in rotation
+    assert "OnUnitActiveSec=5min" in timer
+    for installer in (device, compute):
+        assert "install_log_rotation" in installer
+        assert "enable --now lekiwi-ros-logrotate.timer" in installer

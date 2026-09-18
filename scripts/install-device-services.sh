@@ -100,6 +100,13 @@ export LEKIWI_CURVE_AUTHORIZED_CLIENTS LEKIWI_CURVE_HEALTH_CLIENT_SECRET
 
 install_unit() { render_systemd_unit "$PROJECT_ROOT/systemd/$1" "$UNIT_DIR/$1"; }
 
+install_log_rotation() {
+  as_root install -d -m 0755 /etc/lekiwi
+  render_systemd_unit "$PROJECT_ROOT/systemd/lekiwi-ros-logrotate.conf" /etc/lekiwi/ros-logrotate.conf
+  install_unit lekiwi-ros-logrotate.service
+  install_unit lekiwi-ros-logrotate.timer
+}
+
 if ! (
   set +u
   # shellcheck source=/dev/null
@@ -171,6 +178,8 @@ fi
 
 log "Installing lekiwi-lidar.service"
 install_unit lekiwi-lidar.service
+log "Installing ROS log rotation"
+install_log_rotation
 if [[ $camera_ros_available == true && -z "$(first_match '/dev/v4l/by-id/*WEBCAM*-video-index0')" ]]; then
   log "no front camera found -- lekiwi-cameras will wait without affecting Astra"
   log "(set LEKIWI_FRONT for other hardware)."
@@ -187,6 +196,7 @@ units=(lekiwi-host.service lekiwi-lidar.service)
 [[ $camera_ros_available == true ]] && units+=(lekiwi-cameras.service)
 log "Validating rendered systemd units"
 verify_systemd_units "${units[@]}"
+verify_systemd_units lekiwi-ros-logrotate.service lekiwi-ros-logrotate.timer
 
 log "Reloading systemd and enabling services"
 as_root systemctl daemon-reload
@@ -200,6 +210,7 @@ else
   as_root systemctl enable --now lekiwi-host.service
 fi
 as_root systemctl enable --now lekiwi-lidar.service
+as_root systemctl enable --now lekiwi-ros-logrotate.timer
 
 log "Granting $LEKIWI_SERVICE_USER non-interactive deployment control"
 as_root "$PROJECT_ROOT/scripts/install-deploy-sudoers.sh" device --user "$LEKIWI_SERVICE_USER"

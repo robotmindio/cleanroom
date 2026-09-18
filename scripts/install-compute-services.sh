@@ -72,6 +72,13 @@ resolve_service_paths "$WORKSPACE_ARG" "" true false
 
 install_unit() { render_systemd_unit "$PROJECT_ROOT/systemd/$1" "$UNIT_DIR/$1"; }
 
+install_log_rotation() {
+  as_root install -d -m 0755 /etc/lekiwi
+  render_systemd_unit "$PROJECT_ROOT/systemd/lekiwi-ros-logrotate.conf" /etc/lekiwi/ros-logrotate.conf
+  install_unit lekiwi-ros-logrotate.service
+  install_unit lekiwi-ros-logrotate.timer
+}
+
 host_unit="$UNIT_DIR/lekiwi-host.service"
 cameras_unit="$UNIT_DIR/lekiwi-cameras.service"
 lidar_unit="$UNIT_DIR/lekiwi-lidar.service"
@@ -141,8 +148,11 @@ else
   log "Installing lekiwi-stack.service (local cameras)"
 fi
 install_unit lekiwi-stack.service
+log "Installing ROS log rotation"
+install_log_rotation
 log "Validating rendered systemd unit"
 verify_systemd_units lekiwi-stack.service
+verify_systemd_units lekiwi-ros-logrotate.service lekiwi-ros-logrotate.timer
 
 stack_env=/etc/default/lekiwi-stack
 printf '# Written by scripts/install-compute-services.sh.\nLEKIWI_STACK_ARGS=%s\n' \
@@ -151,6 +161,7 @@ printf '# Written by scripts/install-compute-services.sh.\nLEKIWI_STACK_ARGS=%s\
 log "Reloading systemd and enabling lekiwi-stack.service"
 as_root systemctl daemon-reload
 as_root systemctl enable --now lekiwi-stack.service
+as_root systemctl enable --now lekiwi-ros-logrotate.timer
 
 log "Granting $LEKIWI_SERVICE_USER non-interactive deployment control"
 as_root "$PROJECT_ROOT/scripts/install-deploy-sudoers.sh" compute --user "$LEKIWI_SERVICE_USER"

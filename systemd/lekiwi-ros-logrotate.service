@@ -1,0 +1,19 @@
+[Unit]
+Description=Rotate LeKiwi ROS 2 logs
+
+[Service]
+Type=oneshot
+User=@SERVICE_USER@
+Environment=HOME=@SERVICE_HOME@
+WorkingDirectory=@PROJECT_ROOT@
+ExecStart=/usr/sbin/logrotate --state @SERVICE_HOME@/.ros/lekiwi/ros-logrotate.status /etc/lekiwi/ros-logrotate.conf
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectControlGroups=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+LockPersonality=true
+RestrictSUIDSGID=true
+UMask=0077
