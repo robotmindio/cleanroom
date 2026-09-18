@@ -40,6 +40,8 @@ def test_foxglove_bridge_and_desktop_are_installed_with_the_stack():
     desktop_launcher = (ROOT / "scripts" / "foxglove.sh").read_text()
 
     assert 'package="foxglove_bridge"' in launcher
+    assert 'DeclareLaunchArgument("start_foxglove", default_value="true")' in launcher
+    assert 'condition=IfCondition(start_foxglove)' in launcher
     assert '"capabilities": ["connectionGraph", "assets"]' in launcher
     assert "clientPublish" not in launcher
     assert "<exec_depend>foxglove_bridge</exec_depend>" in package

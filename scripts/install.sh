@@ -35,8 +35,14 @@ source /etc/os-release
 ROS_DISTRO=jazzy
 
 case $(uname -m) in
-  x86_64) ZENOH_ARCH=x86_64-unknown-linux-gnu ;;
-  aarch64|arm64) ZENOH_ARCH=aarch64-unknown-linux-gnu ;;
+  x86_64)
+    ZENOH_ARCH=x86_64-unknown-linux-gnu
+    FOXGLOVE_ARCH=amd64
+    ;;
+  aarch64|arm64)
+    ZENOH_ARCH=aarch64-unknown-linux-gnu
+    FOXGLOVE_ARCH=arm64
+    ;;
   *) die "unsupported CPU architecture: $(uname -m)" ;;
 esac
 
@@ -125,6 +131,15 @@ apt_get install -y \
   python3-zmq \
   psmisc \
   v4l-utils
+
+log "Installing Foxglove Desktop"
+foxglove_tmp_dir=$(mktemp -d)
+foxglove_deb="$foxglove_tmp_dir/foxglove-studio.deb"
+curl -fL -o "$foxglove_deb" \
+  "https://get.foxglove.dev/desktop/latest/foxglove-studio-latest-linux-${FOXGLOVE_ARCH}.deb"
+apt_get install -y "$foxglove_deb"
+rm -f -- "$foxglove_deb"
+rmdir "$foxglove_tmp_dir"
 
 # Qualification invokes these through the system interpreter and PATH.  Check
 # that exact contract now so an incomplete deployment image fails during
