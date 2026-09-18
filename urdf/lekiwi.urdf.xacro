@@ -6,7 +6,14 @@
        Every consumer expands this Xacro (robot_state_publisher, MoveIt, and RViz),
        so its fixed placement and measured wrist/lidar corrections stay aligned. -->
   <xacro:property name="astra_mount_xyz" value="0 0 0.0155"/>
-  <xacro:property name="astra_mount_rpy" value="-0.13962634015954636 0 0"/>
+  <!-- The saddle faces its local +Y. Convert the camera's REP-103 +X to +Y,
+       then apply the saddle's downward pitch (Rx(-pitch) * Rz(pi/2)). -->
+  <xacro:property name="astra_mount_rpy" value="0 0.13962634015954636 1.5707963267948966"/>
+  <!-- Nominal front-face centre of the body envelope; measure the optical
+       centre on the installed camera and retain that correction here. -->
+  <xacro:property name="astra_optical_xyz" value="0.020 0 0.024"/>
+  <xacro:property name="astra_body_xyz" value="0 0 0.024"/>
+  <xacro:property name="astra_body_size" value="0.040 0.165 0.048"/>
   <xacro:property name="wrist_camera_xyz" value="0 0 0"/>
   <xacro:property name="wrist_camera_rpy" value="0 0 0"/>
   <xacro:property name="lidar_offset_xyz" value="0 0 0"/>
@@ -18,31 +25,8 @@
   <!-- The physical wrist cable and servo have a bounded safe travel envelope.
        Declaring it continuous makes MoveIt discard the configured bounds. -->
   <xacro:property name="roll_joint" value="revolute"/>
-  <!-- Complete model vendored from robotmindio/LeKiwi at 0595140; see urdf/README.md. -->
+  <!-- Complete model vendored from robotmindio/LeKiwi; see model-source.json. -->
   <xacro:include filename="lekiwi_cad.urdf"/>
-
-  <!-- The RobotSkin mount and LD06 body are repository-owned integration
-       geometry, not part of the upstream CAD snapshot. -->
-  <link name="robotskin_lidar_mount">
-    <visual name="robotskin_lidar_mount_visual">
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <geometry><mesh filename="package://lekiwi_rmf/urdf/meshes/robotskin_lidar_mount.stl" scale="0.001 0.001 0.001"/></geometry>
-    </visual>
-  </link>
-  <link name="ld06_body">
-    <visual name="ld06_body_visual">
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <geometry><mesh filename="package://lekiwi_rmf/urdf/meshes/ld06_body.stl" scale="0.001 0.001 0.001"/></geometry>
-    </visual>
-  </link>
-  <joint name="robotskin_lidar_mount_joint" type="fixed">
-    <origin xyz="0.055 0.08 0" rpy="0 0 0"/>
-    <parent link="base_plate_layer1-v5"/><child link="robotskin_lidar_mount"/>
-  </joint>
-  <joint name="ld06_body_mount" type="fixed">
-    <origin xyz="0.02 -0.005 0.012" rpy="0 0 0"/>
-    <parent link="robotskin_lidar_mount"/><child link="ld06_body"/>
-  </joint>
 
   <!-- CAD's root is the lower base plate. Its +Y is the physical forward
        direction, so yaw -90 degrees aligns it with REP-103 +X forward. -->
@@ -64,7 +48,9 @@
   <link name="front_camera_link"/>
   <joint name="front_camera_mount" type="fixed">
     <parent link="Camera-Model-v3"/><child link="front_camera_link"/>
-    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <!-- The CAD camera PCB faces local +Y; make that the ROS camera-link +X
+         while retaining the board's measured roll around the lens axis. -->
+    <origin xyz="0 0 0" rpy="1.57079632679 0 1.57079632679"/>
   </joint>
   <link name="front_camera_optical_frame"/>
   <joint name="front_camera_optical" type="fixed">
@@ -72,13 +58,18 @@
     <origin xyz="0 0 0" rpy="-1.57079632679 0 -1.57079632679"/>
   </joint>
   <!-- Astra Pro is distinct from the existing front and wrist cameras. Its
-       compact CAD mount owns placement; this 165 x 48 x 40 mm body is visual-only. -->
+       compact CAD mount owns placement; the body envelope also participates
+       in planning so the arm cannot pass through the camera. -->
   <link name="astra_camera_link">
     <visual>
-      <origin xyz="-0.020 0 0" rpy="0 0 0"/>
-      <geometry><box size="0.040 0.165 0.048"/></geometry>
+      <origin xyz="${astra_body_xyz}" rpy="0 0 0"/>
+      <geometry><box size="${astra_body_size}"/></geometry>
       <material name="astra_body"><color rgba="0.08 0.18 0.25 1"/></material>
     </visual>
+    <collision>
+      <origin xyz="${astra_body_xyz}" rpy="0 0 0"/>
+      <geometry><box size="${astra_body_size}"/></geometry>
+    </collision>
   </link>
   <joint name="astra_camera_mount" type="fixed">
     <parent link="astra_pro_compact_mount"/><child link="astra_camera_link"/>
@@ -87,7 +78,7 @@
   <link name="astra_camera_optical_frame"/>
   <joint name="astra_camera_optical" type="fixed">
     <parent link="astra_camera_link"/><child link="astra_camera_optical_frame"/>
-    <origin xyz="0 0 0" rpy="-1.57079632679 0 -1.57079632679"/>
+    <origin xyz="${astra_optical_xyz}" rpy="-1.57079632679 0 -1.57079632679"/>
   </joint>
   <link name="wrist_camera_link"/>
   <joint name="wrist_camera_mount" type="fixed">
@@ -101,9 +92,7 @@
   </joint>
 
   <!-- Tool frame before the independently planned gripper joint. -->
-  <link name="tool0">
-    <collision><geometry><sphere radius="0.025"/></geometry></collision>
-  </link>
+  <link name="tool0"/>
   <joint name="tool0_mount" type="fixed">
     <parent link="so101_gripper_frame_link"/><child link="tool0"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
@@ -141,12 +130,21 @@
   <xacro:collision_capsule_proxy name="shoulder_collision_proxy" parent="so101_shoulder_link" xyz="-0.0192 0.0012 -0.0091" rpy="0 0 0" radius="0.0458" cylinder_length="0.0190"/>
   <xacro:collision_capsule_proxy name="upper_arm_collision_proxy" parent="so101_upper_arm_link" xyz="-0.0591 -0.0131 0.0202" rpy="0 1.5708 0" radius="0.0460" cylinder_length="0.0502"/>
   <xacro:collision_capsule_proxy name="forearm_collision_proxy" parent="so101_lower_arm_link" xyz="-0.0666 0.0035 0.0202" rpy="0 1.5708 0" radius="0.0411" cylinder_length="0.0749"/>
-  <xacro:collision_sphere_proxy name="wrist_collision_proxy" parent="so101_wrist_link" xyz="-0.0022 -0.0269 0.0222" radius="0.0569"/>
+  <!-- Native wrist bounds plus 4 mm on each face. The old enclosing sphere
+       extended into the moving jaw even in the reference pose. -->
+  <link name="wrist_collision_proxy">
+    <collision><geometry><box size="0.04335 0.08584 0.07031"/></geometry></collision>
+  </link>
+  <joint name="wrist_collision_proxy_mount" type="fixed">
+    <parent link="so101_wrist_link"/><child link="wrist_collision_proxy"/>
+    <origin xyz="-0.00233 -0.026915 0.02215"/>
+  </joint>
   <xacro:collision_capsule_proxy name="roll_collision_proxy" parent="so101_gripper_link" xyz="-0.0024 -0.0020 -0.0517" rpy="0 0 0" radius="0.0459" cylinder_length="0.0136"/>
   <xacro:collision_capsule_proxy name="gripper_collision_proxy" parent="so101_moving_jaw_link" xyz="-0.0012 -0.0360 0.0189" rpy="1.5708 0 0" radius="0.0305" cylinder_length="0.0310"/>
 
-  <!-- LD06 scan plane: the RobotSkin base puts it 75 mm forward, 75 mm right,
-       and 31.5 mm above base_link. The nominal frame stays on the CAD body;
+  <!-- LD06 scan plane: the rear Pi-hole-mounted RobotSkin base puts it
+       135 mm behind the origin, 5 mm left,
+       and 88.5 mm above base_link. The nominal frame stays on the CAD body;
        the child is the small measured correction used by the scan. -->
   <link name="laser_nominal"/>
   <joint name="laser_nominal_mount" type="fixed">
@@ -214,8 +212,8 @@
     <gazebo>
       <!-- Gazebo-native fail-safe: public bridge topics are forwarded only
            while fresh. If ros_gz_bridge or either ROS adapter disappears,
-           it actively zeros wheel demand and interrupts the native arm
-           trajectory with a current-position hold. -->
+           it actively zeros wheel demand and holds the arm at its current
+           position. -->
       <plugin filename="liblekiwi_sim_native_failsafe.so" name="lekiwi_rmf::SimNativeFailsafe"/>
       <plugin filename="gz-sim-joint-state-publisher-system" name="gz::sim::systems::JointStatePublisher">
         <topic>/sim/joint_states</topic><update_rate>50</update_rate>
@@ -229,44 +227,47 @@
         <joint_name>arm_wrist_roll</joint_name>
         <joint_name>arm_gripper</joint_name>
       </plugin>
-      <plugin filename="gz-sim-joint-trajectory-controller-system" name="gz::sim::systems::JointTrajectoryController">
-        <topic>/sim/arm/native_joint_trajectory</topic>
-        <joint_name>arm_shoulder_pan</joint_name><initial_position>0</initial_position>
-        <position_p_gain>18</position_p_gain><position_i_gain>0.2</position_i_gain><position_d_gain>0.8</position_d_gain>
-        <position_cmd_min>-4</position_cmd_min><position_cmd_max>4</position_cmd_max>
-        <joint_name>arm_shoulder_lift</joint_name><initial_position>0</initial_position>
-        <position_p_gain>70</position_p_gain><position_i_gain>0.3</position_i_gain><position_d_gain>2.0</position_d_gain>
-        <position_cmd_min>-4</position_cmd_min><position_cmd_max>4</position_cmd_max>
-        <joint_name>arm_elbow_flex</joint_name><initial_position>0</initial_position>
-        <position_p_gain>70</position_p_gain><position_i_gain>0.3</position_i_gain><position_d_gain>2.0</position_d_gain>
-        <position_cmd_min>-4</position_cmd_min><position_cmd_max>4</position_cmd_max>
-        <joint_name>arm_wrist_flex</joint_name><initial_position>0</initial_position>
-        <position_p_gain>12</position_p_gain><position_i_gain>0.1</position_i_gain><position_d_gain>0.4</position_d_gain>
-        <position_cmd_min>-2</position_cmd_min><position_cmd_max>2</position_cmd_max>
-        <joint_name>arm_wrist_roll</joint_name><initial_position>0</initial_position>
-        <position_p_gain>12</position_p_gain><position_i_gain>0.1</position_i_gain><position_d_gain>0.4</position_d_gain>
-        <position_cmd_min>-2</position_cmd_min><position_cmd_max>2</position_cmd_max>
-        <joint_name>arm_gripper</joint_name><initial_position>0</initial_position>
-        <position_p_gain>8</position_p_gain><position_i_gain>0.05</position_i_gain><position_d_gain>0.25</position_d_gain>
-        <position_cmd_min>-1</position_cmd_min><position_cmd_max>1</position_cmd_max>
+      <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
+        <joint_name>arm_shoulder_pan</joint_name><topic>/sim/arm/arm_shoulder_pan/native_cmd_pos</topic><initial_position>0</initial_position>
+        <p_gain>18</p_gain><i_gain>0.2</i_gain><d_gain>0.8</d_gain><cmd_min>-4</cmd_min><cmd_max>4</cmd_max>
+      </plugin>
+      <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
+        <joint_name>arm_shoulder_lift</joint_name><topic>/sim/arm/arm_shoulder_lift/native_cmd_pos</topic><initial_position>0</initial_position>
+        <p_gain>70</p_gain><i_gain>0.3</i_gain><d_gain>2.0</d_gain><cmd_min>-4</cmd_min><cmd_max>4</cmd_max>
+      </plugin>
+      <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
+        <joint_name>arm_elbow_flex</joint_name><topic>/sim/arm/arm_elbow_flex/native_cmd_pos</topic><initial_position>0</initial_position>
+        <p_gain>70</p_gain><i_gain>0.3</i_gain><d_gain>2.0</d_gain><cmd_min>-4</cmd_min><cmd_max>4</cmd_max>
+      </plugin>
+      <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
+        <joint_name>arm_wrist_flex</joint_name><topic>/sim/arm/arm_wrist_flex/native_cmd_pos</topic><initial_position>0</initial_position>
+        <p_gain>12</p_gain><i_gain>0.1</i_gain><d_gain>0.4</d_gain><cmd_min>-2</cmd_min><cmd_max>2</cmd_max>
+      </plugin>
+      <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
+        <joint_name>arm_wrist_roll</joint_name><topic>/sim/arm/arm_wrist_roll/native_cmd_pos</topic><initial_position>0</initial_position>
+        <p_gain>12</p_gain><i_gain>0.1</i_gain><d_gain>0.4</d_gain><cmd_min>-2</cmd_min><cmd_max>2</cmd_max>
+      </plugin>
+      <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
+        <joint_name>arm_gripper</joint_name><topic>/sim/arm/arm_gripper/native_cmd_pos</topic><initial_position>0</initial_position>
+        <p_gain>8</p_gain><i_gain>0.05</i_gain><d_gain>0.25</d_gain><cmd_min>-1</cmd_min><cmd_max>1</cmd_max>
       </plugin>
     </gazebo>
     <gazebo reference="laser">
       <sensor name="lidar" type="gpu_lidar">
-        <topic>/scan</topic><gz_frame_id>laser</gz_frame_id><update_rate>10</update_rate><always_on>true</always_on>
+        <topic>/scan</topic><update_rate>10</update_rate><always_on>true</always_on>
         <lidar><scan><horizontal><samples>360</samples><resolution>1</resolution><min_angle>-3.14159</min_angle><max_angle>3.14159</max_angle></horizontal></scan><range><min>0.08</min><max>12</max><resolution>0.01</resolution></range></lidar>
       </sensor>
     </gazebo>
     <gazebo reference="front_camera_link">
       <sensor name="front_camera" type="camera">
-        <topic>/camera/front</topic><gz_frame_id>front_camera_optical_frame</gz_frame_id><update_rate>20</update_rate><always_on>true</always_on>
+        <topic>/camera/front</topic><update_rate>20</update_rate><always_on>true</always_on>
         <camera><horizontal_fov>1.0472</horizontal_fov><image><width>640</width><height>480</height><format>R8G8B8</format></image><clip><near>0.05</near><far>20</far></clip><noise><type>gaussian</type><mean>0</mean><stddev>0.007</stddev></noise></camera>
       </sensor>
       <!-- The depth stream is deliberately lower-rate and noisier than RGB.
            launch/bringup adds a seeded delay/dropout stage before exposing its
            point cloud to MoveIt's occupancy-map monitor. -->
       <sensor name="front_depth" type="depth_camera">
-        <topic>/camera/depth</topic><gz_frame_id>front_camera_optical_frame</gz_frame_id><update_rate>10</update_rate><always_on>true</always_on>
+        <topic>/camera/depth</topic><update_rate>10</update_rate><always_on>true</always_on>
         <camera><horizontal_fov>1.0472</horizontal_fov><image><width>320</width><height>240</height><format>R_FLOAT32</format></image><clip><near>0.10</near><far>3.0</far></clip><noise><type>gaussian</type><mean>0</mean><stddev>0.012</stddev></noise></camera>
       </sensor>
     </gazebo>

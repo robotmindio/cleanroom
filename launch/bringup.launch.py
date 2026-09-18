@@ -12,7 +12,6 @@ from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackagePrefix, FindPackageShare
 
 from lekiwi_rmf.launch_validation import validate_context
-from lekiwi_rmf.sim_topics import SIM_ACTUATOR_BRIDGE_ARGUMENTS
 
 
 LD06_SERIAL_PORTS = (
@@ -74,10 +73,7 @@ def generate_launch_description():
     auto_arm_on_startup = LaunchConfiguration("auto_arm_on_startup")
     start_rmf = LaunchConfiguration("start_rmf")
     rmf_domain = LaunchConfiguration("rmf_domain")
-    start_foxglove = LaunchConfiguration("start_foxglove")
     start_rosbridge = LaunchConfiguration("start_rosbridge")
-    foxglove_address = LaunchConfiguration("foxglove_address")
-    foxglove_port = LaunchConfiguration("foxglove_port")
     start_moveit = LaunchConfiguration("start_moveit")
     rosbridge_address = LaunchConfiguration("rosbridge_address")
     rosbridge_port = LaunchConfiguration("rosbridge_port")
@@ -300,10 +296,6 @@ def generate_launch_description():
             # Rosbridge is opt-in and loopback-bound by default. It has no built-in
             # authentication; do not expose it beyond a protected proxy/firewall.
             DeclareLaunchArgument("start_rosbridge", default_value="false"),
-            # Foxglove is the normal read-only observability endpoint. It sees the
-            # whole ROS graph but has neither client-publish nor service capability,
-            # so opening the dashboard cannot command this robot.
-            DeclareLaunchArgument("start_foxglove", default_value="true"),
             # MoveIt is optional for mobile navigation and is too expensive to
             # co-run with RTAB-Map on the 4 GB robot computer. Enable it only
             # for an arm task, preferably from the workstation.
@@ -311,8 +303,6 @@ def generate_launch_description():
             DeclareLaunchArgument("rosbridge_address", default_value="127.0.0.1"),
             DeclareLaunchArgument("rosbridge_port", default_value="9090"),
             DeclareLaunchArgument("rosbridge_domain", default_value="0"),
-            DeclareLaunchArgument("foxglove_address", default_value="127.0.0.1"),
-            DeclareLaunchArgument("foxglove_port", default_value="8765"),
             DeclareLaunchArgument("localization", default_value="visual_slam", choices=["amcl", "visual_slam"]),
             # Simulation starts a disposable mapping session. A real service
             # starts localization-only so an unattended boot cannot mutate an
@@ -324,7 +314,7 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument("publish_camera", default_value="true"),
             DeclareLaunchArgument(
-                "auto_arm_on_startup", default_value="true", choices=["true", "false"]
+                "auto_arm_on_startup", default_value="false", choices=["true", "false"]
             ),
             # The Astra Pro is an additional third camera. Existing front and
             # wrist V4L2 cameras continue to publish unchanged.
@@ -477,17 +467,45 @@ def generate_launch_description():
                 executable="parameter_bridge",
                 arguments=[
                     "/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock",
-                    "/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan",
                     "/sim/joint_states@sensor_msgs/msg/JointState[gz.msgs.Model",
-                    *SIM_ACTUATOR_BRIDGE_ARGUMENTS,
-                    # gz publishes the image on <topic> itself and derives the info topic from
-                    # the parent namespace, so <topic>/camera/front gives /camera/camera_info.
+                    "/sim/sim_base_left_wheel/cmd_vel@std_msgs/msg/Float64]gz.msgs.Double",
+                    "/sim/sim_base_back_wheel/cmd_vel@std_msgs/msg/Float64]gz.msgs.Double",
+                    "/sim/sim_base_right_wheel/cmd_vel@std_msgs/msg/Float64]gz.msgs.Double",
+                ],
+                remappings=[("/sim/joint_states", "/joint_states")],
+                condition=IfCondition(sim),
+                output="screen",
+            ),
+            Node(
+                package="ros_gz_bridge", executable="parameter_bridge",
+                name="sim_arm_position_bridge",
+                arguments=[
+                    "/sim/arm/joint_positions@trajectory_msgs/msg/JointTrajectory]gz.msgs.JointTrajectory"
+                ],
+                condition=IfCondition(sim), output="screen",
+            ),
+            Node(
+                package="ros_gz_bridge",
+                executable="parameter_bridge",
+                name="sim_lidar_bridge",
+                arguments=["/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan"],
+                parameters=[{"override_frame_id": "laser"}],
+                condition=IfCondition(sim),
+                output="screen",
+            ),
+            Node(
+                package="ros_gz_bridge",
+                executable="parameter_bridge",
+                name="sim_camera_bridge",
+                # gz derives CameraInfo from the parent namespace. All three
+                # streams originate at the same optical frame.
+                arguments=[
                     "/camera/front@sensor_msgs/msg/Image[gz.msgs.Image",
                     "/camera/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo",
                     "/camera/depth/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked",
                 ],
+                parameters=[{"override_frame_id": "front_camera_optical_frame"}],
                 remappings=[
-                    ("/sim/joint_states", "/joint_states"),
                     ("/camera/front", "/camera/front/image_raw"),
                     ("/camera/camera_info", "/camera/front/camera_info"),
                     # Preserve the acquisition stamp while adding seeded
@@ -787,23 +805,6 @@ def generate_launch_description():
                 target_action=rmf_owner_guard,
                 on_exit=_after_success("RMF ownership", [free_fleet_adapter]),
             )),
-            Node(
-                package="foxglove_bridge",
-                executable="foxglove_bridge",
-                name="foxglove_bridge",
-                parameters=[{
-                    "address": foxglove_address,
-                    "port": ParameterValue(foxglove_port, value_type=int),
-                    "use_sim_time": ParameterValue(sim, value_type=bool),
-                    # Read-only data plus package assets is enough for the live
-                    # robot model and every dashboard panel. Do not expose ROS
-                    # publishes, services, or parameters through a visualizer.
-                    "capabilities": ["connectionGraph", "assets"],
-                    "publish_client_count": True,
-                }],
-                condition=IfCondition(start_foxglove),
-                output="screen",
-            ),
             Node(
                 package="rosbridge_server",
                 executable="rosbridge_websocket",

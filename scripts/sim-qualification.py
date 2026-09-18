@@ -23,8 +23,10 @@ from typing import Mapping, Sequence
 
 ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_CTESTS = (
-    "test_odometry", "test_odom_scale", "test_free_space", "test_camera_relay",
-    "test_arm_trajectory", "test_collision_model", "test_driver_link",
+    "test_odometry", "test_motor_health", "test_odom_scale", "test_free_space",
+    "test_camera_relay", "test_astra_pro_configuration", "test_astra_cloud_filter",
+    "test_remote_astra_service", "test_arm_trajectory", "test_arm_calibration",
+    "test_collision_model", "test_vendor_lekiwi_model", "test_driver_link",
     "test_cmd_vel_mux", "test_teleop", "test_readiness_gate", "test_sim_host_tools",
     "test_rtabmap_db_maintenance", "test_torque_control", "test_lidar_detection",
     "test_safety_supervisor", "test_arm_workspace_monitor", "test_map_bundle",
@@ -34,6 +36,7 @@ EXPECTED_CTESTS = (
     "test_sim_qualification",
     "test_test_cmd_vel_mux_launch.py", "test_test_driver_fake_host_launch.py",
     "test_test_simulation_physics_launch.py", "test_test_sim_native_failsafe_launch.py",
+    "test_test_sim_sensor_frames_launch.py",
     "test_test_safety_supervisor_launch.py", "test_test_arm_workspace_monitor_launch.py",
     "test_test_rmf_owner_guard_launch.py",
     "test_test_moveit_driver_e2e_launch.py",

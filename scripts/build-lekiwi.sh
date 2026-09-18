@@ -34,7 +34,8 @@ colcon --log-base "$workspace/log" build \
   --build-base "$workspace/build" \
   --install-base "$workspace/install" \
   "${parallel_args[@]}" \
-  --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_IGNORE_PREFIX_PATH="$HOME/.local"
+  --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_IGNORE_PREFIX_PATH="$HOME/.local" \
+    -DPython3_EXECUTABLE=/usr/bin/python3
 
 installed_driver=$workspace/install/lekiwi_rmf/lib/lekiwi_rmf/lekiwi_driver
 if [[ ! -x $installed_driver ]] || ! cmp -s lekiwi_rmf/driver.py "$installed_driver"; then

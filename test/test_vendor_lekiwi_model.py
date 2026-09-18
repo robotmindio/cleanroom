@@ -2,8 +2,10 @@
 
 import importlib.util
 from pathlib import Path
+import sys
 import xml.etree.ElementTree as ET
 
+import pytest
 
 ROOT = Path(__file__).parents[1]
 SPEC = importlib.util.spec_from_file_location(
@@ -18,8 +20,12 @@ def test_transform_replaces_existing_limits_without_duplicate_elements(tmp_path)
     source.write_text(
         """<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
   <xacro:property name="mesh_dir" value="meshes"/>
-  <link name="arm"><visual><geometry><mesh filename="${mesh_dir}/so101/arm.stl"/></geometry></visual><collision/></link>
-  <joint name="arm_wrist_roll" type="revolute"><limit lower="0" upper="0"/></joint>
+  <link name="arm"><visual><geometry>
+    <mesh filename="${mesh_dir}/so101/arm.stl"/>
+  </geometry></visual><collision/></link>
+  <joint name="arm_wrist_roll" type="revolute">
+    <limit lower="-2.74385" upper="2.84121"/>
+  </joint>
 </robot>"""
     )
 
@@ -33,7 +39,26 @@ def test_transform_replaces_existing_limits_without_duplicate_elements(tmp_path)
     joint = root.find("joint")
     assert joint.get("type") == "${roll_joint}"
     assert len(joint.findall("limit")) == 1
-    assert joint.find("limit").get("lower") == VENDOR.ARM_LIMITS["arm_wrist_roll"][0]
+    assert float(joint.find("limit").get("lower")) == VENDOR.JOINT_LIMITS[
+        "arm_wrist_roll"
+    ][0]
+    assert float(joint.find("limit").get("velocity")) == (
+        VENDOR.JOINT_VELOCITY_LIMITS["arm_wrist_roll"]
+    )
+
+
+def test_transform_rejects_a_source_that_xacro_cannot_expand(tmp_path):
+    source = tmp_path / "model.xacro"
+    source.write_text(
+        '<robot xmlns:ns0="http://www.ros.org/wiki/xacro">'
+        '<ns0:property name="mesh_dir" value="meshes"/>'
+        '<link name="body"><visual><geometry>'
+        '<mesh filename="${mesh_dir}/body.stl"/>'
+        '</geometry></visual></link></robot>'
+    )
+
+    with pytest.raises(ValueError, match="invalid LeKiwi source Xacro"):
+        VENDOR.transform(source)
 
 
 def test_vendored_so101_mount_keeps_the_installed_plate_pose():
@@ -42,4 +67,40 @@ def test_vendored_so101_mount_keeps_the_installed_plate_pose():
 
     assert mount.find("parent").get("link") == "base_plate_layer2-v3"
     assert mount.find("child").get("link") == "so101_base_link"
-    assert mount.find("origin").attrib == {"xyz": "0.04 0.08 0.007", "rpy": "0 0 0"}
+    # The official base origin is 38.8353 mm from its shoulder axis. Reusing
+    # the legacy base-part origin displaced that axis by almost 79 mm.
+    origin = mount.find("origin")
+    assert list(map(float, origin.get("xyz").split())) == pytest.approx(
+        [0, 0.02831271, 0.007], abs=1e-7
+    )
+    assert list(map(float, origin.get("rpy").split())) == pytest.approx(
+        [0, 0, 1.5707963267948966], abs=7e-6
+    )
+
+
+def test_vendor_preflights_meshes_and_checks_snapshot_without_writing(tmp_path, monkeypatch):
+    source, output = tmp_path / "source", tmp_path / "output"
+    mesh = source / "URDF/meshes/reauthored/body.stl"
+    mesh.parent.mkdir(parents=True)
+    (source / VENDOR.SOURCE_MODEL).write_text(
+        '<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="test">'
+        '<xacro:property name="mesh_dir" value="meshes"/>'
+        '<link name="body"><visual><geometry>'
+        '<mesh filename="${mesh_dir}/reauthored/body.stl"/>'
+        '</geometry></visual></link></robot>'
+    )
+    monkeypatch.setattr(VENDOR, "source_revision", lambda _: "test-revision")
+    args = ["vendor", "--source", str(source), "--output", str(output)]
+    monkeypatch.setattr(sys, "argv", args)
+    with pytest.raises(FileNotFoundError):
+        VENDOR.main()
+    assert not output.exists()
+    mesh.write_bytes(b"test mesh")
+    assert VENDOR.main() == 0
+    monkeypatch.setattr(sys, "argv", args + ["--check"])
+    assert VENDOR.main() == 0
+    vendored_mesh = output / "meshes/body.stl"
+    vendored_mesh.write_bytes(b"stale mesh")
+    with pytest.raises(SystemExit, match="stale vendored model: meshes/body.stl"):
+        VENDOR.main()
+    assert vendored_mesh.read_bytes() == b"stale mesh"

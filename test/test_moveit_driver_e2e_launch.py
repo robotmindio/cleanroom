@@ -14,7 +14,6 @@ import tempfile
 import threading
 import time
 import unittest
-import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import launch
@@ -27,9 +26,9 @@ pytest.importorskip("zmq")
 
 import rclpy
 from action_msgs.msg import GoalStatus
+from moveit_configs_utils import MoveItConfigsBuilder
 from moveit_msgs.action import MoveGroup
-from moveit_msgs.msg import AllowedCollisionEntry, Constraints, JointConstraint, MoveItErrorCodes
-from moveit_msgs.srv import ApplyPlanningScene
+from moveit_msgs.msg import Constraints, JointConstraint, MoveItErrorCodes
 from rclpy.action import ActionClient
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import JointState
@@ -38,41 +37,6 @@ from std_srvs.srv import Trigger
 
 from lekiwi_rmf.arm_trajectory import ARM_JOINTS
 from lekiwi_rmf.fake_host import FakeLeKiwiHost
-from lekiwi_rmf.moveit_config import moveit_config_builder
-from ros_test_utils import spin_until
-
-
-# At the deterministic fake pose below (pan/roll/gripper=0, lift=-55°, elbow=85°,
-# flex=-30°), MoveIt reports these conservative CAD-envelope contacts.  They
-# are allowed only in this test scene so it can cover transport/execution; they
-# remain enabled in the production collision model pending a physically
-# verified collision-free calibration pose.
-TEST_ONLY_COLLISION_PAIRS = frozenset({
-    frozenset(pair) for pair in (
-        ("arm_pedestal_collision_proxy", "front_camera_collision_proxy"),
-        ("arm_pedestal_collision_proxy", "shoulder_collision_proxy"),
-        ("arm_pedestal_collision_proxy", "upper_arm_collision_proxy"),
-        ("forearm_collision_proxy", "upper_arm_collision_proxy"),
-        ("forearm_collision_proxy", "wrist_collision_proxy"),
-        ("gripper_collision_proxy", "tool0"),
-        ("gripper_collision_proxy", "wrist_collision_proxy"),
-        ("roll_collision_proxy", "wrist_collision_proxy"),
-        ("shoulder_collision_proxy", "upper_arm_collision_proxy"),
-        ("tool0", "wrist_collision_proxy"),
-        # A packet-boundary variant of the same fake startup pose can retain
-        # the host's all-zero feedback for one driver cycle.  These are the
-        # exact additional contacts MoveIt reports in that case.
-        ("arm_pedestal_collision_proxy", "base_link"),
-        ("base_link", "front_camera_collision_proxy"),
-        ("gripper_collision_proxy", "roll_collision_proxy"),
-        ("roll_collision_proxy", "tool0"),
-        ("arm_pedestal_collision_proxy", "lidar_collision_proxy"),
-        ("base_link", "lidar_collision_proxy"),
-        ("forearm_collision_proxy", "shoulder_collision_proxy"),
-        ("shoulder_collision_proxy", "wrist_collision_proxy"),
-        ("upper_arm_collision_proxy", "wrist_collision_proxy"),
-    )
-})
 
 
 def _identity_calibration() -> tuple[str, tempfile.TemporaryDirectory]:
@@ -90,26 +54,24 @@ def _identity_calibration() -> tuple[str, tempfile.TemporaryDirectory]:
 @pytest.mark.rostest
 def generate_test_description():
     fake_host = FakeLeKiwiHost()
-    # The CAD collision proxies intentionally reject the folded all-zero pose.
-    # Begin from this measured, unfolded arm pose so MoveIt can validate the
-    # real current state before planning the small pan motion below.
-    fake_host.set_state(**{
-        "arm_shoulder_lift.pos": -55.0,
-        "arm_elbow_flex.pos": 85.0,
-        "arm_wrist_flex.pos": -30.0,
-    })
+    # SO-101 new_calib zero is the reference L pose, not the legacy folded pose.
     fake_host.start(period_s=0.02)
     calibration, calibration_directory = _identity_calibration()
 
     # This is the repository MoveIt configuration, except that perception is
     # omitted solely for this isolated test.  The local test image intentionally
     # lacks moveit_ros_perception; the production launch retains sensors_3d.
-    moveit_config = moveit_config_builder("false").to_moveit_configs()
-    moveit_parameters = moveit_config.to_dict()
-    robot_links = tuple(
-        link.attrib["name"] for link in ET.fromstring(moveit_parameters["robot_description"])
-        if "name" in link.attrib
+    moveit_config = (
+        MoveItConfigsBuilder("lekiwi", package_name="lekiwi_rmf")
+        .robot_description(file_path="urdf/lekiwi.urdf.xacro", mappings={"sim": "false"})
+        .robot_description_semantic(file_path="config/lekiwi.srdf")
+        .robot_description_kinematics(file_path="config/kinematics.yaml")
+        .joint_limits(file_path="config/joint_limits.yaml")
+        .trajectory_execution(file_path="config/moveit_controllers.yaml")
+        .planning_pipelines(pipelines=["ompl"])
+        .to_moveit_configs()
     )
+    moveit_parameters = moveit_config.to_dict()
     move_group = launch_ros.actions.Node(
         package="moveit_ros_move_group",
         executable="move_group",
@@ -148,7 +110,6 @@ def generate_test_description():
         "driver": driver,
         "fake_host": fake_host,
         "move_group": move_group,
-        "robot_links": robot_links,
         "success": success,
     }
 
@@ -171,7 +132,6 @@ class TestMoveItDriverEndToEnd(unittest.TestCase):
         self.joint_states: list[JointState] = []
         self.node.create_subscription(JointState, "/joint_states", self.joint_states.append, 10)
         self.arm_client = self.node.create_client(Trigger, "/safety/arm")
-        self.apply_scene = self.node.create_client(ApplyPlanningScene, "/apply_planning_scene")
         self.move_group = ActionClient(self.node, MoveGroup, "/move_action")
         # Permissions are receive-time leases, so this timer models the safety
         # supervisor's continuous authorization for the whole action.
@@ -186,6 +146,14 @@ class TestMoveItDriverEndToEnd(unittest.TestCase):
         permission.data = True
         self.arm_permission.publish(permission)
 
+    def _until(self, predicate, timeout: float = 10.0) -> bool:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            rclpy.spin_once(self.node, timeout_sec=0.05)
+            if predicate():
+                return True
+        return False
+
     def _spin_for(self, duration: float) -> None:
         deadline = time.monotonic() + duration
         while time.monotonic() < deadline:
@@ -197,42 +165,17 @@ class TestMoveItDriverEndToEnd(unittest.TestCase):
         # once the service call has succeeded.
         self._publish_permission()
         future = self.arm_client.call_async(Trigger.Request())
-        self.assertTrue(spin_until(self.node, future.done, timeout=10.0))
+        self.assertTrue(self._until(future.done, timeout=10.0))
         self.assertTrue(future.result().success, future.result().message)
 
-    def _allow_test_only_self_collisions(self, robot_links):
-        self.assertTrue(self.apply_scene.wait_for_service(timeout_sec=15.0))
-        request = ApplyPlanningScene.Request()
-        request.scene.is_diff = True
-        matrix = request.scene.allowed_collision_matrix
-        involved_links = tuple(sorted({
-            link for pair in TEST_ONLY_COLLISION_PAIRS for link in pair
-        }))
-        self.assertTrue(set(involved_links) <= set(robot_links))
-        matrix.entry_names = list(involved_links)
-        matrix.entry_values = [
-            AllowedCollisionEntry(enabled=[
-                frozenset((first, second)) in TEST_ONLY_COLLISION_PAIRS
-                for second in involved_links
-            ])
-            for first in involved_links
-        ]
-        future = self.apply_scene.call_async(request)
-        self.assertTrue(spin_until(self.node, future.done, timeout=10.0))
-        self.assertTrue(future.result().success)
-
-    def test_move_group_executes_joint_space_motion(self, fake_host, robot_links, success):
-        self.assertTrue(spin_until(self.node,
+    def test_move_group_executes_joint_space_motion(self, fake_host, success):
+        self.assertTrue(self._until(
             lambda: bool(self.joint_states)
             and self.arm_permission.get_subscription_count() == 1,
             timeout=15.0,
         ))
-        self.assertTrue(spin_until(self.node, self.move_group.server_is_ready, timeout=15.0))
-        # The CAD-backed collision envelopes conservatively overlap in every
-        # deterministic fake feedback pose.  Make only this test graph's
-        # planning scene permissive so it exercises plan-to-controller
-        # transport without modifying production collision or sensor settings.
-        self._allow_test_only_self_collisions(robot_links)
+        self.assertTrue(self._until(self.move_group.server_is_ready, timeout=15.0))
+        # Use the production collision matrix without test-only exemptions.
         # Drain the fake transport's pre-arm torque-off telemetry, then arm on
         # a fresh sample.  This models the explicit operator re-arm required
         # after a host state transition and avoids treating queued feedback as
@@ -251,9 +194,9 @@ class TestMoveItDriverEndToEnd(unittest.TestCase):
         request.max_acceleration_scaling_factor = 0.15
         target_positions = {
             "arm_shoulder_pan": 0.12,
-            "arm_shoulder_lift": math.radians(-55.0),
-            "arm_elbow_flex": math.radians(85.0),
-            "arm_wrist_flex": math.radians(-30.0),
+            "arm_shoulder_lift": 0.0,
+            "arm_elbow_flex": 0.0,
+            "arm_wrist_flex": 0.0,
             "arm_wrist_roll": 0.0,
         }
         request.goal_constraints = [Constraints(joint_constraints=[
@@ -270,24 +213,24 @@ class TestMoveItDriverEndToEnd(unittest.TestCase):
         goal.planning_options.replan = False
 
         goal_future = self.move_group.send_goal_async(goal)
-        self.assertTrue(spin_until(self.node, goal_future.done, timeout=15.0))
+        self.assertTrue(self._until(goal_future.done, timeout=15.0))
         goal_handle = goal_future.result()
         self.assertTrue(goal_handle.accepted, "move_group rejected the plan-and-execute goal")
         result_future = goal_handle.get_result_async()
-        self.assertTrue(spin_until(self.node, result_future.done, timeout=30.0))
+        self.assertTrue(self._until(result_future.done, timeout=30.0))
         result = result_future.result()
         self.assertEqual(result.status, GoalStatus.STATUS_SUCCEEDED)
         self.assertEqual(result.result.error_code.val, MoveItErrorCodes.SUCCESS)
 
         target_degrees = math.degrees(0.12)
-        self.assertTrue(spin_until(self.node,
+        self.assertTrue(self._until(
             lambda: any(
                 action.get("arm_shoulder_pan.pos", 0.0) == pytest.approx(target_degrees, abs=1.0)
                 for action in fake_host.actions
             ),
             timeout=10.0,
         ))
-        self.assertTrue(spin_until(self.node,
+        self.assertTrue(self._until(
             lambda: any(
                 "arm_shoulder_pan" in state.name
                 and state.position[state.name.index("arm_shoulder_pan")] == pytest.approx(0.12, abs=0.03)

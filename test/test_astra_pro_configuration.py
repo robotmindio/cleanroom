@@ -1,5 +1,9 @@
 from pathlib import Path
+import math
+import subprocess
+import xml.etree.ElementTree as ET
 
+import pytest
 import yaml
 
 
@@ -40,10 +44,70 @@ def test_astra_has_its_own_tracked_robot_frame():
 
     assert 'link name="astra_camera_link"' in description
     assert 'link name="astra_camera_optical_frame"' in description
-    assert '<box size="0.040 0.165 0.048"/>' in description
+    robot = ET.fromstring(subprocess.check_output(
+        ["xacro", str(ROOT / "urdf/lekiwi.urdf.xacro")], text=True
+    ))
+    camera = robot.find("link[@name='astra_camera_link']")
+    assert camera.find("visual/geometry/box").get("size") == "0.040 0.165 0.048"
+    assert camera.find("collision/geometry/box").attrib == camera.find("visual/geometry/box").attrib
+    assert camera.find("collision/origin").attrib == camera.find("visual/origin").attrib
     assert '<parent link="astra_pro_compact_mount"/><child link="astra_camera_link"/>' in description
     assert 'property name="astra_mount_xyz" value="0 0 0.0155"' in description
-    assert 'property name="astra_mount_rpy" value="-0.13962634015954636 0 0"' in description
+
+
+def test_so101_visuals_use_one_yellow_material():
+    robot = ET.fromstring(subprocess.check_output(
+        ["xacro", str(ROOT / "urdf/lekiwi.urdf.xacro")], text=True
+    ))
+    yellow = robot.find("material[@name='so101_yellow']/color")
+    assert yellow is not None and yellow.get("rgba") == "1.0 0.82 0.12 1.0"
+    assert all(visual.find("material").get("name") == "so101_yellow"
+               for link in robot.findall("link") if link.get("name").startswith("so101_")
+               for visual in link.findall("visual"))
+
+
+def test_astra_optical_axis_faces_left_rear_and_down_in_the_complete_robot():
+    robot = ET.fromstring(subprocess.check_output(
+        ["xacro", str(ROOT / "urdf/lekiwi.urdf.xacro")], text=True
+    ))
+    parents = {joint.find("child").get("link"): joint for joint in robot.findall("joint")}
+    frame, axis = "astra_camera_optical_frame", (0, 0, 1)
+    while frame != "base_link":
+        joint = parents[frame]
+        roll, pitch, yaw = map(float, joint.find("origin").get("rpy", "0 0 0").split())
+        x, y, z = axis
+        y, z = math.cos(roll) * y - math.sin(roll) * z, math.sin(roll) * y + math.cos(roll) * z
+        x, z = math.cos(pitch) * x + math.sin(pitch) * z, -math.sin(pitch) * x + math.cos(pitch) * z
+        axis = (math.cos(yaw) * x - math.sin(yaw) * y, math.sin(yaw) * x + math.cos(yaw) * y, z)
+        frame = joint.find("parent").get("link")
+    horizontal = math.cos(math.radians(8)) / math.sqrt(5)
+    assert axis == pytest.approx((-horizontal, 2 * horizontal, -math.sin(math.radians(8))), abs=1e-9)
+    mount = robot.find("joint[@name='astra_pro_compact_mount_joint']/origin")
+    assert tuple(map(float, mount.get("xyz").split())) == (-0.09, -0.04, 0.007)
+
+
+def test_fixed_camera_optical_axis_follows_the_physical_lens():
+    robot = ET.fromstring(subprocess.check_output(
+        ["xacro", str(ROOT / "urdf/lekiwi.urdf.xacro")], text=True
+    ))
+    parents = {joint.find("child").get("link"): joint for joint in robot.findall("joint")}
+    frame, axis = "front_camera_optical_frame", (0, 0, 1)
+    while frame != "base_link":
+        joint = parents[frame]
+        roll, pitch, yaw = map(float, joint.find("origin").get("rpy", "0 0 0").split())
+        x, y, z = axis
+        y, z = math.cos(roll) * y - math.sin(roll) * z, math.sin(roll) * y + math.cos(roll) * z
+        x, z = math.cos(pitch) * x + math.sin(pitch) * z, -math.sin(pitch) * x + math.cos(pitch) * z
+        axis = (math.cos(yaw) * x - math.sin(yaw) * y, math.sin(yaw) * x + math.cos(yaw) * y, z)
+        frame = joint.find("parent").get("link")
+    assert axis == pytest.approx((1, 0, 0), abs=1e-9)
+
+
+def test_late_rviz_receives_the_latched_robot_description():
+    rviz = yaml.safe_load((ROOT / "config/lekiwi.rviz").read_text())
+    model = next(display for display in rviz["Visualization Manager"]["Displays"]
+                 if display.get("Class") == "rviz_default_plugins/RobotModel")
+    assert model["Description Topic"]["Durability Policy"] == "Transient Local"
 
 
 def test_sensor_calibration_has_one_xacro_source_for_all_model_consumers():

@@ -10,7 +10,6 @@ from nav_msgs.msg import OccupancyGrid, Odometry
 from sensor_msgs.msg import Image
 
 from lekiwi_rmf.readiness_gate import ReadinessGate, TOPIC_TYPES, topic_qos
-from lekiwi_rmf.sim_topics import WHEEL_COMMAND_TOPICS
 
 
 ROOT = pathlib.Path(__file__).parents[1]
@@ -118,8 +117,10 @@ def test_simulation_base_controller_consumes_only_the_guarded_velocity_topic():
     controller = (ROOT / "lekiwi_rmf" / "sim_omni_controller.py").read_text()
     assert '"/cmd_vel_safe"' in controller
     assert '"/cmd_vel"' not in controller
-    assert "SIM_ACTUATOR_BRIDGE_ARGUMENTS" in source
-    assert WHEEL_COMMAND_TOPICS[0] == "/sim/sim_base_left_wheel/cmd_vel"
+    assert "/sim/sim_base_left_wheel/cmd_vel" in source
+    assert source.count('package="topic_tools"') == 1
+    assert 'name="remote_ld06_relay"' in source
+    assert 'arguments=["/pi/lidar/scan", "/scan", "sensor_msgs/msg/LaserScan"]' in source
 
 
 def test_simulation_uses_a_database_separate_from_the_real_robot():
@@ -130,13 +131,6 @@ def test_simulation_uses_a_database_separate_from_the_real_robot():
 def test_moveit_receives_a_lowercase_sim_argument():
     source = (ROOT / "launch" / "bringup.launch.py").read_text()
     assert "\"'true' if '\", mode, \"' == 'sim' else 'false'\"" in source
-
-
-def test_real_driver_restart_is_rate_limited():
-    source = (ROOT / "launch" / "bringup.launch.py").read_text()
-    start = source.index('executable="lekiwi_driver"')
-    driver = source[start:source.index("arm_ready_gate", start)]
-    assert "respawn_delay=60.0" in driver
 
 
 def test_simulation_exports_a_resource_path_for_vendored_cad_meshes():
@@ -190,3 +184,10 @@ def test_long_lived_nodes_have_idempotent_ros_shutdown():
 def test_interrupted_readiness_gate_is_not_a_successful_dependency():
     source = (ROOT / "lekiwi_rmf/readiness_gate.py").read_text()
     assert "raise SystemExit(130)" in source
+
+
+def test_real_driver_restart_is_rate_limited():
+    source = (ROOT / "launch" / "bringup.launch.py").read_text()
+    start = source.index('executable="lekiwi_driver"')
+    driver = source[start:source.index("arm_ready_gate", start)]
+    assert "respawn_delay=60.0" in driver

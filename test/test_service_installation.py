@@ -12,34 +12,16 @@ ROOT = pathlib.Path(__file__).parents[1]
 
 def test_runtime_helpers_share_device_and_calibration_checks(tmp_path):
     calibration = tmp_path / "camera.yaml"
-    environment = tmp_path / ".env"
     calibration.write_text("image_width: 640\ncamera_matrix:\n  rows: 3\n  cols: 3\n  data: [1, 0, 0, 0, 1, 0, 0, 0, 1]\n")
-    environment.write_text("LEKIWI_ROBOT_HOST=robot-1\n")
     script = r'''
 set -Eeuo pipefail
 source "$1/scripts/lib/runtime-common.sh"
 [[ $(first_match "$2") == "$2" ]]
 camera_calibration_valid "$3"
 wait_for 1 test -s "$3"
-ss() { printf '%s\n' "$FAKE_LISTENERS"; }
-FAKE_LISTENERS=$'LISTEN 0 1 127.0.0.1:5555\nLISTEN 0 1 127.0.0.1:5557'
-lekiwi_motion_port_listening
-lekiwi_safety_ports_listening
-FAKE_LISTENERS='LISTEN 0 1 127.0.0.1:5555'
-lekiwi_motion_port_listening
-! lekiwi_safety_ports_listening
-unset LEKIWI_ROBOT_HOST
-load_lekiwi_env "$4"
-[[ $LEKIWI_ROBOT_HOST == robot-1 ]]
-LEKIWI_ROBOT_HOST=explicit-host
-load_lekiwi_env "$4"
-[[ $LEKIWI_ROBOT_HOST == explicit-host ]]
-printf 'LEKIWI_ROBOT_HOST=bad host\n' > "$4"
-unset LEKIWI_ROBOT_HOST
-! load_lekiwi_env "$4" 2>/dev/null
 '''
     subprocess.run(
-        ["bash", "-c", script, "runtime-test", str(ROOT), str(ROOT / "README.md"), str(calibration), str(environment)],
+        ["bash", "-c", script, "runtime-test", str(ROOT), str(ROOT / "README.md"), str(calibration)],
         check=True,
     )
 
@@ -135,16 +117,11 @@ def test_unit_validation_ignores_unrelated_systemd_units():
     assert 'systemd-analyze verify --recursive-errors=no "$UNIT_DIR/$unit"' in helper
 
 
-def test_stack_limits_journal_output_from_a_log_flood():
-    for name in (
-        "lekiwi-stack.service",
-        "lekiwi-astra.service",
-        "lekiwi-cameras.service",
-        "lekiwi-lidar.service",
-    ):
-        service = (ROOT / "systemd" / name).read_text(encoding="utf-8")
-        assert "LogRateLimitIntervalSec=30s" in service
-        assert "LogRateLimitBurst=1000" in service
+def test_startup_disarm_is_tracked_in_the_launch_default():
+    launch = (ROOT / "launch" / "bringup.launch.py").read_text()
+    launcher = (ROOT / "scripts" / "ros-start.sh").read_text()
+    assert '"auto_arm_on_startup", default_value="false"' in launch
+    assert "deploy-inhibit-auto-arm" not in launcher
 
 
 def test_full_installer_includes_qualification_tooling_dependencies():
@@ -161,24 +138,11 @@ def test_full_installer_includes_qualification_tooling_dependencies():
 
 def test_installer_reapplies_the_pinned_free_fleet_patch_on_rerun():
     installer = (ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
-    common = (ROOT / "scripts" / "thirdparty-common.sh").read_text(encoding="utf-8")
     patch = ROOT / "thirdparty" / "free_fleet" / "0001-retry-nav2-goal-during-activation.patch"
 
     assert patch.is_file()
-    assert 'source "$PROJECT_ROOT/scripts/thirdparty-common.sh"' in installer
-    assert "checkout_pinned()" in common
-    assert "apply_pinned_patch()" in common
     assert 'apply_pinned_patch "$free_fleet_source" "$free_fleet_patch"' in installer
     assert '"$free_fleet_source" "$FREE_FLEET_REV" "$free_fleet_patch"' in installer
-
-
-def test_pi_and_workstation_share_the_pinned_ld06_checkout():
-    pi_installer = (ROOT / "scripts" / "install-pi.sh").read_text(encoding="utf-8")
-    common = (ROOT / "scripts" / "thirdparty-common.sh").read_text(encoding="utf-8")
-
-    assert 'source "$PROJECT_ROOT/scripts/thirdparty-common.sh"' in pi_installer
-    assert "LDLIDAR_STL_REV=" in common
-    assert 'checkout_pinned "$LDLIDAR_STL_REPOSITORY" "$lidar_source"' in pi_installer
 
 
 def test_simulation_installer_excludes_astra_hardware_setup():
@@ -291,13 +255,11 @@ def test_deploy_order_fails_closed_around_the_device_restart():
     assert 'compute_sudoers=$(sudo -n -l)' in deploy
     assert "git merge --ff-only" in deploy
     assert "cannot fetch origin within 30 seconds" in deploy
-    assert "deploy-inhibit-auto-arm" in deploy
+    assert "deploy-inhibit-auto-arm" not in deploy
     assert "LEKIWI_ROBOT_HOST" in deploy
     assert "load_lekiwi_env" in deploy
-    assert 'device_address=${device#*@}' in deploy
     assert "Refreshing stale compute service configuration" in deploy
     assert "reinstall-compute.sh" in deploy
-    assert 'touch "$logs/deploy-inhibit-auto-arm"' in deploy
     assert "reset --hard" not in deploy
 
 
@@ -346,29 +308,3 @@ def test_service_fingerprint_covers_installed_service_behavior():
         "scripts/install-deploy-sudoers.sh",
     ):
         assert source in revision
-
-
-def test_ros_log_rotation_is_installed_for_device_and_compute_roles():
-    rotation = (ROOT / "systemd" / "lekiwi-ros-logrotate.conf").read_text(encoding="utf-8")
-    timer = (ROOT / "systemd" / "lekiwi-ros-logrotate.timer").read_text(encoding="utf-8")
-    device = (ROOT / "scripts" / "install-device-services.sh").read_text(encoding="utf-8")
-    compute = (ROOT / "scripts" / "install-compute-services.sh").read_text(encoding="utf-8")
-
-    assert "maxsize 100M" in rotation
-    assert "copytruncate" in rotation
-    assert "OnUnitActiveSec=5min" in timer
-    for installer in (device, compute):
-        assert "install_log_rotation" in installer
-        assert "enable --now lekiwi-ros-logrotate.timer" in installer
-
-
-def test_compute_service_supports_an_assigned_tailnet_rosbridge_address():
-    installer = (ROOT / "scripts" / "install-compute-services.sh").read_text(encoding="utf-8")
-    unit = (ROOT / "systemd" / "lekiwi-stack.service").read_text(encoding="utf-8")
-
-    assert "Requires=lekiwi-host.service" not in unit
-    assert '"Requires=lekiwi-host.service"' in installer
-    assert 'as_root rm -f "$topology_conf"' in installer
-    assert "--rosbridge-tailnet" in installer
-    assert "start_rosbridge:=true rosbridge_address:=$tailnet_ip" in installer
-    assert "systemctl restart lekiwi-stack.service" in installer

@@ -85,6 +85,20 @@ extensions are built against numpy 1.26, and mixing them segfaults `rmf_adapter`
 `bringup.launch.py` runs the hardware driver against `.venv-lerobot` on its own.
 See [HARDWARE.md](HARDWARE.md).
 
+### Rebuild the complete robot model
+
+From the `cleanroom` checkout, one command validates the sibling `LeKiwi` CAD
+sources, refreshes the vendored Xacro and meshes, renders the reference image,
+builds the ROS package, and runs every CTest:
+
+```bash
+./scripts/rebuild-all.sh
+```
+
+Set `LEKIWI_SOURCE` only when the source checkout is somewhere other than
+`../LeKiwi`. The separate LeKiwi manufacturing audit covers recovery files that
+do not feed the robot Xacro.
+
 ### Headless simulation server
 
 Use the repository's simulation-only installer on a remote brain/server. It
@@ -234,12 +248,18 @@ RViz joint sliders remain preview-only; they never command the physical arm.
 
 ### Arm pose calibration
 
-Run `scripts/calibrate.sh pose`. It starts the temporary host/driver needed to capture the
-physical arm in the vendor CAD's **folded home pose** (the all-zero RViz model), saves
-`~/.ros/lekiwi_arm_calibration.json`, tears that stack down, then starts the normal stack
-when camera calibration is available. Do not use an upright arm for this capture: upright
-is a nonzero CAD configuration. If a joint moves opposite in RViz, change only that
-joint's `directions` value between `1` and `-1`, then restart.
+With the updated stack running, run `scripts/calibrate.sh pose` on the compute
+machine that owns the ROS driver. It captures fresh `/arm/raw_joint_states`,
+independent of the driver's existing offsets, and backs up the previous calibration.
+Support the disarmed arm in the **SO-101 new-calibration zero pose** shown in
+[the model reference](urdf/README.md). The legacy folded-pose instructions do not
+apply to this model. Capture saves `~/.ros/lekiwi_arm_calibration.json` without
+changing torque or restarting services. Restart the driver through the same
+repository launch/deploy workflow to apply it, then verify individual joint
+directions and several poses before executing a trajectory. If a joint moves
+opposite in RViz, correct that joint's `directions` value and recapture the zero
+mapping as needed. Redo motor calibration first if encoder readings wrap or
+disagree with the measured travel range.
 
 ### Recovery after motor power loss
 
@@ -306,10 +326,13 @@ works from the managed service without an interactive permission fix.
 
 The driver uses `astra_camera_optical_frame`; keep its physical mount
 transform/calibration in `urdf/lekiwi.urdf.xacro` when the Astra mount is
-measured, rather than adding a runtime TF. The checked-in zero offset is a
-mounting placeholder and must be replaced with the measured Astra bracket
-offset. Verify the depth cloud frame and its overlay in RViz before enabling
-arm motion.
+measured, rather than adding a runtime TF. The compact bracket uses the existing
+diagonal pair nearest each fingernail in the operator's photo: CAD
+(-100, -20) and (-80, -60) mm, 44.721 mm apart. This places the bracket
+26.565 degrees counterclockwise from the previous left-facing mount.
+The Astra faces left/rear, pitched 8 degrees down; forward (+X) remains
+the arm/fixed-camera side. Its optical-centre correction still needs measurement.
+Verify the depth cloud overlay in RViz before enabling arm motion.
 
 The repository host is started camera-less for ROS, so a delayed camera frame
 cannot take the motor bus down. Direct LeRobot dataset/teleoperation mode may
@@ -593,13 +616,11 @@ workspaces, and all services are already current. Otherwise it refreshes stale
 or misconfigured compute service configuration, fast-forwards both clean checkouts to the same
 pushed commit, confirms torque-off, stops the
 compute stack before the device host, rebuilds both service workspaces, and
-starts the host, cameras, and LD06 before the compute stack. A temporary
-auto-arm inhibit keeps the replacement driver disarmed
-until revision, motor-health, and camera checks pass. Any failure leaves the
-inhibit at `~/.ros/lekiwi/deploy-inhibit-auto-arm` and does not roll back or
-resume a partially deployed robot. Inspect the failure and rerun the deploy;
-remove that file manually only when abandoning the deployment after verifying
-the robot is safe.
+starts the host, cameras, and LD06 before the compute stack. The tracked launch
+default keeps every replacement driver disarmed; the deployer verifies that
+state along with revision, motor health, and cameras. Any failure does not roll
+back or resume a partially deployed robot. Inspect the failure and rerun the
+deploy.
 
 The two halves can also mix ownership: keep the device services running and
 drive the stack by hand whenever you feel like it —

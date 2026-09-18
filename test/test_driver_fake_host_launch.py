@@ -7,6 +7,7 @@ the test cannot discover or actuate physical hardware.
 
 from __future__ import annotations
 
+import time
 import unittest
 
 import launch
@@ -21,11 +22,12 @@ import rclpy
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from rclpy.qos import DurabilityPolicy, QoSProfile
+from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool, String
 from std_srvs.srv import Trigger
 
 from lekiwi_rmf.fake_host import FakeLeKiwiHost, ObservationFault
-from ros_test_utils import spin_until
+from lekiwi_rmf.arm_trajectory import ARM_JOINTS
 
 
 @pytest.mark.rostest
@@ -80,6 +82,7 @@ class TestDriverFakeHostGraph(unittest.TestCase):
         self.node = rclpy.create_node("driver_fake_host_graph_client")
         self.odom: list[Odometry] = []
         self.states: list[str] = []
+        self.raw_states: list[JointState] = []
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.base_permission = self.node.create_publisher(
             Bool, "/test/driver/base_permitted", latched
@@ -96,12 +99,23 @@ class TestDriverFakeHostGraph(unittest.TestCase):
         self.node.create_subscription(
             String, "/test/driver/state", lambda message: self.states.append(message.data), latched
         )
+        self.node.create_subscription(
+            JointState, "/driver_integration/arm/raw_joint_states", self.raw_states.append, 10
+        )
         self.arm_client = self.node.create_client(
             Trigger, "/driver_integration/safety/arm"
         )
 
     def tearDown(self):
         self.node.destroy_node()
+
+    def _until(self, predicate, timeout: float = 5.0) -> bool:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            rclpy.spin_once(self.node, timeout_sec=0.05)
+            if predicate():
+                return True
+        return False
 
     def _permission(self, publisher, allowed: bool) -> None:
         message = Bool()
@@ -111,40 +125,44 @@ class TestDriverFakeHostGraph(unittest.TestCase):
     def _arm(self):
         self.assertTrue(self.arm_client.wait_for_service(timeout_sec=3.0))
         future = self.arm_client.call_async(Trigger.Request())
-        self.assertTrue(spin_until(self.node, future.done, timeout=3.0))
+        self.assertTrue(self._until(future.done, timeout=3.0))
         return future.result()
 
     def test_default_deny_motion_restart_and_link_loss(self, fake_host):
-        self.assertTrue(spin_until(self.node,
+        self.assertTrue(self._until(
             lambda: self.commands.get_subscription_count() == 1
             and self.base_permission.get_subscription_count() == 1
             and self.arm_permission.get_subscription_count() == 1
             and bool(self.odom)
+            and bool(self.raw_states)
             and "DISARMED" in self.states
         ))
+        self.assertEqual(self.raw_states[-1].name, list(ARM_JOINTS))
+        self.assertEqual(len(self.raw_states[-1].position), len(ARM_JOINTS))
+        self.assertGreater(self.raw_states[-1].header.stamp.sec, 0)
 
         denied = self._arm()
         self.assertFalse(denied.success)
         self.assertFalse(fake_host.torque_enabled)
 
         self._permission(self.arm_permission, True)
-        self.assertTrue(spin_until(self.node,
+        self.assertTrue(self._until(
             lambda: self.arm_permission.get_subscription_count() == 1
         ))
         # Re-publish while spinning so the test cannot race discovery against
         # the first transient-local sample on a slow CI runner.
-        self.assertTrue(spin_until(self.node,
+        self.assertTrue(self._until(
             lambda: self._permission(self.arm_permission, True) is None
             and self._arm().success,
             timeout=4.0,
         ))
         self.assertTrue(fake_host.torque_enabled)
-        self.assertTrue(spin_until(self.node, lambda: "ARMED" in self.states))
+        self.assertTrue(self._until(lambda: "ARMED" in self.states))
 
         # Arm permission is a receive-time lease.  A transient-local true
         # sample must not keep the actuator enabled after the supervisor stops.
         state_index = len(self.states)
-        self.assertTrue(spin_until(self.node,
+        self.assertTrue(self._until(
             lambda: not fake_host.torque_enabled
             and "DISARMED" in self.states[state_index:],
             timeout=2.0,
@@ -152,14 +170,14 @@ class TestDriverFakeHostGraph(unittest.TestCase):
         self.assertFalse(fake_host.torque_enabled)
 
         self._permission(self.arm_permission, True)
-        self.assertTrue(spin_until(self.node, lambda: self._arm().success, timeout=4.0))
+        self.assertTrue(self._until(lambda: self._arm().success, timeout=4.0))
         self.assertTrue(fake_host.torque_enabled)
 
         self._permission(self.base_permission, True)
         start = len(fake_host.actions)
         command = Twist()
         command.linear.x = 0.2
-        self.assertTrue(spin_until(self.node,
+        self.assertTrue(self._until(
             lambda: self.commands.publish(command) is None
             and any(action.get("x.vel") == pytest.approx(0.2)
                     for action in fake_host.actions[start:])
@@ -169,7 +187,7 @@ class TestDriverFakeHostGraph(unittest.TestCase):
         # The command watchdog is deliberately longer than this lease so the
         # zero action demonstrates the permission watchdog itself.
         start = len(fake_host.actions)
-        self.assertTrue(spin_until(self.node,
+        self.assertTrue(self._until(
             lambda: self._permission(self.arm_permission, True) is None
             and any(action.get("x.vel") == 0.0 for action in fake_host.actions[start:]),
             timeout=2.0,
@@ -177,7 +195,7 @@ class TestDriverFakeHostGraph(unittest.TestCase):
 
         start = len(fake_host.actions)
         self._permission(self.base_permission, False)
-        self.assertTrue(spin_until(self.node,
+        self.assertTrue(self._until(
             lambda: any(action.get("x.vel") == 0.0 for action in fake_host.actions[start:])
         ))
 
@@ -186,7 +204,7 @@ class TestDriverFakeHostGraph(unittest.TestCase):
         # auto-arm when the first packet from that session arrives.
         state_index = len(self.states)
         fake_host.restart_session()
-        self.assertTrue(spin_until(self.node,
+        self.assertTrue(self._until(
             lambda: not fake_host.torque_enabled
             and "DISARMED" in self.states[state_index:],
             timeout=4.0,
@@ -194,7 +212,7 @@ class TestDriverFakeHostGraph(unittest.TestCase):
         self.assertFalse(fake_host.torque_enabled)
 
         self._permission(self.arm_permission, True)
-        self.assertTrue(spin_until(self.node, lambda: self._arm().success, timeout=4.0))
+        self.assertTrue(self._until(lambda: self._arm().success, timeout=4.0))
         self.assertTrue(fake_host.torque_enabled)
 
         # Silence the source for longer than the driver's link watchdog.  This
@@ -202,7 +220,7 @@ class TestDriverFakeHostGraph(unittest.TestCase):
         # cached observation object remain alive.
         state_index = len(self.states)
         fake_host.queue_observation_fault(ObservationFault.DROP, count=30)
-        self.assertTrue(spin_until(self.node,
+        self.assertTrue(self._until(
             lambda: not fake_host.torque_enabled
             and "LINK_LOST" in self.states[state_index:],
             timeout=4.0,
