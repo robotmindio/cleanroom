@@ -19,7 +19,7 @@ from geometry_msgs.msg import TransformStamped
 from rclpy.duration import Duration
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
-from rclpy.qos import qos_profile_sensor_data
+from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from rclpy.time import Time
 from sensor_msgs.msg import LaserScan, PointCloud2
 from sensor_msgs_py import point_cloud2
@@ -40,6 +40,9 @@ SCAN_TIMEOUT_S = 0.5
 MIN_HEIGHT_M = 0.03
 MAX_HEIGHT_M = 1.0
 TF_TIMEOUT = Duration(seconds=0.05)
+# RTAB-Map subscribes reliably (qos_scan: 1); a reliable publisher also
+# serves best-effort readers such as the readiness gate and RViz.
+CLOUD_QOS = QoSProfile(depth=5, reliability=ReliabilityPolicy.RELIABLE)
 
 
 def scan_points(scan: LaserScan) -> np.ndarray:
@@ -81,7 +84,7 @@ class SlamCloud(Node):
         self._tf_listener = TransformListener(self._tf, self)
         self._astra: Optional[PointCloud2] = None
         self._last_scan: Optional[Time] = None
-        self._publisher = self.create_publisher(PointCloud2, "/slam/cloud", qos_profile_sensor_data)
+        self._publisher = self.create_publisher(PointCloud2, "/slam/cloud", CLOUD_QOS)
         self.create_subscription(LaserScan, "/scan", self._on_scan, qos_profile_sensor_data)
         self.create_subscription(PointCloud2, "/camera/depth/points", self._on_astra, qos_profile_sensor_data)
 

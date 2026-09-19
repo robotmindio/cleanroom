@@ -2,9 +2,10 @@ import math
 
 import numpy as np
 from geometry_msgs.msg import TransformStamped
+from rclpy.qos import ReliabilityPolicy
 from sensor_msgs.msg import LaserScan
 
-from lekiwi_rmf.slam_cloud import obstacle_band, scan_points, transform_points
+from lekiwi_rmf.slam_cloud import CLOUD_QOS, obstacle_band, scan_points, transform_points
 
 
 def test_scan_points_keep_only_valid_returns():
@@ -27,3 +28,7 @@ def test_transform_points_rotates_then_translates():
 def test_obstacle_band_drops_floor_and_overhead_points():
     points = np.array([[1.0, 0.0, 0.0], [1.0, 0.0, 0.5], [1.0, 0.0, 1.5]])
     np.testing.assert_allclose(obstacle_band(points), [[1.0, 0.0, 0.5]])
+
+
+def test_cloud_reaches_rtabmaps_reliable_subscription():
+    assert CLOUD_QOS.reliability == ReliabilityPolicy.RELIABLE
