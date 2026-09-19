@@ -41,7 +41,9 @@ class LeKiwiDriver(Node):
         command_port = self.declare_parameter("remote_command_port", 5555).value
         observation_port = self.declare_parameter("remote_observation_port", 5556).value
         torque_control_port = self.declare_parameter("torque_control_port", 5557).value
-        torque_control_timeout_ms = self.declare_parameter("torque_control_timeout_ms", 1000).value
+        # A disable writes all nine servos and reads every one back: measured at 0.6-1.3 s
+        # on the Pi, so a one-second timeout failed about a third of explicit disarms.
+        torque_control_timeout_ms = self.declare_parameter("torque_control_timeout_ms", 4000).value
         curve_client_secret = self.declare_parameter("curve_client_secret_key_file", "").value
         curve_server_public = self.declare_parameter("curve_server_public_key_file", "").value
         self.xy_scale = self.declare_parameter("xy_velocity_scale", 1.0).value
