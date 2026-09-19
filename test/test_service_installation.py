@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import getpass
 import os
 import pathlib
 import subprocess
@@ -306,5 +307,39 @@ def test_service_fingerprint_covers_installed_service_behavior():
         "scripts/lib/service-install-common.sh",
         "scripts/lib/runtime-common.sh",
         "scripts/install-deploy-sudoers.sh",
+        "scripts/install-device-network.sh",
     ):
         assert source in revision
+
+
+def test_device_network_installer_disables_wifi_power_saving_and_scopes_polkit(tmp_path):
+    user = getpass.getuser()
+    if user == "root":
+        return  # the installer refuses to grant network control to root
+
+    def install():
+        return subprocess.run(
+            [str(ROOT / "scripts" / "install-device-network.sh"), "--user", user],
+            env={**os.environ, "LEKIWI_NETWORK_ROOT": str(tmp_path)},
+            check=True, capture_output=True, text=True,
+        )
+
+    install()
+    install()  # re-running is idempotent
+
+    powersave = (tmp_path / "etc/NetworkManager/conf.d/zz-lekiwi-wifi-powersave-off.conf").read_text()
+    assert "[connection]" in powersave and "wifi.powersave = 2" in powersave
+
+    rule = (tmp_path / "etc/polkit-1/rules.d/50-lekiwi-networkmanager.rules").read_text()
+    assert f'subject.user == "{user}"' in rule
+    assert "org.freedesktop.NetworkManager.network-control" in rule
+    assert "org.freedesktop.NetworkManager.settings.modify.system" in rule
+    # Only the three named actions: no wildcard match on the NetworkManager namespace.
+    assert "indexOf" in rule and "startsWith" not in rule
+
+    refused = subprocess.run(
+        [str(ROOT / "scripts" / "install-device-network.sh"), "--user", "root"],
+        env={**os.environ, "LEKIWI_NETWORK_ROOT": str(tmp_path)},
+        capture_output=True, text=True,
+    )
+    assert refused.returncode != 0

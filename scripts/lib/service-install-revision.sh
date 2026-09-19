@@ -18,7 +18,7 @@ service_fingerprint() {
         systemd/lekiwi-ros-logrotate.timer \
         scripts/ros-astra.sh scripts/ros-cameras.sh scripts/ros-lidar.sh \
         scripts/lib/service-install-common.sh scripts/lib/runtime-common.sh \
-        scripts/install-deploy-sudoers.sh)
+        scripts/install-deploy-sudoers.sh scripts/install-device-network.sh)
       ;;
     *) die "service fingerprint role must be compute or device" ;;
   esac

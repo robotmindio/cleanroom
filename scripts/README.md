@@ -18,6 +18,9 @@ Start with one of these:
 - `install.sh` installs a workstation; `install-pi.sh` installs a device host.
 - `install-sim-host.sh` installs a simulation-only machine.
 - `install-device-services.sh` and `install-compute-services.sh` install boot services.
+  The device installer also turns off Wi-Fi power saving (it adds hundreds of
+  milliseconds of latency) and lets the service user run NetworkManager commands over
+  SSH without a password, through `install-device-network.sh`.
 - `deploy-split.sh` updates an installed split robot.
 - `build-lekiwi.sh` rebuilds this package in an existing workspace.
 

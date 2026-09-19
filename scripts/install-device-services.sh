@@ -207,6 +207,8 @@ as_root systemctl enable --now lekiwi-ros-logrotate.timer
 
 log "Granting $LEKIWI_SERVICE_USER non-interactive deployment control"
 as_root "$PROJECT_ROOT/scripts/install-deploy-sudoers.sh" device --user "$LEKIWI_SERVICE_USER"
+log "Disabling Wi-Fi power saving and granting network control"
+as_root "$PROJECT_ROOT/scripts/install-device-network.sh" --user "$LEKIWI_SERVICE_USER"
 record_service_fingerprint device
 
 if [[ -f $UNIT_DIR/lekiwi-stack.service ]]; then
