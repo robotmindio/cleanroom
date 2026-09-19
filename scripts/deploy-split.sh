@@ -66,8 +66,9 @@ ros_setup() {
   source "$project_root/scripts/setup.bash"
   set -u
   # The ros2 daemon binds its network interface once. One started before a Wi-Fi change
-  # answers nothing, and `ros2 service type` then blocks forever. Start a fresh one.
-  timeout 10 ros2 daemon stop >/dev/null 2>&1 || pkill -u "$(id -u)" -f 'ros2cli.daemon' || true
+  # answers nothing, and `ros2 service type` then blocks forever. A wedged daemon ignores
+  # both `daemon stop` and SIGTERM, so kill it; the next ros2 command starts a fresh one.
+  timeout 10 ros2 daemon stop >/dev/null 2>&1 || pkill -KILL -u "$(id -u)" -f 'ros2cli.daemon' || true
 }
 disarm() {
   local response deadline=$((SECONDS + 90))
