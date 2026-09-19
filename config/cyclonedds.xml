@@ -5,6 +5,12 @@
 <CycloneDDS xmlns="https://cdds.io/config">
   <Domain id="any">
     <General>
+      <!-- DDS never leaves the machine: TTL 0 keeps discovery multicast on
+           this host, so no remote participant is ever found. Topics that must
+           cross (device sensors) ride zenoh over one TCP link instead
+           (config/zenoh_device.json5); DDS multicast discovery over Wi-Fi
+           silently lost any node that restarted after a router hiccup. -->
+      <MulticastTimeToLive>0</MulticastTimeToLive>
       <!-- RGB-D frames are much larger than an Ethernet MTU.  The default
            14,720 B UDP payload is IP-fragmented on the robot Wi-Fi link; one
            lost IP fragment discards the whole DDS sample. -->

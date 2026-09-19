@@ -1,0 +1,34 @@
+// Device-side half of the sensor bridge (lekiwi-zenoh.service).
+//
+// DDS stays on each machine (cyclonedds.xml: MulticastTimeToLive 0). This
+// bridge carries the device's sensor topics to the compute machine over one
+// TCP link, so no router has to pass DDS multicast discovery. It only exports:
+// nothing on the network can publish into the device's DDS through it.
+{
+  plugins: {
+    ros2dds: {
+      allow: {
+        publishers: [
+          "^/pi/lidar/scan$",
+          "^/pi/camera/.*",
+          "^/camera/depth/points$",
+          "^/camera/astra/color/(image_raw|camera_info)$",
+        ],
+        subscribers: [],
+        service_servers: [],
+        service_clients: [],
+        action_servers: [],
+        action_clients: [],
+      },
+      // Raw Astra color is only an RViz preview; cap it so it never crowds
+      // the lidar and depth cloud out of the Wi-Fi link.
+      pub_max_frequencies: ["^/camera/astra/color/image_raw$=2"],
+    },
+  },
+  mode: "peer",
+  // DEBT: plaintext, unauthenticated zenoh, readable by anyone who can reach
+  // port 7447 -- the same exposure the multicast DDS it replaces had. Add
+  // mTLS (transport.link.tls) before the robot joins an untrusted network.
+  listen: { endpoints: ["tcp/0.0.0.0:7447"] },
+  scouting: { multicast: { enabled: false }, gossip: { enabled: false } },
+}

@@ -193,8 +193,8 @@ def test_standard_installers_start_and_relay_the_host_lidar_without_an_opt_in():
     device = (ROOT / "scripts" / "install-device-services.sh").read_text(encoding="utf-8")
 
     assert "--remote-lidar" not in installer
-    assert "units=(lekiwi-host.service lekiwi-lidar.service)" in device
-    assert "as_root systemctl enable --now lekiwi-lidar.service" in device
+    assert "units=(lekiwi-host.service lekiwi-lidar.service lekiwi-zenoh.service)" in device
+    assert "as_root systemctl enable --now lekiwi-lidar.service lekiwi-zenoh.service" in device
     assert "ldlidar_stl_ros2 is unavailable; the standard device installation requires the LD06 driver" in device
     assert 'install-deploy-sudoers.sh" device --user "$LEKIWI_SERVICE_USER"' in device
     assert 'install-deploy-sudoers.sh" compute --user "$LEKIWI_SERVICE_USER"' in installer
@@ -203,7 +203,7 @@ def test_standard_installers_start_and_relay_the_host_lidar_without_an_opt_in():
 
 
 def test_sensor_services_keep_retrying_after_intermittent_usb_resets():
-    for name in ("lekiwi-astra.service", "lekiwi-cameras.service", "lekiwi-lidar.service"):
+    for name in ("lekiwi-astra.service", "lekiwi-cameras.service", "lekiwi-lidar.service", "lekiwi-zenoh.service"):
         unit = (ROOT / "systemd" / name).read_text(encoding="utf-8")
         assert "StartLimitIntervalSec=0" in unit
         assert "Restart=always" in unit

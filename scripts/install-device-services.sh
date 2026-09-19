@@ -7,6 +7,7 @@
 #   lekiwi-astra.service    Astra Pro RGB-D publisher
 #   lekiwi-cameras.service  v4l2_camera publishers for this machine's cameras
 #   lekiwi-lidar.service    private LD06 scan publisher for the compute stack
+#   lekiwi-zenoh.service    exports the sensor topics to the compute stack
 #
 # Cameras are read here by ROS nodes and never by the motor host: one reader
 # per device, and a stalled camera frame must not take the motor bus down.
@@ -171,6 +172,8 @@ fi
 
 log "Installing lekiwi-lidar.service"
 install_unit lekiwi-lidar.service
+log "Installing lekiwi-zenoh.service"
+install_unit lekiwi-zenoh.service
 log "Installing ROS log rotation"
 install_log_rotation
 if [[ $camera_ros_available == true && -z "$(first_match '/dev/v4l/by-id/*WEBCAM*-video-index0')" ]]; then
@@ -184,7 +187,7 @@ if ! grep -qE '^image_width:[[:space:]]*[1-9][0-9]*' "$calibration" 2>/dev/null;
   log "Run scripts/calibrate-camera.sh on this machine first (stop its service while calibrating)."
 fi
 
-units=(lekiwi-host.service lekiwi-lidar.service)
+units=(lekiwi-host.service lekiwi-lidar.service lekiwi-zenoh.service)
 [[ $astra_ros_available == true ]] && units+=(lekiwi-astra.service)
 [[ $camera_ros_available == true ]] && units+=(lekiwi-cameras.service)
 log "Validating rendered systemd units"
@@ -202,7 +205,7 @@ elif [[ $astra_ros_available == true ]]; then
 else
   as_root systemctl enable --now lekiwi-host.service
 fi
-as_root systemctl enable --now lekiwi-lidar.service
+as_root systemctl enable --now lekiwi-lidar.service lekiwi-zenoh.service
 as_root systemctl enable --now lekiwi-ros-logrotate.timer
 
 log "Granting $LEKIWI_SERVICE_USER non-interactive deployment control"

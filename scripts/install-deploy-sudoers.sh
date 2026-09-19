@@ -42,7 +42,8 @@ systemctl=/usr/bin/systemctl
 if [[ $role == compute ]]; then
   units=(lekiwi-stack.service)
 else
-  units=(lekiwi-host.service lekiwi-astra.service lekiwi-cameras.service lekiwi-lidar.service)
+  units=(lekiwi-host.service lekiwi-astra.service lekiwi-cameras.service lekiwi-lidar.service \
+    lekiwi-zenoh.service)
 fi
 
 commands=()

@@ -1,0 +1,24 @@
+// Compute-side half of the sensor bridge; see zenoh_device.json5. The launch
+// file adds the device's endpoint (-e tcp/<remote_ip>:7447).
+{
+  plugins: {
+    ros2dds: {
+      allow: {
+        publishers: [],
+        subscribers: [
+          "^/pi/lidar/scan$",
+          "^/pi/camera/.*",
+          "^/camera/depth/points$",
+          "^/camera/astra/color/(image_raw|camera_info)$",
+        ],
+        service_servers: [],
+        service_clients: [],
+        action_servers: [],
+        action_clients: [],
+      },
+    },
+  },
+  // A client never listens and keeps reconnecting to the device on its own.
+  mode: "client",
+  scouting: { multicast: { enabled: false }, gossip: { enabled: false } },
+}

@@ -60,6 +60,15 @@ else
   echo "lidar: starting (waits for the LD06 serial port)"
 fi
 
+# The only way the sensors above reach the compute machine: DDS stays local.
+if systemctl is-active --quiet lekiwi-zenoh.service 2>/dev/null ||
+    pgrep -f '[z]enoh-bridge-ros2dds' >/dev/null; then
+  echo "sensor bridge: already running"
+else
+  setsid scripts/ros-zenoh.sh >"$LOGS/zenoh.log" 2>&1 &
+  echo "sensor bridge: starting"
+fi
+
 flock -u 9
 exec 9>&-
 echo "device side ready -- logs in $LOGS"

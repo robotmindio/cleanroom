@@ -234,6 +234,10 @@ remote_unit_active lekiwi-cameras.service || die "lekiwi-cameras.service did not
 "${ssh_command[@]}" sudo -n /usr/bin/systemctl reset-failed lekiwi-lidar.service
 "${ssh_command[@]}" sudo -n /usr/bin/systemctl start lekiwi-lidar.service
 remote_unit_active lekiwi-lidar.service || die "lekiwi-lidar.service did not become active"
+# Restart, not start: the bridge reads its allow-list from the source tree.
+"${ssh_command[@]}" sudo -n /usr/bin/systemctl reset-failed lekiwi-zenoh.service
+"${ssh_command[@]}" sudo -n /usr/bin/systemctl restart lekiwi-zenoh.service
+remote_unit_active lekiwi-zenoh.service || die "lekiwi-zenoh.service did not become active"
 
 log "Starting the compute stack disarmed"
 sudo -n /usr/bin/systemctl reset-failed lekiwi-stack.service

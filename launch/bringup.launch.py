@@ -695,6 +695,18 @@ def generate_launch_description():
                 condition=IfCondition(ld06),
                 output="screen",
             ),
+            # Device sensors cross the network only through zenoh: DDS stays on
+            # each machine (cyclonedds.xml), and the device's lekiwi-zenoh
+            # service exports exactly the topics this bridge imports.
+            ExecuteProcess(
+                cmd=[
+                    "zenoh-bridge-ros2dds",
+                    "-c", PathJoinSubstitution([package, "config", "zenoh_compute.json5"]),
+                    "-e", ["tcp/", remote_ip, ":7447"],
+                ],
+                condition=IfCondition(PythonExpression([remote_camera, " or ", remote_ld06])),
+                respawn=True, respawn_delay=5.0, output="screen",
+            ),
             Node(
                 package="topic_tools",
                 executable="relay",

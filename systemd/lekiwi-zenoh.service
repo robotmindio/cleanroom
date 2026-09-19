@@ -1,0 +1,39 @@
+# Sensor bridge on the device machine: exports its sensor topics to the
+# compute stack over one zenoh TCP link (config/zenoh_device.json5).
+[Unit]
+Description=LeKiwi sensor bridge (zenoh)
+Documentation=file://@PROJECT_ROOT@/HARDWARE.md
+After=network-online.target
+Wants=network-online.target
+# Keep retrying through network outages instead of exhausting systemd's
+# restart budget.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=@SERVICE_USER@
+Environment=HOME=@SERVICE_HOME@
+Environment=LEKIWI_WS=@WORKSPACE@
+WorkingDirectory=@PROJECT_ROOT@
+ExecStart=@PROJECT_ROOT@/scripts/ros-zenoh.sh
+# A broken link must not fill journald/rsyslog before it recovers.
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=1000
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectControlGroups=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+LockPersonality=true
+RestrictSUIDSGID=true
+UMask=0077
+# The self-heal watcher kills the bridge on a network change; always restart.
+Restart=always
+RestartSec=10s
+TimeoutStopSec=20s
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target
