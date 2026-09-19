@@ -7,7 +7,7 @@ import types
 from rclpy.qos import DurabilityPolicy, ReliabilityPolicy
 from lifecycle_msgs.msg import State
 from nav_msgs.msg import OccupancyGrid, Odometry
-from sensor_msgs.msg import Image, LaserScan
+from sensor_msgs.msg import Image, LaserScan, PointCloud2
 
 from lekiwi_rmf.readiness_gate import ReadinessGate, TOPIC_TYPES, topic_qos
 
@@ -16,7 +16,7 @@ ROOT = pathlib.Path(__file__).parents[1]
 
 
 def test_readiness_gate_supports_the_bringup_dependencies():
-    assert set(TOPIC_TYPES) == {"image", "odom", "map", "scan"}
+    assert set(TOPIC_TYPES) == {"image", "odom", "map", "scan", "cloud"}
 
 
 def test_topic_gate_requires_semantically_usable_messages():
@@ -52,6 +52,13 @@ def test_topic_gate_requires_semantically_usable_messages():
     assert not gate._ready
     scan.ranges = [float("inf"), 1.5]
     gate._on_message(scan)
+    assert gate._ready
+
+    cloud = PointCloud2()
+    gate._on_message(cloud)
+    assert not gate._ready
+    cloud.width, cloud.height, cloud.data = 1, 1, b"\0" * 12
+    gate._on_message(cloud)
     assert gate._ready
 
 

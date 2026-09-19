@@ -22,7 +22,7 @@ from rclpy.action import ActionClient
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
-from sensor_msgs.msg import Image, LaserScan
+from sensor_msgs.msg import Image, LaserScan, PointCloud2
 
 
 TOPIC_TYPES = {
@@ -30,6 +30,7 @@ TOPIC_TYPES = {
     "odom": Odometry,
     "map": OccupancyGrid,
     "scan": LaserScan,
+    "cloud": PointCloud2,
 }
 
 
@@ -48,7 +49,7 @@ def topic_qos(topic_type: str) -> QoSProfile:
             reliability=ReliabilityPolicy.RELIABLE,
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
         )
-    if topic_type == "scan":
+    if topic_type in ("scan", "cloud"):
         # Laser drivers publish sensor-data (best-effort) QoS; a reliable
         # subscription would never match them.
         return QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT)
@@ -98,8 +99,10 @@ class ReadinessGate(Node):
         else:
             raise ValueError(f"unsupported readiness kind: {kind}")
 
-    def _on_message(self, message: Image | Odometry | OccupancyGrid | LaserScan) -> None:
-        if isinstance(message, LaserScan):
+    def _on_message(self, message: Image | Odometry | OccupancyGrid | LaserScan | PointCloud2) -> None:
+        if isinstance(message, PointCloud2):
+            self._ready = message.width * message.height > 0 and bool(message.data)
+        elif isinstance(message, LaserScan):
             self._ready = any(
                 math.isfinite(value) and message.range_min <= value <= message.range_max
                 for value in message.ranges

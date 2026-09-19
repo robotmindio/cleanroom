@@ -182,14 +182,21 @@ def generate_launch_description():
     # real message/action server is available, then starts its dependent stage.
     # A failed camera, driver, or mapper therefore leaves downstream motion and
     # fleet components stopped instead of launching a noisy degraded stack.
-    # SLAM waits for the sensor it maps with: the laser whenever there is one, so
-    # a camera that drops off USB never holds the map (and Nav2) back.
+    # SLAM waits for the sensor it maps with: the merged lidar/Astra cloud
+    # whenever there is a laser, so one sensor dropping off USB never holds the
+    # map (and Nav2) back.
+    slam_cloud = Node(
+        package="lekiwi_rmf", executable="slam_cloud", name="slam_cloud",
+        parameters=[{"use_sim_time": ParameterValue(sim, value_type=bool)}],
+        condition=IfCondition(PythonExpression([visual_slam, " and ", lidar_on])),
+        output="screen",
+    )
     slam_sensor_gate = Node(
         package="lekiwi_rmf", executable="readiness_gate", name="wait_for_slam_sensor",
         parameters=[{
             "kind": "topic",
-            "topic": PythonExpression(["'/scan' if ", lidar_on, " else '", slam_rgb_topic, "'"]),
-            "topic_type": PythonExpression(["'scan' if ", lidar_on, " else 'image'"]),
+            "topic": PythonExpression(["'/slam/cloud' if ", lidar_on, " else '", slam_rgb_topic, "'"]),
+            "topic_type": PythonExpression(["'cloud' if ", lidar_on, " else 'image'"]),
         }],
         condition=IfCondition(visual_slam), output="screen",
     )
@@ -226,17 +233,22 @@ def generate_launch_description():
         parameters=[{
             "use_sim_time": ParameterValue(sim, value_type=bool),
             "frame_id": "base_footprint", "map_frame_id": "map", "odom_frame_id": "odom",
-            # With a laser, map from scans alone (ICP): the grid already comes
-            # from the laser, and the camera only added visual loop closures at
-            # the price of stalling SLAM whenever it disconnected. Without a
-            # laser, fall back to RGB so there is still something to map with.
+            # With a laser, map from the merged lidar/Astra cloud (ICP), which
+            # keeps flowing while either sensor is alive. RGB over this Wi-Fi
+            # is too slow for visual SLAM and would stall it on every camera
+            # dropout. Without a laser, fall back to RGB so there is still
+            # something to map with.
             "database_path": rtabmap_database,
             "subscribe_rgb": ParameterValue(PythonExpression(["not ", lidar_on]), value_type=bool),
             "Reg/Strategy": ParameterValue(PythonExpression(["'1' if ", lidar_on, " else '0'"]), value_type=str),
             "Icp/VoxelSize": "0.05", "Icp/MaxCorrespondenceDistance": "0.1",
             "Icp/PointToPlane": "false", "RGBD/ProximityPathMaxNeighbors": "10",
             "subscribe_depth": False,
-            "subscribe_rgbd": False, "subscribe_scan": ParameterValue(lidar_on, value_type=bool),
+            "subscribe_rgbd": False, "subscribe_scan": False,
+            "subscribe_scan_cloud": ParameterValue(lidar_on, value_type=bool),
+            # slam_cloud already removed the floor; project every point.
+            "Grid/3D": "false", "Grid/NormalsSegmentation": "false", "Grid/RayTracing": "true",
+            "Grid/MaxObstacleHeight": "1.0",
             "subscribe_odom_info": False, "approx_sync": True, "publish_tf": True,
             "qos_image": 1, "qos_camera_info": 1, "qos_scan": 1, "qos_odom": 1,
             "Rtabmap/MemoryThr": ParameterValue(LaunchConfiguration("rtabmap_wm_nodes"), value_type=str),
@@ -250,7 +262,7 @@ def generate_launch_description():
             ("rgb/image", slam_rgb_topic), ("rgb/camera_info", slam_camera_info_topic),
             ("depth/image", "/camera/astra/depth/image_raw"),
             ("depth/camera_info", "/camera/astra/depth/camera_info"),
-            ("odom", "/odom"), ("scan", "/scan"), ("map", rtabmap_map_topic),
+            ("odom", "/odom"), ("scan_cloud", "/slam/cloud"), ("map", rtabmap_map_topic),
             ("grid_map", "/rtabmap/grid_map"),
         ],
         condition=IfCondition(visual_slam), output="screen",
@@ -823,6 +835,7 @@ def generate_launch_description():
             # RTAB-Map starts only after a real sensor sample. Nav2 then
             # waits for odometry and the resulting map; fixed delays made both
             # components race slow sensors and telemetry reconnects.
+            slam_cloud,
             slam_sensor_gate,
             RegisterEventHandler(OnProcessExit(
                 target_action=slam_sensor_gate,
