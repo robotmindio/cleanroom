@@ -12,6 +12,8 @@ set -Eeuo pipefail
 cd "$(dirname "$0")/.."
 # shellcheck source=/dev/null
 source scripts/lib/runtime-common.sh
+# shellcheck source=/dev/null
+source scripts/lib/self-heal.sh
 load_lekiwi_env
 if [[ -n ${LEKIWI_ROBOT_HOST:-} ]]; then
   use_env_host=true
@@ -101,6 +103,7 @@ fi
 front_camera_info="file://${LEKIWI_CAMERA_INFO:-$HOME/.ros/camera_info/lekiwi_front.yaml}"
 wrist_camera_info="file://${LEKIWI_WRIST_CAMERA_INFO:-$HOME/.ros/camera_info/lekiwi_wrist.yaml}"
 
+self_heal
 exec ros2 launch lekiwi_rmf bringup.launch.py mode:=real \
   camera_source:="$camera_source" \
   camera_device:="$FRONT" wrist_camera_device:="${WRIST:-none}" \

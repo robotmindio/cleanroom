@@ -73,3 +73,14 @@ With the robot powered off, check the battery/power switch, servo-bus power lead
 and the USB-to-servo-controller data cable. Restore power and reseat those two
 connections, then run `scripts/up.sh` again. A successful host startup prints
 `host: up`; it must do so before any ROS navigation or arm issue can be diagnosed.
+
+## Topics go silent after a Wi-Fi change or a USB re-enumeration
+
+Cyclone DDS binds its network interface once, and a serial node keeps a dead handle
+after its USB device re-enumerates. Neither makes the process exit, so the service
+looked healthy while publishing nothing. Under systemd, the wrappers now watch for
+this (`scripts/lib/self-heal.sh`): a removed or added IPv4 address on a real
+interface, or a replaced lidar serial node, kills the service's main process and
+systemd restarts it within about 15 seconds. The journal line to look for is
+`self-heal: ... letting systemd restart the service`. Manual runs (`scripts/up.sh`)
+are not supervised; restart them after changing networks.

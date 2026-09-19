@@ -5,6 +5,8 @@ set -Eeuo pipefail
 cd "$(dirname "$0")/.."
 # shellcheck source=/dev/null
 source scripts/lib/runtime-common.sh
+# shellcheck source=/dev/null
+source scripts/lib/self-heal.sh
 
 if [ -f "${LEKIWI_WS:-$HOME/lekiwi_ws}/install/setup.bash" ]; then
   set +u
@@ -16,4 +18,5 @@ else
   source scripts/setup-pi.bash
 fi
 
+self_heal
 exec ros2 launch lekiwi_rmf pi_astra.launch.py

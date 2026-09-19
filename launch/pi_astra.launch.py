@@ -27,10 +27,10 @@ def generate_launch_description():
                 # the USB-owning machine and publish the compact result below.
                 ("/depth/points", "/camera/depth/points_raw"),
             ],
-            output="screen",
+            output="screen", respawn=True, respawn_delay=5.0,
         ),
         Node(
             package="lekiwi_rmf", executable="astra_cloud_filter", name="astra_cloud_filter",
-            output="screen",
+            output="screen", respawn=True, respawn_delay=5.0,
         ),
     ])

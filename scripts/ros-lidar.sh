@@ -3,6 +3,8 @@
 set -Eeuo pipefail
 
 cd "$(dirname "$0")/.."
+# shellcheck source=/dev/null
+source scripts/lib/self-heal.sh
 workspace=${LEKIWI_WS:-$HOME/lekiwi_ws}
 if [ -f "$workspace/install/setup.bash" ]; then
   set +u
@@ -30,6 +32,7 @@ if [ ! -e "$PORT" ]; then
   done
 fi
 
+self_heal "$PORT"
 exec ros2 run ldlidar_stl_ros2 ldlidar_stl_ros2_node --ros-args \
   -p product_name:=LDLiDAR_LD06 -p topic_name:=/pi/lidar/scan \
   -p frame_id:=laser -p port_name:="$PORT" -p port_baudrate:=230400
