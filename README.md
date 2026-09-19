@@ -268,7 +268,7 @@ telemetry and current permission from the continuous safety supervisor. A host
 session change, stale/failed telemetry, or withdrawn permission cancels the
 interrupted trajectory, stops the base, freezes the arm at its present position,
 and remains disarmed after recovery. Torque stays on and `TORQUE_FAULT` is never
-latched by a failure; only an explicit `/safety/disarm` cuts servo torque. To cut
+latched by a failure or an unconfirmed disarm; only an explicit `/safety/disarm` cuts servo torque. To cut
 torque on every failure instead, set `LEKIWI_DISABLE_TORQUE_ON_FAILURE=true` in
 `.env` on both the workstation and the robot computer (launch argument
 `disable_torque_on_failure:=true`, host option `--safety.disable_torque_on_failure=true`).

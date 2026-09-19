@@ -787,7 +787,7 @@ def test_failure_stops_motion_but_never_cuts_or_latches_torque_by_default():
     assert node.states == ["LINK_LOST"]
 
 
-def test_explicit_disarm_still_cuts_torque_and_reports_an_unconfirmed_cut():
+def test_explicit_disarm_cuts_torque_and_reports_but_never_latches_an_unconfirmed_cut():
     node = hold_mode_node()
     response = types.SimpleNamespace()
 
@@ -795,7 +795,13 @@ def test_explicit_disarm_still_cuts_torque_and_reports_an_unconfirmed_cut():
 
     assert node.torque_requests == [False]
     assert response.success is False
+    assert node.torque_fault is False
+    assert node.states == ["DISARMED"]
+
+    node.disable_torque_on_failure = True
+    node.disarm(None, response)
     assert node.torque_fault is True
+    assert node.states[-1] == "TORQUE_FAULT"
 
 
 def test_opt_in_restores_cutting_torque_on_failure():
