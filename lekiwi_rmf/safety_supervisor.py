@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import math
 import struct
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
 from typing import Optional
@@ -171,6 +171,13 @@ class SafetyStateMachine:
         self.base_ever_ready = True
         self.arm_ever_ready = True
         return True, "safety fault reset; robot remains disarmed"
+
+
+def permit_unless_strict(decision: SafetyDecision, strict: bool) -> SafetyDecision:
+    """Report the findings, but let a non-strict (domestic) robot move regardless."""
+    if strict:
+        return decision
+    return replace(decision, base_permitted=True, arm_permitted=True)
 
 
 def _seconds_to_ns(value: float, name: str) -> int:
@@ -579,9 +586,10 @@ class SafetySupervisor(Node):
         self.declare_parameter("permission_timeout", 0.5)
         self.declare_parameter("battery_timeout", 2.0)
         self.declare_parameter("require_scan", True)
-        # false (default): the robot recovers by itself when a failed input returns.
-        # true (larger robots): any fault latches until /safety/reset_fault.
-        self.declare_parameter("latch_faults", False)
+        # false (default, domestic robot): the supervisor reports its findings but does not
+        # withhold motion, and nothing latches. true (larger robots): missing or unhealthy
+        # inputs deny motion, and any fault latches until /safety/reset_fault.
+        self.declare_parameter("strict", False)
         self.declare_parameter("require_driver_state", True)
         self.declare_parameter("require_full_scan", True)
         self.declare_parameter("minimum_scan_coverage", 6.0)
@@ -665,7 +673,7 @@ class SafetySupervisor(Node):
             requirements,
             driver_state="DISARMED" if require_driver_state else "ARMED",
             arm_stowed=not require_joint_states,
-            latch_faults=bool(self.get_parameter("latch_faults").value),
+            latch_faults=bool(self.get_parameter("strict").value),
         )
         if bool(self.get_parameter("require_acceptance").value):
             requirements["acceptance"] = Requirement(2**62)
@@ -851,7 +859,9 @@ class SafetySupervisor(Node):
         return response
 
     def _publish(self) -> None:
-        decision = self._machine.decision(self._now())
+        decision = permit_unless_strict(
+            self._machine.decision(self._now()), bool(self.get_parameter("strict").value)
+        )
         state = String()
         state.data = decision.state.value
         base = Bool()

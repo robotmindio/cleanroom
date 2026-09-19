@@ -283,11 +283,12 @@ ros2 service call /safety/arm std_srvs/srv/Trigger '{}'
 
 `/safety/state` reports the driver's `DISARMED`, `ARMED`, or `LINK_LOST` state.
 The supervisor publishes `safety/supervisor_state`,
-`safety/base_motion_permitted`, and `safety/arm_motion_permitted`. By default
-permission is withdrawn while an input is unhealthy and returns by itself when it
-recovers; with `LEKIWI_DISARM_ON_FAILURE=true` runtime faults latch until
-`/safety/reset_fault` is called while the driver is disarmed and all inputs are
-healthy. An e-stop always latches. `/safety/disarm` stops ROS commands and
+`safety/base_motion_permitted`, and `safety/arm_motion_permitted`. By default (real
+mode, domestic robot) it reports missing or unhealthy inputs in `/diagnostics` but does
+not withhold motion. With `LEKIWI_DISARM_ON_FAILURE=true`, and always in simulation,
+missing or unhealthy inputs deny motion and runtime faults latch until
+`/safety/reset_fault` is called while the driver is disarmed and all inputs are healthy.
+An e-stop always latches in that mode. `/safety/disarm` stops ROS commands and
 waits for the motor host to confirm that it cut torque on all nine servos.
 The host always restarts torque-off. `/safety/arm` holds each arm joint at its
 measured position, sends zero wheel velocity, and requires an explicit fresh
@@ -296,8 +297,9 @@ mechanical, or process failure.
 
 ### Production safety prerequisites
 
-Real mode loads `config/safety_production.yaml`. It denies base and arm motion
-until the following current, stamped inputs are present and healthy:
+Real mode loads `config/safety_production.yaml`. With `LEKIWI_DISARM_ON_FAILURE=true`
+(larger robots) it denies base and arm motion until the following current, stamped
+inputs are present and healthy. By default the supervisor only reports them:
 
 | Input | Topic | Purpose |
 | --- | --- | --- |

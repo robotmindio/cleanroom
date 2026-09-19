@@ -458,3 +458,18 @@ def test_an_estop_still_latches_when_fault_latching_is_off():
     machine.update("estop", False, SECOND)
 
     assert machine.decision(SECOND).state == SafetyState.ESTOP
+
+
+def test_a_non_strict_supervisor_reports_faults_but_never_withholds_motion():
+    from lekiwi_rmf.safety_supervisor import permit_unless_strict
+
+    machine = _machine()  # nothing has reported: default-deny in the state machine
+    denied = machine.decision(SECOND)
+    assert denied.state == SafetyState.BOOT
+    assert not denied.base_permitted and not denied.arm_permitted and denied.faults
+
+    domestic = permit_unless_strict(denied, strict=False)
+    assert domestic.base_permitted and domestic.arm_permitted
+    assert domestic.state == SafetyState.BOOT and domestic.faults == denied.faults
+
+    assert permit_unless_strict(denied, strict=True) == denied

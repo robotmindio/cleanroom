@@ -262,4 +262,14 @@ printf '%s\n' "$target" > "$marker"
 [[ $("${ssh_command[@]}" git -C "$remote_repo" rev-parse HEAD) == "$target" ]] || \
   die "device revision changed during deployment"
 trap - EXIT
-echo "deployed ${target:0:12} to compute and $device; robot remains disarmed"
+# The verification above left the driver deliberately disarmed. A domestic robot stays
+# armed, so arm it again; only LEKIWI_DISARM_ON_FAILURE=true keeps it disarmed for an operator.
+outcome="robot remains disarmed"
+if [[ ${LEKIWI_DISARM_ON_FAILURE:-false} != true ]]; then
+  if wait_for 60 sh -c "ros2 service call /safety/arm std_srvs/srv/Trigger '{}' | grep -q 'success=True'"; then
+    outcome="robot armed"
+  else
+    outcome="robot could not be armed (run: ros2 service call /safety/arm std_srvs/srv/Trigger '{}')"
+  fi
+fi
+echo "deployed ${target:0:12} to compute and $device; $outcome"
