@@ -734,6 +734,7 @@ def generate_launch_description():
                 executable="safety_supervisor",
                 name="safety_supervisor",
                 parameters=[safety_params_file, {
+                    "latch_faults": ParameterValue(disarm_on_failure, value_type=bool),
                     "acceptance_file": safety_acceptance_file,
                     # A validated physical record is accepted only when its
                     # measured stopping distance still fits this exact tracked

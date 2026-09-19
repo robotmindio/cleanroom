@@ -66,7 +66,11 @@ class SafetyDecision:
 
 @dataclass
 class SafetyStateMachine:
-    """Default-deny, fault-latching health evaluator."""
+    """Default-deny health evaluator. Faults latch only when latch_faults is set.
+
+    Without latching, permission is withdrawn while an input is unhealthy and returns
+    by itself when it recovers. An e-stop always latches: it is an operator action.
+    """
 
     requirements: dict[str, Requirement]
     samples: dict[str, InputSample] = field(default_factory=dict)
@@ -74,6 +78,7 @@ class SafetyStateMachine:
     arm_stowed: bool = False
     fault_latched: bool = False
     estop_latched: bool = False
+    latch_faults: bool = True
     base_ever_ready: bool = False
     arm_ever_ready: bool = False
 
@@ -85,7 +90,7 @@ class SafetyStateMachine:
             self.estop_latched = True
         elif not healthy:
             requirement = self.requirements[name]
-            if (
+            if self.latch_faults and (
                 (requirement.base and self.base_ever_ready)
                 or (requirement.arm and self.arm_ever_ready)
             ):
@@ -115,9 +120,9 @@ class SafetyStateMachine:
             all_faults = (*all_faults, "driver: link lost")
             base_faults = (*base_faults, "driver: link lost")
             arm_faults = (*arm_faults, "driver: link lost")
-            if self.base_ever_ready or self.arm_ever_ready:
+            if self.latch_faults and (self.base_ever_ready or self.arm_ever_ready):
                 self.fault_latched = True
-        elif (
+        elif self.latch_faults and (
             (base_faults and self.base_ever_ready)
             or (arm_faults and self.arm_ever_ready)
         ):
@@ -574,6 +579,9 @@ class SafetySupervisor(Node):
         self.declare_parameter("permission_timeout", 0.5)
         self.declare_parameter("battery_timeout", 2.0)
         self.declare_parameter("require_scan", True)
+        # false (default): the robot recovers by itself when a failed input returns.
+        # true (larger robots): any fault latches until /safety/reset_fault.
+        self.declare_parameter("latch_faults", False)
         self.declare_parameter("require_driver_state", True)
         self.declare_parameter("require_full_scan", True)
         self.declare_parameter("minimum_scan_coverage", 6.0)
@@ -657,6 +665,7 @@ class SafetySupervisor(Node):
             requirements,
             driver_state="DISARMED" if require_driver_state else "ARMED",
             arm_stowed=not require_joint_states,
+            latch_faults=bool(self.get_parameter("latch_faults").value),
         )
         if bool(self.get_parameter("require_acceptance").value):
             requirements["acceptance"] = Requirement(2**62)

@@ -413,3 +413,48 @@ def test_battery_unknown_soc_is_nan_only_and_invalid_values_fail_closed():
     battery.percentage = 0.5
     battery.voltage = math.nan
     assert not _valid_battery(battery, 10.5, 0.1)
+
+
+def test_without_latching_permission_returns_by_itself_when_an_input_recovers():
+    machine = _machine()
+    machine.latch_faults = False
+    _healthy(machine)
+    machine.driver_state = "ARMED"
+    assert machine.decision(SECOND).state == SafetyState.ARMED
+
+    # A stale scan withdraws base permission but latches nothing.
+    stale = machine.decision(3 * SECOND)
+    assert not stale.base_permitted
+    assert not machine.fault_latched
+    assert stale.state != SafetyState.FAULT_LATCHED
+
+    for name in machine.requirements:
+        machine.update(name, True, 3 * SECOND)
+    assert machine.decision(3 * SECOND).base_permitted
+
+
+def test_without_latching_a_link_loss_recovers_when_the_driver_reports_disarmed_again():
+    machine = _machine()
+    machine.latch_faults = False
+    _healthy(machine)
+    machine.driver_state = "ARMED"
+    assert machine.decision(SECOND).arm_permitted
+
+    machine.driver_state = "LINK_LOST"
+    lost = machine.decision(SECOND)
+    assert not lost.base_permitted and not lost.arm_permitted
+    assert not machine.fault_latched
+
+    machine.driver_state = "DISARMED"
+    # The disarmed driver can bootstrap its automatic re-arm from the readiness leases.
+    assert machine.decision(SECOND).state == SafetyState.READY
+    assert machine.decision(SECOND).arm_permitted
+
+
+def test_an_estop_still_latches_when_fault_latching_is_off():
+    machine = _machine()
+    machine.latch_faults = False
+    _healthy(machine)
+    machine.update("estop", False, SECOND)
+
+    assert machine.decision(SECOND).state == SafetyState.ESTOP
