@@ -124,11 +124,13 @@ def test_sensor_calibration_has_one_xacro_source_for_all_model_consumers():
     assert 'file_path="urdf/lekiwi.urdf.xacro"' in moveit
 
 
-def test_rviz_shows_astra_from_a_fixed_frame_available_without_odometry():
+def test_rviz_draws_the_robot_over_a_still_map():
     rviz = (ROOT / "config" / "lekiwi.rviz").read_text()
     launcher = (ROOT / "scripts" / "rviz.sh").read_text()
 
-    assert "Fixed Frame: base_link" in rviz
+    # The map stays put for goal clicking; the orbit view still follows the robot.
+    assert "Fixed Frame: map" in rviz
+    assert "Target Frame: base_link" in rviz
     assert "Name: Astra RGB" in rviz
     assert "Value: /camera/astra/color/image_raw" in rviz
     assert "Value: /camera/front/image_raw" in rviz
