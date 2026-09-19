@@ -71,6 +71,19 @@ def enable_with_rollback(enable_steps, rollback_steps):
         raise RuntimeError(f"enable transaction failed: {enable_error}{suffix}") from enable_error
 
 
+def react_to_command_silence(disable_torque_on_failure: bool, cut_torque, hold_position) -> str:
+    """Stop the robot when commands stop arriving; cut servo torque only if opted in.
+
+    By default the arm is frozen at its present position and the base is stopped
+    with torque left on, so a dropped link never leaves the arm limp.
+    """
+    if disable_torque_on_failure:
+        cut_torque()
+        return "cut"
+    hold_position()
+    return "hold"
+
+
 def validated_bind_address(value: str) -> str:
     """Accept an IPv4 control interface, including the all-interface bind."""
     try:

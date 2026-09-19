@@ -25,8 +25,8 @@ from lerobot.robots.lekiwi.config_lekiwi import LeKiwiConfig, LeKiwiHostConfig
 from lerobot.robots.lekiwi.lekiwi import LeKiwi
 
 from lekiwi_rmf.torque_control import (
-    enable_with_rollback, run_all_safety_steps, torque_readback_matches,
-    validate_action_payload, validated_bind_address,
+    enable_with_rollback, react_to_command_silence, run_all_safety_steps,
+    torque_readback_matches, validate_action_payload, validated_bind_address,
 )
 from lekiwi_rmf.arm_trajectory import ARM_JOINTS
 from lekiwi_rmf.zmq_security import CurveServerSecurity
@@ -50,6 +50,9 @@ class TorqueSafetyConfig:
     port_zmq: int = 5557
     state_file: str = "~/.ros/lekiwi/servo_torque_state"
     bind_address: str = "0.0.0.0"
+    # False: command silence stops the base and freezes the arm with torque left on.
+    # True: it cuts all servo torque.
+    disable_torque_on_failure: bool = False
 
 
 @dataclass
@@ -462,16 +465,23 @@ def main(cfg: TorqueHostConfig):
                 and not watchdog_active
                 and watchdog_now >= next_watchdog_attempt
             ):
-                logging.warning("Command watchdog elapsed; cutting all servo torque")
                 next_watchdog_attempt = watchdog_now + 0.25
                 try:
-                    control._disable(robot)
+                    outcome = react_to_command_silence(
+                        cfg.safety.disable_torque_on_failure,
+                        lambda: control._disable(robot),
+                        lambda: control._hold_present_arm_position(robot),
+                    )
+                    logging.warning(
+                        "Command watchdog elapsed; %s",
+                        "cut all servo torque" if outcome == "cut"
+                        else "stopped the base and froze the arm, torque unchanged",
+                    )
                     watchdog_active = True
                 except Exception:
-                    # A failed physical cut is retried at a bounded rate; one
-                    # failed bus transaction must not permanently suppress the
-                    # host's autonomous fail-safe.
-                    logging.exception("Command watchdog could not confirm torque-off")
+                    # A failed bus transaction is retried at a bounded rate; it
+                    # must not permanently suppress the host's autonomous fail-safe.
+                    logging.exception("Command watchdog action was not confirmed")
 
             observation = robot.get_observation()
             sample_monotonic_ns = time.monotonic_ns()

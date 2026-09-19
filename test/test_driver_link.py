@@ -20,7 +20,7 @@ _NODE.body = [
         "handle_host_session_change",
         "enforce_reported_torque_state",
         "arm_after_startup_telemetry", "on_command", "publish_safety", "publish_state", "publish_motor_health",
-        "set_disarmed", "set_servo_torque",
+        "set_disarmed", "set_servo_torque", "cut_torque_after_failure",
         "_permission_is_fresh", "_permission_is_current",
         "_capability_permission_is_current", "enforce_permission_leases",
         "on_base_permission", "on_arm_permission",
@@ -31,6 +31,9 @@ driver = types.ModuleType("driver_under_test")
 exec(compile(ast.Module(body=[_NODE], type_ignores=[]), "driver.py", "exec"), driver.__dict__)
 driver.math = math
 driver.time = time
+# The tests below written before torque-hold became the default cover the opt-in mode
+# that cuts torque on every failure. The hold-torque default has its own tests at the end.
+driver.LeKiwiDriver.disable_torque_on_failure = True
 
 
 def grant_fresh_arm_permission(node, permitted=True):
@@ -751,3 +754,93 @@ def test_safety_marker_matches_the_safety_state():
     node.publish_safety("TORQUE_FAULT")
     assert messages[-1].data == "TORQUE_FAULT"
     assert markers[-1].text == "TORQUE_FAULT"
+
+
+def hold_mode_node(unreachable_host=True):
+    """A driver with the default policy whose torque host never answers a cut."""
+    driver.Twist = object
+    node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
+    node.disable_torque_on_failure = False
+    node.state_lock = threading.Lock()
+    node.action_lock = threading.Lock()
+    node.armed = True
+    node.torque_fault = False
+    node.auto_arm_pending = False
+    node.get_clock = lambda: types.SimpleNamespace(now=lambda: object())
+    node.cancel_trajectory = lambda _outcome: None
+    node.states = []
+    node.publish_safety = node.states.append
+    node.get_logger = lambda: types.SimpleNamespace(warn=lambda *_: None)
+    node.torque_requests = []
+    node.set_servo_torque = lambda enabled: node.torque_requests.append(enabled) or not unreachable_host
+    return node
+
+
+def test_failure_stops_motion_but_never_cuts_or_latches_torque_by_default():
+    node = hold_mode_node()
+
+    assert node.set_disarmed("LINK_LOST") is True
+    assert node.torque_requests == []
+    assert node.torque_fault is False
+    assert node.armed is False
+    assert node.stop_pending is True
+    assert node.states == ["LINK_LOST"]
+
+
+def test_explicit_disarm_still_cuts_torque_and_reports_an_unconfirmed_cut():
+    node = hold_mode_node()
+    response = types.SimpleNamespace()
+
+    node.disarm(None, response)
+
+    assert node.torque_requests == [False]
+    assert response.success is False
+    assert node.torque_fault is True
+
+
+def test_opt_in_restores_cutting_torque_on_failure():
+    node = hold_mode_node()
+    node.disable_torque_on_failure = True
+
+    assert node.set_disarmed("LINK_LOST") is False
+    assert node.torque_requests == [False]
+    assert node.torque_fault is True
+    assert node.states == ["TORQUE_FAULT"]
+
+
+def test_torque_held_after_a_failure_is_not_treated_as_an_outside_change():
+    node = hold_mode_node()
+    node.armed = False
+    node.robot = types.SimpleNamespace(observation_torque_enabled=True)
+    node.get_logger = lambda: types.SimpleNamespace(error=lambda *_: None)
+    disarms = []
+    node.set_disarmed = disarms.append
+
+    assert node.enforce_reported_torque_state() is False
+    assert disarms == []
+
+    node.disable_torque_on_failure = True
+    assert node.enforce_reported_torque_state() is True
+    assert disarms == ["DISARMED"]
+
+
+def test_unconfirmed_arm_leaves_torque_alone_by_default():
+    class Now:
+        def __sub__(self, other):
+            return types.SimpleNamespace(nanoseconds=0)
+
+    node = hold_mode_node()
+    node.armed = False
+    node.get_clock = lambda: types.SimpleNamespace(now=lambda: Now())
+    node.last_fresh = object()
+    node.link_timeout = 1.0
+    node.link_lost = False
+    node.last_observation = {"complete": True}
+    grant_fresh_arm_permission(node)
+    response = types.SimpleNamespace()
+
+    assert node.arm(None, response) is response
+    assert response.success is False
+    assert node.torque_requests == [True]
+    assert node.torque_fault is False
+    assert "left unchanged" in response.message

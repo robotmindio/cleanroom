@@ -343,3 +343,26 @@ def test_device_network_installer_disables_wifi_power_saving_and_scopes_polkit(t
         capture_output=True, text=True,
     )
     assert refused.returncode != 0
+
+
+def test_torque_on_failure_key_is_validated_and_reaches_both_machines(tmp_path):
+    env_file = tmp_path / ".env"
+
+    def load(value):
+        env_file.write_text(f"LEKIWI_DISABLE_TORQUE_ON_FAILURE={value}\n")
+        return subprocess.run(
+            ["bash", "-c", 'source "$1/scripts/lib/runtime-common.sh"; load_lekiwi_env "$2" && echo "${LEKIWI_DISABLE_TORQUE_ON_FAILURE:-unset}"',
+             "test", str(ROOT), str(env_file)],
+            env={k: v for k, v in os.environ.items() if k != "LEKIWI_DISABLE_TORQUE_ON_FAILURE"},
+            capture_output=True, text=True,
+        )
+
+    assert load("true").stdout.strip() == "true"
+    assert load("false").stdout.strip() == "false"
+    assert load("yes").returncode != 0
+
+    # Both sides must pass the same opt-in on, and default to holding torque.
+    stack = (ROOT / "scripts" / "ros-start.sh").read_text(encoding="utf-8")
+    host = (ROOT / "scripts" / "robot-host.sh").read_text(encoding="utf-8")
+    assert "disable_torque_on_failure:=true" in stack
+    assert '--safety.disable_torque_on_failure="${LEKIWI_DISABLE_TORQUE_ON_FAILURE:-false}"' in host

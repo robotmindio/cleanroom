@@ -70,6 +70,12 @@ class LeKiwiDriver(Node):
         self.odom_topic = self.declare_parameter("odom_topic", "/wheel/odometry").value
         self.publish_odom_tf = self.declare_parameter("publish_odom_tf", False).value
         self.auto_arm_on_startup = self.declare_parameter("auto_arm_on_startup", True).value
+        # Failures (link loss, stale telemetry, withdrawn permission, shutdown) stop the
+        # base and freeze the arm but leave torque on. Only an explicit safety/disarm cuts
+        # it unless this is set, which restores cutting torque on every failure.
+        self.disable_torque_on_failure = bool(
+            self.declare_parameter("disable_torque_on_failure", False).value
+        )
         self.publish_motor_health_enabled = self.declare_parameter(
             "publish_motor_health", True
         ).value
@@ -357,7 +363,7 @@ class LeKiwiDriver(Node):
                 self.trajectory["done"].set()
                 self.trajectory = None
 
-    def set_disarmed(self, state, publish=True, clear_torque_fault=False):
+    def set_disarmed(self, state, publish=True, clear_torque_fault=False, deliberate=False):
         with self.action_lock:
             with self.state_lock:
                 was_armed = self.armed
@@ -370,7 +376,7 @@ class LeKiwiDriver(Node):
 
             # Never hold state_lock across a service/network operation. action_lock
             # still guarantees that an arm or command cannot overtake this cut.
-            torque_cut = self.set_servo_torque(False)
+            torque_cut = self.cut_torque_after_failure() if not deliberate else self.set_servo_torque(False)
             with self.state_lock:
                 if not torque_cut:
                     self.torque_fault = True
@@ -386,6 +392,16 @@ class LeKiwiDriver(Node):
             if publish:
                 self.publish_safety(published_state)
             return torque_cut
+
+    def cut_torque_after_failure(self):
+        """Cut servo torque after a failure, unless the operator chose to hold it.
+
+        Returns True when torque is confirmed off or deliberately left alone, so no
+        fault latches and arming is never blocked by a failed cut.
+        """
+        if not self.disable_torque_on_failure:
+            return True
+        return self.set_servo_torque(False)
 
     def set_servo_torque(self, enabled):
         """Synchronously require the serial-bus owner to change physical torque."""
@@ -425,7 +441,7 @@ class LeKiwiDriver(Node):
                 # A reply can be lost after the host applied the enable.  A
                 # separate disable transaction resolves that ambiguous state
                 # toward torque-off before reporting the arm request failed.
-                torque_cut = self.set_servo_torque(False)
+                torque_cut = self.cut_torque_after_failure()
                 with self.state_lock:
                     if not torque_cut:
                         self.torque_fault = True
@@ -443,7 +459,7 @@ class LeKiwiDriver(Node):
                     and not self.torque_fault
                 )
             if not still_safe:
-                torque_cut = self.set_servo_torque(False)
+                torque_cut = self.cut_torque_after_failure()
                 with self.state_lock:
                     if not torque_cut:
                         self.torque_fault = True
@@ -487,7 +503,7 @@ class LeKiwiDriver(Node):
             if not self.set_servo_torque(True):
                 # Treat an enable timeout as physically ambiguous: the host
                 # may have completed the write before its reply was lost.
-                torque_cut = self.set_servo_torque(False)
+                torque_cut = self.cut_torque_after_failure()
                 with self.state_lock:
                     if not torque_cut:
                         self.torque_fault = True
@@ -497,7 +513,9 @@ class LeKiwiDriver(Node):
                 response.message = (
                     "motor host did not confirm servo torque enabled; "
                     + (
-                        "the fail-safe disable was not confirmed"
+                        "torque was left unchanged"
+                        if not self.disable_torque_on_failure
+                        else "the fail-safe disable was not confirmed"
                         if not torque_cut
                         else "a fail-safe disable was confirmed"
                     )
@@ -510,7 +528,7 @@ class LeKiwiDriver(Node):
                     and not self.torque_fault
                 )
             if not still_safe:
-                torque_cut = self.set_servo_torque(False)
+                torque_cut = self.cut_torque_after_failure()
                 with self.state_lock:
                     if not torque_cut:
                         self.torque_fault = True
@@ -530,7 +548,7 @@ class LeKiwiDriver(Node):
 
     def disarm(self, request, response):
         del request
-        torque_cut = self.set_disarmed("DISARMED", clear_torque_fault=True)
+        torque_cut = self.set_disarmed("DISARMED", clear_torque_fault=True, deliberate=True)
         response.success = torque_cut
         response.message = (
             "commands disabled and all servo torque cut"
@@ -780,6 +798,10 @@ class LeKiwiDriver(Node):
         with self.state_lock:
             logical = self.armed
         if reported == logical:
+            return False
+        if reported and not self.disable_torque_on_failure:
+            # Torque was deliberately left on after a failure; the disarmed driver
+            # keeps the arm frozen and the base stopped.
             return False
         self.get_logger().error(
             "Motor host torque state changed outside the driver's arm/disarm transaction; disarming"

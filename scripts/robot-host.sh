@@ -7,6 +7,7 @@ set -Eeuo pipefail
 cd "$(dirname "$0")/.."
 # shellcheck source=/dev/null
 source scripts/lib/runtime-common.sh
+load_lekiwi_env
 export PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}"
 
 # Systemd supplies LEKIWI_LEROBOT_VENV explicitly.  Interactive use retains
@@ -103,6 +104,7 @@ run_host_once() {
     --robot.id="$ID" --robot.port="$PORT" --robot.cameras="$1" \
     --robot.num_read_retries="$READ_RETRIES" \
     --safety.bind_address="$BIND_ADDRESS" \
+    --safety.disable_torque_on_failure="${LEKIWI_DISABLE_TORQUE_ON_FAILURE:-false}" \
     "${CURVE_ARGS[@]}" \
     --host.connection_time_s=86400
 }

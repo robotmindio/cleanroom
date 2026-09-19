@@ -16,6 +16,15 @@ load_lekiwi_env() {
         }
         [[ -n ${LEKIWI_ROBOT_HOST:-} ]] || export LEKIWI_ROBOT_HOST=$value
         ;;
+      LEKIWI_DISABLE_TORQUE_ON_FAILURE=*)
+        value=${line#*=}
+        value=${value%$'\r'}
+        [[ $value == true || $value == false ]] || {
+          echo "$file: LEKIWI_DISABLE_TORQUE_ON_FAILURE must be true or false" >&2
+          return 1
+        }
+        [[ -n ${LEKIWI_DISABLE_TORQUE_ON_FAILURE:-} ]] || export LEKIWI_DISABLE_TORQUE_ON_FAILURE=$value
+        ;;
     esac
   done < "$file"
 }

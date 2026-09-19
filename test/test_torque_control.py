@@ -6,7 +6,7 @@ import pytest
 
 from lekiwi_rmf.torque_control import (
     TorqueControlClient, TorqueControlError, enable_with_rollback,
-    run_all_safety_steps, torque_readback_matches,
+    react_to_command_silence, run_all_safety_steps, torque_readback_matches,
     validate_action_payload, validated_bind_address,
 )
 
@@ -101,7 +101,10 @@ def test_driver_and_host_wire_disarm_to_the_serial_bus_owner():
     assert "except FileNotFoundError:" in host
     assert "return False" in host
     assert "control._disable(robot)" in host
-    assert "cutting all servo torque" in host
+    assert "cut all servo torque" in host
+    # The watchdog must go through the opt-in policy, never cut torque directly.
+    assert "react_to_command_silence(" in host
+    assert "cfg.safety.disable_torque_on_failure" in host
 
 
 def test_torque_confirmation_requires_every_expected_motor():
@@ -180,3 +183,18 @@ def test_host_action_decoder_requires_complete_strict_finite_json():
     ):
         with pytest.raises(ValueError):
             validate_action_payload(malformed, keys)
+
+
+def test_command_silence_holds_the_robot_and_cuts_torque_only_when_opted_in():
+    calls = []
+
+    assert react_to_command_silence(
+        False, lambda: calls.append("cut"), lambda: calls.append("hold")
+    ) == "hold"
+    assert calls == ["hold"]
+
+    calls.clear()
+    assert react_to_command_silence(
+        True, lambda: calls.append("cut"), lambda: calls.append("hold")
+    ) == "cut"
+    assert calls == ["cut"]
