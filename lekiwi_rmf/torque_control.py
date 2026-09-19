@@ -107,7 +107,14 @@ def torque_readback_matches(states, enabled: bool, expected_motors) -> bool:
 
 
 class TorqueControlClient:
-    """Use a one-shot ZMQ request so service callbacks cannot share socket state."""
+    """Use a one-shot ZMQ request so service callbacks cannot share socket state.
+
+    Each request opens a new connection, so one lost SYN on a weak Wi-Fi link costs a
+    full TCP retransmit and outlasts the reply timeout. Enable and disable are
+    idempotent on the host, so a request that got no reply is safely sent once more.
+    """
+
+    ATTEMPTS = 2
 
     def __init__(
         self, host: str, port: int = 5557, timeout_ms: int = 1000, zmq_module=None,
@@ -134,10 +141,7 @@ class TorqueControlClient:
             return zmq
         return self._zmq_module
 
-    def set_enabled(self, enabled: bool) -> None:
-        """Require the host to confirm that all servo torque is on or off."""
-        if not isinstance(enabled, bool):
-            raise ValueError("torque state must be boolean")
+    def _request(self, message: dict):
         zmq = self._zmq()
         context = zmq.Context()
         socket = context.socket(zmq.REQ)
@@ -147,13 +151,25 @@ class TorqueControlClient:
             socket.setsockopt(zmq.RCVTIMEO, self.timeout_ms)
             self.curve.configure_socket(socket)
             socket.connect(f"tcp://{self.host}:{self.port}")
-            socket.send_json({"command": "enable" if enabled else "disable"})
-            response = socket.recv_json()
-        except Exception as error:
-            raise TorqueControlError(f"torque host {self.host}:{self.port} did not reply: {error}") from error
+            socket.send_json(message)
+            return socket.recv_json()
         finally:
             socket.close()
             context.term()
+
+    def set_enabled(self, enabled: bool) -> None:
+        """Require the host to confirm that all servo torque is on or off."""
+        if not isinstance(enabled, bool):
+            raise ValueError("torque state must be boolean")
+        error = None
+        for _attempt in range(self.ATTEMPTS):
+            try:
+                response = self._request({"command": "enable" if enabled else "disable"})
+                break
+            except Exception as failure:
+                error = failure
+        else:
+            raise TorqueControlError(f"torque host {self.host}:{self.port} did not reply: {error}") from error
 
         if not isinstance(response, dict) or response.get("ok") is not True:
             detail = response.get("error", "invalid response") if isinstance(response, dict) else "invalid response"

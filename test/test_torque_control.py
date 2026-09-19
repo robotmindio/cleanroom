@@ -198,3 +198,37 @@ def test_command_silence_holds_the_robot_and_cuts_torque_only_when_opted_in():
         True, lambda: calls.append("cut"), lambda: calls.append("hold")
     ) == "cut"
     assert calls == ["cut"]
+
+
+class _SequencedZmq(_Zmq):
+    """A new context per request, each answering with the next scripted response."""
+
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.contexts = []
+
+    def Context(self):
+        context = _Context(self.responses.pop(0))
+        self.contexts.append(context)
+        return context
+
+
+def test_client_retries_once_when_a_request_gets_no_reply():
+    zmq = _SequencedZmq([TimeoutError("no reply"), {"ok": True, "torque_enabled": False}])
+
+    TorqueControlClient("127.0.0.1", zmq_module=zmq).set_enabled(False)
+
+    assert len(zmq.contexts) == 2
+    assert all(context.terminated and context.socket_instance.closed for context in zmq.contexts)
+
+
+def test_client_gives_up_after_two_silent_attempts_and_never_retries_a_refusal():
+    silent = _SequencedZmq([TimeoutError("no reply"), TimeoutError("still nothing")])
+    with pytest.raises(TorqueControlError, match="did not reply: still nothing"):
+        TorqueControlClient("127.0.0.1", zmq_module=silent).set_enabled(True)
+    assert len(silent.contexts) == 2
+
+    refused = _SequencedZmq([{"ok": False, "error": "bus failure"}, {"ok": True, "torque_enabled": True}])
+    with pytest.raises(TorqueControlError, match="rejected"):
+        TorqueControlClient("127.0.0.1", zmq_module=refused).set_enabled(True)
+    assert len(refused.contexts) == 1
