@@ -67,11 +67,16 @@ ros_setup() {
   set -u
 }
 disarm() {
-  local response
+  local response deadline=$((SECONDS + 90))
   wait_for 30 ros2 service type /safety/disarm || die "/safety/disarm is unavailable"
-  response=$(timeout 20 ros2 service call /safety/disarm std_srvs/srv/Trigger '{}') || \
-    die "disarm request did not complete"
-  [[ $response == *"success=True"* ]] || die "motor host did not confirm torque-off: $response"
+  # Starting the Astra resets the USB hub it shares with the motor-bus adapter, which
+  # leaves the host's torque endpoint silent for up to ~15 s. Disarming is idempotent,
+  # so retry through that window instead of failing the deployment on it.
+  until response=$(timeout 30 ros2 service call /safety/disarm std_srvs/srv/Trigger '{}' 2>&1) &&
+    [[ $response == *"success=True"* ]]; do
+    (( SECONDS < deadline )) || die "motor host did not confirm torque-off: $response"
+    sleep 3
+  done
 }
 remote_unit_exists() {
   "${ssh_command[@]}" /usr/bin/systemctl cat "$1" >/dev/null 2>&1
