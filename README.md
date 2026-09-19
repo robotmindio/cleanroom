@@ -263,16 +263,19 @@ disagree with the measured travel range.
 
 ### Recovery after motor power loss
 
-Real hardware is default-deny. Startup arming is guarded by complete, fresh
-telemetry and current permission from the continuous safety supervisor. A host
-session change, stale/failed telemetry, or withdrawn permission cancels the
-interrupted trajectory, stops the base, freezes the arm at its present position,
-and remains disarmed after recovery. Torque stays on and `TORQUE_FAULT` is never
-latched by a failure or an unconfirmed disarm; only an explicit `/safety/disarm` cuts servo torque. To cut
-torque on every failure instead, set `LEKIWI_DISABLE_TORQUE_ON_FAILURE=true` in
-`.env` on both the workstation and the robot computer (launch argument
-`disable_torque_on_failure:=true`, host option `--safety.disable_torque_on_failure=true`).
-Inspect the robot and then:
+Arming is guarded by complete, fresh telemetry and current permission from the
+continuous safety supervisor. By default the robot stays armed: a host session
+change, stale or failed telemetry, or withdrawn permission cancels the interrupted
+trajectory, stops the base and freezes the arm at its present position with servo
+torque on, and the driver re-arms itself as soon as telemetry and permission are
+healthy again. Nothing latches `TORQUE_FAULT`. Only an operator's `/safety/disarm`
+cuts torque and stays disarmed until `/safety/arm`.
+
+For larger robots, set `LEKIWI_DISARM_ON_FAILURE=true` in `.env` on both the
+workstation and the robot computer (launch argument `disarm_on_failure:=true`, host
+option `--safety.disarm_on_failure=true`). Every failure then disarms, cuts all servo
+torque, latches `TORQUE_FAULT` if the cut is unconfirmed, and stays disarmed until
+you inspect the robot and:
 
 ```bash
 ros2 service call /safety/arm std_srvs/srv/Trigger '{}'

@@ -71,7 +71,7 @@ def generate_launch_description():
     curve_client_secret = LaunchConfiguration("curve_client_secret_key_file")
     curve_server_public = LaunchConfiguration("curve_server_public_key_file")
     auto_arm_on_startup = LaunchConfiguration("auto_arm_on_startup")
-    disable_torque_on_failure = LaunchConfiguration("disable_torque_on_failure")
+    disarm_on_failure = LaunchConfiguration("disarm_on_failure")
     start_rmf = LaunchConfiguration("start_rmf")
     rmf_domain = LaunchConfiguration("rmf_domain")
     start_foxglove = LaunchConfiguration("start_foxglove")
@@ -323,10 +323,12 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "auto_arm_on_startup", default_value="false", choices=["true", "false"]
             ),
-            # false: a failure stops the base and freezes the arm but never cuts servo
-            # torque. true: every failure cuts torque and a failed cut latches TORQUE_FAULT.
+            # false: the robot stays armed; a failure stops the base, freezes the arm with
+            # torque on, and the driver re-arms itself. true (larger robots): every failure
+            # disarms, cuts torque, latches TORQUE_FAULT if the cut is unconfirmed, and waits
+            # for an explicit safety/arm.
             DeclareLaunchArgument(
-                "disable_torque_on_failure", default_value="false", choices=["true", "false"]
+                "disarm_on_failure", default_value="false", choices=["true", "false"]
             ),
             # The Astra Pro is an additional third camera. Existing front and
             # wrist V4L2 cameras continue to publish unchanged.
@@ -691,8 +693,8 @@ def generate_launch_description():
                     "auto_arm_on_startup": ParameterValue(
                         auto_arm_on_startup, value_type=bool
                     ),
-                    "disable_torque_on_failure": ParameterValue(
-                        disable_torque_on_failure, value_type=bool
+                    "disarm_on_failure": ParameterValue(
+                        disarm_on_failure, value_type=bool
                     ),
                     "odom_topic": "/wheel/odometry",
                     "publish_odom_tf": False,

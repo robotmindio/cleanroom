@@ -20,7 +20,7 @@ _NODE.body = [
         "handle_host_session_change",
         "enforce_reported_torque_state",
         "arm_after_startup_telemetry", "on_command", "publish_safety", "publish_state", "publish_motor_health",
-        "set_disarmed", "set_servo_torque", "cut_torque_after_failure",
+        "set_disarmed", "set_servo_torque", "cut_torque_after_failure", "_retry_rearm_soon",
         "_permission_is_fresh", "_permission_is_current",
         "_capability_permission_is_current", "enforce_permission_leases",
         "on_base_permission", "on_arm_permission",
@@ -31,9 +31,10 @@ driver = types.ModuleType("driver_under_test")
 exec(compile(ast.Module(body=[_NODE], type_ignores=[]), "driver.py", "exec"), driver.__dict__)
 driver.math = math
 driver.time = time
-# The tests below written before torque-hold became the default cover the opt-in mode
-# that cuts torque on every failure. The hold-torque default has its own tests at the end.
-driver.LeKiwiDriver.disable_torque_on_failure = True
+# The tests below written before staying armed became the default cover the opt-in strict
+# mode (disarm, cut torque and wait for an operator on every failure). The default has its
+# own tests at the end.
+driver.LeKiwiDriver.disarm_on_failure = True
 
 
 def grant_fresh_arm_permission(node, permitted=True):
@@ -760,7 +761,7 @@ def hold_mode_node(unreachable_host=True):
     """A driver with the default policy whose torque host never answers a cut."""
     driver.Twist = object
     node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
-    node.disable_torque_on_failure = False
+    node.disarm_on_failure = False
     node.state_lock = threading.Lock()
     node.action_lock = threading.Lock()
     node.armed = True
@@ -798,7 +799,7 @@ def test_explicit_disarm_cuts_torque_and_reports_but_never_latches_an_unconfirme
     assert node.torque_fault is False
     assert node.states == ["DISARMED"]
 
-    node.disable_torque_on_failure = True
+    node.disarm_on_failure = True
     node.disarm(None, response)
     assert node.torque_fault is True
     assert node.states[-1] == "TORQUE_FAULT"
@@ -806,7 +807,7 @@ def test_explicit_disarm_cuts_torque_and_reports_but_never_latches_an_unconfirme
 
 def test_opt_in_restores_cutting_torque_on_failure():
     node = hold_mode_node()
-    node.disable_torque_on_failure = True
+    node.disarm_on_failure = True
 
     assert node.set_disarmed("LINK_LOST") is False
     assert node.torque_requests == [False]
@@ -825,7 +826,7 @@ def test_torque_held_after_a_failure_is_not_treated_as_an_outside_change():
     assert node.enforce_reported_torque_state() is False
     assert disarms == []
 
-    node.disable_torque_on_failure = True
+    node.disarm_on_failure = True
     assert node.enforce_reported_torque_state() is True
     assert disarms == ["DISARMED"]
 
@@ -850,3 +851,83 @@ def test_unconfirmed_arm_leaves_torque_alone_by_default():
     assert node.torque_requests == [True]
     assert node.torque_fault is False
     assert "left unchanged" in response.message
+
+
+def rearm_node(strict=False):
+    """A hold-mode driver whose telemetry and supervisor permission are healthy."""
+    node = hold_mode_node(unreachable_host=False)
+    node.disarm_on_failure = strict
+    node.armed = False
+    node.auto_arm_pending = False
+    node.link_lost = False
+    grant_fresh_arm_permission(node)
+    node.get_logger = lambda: types.SimpleNamespace(
+        warn=lambda *_: None, error=lambda *_: None, info=lambda *_: None
+    )
+    return node
+
+
+def test_a_failure_is_followed_by_an_automatic_rearm_by_default():
+    node = rearm_node()
+    node.armed = True
+
+    node.set_disarmed("LINK_LOST")
+    assert node.armed is False and node.auto_arm_pending is True
+
+    assert node.arm_after_startup_telemetry() is True
+    assert node.armed is True
+    assert node.states[-1] == "ARMED"
+    assert node.torque_requests == [True]  # never cut, then enabled again
+
+
+def test_an_operator_disarm_stays_disarmed_and_only_an_explicit_arm_resumes():
+    node = rearm_node()
+    node.armed = True
+
+    node.disarm(None, types.SimpleNamespace())
+
+    assert node.armed is False and node.auto_arm_pending is False
+    assert node.arm_after_startup_telemetry() is False
+    assert node.armed is False
+
+
+def test_strict_mode_waits_for_an_explicit_arm_after_a_failure():
+    node = rearm_node(strict=True)
+    node.armed = True
+
+    node.set_disarmed("LINK_LOST")
+
+    assert node.auto_arm_pending is False
+    assert node.arm_after_startup_telemetry() is False
+
+
+def test_automatic_rearm_waits_for_telemetry_and_supervisor_permission():
+    node = rearm_node()
+    node.auto_arm_pending = True
+
+    node.link_lost = True
+    assert node.arm_after_startup_telemetry() is False
+    node.link_lost = False
+    grant_fresh_arm_permission(node, permitted=False)
+    assert node.arm_after_startup_telemetry() is False
+    assert node.torque_requests == []
+
+    grant_fresh_arm_permission(node)
+    assert node.arm_after_startup_telemetry() is True
+
+
+def test_a_failed_automatic_rearm_is_retried_at_a_bounded_rate():
+    node = rearm_node()
+    node.auto_arm_pending = True
+    node.set_servo_torque = lambda enabled: node.torque_requests.append(enabled) or False
+
+    assert node.arm_after_startup_telemetry() is False
+    assert node.auto_arm_pending is True and node.armed is False
+    attempts = len(node.torque_requests)
+
+    assert node.arm_after_startup_telemetry() is False  # inside the retry window
+    assert len(node.torque_requests) == attempts
+
+    node._next_rearm_at = 0.0
+    node.set_servo_torque = lambda enabled: node.torque_requests.append(enabled) or True
+    assert node.arm_after_startup_telemetry() is True

@@ -104,7 +104,7 @@ run_host_once() {
     --robot.id="$ID" --robot.port="$PORT" --robot.cameras="$1" \
     --robot.num_read_retries="$READ_RETRIES" \
     --safety.bind_address="$BIND_ADDRESS" \
-    --safety.disable_torque_on_failure="${LEKIWI_DISABLE_TORQUE_ON_FAILURE:-false}" \
+    --safety.disarm_on_failure="${LEKIWI_DISARM_ON_FAILURE:-false}" \
     "${CURVE_ARGS[@]}" \
     --host.connection_time_s=86400
 }

@@ -104,7 +104,7 @@ def test_driver_and_host_wire_disarm_to_the_serial_bus_owner():
     assert "cut all servo torque" in host
     # The watchdog must go through the opt-in policy, never cut torque directly.
     assert "react_to_command_silence(" in host
-    assert "cfg.safety.disable_torque_on_failure" in host
+    assert "cfg.safety.disarm_on_failure" in host
 
 
 def test_torque_confirmation_requires_every_expected_motor():

@@ -72,11 +72,14 @@ class LeKiwiDriver(Node):
         self.odom_topic = self.declare_parameter("odom_topic", "/wheel/odometry").value
         self.publish_odom_tf = self.declare_parameter("publish_odom_tf", False).value
         self.auto_arm_on_startup = self.declare_parameter("auto_arm_on_startup", True).value
-        # Failures (link loss, stale telemetry, withdrawn permission, shutdown) stop the
-        # base and freeze the arm but leave torque on. Only an explicit safety/disarm cuts
-        # it unless this is set, which restores cutting torque on every failure.
-        self.disable_torque_on_failure = bool(
-            self.declare_parameter("disable_torque_on_failure", False).value
+        # By default the robot stays armed: a failure (link loss, stale telemetry, host
+        # restart, withdrawn permission) stops the base and freezes the arm with torque on,
+        # and the driver re-arms itself once telemetry and permission are healthy again.
+        # Only an operator's safety/disarm stays disarmed. Setting this restores the strict
+        # behaviour for larger robots: every failure disarms, cuts torque, latches
+        # TORQUE_FAULT if the cut is unconfirmed, and waits for an explicit safety/arm.
+        self.disarm_on_failure = bool(
+            self.declare_parameter("disarm_on_failure", False).value
         )
         self.publish_motor_health_enabled = self.declare_parameter(
             "publish_motor_health", True
@@ -141,10 +144,11 @@ class LeKiwiDriver(Node):
         self._base_permission_received_at_ns = None
         self._arm_permission_received_at_ns = None
         self._arm_permission_expired = False
-        # Startup is allowed to arm only after a complete, fresh observation.  A link
-        # loss or an explicit disarm clears this one-shot flag, so recovery can never
-        # resume movement without an operator deliberately arming again.
-        self.auto_arm_pending = bool(self.auto_arm_on_startup)
+        # Startup is allowed to arm only after a complete, fresh observation. With
+        # disarm_on_failure, a link loss or an explicit disarm clears this one-shot flag,
+        # so recovery never resumes movement without an operator arming again. Without it
+        # the flag is set again after every failure, so the robot re-arms itself.
+        self.auto_arm_pending = bool(self.auto_arm_on_startup) or not self.disarm_on_failure
         calibration_path = os.path.expanduser(calibration_file)
         self.arm_calibrated = os.path.isfile(calibration_path)
         self.stop_pending = True
@@ -370,8 +374,9 @@ class LeKiwiDriver(Node):
             with self.state_lock:
                 was_armed = self.armed
                 self.armed = False
-                # A manual disarm or link loss must override a still-pending startup arm.
-                self.auto_arm_pending = False
+                # An operator's disarm must hold, and in the strict mode so must a failure.
+                # Otherwise the driver re-arms itself once telemetry and permission allow.
+                self.auto_arm_pending = not deliberate and not self.disarm_on_failure
                 self.command = Twist()
                 self.command_stamp = self.get_clock().now()
                 self.stop_pending = True
@@ -383,7 +388,7 @@ class LeKiwiDriver(Node):
                 if not torque_cut:
                     # The latch blocks arming, so it exists only in the opt-in mode that
                     # treats torque as safety-critical; by default torque is never blocked.
-                    self.torque_fault = self.disable_torque_on_failure
+                    self.torque_fault = self.disarm_on_failure
                 elif clear_torque_fault:
                     # Only a deliberate disarm request may acknowledge recovery;
                     # incidental watchdog cuts cannot silently clear this latch.
@@ -403,7 +408,7 @@ class LeKiwiDriver(Node):
         Returns True when torque is confirmed off or deliberately left alone, so no
         fault latches and arming is never blocked by a failed cut.
         """
-        if not self.disable_torque_on_failure:
+        if not self.disarm_on_failure:
             return True
         return self.set_servo_torque(False)
 
@@ -426,11 +431,12 @@ class LeKiwiDriver(Node):
         return True
 
     def arm_after_startup_telemetry(self):
-        """Perform the configured, one-shot startup arm after validated telemetry."""
+        """Arm after validated telemetry: at startup, and by default after every failure."""
         with self.action_lock:
             with self.state_lock:
                 if (
                     not self.auto_arm_pending
+                    or time.monotonic() < getattr(self, "_next_rearm_at", 0.0)
                     or self.link_lost
                     or self.armed
                     or not self._permission_is_current(
@@ -452,6 +458,7 @@ class LeKiwiDriver(Node):
                     state = "TORQUE_FAULT" if self.torque_fault else "DISARMED"
                 self.publish_safety(state)
                 self.get_logger().error("Initial telemetry is healthy, but the motor host would not enable torque")
+                self._retry_rearm_soon()
                 return False
             with self.state_lock:
                 still_safe = (
@@ -469,6 +476,7 @@ class LeKiwiDriver(Node):
                         self.torque_fault = True
                     state = "TORQUE_FAULT" if self.torque_fault else "DISARMED"
                 self.publish_safety(state)
+                self._retry_rearm_soon()
                 return False
             with self.state_lock:
                 self.armed = True
@@ -477,6 +485,13 @@ class LeKiwiDriver(Node):
             self.publish_safety("ARMED")
             self.get_logger().info("Armed after initial healthy LeKiwi telemetry")
             return True
+
+    def _retry_rearm_soon(self):
+        """Unless strict, a failed automatic arm is retried, at a bounded rate."""
+        if not self.disarm_on_failure:
+            with self.state_lock:
+                self.auto_arm_pending = True
+                self._next_rearm_at = time.monotonic() + 2.0
 
     def arm(self, request, response):
         del request
@@ -518,7 +533,7 @@ class LeKiwiDriver(Node):
                     "motor host did not confirm servo torque enabled; "
                     + (
                         "torque was left unchanged"
-                        if not self.disable_torque_on_failure
+                        if not self.disarm_on_failure
                         else "the fail-safe disable was not confirmed"
                         if not torque_cut
                         else "a fail-safe disable was confirmed"
@@ -783,13 +798,18 @@ class LeKiwiDriver(Node):
     def handle_host_session_change(self):
         if not getattr(self.robot, "observation_session_changed", False):
             return False
-        # A new host process always starts torque-off. Keep logical state
-        # aligned and require a deliberate re-arm even if downtime was shorter
-        # than the telemetry watchdog threshold.
+        # A new host process always starts torque-off. Keep logical state aligned
+        # even if downtime was shorter than the telemetry watchdog threshold; the
+        # robot then re-arms itself, or waits for an operator in the strict mode.
         self.odom_samples.reset()
         self.set_disarmed("DISARMED")
         self.get_logger().error(
-            "LeKiwi host session changed; robot remains disarmed until an explicit safety/arm request"
+            "LeKiwi host session changed; "
+            + (
+                "robot remains disarmed until an explicit safety/arm request"
+                if self.disarm_on_failure
+                else "re-arming automatically once telemetry and permission are healthy"
+            )
         )
         return True
 
@@ -803,7 +823,7 @@ class LeKiwiDriver(Node):
             logical = self.armed
         if reported == logical:
             return False
-        if reported and not self.disable_torque_on_failure:
+        if reported and not self.disarm_on_failure:
             # Torque was deliberately left on after a failure; the disarmed driver
             # keeps the arm frozen and the base stopped.
             return False
@@ -881,7 +901,11 @@ class LeKiwiDriver(Node):
             with self.state_lock:
                 recovered_state = "TORQUE_FAULT" if self.torque_fault else "DISARMED"
             self.publish_safety(recovered_state)
-            self.get_logger().warn("LeKiwi telemetry recovered; inspect robot, then call safety/arm")
+            self.get_logger().warn(
+                "LeKiwi telemetry recovered; inspect robot, then call safety/arm"
+                if self.disarm_on_failure
+                else "LeKiwi telemetry recovered; re-arming automatically"
+            )
 
         velocity = (
             float(observation["x.vel"]) * self.xy_scale,

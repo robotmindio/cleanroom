@@ -50,9 +50,9 @@ class TorqueSafetyConfig:
     port_zmq: int = 5557
     state_file: str = "~/.ros/lekiwi/servo_torque_state"
     bind_address: str = "0.0.0.0"
-    # False: command silence stops the base and freezes the arm with torque left on.
-    # True: it cuts all servo torque.
-    disable_torque_on_failure: bool = False
+    # False: command silence stops the base and freezes the arm with torque left on; the
+    # driver re-arms itself. True (larger robots): it cuts all servo torque.
+    disarm_on_failure: bool = False
 
 
 @dataclass
@@ -468,7 +468,7 @@ def main(cfg: TorqueHostConfig):
                 next_watchdog_attempt = watchdog_now + 0.25
                 try:
                     outcome = react_to_command_silence(
-                        cfg.safety.disable_torque_on_failure,
+                        cfg.safety.disarm_on_failure,
                         lambda: control._disable(robot),
                         lambda: control._hold_present_arm_position(robot),
                     )

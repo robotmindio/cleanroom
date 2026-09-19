@@ -15,8 +15,8 @@ source scripts/lib/runtime-common.sh
 # shellcheck source=/dev/null
 source scripts/lib/self-heal.sh
 load_lekiwi_env
-# Default is to keep torque on after a failure; only the explicit opt-in is passed on.
-[[ ${LEKIWI_DISABLE_TORQUE_ON_FAILURE:-false} != true ]] || set -- disable_torque_on_failure:=true "$@"
+# By default the robot stays armed after a failure; only the strict opt-in is passed on.
+[[ ${LEKIWI_DISARM_ON_FAILURE:-false} != true ]] || set -- disarm_on_failure:=true "$@"
 if [[ -n ${LEKIWI_ROBOT_HOST:-} ]]; then
   use_env_host=true
   for arg in "$@"; do
