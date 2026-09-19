@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""End a mapping launch before its live RTAB-Map database exceeds its quota.
+"""Stop a mapping session from growing its RTAB-Map database past its quota.
 
-SQLite databases must not be renamed while open. This companion exits with
-``QUOTA_EXIT`` when the database plus sidecars reaches the configured size or
-the mapping session reaches its duration. The launch file translates that exit
-into an orderly stack shutdown, after which startup maintenance may archive the
-closed database safely.
+This companion exits with ``QUOTA_EXIT`` when the database plus sidecars
+reaches the configured size or the mapping session reaches its duration. The
+launch file translates that exit into switching RTAB-Map to localization, so
+the map stops growing while the robot keeps running on it.
 """
 
 from __future__ import annotations
@@ -59,14 +58,14 @@ def monitor_database(
         if size >= maximum_bytes:
             print(
                 f"RTAB-Map mapping quota reached: {size} bytes >= {maximum_bytes}; "
-                "requesting orderly launch shutdown",
+                "freezing the map",
                 flush=True,
             )
             return QUOTA_EXIT
         if elapsed >= maximum_seconds:
             print(
                 f"RTAB-Map mapping duration reached: {elapsed:.1f}s >= {maximum_seconds:.1f}s; "
-                "requesting orderly launch shutdown",
+                "freezing the map",
                 flush=True,
             )
             return QUOTA_EXIT

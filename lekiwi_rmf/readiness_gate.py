@@ -22,13 +22,14 @@ from rclpy.action import ActionClient
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import Image, LaserScan
 
 
 TOPIC_TYPES = {
     "image": Image,
     "odom": Odometry,
     "map": OccupancyGrid,
+    "scan": LaserScan,
 }
 
 
@@ -47,6 +48,10 @@ def topic_qos(topic_type: str) -> QoSProfile:
             reliability=ReliabilityPolicy.RELIABLE,
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
         )
+    if topic_type == "scan":
+        # Laser drivers publish sensor-data (best-effort) QoS; a reliable
+        # subscription would never match them.
+        return QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT)
     return QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE)
 
 
@@ -93,8 +98,13 @@ class ReadinessGate(Node):
         else:
             raise ValueError(f"unsupported readiness kind: {kind}")
 
-    def _on_message(self, message: Image | Odometry | OccupancyGrid) -> None:
-        if isinstance(message, Image):
+    def _on_message(self, message: Image | Odometry | OccupancyGrid | LaserScan) -> None:
+        if isinstance(message, LaserScan):
+            self._ready = any(
+                math.isfinite(value) and message.range_min <= value <= message.range_max
+                for value in message.ranges
+            )
+        elif isinstance(message, Image):
             self._ready = (
                 message.width > 0 and message.height > 0 and message.step > 0
                 and bool(message.encoding) and bool(message.data)

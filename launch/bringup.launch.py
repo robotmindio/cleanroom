@@ -55,11 +55,18 @@ def _after_success(stage, actions):
 
 
 def _mapping_guard_exit(event, context):
-    """Turn a quota exit into an orderly close of RTAB-Map's SQLite files."""
+    """Freeze the map at its quota instead of stopping the robot.
+
+    Shutting the stack down would let startup maintenance rotate the full
+    database away, so an always-mapping robot would lose its map at every quota.
+    """
     if context.is_shutdown or event.returncode in (0, 130, -2, -15):
         return []
     if event.returncode == 75:
-        return [EmitEvent(event=Shutdown(reason="RTAB-Map mapping session quota reached"))]
+        return [ExecuteProcess(
+            cmd=["ros2", "service", "call", "/rtabmap/set_mode_localization", "std_srvs/srv/Empty"],
+            output="screen",
+        )]
     return [EmitEvent(event=Shutdown(reason=f"RTAB-Map mapping guard failed ({event.returncode})"))]
 
 
@@ -175,9 +182,15 @@ def generate_launch_description():
     # real message/action server is available, then starts its dependent stage.
     # A failed camera, driver, or mapper therefore leaves downstream motion and
     # fleet components stopped instead of launching a noisy degraded stack.
-    camera_ready_gate = Node(
-        package="lekiwi_rmf", executable="readiness_gate", name="wait_for_camera",
-        parameters=[{"kind": "topic", "topic": slam_rgb_topic, "topic_type": "image"}],
+    # SLAM waits for the sensor it maps with: the laser whenever there is one, so
+    # a camera that drops off USB never holds the map (and Nav2) back.
+    slam_sensor_gate = Node(
+        package="lekiwi_rmf", executable="readiness_gate", name="wait_for_slam_sensor",
+        parameters=[{
+            "kind": "topic",
+            "topic": PythonExpression(["'/scan' if ", lidar_on, " else '", slam_rgb_topic, "'"]),
+            "topic_type": PythonExpression(["'scan' if ", lidar_on, " else 'image'"]),
+        }],
         condition=IfCondition(visual_slam), output="screen",
     )
     odom_ready_gate = Node(
@@ -213,7 +226,15 @@ def generate_launch_description():
         parameters=[{
             "use_sim_time": ParameterValue(sim, value_type=bool),
             "frame_id": "base_footprint", "map_frame_id": "map", "odom_frame_id": "odom",
-            "database_path": rtabmap_database, "subscribe_rgb": True,
+            # With a laser, map from scans alone (ICP): the grid already comes
+            # from the laser, and the camera only added visual loop closures at
+            # the price of stalling SLAM whenever it disconnected. Without a
+            # laser, fall back to RGB so there is still something to map with.
+            "database_path": rtabmap_database,
+            "subscribe_rgb": ParameterValue(PythonExpression(["not ", lidar_on]), value_type=bool),
+            "Reg/Strategy": PythonExpression(["'1' if ", lidar_on, " else '0'"]),
+            "Icp/VoxelSize": "0.05", "Icp/MaxCorrespondenceDistance": "0.1",
+            "Icp/PointToPlane": "false", "RGBD/ProximityPathMaxNeighbors": "10",
             "subscribe_depth": False,
             "subscribe_rgbd": False, "subscribe_scan": ParameterValue(lidar_on, value_type=bool),
             "subscribe_odom_info": False, "approx_sync": True, "publish_tf": True,
@@ -311,12 +332,12 @@ def generate_launch_description():
             DeclareLaunchArgument("foxglove_address", default_value="127.0.0.1"),
             DeclareLaunchArgument("foxglove_port", default_value="8765"),
             DeclareLaunchArgument("localization", default_value="visual_slam", choices=["amcl", "visual_slam"]),
-            # Simulation starts a disposable mapping session. A real service
-            # starts localization-only so an unattended boot cannot mutate an
-            # operational map without an explicit tracked mapping request.
+            # A domestic robot keeps extending its map as it runs. The session
+            # guard freezes it (switches to localization) at the quota, and
+            # slam_mode:=localization pins a finished map.
             DeclareLaunchArgument(
                 "slam_mode",
-                default_value=PythonExpression(["'mapping' if ", sim, " else 'localization'"]),
+                default_value="mapping",
                 choices=["mapping", "localization"],
             ),
             DeclareLaunchArgument("publish_camera", default_value="true"),
@@ -799,13 +820,13 @@ def generate_launch_description():
                 condition=IfCondition(canned_map),
                 output="screen",
             ),
-            # RTAB-Map starts only after an actual camera frame. Nav2 then
+            # RTAB-Map starts only after a real sensor sample. Nav2 then
             # waits for odometry and the resulting map; fixed delays made both
-            # components race slow cameras and telemetry reconnects.
-            camera_ready_gate,
+            # components race slow sensors and telemetry reconnects.
+            slam_sensor_gate,
             RegisterEventHandler(OnProcessExit(
-                target_action=camera_ready_gate,
-                on_exit=_after_success("camera", [rtabmap_node, mapping_guard]),
+                target_action=slam_sensor_gate,
+                on_exit=_after_success("SLAM sensor", [rtabmap_node, mapping_guard]),
             )),
             RegisterEventHandler(OnProcessExit(
                 target_action=mapping_guard,

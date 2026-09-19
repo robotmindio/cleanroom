@@ -4,10 +4,10 @@ import importlib.util
 import pathlib
 import types
 
-from rclpy.qos import DurabilityPolicy
+from rclpy.qos import DurabilityPolicy, ReliabilityPolicy
 from lifecycle_msgs.msg import State
 from nav_msgs.msg import OccupancyGrid, Odometry
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import Image, LaserScan
 
 from lekiwi_rmf.readiness_gate import ReadinessGate, TOPIC_TYPES, topic_qos
 
@@ -16,7 +16,7 @@ ROOT = pathlib.Path(__file__).parents[1]
 
 
 def test_readiness_gate_supports_the_bringup_dependencies():
-    assert set(TOPIC_TYPES) == {"image", "odom", "map"}
+    assert set(TOPIC_TYPES) == {"image", "odom", "map", "scan"}
 
 
 def test_topic_gate_requires_semantically_usable_messages():
@@ -44,6 +44,19 @@ def test_topic_gate_requires_semantically_usable_messages():
     odom.pose.pose.orientation.w = 1.0
     gate._on_message(odom)
     assert gate._ready
+
+    scan = LaserScan()
+    scan.range_min, scan.range_max = 0.02, 12.0
+    scan.ranges = [float("inf"), 0.0]
+    gate._on_message(scan)
+    assert not gate._ready
+    scan.ranges = [float("inf"), 1.5]
+    gate._on_message(scan)
+    assert gate._ready
+
+
+def test_scan_readiness_matches_best_effort_laser_drivers():
+    assert topic_qos("scan").reliability == ReliabilityPolicy.BEST_EFFORT
 
 
 def test_map_readiness_receives_rtabmaps_latched_grid():

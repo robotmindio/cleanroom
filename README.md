@@ -183,7 +183,7 @@ scripts/sim-up.sh slam_mode:=localization \
 | `mode` | `sim`, `real` | `sim` | Select Gazebo or the LeRobot hardware bridge |
 | `headless` | `true`, `false` | `true` | Run Gazebo server-only with offscreen rendering; set false to open its GUI |
 | `localization` | `visual_slam`, `amcl` | `visual_slam` | Select the sole `map -> odom` provider |
-| `slam_mode` | `mapping`, `localization` | sim: `mapping`; real: `localization` | Extend or reuse the RTAB-Map database |
+| `slam_mode` | `mapping`, `localization` | `mapping` | Extend or reuse the RTAB-Map database; the session quota switches mapping to localization |
 | `remote_ip` | IPv4/hostname | `127.0.0.1` | Address of the LeKiwi ZMQ host |
 | `rtabmap_database` | file path | sim: `~/.ros/lekiwi_rtabmap_sim.db`; real: `~/.ros/lekiwi_rtabmap.db` | Visual map database |
 | `publish_astra` | `true`, `false` | `true` | Start the tracked local Astra Pro as registered RGB-D; otherwise SLAM uses the front RGB camera plus scan |
@@ -815,7 +815,7 @@ profile still denies motion until its required health inputs and physical
 acceptance record are installed. Do not weaken the supervisor just to map;
 use a reviewed mapping configuration and retain the hardwired E-stop.
 
-Drive slowly around the complete route and return to previously viewed areas from similar angles so RTAB-Map can close loops. Avoid motion blur, blank walls, changing illumination, and moving the arm through the front camera view.
+Drive slowly around the complete route and return to previously visited areas so RTAB-Map can close loops. With a laser (the default whenever one is present) RTAB-Map maps from scans alone, so a missing camera does not stop mapping; long featureless corridors are the weak case. Without a laser it maps from the front camera: avoid motion blur, blank walls, and changing illumination.
 
 Stop with `Ctrl-C`; RTAB-Map persists the database at the configured path.
 
