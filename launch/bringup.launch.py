@@ -232,7 +232,7 @@ def generate_launch_description():
             # laser, fall back to RGB so there is still something to map with.
             "database_path": rtabmap_database,
             "subscribe_rgb": ParameterValue(PythonExpression(["not ", lidar_on]), value_type=bool),
-            "Reg/Strategy": PythonExpression(["'1' if ", lidar_on, " else '0'"]),
+            "Reg/Strategy": ParameterValue(PythonExpression(["'1' if ", lidar_on, " else '0'"]), value_type=str),
             "Icp/VoxelSize": "0.05", "Icp/MaxCorrespondenceDistance": "0.1",
             "Icp/PointToPlane": "false", "RGBD/ProximityPathMaxNeighbors": "10",
             "subscribe_depth": False,
