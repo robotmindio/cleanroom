@@ -6,7 +6,6 @@ import getpass
 import os
 import pathlib
 import re
-import shlex
 import shutil
 import stat
 import subprocess
@@ -498,12 +497,8 @@ def test_port_probes_match_the_exact_local_port(tmp_path):
 
 def test_log_pruning_removes_only_stale_files_under_the_ros_log_directory(tmp_path):
     unit = (ROOT / "systemd" / "lekiwi-ros-logrotate.service").read_text(encoding="utf-8")
-    commands = [
-        shlex.split(line.removeprefix("ExecStart=-").replace("@SERVICE_HOME@", str(tmp_path)))
-        for line in unit.splitlines()
-        if line.startswith("ExecStart=-/usr/bin/find")
-    ]
-    assert len(commands) == 2
+    assert "ExecStart=-@PROJECT_ROOT@/scripts/prune-ros-logs.sh @SERVICE_HOME@/.ros/log" in unit
+    command = [str(ROOT / "scripts" / "prune-ros-logs.sh"), str(tmp_path / ".ros" / "log")]
 
     log = tmp_path / ".ros" / "log"
     outside = tmp_path / "elsewhere"
@@ -518,6 +513,8 @@ def test_log_pruning_removes_only_stale_files_under_the_ros_log_directory(tmp_pa
         "2026-01-02/launch.log": recent,
         "2026-01-02/rotated.log.1": old,
         "2026-01-02/held_open.log": old,
+        # A first run after a long time has thousands of stale files to test.
+        **{f"2026-01-01/backlog_{n}.log": old for n in range(500)},
     }
     for name, mtime in files.items():
         path = log / name
@@ -533,11 +530,10 @@ def test_log_pruning_removes_only_stale_files_under_the_ros_log_directory(tmp_pa
 
     # A quiet node's open log is stale by mtime but must survive the prune.
     with (log / "2026-01-02" / "held_open.log").open():
-        for command in commands:
-            subprocess.run(command, check=True)
-    # Emptying a directory refreshes its mtime; a later run removes it once it has stayed empty.
-    os.utime(log / "2026-01-01", (old, old))
-    subprocess.run(commands[1], check=True)
+        subprocess.run(command, check=True)
+        # Emptying a directory refreshes its mtime; a later run removes it once it has stayed empty.
+        os.utime(log / "2026-01-01", (old, old))
+        subprocess.run(command, check=True)
 
     remaining = {str(p.relative_to(log)) for p in log.rglob("*") if not p.is_dir() or p.is_symlink()}
     assert remaining == {
