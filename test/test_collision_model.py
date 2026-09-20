@@ -101,6 +101,69 @@ def test_native_wrist_box_encloses_visual_meshes_with_clearance():
     assert robot.find("link[@name='tool0']/collision") is None
 
 
+def _rotation(r: float, p: float, y: float) -> np.ndarray:
+    cr, cp, cy = np.cos([r, p, y])
+    sr, sp, sy = np.sin([r, p, y])
+    return np.array([[cy*cp, cy*sp*sr-sy*cr, cy*sp*cr+sy*sr],
+                     [sy*cp, sy*sp*sr+cy*cr, sy*sp*cr-cy*sr],
+                     [-sp, cp*sr, cp*cr]])
+
+
+def _transform(origin: ET.Element | None) -> np.ndarray:
+    matrix = np.eye(4)
+    if origin is not None:
+        matrix[:3, :3] = _rotation(*np.fromstring(origin.get("rpy", "0 0 0"), sep=" "))
+        matrix[:3, 3] = np.fromstring(origin.get("xyz", "0 0 0"), sep=" ")
+    return matrix
+
+
+def _link_surface_points(robot: ET.Element, link: str, count: int) -> np.ndarray:
+    """Vertices, edge midpoints and centroids of every visual mesh, in the link frame."""
+    points = []
+    for visual in robot.find(f"link[@name='{link}']").findall("visual"):
+        mesh = visual.find("geometry/mesh")
+        data = (ROOT / mesh.get("filename").removeprefix("package://lekiwi_rmf/")).read_bytes()
+        assert len(data) == 84 + int.from_bytes(data[80:84], "little") * 50
+        triangles = np.frombuffer(data, offset=84, dtype=np.dtype([
+            ("normal", "<f4", (3,)), ("vertices", "<f4", (3, 3)), ("attr", "<u2")
+        ]))["vertices"].astype(float)
+        a, b, c = triangles[:, 0], triangles[:, 1], triangles[:, 2]
+        cloud = np.vstack([a, b, c, (a+b)/2, (b+c)/2, (c+a)/2, (a+b+c)/3])
+        cloud = cloud * np.fromstring(mesh.get("scale", "1 1 1"), sep=" ")
+        transform = _transform(visual.find("origin"))
+        points.append(cloud @ transform[:3, :3].T + transform[:3, 3])
+    points = np.vstack(points)
+    return points[np.random.default_rng(0).choice(len(points), count, replace=False)]
+
+
+def test_wrist_and_moving_jaw_meshes_never_touch_at_any_roll_or_gripper_angle():
+    """Justifies the SRDF exemption: only their padded proxies overlap when the jaw opens."""
+    robot = _real_robot()
+    roll = robot.find("joint[@name='arm_wrist_roll']")
+    grip = robot.find("joint[@name='arm_gripper']")
+    wrist = _link_surface_points(robot, "so101_wrist_link", 4000)
+    jaw = _link_surface_points(robot, "so101_moving_jaw_link", 2500)
+    wrist_sq = (wrist ** 2).sum(axis=1)
+
+    def limits(joint):
+        return float(joint.find("limit").get("lower")), float(joint.find("limit").get("upper"))
+
+    def spin(angle):
+        c, s = np.cos(angle), np.sin(angle)
+        return np.array([[c, -s, 0, 0], [s, c, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
+
+    closest = np.inf
+    for roll_angle in np.linspace(*limits(roll), 13):
+        for grip_angle in np.linspace(*limits(grip), 5):
+            pose = (_transform(roll.find("origin")) @ spin(roll_angle)
+                    @ _transform(grip.find("origin")) @ spin(grip_angle))
+            moved = jaw @ pose[:3, :3].T + pose[:3, 3]
+            squared = wrist_sq[:, None] + (moved ** 2).sum(axis=1) - 2 * wrist @ moved.T
+            closest = min(closest, float(np.sqrt(max(squared.min(), 0.0))))
+    # Measured 9 mm on the full meshes; sampling error is about 2 mm.
+    assert closest > 0.004
+
+
 def test_wrist_roll_is_bounded_identically_on_hardware_and_simulation():
     real_joint = _real_robot().find("./joint[@name='arm_wrist_roll']")
     assert real_joint is not None

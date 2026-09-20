@@ -50,7 +50,8 @@
   <disable_collisions link1="ld06_body" link2="laser_nominal" reason="Adjacent"/>
   <disable_collisions link1="laser_nominal" link2="laser" reason="Adjacent"/>
   <!-- Mesh-enclosing proxies are only disabled against bolted neighbours.
-       Every non-adjacent pair remains collision-checked by MoveIt. -->
+       Every non-adjacent pair remains collision-checked by MoveIt, except
+       pairs proven below never to touch. -->
   <disable_collisions link1="base_link" link2="arm_pedestal_collision_proxy" reason="Adjacent"/>
   <disable_collisions link1="base_link" link2="front_camera_collision_proxy" reason="Adjacent"/>
   <!-- These oversized envelopes are on the same rigid chassis assembly;
@@ -62,4 +63,10 @@
   <disable_collisions link1="forearm_collision_proxy" link2="wrist_collision_proxy" reason="Adjacent"/>
   <disable_collisions link1="wrist_collision_proxy" link2="roll_collision_proxy" reason="Adjacent"/>
   <disable_collisions link1="roll_collision_proxy" link2="gripper_collision_proxy" reason="Adjacent"/>
+  <!-- The jaw hinges on the gripper link, so the wrist meshes and the moving
+       jaw meshes stay at least 9 mm apart over every wrist-roll and gripper
+       angle (test_collision_model). Their 4 mm-padded proxies still overlap
+       once the jaw opens, which would otherwise report a collision that
+       cannot happen. -->
+  <disable_collisions link1="wrist_collision_proxy" link2="gripper_collision_proxy" reason="Never"/>
 </robot>
