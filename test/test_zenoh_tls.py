@@ -54,3 +54,11 @@ def test_bridge_configs_require_the_same_private_ca_and_never_use_plaintext():
     assert f'"{TLS_DIR}/device.key"' in device and f'"{TLS_DIR}/device.crt"' in device
     assert f'"{TLS_DIR}/compute.key"' in compute and f'"{TLS_DIR}/compute.crt"' in compute
     assert '["tls/", remote_ip, ":7447"]' in launch and '["tcp/"' not in launch
+
+
+def test_main_installers_provision_the_identities():
+    compute = (ROOT / "scripts" / "install-compute-services.sh").read_text()
+    assert 'setup-zenoh-tls.sh" --user "$LEKIWI_SERVICE_USER" "${REMOTE:-local}"' in compute
+    # A change to the provisioning script makes deploy-split refresh the compute service.
+    revision = (ROOT / "scripts" / "lib" / "service-install-revision.sh").read_text()
+    assert "scripts/setup-zenoh-tls.sh" in revision.split("device)")[0]

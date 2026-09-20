@@ -23,8 +23,9 @@ Start with one of these:
   domain hides 5 GHz networks) and lets the service user run NetworkManager commands
   over SSH without a password, through `install-device-network.sh`.
 - `setup-zenoh-tls.sh DEVICE` creates a private CA and installs the mutual-TLS
-  identities of the zenoh sensor bridge on both machines. Run it once before the
-  first deploy; `deploy-split.sh` refuses to run without them.
+  identities of the zenoh sensor bridge on both machines. `install-compute-services.sh`
+  runs it (idempotently), so it only needs running by hand with `--renew`;
+  `deploy-split.sh` refuses to run without the identities.
 - `deploy-split.sh` updates an installed split robot.
 - `build-lekiwi.sh` rebuilds this package in an existing workspace.
 

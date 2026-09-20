@@ -9,7 +9,7 @@ service_fingerprint() {
       sources=(systemd/lekiwi-stack.service systemd/lekiwi-ros-logrotate.conf \
         systemd/lekiwi-ros-logrotate.service systemd/lekiwi-ros-logrotate.timer \
         scripts/lib/service-install-common.sh scripts/lib/runtime-common.sh \
-        scripts/lib/self-heal.sh scripts/install-deploy-sudoers.sh)
+        scripts/lib/self-heal.sh scripts/install-deploy-sudoers.sh scripts/setup-zenoh-tls.sh)
       ;;
     device)
       sources=(systemd/lekiwi-host.service systemd/lekiwi-astra.service \

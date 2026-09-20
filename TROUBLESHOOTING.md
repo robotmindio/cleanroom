@@ -80,9 +80,10 @@ The device's sensor topics cross the network over one zenoh link (port 7447) tha
 requires mutual TLS. If `journalctl -u lekiwi-zenoh` on the device says
 `missing /etc/lekiwi/zenoh-tls/...`, or the compute bridge logs `received fatal
 alert` or `Unable to connect to tls/...`, the two machines do not share a
-certificate authority. Run `scripts/setup-zenoh-tls.sh DEVICE` on the compute
-machine (add `--renew` after a lost or expired identity; certificates last five
-years), then restart both bridges with `scripts/deploy-split.sh`. The bridge never
+certificate authority. Run `scripts/reinstall-compute.sh` on the compute
+machine, which provisions the identities; for a lost or expired one (certificates
+last five years) run `scripts/setup-zenoh-tls.sh --renew DEVICE` instead. Then
+restart both bridges with `scripts/deploy-split.sh`. The bridge never
 falls back to plaintext.
 
 ## Topics go silent after a Wi-Fi change or a USB re-enumeration

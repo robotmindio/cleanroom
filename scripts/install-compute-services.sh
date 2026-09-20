@@ -143,6 +143,13 @@ else
   fi
 fi
 
+# Device sensors cross the network through the mutual-TLS zenoh bridge; make sure both
+# ends have their identities (a no-op once they are installed).
+if [[ $STACK_ARGS == *remote* ]]; then
+  log "Ensuring the zenoh bridge TLS identities"
+  as_root "$PROJECT_ROOT/scripts/setup-zenoh-tls.sh" --user "$LEKIWI_SERVICE_USER" "${REMOTE:-local}"
+fi
+
 if [[ $ROSBRIDGE_TAILNET == true ]]; then
   command -v tailscale >/dev/null || die "--rosbridge-tailnet requires tailscale"
   tailnet_ip=$(tailscale ip -4)

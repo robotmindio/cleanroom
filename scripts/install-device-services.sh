@@ -174,6 +174,10 @@ log "Installing lekiwi-lidar.service"
 install_unit lekiwi-lidar.service
 log "Installing lekiwi-zenoh.service"
 install_unit lekiwi-zenoh.service
+if [[ ! -r /etc/lekiwi/zenoh-tls/device.key ]]; then
+  log "warning: no zenoh TLS identity yet; the bridge will not start until the compute"
+  log "machine runs scripts/install-compute-services.sh (or scripts/setup-zenoh-tls.sh)."
+fi
 log "Installing ROS log rotation"
 install_log_rotation
 if [[ $camera_ros_available == true && -z "$(first_match '/dev/v4l/by-id/*WEBCAM*-video-index0')" ]]; then

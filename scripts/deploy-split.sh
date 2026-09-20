@@ -139,14 +139,6 @@ for unit in lekiwi-astra.service lekiwi-cameras.service lekiwi-lidar.service; do
   remote_unit_exists "$unit" || \
     die "$unit is not installed; rerun scripts/install-device-services.sh on $device"
 done
-# The sensor bridge is mutual TLS; a missing identity would leave the robot without sensors.
-for file in ca.crt compute.crt compute.key; do
-  [[ -r /etc/lekiwi/zenoh-tls/$file ]] || die "missing /etc/lekiwi/zenoh-tls/$file; run scripts/setup-zenoh-tls.sh $device"
-done
-for file in ca.crt device.crt device.key; do
-  "${ssh_command[@]}" test -r "/etc/lekiwi/zenoh-tls/$file" || \
-    die "missing /etc/lekiwi/zenoh-tls/$file on $device; run scripts/setup-zenoh-tls.sh $device"
-done
 if ! grep -Fq "remote_ip:=$device_address" /etc/default/lekiwi-stack \
   || ! grep -Fq 'laser_source:=ld06 lidar_source:=remote' /etc/default/lekiwi-stack; then
   refresh_compute_service
@@ -176,6 +168,14 @@ if [[ $(cat "$service_marker" 2>/dev/null || true) != "$expected_service_fingerp
 fi
 [[ $(cat "$service_marker" 2>/dev/null || true) == "$expected_service_fingerprint" ]] || \
   die "compute service configuration did not refresh"
+# The sensor bridge is mutual TLS; a missing identity would leave the robot without sensors.
+for file in ca.crt compute.crt compute.key; do
+  [[ -r /etc/lekiwi/zenoh-tls/$file ]] || die "missing /etc/lekiwi/zenoh-tls/$file; run scripts/reinstall-compute.sh"
+done
+for file in ca.crt device.crt device.key; do
+  "${ssh_command[@]}" test -r "/etc/lekiwi/zenoh-tls/$file" || \
+    die "missing /etc/lekiwi/zenoh-tls/$file on $device; run scripts/reinstall-compute.sh"
+done
 expected_device_service_fingerprint=$(service_fingerprint device) || die "cannot calculate device service configuration fingerprint"
 [[ $("${ssh_command[@]}" "cat '$remote_service_marker' 2>/dev/null || true") == "$expected_device_service_fingerprint" ]] || \
   die "device service configuration is stale; rerun scripts/install-device-services.sh on $device"
