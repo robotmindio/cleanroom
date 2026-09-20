@@ -2,11 +2,16 @@ name: ROS Jazzy
 
 on:
   push:
+    branches: [main]
   pull_request:
+
+permissions:
+  contents: read
 
 jobs:
   build-test-lint:
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     container: ros:jazzy-ros-base
     defaults:
       run:
@@ -63,14 +68,14 @@ jobs:
           PY
           python3 -m compileall -q lekiwi_rmf scripts test
           ament_flake8 --config config/flake8.ini lekiwi_rmf scripts test
-          non_executable=$(find scripts -maxdepth 1 -type f \
+          non_executable=$(find scripts -type f \
             \( -name '*.py' -o -name '*.sh' -o -name '*.bash' \) \
             ! -perm /111 -print -quit)
           if [ -n "$non_executable" ]; then
             echo "installed script source is not executable: $non_executable" >&2
             exit 1
           fi
-          find scripts -maxdepth 1 -type f \( -name '*.sh' -o -name '*.bash' \) -print0 |
+          find scripts -type f \( -name '*.sh' -o -name '*.bash' \) -print0 |
             xargs -0 -r shellcheck
       - name: Python coverage report
         env:

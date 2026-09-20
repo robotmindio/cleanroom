@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Shared, deliberately small helpers for the systemd installers. This file is
-# sourced by installers that already provide log() and die().
+# sourced by installers that already provide log() and die(); the unit helpers
+# also need PROJECT_ROOT and UNIT_DIR.
 
 if ! declare -F as_root >/dev/null; then
   SUDO=()
@@ -113,4 +114,26 @@ verify_systemd_units() {
     # topology has no local host) or unrelated and broken. Validate this unit.
     as_root systemd-analyze verify --recursive-errors=no "$UNIT_DIR/$unit"
   done
+}
+
+# Units whose rendered file replaced a different installed one. A running
+# service keeps its old environment until restarted, so installers restart
+# these after enabling; a first installation is started by enable --now.
+CHANGED_UNITS=()
+
+install_unit() { # install_unit <unit-file-name>
+  local before after
+  before=$(as_root sha256sum "$UNIT_DIR/$1" 2>/dev/null || true)
+  render_systemd_unit "$PROJECT_ROOT/systemd/$1" "$UNIT_DIR/$1"
+  after=$(as_root sha256sum "$UNIT_DIR/$1")
+  [[ -z $before || $before == "$after" ]] || CHANGED_UNITS+=("$1")
+}
+
+install_log_rotation() {
+  [[ -x /usr/sbin/logrotate ]] || \
+    die "logrotate is required by lekiwi-ros-logrotate.service (sudo apt-get install logrotate)"
+  as_root install -d -m 0755 /etc/lekiwi
+  render_systemd_unit "$PROJECT_ROOT/systemd/lekiwi-ros-logrotate.conf" /etc/lekiwi/ros-logrotate.conf
+  install_unit lekiwi-ros-logrotate.service
+  install_unit lekiwi-ros-logrotate.timer
 }

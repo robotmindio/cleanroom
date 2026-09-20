@@ -18,4 +18,3 @@ __pycache__/
 .rmf_schedule_node.yaml
 *.db
 .claude/
-.env
