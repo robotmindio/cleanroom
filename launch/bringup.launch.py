@@ -260,10 +260,7 @@ def generate_launch_description():
         }],
         remappings=[
             ("rgb/image", slam_rgb_topic), ("rgb/camera_info", slam_camera_info_topic),
-            ("depth/image", "/camera/astra/depth/image_raw"),
-            ("depth/camera_info", "/camera/astra/depth/camera_info"),
             ("odom", "/odom"), ("scan_cloud", "/slam/cloud"), ("map", rtabmap_map_topic),
-            ("grid_map", "/rtabmap/grid_map"),
         ],
         condition=IfCondition(visual_slam), output="screen",
     )

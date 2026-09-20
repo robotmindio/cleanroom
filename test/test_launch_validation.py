@@ -151,3 +151,10 @@ def test_amcl_never_silently_uses_the_default_synthetic_map():
 def test_static_map_requires_an_approved_bundle_even_without_rmf():
     with pytest.raises(ValueError, match="cannot read YAML"):
         validate_launch_arguments(valid_arguments(static_map="true"))
+
+
+def test_a_remote_lidar_needs_the_ld06_laser_source_not_auto():
+    with pytest.raises(ValueError, match="lidar_source:=remote requires laser_source:=ld06"):
+        validate_launch_arguments(valid_arguments(laser_source="auto", lidar_source="remote"))
+
+    validate_launch_arguments(valid_arguments(laser_source="ld06", lidar_source="remote"))

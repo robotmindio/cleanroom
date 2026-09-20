@@ -234,6 +234,10 @@ def validate_launch_arguments(
         raise ValueError("real navigation requires laser_source:=camera, ld06, or auto")
     if mode == "real" and laser_source == "camera" and not publish_camera:
         raise ValueError("laser_source:=camera requires publish_camera:=true")
+    if mode == "real" and lidar_source == "remote" and laser_source == "auto":
+        # auto only looks for a lidar on this machine, so it would start the
+        # camera laser and never relay the device's LD06.
+        raise ValueError("lidar_source:=remote requires laser_source:=ld06")
     if mode == "sim" and camera_source == "remote":
         raise ValueError("camera_source:=remote is unsupported in simulation")
     if mode == "sim" and lidar_source == "remote":
