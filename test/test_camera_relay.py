@@ -151,3 +151,40 @@ def test_wrist_frames_are_relayed_but_its_missing_calibration_is_not_invented(gr
 
     assert ours_image, "wrist frames should be relayed like any other camera"
     assert not seen_infos, "wrist has no calibration; inventing one would be worse"
+
+
+def test_frames_are_not_decoded_while_nothing_consumes_the_raw_topic(graph):
+    device, relay, executor = graph
+    decoded = []
+    original = relay.bridge
+
+    class CountingBridge:
+        def compressed_imgmsg_to_cv2(self, *args):
+            decoded.append(args)
+            return original.compressed_imgmsg_to_cv2(*args)
+
+        cv2_to_imgmsg = staticmethod(original.cv2_to_imgmsg)
+
+    relay.bridge = CountingBridge()
+    try:
+        for _ in range(10):
+            device.publish()
+            executor.spin_once(timeout_sec=0.02)
+    finally:
+        relay.bridge = original
+
+    assert not decoded
+
+
+def test_a_bridge_that_cannot_decode_is_reported_with_the_library_versions():
+    assert camera_relay.decoder_error(BRIDGE) is None
+
+    class Broken:
+        def compressed_imgmsg_to_cv2(self, *_):
+            raise KeyError(16)
+
+        cv2_to_imgmsg = staticmethod(BRIDGE.cv2_to_imgmsg)
+
+    problem = camera_relay.decoder_error(Broken())
+    assert "KeyError(16)" in problem
+    assert f"OpenCV {cv2.__version__}" in problem and f"NumPy {np.__version__}" in problem

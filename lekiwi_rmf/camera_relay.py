@@ -8,12 +8,29 @@ raw images plus CameraInfo on the /camera/... topics -- so nothing downstream
 can tell the topologies apart. Frames keep their original stamps: RTAB-Map
 syncs approximately, which ordinary NTP-synced clocks comfortably satisfy.
 """
+import cv2
+import numpy as np
 import rclpy
 from cv_bridge import CvBridge
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from sensor_msgs.msg import CameraInfo, CompressedImage, Image
+
+
+def decoder_error(bridge) -> str | None:
+    """Why this environment cannot relay a frame, or None when it can.
+
+    cv_bridge is built against one OpenCV/NumPy generation; a pip-installed
+    mismatch makes every frame fail, so it is checked once at startup.
+    """
+    ok, jpeg = cv2.imencode(".jpg", np.zeros((2, 2, 3), np.uint8))
+    message = CompressedImage(format="jpeg", data=jpeg.tobytes() if ok else b"")
+    try:
+        bridge.cv2_to_imgmsg(bridge.compressed_imgmsg_to_cv2(message, "bgr8"), "bgr8")
+    except Exception as error:
+        return f"{error!r} (OpenCV {cv2.__version__}, NumPy {np.__version__})"
+    return None
 
 
 class CameraRelay(Node):
@@ -25,6 +42,12 @@ class CameraRelay(Node):
     def __init__(self):
         super().__init__("camera_relay")
         self.bridge = CvBridge()
+        problem = decoder_error(self.bridge)
+        if problem:
+            self.get_logger().error(
+                f"cv_bridge cannot decode camera frames: {problem}; "
+                "the OpenCV/NumPy in this environment does not match ROS's cv_bridge"
+            )
         self.last_info = {}
         # Canonical raw camera topics are consumed by the floor scan and RTAB-Map.
         # Keep their delivery contract identical to the local v4l2 camera path.
@@ -47,11 +70,17 @@ class CameraRelay(Node):
         info_pub = self.create_publisher(CameraInfo, f"/camera/{name}/camera_info", self.raw_qos) if with_info else None
 
         def on_image(msg):
+            # Decoding and re-encoding every frame is wasted work while nothing
+            # (SLAM, free-space, RViz, Foxglove) consumes the raw topic.
+            if pub.get_subscription_count() == 0:
+                return
             try:
                 cv_image = self.bridge.compressed_imgmsg_to_cv2(msg, "bgr8")
                 image = self.bridge.cv2_to_imgmsg(cv_image, "bgr8")
             except Exception as error:  # a truncated JPEG is data damage, not fatal
-                self.get_logger().warn(f"{name}: undecodable frame: {error}")
+                self.get_logger().warn(
+                    f"{name}: undecodable frame: {error}", throttle_duration_sec=5.0
+                )
                 return
             image.header = msg.header
             pub.publish(image)
