@@ -11,11 +11,12 @@
            (config/zenoh_device.json5); DDS multicast discovery over Wi-Fi
            silently lost any node that restarted after a router hiccup. -->
       <MulticastTimeToLive>0</MulticastTimeToLive>
-      <!-- RGB-D frames are much larger than an Ethernet MTU.  The default
-           14,720 B UDP payload is IP-fragmented on the robot Wi-Fi link; one
-           lost IP fragment discards the whole DDS sample. -->
-      <MaxMessageSize>1200B</MaxMessageSize>
-      <FragmentSize>1192B</FragmentSize>
+      <!-- Everything DDS carries stays on this host, so datagrams can use the
+           loopback MTU. The Astra driver publishes 4.9 MB clouds at 30 Hz to
+           its filter; with 1,200 B fragments that is about 4,100 datagrams per
+           sample, which capped delivery near 20 Hz at twice the CPU. -->
+      <MaxMessageSize>65500B</MaxMessageSize>
+      <FragmentSize>65000B</FragmentSize>
     </General>
     <Discovery>
       <!-- "none" drops the participant index entirely: participants take ephemeral
