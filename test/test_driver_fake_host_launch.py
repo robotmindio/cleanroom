@@ -54,6 +54,10 @@ def generate_test_description():
             "arm_motion_permission_topic": "/test/driver/arm_permitted",
             "arm_calibration_file": "/test/intentionally-missing-calibration.json",
             "auto_arm_on_startup": False,
+            # This scenario covers the strict behaviour: a withdrawn permission
+            # or lost link disarms and cuts torque. The default (stay armed)
+            # policy is covered by test_driver_link.py.
+            "disarm_on_failure": True,
             # The host/driver protocol is tested here. This development image's
             # diagnostic_msgs C extension aborts while serializing any
             # DiagnosticStatus (also reproducible outside this package), so

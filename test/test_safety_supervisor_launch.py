@@ -28,6 +28,9 @@ def generate_test_description():
         namespace="safety_integration",
         name="safety_supervisor",
         parameters=[{
+            # The default (domestic) supervisor reports findings but never
+            # withholds motion; this scenario covers the strict decisions.
+            "strict": True,
             "publish_frequency": 40.0,
             "sensor_timeout": 0.20,
             "state_timeout": 1.0,
