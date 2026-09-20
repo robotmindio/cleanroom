@@ -35,6 +35,7 @@ driver.time = time
 # mode (disarm, cut torque and wait for an operator on every failure). The default has its
 # own tests at the end.
 driver.LeKiwiDriver.disarm_on_failure = True
+driver.LeKiwiDriver.operator_disarmed = False
 
 
 def grant_fresh_arm_permission(node, permitted=True):
@@ -889,6 +890,42 @@ def test_an_operator_disarm_stays_disarmed_and_only_an_explicit_arm_resumes():
     assert node.armed is False and node.auto_arm_pending is False
     assert node.arm_after_startup_telemetry() is False
     assert node.armed is False
+
+
+def test_a_failure_after_an_operator_disarm_never_rearms_the_robot():
+    node = rearm_node()
+    node.armed = True
+    node.disarm(None, types.SimpleNamespace())
+
+    node.set_disarmed("LINK_LOST")  # e.g. the link drops while the operator has it disarmed
+
+    assert node.auto_arm_pending is False
+    assert node.arm_after_startup_telemetry() is False
+    node._retry_rearm_soon()
+    assert node.auto_arm_pending is False
+
+
+def test_an_explicit_arm_hands_recovery_back_to_the_automatic_rearm():
+    class _Instant:
+        nanoseconds = 0
+
+        def __sub__(self, _other):
+            return types.SimpleNamespace(nanoseconds=0)
+
+    node = rearm_node()
+    node.armed = True
+    node.disarm(None, types.SimpleNamespace())
+    node.get_clock = lambda: types.SimpleNamespace(now=_Instant)
+    node.last_fresh = _Instant()
+    node.last_observation = {"joint": 0.0}
+    node.link_timeout = 1.0
+    node._capability_permission_is_current = lambda: True
+
+    response = node.arm(None, types.SimpleNamespace())
+
+    assert response.success is True and node.operator_disarmed is False
+    node.set_disarmed("LINK_LOST")
+    assert node.auto_arm_pending is True
 
 
 def test_strict_mode_waits_for_an_explicit_arm_after_a_failure():

@@ -149,6 +149,9 @@ class LeKiwiDriver(Node):
         # so recovery never resumes movement without an operator arming again. Without it
         # the flag is set again after every failure, so the robot re-arms itself.
         self.auto_arm_pending = bool(self.auto_arm_on_startup) or not self.disarm_on_failure
+        # Set by an operator's safety/disarm and cleared only by a successful safety/arm,
+        # so no later failure or telemetry recovery can re-arm a robot the operator disarmed.
+        self.operator_disarmed = False
         calibration_path = os.path.expanduser(calibration_file)
         self.arm_calibrated = os.path.isfile(calibration_path)
         self.stop_pending = True
@@ -376,7 +379,9 @@ class LeKiwiDriver(Node):
                 self.armed = False
                 # An operator's disarm must hold, and in the strict mode so must a failure.
                 # Otherwise the driver re-arms itself once telemetry and permission allow.
-                self.auto_arm_pending = not deliberate and not self.disarm_on_failure
+                if deliberate:
+                    self.operator_disarmed = True
+                self.auto_arm_pending = not self.operator_disarmed and not self.disarm_on_failure
                 self.command = Twist()
                 self.command_stamp = self.get_clock().now()
                 self.stop_pending = True
@@ -490,7 +495,7 @@ class LeKiwiDriver(Node):
         """Unless strict, a failed automatic arm is retried, at a bounded rate."""
         if not self.disarm_on_failure:
             with self.state_lock:
-                self.auto_arm_pending = True
+                self.auto_arm_pending = not self.operator_disarmed
                 self._next_rearm_at = time.monotonic() + 2.0
 
     def arm(self, request, response):
@@ -558,6 +563,7 @@ class LeKiwiDriver(Node):
                 return response
             with self.state_lock:
                 self.armed = True
+                self.operator_disarmed = False
                 self.command = Twist()
                 self.command_stamp = now
             self.publish_safety("ARMED")
@@ -965,9 +971,10 @@ class LeKiwiDriver(Node):
                 self.base_motion_permitted,
                 getattr(self, "_base_permission_received_at_ns", None),
             ) else self.command
-        action = {
+        hold_action = {
             f"{joint}.pos": float(observation.get(f"{joint}.pos", 0.0)) for joint in ARM_JOINTS
         }
+        action = dict(hold_action)
         with self.trajectory_lock:
             trajectory = self.trajectory
             if trajectory:
@@ -993,6 +1000,8 @@ class LeKiwiDriver(Node):
                     trajectory["result_code"] = FollowJointTrajectory.Result.PATH_TOLERANCE_VIOLATED
                     trajectory["done"].set()
                     self.trajectory = None
+                    # The setpoint that failed the check must not reach the servos.
+                    action.update(hold_action)
                 elif elapsed >= final_point.time and all(
                     abs(self.arm_positions[name] - final_point.positions[name]) <= tolerance
                     for name, tolerance in trajectory["goal_tolerances"].items()
