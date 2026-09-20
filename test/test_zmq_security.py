@@ -262,7 +262,6 @@ def test_repository_client_speaks_authenticated_state_protocol(tmp_path):
     )
     try:
         client.connect()
-        assert client.zmq_cmd_socket.getsockopt(zmq.SNDTIMEO) == 100
         assert client.zmq_cmd_socket.getsockopt(zmq.IMMEDIATE) == 1
         for socket in (client.zmq_cmd_socket, client.zmq_observation_socket):
             assert socket.getsockopt(zmq.HEARTBEAT_IVL) == 1000

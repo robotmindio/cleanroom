@@ -28,7 +28,6 @@ class LeKiwiZmqClient:
         curve_credentials: CurveClientCredentials | None = None,
         polling_timeout_ms: int = 15,
         connect_timeout_s: int = 5,
-        command_timeout_ms: int = 100,
         zmq_module=None,
     ):
         if not isinstance(remote_ip, str) or not remote_ip.strip():
@@ -42,13 +41,6 @@ class LeKiwiZmqClient:
         ).validate()
         self.polling_timeout_ms = polling_timeout_ms
         self.connect_timeout_s = connect_timeout_s
-        if (
-            isinstance(command_timeout_ms, bool)
-            or not isinstance(command_timeout_ms, int)
-            or command_timeout_ms <= 0
-        ):
-            raise ValueError("command_timeout_ms must be a positive integer")
-        self.command_timeout_ms = command_timeout_ms
         self._provided_zmq = zmq_module
         self._zmq = None
         self.zmq_context = None
@@ -79,7 +71,6 @@ class LeKiwiZmqClient:
         try:
             self.zmq_cmd_socket.setsockopt(zmq.LINGER, 0)
             self.zmq_cmd_socket.setsockopt(zmq.CONFLATE, 1)
-            self.zmq_cmd_socket.setsockopt(zmq.SNDTIMEO, self.command_timeout_ms)
             # Do not silently queue motion for a host that is not currently
             # connected. A later reconnect must never receive an old action.
             self.zmq_cmd_socket.setsockopt(zmq.IMMEDIATE, 1)
