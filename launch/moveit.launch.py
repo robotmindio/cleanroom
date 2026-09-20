@@ -20,9 +20,9 @@ def generate_launch_description():
     # by a fresh, calibrated depth cloud. Pinning the resolution also keeps the
     # planning-scene representation reproducible across machines.
     parameters["octomap_resolution"] = 0.1
-    # The execution-time arm gate requires a live monitored scene, not merely
-    # an initial planning snapshot. Publish complete state/geometry updates at
-    # a bounded frequency so silence is distinguishable from empty free space.
+    # RViz's planning-scene display follows /monitored_planning_scene, so publish
+    # complete state/geometry updates at a bounded frequency. The arm gate does
+    # not use this topic; it takes liveness from /moveit/filtered_cloud.
     parameters["publish_planning_scene"] = True
     parameters["publish_geometry_updates"] = True
     parameters["publish_state_updates"] = True

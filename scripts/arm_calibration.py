@@ -63,7 +63,7 @@ def main():
                        "directions": directions}, output, indent=2)
             output.write("\n")
         os.replace(temporary, args.output)
-        print(f"Saved {args.output}; restart scripts/up.sh to apply it.")
+        print(f"Saved {args.output}; restart the stack to apply it (scripts/up.sh, or sudo systemctl restart lekiwi-stack.service).")
     finally:
         node.destroy_node()
         rclpy.shutdown()

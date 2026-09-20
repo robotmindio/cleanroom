@@ -90,7 +90,7 @@ def main():
                 print("Cancelled; no command sent.")
                 return 0
         if not node.client.wait_for_server(timeout_sec=3.0):
-            raise RuntimeError("arm controller action is unavailable; run scripts/up.sh and check that the driver is armed")
+            raise RuntimeError("arm controller action is unavailable; start the stack (scripts/up.sh or lekiwi-stack.service) and check that the driver is armed")
         goal = FollowJointTrajectory.Goal()
         goal.trajectory = JointTrajectory(
             joint_names=[joint],

@@ -156,9 +156,10 @@ only the automatic-archive retention policy; it never opens or moves the active 
 
 ## ROS logs consume disk
 
-The service installers enable `lekiwi-ros-logrotate.timer`. Every five minutes it rotates
-ROS logs above 100 MiB with `copytruncate`, keeps twelve archives, and compresses older
-ones.
+The service installers enable `lekiwi-ros-logrotate.timer`. Every five minutes
+`lekiwi-ros-logrotate.service` rotates ROS logs above 100 MiB with `copytruncate` and keeps
+twelve compressed archives. The same run deletes log files untouched for four days and launch
+directories left empty, so finished launches do not accumulate under `~/.ros/log`.
 
 ## Installer reports a ParaView/VTK conflict
 

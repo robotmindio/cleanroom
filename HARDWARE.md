@@ -265,8 +265,10 @@ scripts/robot-host.sh
 Defaults: command socket `5555/tcp`, observations `5556/tcp`, torque safety
 `5557/tcp`, watchdog 500 ms, loop 30 Hz, bound to all interfaces (set
 `LEKIWI_BIND_ADDRESS` to pin one). The watchdog stops the base when
-commands stop arriving. It is not an E-stop. The repository host starts
-torque-off and only changes servo torque through the separate safety endpoint.
+commands stop arriving and, by default, leaves servo torque on. It is not an E-stop.
+The repository host starts torque-off and changes servo torque through the separate
+safety endpoint; only in the strict mode (`LEKIWI_DISARM_ON_FAILURE=true`) does the
+watchdog also cut torque.
 
 By default the direct host auto-detects both known cameras; set `LEKIWI_WRIST=none`
 to leave the wrist feed out when USB bandwidth is tight. Its ZMQ clients can use
