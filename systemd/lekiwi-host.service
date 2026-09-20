@@ -58,6 +58,9 @@ RestrictSUIDSGID=true
 UMask=0077
 Restart=on-failure
 RestartSec=10s
+# The ExecStartPost gate retries for up to 120 x (1 s probe + 1 s sleep); the
+# 90 s default would kill a host that is merely slow to find its servos.
+TimeoutStartSec=300s
 # robot-host.sh exits cleanly on SIGTERM (it traps INT TERM HUP); the cgroup
 # kill mops up its python child, which holds the motor bus.
 TimeoutStopSec=20s

@@ -4,21 +4,10 @@ set -Eeuo pipefail
 
 cd "$(dirname "$0")/.."
 # shellcheck source=/dev/null
+source scripts/lib/runtime-common.sh
+# shellcheck source=/dev/null
 source scripts/lib/self-heal.sh
-workspace=${LEKIWI_WS:-$HOME/lekiwi_ws}
-if [ -f "$workspace/install/setup.bash" ]; then
-  set +u
-  # shellcheck source=/dev/null
-  source /opt/ros/jazzy/setup.bash
-  # shellcheck source=/dev/null
-  source "$workspace/install/setup.bash"
-  set -u
-  export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
-  export CYCLONEDDS_URI="file://$PWD/config/cyclonedds.xml"
-else
-  # shellcheck source=/dev/null
-  source scripts/setup-pi.bash
-fi
+source_device_ros_env
 export PATH="$HOME/.local/bin:$PATH"
 
 # The link is mutual TLS (config/zenoh_device.json5). Never fall back to plaintext.

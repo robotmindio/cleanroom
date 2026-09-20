@@ -5,7 +5,14 @@ from __future__ import annotations
 import getpass
 import os
 import pathlib
+import re
+import shlex
+import shutil
+import stat
 import subprocess
+import time
+
+import pytest
 
 
 ROOT = pathlib.Path(__file__).parents[1]
@@ -120,9 +127,7 @@ def test_unit_validation_ignores_unrelated_systemd_units():
 
 def test_startup_disarm_is_tracked_in_the_launch_default():
     launch = (ROOT / "launch" / "bringup.launch.py").read_text()
-    launcher = (ROOT / "scripts" / "ros-start.sh").read_text()
     assert '"auto_arm_on_startup", default_value="false"' in launch
-    assert "deploy-inhibit-auto-arm" not in launcher
 
 
 def test_full_installer_includes_qualification_tooling_dependencies():
@@ -144,6 +149,43 @@ def test_installer_reapplies_the_pinned_free_fleet_patch_on_rerun():
     assert patch.is_file()
     assert 'apply_pinned_patch "$free_fleet_source" "$free_fleet_patch"' in installer
     assert '"$free_fleet_source" "$FREE_FLEET_REV" "$free_fleet_patch"' in installer
+    # One implementation of the pinned checkout, shared with install-pi.sh.
+    assert "checkout_pinned() {" not in installer
+    assert "reset --hard" not in installer
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git is required")
+def test_pinned_checkout_reverses_only_its_patch_and_keeps_other_local_edits(tmp_path):
+    script = r'''
+set -Eeuo pipefail
+die() { printf '%s\n' "$*" >&2; exit 1; }
+source "$1/scripts/thirdparty-common.sh"
+git() { command git -c user.name=test -c user.email=test@example.invalid "$@"; }
+cd "$2"
+git init -q upstream
+printf 'one\n' > upstream/a.txt
+printf 'two\n' > upstream/b.txt
+git -C upstream add .
+git -C upstream commit -qm base
+printf 'patched\n' > upstream/a.txt
+git -C upstream diff > fix.patch
+git -C upstream checkout -q a.txt
+revision=$(git -C upstream rev-parse HEAD)
+
+checkout_pinned "$PWD/upstream" "$PWD/dest" "$revision" "$PWD/fix.patch" >/dev/null 2>&1
+apply_pinned_patch dest "$PWD/fix.patch" "the test patch"
+# A rerun over the patched tree, with an unrelated local edit beside it.
+printf 'mine\n' > dest/b.txt
+checkout_pinned "$PWD/upstream" "$PWD/dest" "$revision" "$PWD/fix.patch" >/dev/null 2>&1
+apply_pinned_patch dest "$PWD/fix.patch" "the test patch"
+[[ $(cat dest/a.txt) == patched ]]
+[[ $(cat dest/b.txt) == mine ]]
+
+# Without the known patch, local changes are refused rather than discarded.
+if (checkout_pinned "$PWD/upstream" "$PWD/dest" "$revision" >/dev/null 2>&1); then exit 1; fi
+[[ $(cat dest/b.txt) == mine ]]
+'''
+    subprocess.run(["bash", "-c", script, "pinned-checkout", str(ROOT), str(tmp_path)], check=True)
 
 
 def test_simulation_installer_excludes_astra_hardware_setup():
@@ -163,9 +205,12 @@ def test_split_compute_installs_and_starts_moveit_by_default():
 
     assert '"ros-$ROS_DISTRO-moveit"' in installer
     assert "start_moveit:=true" in compute
-    assert "LEKIWI_ROBOT_HOST" in reinstall
+    assert "load_lekiwi_env" in reinstall
     assert "install-compute-services.sh" in reinstall
-    assert "systemctl restart lekiwi-stack.service" in reinstall
+    assert '--remote "$remote"' in reinstall
+    # The installer restarts the stack; the wrapper must not restart it twice.
+    assert "systemctl restart lekiwi-stack.service" in compute
+    assert "systemctl restart" not in reinstall
     assert "start_moveit:=true" in workstation
 
 
@@ -175,6 +220,7 @@ def test_service_installers_support_an_unauthenticated_split_zmq_transport():
 
     assert 'if [[ -n $CURVE_DIR_ARG ]]; then' in device
     assert 'STACK_ARGS="camera_source:=remote remote_ip:=$REMOTE laser_source:=ld06 lidar_source:=remote start_moveit:=true"' in compute
+    assert compute.count("--curve-dir does not contain") == 1
 
 
 def test_remote_stack_has_no_local_host_dependency():
@@ -193,13 +239,55 @@ def test_standard_installers_start_and_relay_the_host_lidar_without_an_opt_in():
     device = (ROOT / "scripts" / "install-device-services.sh").read_text(encoding="utf-8")
 
     assert "--remote-lidar" not in installer
-    assert "units=(lekiwi-host.service lekiwi-lidar.service lekiwi-zenoh.service)" in device
-    assert "as_root systemctl enable --now lekiwi-lidar.service lekiwi-zenoh.service" in device
+    assert "units=(lekiwi-host.service lekiwi-lidar.service)" in device
+    assert "as_root systemctl enable --now lekiwi-lidar.service" in device
     assert "ldlidar_stl_ros2 is unavailable; the standard device installation requires the LD06 driver" in device
     assert 'install-deploy-sudoers.sh" device --user "$LEKIWI_SERVICE_USER"' in device
     assert 'install-deploy-sudoers.sh" compute --user "$LEKIWI_SERVICE_USER"' in installer
     assert "record_service_fingerprint device" in device
     assert "record_service_fingerprint compute" in installer
+
+
+def test_device_installer_skips_the_zenoh_service_without_its_binary():
+    device = (ROOT / "scripts" / "install-device-services.sh").read_text(encoding="utf-8")
+    pi_installer = (ROOT / "scripts" / "install-pi.sh").read_text(encoding="utf-8")
+    common = (ROOT / "scripts" / "thirdparty-common.sh").read_text(encoding="utf-8")
+    workstation_installer = (ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
+
+    assert 'command -v zenoh-bridge-ros2dds' in device
+    assert "skipping lekiwi-zenoh.service" in device
+    assert "[[ $zenoh_available == true ]] && units+=(lekiwi-zenoh.service)" in device
+    # The README-prescribed device installer provides the binary the unit runs.
+    assert 'install_zenoh_bridge "$HOME/.local/bin"' in pi_installer
+    assert 'install_zenoh_bridge "$HOME/.local/bin"' in workstation_installer
+    assert "install_zenoh_bridge() {" in common
+
+
+def test_installed_units_that_change_are_queued_for_restart(tmp_path):
+    device = (ROOT / "scripts" / "install-device-services.sh").read_text(encoding="utf-8")
+    script = r'''
+set -Eeuo pipefail
+PROJECT_ROOT=$1
+UNIT_DIR=$2
+LEKIWI_SERVICE_USER=robot
+LEKIWI_SERVICE_HOME=/srv/robot
+LEKIWI_SERVICE_WORKSPACE=/srv/robot/lekiwi_ws
+LEKIWI_SERVICE_LEROBOT_VENV=/srv/robot/lerobot-venv
+as_root() { "$@"; }
+die() { printf '%s\n' "$*" >&2; exit 1; }
+source "$PROJECT_ROOT/scripts/lib/service-install-common.sh"
+
+LEKIWI_HOST_BIND_ADDRESS=0.0.0.0
+install_unit lekiwi-host.service
+[[ ${#CHANGED_UNITS[@]} -eq 0 ]]   # first installation: enable --now starts it
+install_unit lekiwi-host.service
+[[ ${#CHANGED_UNITS[@]} -eq 0 ]]   # identical rerun: nothing to restart
+LEKIWI_HOST_BIND_ADDRESS=10.0.0.5
+install_unit lekiwi-host.service
+[[ ${CHANGED_UNITS[*]} == lekiwi-host.service ]]
+'''
+    subprocess.run(["bash", "-c", script, "unit-change", str(ROOT), str(tmp_path)], check=True)
+    assert 'systemctl try-restart "${CHANGED_UNITS[@]}"' in device
 
 
 def test_sensor_services_keep_retrying_after_intermittent_usb_resets():
@@ -217,7 +305,9 @@ def test_pi_and_manual_split_startup_include_the_ld06():
 
     assert "Installing the pinned LD06 ROS driver" in pi_installer
     assert "ldlidar_stl_ros2_node" in pi_installer
-    assert "setsid scripts/ros-lidar.sh" in pi_up
+    assert "start_recorded lidar scripts/ros-lidar.sh" in pi_up
+    assert "start_recorded astra scripts/ros-astra.sh" in pi_up
+    assert "start_recorded zenoh scripts/ros-zenoh.sh" in pi_up
     assert "laser_source:=ld06 lidar_source:=remote" in workstation_up
     assert "start_moveit:=true" in workstation_up
     assert "waiting for LD06 serial port" in lidar
@@ -230,14 +320,6 @@ def test_device_installer_finds_ros_packages_under_sudo_root_path():
     assert 'source "$LEKIWI_SERVICE_WORKSPACE/install/setup.bash"' in installer
 
 
-def test_lidar_installer_does_not_restart_motion_or_camera_services():
-    installer = (ROOT / "scripts" / "install-lidar-service.sh").read_text(encoding="utf-8")
-
-    assert "lekiwi-lidar.service" in installer
-    assert "lekiwi-host.service" not in installer
-    assert "lekiwi-cameras.service" not in installer
-
-
 def test_deploy_order_fails_closed_around_the_device_restart():
     deploy = (ROOT / "scripts" / "deploy-split.sh").read_text(encoding="utf-8")
 
@@ -248,6 +330,11 @@ def test_deploy_order_fails_closed_around_the_device_restart():
     start_stack = deploy.index("start lekiwi-stack.service", start_host)
     assert disarm < stop_stack < stop_host < start_host < start_stack
     assert "lekiwi-lidar.service" in deploy
+    # The zenoh bridge is required and preflighted before anything is stopped;
+    # Astra and the cameras are skipped by the device installer without their ROS packages.
+    assert "device_units=(lekiwi-host.service lekiwi-lidar.service lekiwi-zenoh.service)" in deploy
+    assert "for unit in lekiwi-lidar.service lekiwi-zenoh.service; do" in deploy
+    assert 'if remote_unit_exists "$unit"; then device_units+=("$unit"); fi' in deploy
     assert ".lekiwi-source-revision" in deploy
     assert "expected_service_fingerprint" in deploy
     assert "canonical /scan is not the LD06 frame" in deploy
@@ -256,7 +343,6 @@ def test_deploy_order_fails_closed_around_the_device_restart():
     assert 'compute_sudoers=$(sudo -n -l)' in deploy
     assert "git merge --ff-only" in deploy
     assert "cannot fetch origin within 30 seconds" in deploy
-    assert "deploy-inhibit-auto-arm" not in deploy
     assert "LEKIWI_ROBOT_HOST" in deploy
     assert "load_lekiwi_env" in deploy
     assert "Refreshing stale compute service configuration" in deploy
@@ -281,6 +367,7 @@ def test_deploy_sudoers_are_limited_by_machine_role():
     assert "lekiwi-astra.service" in device
     assert "lekiwi-cameras.service" in device
     assert "lekiwi-lidar.service" in device
+    assert "lekiwi-zenoh.service" in device
     assert "lekiwi-stack.service" not in device
     assert "NOPASSWD" in compute and "NOPASSWD" in device
     assert "daemon-reload" not in compute + device
@@ -379,3 +466,209 @@ def test_torque_on_failure_key_is_validated_and_reaches_both_machines(tmp_path):
     host = (ROOT / "scripts" / "robot-host.sh").read_text(encoding="utf-8")
     assert "disarm_on_failure:=true" in stack
     assert '--safety.disarm_on_failure="${LEKIWI_DISARM_ON_FAILURE:-false}"' in host
+
+
+def _executable(path: pathlib.Path, body: str) -> pathlib.Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("#!/usr/bin/env bash\n" + body, encoding="utf-8")
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+    return path
+
+
+def test_port_probes_match_the_exact_local_port(tmp_path):
+    listing = {
+        "only-lookalikes": "LISTEN 0 4096 0.0.0.0:55550 0.0.0.0:*\nLISTEN 0 4096 [::]:15557 [::]:*\n",
+        "motion-only": "LISTEN 0 4096 0.0.0.0:5555 0.0.0.0:*\n",
+        "both": "LISTEN 0 4096 0.0.0.0:5555 0.0.0.0:*\nLISTEN 0 4096 [::]:5557 [::]:*\n",
+    }
+
+    def probe(name: str, function: str) -> int:
+        fake = tmp_path / name / "ss"
+        _executable(fake, f"cat <<'OUT'\nState Recv-Q Send-Q Local Peer\n{listing[name]}OUT\n")
+        return subprocess.run(
+            ["bash", "-c", f'source "{ROOT}/scripts/lib/runtime-common.sh"; {function}'],
+            env={**os.environ, "PATH": f"{fake.parent}:{os.environ['PATH']}"},
+        ).returncode
+
+    assert probe("only-lookalikes", "lekiwi_motion_port_listening") != 0
+    assert probe("motion-only", "lekiwi_motion_port_listening") == 0
+    assert probe("motion-only", "lekiwi_safety_ports_listening") != 0
+    assert probe("both", "lekiwi_safety_ports_listening") == 0
+
+
+def test_log_pruning_removes_only_stale_files_under_the_ros_log_directory(tmp_path):
+    unit = (ROOT / "systemd" / "lekiwi-ros-logrotate.service").read_text(encoding="utf-8")
+    commands = [
+        shlex.split(line.removeprefix("ExecStart=-").replace("@SERVICE_HOME@", str(tmp_path)))
+        for line in unit.splitlines()
+        if line.startswith("ExecStart=-/usr/bin/find")
+    ]
+    assert len(commands) == 2
+
+    log = tmp_path / ".ros" / "log"
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    old = time.time() - 6 * 86400
+    recent = time.time() - 3600
+    files = {
+        "loose_old.log": old,
+        "loose_new.log": recent,
+        "2026-01-01/launch.log.1": old,
+        "2026-01-01/launch.log": old,
+        "2026-01-02/launch.log": recent,
+        "2026-01-02/rotated.log.1": old,
+    }
+    for name, mtime in files.items():
+        path = log / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("x", encoding="utf-8")
+        os.utime(path, (mtime, mtime))
+    (log / "2026-01-03").mkdir()
+    os.utime(log / "2026-01-03", (old, old))
+    (log / "latest").symlink_to("2026-01-02")
+    (outside / "keep.log").write_text("x", encoding="utf-8")
+    os.utime(outside / "keep.log", (old, old))
+    (log / "linked").symlink_to(outside)
+
+    for command in commands:
+        subprocess.run(command, check=True)
+    # Emptying a directory refreshes its mtime; a later run removes it once it has stayed empty.
+    os.utime(log / "2026-01-01", (old, old))
+    subprocess.run(commands[1], check=True)
+
+    remaining = {str(p.relative_to(log)) for p in log.rglob("*") if not p.is_dir() or p.is_symlink()}
+    assert remaining == {"loose_new.log", "2026-01-02/launch.log", "latest", "linked"}
+    assert not (log / "2026-01-01").exists()
+    assert not (log / "2026-01-03").exists()
+    assert (outside / "keep.log").exists()
+
+
+def test_rotation_config_compresses_rotated_launch_logs_at_once():
+    config = (ROOT / "systemd" / "lekiwi-ros-logrotate.conf").read_text(encoding="utf-8")
+
+    assert "20*/*.log" in config
+    assert "\n    compress\n" in config
+    assert "delaycompress" not in config
+    # Both installers get the timer's binary from the shared helper, which refuses to install without it.
+    helper = (ROOT / "scripts" / "lib" / "service-install-common.sh").read_text(encoding="utf-8")
+    assert "[[ -x /usr/sbin/logrotate ]]" in helper
+
+
+def test_stack_survives_repeated_self_heal_kills_and_host_gets_time_to_pass_its_gate():
+    stack = (ROOT / "systemd" / "lekiwi-stack.service").read_text(encoding="utf-8")
+    host = (ROOT / "systemd" / "lekiwi-host.service").read_text(encoding="utf-8")
+
+    assert "StartLimitIntervalSec=0" in stack
+    assert "StartLimitBurst" not in stack
+    # The ExecStartPost gate probes up to 120 times, one second each plus a one second sleep.
+    timeout = int(re.search(r"^TimeoutStartSec=(\d+)s$", host, re.MULTILINE).group(1))
+    assert timeout > 2 * 120
+
+
+def test_long_running_startup_children_do_not_inherit_the_start_lock():
+    for name in ("up.sh", "pi-up.sh", "workstation-up.sh"):
+        script = (ROOT / "scripts" / name).read_text(encoding="utf-8")
+        launches = [line for line in script.splitlines() if "setsid" in line and "&" in line]
+        assert launches, name
+        assert all("9>&-" in line for line in launches), name
+        assert "flock -n 9" in script
+
+
+def test_ros_stop_leaves_units_owned_by_systemd_alone(tmp_path):
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    fake_systemctl = tmp_path / "bin" / "systemctl"
+    _executable(fake_systemctl, 'exit 0\n')  # every unit reports active
+    sentinel = subprocess.Popen(["sleep", "60"], start_new_session=True)
+    try:
+        kinds = ("stack", "host", "astra", "cameras", "lidar", "zenoh")
+        for kind in kinds:
+            (runtime / f"{kind}.pid").write_text(f"{sentinel.pid}\n", encoding="utf-8")
+        result = subprocess.run(
+            ["bash", str(ROOT / "scripts" / "ros-stop.sh")],
+            env={**os.environ, "LEKIWI_RUNTIME_DIR": str(runtime),
+                 "PATH": f"{fake_systemctl.parent}:{os.environ['PATH']}"},
+            capture_output=True, text=True, timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
+        for unit in ("stack", "host", "astra", "cameras", "lidar", "zenoh"):
+            assert f"lekiwi-{unit}.service is active -- left running" in result.stdout
+        assert sentinel.poll() is None
+        assert all((runtime / f"{kind}.pid").exists() for kind in kinds)
+    finally:
+        sentinel.kill()
+        sentinel.wait()
+
+
+def test_sync_calibration_uses_the_configured_robot_and_gives_up(tmp_path):
+    scripts = tmp_path / "scripts"
+    for name in ("sync-calibration.sh", "lib/runtime-common.sh"):
+        target = scripts / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text((ROOT / "scripts" / name).read_text(encoding="utf-8"), encoding="utf-8")
+    fakes = tmp_path / "bin"
+    calls = tmp_path / "rsync-calls"
+    _executable(fakes / "rsync", f'printf "%s\\n" "$*" >> "{calls}"\nexit 1\n')
+    _executable(fakes / "sleep", "exit 0\n")
+    environment = {k: v for k, v in os.environ.items() if k != "LEKIWI_ROBOT_HOST"}
+    environment.update(HOME=str(tmp_path / "home"), PATH=f"{fakes}:{os.environ['PATH']}")
+
+    def run(**extra):
+        return subprocess.run(
+            ["bash", str(scripts / "sync-calibration.sh")],
+            env={**environment, **extra}, capture_output=True, text=True, timeout=30,
+        )
+
+    assert run().returncode == 2
+    assert not calls.exists()
+
+    result = run(LEKIWI_ROBOT_HOST="robot.example")
+    assert result.returncode == 1
+    lines = calls.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 5 * 5  # five files, five attempts
+    assert all(" robot.example:" in line for line in lines)
+
+
+def test_calibration_starts_again_exactly_the_services_it_stopped(tmp_path):
+    scripts = tmp_path / "scripts"
+    for name in ("calibrate.sh", "lib/runtime-common.sh", "lib/service-install-common.sh"):
+        target = scripts / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text((ROOT / "scripts" / name).read_text(encoding="utf-8"), encoding="utf-8")
+    (scripts / "setup.bash").write_text("", encoding="utf-8")
+    fakes = tmp_path / "bin"
+    log = tmp_path / "systemctl.log"
+    _executable(fakes / "systemctl", f'''
+if [[ $1 == is-active ]]; then
+  [[ $3 == lekiwi-host.service ]]   # only the motor host service is running
+  exit
+fi
+echo "$*" >> "{log}"
+''')
+    _executable(fakes / "sudo", 'exec "$@"\n')
+    _executable(fakes / "sleep", "exit 0\n")
+    _executable(fakes / "pgrep", "exit 1\n")
+    _executable(fakes / "fuser", "exit 1\n")
+    home = tmp_path / "home"
+    motor_file = home / ".cache/huggingface/lerobot/calibration/robots/lekiwi/lekiwi_1.json"
+
+    def run(host_script: str):
+        _executable(scripts / "robot-host.sh", host_script)
+        _executable(scripts / "ros-stop.sh", "exit 0\n")
+        log.write_text("", encoding="utf-8")
+        result = subprocess.run(
+            ["bash", str(scripts / "calibrate.sh"), "motor"],
+            env={**os.environ, "HOME": str(home), "LEKIWI_LOGS": str(tmp_path / "logs"),
+                 "PATH": f"{fakes}:{os.environ['PATH']}"},
+            capture_output=True, text=True, timeout=30,
+        )
+        return result, log.read_text(encoding="utf-8").splitlines()
+
+    failed, calls = run("exit 1\n")
+    assert failed.returncode != 0
+    assert calls == ["stop lekiwi-host.service", "start lekiwi-host.service"]
+
+    motor_file.parent.mkdir(parents=True)
+    finished, calls = run(f'echo "{{}}" > "{motor_file}"\n')
+    assert finished.returncode == 0, finished.stderr
+    assert calls == ["stop lekiwi-host.service", "start lekiwi-host.service"]

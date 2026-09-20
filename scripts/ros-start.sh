@@ -78,19 +78,6 @@ load_launch_calibration() {
 }
 load_launch_calibration "$@"
 
-require_camera_calibration() {
-  local calibration="${LEKIWI_CAMERA_INFO:-$HOME/.ros/camera_info/lekiwi_front.yaml}"
-  if ! camera_calibration_valid; then
-    echo "$0: camera calibration is missing or invalid: $calibration" >&2
-    echo "Launching the calibration program now." >&2
-    scripts/calibrate-camera.sh "$calibration"
-  fi
-  if ! camera_calibration_valid; then
-    echo "$0: camera calibration was not saved or is invalid: $calibration" >&2
-    exit 1
-  fi
-}
-
 if [[ $camera_source == local ]]; then
   FRONT="${LEKIWI_FRONT:-$(first_match '/dev/v4l/by-id/*WEBCAM*-video-index0')}"
   [ -n "$FRONT" ] || { echo "$0: no front camera found -- set LEKIWI_FRONT or pass camera_source:=remote" >&2; exit 1; }

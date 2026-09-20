@@ -44,12 +44,33 @@ wait_for() { # wait_for <seconds> <command...>
   done
 }
 
+tcp_port_listening() { # tcp_port_listening <port>: exact local port, not :55550
+  grep -Eq ":$1[[:space:]]" < <(ss -tln 2>/dev/null)
+}
+
 lekiwi_motion_port_listening() {
-  ss -tln 2>/dev/null | grep -q ':5555'
+  tcp_port_listening 5555
 }
 
 lekiwi_safety_ports_listening() {
-  lekiwi_motion_port_listening && ss -tln 2>/dev/null | grep -q ':5557'
+  lekiwi_motion_port_listening && tcp_port_listening 5557
+}
+
+source_device_ros_env() { # ROS and DDS settings for a device service; run from the repository root
+  local workspace=${LEKIWI_WS:-$HOME/lekiwi_ws}
+  if [ -f "$workspace/install/setup.bash" ]; then
+    set +u # ROS's own setup scripts read unset variables
+    # shellcheck source=/dev/null
+    source /opt/ros/jazzy/setup.bash
+    # shellcheck source=/dev/null
+    source "$workspace/install/setup.bash"
+    set -u
+    export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+    export CYCLONEDDS_URI="file://$PWD/config/cyclonedds.xml"
+  else
+    # shellcheck source=/dev/null
+    source scripts/setup-pi.bash
+  fi
 }
 
 camera_calibration_valid() {

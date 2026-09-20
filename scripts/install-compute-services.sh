@@ -71,20 +71,22 @@ source "$PROJECT_ROOT/scripts/lib/service-install-revision.sh"
 resolve_service_user "$SERVICE_USER_ARG"
 resolve_service_paths "$WORKSPACE_ARG" "" true false
 
-install_unit() { render_systemd_unit "$PROJECT_ROOT/systemd/$1" "$UNIT_DIR/$1"; }
-
-install_log_rotation() {
-  as_root install -d -m 0755 /etc/lekiwi
-  render_systemd_unit "$PROJECT_ROOT/systemd/lekiwi-ros-logrotate.conf" /etc/lekiwi/ros-logrotate.conf
-  install_unit lekiwi-ros-logrotate.service
-  install_unit lekiwi-ros-logrotate.timer
-}
-
 host_unit="$UNIT_DIR/lekiwi-host.service"
 cameras_unit="$UNIT_DIR/lekiwi-cameras.service"
 lidar_unit="$UNIT_DIR/lekiwi-lidar.service"
 topology_dir="$UNIT_DIR/lekiwi-stack.service.d"
 topology_conf="$topology_dir/topology.conf"
+
+curve_args=""
+if [[ -n $CURVE_DIR_ARG ]]; then
+  [[ $CURVE_DIR_ARG == /* && $CURVE_DIR_ARG != *[[:space:]]* ]] || \
+    die "--curve-dir must be an absolute path without whitespace"
+  curve_client_secret="$CURVE_DIR_ARG/clients/driver.key_secret"
+  curve_server_public="$CURVE_DIR_ARG/server.key"
+  [[ -f $curve_client_secret && -f $curve_server_public ]] || \
+    die "--curve-dir does not contain clients/driver.key_secret and server.key"
+  curve_args="curve_client_secret_key_file:=$curve_client_secret curve_server_public_key_file:=$curve_server_public"
+fi
 
 if [[ -n $REMOTE ]]; then
   # There is no local host to depend on. The base unit is remote-safe; remove
@@ -98,15 +100,6 @@ if [[ -n $REMOTE ]]; then
     log "unusual split. If the devices are actually here, drop --remote."
   fi
   STACK_ARGS="camera_source:=remote remote_ip:=$REMOTE laser_source:=ld06 lidar_source:=remote start_moveit:=true"
-  if [[ -n $CURVE_DIR_ARG ]]; then
-    [[ $CURVE_DIR_ARG == /* && $CURVE_DIR_ARG != *[[:space:]]* ]] || \
-      die "--curve-dir must be an absolute path without whitespace"
-    curve_client_secret="$CURVE_DIR_ARG/clients/driver.key_secret"
-    curve_server_public="$CURVE_DIR_ARG/server.key"
-    [[ -f $curve_client_secret && -f $curve_server_public ]] || \
-      die "--curve-dir does not contain clients/driver.key_secret and server.key"
-    STACK_ARGS="$STACK_ARGS curve_client_secret_key_file:=$curve_client_secret curve_server_public_key_file:=$curve_server_public"
-  fi
 else
   # All-in-one: add the local motor host dependency. systemd dependencies
   # cannot be removed by an empty drop-in, so the base unit has none.
@@ -132,15 +125,6 @@ else
     # service, even when this compute stack shares the same machine.
     [[ -f $lidar_unit ]] && STACK_ARGS="laser_source:=ld06 lidar_source:=remote" || STACK_ARGS=""
   fi
-  if [[ -n $CURVE_DIR_ARG ]]; then
-    [[ $CURVE_DIR_ARG == /* && $CURVE_DIR_ARG != *[[:space:]]* ]] || \
-      die "--curve-dir must be an absolute path without whitespace"
-    curve_client_secret="$CURVE_DIR_ARG/clients/driver.key_secret"
-    curve_server_public="$CURVE_DIR_ARG/server.key"
-    [[ -f $curve_client_secret && -f $curve_server_public ]] || \
-      die "--curve-dir does not contain clients/driver.key_secret and server.key"
-    STACK_ARGS="${STACK_ARGS:+$STACK_ARGS }curve_client_secret_key_file:=$curve_client_secret curve_server_public_key_file:=$curve_server_public"
-  fi
 fi
 
 # Device sensors cross the network through the mutual-TLS zenoh bridge; make sure both
@@ -149,6 +133,8 @@ if [[ $STACK_ARGS == *remote* ]]; then
   log "Ensuring the zenoh bridge TLS identities"
   as_root "$PROJECT_ROOT/scripts/setup-zenoh-tls.sh" --user "$LEKIWI_SERVICE_USER" "${REMOTE:-local}"
 fi
+
+[[ -z $curve_args ]] || STACK_ARGS="${STACK_ARGS:+$STACK_ARGS }$curve_args"
 
 if [[ $ROSBRIDGE_TAILNET == true ]]; then
   command -v tailscale >/dev/null || die "--rosbridge-tailnet requires tailscale"
@@ -191,9 +177,14 @@ Done. Check on it with:
   systemctl status lekiwi-stack.service
   journalctl -u lekiwi-stack.service -f
 
-Extra launch arguments (slam_mode:=localization and friends) go into
-$(printf %q "$stack_env") as LEKIWI_STACK_ARGS, then:
-  sudo systemctl restart lekiwi-stack.service
+This installer rewrites $(printf %q "$stack_env") on every run (deploy-split.sh
+runs it again whenever the service configuration changes), so do not add launch
+arguments there. Extra ones (slam_mode:=localization and friends) belong in a
+drop-in, which the installer leaves alone:
+  sudo systemctl edit lekiwi-stack.service
+    [Service]
+    ExecStart=
+    ExecStart=$PROJECT_ROOT/scripts/ros-start.sh \$LEKIWI_STACK_ARGS slam_mode:=localization
 EOF
 if [[ -n $REMOTE ]]; then
   cat <<EOF

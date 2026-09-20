@@ -19,6 +19,9 @@ fi
 LOGS="${LEKIWI_LOGS:-$HOME/.ros/lekiwi}"
 mkdir -p "$LOGS"
 
+# The lock is held by this shell alone: the long-running children below close
+# descriptor 9, so a failed start releases it when this script exits and the
+# next run is not told that startup is still in progress.
 exec 9>"$LOGS/workstation-up-start.lock"
 if ! flock -n 9; then
   echo "$0: startup is already in progress" >&2
@@ -32,14 +35,14 @@ fi
 
 setsid scripts/ros-start.sh remote_ip:="$ROBOT_HOST" camera_source:=remote \
   laser_source:=ld06 lidar_source:=remote start_moveit:=true "$@" \
-  >"$LOGS/stack.log" 2>&1 &
+  >"$LOGS/stack.log" 2>&1 9>&- &
 wait_for 120 grep -q 'Connected to LeKiwi host' "$LOGS/stack.log" || {
   echo "driver never reached the Pi host -- see $LOGS/stack.log" >&2
   exit 1
 }
 echo "stack: up"
 
-setsid scripts/rviz.sh >"$LOGS/rviz.log" 2>&1 &
+setsid scripts/rviz.sh >"$LOGS/rviz.log" 2>&1 9>&- &
 flock -u 9
 exec 9>&-
 echo "rviz: starting"

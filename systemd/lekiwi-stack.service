@@ -20,15 +20,17 @@
 #     driver then republishes the host's front JPEG as if it were local.
 #
 # Either way the stack may come up before the other half of the robot does.
-# Bound restart attempts so a missing device cannot fill journald forever; a
-# successful host readiness gate makes each attempt meaningful.
+# RestartSec paces the retries and LogRateLimit* bounds journald, so a missing
+# device neither floods the log nor exhausts a restart budget.
 [Unit]
 Description=LeKiwi ROS 2 stack (bringup.launch.py)
 Documentation=file://@PROJECT_ROOT@/README.md
 After=network-online.target
 Wants=network-online.target
-StartLimitIntervalSec=600
-StartLimitBurst=8
+# The self-heal watcher deliberately SIGKILLs the stack on every IPv4 change,
+# and a Wi-Fi switch or DHCP renewal storm can repeat that; RestartSec paces it.
+# A start limit would leave the robot without its stack until a human intervenes.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -36,8 +38,10 @@ User=@SERVICE_USER@
 Environment=HOME=@SERVICE_HOME@
 Environment=LEKIWI_WS=@WORKSPACE@
 WorkingDirectory=@PROJECT_ROOT@
-# Extra launch arguments, e.g. slam_mode:=localization. In the remote
-# topology the installer also puts camera_source:=remote remote_ip:=... here.
+# Launch arguments chosen by the installer for this topology, e.g.
+# camera_source:=remote remote_ip:=... . /etc/default/lekiwi-stack is rewritten
+# on every installer run; extra arguments (slam_mode:=localization) belong in a
+# drop-in that repeats ExecStart= with them appended.
 Environment=LEKIWI_STACK_ARGS=
 EnvironmentFile=-/etc/default/lekiwi-stack
 ExecStart=@PROJECT_ROOT@/scripts/ros-start.sh $LEKIWI_STACK_ARGS

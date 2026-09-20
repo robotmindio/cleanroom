@@ -8,6 +8,7 @@
 #   lekiwi-cameras.service  v4l2_camera publishers for this machine's cameras
 #   lekiwi-lidar.service    private LD06 scan publisher for the compute stack
 #   lekiwi-zenoh.service    exports the sensor topics to the compute stack
+#                           (needs zenoh-bridge-ros2dds; skipped without it)
 #
 # Cameras are read here by ROS nodes and never by the motor host: one reader
 # per device, and a stalled camera frame must not take the motor bus down.
@@ -15,7 +16,8 @@
 # over the network -- point scripts/install-compute-services.sh there at this
 # one (hostname -I).
 #
-# Re-run any time; both installers are idempotent.
+# Re-run any time; both installers are idempotent. A service whose installed
+# unit changed (new --bind-address or --curve-dir) is restarted to pick it up.
 # Usage: scripts/install-device-services.sh [--service-user USER]
 #        [--workspace PATH] [--lerobot-venv PATH] [--bind-address IPV4]
 #        [--curve-dir PATH]
@@ -77,7 +79,7 @@ LEKIWI_CURVE_SERVER_PUBLIC=""
 LEKIWI_CURVE_AUTHORIZED_CLIENTS=""
 LEKIWI_CURVE_HEALTH_CLIENT_SECRET=""
 if [[ -n $CURVE_DIR_ARG ]]; then
-  curve_dir=${CURVE_DIR_ARG:-"$LEKIWI_SERVICE_HOME/.ros/lekiwi/curve"}
+  curve_dir=$CURVE_DIR_ARG
   [[ $curve_dir == /* && $curve_dir != *[[:space:]]* ]] || \
     die "--curve-dir must be an absolute path without whitespace"
   LEKIWI_CURVE_SERVER_SECRET="$curve_dir/server.key_secret"
@@ -91,15 +93,6 @@ if [[ -n $CURVE_DIR_ARG ]]; then
 fi
 export LEKIWI_CURVE_SERVER_SECRET LEKIWI_CURVE_SERVER_PUBLIC
 export LEKIWI_CURVE_AUTHORIZED_CLIENTS LEKIWI_CURVE_HEALTH_CLIENT_SECRET
-
-install_unit() { render_systemd_unit "$PROJECT_ROOT/systemd/$1" "$UNIT_DIR/$1"; }
-
-install_log_rotation() {
-  as_root install -d -m 0755 /etc/lekiwi
-  render_systemd_unit "$PROJECT_ROOT/systemd/lekiwi-ros-logrotate.conf" /etc/lekiwi/ros-logrotate.conf
-  install_unit lekiwi-ros-logrotate.service
-  install_unit lekiwi-ros-logrotate.timer
-}
 
 if ! (
   set +u
@@ -172,11 +165,26 @@ fi
 
 log "Installing lekiwi-lidar.service"
 install_unit lekiwi-lidar.service
-log "Installing lekiwi-zenoh.service"
-install_unit lekiwi-zenoh.service
-if [[ ! -r /etc/lekiwi/zenoh-tls/device.key ]]; then
-  log "warning: no zenoh TLS identity yet; the bridge will not start until the compute"
-  log "machine runs scripts/install-compute-services.sh (or scripts/setup-zenoh-tls.sh)."
+# ros-zenoh.sh runs the bridge from the service user's ~/.local/bin, where
+# scripts/install.sh and scripts/install-pi.sh put it.
+zenoh_available=false
+if PATH="$LEKIWI_SERVICE_HOME/.local/bin:$PATH" command -v zenoh-bridge-ros2dds >/dev/null; then
+  zenoh_available=true
+  log "Installing lekiwi-zenoh.service"
+  install_unit lekiwi-zenoh.service
+  if [[ ! -r /etc/lekiwi/zenoh-tls/device.key ]]; then
+    log "warning: no zenoh TLS identity yet; the bridge will not start until the compute"
+    log "machine runs scripts/install-compute-services.sh (or scripts/setup-zenoh-tls.sh)."
+  fi
+else
+  # Without the binary the unit would crash-loop every RestartSec. The compute
+  # stack then receives no device sensors, so say so loudly.
+  log "warning: zenoh-bridge-ros2dds not found for $LEKIWI_SERVICE_USER; skipping lekiwi-zenoh.service"
+  log "Sensors will not reach the compute stack. Run scripts/install-pi.sh (or scripts/install.sh) as that user, then rerun this installer."
+  if [[ -f $UNIT_DIR/lekiwi-zenoh.service ]]; then
+    as_root systemctl disable --now lekiwi-zenoh.service 2>/dev/null || true
+    as_root rm -f "$UNIT_DIR/lekiwi-zenoh.service"
+  fi
 fi
 log "Installing ROS log rotation"
 install_log_rotation
@@ -191,7 +199,8 @@ if ! grep -qE '^image_width:[[:space:]]*[1-9][0-9]*' "$calibration" 2>/dev/null;
   log "Run scripts/calibrate-camera.sh on this machine first (stop its service while calibrating)."
 fi
 
-units=(lekiwi-host.service lekiwi-lidar.service lekiwi-zenoh.service)
+units=(lekiwi-host.service lekiwi-lidar.service)
+[[ $zenoh_available == true ]] && units+=(lekiwi-zenoh.service)
 [[ $astra_ros_available == true ]] && units+=(lekiwi-astra.service)
 [[ $camera_ros_available == true ]] && units+=(lekiwi-cameras.service)
 log "Validating rendered systemd units"
@@ -209,8 +218,13 @@ elif [[ $astra_ros_available == true ]]; then
 else
   as_root systemctl enable --now lekiwi-host.service
 fi
-as_root systemctl enable --now lekiwi-lidar.service lekiwi-zenoh.service
+as_root systemctl enable --now lekiwi-lidar.service
+[[ $zenoh_available != true ]] || as_root systemctl enable --now lekiwi-zenoh.service
 as_root systemctl enable --now lekiwi-ros-logrotate.timer
+if (( ${#CHANGED_UNITS[@]} )); then
+  log "Restarting units whose installed configuration changed: ${CHANGED_UNITS[*]}"
+  as_root systemctl try-restart "${CHANGED_UNITS[@]}"
+fi
 
 log "Granting $LEKIWI_SERVICE_USER non-interactive deployment control"
 as_root "$PROJECT_ROOT/scripts/install-deploy-sudoers.sh" device --user "$LEKIWI_SERVICE_USER"

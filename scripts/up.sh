@@ -69,6 +69,11 @@ require_free_cameras() {
 # Process-name sweeps are unsafe on a shared workstation: another robot can have
 # the same Nav2 executable names.  Stop only this launcher's recorded process
 # groups; an unrecorded stack is deliberately left for its owner to manage.
+# A boot service owns its stack; starting another one would put two drivers on one robot.
+if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet lekiwi-stack.service; then
+  echo "$0: lekiwi-stack.service is running -- stop it first: sudo systemctl stop lekiwi-stack.service" >&2
+  exit 1
+fi
 if [[ -e $RUNTIME_DIR/stack.pid || -e $RUNTIME_DIR/host.pid || -e $RUNTIME_DIR/rviz.pid ]]; then
   echo "Stopping this launcher's recorded stack before restart." >&2
   scripts/ros-stop.sh

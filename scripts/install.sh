@@ -1,13 +1,9 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-ZENOH_VERSION=1.5.0
 LEROBOT_VERSION=0.6.1
 FREE_FLEET_REV=e178db662720e36116a5559e4c13847466d5be2d
 RMF_DEMOS_REV=2.3.0
-# LDROBOT LD06 lidar driver, tag v3.0.3. Not released into the ROS apt repos;
-# thirdparty/ldlidar_stl_ros2/ carries a build fix applied after this clone.
-LIDLIDAR_STL_REV=cac5d3d4c15522c6126ef65cfa8a65b08531a66b
 ASTRA_CAMERA_REV=f7e71d9ce806e788cb48d8580aac2c778fba4214
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 WORKSPACE=${LEKIWI_WS:-"$HOME/lekiwi_ws"}
@@ -15,6 +11,8 @@ WORKSPACE=${LEKIWI_WS:-"$HOME/lekiwi_ws"}
 log() { printf '\n==> %s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 trap 'printf "error: installer failed at line %s\n" "$LINENO" >&2' ERR
+# shellcheck source=/dev/null
+source "$PROJECT_ROOT/scripts/thirdparty-common.sh"
 
 if [[ ${1:-} == --help ]]; then
   printf 'Usage: LEKIWI_WS=/path/to/workspace %s [--simulation]\n' "$0"
@@ -35,14 +33,8 @@ source /etc/os-release
 ROS_DISTRO=jazzy
 
 case $(uname -m) in
-  x86_64)
-    ZENOH_ARCH=x86_64-unknown-linux-gnu
-    FOXGLOVE_ARCH=amd64
-    ;;
-  aarch64|arm64)
-    ZENOH_ARCH=aarch64-unknown-linux-gnu
-    FOXGLOVE_ARCH=arm64
-    ;;
+  x86_64) FOXGLOVE_ARCH=amd64 ;;
+  aarch64|arm64) FOXGLOVE_ARCH=arm64 ;;
   *) die "unsupported CPU architecture: $(uname -m)" ;;
 esac
 
@@ -125,6 +117,7 @@ apt_get install -y \
   "ros-$ROS_DISTRO-v4l2-camera" \
   libgoogle-glog-dev \
   libuvc-dev \
+  logrotate \
   python3-matplotlib \
   python3-opencv \
   python3-yaml \
@@ -160,45 +153,17 @@ done
 
 mkdir -p "$WORKSPACE/src" "$HOME/.local/bin"
 
-checkout() {
-  local url=$1 destination=$2 revision=$3 expected_patch=${4:-}
-  if [[ ! -d $destination/.git ]]; then
-    git clone --filter=blob:none "$url" "$destination"
-  elif [[ -n $(git -C "$destination" status --porcelain) ]]; then
-    # Some vendored sources need a tracked build patch after checkout. Permit
-    # only that exact, reversible diff; all other local edits remain protected.
-    if [[ -n $expected_patch ]] && git -C "$destination" apply --reverse --check "$expected_patch" 2>/dev/null; then
-      git -C "$destination" reset --hard HEAD >/dev/null
-    else
-      die "$destination has local changes; preserve them before rerunning"
-    fi
-  fi
-  git -C "$destination" fetch --depth 1 origin "$revision"
-  git -C "$destination" checkout --detach FETCH_HEAD
-}
-
-apply_pinned_patch() {
-  local destination=$1 patch=$2 description=$3
-  if git -C "$destination" apply --check "$patch" 2>/dev/null; then
-    git -C "$destination" apply "$patch"
-  else
-    die "could not apply ${description}; upstream may have changed or the checkout has unexpected edits"
-  fi
-}
-
 log "Fetching pinned Free Fleet and RMF task tools"
 free_fleet_source="$WORKSPACE/src/free_fleet"
 free_fleet_patch="$PROJECT_ROOT/thirdparty/free_fleet/0001-retry-nav2-goal-during-activation.patch"
-checkout https://github.com/open-rmf/free_fleet.git "$free_fleet_source" "$FREE_FLEET_REV" "$free_fleet_patch"
+checkout_pinned https://github.com/open-rmf/free_fleet.git "$free_fleet_source" "$FREE_FLEET_REV" "$free_fleet_patch"
 apply_pinned_patch "$free_fleet_source" "$free_fleet_patch" "the Free Fleet Nav2 activation retry patch"
-checkout https://github.com/open-rmf/rmf_demos.git "$WORKSPACE/src/rmf_demos" "$RMF_DEMOS_REV"
+checkout_pinned https://github.com/open-rmf/rmf_demos.git "$WORKSPACE/src/rmf_demos" "$RMF_DEMOS_REV"
 
 log "Fetching the pinned LDROBOT LD06 driver"
-checkout https://github.com/ldrobotSensorTeam/ldlidar_stl_ros2.git \
-  "$WORKSPACE/src/ldlidar_stl_ros2" "$LIDLIDAR_STL_REV" \
-  "$PROJECT_ROOT/thirdparty/ldlidar_stl_ros2/0001-linux-build-fixes.patch"
 ldlidar_source="$WORKSPACE/src/ldlidar_stl_ros2"
 ldlidar_patch="$PROJECT_ROOT/thirdparty/ldlidar_stl_ros2/0001-linux-build-fixes.patch"
+checkout_pinned "$LDLIDAR_STL_REPOSITORY" "$ldlidar_source" "$LDLIDAR_STL_REV" "$ldlidar_patch"
 apply_pinned_patch "$ldlidar_source" "$ldlidar_patch" "the LDROBOT Linux build fixes"
 
 extra_source_paths=()
@@ -207,7 +172,7 @@ if [[ $install_mode == full ]]; then
   log "Fetching the pinned Orbbec Astra Pro ROS 2 driver"
   astra_source="$WORKSPACE/src/ros2_astra_camera"
   astra_patch="$PROJECT_ROOT/thirdparty/ros2_astra_camera/0001-jazzy-image-geometry-and-parameter-callback.patch"
-  checkout https://github.com/orbbec/ros2_astra_camera.git \
+  checkout_pinned https://github.com/orbbec/ros2_astra_camera.git \
     "$astra_source" "$ASTRA_CAMERA_REV" "$astra_patch"
   apply_pinned_patch "$astra_source" "$astra_patch" "the Astra ROS 2 Jazzy compatibility fixes"
   # The OpenNI driver opens the Astra Pro's depth interface directly; without
@@ -225,16 +190,7 @@ else
 fi
 
 log "Installing the Zenoh ROS 2 bridge"
-zenoh_zip="zenoh-plugin-ros2dds-${ZENOH_VERSION}-${ZENOH_ARCH}-standalone.zip"
-tmp_dir=$(mktemp -d)
-curl -fL -o "$tmp_dir/$zenoh_zip" \
-  "https://github.com/eclipse-zenoh/zenoh-plugin-ros2dds/releases/download/${ZENOH_VERSION}/${zenoh_zip}"
-unzip -q "$tmp_dir/$zenoh_zip" -d "$tmp_dir/zenoh"
-zenoh_bridge=$(find "$tmp_dir/zenoh" -type f -name zenoh-bridge-ros2dds -print -quit)
-[[ -n $zenoh_bridge ]] || die "Zenoh archive did not contain zenoh-bridge-ros2dds"
-install -m 0755 "$zenoh_bridge" "$HOME/.local/bin/zenoh-bridge-ros2dds"
-find "$tmp_dir" -type f -delete
-find "$tmp_dir" -depth -type d -empty -delete
+install_zenoh_bridge "$HOME/.local/bin"
 
 log "Creating the ROS-compatible Python environment"
 python3 -m venv --system-site-packages "$WORKSPACE/.venv"

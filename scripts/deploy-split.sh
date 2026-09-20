@@ -88,6 +88,10 @@ remote_unit_exists() {
 remote_unit_active() {
   "${ssh_command[@]}" /usr/bin/systemctl is-active --quiet "$1"
 }
+remote_unit_active_all() {
+  local unit
+  for unit in "$@"; do remote_unit_active "$unit" || return 1; done
+}
 # shellcheck disable=SC2016 # $device expands in the remote shell.
 remote_front_camera_present() {
   "${ssh_command[@]}" 'for device in /dev/v4l/by-id/*WEBCAM*-video-index0; do [[ -e $device ]] && exit 0; done; exit 1'
@@ -101,7 +105,10 @@ refresh_compute_service() {
   LEKIWI_ROBOT_HOST=${device#*@} LEKIWI_WS=$workspace \
     "$project_root/scripts/reinstall-compute.sh"
 }
-device_units=(lekiwi-host.service lekiwi-astra.service lekiwi-cameras.service lekiwi-lidar.service)
+# The device installer skips Astra and the cameras when their ROS package is
+# missing, so those two are deployed only where they are installed.
+device_units=(lekiwi-host.service lekiwi-lidar.service lekiwi-zenoh.service)
+has_device_unit() { [[ " ${device_units[*]} " == *" $1 "* ]]; }
 
 log "Preflighting source revisions and deployment permissions"
 require_clean "$project_root" "local repository"
@@ -135,9 +142,12 @@ remote_branch=$("${ssh_command[@]}" git -C "$remote_repo" symbolic-ref --quiet -
   die "device workspace is not installed: $remote_workspace"
 /usr/bin/systemctl cat lekiwi-stack.service >/dev/null 2>&1 || die "lekiwi-stack.service is not installed"
 remote_unit_exists lekiwi-host.service || die "lekiwi-host.service is not installed"
-for unit in lekiwi-astra.service lekiwi-cameras.service lekiwi-lidar.service; do
+for unit in lekiwi-lidar.service lekiwi-zenoh.service; do
   remote_unit_exists "$unit" || \
     die "$unit is not installed; rerun scripts/install-device-services.sh on $device"
+done
+for unit in lekiwi-astra.service lekiwi-cameras.service; do
+  if remote_unit_exists "$unit"; then device_units+=("$unit"); fi
 done
 if ! grep -Fq "remote_ip:=$device_address" /etc/default/lekiwi-stack \
   || ! grep -Fq 'laser_source:=ld06 lidar_source:=remote' /etc/default/lekiwi-stack; then
@@ -191,10 +201,7 @@ if [[ $(cat "$marker" 2>/dev/null || true) == "$target" && \
       $(workspace_revision "$workspace") == "$target" && \
       $(remote_workspace_revision) == "$target" ]] && \
     /usr/bin/systemctl is-active --quiet lekiwi-stack.service && \
-    remote_unit_active lekiwi-host.service && \
-    remote_unit_active lekiwi-astra.service && \
-    remote_unit_active lekiwi-cameras.service && \
-    remote_unit_active lekiwi-lidar.service; then
+    remote_unit_active_all "${device_units[@]}"; then
   echo "already deployed ${target:0:12}; services and both workspaces are current"
   exit 0
 fi
@@ -233,12 +240,12 @@ log "Starting and validating device services"
 "${ssh_command[@]}" sudo -n /usr/bin/systemctl reset-failed lekiwi-host.service
 "${ssh_command[@]}" sudo -n /usr/bin/systemctl start lekiwi-host.service
 remote_unit_active lekiwi-host.service || die "lekiwi-host.service did not become active"
-"${ssh_command[@]}" sudo -n /usr/bin/systemctl reset-failed lekiwi-astra.service
-"${ssh_command[@]}" sudo -n /usr/bin/systemctl start lekiwi-astra.service
-remote_unit_active lekiwi-astra.service || die "lekiwi-astra.service did not become active"
-"${ssh_command[@]}" sudo -n /usr/bin/systemctl reset-failed lekiwi-cameras.service
-"${ssh_command[@]}" sudo -n /usr/bin/systemctl start lekiwi-cameras.service
-remote_unit_active lekiwi-cameras.service || die "lekiwi-cameras.service did not become active"
+for unit in lekiwi-astra.service lekiwi-cameras.service; do
+  has_device_unit "$unit" || continue
+  "${ssh_command[@]}" sudo -n /usr/bin/systemctl reset-failed "$unit"
+  "${ssh_command[@]}" sudo -n /usr/bin/systemctl start "$unit"
+  remote_unit_active "$unit" || die "$unit did not become active"
+done
 "${ssh_command[@]}" sudo -n /usr/bin/systemctl reset-failed lekiwi-lidar.service
 "${ssh_command[@]}" sudo -n /usr/bin/systemctl start lekiwi-lidar.service
 remote_unit_active lekiwi-lidar.service || die "lekiwi-lidar.service did not become active"
@@ -259,14 +266,20 @@ driver_state=$(timeout 10 ros2 topic echo --once /safety/driver_state --field da
 [[ $driver_state == DISARMED ]] || die "updated driver is not disarmed: $driver_state"
 wait_for 30 sh -c "ros2 topic info /hardware/diagnostics | grep -Eq 'Publisher count: [1-9]'" || \
   die "updated driver is not publishing motor health"
-if remote_front_camera_present; then
+if ! has_device_unit lekiwi-cameras.service; then
+  log "lekiwi-cameras.service is not installed on the device; skipping the camera check"
+elif remote_front_camera_present; then
   timeout 30 ros2 topic echo --once /pi/camera/front/image_raw/compressed >/dev/null || \
     die "attached front camera did not reach compute"
 else
   log "No front camera is attached; its independent service remains waiting"
 fi
-timeout 30 ros2 topic echo --once /camera/depth/points >/dev/null || \
-  die "device Astra point cloud did not reach compute"
+if has_device_unit lekiwi-astra.service; then
+  timeout 30 ros2 topic echo --once /camera/depth/points >/dev/null || \
+    die "device Astra point cloud did not reach compute"
+else
+  log "lekiwi-astra.service is not installed on the device; skipping the point-cloud check"
+fi
 lidar_frame=$(timeout 30 ros2 topic echo --once --field header.frame_id /scan | \
   awk 'NF && $1 != "---" { print $1; exit }') || \
   die "device LD06 scan did not reach compute"

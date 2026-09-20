@@ -1,5 +1,5 @@
 [Unit]
-Description=Rotate LeKiwi ROS 2 logs
+Description=Rotate and prune LeKiwi ROS 2 logs
 
 [Service]
 Type=oneshot
@@ -7,6 +7,12 @@ User=@SERVICE_USER@
 Environment=HOME=@SERVICE_HOME@
 WorkingDirectory=@PROJECT_ROOT@
 ExecStart=/usr/sbin/logrotate --state @SERVICE_HOME@/.ros/lekiwi/ros-logrotate.status /etc/lekiwi/ros-logrotate.conf
+# Logs of finished launches and one-off ros2 commands are never rotated again,
+# so delete files untouched for four days: loose logs and launch-directory
+# files (depth 1-2), then launch directories left empty for an hour. find does
+# not follow symlinks, so `latest` itself is never removed or traversed.
+ExecStart=-/usr/bin/find @SERVICE_HOME@/.ros/log -mindepth 1 -maxdepth 2 -type f -mtime +3 -delete
+ExecStart=-/usr/bin/find @SERVICE_HOME@/.ros/log -mindepth 1 -maxdepth 1 -type d -empty -mmin +60 -delete
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full

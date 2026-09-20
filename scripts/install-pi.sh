@@ -15,6 +15,8 @@ die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 trap 'printf "error: installer failed at line %s\n" "$LINENO" >&2' ERR
 # shellcheck source=/dev/null
 source "$PROJECT_ROOT/scripts/thirdparty-common.sh"
+# shellcheck source=/dev/null
+source "$PROJECT_ROOT/scripts/lib/service-install-common.sh"
 
 if [[ ${1:-} == --help ]]; then
   printf 'Usage: [LEKIWI_LEROBOT_VENV=/path] %s\n' "$0"
@@ -35,24 +37,19 @@ import sys
 raise SystemExit(0 if sys.version_info >= (3, 12) else 1)
 PY
 
-SUDO=()
-[[ $EUID -eq 0 ]] || SUDO=(sudo)
-# Only escalate for the steps that still need it, so a Pi that is already provisioned
-# installs over SSH without a sudo password.
-need_root() {
-  [[ $EUID -eq 0 ]] || command -v sudo >/dev/null || die "sudo is required to $1"
-}
-
+# Only escalate (as_root) for the steps that still need it, so a Pi that is already
+# provisioned installs over SSH without a sudo password.
 log "Checking system prerequisites"
 installed() { dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q 'ok installed'; }
 missing=()
-for pkg in curl git iw python3-venv python3-pip; do
+# psmisc provides fuser (scripts/up.sh, scripts/calibrate.sh), logrotate serves
+# lekiwi-ros-logrotate.timer, and unzip unpacks the Zenoh bridge below.
+for pkg in curl git iw python3-venv python3-pip psmisc logrotate unzip; do
   installed "$pkg" || missing+=("$pkg")
 done
 if (( ${#missing[@]} )); then
-  need_root "install ${missing[*]}"
-  "${SUDO[@]}" apt-get update
-  "${SUDO[@]}" apt-get install -y "${missing[@]}"
+  as_root apt-get update
+  as_root apt-get install -y "${missing[@]}"
 else
   printf 'already installed\n'
 fi
@@ -60,8 +57,7 @@ fi
 # brltty claims CH34x USB serial adapters and steals the Feetech bus from LeRobot.
 if installed brltty; then
   log "Removing brltty (it grabs the CH34x motor bus adapter)"
-  need_root "remove brltty"
-  "${SUDO[@]}" apt-get remove -y brltty
+  as_root apt-get remove -y brltty
 fi
 
 log "Granting serial and camera access"
@@ -69,8 +65,7 @@ for group in dialout video; do
   if id -nG "$USER" | tr ' ' '\n' | grep -qx "$group"; then
     printf 'already in %s\n' "$group"
   else
-    need_root "add $USER to $group"
-    "${SUDO[@]}" usermod -aG "$group" "$USER"
+    as_root usermod -aG "$group" "$USER"
     printf 'added to %s (log out and back in to take effect)\n' "$group"
   fi
 done
@@ -119,30 +114,26 @@ if [[ -n $pi_ros_distro ]]; then
   # the legacy list beside it: apt rejects their different Signed-By settings.
   if [[ -e $legacy_ros_source && -e $modern_ros_source ]]; then
     log "Disabling the duplicate legacy ROS apt source"
-    need_root "disable the duplicate ROS 2 apt source"
-    "${SUDO[@]}" mv -f "$legacy_ros_source" "$legacy_ros_source.disabled"
+    as_root mv -f "$legacy_ros_source" "$legacy_ros_source.disabled"
   fi
   if [[ ! -e $legacy_ros_source && ! -e $modern_ros_source ]]; then
-    need_root "add the ROS 2 apt repository"
-    "${SUDO[@]}" apt-get install -y curl gnupg
-    "${SUDO[@]}" curl -fsSL -o /usr/share/keyrings/ros-archive-keyring.gpg \
+    as_root apt-get install -y curl gnupg
+    as_root curl -fsSL -o /usr/share/keyrings/ros-archive-keyring.gpg \
       https://raw.githubusercontent.com/ros/rosdistro/master/ros.key
     echo "deb [signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] \
 http://packages.ros.org/ros2/ubuntu $codename main" |
-      "${SUDO[@]}" tee /etc/apt/sources.list.d/ros2.list >/dev/null
-    "${SUDO[@]}" apt-get update
+      as_root tee /etc/apt/sources.list.d/ros2.list >/dev/null
+    as_root apt-get update
   fi
-  need_root "install the ROS device packages"
   # image-transport-plugins provides the compressed transport: raw 640x480 at 30 Hz is
   # 27 MB/s, which the robot's wifi cannot carry. cyclonedds matches the workstation.
-  "${SUDO[@]}" apt-get install -y \
+  as_root apt-get install -y \
     "ros-$pi_ros_distro-ros-base" \
     "ros-$pi_ros_distro-v4l2-camera" \
     "ros-$pi_ros_distro-image-transport-plugins" \
     "ros-$pi_ros_distro-rmw-cyclonedds-cpp" \
     ros-dev-tools \
     python3-yaml \
-    psmisc \
     v4l-utils
 
   log "Installing the pinned LD06 ROS driver"
@@ -160,6 +151,9 @@ http://packages.ros.org/ros2/ubuntu $codename main" |
     --build-base "$WORKSPACE/build" --install-base "$WORKSPACE/install"
   [[ -x $WORKSPACE/install/ldlidar_stl_ros2/lib/ldlidar_stl_ros2/ldlidar_stl_ros2_node ]] || \
     die "LD06 ROS driver build did not install its node"
+
+  log "Installing the Zenoh sensor bridge"
+  install_zenoh_bridge "$HOME/.local/bin"
 else
   printf 'not Ubuntu 24.04 -- skipping ROS; this Pi can run the LeRobot host but\n'
   printf 'not publish cameras to ROS. Reimage with Ubuntu Server 24.04 arm64 for that.\n'
@@ -186,7 +180,7 @@ One-time motor setup (see HARDWARE.md for the full procedure):
   lerobot-find-port
   lerobot-setup-motors --robot.type=lekiwi --robot.port=/dev/ttyACM0
 
-Then start the Pi host, camera publisher, and LD06 publisher. On its first run it guides you through
+Then start the Pi host, sensor publishers, and Zenoh bridge. On its first run it guides you through
 motor calibration automatically:
   $PROJECT_ROOT/scripts/pi-up.sh
 

@@ -23,11 +23,16 @@
 #
 #   The wheel/height tools save their measured values to the machine-local launch file.
 #   Set CALIBRATE_DRYRUN=1 to only print what auto would do (no services touched).
+#   Boot services stopped for a step are started again when the script exits,
+#   whether it finished, failed, or was interrupted.
 set -Eeuo pipefail
 
 cd "$(dirname "$0")/.."
 # shellcheck source=/dev/null
 source scripts/lib/runtime-common.sh
+die() { echo "$0: $*" >&2; exit 1; }
+# shellcheck source=/dev/null
+source scripts/lib/service-install-common.sh
 
 set +u
 # shellcheck source=/dev/null
@@ -122,59 +127,36 @@ unit_active() { # unit_active <name> -- the boot service is up and owns the devi
   systemctl is-active --quiet "$1" 2>/dev/null
 }
 
-as_root() { # as_root <command...>
-  if [[ $EUID -eq 0 ]]; then "$@"; else
-    command -v sudo >/dev/null || {
-      echo "root/sudo required for: $* (this script stops the boot services it needs)" >&2
-      exit 1
-    }
-    sudo "$@"
-  fi
-}
-
 # The boot services own the hardware by design: lekiwi-host.service keeps the motor
 # host alive on the bus and lekiwi-cameras.service publishes the cameras. Both would
 # block -- or race -- a calibration run, so stop whichever one the step needs and
-# remember it; the end-of-run message tells the user how to bring the services back.
-stopped_host=0
-stopped_cameras=0
+# start exactly those again on exit.
+stopped_units=()
 
-stop_host_service() {
-  if unit_active lekiwi-host.service; then
-    echo "Stopping lekiwi-host.service (it owns the motor bus)."
-    if ! as_root systemctl stop lekiwi-host.service; then
-      echo "$0: could not stop lekiwi-host.service; run 'sudo systemctl stop lekiwi-host.service' and retry" >&2
-      exit 1
-    fi
-    stopped_host=1
-    sleep 2  # let the supervisor and its python child release the bus
+stop_service() { # stop_service <unit> <what it owns>
+  unit_active "$1" || return 0
+  echo "Stopping $1 ($2)."
+  if ! as_root systemctl stop "$1"; then
+    echo "$0: could not stop $1; run 'sudo systemctl stop $1' and retry" >&2
+    exit 1
   fi
+  stopped_units+=("$1")
+  sleep 2  # let the service's processes release the device
 }
 
-stop_cameras_service() {
-  if unit_active lekiwi-cameras.service; then
-    echo "Stopping lekiwi-cameras.service (it owns the cameras)."
-    if ! as_root systemctl stop lekiwi-cameras.service; then
-      echo "$0: could not stop lekiwi-cameras.service; run 'sudo systemctl stop lekiwi-cameras.service' and retry" >&2
-      exit 1
-    fi
-    stopped_cameras=1
-    sleep 2
-  fi
+restore_services() {
+  local unit
+  for unit in "${stopped_units[@]}"; do
+    echo "Starting $unit again."
+    as_root systemctl start "$unit" || echo "$0: could not start $unit; run 'sudo systemctl start $unit'" >&2
+  done
 }
-
-service_restore_hint() {
-  if (( stopped_host || stopped_cameras )); then
-    echo
-    echo "Boot services stopped during calibration:"
-    (( stopped_host )) && echo "  sudo systemctl start lekiwi-host.service     (re-enable the headless device flow)"
-    (( stopped_cameras )) && echo "  sudo systemctl start lekiwi-cameras.service"
-    echo "scripts/up.sh starts its own host and cameras, so the wired local flow needs none of these."
-  fi
-}
+trap restore_services EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM HUP
 
 calibrate_motor() {
-  stop_host_service
+  stop_service lekiwi-host.service "it owns the motor bus"
   if port_owned; then
     echo "$0: the motor bus is still owned (a process holds the serial device or the host)." >&2
     echo "Stop it first and re-run -- e.g. pgrep -f lekiwi_host to see who, then kill it." >&2
@@ -240,7 +222,7 @@ calibrate_pose() {
 calibrate_camera() {
   # The camera node holds the camera; stop anything reading it first.
   stop_stack_if_running
-  stop_cameras_service
+  stop_service lekiwi-cameras.service "it owns the cameras"
   if [ ! -e "${LEKIWI_FRONT:-$(first_match '/dev/v4l/by-id/*WEBCAM*-video-index0')}" ]; then
     echo "$0: the front camera is not attached to this machine." >&2
     echo "Run this command on the machine that owns the camera (the robot-side Pi in a split setup)." >&2
@@ -261,7 +243,7 @@ calibrate_wrist() {
   # Intrinsics are optional for navigation, but required before treating the wrist
   # image as a calibrated camera in RViz, recording, or manipulation perception.
   stop_stack_if_running
-  stop_cameras_service
+  stop_service lekiwi-cameras.service "it owns the cameras"
   if [ ! -e "${LEKIWI_WRIST:-$(first_match '/dev/v4l/by-id/*JYU2C*-video-index0')}" ]; then
     echo "$0: the wrist camera is not attached to this machine." >&2
     echo "Run this command on the machine that owns the camera (the robot-side Pi in a split setup)." >&2
@@ -381,7 +363,6 @@ case "$mode" in
     echo "  pose    $POSE_FILE"
     echo "  camera  $CAMERA_FILE"
     echo "  wrist   $WRIST_CAMERA_FILE (optional)"
-    service_restore_hint
     ;;
   motor)
     if calibrating; then
@@ -390,7 +371,6 @@ case "$mode" in
     calibrate_motor
     echo
     echo "Motor calibration done. Start the robot with scripts/up.sh"
-    service_restore_hint
     ;;
   pose)
     calibrate_pose
@@ -398,11 +378,9 @@ case "$mode" in
     ;;
   camera)
     calibrate_camera
-    service_restore_hint
     ;;
   wrist)
     calibrate_wrist
-    service_restore_hint
     ;;
   height)
     calibrate_height
