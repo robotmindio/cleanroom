@@ -10,8 +10,10 @@ ExecStart=/usr/sbin/logrotate --state @SERVICE_HOME@/.ros/lekiwi/ros-logrotate.s
 # Logs of finished launches and one-off ros2 commands are never rotated again,
 # so delete files untouched for four days: loose logs and launch-directory
 # files (depth 1-2), then launch directories left empty for an hour. find does
-# not follow symlinks, so `latest` itself is never removed or traversed.
-ExecStart=-/usr/bin/find @SERVICE_HOME@/.ros/log -mindepth 1 -maxdepth 2 -type f -mtime +3 -delete
+# not follow symlinks, so `latest` itself is never removed or traversed. A file
+# a running node still holds open is kept: unlinking it would silently discard
+# everything that node logs afterwards.
+ExecStart=-/usr/bin/find @SERVICE_HOME@/.ros/log -mindepth 1 -maxdepth 2 -type f -mtime +3 ! -exec /usr/bin/fuser -s {} \; -delete
 ExecStart=-/usr/bin/find @SERVICE_HOME@/.ros/log -mindepth 1 -maxdepth 1 -type d -empty -mmin +60 -delete
 NoNewPrivileges=true
 PrivateTmp=true

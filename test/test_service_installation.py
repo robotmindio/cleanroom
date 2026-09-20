@@ -517,6 +517,7 @@ def test_log_pruning_removes_only_stale_files_under_the_ros_log_directory(tmp_pa
         "2026-01-01/launch.log": old,
         "2026-01-02/launch.log": recent,
         "2026-01-02/rotated.log.1": old,
+        "2026-01-02/held_open.log": old,
     }
     for name, mtime in files.items():
         path = log / name
@@ -530,14 +531,18 @@ def test_log_pruning_removes_only_stale_files_under_the_ros_log_directory(tmp_pa
     os.utime(outside / "keep.log", (old, old))
     (log / "linked").symlink_to(outside)
 
-    for command in commands:
-        subprocess.run(command, check=True)
+    # A quiet node's open log is stale by mtime but must survive the prune.
+    with (log / "2026-01-02" / "held_open.log").open():
+        for command in commands:
+            subprocess.run(command, check=True)
     # Emptying a directory refreshes its mtime; a later run removes it once it has stayed empty.
     os.utime(log / "2026-01-01", (old, old))
     subprocess.run(commands[1], check=True)
 
     remaining = {str(p.relative_to(log)) for p in log.rglob("*") if not p.is_dir() or p.is_symlink()}
-    assert remaining == {"loose_new.log", "2026-01-02/launch.log", "latest", "linked"}
+    assert remaining == {
+        "loose_new.log", "2026-01-02/launch.log", "2026-01-02/held_open.log", "latest", "linked",
+    }
     assert not (log / "2026-01-01").exists()
     assert not (log / "2026-01-03").exists()
     assert (outside / "keep.log").exists()
