@@ -22,6 +22,9 @@ Start with one of these:
   milliseconds of latency), sets the Wi-Fi regulatory country (`ID`; the default world
   domain hides 5 GHz networks) and lets the service user run NetworkManager commands
   over SSH without a password, through `install-device-network.sh`.
+- `setup-zenoh-tls.sh DEVICE` creates a private CA and installs the mutual-TLS
+  identities of the zenoh sensor bridge on both machines. Run it once before the
+  first deploy; `deploy-split.sh` refuses to run without them.
 - `deploy-split.sh` updates an installed split robot.
 - `build-lekiwi.sh` rebuilds this package in an existing workspace.
 

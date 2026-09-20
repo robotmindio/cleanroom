@@ -1,5 +1,6 @@
 // Compute-side half of the sensor bridge; see zenoh_device.json5. The launch
-// file adds the device's endpoint (-e tcp/<remote_ip>:7447).
+// file adds the device's endpoint (-e tls/<remote_ip>:7447). The link is
+// mutual TLS; see zenoh_device.json5.
 {
   plugins: {
     ros2dds: {
@@ -20,5 +21,18 @@
   },
   // A client never listens and keeps reconnecting to the device on its own.
   mode: "client",
+  transport: {
+    link: {
+      tls: {
+        root_ca_certificate: "/etc/lekiwi/zenoh-tls/ca.crt",
+        connect_private_key: "/etc/lekiwi/zenoh-tls/compute.key",
+        connect_certificate: "/etc/lekiwi/zenoh-tls/compute.crt",
+        enable_mtls: true,
+        // The device is reached by whatever address is current (LAN, Tailscale);
+        // its identity is the private CA's signature, not its name.
+        verify_name_on_connect: false,
+      },
+    },
+  },
   scouting: { multicast: { enabled: false }, gossip: { enabled: false } },
 }

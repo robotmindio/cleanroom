@@ -4,6 +4,11 @@
 // bridge carries the device's sensor topics to the compute machine over one
 // TCP link, so no router has to pass DDS multicast discovery. It only exports:
 // nothing on the network can publish into the device's DDS through it.
+//
+// The link is mutual TLS: only a peer holding a certificate signed by the
+// private CA in /etc/lekiwi/zenoh-tls can connect, and traffic is encrypted.
+// scripts/setup-zenoh-tls.sh creates and installs those files; without them
+// the bridge refuses to start rather than fall back to plaintext.
 {
   plugins: {
     ros2dds: {
@@ -26,9 +31,16 @@
     },
   },
   mode: "peer",
-  // DEBT: plaintext, unauthenticated zenoh, readable by anyone who can reach
-  // port 7447 -- the same exposure the multicast DDS it replaces had. Add
-  // mTLS (transport.link.tls) before the robot joins an untrusted network.
-  listen: { endpoints: ["tcp/0.0.0.0:7447"] },
+  listen: { endpoints: ["tls/0.0.0.0:7447"] },
+  transport: {
+    link: {
+      tls: {
+        root_ca_certificate: "/etc/lekiwi/zenoh-tls/ca.crt",
+        listen_private_key: "/etc/lekiwi/zenoh-tls/device.key",
+        listen_certificate: "/etc/lekiwi/zenoh-tls/device.crt",
+        enable_mtls: true,
+      },
+    },
+  },
   scouting: { multicast: { enabled: false }, gossip: { enabled: false } },
 }
