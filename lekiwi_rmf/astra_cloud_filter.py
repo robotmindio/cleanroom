@@ -4,12 +4,13 @@
 from __future__ import annotations
 
 import math
-import struct
 import time
 
+import numpy as np
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
+from rclpy.serialization import deserialize_message
 from sensor_msgs.msg import PointCloud2, PointField
 
 
@@ -23,15 +24,18 @@ def compact_cloud(message: PointCloud2, stride: int) -> PointCloud2 | None:
     required = message.height * message.row_step
     if len(message.data) < required:
         return None
-    unpack = struct.Struct((">" if message.is_bigendian else "<") + "f")
-    output = bytearray()
-    for row in range(0, message.height, stride):
-        for column in range(0, message.width, stride):
-            start = row * message.row_step + column * message.point_step
-            xyz = tuple(unpack.unpack_from(message.data, start + offsets[name])[0] for name in ("x", "y", "z"))
-            if not all(math.isfinite(value) for value in xyz):
-                continue
-            output.extend(message.data[start:start + message.point_step])
+    raster = np.frombuffer(message.data, dtype=np.uint8, count=required).reshape(
+        message.height, message.row_step
+    )
+    samples = raster[:, :message.width * message.point_step].reshape(
+        message.height, message.width, message.point_step
+    )[::stride, ::stride].reshape(-1, message.point_step)
+    float32 = np.dtype(">f4" if message.is_bigendian else "<f4")
+    finite = np.ones(len(samples), dtype=bool)
+    for name in ("x", "y", "z"):
+        column = np.ascontiguousarray(samples[:, offsets[name]:offsets[name] + 4]).view(float32)
+        finite &= np.isfinite(column[:, 0])
+    output = samples[finite].tobytes()
     if not output:
         return None
     cloud = PointCloud2()
@@ -42,7 +46,7 @@ def compact_cloud(message: PointCloud2, stride: int) -> PointCloud2 | None:
     cloud.is_bigendian = message.is_bigendian
     cloud.point_step = message.point_step
     cloud.row_step = len(output)
-    cloud.data = bytes(output)
+    cloud.data = output
     cloud.is_dense = True
     return cloud
 
@@ -59,13 +63,18 @@ class AstraCloudFilter(Node):
         self._period = 1.0 / rate
         self._last_publish = 0.0
         self._publisher = self.create_publisher(PointCloud2, "/camera/depth/points", qos_profile_sensor_data)
-        self.create_subscription(PointCloud2, "/camera/depth/points_raw", self._on_cloud, qos_profile_sensor_data)
+        # The driver publishes 4.9 MB clouds at 30 Hz and about one in six is kept, so
+        # take them serialised and only deserialise the ones that are used.
+        self.create_subscription(
+            PointCloud2, "/camera/depth/points_raw", self._on_cloud, qos_profile_sensor_data,
+            raw=True,
+        )
 
-    def _on_cloud(self, message: PointCloud2) -> None:
+    def _on_cloud(self, serialized: bytes) -> None:
         now = time.monotonic()
         if now - self._last_publish < self._period:
             return
-        cloud = compact_cloud(message, self._stride)
+        cloud = compact_cloud(deserialize_message(serialized, PointCloud2), self._stride)
         if cloud is None:
             self.get_logger().warning("discarding Astra cloud without finite XYZ data")
             return
