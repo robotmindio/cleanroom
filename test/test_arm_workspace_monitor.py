@@ -33,10 +33,10 @@ def test_joint_snapshot_requires_one_complete_finite_stamped_message():
     assert complete_joint_snapshot(stampless, ("joint_a", "joint_b")) is None
 
 
-def test_gate_requires_fresh_joint_scene_and_collision_free_service_result():
+def test_gate_requires_fresh_joint_perception_and_collision_free_service_result():
     state = ArmWorkspaceState(
         joint_received_ns=SECOND,
-        scene_received_ns=SECOND,
+        perception_received_ns=SECOND,
         checked_ns=SECOND,
         collision_free=True,
     )
@@ -54,10 +54,26 @@ def test_gate_requires_fresh_joint_scene_and_collision_free_service_result():
 def test_gate_rejects_future_receive_timestamps():
     state = ArmWorkspaceState(
         joint_received_ns=SECOND + 1,
-        scene_received_ns=SECOND,
+        perception_received_ns=SECOND,
         checked_ns=SECOND,
         collision_free=True,
     )
     clear, detail = state.decision(SECOND, SECOND, SECOND, SECOND)
     assert not clear
     assert "joint state stale" == detail
+
+
+def test_gate_blocks_until_the_perception_cloud_arrives_and_when_it_goes_stale():
+    state = ArmWorkspaceState(
+        joint_received_ns=SECOND,
+        checked_ns=SECOND,
+        collision_free=True,
+    )
+    assert state.decision(SECOND, SECOND, SECOND, SECOND) == (
+        False, "perception cloud missing"
+    )
+    state.perception_received_ns = SECOND
+    assert state.decision(SECOND, SECOND, SECOND, SECOND)[0]
+    assert state.decision(SECOND * 2 + 1, SECOND * 3, SECOND, SECOND * 3) == (
+        False, "perception cloud stale"
+    )

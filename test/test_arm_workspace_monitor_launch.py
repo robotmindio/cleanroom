@@ -10,12 +10,11 @@ import launch
 import launch_ros.actions
 import launch_testing.actions
 import launch_testing.asserts
-from moveit_msgs.msg import PlanningScene
 from moveit_msgs.srv import GetStateValidity
 import pytest
 import rclpy
 from rclpy.qos import DurabilityPolicy, QoSProfile
-from sensor_msgs.msg import JointState
+from sensor_msgs.msg import JointState, PointCloud2
 from std_msgs.msg import Bool
 
 
@@ -29,11 +28,11 @@ def generate_test_description():
             "joint_names": ["joint_a", "joint_b"],
             "check_frequency": 40.0,
             "joint_timeout": 0.20,
-            "planning_scene_timeout": 0.20,
+            "perception_timeout": 0.20,
             "validity_timeout": 0.15,
             "service_timeout": 0.10,
             "joint_state_topic": "/test/arm_workspace/joints",
-            "planning_scene_topic": "/test/arm_workspace/scene",
+            "perception_topic": "/test/arm_workspace/cloud",
             "state_validity_service": "/test/arm_workspace/check_state_validity",
             "output_topic": "/test/arm_workspace/clear",
         }],
@@ -61,8 +60,8 @@ class TestArmWorkspaceMonitorGraph(unittest.TestCase):
         self.joints = self.node.create_publisher(
             JointState, "/test/arm_workspace/joints", 10
         )
-        self.scene = self.node.create_publisher(
-            PlanningScene, "/test/arm_workspace/scene", 10
+        self.cloud = self.node.create_publisher(
+            PointCloud2, "/test/arm_workspace/cloud", 10
         )
         self.service = self.node.create_service(
             GetStateValidity,
@@ -93,9 +92,7 @@ class TestArmWorkspaceMonitorGraph(unittest.TestCase):
         joints.name = ["joint_a", "joint_b"]
         joints.position = [0.1, -0.2]
         self.joints.publish(joints)
-        scene = PlanningScene()
-        scene.world.octomap.octomap.header.stamp = self.node.get_clock().now().to_msg()
-        self.scene.publish(scene)
+        self.cloud.publish(PointCloud2())
 
     def _until(self, predicate, timeout=5.0, publish=True):
         deadline = time.monotonic() + timeout
@@ -110,7 +107,7 @@ class TestArmWorkspaceMonitorGraph(unittest.TestCase):
     def test_collision_and_silence_withdraw_workspace_permission(self):
         self.assertTrue(self._until(
             lambda: self.joints.get_subscription_count() == 1
-            and self.scene.get_subscription_count() == 1
+            and self.cloud.get_subscription_count() == 1
             and bool(self.clear)
         ))
         self.assertTrue(self._until(lambda: any(self.clear) and bool(self.requests)))

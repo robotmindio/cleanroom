@@ -9,12 +9,11 @@ from dataclasses import dataclass
 
 import rclpy
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
-from moveit_msgs.msg import PlanningScene
 from moveit_msgs.srv import GetStateValidity
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
-from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
-from sensor_msgs.msg import JointState
+from rclpy.qos import DurabilityPolicy, QoSProfile, qos_profile_sensor_data
+from sensor_msgs.msg import JointState, PointCloud2
 from std_msgs.msg import Bool
 
 from lekiwi_rmf.arm_trajectory import ARM_JOINTS
@@ -25,18 +24,18 @@ class ArmWorkspaceState:
     """Receive-time leases for the inputs and latest MoveIt verdict."""
 
     joint_received_ns: int | None = None
-    scene_received_ns: int | None = None
+    perception_received_ns: int | None = None
     checked_ns: int | None = None
     collision_free: bool = False
     detail: str = "not checked"
 
     def decision(
-        self, now_ns: int, joint_timeout_ns: int, scene_timeout_ns: int,
+        self, now_ns: int, joint_timeout_ns: int, perception_timeout_ns: int,
         validity_timeout_ns: int,
     ) -> tuple[bool, str]:
         for label, stamp, timeout in (
             ("joint state", self.joint_received_ns, joint_timeout_ns),
-            ("planning scene", self.scene_received_ns, scene_timeout_ns),
+            ("perception cloud", self.perception_received_ns, perception_timeout_ns),
             ("state-validity result", self.checked_ns, validity_timeout_ns),
         ):
             if stamp is None:
@@ -85,12 +84,16 @@ class ArmWorkspaceMonitor(Node):
         self.declare_parameter("group_name", "arm")
         self.declare_parameter("joint_names", list(ARM_JOINTS))
         self.declare_parameter("joint_state_topic", "/joint_states")
-        self.declare_parameter("planning_scene_topic", "/monitored_planning_scene")
+        # MoveIt never stamps the octomap it puts in the monitored scene, so
+        # the scene cannot show that perception is alive. The occupancy-map
+        # updater publishes this cloud only after it has processed a depth
+        # frame, so receiving it is the liveness evidence.
+        self.declare_parameter("perception_topic", "/moveit/filtered_cloud")
         self.declare_parameter("state_validity_service", "/check_state_validity")
         self.declare_parameter("output_topic", "/safety/arm_workspace_clear")
         self.declare_parameter("check_frequency", 30.0)
         self.declare_parameter("joint_timeout", 0.25)
-        self.declare_parameter("planning_scene_timeout", 0.50)
+        self.declare_parameter("perception_timeout", 1.0)
         self.declare_parameter("validity_timeout", 0.15)
         self.declare_parameter("service_timeout", 0.10)
 
@@ -104,28 +107,21 @@ class ArmWorkspaceMonitor(Node):
         ):
             raise ValueError("MoveIt group and joint_names must be non-empty and unique")
         frequency, _unused = _positive_seconds(self, "check_frequency")
-        self._joint_timeout, self._joint_timeout_ns = _positive_seconds(self, "joint_timeout")
-        self._scene_timeout, self._scene_timeout_ns = _positive_seconds(
-            self, "planning_scene_timeout"
-        )
-        self._validity_timeout, self._validity_timeout_ns = _positive_seconds(
+        _unused, self._joint_timeout_ns = _positive_seconds(self, "joint_timeout")
+        _unused, self._perception_timeout_ns = _positive_seconds(self, "perception_timeout")
+        validity_timeout, self._validity_timeout_ns = _positive_seconds(
             self, "validity_timeout"
         )
-        self._service_timeout, self._service_timeout_ns = _positive_seconds(
-            self, "service_timeout"
-        )
-        if 1.0 / frequency >= self._validity_timeout:
+        _unused, self._service_timeout_ns = _positive_seconds(self, "service_timeout")
+        if 1.0 / frequency >= validity_timeout:
             raise ValueError("check_frequency must refresh before validity_timeout")
 
         self._state = ArmWorkspaceState()
         self._joint_snapshot: JointState | None = None
-        self._scene_generation = 0
         self._pending = None
         self._pending_sent_ns: int | None = None
-        self._pending_scene_generation: int | None = None
 
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
-        scene_qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE)
         self._permission_pub = self.create_publisher(
             Bool, str(self.get_parameter("output_topic").value), latched
         )
@@ -134,9 +130,11 @@ class ArmWorkspaceMonitor(Node):
             JointState, str(self.get_parameter("joint_state_topic").value),
             self._on_joint_state, 10,
         )
+        # Only the arrival matters, so skip deserialising the cloud. Best
+        # effort matches either reliability the updater publishes with.
         self.create_subscription(
-            PlanningScene, str(self.get_parameter("planning_scene_topic").value),
-            self._on_planning_scene, scene_qos,
+            PointCloud2, str(self.get_parameter("perception_topic").value),
+            self._on_perception, qos_profile_sensor_data, raw=True,
         )
         self._client = self.create_client(
             GetStateValidity, str(self.get_parameter("state_validity_service").value)
@@ -170,21 +168,8 @@ class ArmWorkspaceMonitor(Node):
         self._joint_snapshot = snapshot
         self._state.joint_received_ns = self._monotonic_ns()
 
-    def _on_planning_scene(self, message: PlanningScene) -> None:
-        # Robot-state-only scene diffs are not evidence that the depth updater
-        # is alive. Advance the lease only for a recently stamped octomap, so a
-        # live move_group with a dead perception plugin remains fail-closed.
-        stamp = message.world.octomap.octomap.header.stamp
-        source_ns = int(stamp.sec) * 1_000_000_000 + int(stamp.nanosec)
-        source_age_ns = self.get_clock().now().nanoseconds - source_ns
-        if (
-            source_ns <= 0
-            or source_age_ns < 0
-            or source_age_ns > self._scene_timeout_ns
-        ):
-            return
-        self._scene_generation += 1
-        self._state.scene_received_ns = self._monotonic_ns()
+    def _on_perception(self, _serialized_cloud: bytes) -> None:
+        self._state.perception_received_ns = self._monotonic_ns()
 
     def _preconditions(self, now_ns: int) -> tuple[bool, str]:
         if self._joint_snapshot is None or self._state.joint_received_ns is None:
@@ -192,11 +177,11 @@ class ArmWorkspaceMonitor(Node):
         joint_age = now_ns - self._state.joint_received_ns
         if joint_age < 0 or joint_age > self._joint_timeout_ns:
             return False, "joint state stale"
-        if self._state.scene_received_ns is None:
-            return False, "monitored planning scene missing"
-        scene_age = now_ns - self._state.scene_received_ns
-        if scene_age < 0 or scene_age > self._scene_timeout_ns:
-            return False, "monitored planning scene stale"
+        if self._state.perception_received_ns is None:
+            return False, "perception cloud missing"
+        perception_age = now_ns - self._state.perception_received_ns
+        if perception_age < 0 or perception_age > self._perception_timeout_ns:
+            return False, "perception cloud stale"
         if not self._client.service_is_ready():
             return False, "MoveIt state-validity service unavailable"
         return True, ""
@@ -211,7 +196,6 @@ class ArmWorkspaceMonitor(Node):
         future = self._pending
         self._pending = None
         self._pending_sent_ns = None
-        self._pending_scene_generation = None
         try:
             self._client.remove_pending_request(future)
         except (AttributeError, KeyError):
@@ -227,16 +211,13 @@ class ArmWorkspaceMonitor(Node):
         future = self._client.call_async(request)
         self._pending = future
         self._pending_sent_ns = now_ns
-        self._pending_scene_generation = self._scene_generation
         future.add_done_callback(self._on_check_complete)
 
     def _on_check_complete(self, future) -> None:
         if future is not self._pending:
             return
-        sent_scene_generation = self._pending_scene_generation
         self._pending = None
         self._pending_sent_ns = None
-        self._pending_scene_generation = None
         now_ns = self._monotonic_ns()
         try:
             response = future.result()
@@ -260,11 +241,6 @@ class ArmWorkspaceMonitor(Node):
             )
             self._publish(False, self._state.detail)
             return
-        if sent_scene_generation != self._scene_generation:
-            # A newer scene arrived while the service evaluated the old one.
-            # Keep only a still-fresh prior verdict and immediately recheck.
-            self._state.detail = "planning scene changed during state-validity check"
-            return
         self._state.checked_ns = now_ns
         self._state.collision_free = True
         self._state.detail = "collision-free"
@@ -279,7 +255,7 @@ class ArmWorkspaceMonitor(Node):
         elif self._pending is None:
             self._request_check(now_ns)
         clear, decision_detail = self._state.decision(
-            now_ns, self._joint_timeout_ns, self._scene_timeout_ns,
+            now_ns, self._joint_timeout_ns, self._perception_timeout_ns,
             self._validity_timeout_ns,
         )
         self._publish(clear, decision_detail)
@@ -297,7 +273,6 @@ class ArmWorkspaceMonitor(Node):
         status.values = [
             KeyValue(key="arm_workspace_clear", value=str(bool(clear)).lower()),
             KeyValue(key="detail", value=detail),
-            KeyValue(key="planning_scene_generation", value=str(self._scene_generation)),
         ]
         diagnostics = DiagnosticArray()
         diagnostics.header.stamp = self.get_clock().now().to_msg()
