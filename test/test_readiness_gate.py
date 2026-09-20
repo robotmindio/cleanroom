@@ -138,9 +138,11 @@ def test_simulation_base_controller_consumes_only_the_guarded_velocity_topic():
     assert '"/cmd_vel_safe"' in controller
     assert '"/cmd_vel"' not in controller
     assert "/sim/sim_base_left_wheel/cmd_vel" in source
-    assert source.count('package="topic_tools"') == 1
-    assert 'name="remote_ld06_relay"' in source
-    assert 'arguments=["/pi/lidar/scan", "/scan", "sensor_msgs/msg/LaserScan"]' in source
+    # Every real LD06 path reaches /scan only through the body-masking filter.
+    assert source.count('executable="scan_self_filter"') == 1
+    assert "'/pi/lidar/scan' if " in source
+    assert '"topic_name": "/lidar/scan_raw"' in source
+    assert '"topic_name": "/scan"' not in source
 
 
 def test_simulation_uses_a_database_separate_from_the_real_robot():

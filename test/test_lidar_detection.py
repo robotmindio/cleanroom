@@ -37,8 +37,10 @@ def test_auto_detection_keeps_the_legacy_interface_name_compatible():
     assert lidar._lidar_default_port() == legacy
 
 
-def test_remote_relay_has_a_laserscan_type_before_the_pi_publisher_appears():
-    assert 'arguments=["/pi/lidar/scan", "/scan", "sensor_msgs/msg/LaserScan"]' in _SOURCE
+def test_scan_filter_subscribes_before_the_pi_publisher_appears():
+    # A typed subscription needs no publisher yet, unlike a type-inferring relay.
+    assert 'executable="scan_self_filter"' in _SOURCE
+    assert "'/pi/lidar/scan' if " in _SOURCE
 
 
 def test_laser_frame_has_a_measured_correction_after_the_nominal_cad_pose():

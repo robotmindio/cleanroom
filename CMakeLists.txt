@@ -18,6 +18,7 @@ install(PROGRAMS lekiwi_rmf/camera_relay.py DESTINATION lib/${PROJECT_NAME} RENA
 install(PROGRAMS lekiwi_rmf/cmd_vel_mux.py DESTINATION lib/${PROJECT_NAME} RENAME cmd_vel_mux)
 install(PROGRAMS lekiwi_rmf/readiness_gate.py DESTINATION lib/${PROJECT_NAME} RENAME readiness_gate)
 install(PROGRAMS lekiwi_rmf/slam_cloud.py DESTINATION lib/${PROJECT_NAME} RENAME slam_cloud)
+install(PROGRAMS lekiwi_rmf/scan_self_filter.py DESTINATION lib/${PROJECT_NAME} RENAME scan_self_filter)
 install(PROGRAMS lekiwi_rmf/safety_supervisor.py DESTINATION lib/${PROJECT_NAME} RENAME safety_supervisor)
 install(PROGRAMS lekiwi_rmf/arm_workspace_monitor.py DESTINATION lib/${PROJECT_NAME} RENAME arm_workspace_monitor)
 install(PROGRAMS lekiwi_rmf/rmf_owner_guard.py DESTINATION lib/${PROJECT_NAME} RENAME rmf_owner_guard)

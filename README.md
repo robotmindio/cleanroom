@@ -206,7 +206,7 @@ Arguments of `launch/bringup.launch.py`. The repository scripts pass extra
 | `camera_device` | V4L2 path | `/dev/video0` | Existing front V4L2 camera |
 | `wrist_camera_device` | V4L2 path, `none` | `none` | Wrist camera; `scripts/ros-start.sh` passes the detected JYU2C, or `none` when `LEKIWI_WRIST=none` |
 | `laser_source` | `auto`, `camera`, `ld06`, `none` | `auto` | Select camera fallback or LD06 on real hardware; Gazebo supplies `/scan` in sim |
-| `lidar_source` | `local`, `remote` | `local` | Machine that opens the LD06 serial port; remote relays `/pi/lidar/scan` |
+| `lidar_source` | `local`, `remote` | `local` | Machine that opens the LD06 serial port; remote reads `/pi/lidar/scan` |
 | `lidar_port` | serial path | CP2102 `/dev/serial/by-id/...` | LD06 device when `laser_source:=ld06` |
 | `urdf/lekiwi.urdf.xacro` sensor-calibration properties | metres, radians | Astra `0 0 0.0155`, `-8°`; others `0.0` | Astra's CAD compact-mount contact pose plus measured wrist and LD06 corrections, shared by RViz, MoveIt, and robot_state_publisher |
 | `camera_height`, `camera_offset_x`, `camera_offset_y` | metres | `0.093`, `0.03`, `0.0` | Front-camera pose used by the camera scan |
@@ -613,7 +613,7 @@ The compute installer picks the topology:
 - with `--remote <device-address>` it reaches a host on another machine;
   compressed frames, the Astra cloud and the device LD06's `/pi/lidar/scan`
   arrive through the zenoh bridge, and relays in the bringup expand them into
-  the same canonical topics (`/scan` has the relayed LD06 as its sole publisher
+  the same canonical topics (`/scan` has the body-masked LD06 as its sole publisher
   by default), so nothing downstream can tell the topologies apart.
 
 Both installers are re-runnable when the split changes; keep the machines'
@@ -748,7 +748,10 @@ robot should end up and drag before releasing to set which way it should face.
 ### Choosing what publishes /scan
 
 Nav2's obstacle layer and the SLAM cloud both read `/scan`, and `laser_source` decides who
-produces it on the real robot. In simulation Gazebo always provides it and this argument
+produces it on the real robot. LD06 scans pass through `scan_self_filter` first, which drops
+the returns from the robot's own body (`config/lidar_self_mask.yaml`); without it those
+points sit inside the collision monitor's stop zone and hold the base at zero. Re-measure the
+sector with a stationary, stowed robot after changing anything mounted within 20 cm of the lidar. In simulation Gazebo always provides it and this argument
 does nothing.
 
 `laser_source:=camera` forces the camera fallback. `laser_source:=auto` (the default) uses
@@ -785,8 +788,8 @@ RobotSkin base -- see HARDWARE.md for the mount, port and permissions. The
 normal startup scripts detect its stable `/dev/serial/by-id` device themselves.
 
 The standard device installer starts `lekiwi-lidar.service` on the robot host,
-and the standard compute installer relays its private scan as the sole `/scan`
-publisher. No LD06-specific installation or launch flag is needed.
+and the standard compute installer publishes its private scan, with the robot's own
+body masked out, as the sole `/scan` publisher. No LD06-specific installation or launch flag is needed.
 
 Its 12 m range makes the camera trick redundant, which is why the two are
 mutually exclusive. `laser_source:=none` is rejected in real mode: production

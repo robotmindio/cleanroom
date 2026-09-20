@@ -684,7 +684,7 @@ def generate_launch_description():
                 name="ld06_lidar",
                 parameters=[{
                     "product_name": "LDLiDAR_LD06",
-                    "topic_name": "/scan",
+                    "topic_name": "/lidar/scan_raw",
                     "frame_id": "laser",
                     "port_name": lidar_port,
                     "port_baudrate": 230400,
@@ -704,15 +704,21 @@ def generate_launch_description():
                 condition=IfCondition(PythonExpression([remote_camera, " or ", remote_ld06])),
                 respawn=True, respawn_delay=5.0, output="screen",
             ),
+            # Both LD06 paths end here: the robot's own body is blanked out of the scan
+            # (config/lidar_self_mask.yaml) before anything reads /scan. The node
+            # subscribes without needing the Pi's publisher to exist yet, so a compute
+            # host that boots first simply waits.
             Node(
-                package="topic_tools",
-                executable="relay",
-                name="remote_ld06_relay",
-                # Keep the relay alive if this compute host boots before the
-                # Pi's lidar publisher. Without the known type, topic_tools
-                # exits while trying to infer it from a not-yet-advertised topic.
-                arguments=["/pi/lidar/scan", "/scan", "sensor_msgs/msg/LaserScan"],
-                condition=IfCondition(remote_ld06),
+                package="lekiwi_rmf",
+                executable="scan_self_filter",
+                name="scan_self_filter",
+                parameters=[
+                    PathJoinSubstitution([package, "config", "lidar_self_mask.yaml"]),
+                    {"input_topic": PythonExpression(
+                        ["'/pi/lidar/scan' if ", remote_ld06, " else '/lidar/scan_raw'"]
+                    )},
+                ],
+                condition=IfCondition(PythonExpression([ld06, " or ", remote_ld06])),
                 output="screen",
             ),
             Node(
