@@ -1,4 +1,4 @@
-# LeKiwi ROS 2 + visual SLAM + Open-RMF
+# LeKiwi ROS 2 + lidar SLAM + Open-RMF
 
 A shared ROS 2 Jazzy stack for running a LeKiwi mobile manipulator in Gazebo or on real hardware. Nav2 and Open-RMF see the same robot interface in both modes.
 
@@ -9,8 +9,8 @@ Open-RMF -> Free Fleet -> Nav2 -> cmd_vel_smoothed --+
                          ^                            |-> mux -> collision monitor -> /cmd_vel_safe
                          |                            |                              |-- Gazebo Harmonic
                          |                            `-> manual teleop              `-- LeRobot ZMQ host -> LeKiwi
-                RTAB-Map visual SLAM
-                front RGB + wheel odometry
+                RTAB-Map lidar SLAM
+                LD06 + Astra cloud + wheel odometry
 ```
 
 The package includes:
@@ -20,7 +20,8 @@ The package includes:
 - a LeRobot-to-ROS driver for velocity, odometry, arm joints, and the front camera;
 - MoveIt planning and execution for the five-joint arm on real hardware and
   the physics-actuated Gazebo arm;
-- RTAB-Map monocular place recognition and loop closure using metric wheel odometry;
+- RTAB-Map lidar SLAM (ICP and proximity loop closure) on the merged LD06 scan and
+  Astra obstacle-band cloud, using metric wheel odometry;
 - a Free Fleet adapter connecting Nav2 to Open-RMF;
 - a read-only Foxglove dashboard for robot, navigation, sensor, and safety telemetry;
 - optional rosbridge WebSocket access for browsers and external applications;
@@ -121,7 +122,7 @@ Source the environment in every new terminal:
 source scripts/setup.bash
 ```
 
-Launch Gazebo, visual SLAM, and Nav2 through the managed renderer preflight:
+Launch Gazebo, lidar SLAM, and Nav2 through the managed renderer preflight:
 
 ```bash
 scripts/sim-up.sh
@@ -155,13 +156,13 @@ ros2 action send_goal /navigate_to_pose nav2_msgs/action/NavigateToPose \
 ```
 
 RMF is opt-in because it connects the robot to a fleet graph. It is only valid
-in `slam_mode:=localization` with an approved map bundle; the checked-in
+with `localization:=amcl`, `slam_mode:=localization` and an approved map bundle; the checked-in
 synthetic development bundle cannot start RMF. After installing a surveyed
 bundle, start the managed simulation with its manifest:
 
 ```bash
-scripts/sim-up.sh slam_mode:=localization start_rmf:=true \
-  map_bundle:=/absolute/path/to/site-v1.yaml
+scripts/sim-up.sh localization:=amcl slam_mode:=localization \
+  start_rmf:=true map_bundle:=/absolute/path/to/site-v1.yaml
 ```
 
 ```bash
@@ -169,7 +170,7 @@ ROS_DOMAIN_ID=0 ros2 run rmf_demos_tasks dispatch_patrol \
   -p charger dropoff -n 1 --use_sim_time
 ```
 
-On later runs, reuse the visual database without adding new map nodes:
+On later runs, reuse the map database without adding new map nodes:
 
 ```bash
 scripts/sim-up.sh slam_mode:=localization \
@@ -178,20 +179,32 @@ scripts/sim-up.sh slam_mode:=localization \
 
 ## Launch options
 
+Arguments of `launch/bringup.launch.py`. The repository scripts pass extra
+`name:=value` arguments straight through (`scripts/sim-up.sh`, `scripts/up.sh`,
+`scripts/workstation-up.sh`, `scripts/ros-start.sh`).
+
 | Argument | Values | Default | Purpose |
 | --- | --- | --- | --- |
 | `mode` | `sim`, `real` | `sim` | Select Gazebo or the LeRobot hardware bridge |
 | `headless` | `true`, `false` | `true` | Run Gazebo server-only with offscreen rendering; set false to open its GUI |
-| `localization` | `visual_slam`, `amcl` | `visual_slam` | Select the sole `map -> odom` provider |
+| `localization` | `visual_slam`, `amcl` | `visual_slam` | Select the sole `map -> odom` provider; `visual_slam` is RTAB-Map running lidar-only |
 | `slam_mode` | `mapping`, `localization` | `mapping` | Extend or reuse the RTAB-Map database; the session quota switches mapping to localization |
-| `remote_ip` | IPv4/hostname | `127.0.0.1` | Address of the LeKiwi ZMQ host |
-| `rtabmap_database` | file path | sim: `~/.ros/lekiwi_rtabmap_sim.db`; real: `~/.ros/lekiwi_rtabmap.db` | Visual map database |
-| `publish_astra` | `true`, `false` | `true` | Start the tracked local Astra Pro as registered RGB-D; otherwise SLAM uses the front RGB camera plus scan |
-| `hardware_config` | YAML path | `config/hardware.yaml` | Tracked hardware identities, including the required Astra serial when RGB-D is enabled |
+| `remote_ip` | IPv4/hostname | `127.0.0.1` | Address of the LeKiwi ZMQ host and of the device zenoh bridge (`scripts/ros-start.sh` takes it from `LEKIWI_ROBOT_HOST`) |
+| `curve_client_secret_key_file`, `curve_server_public_key_file` | file paths | empty | Optional CURVE identity for the ZMQ link; set both or neither |
+| `disarm_on_failure` | `true`, `false` | `false` | Strict failure policy for larger robots: every failure disarms, cuts torque and waits for `/safety/arm`; also makes the safety supervisor deny motion. See [Arming and recovery](#arming-and-recovery). Scripts set it from `LEKIWI_DISARM_ON_FAILURE` |
+| `rtabmap_database` | file path | sim: `~/.ros/lekiwi_rtabmap_sim.db`; real: `~/.ros/lekiwi_rtabmap.db` | RTAB-Map map database |
+| `rtabmap_wm_nodes` | integer | `300` | Nodes kept in RTAB-Map working memory before older ones move to the database |
+| `rtabmap_mapping_max_bytes`, `rtabmap_mapping_max_seconds` | integers | `536870912`, `14400` | Mapping-session quota; reaching either switches RTAB-Map to localization |
+| `static_map` | `true`, `false` | `false` | Serve the checked-in floor plan on `/map` and move RTAB-Map's own grid to `/rtabmap/map` |
+| `map_bundle` | YAML path | `maps/bundles/cleanroom-development.yaml` | Immutable map bundle used for the map, graph and fleet config when `amcl`, `static_map` or RMF is selected |
+| `publish_camera` | `true`, `false` | `true` | Enable the front-camera pipeline (local V4L2 or the remote relay) |
+| `publish_astra` | `true`, `false` | `true` | Start the Astra Pro driver on this machine (real mode, `camera_source:=local`); with `camera_source:=remote` the device's `lekiwi-astra.service` supplies it |
+| `hardware_config` | YAML path | `config/hardware.yaml` | Tracked hardware identities, including the required Astra serial when the Astra is launched |
 | `camera_info_url` | ROS camera URL | `file://~/.ros/camera_info/lekiwi_front.yaml` | V4L2 front-camera calibration (not used by Astra Pro) |
 | `wrist_camera_info_url` | ROS camera URL | `file://~/.ros/camera_info/lekiwi_wrist.yaml` | Optional wrist-camera calibration |
 | `camera_source` | `local`, `remote` | `local` | Read the camera here, or decompress what the robot's Pi publishes |
 | `camera_device` | V4L2 path | `/dev/video0` | Existing front V4L2 camera |
+| `wrist_camera_device` | V4L2 path, `none` | `none` | Wrist camera; `scripts/ros-start.sh` passes the detected JYU2C, or `none` when `LEKIWI_WRIST=none` |
 | `laser_source` | `auto`, `camera`, `ld06`, `none` | `auto` | Select camera fallback or LD06 on real hardware; Gazebo supplies `/scan` in sim |
 | `lidar_source` | `local`, `remote` | `local` | Machine that opens the LD06 serial port; remote relays `/pi/lidar/scan` |
 | `lidar_port` | serial path | CP2102 `/dev/serial/by-id/...` | LD06 device when `laser_source:=ld06` |
@@ -200,7 +213,7 @@ scripts/sim-up.sh slam_mode:=localization \
 | `camera_pitch`, `camera_yaw`, `camera_roll` | radians | `0.031`, `0.0`, `0.0` | Front-camera orientation used by the camera scan |
 | `xy_velocity_scale` | float | `1.0` | Correction for reported and commanded translation |
 | `yaw_velocity_scale` | float | `0.90` | Correction for reported and commanded rotation |
-| `start_rmf` | `true`, `false` | `false` | Start Zenoh, RMF schedule, dispatcher, and fleet adapter |
+| `start_rmf` | `true`, `false` | `false` | Start Zenoh, RMF schedule, dispatcher, and fleet adapter; requires `localization:=amcl`, `slam_mode:=localization` and an approved `map_bundle` |
 | `rmf_domain` | integer | `0` | DDS domain used by RMF processes; validation currently requires `0` because no tracked cross-domain bridge is configured |
 | `start_foxglove` | `true`, `false` | `true` | Start the read-only Foxglove WebSocket bridge |
 | `foxglove_address` | bind address | `127.0.0.1` | Interface exposed by Foxglove; loopback by default |
@@ -211,26 +224,25 @@ scripts/sim-up.sh slam_mode:=localization \
 | `rosbridge_port` | TCP port | `9090` | WebSocket listening port |
 | `rosbridge_domain` | integer | `0` | ROS graph exposed through rosbridge |
 
-Only one localization mode should run. `visual_slam` publishes `map -> odom` through RTAB-Map; `amcl` publishes it from the fixed occupancy map.
+Only one localization mode should run. `visual_slam` (the value name is kept) publishes `map -> odom` through RTAB-Map; `amcl` publishes it from the fixed occupancy map.
 
 ### Arm planning
 
-Start MoveIt with either robot mode. Open RViz separately when visual planning
-is needed; `bringup.launch.py` does not start a desktop session. The following
-starts the real arm action server, but does not move the robot:
+Start MoveIt with either robot mode. `bringup.launch.py` does not start a
+desktop session; `scripts/workstation-up.sh` starts RViz after the stack, and
+`scripts/rviz.sh` opens it on any running stack. The following
+starts the real arm action server on a wired robot, but does not move it
+(`scripts/workstation-up.sh` and the compute service already enable MoveIt):
 
 ```bash
-# terminal 1
-ros2 launch lekiwi_rmf bringup.launch.py mode:=real start_moveit:=true
-# terminal 2, after the stack is running
-scripts/rviz.sh
+scripts/up.sh start_moveit:=true
 ```
 
 MoveIt executes through `/arm_controller/follow_joint_trajectory` in both
 modes. In simulation, Gazebo's six-joint physics controller supplies actual
 joint feedback and the adapter enforces the same trajectory limits and
-tolerances as the hardware boundary. To exercise it, launch with
-`mode:=sim start_moveit:=true`; the delayed depth cloud feeds MoveIt's octomap.
+tolerances as the hardware boundary. To exercise it, run
+`scripts/sim-up.sh start_moveit:=true`; the delayed depth cloud feeds MoveIt's octomap.
 The host uses five motor read retries while the arm moves; override only after validating
 your bus with `LEKIWI_READ_RETRIES`.
 
@@ -252,7 +264,7 @@ With the updated stack running, run `scripts/calibrate.sh pose` on the compute
 machine that owns the ROS driver. It captures fresh `/arm/raw_joint_states`,
 independent of the driver's existing offsets, and backs up the previous calibration.
 Support the disarmed arm in the **SO-101 new-calibration zero pose** shown in
-[the model reference](urdf/README.md). The legacy folded-pose instructions do not
+[the model reference](urdf/README.md). Folded-pose instructions from other SO-101 guides do not
 apply to this model. Capture saves `~/.ros/lekiwi_arm_calibration.json` without
 changing torque or restarting services. Restart the driver through the same
 repository launch/deploy workflow to apply it, then verify individual joint
@@ -261,39 +273,46 @@ opposite in RViz, correct that joint's `directions` value and recapture the zero
 mapping as needed. Redo motor calibration first if encoder readings wrap or
 disagree with the measured travel range.
 
-### Recovery after motor power loss
+### Arming and recovery
 
-Arming is guarded by complete, fresh telemetry and current permission from the
-continuous safety supervisor. By default the robot stays armed: a host session
-change, stale or failed telemetry, or withdrawn permission cancels the interrupted
-trajectory, stops the base and freezes the arm at its present position with servo
-torque on, and the driver re-arms itself as soon as telemetry and permission are
-healthy again. Nothing latches `TORQUE_FAULT`. Only an operator's `/safety/disarm`
-cuts torque and stays disarmed until `/safety/arm`.
+Arming requires complete, fresh telemetry and current permission from the
+continuous safety supervisor. The motor host runs continuously; a clean service
+stop or restart disconnects it and cuts servo torque, and a restarted driver
+arms itself again once telemetry and permission are healthy.
+
+By default (`disarm_on_failure` off, the domestic robot) the robot stays armed:
+a host session change, stale or failed telemetry, or withdrawn permission
+cancels the interrupted trajectory, stops the base and freezes the arm at its
+present position with servo torque on, and the driver re-arms itself every 2 s
+until telemetry and permission are healthy again. Nothing latches `TORQUE_FAULT`.
+Only an operator's `/safety/disarm` cuts torque; it stays disarmed, across later
+link losses too, until an operator calls `/safety/arm`. The ZMQ command,
+observation and torque sockets use heartbeat and TCP keepalive, so a half-open
+link is detected and reconnected instead of hanging.
 
 For larger robots, set `LEKIWI_DISARM_ON_FAILURE=true` in `.env` on both the
 workstation and the robot computer (launch argument `disarm_on_failure:=true`, host
-option `--safety.disarm_on_failure=true`). Every failure then disarms, cuts all servo
-torque, latches `TORQUE_FAULT` if the cut is unconfirmed, and stays disarmed until
-you inspect the robot and:
+option `--safety.disarm_on_failure=true`). This strict mode disarms on every
+failure, cuts all servo torque, latches `TORQUE_FAULT` if the cut is unconfirmed,
+never re-arms by itself, and stays disarmed until you inspect the robot and:
 
 ```bash
 ros2 service call /safety/arm std_srvs/srv/Trigger '{}'
 ```
 
-`/safety/state` reports the driver's `DISARMED`, `ARMED`, or `LINK_LOST` state.
+The driver publishes its `DISARMED`, `ARMED`, or `LINK_LOST` state on
+`safety/driver_state` (the driver's own `safety/state`, remapped by bringup).
 The supervisor publishes `safety/supervisor_state`,
 `safety/base_motion_permitted`, and `safety/arm_motion_permitted`. By default (real
-mode, domestic robot) it reports missing or unhealthy inputs in `/diagnostics` but does
-not withhold motion. With `LEKIWI_DISARM_ON_FAILURE=true`, and always in simulation,
-missing or unhealthy inputs deny motion and runtime faults latch until
-`/safety/reset_fault` is called while the driver is disarmed and all inputs are healthy.
-An e-stop always latches in that mode. `/safety/disarm` stops ROS commands and
-waits for the motor host to confirm that it cut torque on all nine servos.
-The host always restarts torque-off. `/safety/arm` holds each arm joint at its
-measured position, sends zero wheel velocity, and requires an explicit fresh
-arm request. The physical E-stop remains mandatory for any electrical,
-mechanical, or process failure.
+mode, domestic robot) it reports missing or unhealthy inputs in `/diagnostics` but
+does not withhold motion. With `LEKIWI_DISARM_ON_FAILURE=true`, and always in
+simulation, missing or unhealthy inputs deny motion and runtime faults latch until
+`/safety/reset_fault` is called while the driver is disarmed and all inputs are
+healthy. An e-stop always latches in that mode. `/safety/disarm` stops ROS commands
+and waits for the motor host to confirm that it cut torque on all nine servos.
+Arming, manual or automatic, holds each arm joint at its measured position and
+sends zero wheel velocity. The physical E-stop remains mandatory for any
+electrical, mechanical, or process failure.
 
 ### Production safety prerequisites
 
@@ -327,10 +346,11 @@ is implied by a passing software test.
 The local real robot has three cameras: the existing front V4L2 camera, the
 existing wrist V4L2 camera, and an ORBBEC Astra Pro. The Astra's pinned
 OpenNI/UVC driver publishes synchronized, depth-registered RGB-D under
-`/camera/astra/...`; its cloud is additionally exposed at
-`/camera/depth/points` for MoveIt. RTAB-Map uses the Astra RGB-D pair when it
-is enabled; otherwise it uses the front RGB camera plus `/scan`, which keeps
-the remote-camera topology usable. Set the physical serial in the tracked
+`/camera/astra/...`; its filtered cloud is published at `/camera/depth/points`
+for MoveIt's octomap updater and for the SLAM cloud (`/slam/cloud`), which merges
+each LD06 scan with the Astra points between 3 cm and 1 m above the floor.
+RTAB-Map consumes only that cloud plus wheel odometry, never the RGB or depth
+images. Set the physical serial in the tracked
 `config/hardware.yaml` before enabling Astra: an empty serial is rejected
 instead of allowing the driver to claim an arbitrary compatible USB camera.
 The full hardware installer also installs the camera's udev rule, so this
@@ -352,17 +372,19 @@ still be camera-sensitive and should not be used as the ROS motor service.
 
 The front/wrist V4L2 cameras are also the supported remote-camera topology:
 frames are read by `v4l2_camera` on the machine where they are plugged in, then
-relayed as below. Astra is local-only in this launch configuration.
+relayed as below. The Astra is read by `ros-astra.sh` (`lekiwi-astra.service`)
+on whichever machine holds its USB connection; on a split robot the device zenoh
+bridge carries its cloud and a 2 Hz colour preview to the workstation.
 
 With a Pi on the robot, `ros-cameras.sh` reads each USB camera there and publishes a
-compressed `/pi/camera/...` stream. The workstation relays and expands it onto the
-canonical `/camera/...` topics when `camera_source:=remote`; camera frames never pass
-through the LeRobot motor host.
+compressed `/pi/camera/...` stream. The device zenoh bridge carries it to the
+workstation, which expands it onto the canonical `/camera/...` topics when
+`camera_source:=remote`; camera frames never pass through the LeRobot motor host.
 
 On a wired robot, use the default `camera_source:=local`; the existing
 `camera_device` continues to identify the front V4L2 camera.
 
-The known JYU2C wrist camera is auto-detected unless `LEKIWI_WRIST=none`. It publishes on `/camera/wrist/image_raw` for watching the gripper. Run `scripts/calibrate.sh wrist` **on the machine the wrist camera is plugged into** before using its `camera_info` for calibrated perception; navigation and RTAB-Map use only the front camera. In remote mode the camera node publishes its compressed wrist stream to the workstation. Both cameras share one USB 2.0 hub, so the wrist feed stays small.
+The known JYU2C wrist camera is auto-detected unless `LEKIWI_WRIST=none`. It publishes on `/camera/wrist/image_raw` for watching the gripper. Run `scripts/calibrate.sh wrist` **on the machine the wrist camera is plugged into** before using its `camera_info` for calibrated perception; the camera-scan fallback uses only the front camera. In remote mode the camera node publishes its compressed wrist stream to the workstation. Both cameras share one USB 2.0 hub, so the wrist feed stays small.
 
 ### Odometry scale
 
@@ -484,28 +506,45 @@ scripts/up.sh
 ```
 
 It starts the LeRobot host, waits for the nine servos to answer, and brings up the
-ROS navigation stack; logs land in `~/.ros/lekiwi`. Real mode remains motion-
-denied until the production safety supervisor has current healthy inputs and
-`config/safety_acceptance.yaml` has been replaced by a validated physical
-acceptance record. A successful launch alone does not mean the robot is safe
-to move. On the 4 GB robot computer, MoveIt and RViz are intentionally opt-in
-so they cannot starve camera safety. In a split deployment, the compute
+ROS navigation stack; logs land in `~/.ros/lekiwi`. Run `scripts/rviz.sh` to watch it. With
+`LEKIWI_DISARM_ON_FAILURE=true` real mode stays motion-denied until the production
+safety supervisor has current healthy inputs and `config/safety_acceptance.yaml`
+has been replaced by a validated physical acceptance record; by default the
+supervisor only reports them. A successful launch alone does not mean the robot
+is safe to move. On the 4 GB robot computer, MoveIt and RViz are intentionally
+opt-in so they cannot starve camera safety. In a split deployment, the compute
 installer and `scripts/workstation-up.sh` enable MoveIt on the workstation by
-default. Run `scripts/rviz.sh` there when visualisation is needed.
-`scripts/ros-stop.sh` stops all of it.
+default.
+
 With a robot computer holding the devices, its half runs there instead:
 
 ```bash
-scripts/pi-up.sh                         # on the robot computer (motor host + cameras + LD06)
-scripts/workstation-up.sh <PI_IP>         # on the workstation
+scripts/pi-up.sh                 # on the robot computer
+scripts/workstation-up.sh        # on the workstation
 ```
 
-`workstation-up.sh` starts the remote ROS stack and RViz; any following arguments go
-to the ROS launch file, so
-`scripts/workstation-up.sh 192.168.1.50 slam_mode:=localization` works. The Pi host
-has to be up first — the driver gives up and exits if no host
-answers on `5555/tcp`. Stop everything with `Ctrl-C`, or `scripts/ros-stop.sh`
-from another terminal.
+`pi-up.sh` starts the motor host, cameras, LD06, Astra, and zenoh sensor bridge.
+`workstation-up.sh` starts the ROS stack (MoveIt, remote cameras and lidar) and
+RViz against the robot named by `LEKIWI_ROBOT_HOST`; pass the address as the first
+argument to override it, and any following `name:=value` arguments go to the ROS
+launch file, e.g. `scripts/workstation-up.sh slam_mode:=localization`. The device
+half has to be up first — the driver gives up and exits if no host answers on
+`5555/tcp`. `scripts/ros-stop.sh` stops what `up.sh`, `pi-up.sh` and
+`workstation-up.sh` started; it never touches systemd-owned units, only reports
+them.
+
+### Configuration
+
+Copy `.env.example` to `.env` in the repository root. Scripts read exactly two
+keys from it: `LEKIWI_ROBOT_HOST` (the robot computer's hostname or IPv4 address,
+used by `workstation-up.sh`, `ros-start.sh`, `deploy-split.sh` and the compute
+installer) and `LEKIWI_DISARM_ON_FAILURE` (`true` or `false`). A value already
+present in the environment wins. Every other `LEKIWI_*` override (`LEKIWI_WS`,
+`LEKIWI_LOGS`, `LEKIWI_FRONT`, `LEKIWI_WRIST`, `LEKIWI_PORT`, `LEKIWI_ID`,
+`LEKIWI_STACK_ARGS`, ...) is honoured only as an environment variable; the same
+name in `.env` is ignored. Under systemd the compute stack's extra launch
+arguments live in `/etc/default/lekiwi-stack` (`LEKIWI_STACK_ARGS`), written by
+the installer.
 
 ### Boot services
 
@@ -532,7 +571,10 @@ sudo scripts/install-compute-services.sh \
   --service-user "$USER" --workspace "$HOME/lekiwi_ws"
 ```
 
-For a split device/compute deployment, install the device unit on the motor
+Both fail early if the selected workspace or LeRobot Python is missing. They
+render, verify, reload, and enable the units.
+
+For a split device/compute deployment, install the device units on the motor
 machine, then configure the compute machine with:
 
 ```bash
@@ -545,13 +587,81 @@ sudo scripts/install-compute-services.sh --service-user "$USER" \
   --workspace "$HOME/lekiwi_ws" --remote DEVICE_IP
 ```
 
-After setting `LEKIWI_ROBOT_HOST` in `.env`, reinstall and restart that compute
-service with `scripts/reinstall-compute.sh`.
+With `LEKIWI_ROBOT_HOST` set in `.env` the compute installer uses it as
+`--remote`. After changing it, reinstall and restart that compute service with
+`scripts/reinstall-compute.sh`.
 
-The motor and torque endpoints bind to all interfaces (`0.0.0.0`) by default,
-so any reachable server can use unauthenticated ZMQ. Do not expose ports 5555,
-5556, or 5557 outside a trusted robot network: an unauthenticated client can
-command the robot. CURVE remains an opt-in hardening layer.
+Units installed:
+
+| Machine | Unit | Owns |
+| --- | --- | --- |
+| Device | `lekiwi-host.service` | The motor bus, camera-less: motion on `5555/tcp`, observations on `5556/tcp`, torque safety on `5557/tcp` |
+| Device | `lekiwi-cameras.service` | Front and wrist cameras, published by `v4l2_camera` right where they are plugged in — never read by the motor host: one reader per device, so a stalled camera frame cannot abort the motor bus (installed when `v4l2_camera` is available) |
+| Device | `lekiwi-astra.service` | The Astra Pro RGB-D publisher (installed when `astra_camera` is available) |
+| Device | `lekiwi-lidar.service` | The LD06 serial port; publishes the private `/pi/lidar/scan` |
+| Device | `lekiwi-zenoh.service` | Zenoh bridge exporting the sensor topics to the compute machine on `7447/tcp` |
+| Compute | `lekiwi-stack.service` | The ROS bringup (`scripts/ros-start.sh`) |
+| Both | `lekiwi-ros-logrotate.timer` | ROS log rotation |
+
+The compute installer picks the topology:
+
+- without arguments it assumes the device side is this same machine and
+  orders itself after the host, starting only once its ZMQ port answers. If a
+  `lekiwi-cameras.service` is installed here too, the stack takes that
+  service's compressed frames over loopback (`camera_source:=remote`) — v4l2
+  allows one reader per camera, and the service already holds them;
+- with `--remote <device-address>` it reaches a host on another machine;
+  compressed frames, the Astra cloud and the device LD06's `/pi/lidar/scan`
+  arrive through the zenoh bridge, and relays in the bringup expand them into
+  the same canonical topics (`/scan` has the relayed LD06 as its sole publisher
+  by default), so nothing downstream can tell the topologies apart.
+
+Both installers are re-runnable when the split changes; keep the machines'
+clocks roughly in sync (anything NTP-ish) since camera stamps originate on the
+device machine and are paired approximately. The stack keeps retrying until the
+device half appears, however long the other machine takes to boot; stop
+services with `systemctl`, since `scripts/ros-stop.sh` leaves them alone and
+the restart policy would undo a raw kill anyway. RViz is deliberately not a
+service — it needs a desktop session — so run `scripts/rviz.sh` when you sit
+down at it. Inspect the units with:
+
+```bash
+systemctl status lekiwi-host.service lekiwi-cameras.service lekiwi-astra.service \
+  lekiwi-lidar.service lekiwi-zenoh.service lekiwi-stack.service
+journalctl -u lekiwi-host.service -f
+```
+
+All units run as the selected non-root service account with no new
+privileges, a private temporary directory, a protected system tree, kernel and
+control-group protection, and restrictive file creation permissions. Their
+HOME remains writable for repository-managed ROS databases, logs, calibration,
+and key material; serial and V4L2 devices remain visible because their dynamic
+device paths are required by the host, camera and lidar services.
+
+The motor host runs continuously. A clean stop or restart of
+`lekiwi-host.service` disconnects it and cuts servo torque; the arming policy is
+described in [Arming and recovery](#arming-and-recovery).
+
+### Network exposure
+
+The device services listen on every interface by default, and none of the
+listeners is authenticated unless CURVE is configured:
+
+| Port | Listener | Carries | Protection |
+| --- | --- | --- | --- |
+| `5555/tcp` | `lekiwi-host` | ZMQ motor commands | none; optional CURVE |
+| `5556/tcp` | `lekiwi-host` | ZMQ observations and joint state | none; optional CURVE |
+| `5557/tcp` | `lekiwi-host` | Torque arm, disarm and state | none; optional CURVE |
+| `7447/tcp` | `lekiwi-zenoh` | Zenoh, export-only: `/pi/lidar/scan`, `/pi/camera/*`, `/camera/depth/points`, and the Astra colour `image_raw` and `camera_info` | none; plaintext |
+
+Anyone who can reach `5555` or `5557` can command the robot and cut torque, so
+keep them on a trusted robot network or behind a firewall. `7447` exposes
+sensor data (lidar, camera and depth frames) in the clear but accepts no
+publishers, services or actions: its allow-list is export-only, so nothing that
+connects can publish into the device's DDS. `--bind-address DEVICE_IP` pins the
+ZMQ sockets to one interface; it does not affect `7447`. CURVE covers the ZMQ
+sockets only. Neither it nor anything else in this repository secures DDS or
+zenoh; see [DEFERRED.md](DEFERRED.md#network-security-and-credentials).
 
 Generate the server, health, and driver identities once as the device service
 account, then install both halves with a protected key directory. Copy the
@@ -570,46 +680,11 @@ sudo scripts/install-compute-services.sh --remote DEVICE_IP \
 The last command is run on the compute host only after its key directory has
 `clients/driver.key_secret` and `server.key`. Omit both `--curve-dir` options
 to use the enabled unauthenticated transport. CURVE does not configure a
-firewall or authenticate ROS 2 DDS.
-
-The device side installs three units: `lekiwi-host.service` (the motor bus,
-served on `5555/tcp` with observations on `5556/tcp` and torque safety on
-`5557/tcp`) and `lekiwi-cameras.service` (the cameras, published by
-`v4l2_camera` right where they are plugged in — never read by the motor host:
-one reader per device, so a stalled camera frame cannot abort the motor bus).
-`lekiwi-lidar.service` owns the LD06 serial port and publishes the private
-device scan.
-The compute side installs `lekiwi-stack.service`:
-
-- without arguments it assumes the device side is this same machine and
-  orders itself after the host, starting only once its ZMQ port answers. If a
-  `lekiwi-cameras.service` is installed here too, the stack takes that
-  service's compressed frames over loopback (`camera_source:=remote`) — v4l2
-  allows one reader per camera, and the service already holds them;
-- with `--remote <device-address>` it reaches a host on another machine;
-  compressed frames stream from the device machine and relays in the bringup
-  expand them into the same canonical topics, so nothing downstream can tell
-  the topologies apart. It also relays the device LD06's `/pi/lidar/scan` as
-  the sole `/scan` publisher by default.
-
-Both installers are re-runnable when the split changes; keep the machines'
-clocks roughly in sync (anything NTP-ish) since camera stamps now originate
-on the device machine and RTAB-Map pairs them approximately. The stack keeps
-retrying until the device half appears, however long the other machine takes
-to boot; stop services with `systemctl`, not `scripts/ros-stop.sh`, which the
-restart policy would simply undo. RViz is deliberately not a service — it
-needs a desktop session — so run `scripts/rviz.sh` when you sit down at it.
-
-All four units run as the selected non-root service account with no new
-privileges, a private temporary directory, a read-only system tree, kernel and
-control-group protection, and restrictive file creation permissions. Their
-HOME remains writable for repository-managed ROS databases, logs, calibration,
-and key material; serial and V4L2 devices remain visible because their dynamic
-device paths are required by the host/camera services.
+firewall.
 
 ### Coordinated split deployment
 
-The normal device and compute service installers seed a least-privilege
+The normal device and compute service installers also seed a least-privilege
 deployment sudo rule for their selected account. It permits only LeKiwi unit
 start, stop, restart, and reset; it does not grant an arbitrary shell or root
 commands. Run the service installers once after changing a unit template or
@@ -626,26 +701,20 @@ creating a passwordless privilege rule without one would be a privilege-escalati
 The deployer first exits quickly when the requested revision, both built
 workspaces, and all services are already current. Otherwise it refreshes stale
 or misconfigured compute service configuration, fast-forwards both clean checkouts to the same
-pushed commit, confirms torque-off, stops the
-compute stack before the device host, rebuilds both service workspaces, and
-starts the host, cameras, and LD06 before the compute stack. The tracked launch
-default keeps every replacement driver disarmed; the deployer verifies that
-state along with revision, motor health, and cameras. Any failure does not roll
+pushed commit, disarms and confirms torque-off, stops the compute stack before
+the device services, rebuilds both service workspaces, and starts the host,
+Astra, cameras, LD06 and zenoh bridge before the compute stack. It verifies
+revision, motor health, cameras, the Astra cloud and the LD06 scan with the
+driver disarmed, then re-arms it unless `LEKIWI_DISARM_ON_FAILURE=true`, in
+which case the robot stays disarmed for an operator. Any failure does not roll
 back or resume a partially deployed robot. Inspect the failure and rerun the
 deploy.
 
-The two halves can also mix ownership: keep the device services running and
-drive the stack by hand whenever you feel like it —
-
-```bash
-scripts/ros-start.sh camera_source:=remote   # frames come from the cameras service
-scripts/rviz.sh                              # Ctrl-C on ros-start.sh stops it
-```
-
-— and `scripts/ros-stop.sh` knows about the units: an active
-`lekiwi-host.service` or `lekiwi-cameras.service` is left alone and reported,
-so stopping a manual stack never takes the boot services down with it.
-
+The two halves can also mix ownership: keep the device services running, stop
+`lekiwi-stack.service`, and run `scripts/workstation-up.sh` on the compute
+machine by hand. `scripts/ros-stop.sh` stops that manual stack and leaves the
+active `lekiwi-*` boot services running, reporting each, so stopping a manual
+stack never takes them down with it.
 
 To watch the robot, `scripts/rviz.sh` opens RViz on `config/lekiwi.rviz` — map,
 costmaps, robot model, TF, the goal-pose tool, and a panel for each camera. The
@@ -678,7 +747,7 @@ robot should end up and drag before releasing to set which way it should face.
 
 ### Choosing what publishes /scan
 
-Nav2's obstacle layer and RTAB-Map both read `/scan`, and `laser_source` decides who
+Nav2's obstacle layer and the SLAM cloud both read `/scan`, and `laser_source` decides who
 produces it on the real robot. In simulation Gazebo always provides it and this argument
 does nothing.
 
@@ -689,7 +758,8 @@ floor pixel is at a known distance, and the first pixel that stops looking like 
 obstacle.
 
 It only means anything once the camera's geometry is measured. Lay the printed 8x6
-checkerboard flat on the floor in view of the camera and run:
+checkerboard flat on the floor in view of the camera and, on a wired robot,
+run `scripts/calibrate.sh height`, or with the stack running run:
 
 ```bash
 ros2 run lekiwi_rmf free_space.py --ros-args -p calibrate:=true \
@@ -697,7 +767,8 @@ ros2 run lekiwi_rmf free_space.py --ros-args -p calibrate:=true \
 ```
 
 It prints and saves the camera height and pitch in `~/.ros/lekiwi_launch_calibration.conf`.
-Future `scripts/up.sh` launches use them automatically; an explicit launch argument overrides
+Every launch through `scripts/ros-start.sh` (`scripts/up.sh`, `scripts/workstation-up.sh`,
+`lekiwi-stack.service`) uses them automatically; an explicit launch argument overrides
 the saved value:
 
 ```bash
@@ -740,9 +811,9 @@ scripts/pi-up.sh
 ```
 
 Keep the host watchdog enabled. Ports `5555/tcp`, `5556/tcp`, and `5557/tcp`
-must be reachable from the ROS computer only through the configured protected
-control interface; do not expose them to an untrusted network. Check the
-repository health handshake before starting ROS:
+bind all interfaces by default (see [Network exposure](#network-exposure)) and
+must be reachable from the ROS computer only; do not expose them to an untrusted
+network. Check the repository health handshake on the Pi before starting ROS:
 
 ```bash
 "$HOME/lekiwi_ws/.venv-lerobot/bin/python" scripts/host-health-check.py \
@@ -751,27 +822,18 @@ repository health handshake before starting ROS:
 
 ### 2. Calibrate the front camera
 
-Calibration is mandatory for visual SLAM. Use the exact camera resolution, lens focus, and mounting that will be used in operation. The example target is an 8-by-6 inner-corner checkerboard with 25 mm squares.
+Calibration is required for the camera-scan fallback and for any calibrated use of
+the front camera. Use the exact camera resolution, lens focus, and mounting that will be used in operation. The example target is an 8-by-6 inner-corner checkerboard with 25 mm squares.
 
-Start the bridge without RMF. AMCL may wait for `/scan` during this calibration-only run; that does not prevent camera publication.
-
-```bash
-ros2 launch lekiwi_rmf bringup.launch.py \
-  mode:=real remote_ip:=192.168.1.50 \
-  curve_client_secret_key_file:=/secure/path/driver.key_secret \
-  curve_server_public_key_file:=/secure/path/server.key \
-  localization:=amcl publish_camera:=true start_rmf:=false
-```
-
-In another sourced terminal:
+Run the calibration on the machine the camera is plugged into (the robot computer
+in a split deployment; it needs that machine's camera publisher stopped first). It
+runs the checkerboard calibrator and saves the result:
 
 ```bash
-ros2 run camera_calibration cameracalibrator \
-  --size 8x6 --square 0.025 \
-  image:=/camera/front/image_raw camera:=/camera/front
+scripts/calibrate.sh camera
 ```
 
-Save/commit the calibration in the calibration window. The expected default file is:
+The saved file is:
 
 ```text
 ~/.ros/camera_info/lekiwi_front.yaml
@@ -788,51 +850,50 @@ The camera matrix `k` must not be all zeroes.
 
 ### 3. Calibrate wheel odometry
 
-Place LeKiwi at the RMF charger pose `[-4.0, -2.5, 0.0]`. Measure commanded versus actual straight-line travel and rotation, then tune these driver parameters if needed:
+Place LeKiwi at the RMF charger pose `[-4.0, -2.5, 0.0]`. Measure commanded versus actual straight-line travel and rotation, then tune these driver parameters if needed (`scripts/calibrate.sh wheels` shows the measurement procedure and saves the results):
 
 ```text
 xy_velocity_scale
 yaw_velocity_scale
 ```
 
-Accurate wheel scale matters: monocular images do not provide absolute metric scale by themselves.
+Accurate wheel scale matters: RTAB-Map's ICP starts from wheel odometry, and Nav2 tracks it.
 
-### 4. Build the visual map
+### 4. Build the map
 
-Use a new database filename for the first mapping run:
+Use a new database filename for the first mapping run. Start the workstation side
+(the robot address comes from `LEKIWI_ROBOT_HOST`; on a wired robot use
+`scripts/up.sh` with the same arguments):
 
 ```bash
-ros2 launch lekiwi_rmf bringup.launch.py \
-  mode:=real remote_ip:=192.168.1.50 \
-  curve_client_secret_key_file:=/secure/path/driver.key_secret \
-  curve_server_public_key_file:=/secure/path/server.key \
-  localization:=visual_slam slam_mode:=mapping \
+scripts/workstation-up.sh localization:=visual_slam slam_mode:=mapping \
   rtabmap_database:=$HOME/.ros/lekiwi_cleanroom.db
 ```
 
-This is the mapping procedure, not a safety bypass: the current production
-profile still denies motion until its required health inputs and physical
-acceptance record are installed. Do not weaken the supervisor just to map;
-use a reviewed mapping configuration and retain the hardwired E-stop.
+For an authenticated ZMQ link add `curve_client_secret_key_file:=/secure/path/driver.key_secret`
+and `curve_server_public_key_file:=/secure/path/server.key`; the boot service takes
+them from `install-compute-services.sh --curve-dir`.
 
-Drive slowly around the complete route and return to previously visited areas so RTAB-Map can close loops. With a laser (the default whenever one is present) RTAB-Map maps from scans alone, so a missing camera does not stop mapping; long featureless corridors are the weak case. Without a laser it maps from the front camera: avoid motion blur, blank walls, and changing illumination.
+This is the mapping procedure, not a safety bypass: with
+`LEKIWI_DISARM_ON_FAILURE=true` the production profile still denies motion until
+its required health inputs and physical acceptance record are installed. Do not
+weaken the supervisor just to map; use a reviewed mapping configuration and retain
+the hardwired E-stop.
 
-Stop with `Ctrl-C`; RTAB-Map persists the database at the configured path.
+Drive slowly around the complete route and return to previously visited areas so RTAB-Map can close loops. RTAB-Map maps from the merged LD06 scan and Astra cloud alone, using ICP scan matching and proximity loop closure, so a single sensor dropout does not stop mapping and lighting does not matter. Long featureless corridors and repetitive cleanroom walls are the weak case for ICP.
+
+Stop with `scripts/ros-stop.sh`; RTAB-Map persists the database at the configured path.
 
 ### 5. Operate from the saved map
 
 Start from the charger pose and switch RTAB-Map to localization mode:
 
 ```bash
-ros2 launch lekiwi_rmf bringup.launch.py \
-  mode:=real remote_ip:=192.168.1.50 \
-  curve_client_secret_key_file:=/secure/path/driver.key_secret \
-  curve_server_public_key_file:=/secure/path/server.key \
-  localization:=visual_slam slam_mode:=localization \
+scripts/workstation-up.sh localization:=visual_slam slam_mode:=localization \
   rtabmap_database:=$HOME/.ros/lekiwi_cleanroom.db
 ```
 
-Then dispatch Nav2 goals or RMF tasks with the same commands used in simulation.
+Then dispatch Nav2 goals. RMF tasks additionally need `localization:=amcl` and an approved map bundle (see [Immutable map bundles](#immutable-map-bundles)).
 
 ## Frames and interfaces
 
@@ -846,9 +907,11 @@ map -> odom -> base_footprint -> base_link -> ld06_body -> laser
 | `/cmd_vel_smoothed` | Nav2 | `cmd_vel_mux` |
 | `/cmd_vel_safe` | Collision monitor (intended sole guarded output) | Gazebo or `lekiwi_driver` |
 | `/wheel/odometry`, `/odom`, `odom -> base_footprint` | Driver and robot-localization EKF | RTAB-Map and Nav2 |
-| `/camera/front/image_raw` | Gazebo, local `v4l2_camera`, or the remote-camera relay | RTAB-Map |
-| `/camera/front/camera_info` | Gazebo, calibrated `v4l2_camera`, or the relay | RTAB-Map |
-| `/scan` | Gazebo, `free_space.py`, or the LD06 driver (`laser_source`) | Nav2 and RTAB-Map |
+| `/camera/front/image_raw` | Gazebo, local `v4l2_camera`, or the remote-camera relay | Camera-scan fallback, RViz, calibration |
+| `/camera/front/camera_info` | Gazebo, calibrated `v4l2_camera`, or the relay | Camera-scan fallback, RViz, calibration |
+| `/scan` | Gazebo, `free_space.py`, or the LD06 driver (`laser_source`) | Nav2 and `slam_cloud` |
+| `/camera/depth/points` | Astra cloud filter (device or local) | MoveIt, `slam_cloud`, safety supervisor |
+| `/slam/cloud` | `slam_cloud` (LD06 scan plus Astra obstacle band) | RTAB-Map |
 | `map -> odom` | RTAB-Map or AMCL | Nav2 and Free Fleet |
 | `/navigate_to_pose` | Nav2 action server | Free Fleet through Zenoh |
 | `safety/driver_state` | `lekiwi_driver` | Safety supervisor |
@@ -858,7 +921,7 @@ map -> odom -> base_footprint -> base_link -> ld06_body -> laser
 | `/safety/arm`, `/safety/disarm`, `/safety/reset_fault` | Driver / supervisor | Explicit operator control |
 | `ws://127.0.0.1:9090` | rosbridge when explicitly enabled | Local browser/external client |
 
-By default nothing serves the checked-in PGM: RTAB-Map publishes `/map` itself, drawing the occupancy grid from the camera-derived `/scan` while its visual place database corrects pose drift. The robot starts at the origin of a map it has not seen yet, and the grid grows as it drives. `static_map:=true` puts the checked-in floor plan back on `/map` instead, and moves RTAB-Map's own grid to `/rtabmap/map`.
+By default nothing serves the checked-in PGM: RTAB-Map publishes `/map` itself, drawing the occupancy grid from the merged LD06 and Astra cloud while ICP scan matching and proximity loop closure correct pose drift. The robot starts at the origin of a map it has not seen yet, and the grid grows as it drives. `static_map:=true` puts the checked-in floor plan back on `/map` instead, and moves RTAB-Map's own grid to `/rtabmap/map`.
 
 A live map and the checked-in RMF navigation graph do not agree on coordinates: the graph names points in the PGM's frame. Keep `start_rmf:=false` while mapping, or regenerate the graph against the map the robot draws.
 
@@ -887,9 +950,8 @@ selects the map, graph, and fleet from that manifest; do not provide separate
 artifact paths that disagree with it:
 
 ```bash
-ros2 launch lekiwi_rmf bringup.launch.py mode:=real \
-  slam_mode:=localization start_rmf:=true \
-  map_bundle:=/absolute/path/to/maps/bundles/site-v1.yaml
+scripts/workstation-up.sh localization:=amcl slam_mode:=localization \
+  start_rmf:=true map_bundle:=/absolute/path/to/maps/bundles/site-v1.yaml
 ```
 
 Mapping is a separate, bounded activity. The session guard includes the
@@ -903,119 +965,16 @@ map-bundle workflow.
 
 ## Troubleshooting
 
-### `ros2 topic list` hangs and never returns
-
-Orphaned nodes from an earlier bringup are still holding DDS participants. `ros2 launch`
-shuts its nodes down on SIGINT to the whole process group; killing the launcher alone
-leaves around twenty nodes running. Those orphans keep talking to each other, so a new
-stack still works while introspection dies silently. Stop a run with `Ctrl-C`, or from
-another terminal:
-
-```bash
-scripts/ros-stop.sh
-```
-
-### RTAB-Map floods the log with `Not found word N (dict size=M)`
-
-Mapping restarted on top of a database from an earlier session whose visual dictionary no
-longer matches. Every loop closure is then rejected with `Not enough features in images
-(old=0)`. Delete the database or point `rtabmap_database:=` at a fresh path.
-
-### The machine runs out of memory during a long mapping run
-
-RTAB-Map's working memory lives in RAM. `rtabmap_wm_nodes` (default 300) caps how many
-nodes stay resident; the rest move to the database and return when the robot comes back
-near them. Lower it on a small machine, raise it where memory allows — a larger working
-memory recognises places sooner.
-
-### RTAB-Map database or old crash archives consume disk
-
-Before every repository-managed real-hardware launch, the default
-`~/.ros/lekiwi_rtabmap.db` is rotated once it exceeds 512 MiB. Its SQLite sidecars move with
-it, so a fresh database cannot replay an old WAL. Automatic `stale-*` and `corrupt-*` archives
-are retained for at most 14 days, three sessions, and 1.5 GiB combined (including sidecars).
-An explicit `rtabmap_database:=...` is never rotated or deleted; use it for a map that must be
-kept. The same policy runs from both `scripts/up.sh` and the systemd `scripts/ros-start.sh` path.
-If the stack is already running, `scripts/rtabmap-db-maintenance.py --prune-only` safely applies
-only the automatic-archive retention policy; it never opens or moves the active database.
-
-### ROS logs consume disk
-
-The service installers enable `lekiwi-ros-logrotate.timer`. Every five minutes it rotates
-ROS logs above 100 MiB with `copytruncate`, keeps twelve archives, and compresses older
-ones. Re-run the relevant service installer after pulling this change.
-
-### Installer reports a ParaView/VTK conflict
-
-Ubuntu's `python3-paraview` conflicts with the `python3-vtk9` package required by RTAB-Map through PCL. If you do not need the existing ParaView installation, remove it and rerun the installer:
-
-```bash
-sudo apt-get remove paraview python3-paraview
-./scripts/install.sh
-```
-
-### Driver rejects missing calibration
-
-Visual-SLAM mode deliberately fails if the real camera calibration is missing or empty. Run camera calibration and pass the correct `camera_info_url`.
-
-### RTAB-Map receives no synchronized data
-
-Check all three inputs:
-
-```bash
-ros2 topic hz /camera/front/image_raw
-ros2 topic hz /camera/front/camera_info
-ros2 topic hz /odom
-```
-
-Also verify the static camera transform:
-
-```bash
-ros2 run tf2_ros tf2_echo base_footprint front_camera_optical_frame
-```
-
-### pytest fails with `PluginValidationError`
-
-A newer `pytest` in `~/.local` shadows the one ROS's `launch_testing` plugins
-expect. Disable plugin autoloading for the unit tests:
-
-```bash
-PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest test -q
-```
-
-### Free Fleet does not discover `lekiwi_1`
-
-Confirm that the bridge is running and Nav2 provides the action server:
-
-```bash
-pgrep -af zenoh-bridge-ros2dds
-ros2 action list | grep navigate_to_pose
-ROS_DOMAIN_ID=0 ros2 node list
-```
-
-### A rosbridge client cannot connect
-
-Confirm that rosbridge is listening and uses the intended ROS domain:
-
-```bash
-ros2 node list | grep -E 'rosapi|rosbridge'
-ss -ltn | grep ':9090'
-```
-
-Remote clients require an explicitly permitted firewall rule for TCP 9090 and
-an authenticated proxy; a raw unauthenticated WebSocket is not supported for
-robot control.
-
-### Localization jumps or closes false loops
-
-Recalibrate the camera and wheel scale first. Then remap with slower motion and more distinctive views. Repetitive cleanroom walls are difficult for feature-based place recognition.
+Symptoms and fixes are collected in [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
 ## Safety and current limits
 
-- Real mode uses a default-deny, continuously evaluated safety supervisor. A
-  one-shot readiness message is not a motion permit. Missing or stale required
-  inputs deny motion; a runtime fault latches until the driver is disarmed and
-  `/safety/reset_fault` is explicitly called.
+- Real mode evaluates its safety inputs continuously; a one-shot readiness
+  message is not a motion permit. With `LEKIWI_DISARM_ON_FAILURE=true` (strict
+  mode) the supervisor is default-deny: missing or stale required inputs deny
+  motion, and a runtime fault latches until the driver is disarmed and
+  `/safety/reset_fault` is explicitly called. By default it reports them in
+  `/diagnostics` without withholding motion.
 - Keep a hardwired physical E-stop reachable and supervise every hardware run.
   The ROS E-stop topic and software torque cut are status/control interfaces,
   not substitutes for removing actuator energy independently of ROS.
@@ -1034,27 +993,32 @@ Recalibrate the camera and wheel scale first. Then remap with slower motion and 
   requires the accepted footprint and padding to match both tracked Nav2
   costmaps and proves the enabled StopZone leaves at least the measured worst
   stopping distance plus uncertainty around that footprint.
-- The driver may arm only during guarded startup after receiving fresh healthy
-  telemetry and supervisor permission. A host session change, disarm, or link
-  loss never restores torque automatically; `/safety/arm` is then an explicit
-  operator action after inspection, while `/safety/disarm` cuts torque through
-  the motor host and aborts arm motion.
+- The driver arms only after receiving fresh healthy telemetry and supervisor
+  permission. By default it re-arms itself after a host session change or link
+  loss, with servo torque on throughout; in strict mode it disarms, cuts torque,
+  and `/safety/arm` is an explicit operator action after inspection. An
+  operator's `/safety/disarm` cuts torque through the motor host, aborts arm
+  motion, and holds until `/safety/arm`.
 - Rosbridge is disabled by default and loopback-bound when enabled. It has no
   authentication or TLS. Keep it on loopback, or put a separately managed
-  authenticated proxy and firewall in front of it. The motor command and
-  torque endpoints also default to loopback, but support the explicitly
-  configured unauthenticated device LAN transport.
+  authenticated proxy and firewall in front of it. The motor command,
+  observation and torque endpoints (`5555`-`5557/tcp`) bind all interfaces by
+  default and are unauthenticated unless CURVE is configured; the device zenoh
+  bridge (`7447/tcp`) is plaintext and unauthenticated. See
+  [Network exposure](#network-exposure).
 - This repository does not configure DDS security. ROS 2 discovery and the
   control graph are residual network exposure unless the deployment supplies
   DDS security or network isolation; neither rosbridge nor CURVE secures DDS.
-- The motor-host watchdog cuts and verifies all servo torque when commands
-  cease; authenticated telemetry makes the ROS driver observe that cut and
-  require an explicit re-arm. This software mechanism is not a
-  substitute for an E-stop. A front monocular floor scan is supplemental and
-  cannot see all side/rear, floor-coloured, low, or overhanging obstacles.
-- Production MoveIt now has an execution-time arm-workspace gate. It requires
-  fresh complete joint state, a freshly stamped octomap and repeated successful
-  `/check_state_validity` responses; collision, timeout or perception failure
+- When commands cease, the motor-host watchdog stops the base and freezes the
+  arm with torque on by default; in strict mode it cuts and verifies all servo
+  torque and the ROS driver observes that cut and requires an explicit re-arm.
+  This software mechanism is not a substitute for an E-stop. The camera floor
+  scan fallback is supplemental and cannot see all side/rear, floor-coloured,
+  low, or overhanging obstacles.
+- Production MoveIt has an execution-time arm-workspace gate. It requires
+  fresh complete joint state, a fresh `/moveit/filtered_cloud` (the MoveIt
+  octomap updater's output, the perception-liveness evidence) and repeated
+  successful `/check_state_validity` responses; collision, timeout or perception failure
   withdraws the arm lease. Its discrete check and software stop still require
   measured physical latency/intrusion acceptance, and the CAD collision matrix
   needs a measured collision-free calibration pose.
@@ -1062,7 +1026,7 @@ Recalibrate the camera and wheel scale first. Then remap with slower motion and 
   launch-time `sim_sdf` conversion adds anisotropic `fdir1` contact friction,
   and encoder joint positions—not model ground truth—produce `/odom`.
   Commands have velocity, acceleration, jerk, wheel-rate, and ROS watchdog
-  limits. A Gazebo-native 250 ms failsafe now owns the final actuator topics:
+  limits. A Gazebo-native 250 ms failsafe owns the final actuator topics:
   stale wheel traffic is forced to zero, and loss of the arm adapter heartbeat
   interrupts an active native trajectory with a measured-position hold. This
   is simulation fault containment, not a physical safety mechanism or E-stop.

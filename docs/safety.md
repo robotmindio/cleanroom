@@ -2,9 +2,10 @@
 
 This document records which requested safety functions can be provided by the
 current robot hardware and which require an additional physical signal source.
-The repository safety supervisor consumes the topics below and default-denies
-motion when a required input is absent, stale, or unhealthy. A ROS topic alone
-is not evidence of a real safety function.
+The repository safety supervisor consumes the topics below. In strict mode
+(`LEKIWI_DISARM_ON_FAILURE=true`, and always in simulation) it default-denies
+motion when a required input is absent, stale, or unhealthy; by default it only
+reports them. A ROS topic alone is not evidence of a real safety function.
 
 | Function | Software support exists? | What is required for a real implementation |
 | --- | --- | --- |
@@ -25,12 +26,17 @@ treated as safety functionality or used to validate the production profile.
 The motor host is the only serial-bus owner. At 10 Hz it reads each STS3215's
 torque state, position, raw status register, load, voltage, temperature,
 current, and programmed minimum/maximum voltage and maximum-temperature limits.
-It sends this snapshot in authenticated observation telemetry; the ROS driver
+It sends this snapshot in its observation telemetry (authenticated when CURVE
+is configured); the ROS driver
 validates it and publishes `/hardware/diagnostics`.
 
-The driver requests a guarded arm automatically at startup. It cannot energize
-the servos until it has fresh host telemetry and current safety-supervisor
-permission; a failed or missing safety input still leaves it disarmed.
+By default the driver arms itself at startup and re-arms every 2 s after a
+failure, but it cannot energize the servos until it has fresh host telemetry and
+current safety-supervisor permission; a failure stops the base and freezes the
+arm with torque on. In strict mode a failed or missing safety input disarms the
+driver, cuts torque, and leaves it disarmed until an operator calls
+`/safety/arm`. An operator's `/safety/disarm` holds in either mode. See the
+[README](../README.md#arming-and-recovery).
 
 The diagnostics use these units:
 
@@ -41,7 +47,8 @@ The diagnostics use these units:
 | Load | raw value and signed duty-cycle estimate (`raw / 1000`), not physical torque |
 | Temperature | internal servo temperature in °C |
 
-The following conditions are `ERROR` and therefore revoke safety permission:
+The following conditions are `ERROR` and therefore revoke safety permission in
+strict mode (by default they are reported and motion is not withheld):
 
 - communication failure, incomplete readback, or invalid value;
 - torque readback that differs from the host's safety latch; or

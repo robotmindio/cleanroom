@@ -16,16 +16,19 @@ Owner: robot integrator and safety reviewer at the deployment site.
   energy without depending on ROS, the motor host, DDS, or the compute OS.
 - Install bumper/contact sensing and publish its real state on
   `safety/bumper_active`.
-- Provide full low-obstacle scan coverage. The monocular front-camera fallback
-  is not a 360-degree scanner and cannot satisfy the production profile's
-  6-radian scan requirement or reliably detect side, rear, low-contrast and
-  overhanging obstacles.
-- Install and calibrate a physical arm-workspace depth sensor that publishes
-  `/camera/depth/points`. The current physical camera arrangement does not
-  establish that coverage.
-- Provide stamped `/imu/data`, `/battery_state`, and
-  `/hardware/diagnostics` from accepted physical sources. Servo voltage alone
-  is not a qualified battery state-of-charge source.
+- Accept the LD06 as the production scan source: verify its 360-degree
+  coverage, mounting-plane height and self-occlusion against the production
+  profile's 6-radian scan requirement. The camera floor-scan fallback is not a
+  360-degree scanner and cannot satisfy that requirement or reliably detect
+  side, rear, low-contrast and overhanging obstacles.
+- Measure the Astra Pro's optical-centre correction and prove that its
+  `/camera/depth/points` cloud covers the arm workspace; the driver publishes
+  the cloud, but coverage is not established.
+- Provide stamped `/imu/data` and `/battery_state` from accepted physical
+  sources. Servo voltage alone is not a qualified battery state-of-charge
+  source. `/hardware/diagnostics` comes from the driver's motor telemetry; its
+  voltage, temperature, current and load thresholds still need the bench
+  qualification in [docs/safety.md](docs/safety.md).
 - Review the electrical and mechanical stop design, including the effect of a
   stalled process, severed network, motor-bus failure, payload shift and power
   fault. Software torque-off is not the independent E-stop.
@@ -57,8 +60,9 @@ cleared.
   the production CAD/SRDF collision matrix against the assembled robot. The
   loopback MoveIt test uses that production matrix, but simulated clearance is
   not evidence that it matches the assembled robot.
-- With the real depth updater installed, verify that a new obstacle produces a
-  freshly stamped octomap, causes `/safety/arm_workspace_clear` to become
+- With the real depth updater running, verify that a new obstacle keeps
+  `/moveit/filtered_cloud` (the perception-liveness evidence of the arm
+  workspace monitor) fresh, causes `/safety/arm_workspace_clear` to become
   false, and stops a guarded physical trajectory within the predeclared limit.
   The software monitor checks discretely; its physical stopping latency is not
   established by its launch test.
@@ -87,7 +91,7 @@ Owner: site mapping and fleet integrator.
   tracked 0.32 m fleet envelope remains conservative for the real robot.
 - Inventory and stop or adopt any externally started `free_fleet_adapter`
   before RMF testing; two adapters must never own the same Nav2 instance. The
-  tracked `rmf_owner_guard` now refuses to start this repository's adapter when
+  tracked `rmf_owner_guard` refuses to start this repository's adapter when
   it discovers the configured fleet's ownership nodes on the selected DDS
   graph. This is a bounded preflight, not a distributed lease: the site must
   still account for other domains, undiscoverable hosts and an adapter started
@@ -107,11 +111,25 @@ Owner: deployment/network administrator.
   rotation and recovery; then prove an unauthorized participant cannot publish
   control topics or call motion services.
 - Keep rosbridge disabled or loopback-only unless an authenticated TLS proxy,
-  authorization policy and firewall are deployed and tested. Rosbridge itself
-  is not an authentication boundary.
-- For remote motor control, generate unique CURVE client/server identities,
-  transfer secret keys through an approved channel, restrict key permissions,
-  install firewall rules and prove unauthorized ZMQ clients are rejected.
+  authorization policy and firewall are deployed and tested. The one built-in
+  exception is `scripts/install-compute-services.sh --rosbridge-tailnet`, which
+  binds it to the host's `tailscale0` address: WireGuard authenticates and
+  encrypts the link, but rosbridge itself remains no authorization boundary, so
+  decide which tailnet peers may command the robot.
+- The motor host's ZMQ endpoints (`5555`-`5557/tcp`) bind all interfaces by
+  default and are unauthenticated unless CURVE is enabled. For remote motor
+  control, generate unique CURVE client/server identities, transfer secret keys
+  through an approved channel, restrict key permissions, pin `--bind-address`
+  to the control interface, install firewall rules and prove unauthorized ZMQ
+  clients are rejected.
+- Device zenoh bridge (`7447/tcp`, `config/zenoh_device.json5`): it listens on
+  all interfaces with plaintext, unauthenticated transport. Its allow-list is
+  export-only (`/pi/lidar/scan`, `/pi/camera/*`, `/camera/depth/points`, the
+  Astra colour `image_raw` and `camera_info`), so nothing that connects can
+  publish into the device's DDS, but anyone who can reach the port can read the
+  lidar, camera and depth streams. Enable zenoh mTLS (`transport.link.tls`) on
+  both bridge halves, or firewall the port to the compute host, before the
+  robot joins an untrusted network.
 - Do not copy private keys, tokens or site firewall secrets into this
   repository.
 - Optional Hugging Face dataset upload still requires the `core-scripts`
@@ -127,7 +145,7 @@ Owner: deployment image maintainer.
   the target hosts.
 - Ensure the system ROS interpreter has `python3-zmq`, and the deployed image
   has `moveit_ros_perception`, ShellCheck and the remaining rosdep-resolved
-  dependencies. CMake now omits ZMQ launch tests when its selected interpreter
+  dependencies. CMake omits ZMQ launch tests when its selected interpreter
   lacks pyzmq instead of emitting malformed missing-result failures. The
   tracked qualification runner checks the complete required test-name set and
   fails when those tests were omitted; an acceptance image must install the
@@ -151,8 +169,7 @@ Owner: deployment image maintainer.
 
 ## Qualified simulation-server acceptance
 
-Owner: simulation-server administrator. This section incorporates the former
-server handoff.
+Owner: simulation-server administrator.
 
 Requirements:
 
@@ -246,25 +263,18 @@ state, fault-injection result, RViz/move_group values and final 30 lines of
 the generated checklist remains incomplete until the manual mux, obstacle,
 RViz and heartbeat-loss observations above are attached and reviewed.
 
-## Historical evidence that must be repeated
+## Evidence to collect on the deployed revision
 
-The deleted test handoff contained useful baselines, but they predate the
-current acceptance schema and do not make `validated: true` legitimate:
+Only measurements taken on the final deployed revision can support
+`validated: true`. Collect these and copy the results into the formal acceptance
+artifacts:
 
-- Renderer-free simulation previously measured `dx=0.198 m`, `dy=0`, shoulder
-  pan `0.250 rad`, and gripper `0.287 rad` for a `0.300 rad` goal.
-- A prior Pi rendered attempt exited 139 on unsupported OpenGL; an older Ogre1
-  run observed collision monitor exit -11. Gazebo was the sole simulated
-  joint-state source.
-- The gripper's defective raw range `2045..2051` was replaced with endpoints
-  `3325/1875` (1450 ticks); a return command measured `1.549 rad`.
-- Historical camera evidence used 320x240 frames and recorded 90 scans in 20 s
-  with header ages 0.028..0.364 s.
-- Historical guarded-base/camera-loss/link-loss checks observed 35 zero-
-  velocity samples after disarm and `DISARMED -> LINK_LOST -> DISARMED`.
-- Historical wrist-roll, LAN endpoint, RViz scaling and installed-driver
-  checks passed for an older revision.
-
-Repeat the relevant evidence against the final deployed revision and copy the
-new measurements into the formal acceptance artifacts rather than relying on
-these baselines.
+- Renderer-free simulation physics: base translation, shoulder-pan and gripper
+  response to a `FollowJointTrajectory` goal.
+- Gripper endpoint calibration and a return-command position check on the
+  physical gripper.
+- Camera and scan rates and header ages over a fixed interval.
+- Guarded-base, camera-loss and link-loss behaviour: zero-velocity samples after
+  disarm and the `DISARMED -> LINK_LOST -> DISARMED` state sequence.
+- Wrist-roll travel, LAN endpoint reachability, RViz scaling and the installed
+  driver.

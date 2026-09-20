@@ -10,15 +10,19 @@ The main [README](README.md) picks up from the end of this document.
 
 | Machine | Runs | Installer |
 | --- | --- | --- |
-| Robot's Raspberry Pi | LeRobot host (Feetech bus, ZMQ server); optional ROS camera service | `scripts/install-pi.sh` |
+| Robot's Raspberry Pi | LeRobot host (Feetech bus, ZMQ server); ROS camera, Astra, LD06 and zenoh bridge services | `scripts/install-pi.sh` |
 | Workstation | ROS 2, Nav2, RTAB-Map, Open-RMF, and the LeRobot *client* | `scripts/install.sh` |
 
 Motor commands travel over LeRobot ZMQ `5555/tcp`; observations and joint state
 travel over `5556/tcp`. The repository-owned torque safety endpoint is
-`5557/tcp`. These are control-plane interfaces: keep them loopback-bound unless
-the authenticated ZMQ deployment and firewall policy are configured. CURVE
-protects only the ZMQ sockets; it does not secure ROS 2 DDS, which remains a
-separate exposure unless the deployment isolates it or enables DDS security.
+`5557/tcp`. The device sensor bridge listens on `7447/tcp` (zenoh, export-only).
+The motor host binds all interfaces by default so the workstation can reach it,
+and none of these listeners is authenticated unless CURVE is configured for the
+ZMQ sockets (`7447` is always plaintext). Keep them on a trusted robot network
+or behind a firewall; see the README's
+[Network exposure](README.md#network-exposure). CURVE protects only the ZMQ
+sockets; it does not secure ROS 2 DDS or zenoh, which remain separate exposures
+unless the deployment isolates them.
 
 In ROS operation the motor host is started camera-less (`--no-cameras`). A
 separate `v4l2_camera` service owns each USB camera and publishes the front and
@@ -259,7 +263,8 @@ scripts/robot-host.sh
 ```
 
 Defaults: command socket `5555/tcp`, observations `5556/tcp`, torque safety
-`5557/tcp`, watchdog 500 ms, loop 30 Hz. The watchdog stops the base when
+`5557/tcp`, watchdog 500 ms, loop 30 Hz, bound to all interfaces (set
+`LEKIWI_BIND_ADDRESS` to pin one). The watchdog stops the base when
 commands stop arriving. It is not an E-stop. The repository host starts
 torque-off and only changes servo torque through the separate safety endpoint.
 
@@ -274,18 +279,18 @@ use the boot services) and let ROS own the USB devices. The ROS camera
 publisher on a remote device machine:
 
 ```bash
-source scripts/setup-pi.bash
-ros2 launch launch/pi_cameras.launch.py \
-  front_device:=/dev/v4l/by-id/usb-YOUR_CAMERA-video-index0
+scripts/ros-cameras.sh
 ```
 
-Find that path with `ls /dev/v4l/by-id/`. Use it rather than `/dev/video0`, which is
-reassigned whenever USB re-enumerates.
+It finds the front camera by name; for other hardware set `LEKIWI_FRONT` to the
+camera's `/dev/v4l/by-id/usb-YOUR_CAMERA-video-index0` path. Find that path with
+`ls /dev/v4l/by-id/`. Use it rather than `/dev/video0`, which is reassigned
+whenever USB re-enumerates.
 
 For the normal two-computer setup, use the device launcher instead. It starts
-the camera-less motor host, ROS camera publisher, and LD06 publisher —
-v4l2_camera reads the cameras here, and only compressed frames cross the
-network to the workstation:
+the camera-less motor host, ROS camera publisher, LD06 publisher, Astra
+publisher and zenoh sensor bridge — v4l2_camera reads the cameras here, and only
+compressed frames cross the network to the workstation:
 
 ```bash
 scripts/pi-up.sh
@@ -294,34 +299,24 @@ scripts/pi-up.sh
 ### Optional boot services
 
 For unattended startup, install the device services on the machine that owns
-the serial adapter and USB cameras. Install the compute service where the ROS
-workspace runs:
+the serial adapter and USB cameras (`sudo scripts/install-device-services.sh`)
+and the compute service where the ROS workspace runs
+(`sudo scripts/install-compute-services.sh --remote DEVICE_IP`). For the units,
+their options, CURVE keys, and the split-deployment workflow, see the README's
+[Boot services](README.md#boot-services); the installers render, verify, reload
+and enable the units. Inspect them with:
 
 ```bash
-sudo scripts/install-device-services.sh \
-  --service-user "$USER" --workspace "$HOME/lekiwi_ws" \
-  --lerobot-venv "$HOME/lekiwi_ws/.venv-lerobot" \
-  --bind-address 127.0.0.1
-sudo scripts/install-compute-services.sh \
-  --service-user "$USER" --workspace "$HOME/lekiwi_ws"
-```
-
-For a separate ROS workstation, use `--remote DEVICE_IP`. The standard device
-service owns the LD06 and the compute installer relays it automatically. A direct root invocation must include `--service-user USER`; when
-run through `sudo`, the invoking non-root account is selected. Both installers
-fail early if the selected workspace or LeRobot Python is missing. They render,
-verify, reload, and enable the units. They also install the narrow deployment
-sudo rule, so later `scripts/deploy-split.sh DEVICE_IP` runs without a password
-prompt on either host; inspect the units with:
-
-```bash
-systemctl status lekiwi-host.service lekiwi-cameras.service lekiwi-lidar.service lekiwi-stack.service
+systemctl status lekiwi-host.service lekiwi-cameras.service lekiwi-astra.service \
+  lekiwi-lidar.service lekiwi-zenoh.service lekiwi-stack.service
 journalctl -u lekiwi-host.service -f
 ```
 
-The host service runs camera-less and always starts torque-off. A host or ROS
-restart is never permission to energize the servos. Motion requires fresh
-telemetry, healthy safety inputs, and an explicit `/safety/arm` request.
+The host service runs camera-less and continuously; a clean stop or restart
+disconnects it and cuts servo torque, and each new host session starts with
+torque off. The ROS driver energizes the servos only when it arms: by default
+automatically once telemetry and safety permission are healthy, and with
+`LEKIWI_DISARM_ON_FAILURE=true` only on an explicit `/safety/arm` request.
 
 At the default `jpeg_quality:=50` a 640x480 frame measures about 14 KB, so
 30 Hz costs roughly 3 Mbit/s; the same frame at the library default of 95
@@ -385,11 +380,9 @@ ls /dev/serial/by-id/    # e.g. usb-Silicon_Labs_CP2102N_...-if00-port0
 ```
 
 Nothing else is configurable: the LD06 speaks 230400 baud and the default
-startup detects its known CP2102 by-id device automatically:
-
-```bash
-scripts/up.sh
-```
+startup detects its known CP2102 by-id device automatically (`scripts/up.sh` on
+a wired robot, `scripts/pi-up.sh` or `lekiwi-lidar.service` on the device side of
+a split one).
 
 The normal `scripts/install-device-services.sh` installation on the robot host
 starts `lekiwi-lidar.service`; the normal compute installation relays its
@@ -458,12 +451,12 @@ it. The ROS driver (`lekiwi_rmf/driver.py`) is a pure ZMQ `LeKiwiClient` — it
 never touches USB, so the ROS machine needs no serial or camera permissions at
 all. A non-loopback host supports unauthenticated ZMQ on a trusted robot LAN.
 Use the service installer above without `--curve-dir`, or opt into CURVE by
-supplying the client secret and pinned server public key explicitly:
+installing both halves with `--curve-dir`. Then start the workstation side with
+the repository script, which reads the robot address from `LEKIWI_ROBOT_HOST`
+in `.env` (or takes it as its first argument):
 
 ```bash
-ros2 launch lekiwi_rmf bringup.launch.py mode:=real remote_ip:=192.168.1.50 \
-  curve_client_secret_key_file:=/secure/path/driver.key_secret \
-  curve_server_public_key_file:=/secure/path/server.key
+scripts/workstation-up.sh
 ```
 
 Calibrate each camera on the machine it is plugged into with
@@ -472,10 +465,11 @@ relays both feeds; navigation and RTAB-Map use only the front camera.
 
 ## Safety
 
-The ROS production profile is default-deny. It requires current, stamped
-feedback for the motor host, full scan, depth point cloud, odometry, IMU, joint
-states, battery, motor diagnostics, bumper, and E-stop inputs before granting
-base or arm permission. The arm must also be inside the configured stow pose
+The ROS production profile is default-deny in strict mode
+(`LEKIWI_DISARM_ON_FAILURE=true`); by default it reports the same conditions
+without withholding motion. It requires current, stamped feedback for the motor
+host, full scan, depth point cloud, odometry, IMU, joint states, battery, motor
+diagnostics, bumper, and E-stop inputs before granting base or arm permission. The arm must also be inside the configured stow pose
 for base motion. These interfaces are:
 
 ```text
@@ -505,9 +499,13 @@ collision-monitor obstacle-stop trial must pass, and its StopZone must leave at
 least the measured worst stopping distance plus uncertainty around that exact
 footprint; the supervisor checks those relationships at every startup.
 
-The driver never auto-arms, and host or ROS restart always leaves the servos
-torque-off. An operator must inspect the robot and call `/safety/arm`; after a
-fault, call `/safety/reset_fault` only once the driver is disarmed and every
-required input is healthy. Keep a hardwired physical E-stop reachable: ROS
-topics and software torque control cannot remove energy after a process,
-electrical, or mechanical failure.
+By default the robot stays armed: a failure stops the base and freezes the arm
+with torque on, the driver re-arms itself every 2 s, and a driver restart
+auto-arms. An operator's `/safety/disarm` cuts torque and holds until
+`/safety/arm`. With `LEKIWI_DISARM_ON_FAILURE=true` (larger robots) every
+failure disarms, cuts torque, latches, and waits for an operator to inspect the
+robot and call `/safety/arm`; after a fault, call `/safety/reset_fault` only
+once the driver is disarmed and every required input is healthy. See the
+README's [Arming and recovery](README.md#arming-and-recovery). Keep a
+hardwired physical E-stop reachable: ROS topics and software torque control
+cannot remove energy after a process, electrical, or mechanical failure.

@@ -6,7 +6,7 @@ Start with one of these:
 | --- | --- |
 | Run a wired robot | `scripts/up.sh` |
 | Run the device side of a split robot | `scripts/pi-up.sh` |
-| Run the workstation side of a split robot | `scripts/workstation-up.sh DEVICE` |
+| Run the workstation side of a split robot | `scripts/workstation-up.sh [DEVICE]` |
 | Run simulation | `scripts/sim-up.sh` |
 | Stop a manually launched stack | `scripts/ros-stop.sh` |
 | Calibrate the robot | `scripts/calibrate.sh` |
@@ -27,6 +27,8 @@ Start with one of these:
   runs it (idempotently), so it only needs running by hand with `--renew`;
   `deploy-split.sh` refuses to run without the identities.
 - `deploy-split.sh` updates an installed split robot.
+- `reinstall-compute.sh` reinstalls and restarts `lekiwi-stack.service` from the
+  `LEKIWI_ROBOT_HOST` in `.env`, with MoveIt enabled.
 - `build-lekiwi.sh` rebuilds this package in an existing workspace.
 
 ## Calibration and maintenance
@@ -40,6 +42,28 @@ Start with one of these:
 - `sim-qualification.py` runs the documented simulation qualification.
 - `validate-map-bundle.py` and `rtabmap-db-maintenance.py` validate or maintain
   stored navigation data.
+
+## Launchers
+
+- `up.sh` starts the LeRobot host and ROS stack on a wired robot (RViz: `rviz.sh`).
+- `pi-up.sh` starts the device half of a split robot: motor host, cameras, LD06,
+  Astra and the zenoh sensor bridge.
+- `workstation-up.sh [DEVICE] [launch args]` starts the ROS stack (remote cameras
+  and lidar, MoveIt) and RViz against the device named by `LEKIWI_ROBOT_HOST` or
+  its first argument.
+- `ros-start.sh [launch args]` runs `bringup.launch.py` against the real robot in
+  the foreground: it applies `.env`, saved calibration and camera detection. It
+  is what `up.sh`, `workstation-up.sh` and `lekiwi-stack.service` execute.
+- `robot-host.sh [calibrate|--no-cameras]` runs the LeRobot motor host (or its
+  motor calibration) with this machine's device paths; `lekiwi-host.service`
+  executes it.
+- `ros-stop.sh` stops the process groups the launchers above recorded; it leaves
+  active systemd units alone and reports them.
+- `foxglove.sh` opens Foxglove Desktop on the local read-only bridge.
+
+Configuration comes from `.env` (only `LEKIWI_ROBOT_HOST` and
+`LEKIWI_DISARM_ON_FAILURE`) and from `LEKIWI_*` environment variables; see the
+README's [Configuration](../README.md#configuration).
 
 ## Internals
 
