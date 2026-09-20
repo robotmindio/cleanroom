@@ -164,12 +164,10 @@
         "/scan": {"visible": true, "colorField": "_auto_distance", "colorMode": "colormap", "colorMap": "turbo", "pointSize": 3},
         "/camera/depth/points": {"visible": true, "colorField": "_auto_distance", "colorMode": "colormap", "colorMap": "turbo", "pointSize": 1, "explicitAlpha": 0.8},
         "/plan": {"visible": true, "type": "line", "lineWidth": 0.08, "gradient": ["#4de0ffff", "#4de0ff80"]},
-        "/local_plan": {"visible": true, "type": "line", "lineWidth": 0.1, "gradient": ["#ffb020ff", "#ffb02080"]},
         "/goal_pose": {"visible": true, "type": "arrow", "color": "#28e87bff"},
         "/safety/marker": {"visible": true, "showOutlines": true},
         "/collision_stop_zone": {"visible": true},
-        "/collision_slowdown_zone": {"visible": true},
-        "/waypoints": {"visible": true}
+        "/collision_slowdown_zone": {"visible": true}
       },
       "imageMode": {}
     },
@@ -236,12 +234,10 @@
         "/local_costmap/published_footprint": {"visible": true},
         "/scan": {"visible": true, "colorField": "_auto_distance", "colorMode": "colormap", "colorMap": "turbo", "pointSize": 3},
         "/plan": {"visible": true, "type": "line", "lineWidth": 0.1, "gradient": ["#4de0ffff", "#4de0ff80"]},
-        "/local_plan": {"visible": true, "type": "line", "lineWidth": 0.12, "gradient": ["#ffb020ff", "#ffb02080"]},
         "/goal_pose": {"visible": true, "type": "arrow", "color": "#28e87bff"},
         "/safety/marker": {"visible": true, "showOutlines": true},
         "/collision_stop_zone": {"visible": true},
-        "/collision_slowdown_zone": {"visible": true},
-        "/waypoints": {"visible": true}
+        "/collision_slowdown_zone": {"visible": true}
       },
       "imageMode": {}
     },
@@ -291,8 +287,7 @@
       },
       "topics": {
         "/scan": {"visible": true, "colorField": "_auto_distance", "colorMode": "colormap", "colorMap": "turbo", "pointSize": 3},
-        "/camera/depth/points": {"visible": true, "colorField": "_auto_distance", "colorMode": "colormap", "colorMap": "turbo", "pointSize": 1, "explicitAlpha": 0.85},
-        "/mobile_base/sensors/bumper_pointcloud": {"visible": true, "colorField": "_auto_distance", "colorMode": "colormap", "colorMap": "turbo", "pointSize": 4}
+        "/camera/depth/points": {"visible": true, "colorField": "_auto_distance", "colorMode": "colormap", "colorMap": "turbo", "pointSize": 1, "explicitAlpha": 0.85}
       },
       "imageMode": {}
     },
@@ -397,7 +392,7 @@
     "RawMessages!collision_monitor": {"topicPath": "/collision_monitor_state", "diffEnabled": false, "defaultExpanded": false, "foxglovePanelTitle": "Collision monitor"},
     "RawMessages!battery": {"topicPath": "/battery_state", "diffEnabled": false, "defaultExpanded": false, "foxglovePanelTitle": "Battery message"},
     "RawMessages!hardware": {"topicPath": "/hardware/diagnostics", "diffEnabled": false, "defaultExpanded": false, "foxglovePanelTitle": "Motor and bus diagnostics"},
-    "RawMessages!driver_state": {"topicPath": "/safety/state", "diffEnabled": false, "defaultExpanded": false, "foxglovePanelTitle": "Driver state"},
+    "RawMessages!driver_state": {"topicPath": "/safety/driver_state", "diffEnabled": false, "defaultExpanded": false, "foxglovePanelTitle": "Driver state"},
     "RawMessages!joint_states": {"topicPath": "/joint_states", "diffEnabled": false, "defaultExpanded": false, "foxglovePanelTitle": "Joint states"}
   },
   "globalVariables": {},

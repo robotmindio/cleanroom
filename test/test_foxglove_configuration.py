@@ -28,9 +28,12 @@ def test_dashboard_has_the_operator_views_and_live_robot_model():
     overview_topics = config["3D!overview"]["topics"]
     for topic in (
         "/map", "/global_costmap/costmap", "/local_costmap/costmap", "/scan",
-        "/camera/depth/points", "/plan", "/local_plan", "/safety/marker",
+        "/camera/depth/points", "/plan", "/safety/marker",
     ):
         assert overview_topics[topic]["visible"]
+
+    # The driver's safety/state is remapped to safety/driver_state by bringup.
+    assert config["RawMessages!driver_state"]["topicPath"] == "/safety/driver_state"
 
 
 def test_foxglove_bridge_and_desktop_are_installed_with_the_stack():
