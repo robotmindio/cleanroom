@@ -15,7 +15,7 @@
       allow: {
         publishers: [
           "^/pi/lidar/scan$",
-          "^/pi/camera/.*",
+          "^/pi/camera/(front|wrist)/(image_raw/compressed|camera_info)$",
           "^/camera/depth/points$",
           "^/camera/astra/color/(image_raw|camera_info)$",
         ],
@@ -28,6 +28,14 @@
       // Raw Astra color is only an RViz preview; cap it so it never crowds
       // the lidar and depth cloud out of the Wi-Fi link.
       pub_max_frequencies: ["^/camera/astra/color/image_raw$=2"],
+      // One TCP link carries everything, and a scan queued behind a multi-MB
+      // frame arrived over a second late, which stops the base (collision
+      // monitor source timeout). Zenoh priorities: 1 is highest, 5 the default,
+      // 7 the lowest. The scan goes first and the preview last.
+      pub_priorities: [
+        "^/pi/lidar/scan$=2",
+        "^/camera/astra/color/(image_raw|camera_info)$=7",
+      ],
     },
   },
   mode: "peer",

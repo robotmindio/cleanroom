@@ -8,7 +8,7 @@
         publishers: [],
         subscribers: [
           "^/pi/lidar/scan$",
-          "^/pi/camera/.*",
+          "^/pi/camera/(front|wrist)/(image_raw/compressed|camera_info)$",
           "^/camera/depth/points$",
           "^/camera/astra/color/(image_raw|camera_info)$",
         ],
