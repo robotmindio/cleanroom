@@ -4,17 +4,29 @@
 #   - Wi-Fi power saving off. Ubuntu and Raspberry Pi OS enable it by default; the radio
 #     then sleeps between beacons and every packet waits up to hundreds of milliseconds,
 #     which stalls ROS discovery, the camera streams and the torque link.
+#   - The Wi-Fi regulatory country. Without one the kernel uses the world domain "00", which
+#     the Raspberry Pi's brcmfmac firmware rejects ("Firmware rejected country setting");
+#     the radio then treats 5 GHz as passive-only and sees a 5 GHz network only now and then.
 #   - A polkit rule that lets the deployment user manage NetworkManager over SSH without a
 #     password (nmcli connection up/modify, Wi-Fi scans). It grants no shell access.
 #
-# Usage: sudo scripts/install-device-network.sh --user USER
+# Usage: sudo scripts/install-device-network.sh --user USER [--country CC]
+#   --country  two-letter ISO 3166 regulatory country (default ID)
 # LEKIWI_NETWORK_ROOT=DIR writes under DIR and skips NetworkManager checks (tests only).
 set -Eeuo pipefail
 
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
-[[ ${1:-} == --user && $# -eq 2 ]] || die "usage: $0 --user USER"
+usage="usage: $0 --user USER [--country CC]"
+[[ ${1:-} == --user && $# -ge 2 ]] || die "$usage"
 deploy_user=$2
+country=ID
+if [[ $# -eq 4 && $3 == --country ]]; then
+  country=$4
+elif [[ $# -ne 2 ]]; then
+  die "$usage"
+fi
+[[ $country =~ ^[A-Z]{2}$ ]] || die "--country must be two uppercase letters, not '$country'"
 if [[ ! $deploy_user =~ ^[a-z_][a-z0-9_-]*$ ]] || ! getent passwd "$deploy_user" >/dev/null; then
   die "a valid non-root deployment user is required"
 fi
@@ -31,8 +43,13 @@ fi
 
 nm_conf=$root/etc/NetworkManager/conf.d/zz-lekiwi-wifi-powersave-off.conf
 polkit_rule=$root/etc/polkit-1/rules.d/50-lekiwi-networkmanager.rules
+regdom_conf=$root/etc/modprobe.d/lekiwi-cfg80211-regdom.conf
 
-install -d -m 0755 "${nm_conf%/*}" "${polkit_rule%/*}"
+install -d -m 0755 "${nm_conf%/*}" "${polkit_rule%/*}" "${regdom_conf%/*}"
+
+# cfg80211 reads this on every load, so the country survives reboots.
+printf '%s\n' '# Managed by scripts/install-device-network.sh.' "options cfg80211 ieee80211_regdom=$country" |
+  install -m 0644 /dev/stdin "$regdom_conf"
 
 # wifi.powersave: 2 = disable. The zz- prefix sorts after the distribution's
 # default-wifi-powersave-on.conf, and later files win.
@@ -55,6 +72,12 @@ EOF
 
 if [[ -z $root ]]; then
   systemctl reload NetworkManager
-  printf 'installed %s and %s\n' "$nm_conf" "$polkit_rule"
+  # Apply the country now; the modprobe option only takes effect at the next module load.
+  if command -v iw >/dev/null; then
+    iw reg set "$country"
+  else
+    printf 'warning: iw is not installed; country %s applies at the next reboot\n' "$country"
+  fi
+  printf 'installed %s, %s and %s\n' "$nm_conf" "$polkit_rule" "$regdom_conf"
   printf 'Power saving is off from the next Wi-Fi connect or reboot.\n'
 fi

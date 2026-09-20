@@ -312,20 +312,33 @@ def test_service_fingerprint_covers_installed_service_behavior():
         assert source in revision
 
 
-def test_device_network_installer_disables_wifi_power_saving_and_scopes_polkit(tmp_path):
+def test_device_network_installer_sets_wifi_country_disables_power_saving_and_scopes_polkit(tmp_path):
     user = getpass.getuser()
     if user == "root":
         return  # the installer refuses to grant network control to root
 
-    def install():
+    def install(*extra):
         return subprocess.run(
-            [str(ROOT / "scripts" / "install-device-network.sh"), "--user", user],
+            [str(ROOT / "scripts" / "install-device-network.sh"), "--user", user, *extra],
             env={**os.environ, "LEKIWI_NETWORK_ROOT": str(tmp_path)},
             check=True, capture_output=True, text=True,
         )
 
     install()
     install()  # re-running is idempotent
+
+    regdom = tmp_path / "etc/modprobe.d/lekiwi-cfg80211-regdom.conf"
+    assert "options cfg80211 ieee80211_regdom=ID" in regdom.read_text()
+    install("--country", "MX")
+    assert "ieee80211_regdom=MX" in regdom.read_text()
+    bad_country = subprocess.run(
+        [str(ROOT / "scripts" / "install-device-network.sh"), "--user", user, "--country", "idn"],
+        env={**os.environ, "LEKIWI_NETWORK_ROOT": str(tmp_path)},
+        capture_output=True, text=True,
+    )
+    assert bad_country.returncode != 0
+    assert "ieee80211_regdom=MX" in regdom.read_text()
+    install()
 
     powersave = (tmp_path / "etc/NetworkManager/conf.d/zz-lekiwi-wifi-powersave-off.conf").read_text()
     assert "[connection]" in powersave and "wifi.powersave = 2" in powersave

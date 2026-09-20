@@ -46,7 +46,7 @@ need_root() {
 log "Checking system prerequisites"
 installed() { dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q 'ok installed'; }
 missing=()
-for pkg in curl git python3-venv python3-pip; do
+for pkg in curl git iw python3-venv python3-pip; do
   installed "$pkg" || missing+=("$pkg")
 done
 if (( ${#missing[@]} )); then
