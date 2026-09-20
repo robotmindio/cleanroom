@@ -3,9 +3,13 @@ import math
 import numpy as np
 from geometry_msgs.msg import TransformStamped
 from rclpy.qos import ReliabilityPolicy
+from rclpy.clock import ClockType
+from rclpy.time import Time
 from sensor_msgs.msg import LaserScan
 
-from lekiwi_rmf.slam_cloud import CLOUD_QOS, obstacle_band, scan_points, transform_points
+from lekiwi_rmf.slam_cloud import (
+    CLOUD_QOS, clamp_to_newest, obstacle_band, scan_points, transform_points,
+)
 
 
 def test_scan_points_keep_only_valid_returns():
@@ -32,3 +36,13 @@ def test_obstacle_band_drops_floor_and_overhead_points():
 
 def test_cloud_reaches_rtabmaps_reliable_subscription():
     assert CLOUD_QOS.reliability == ReliabilityPolicy.RELIABLE
+
+
+def test_cloud_slightly_newer_than_odometry_uses_the_newest_transform():
+    # tf2 hands back its newest time on the system clock, stamps are ROS time.
+    newest = Time(seconds=10.000, clock_type=ClockType.SYSTEM_TIME)
+    assert clamp_to_newest(Time(seconds=9.5), newest) == Time(seconds=9.5)
+    assert clamp_to_newest(Time(seconds=10.001), newest) == Time(seconds=10.000)
+    assert clamp_to_newest(Time(seconds=10.19), newest) == Time(seconds=10.000)
+    # Odometry that stopped is not papered over.
+    assert clamp_to_newest(Time(seconds=10.25), newest) is None

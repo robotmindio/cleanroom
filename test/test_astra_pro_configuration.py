@@ -114,7 +114,7 @@ def test_sensor_calibration_has_one_xacro_source_for_all_model_consumers():
     description = (ROOT / "urdf" / "lekiwi.urdf.xacro").read_text()
     bringup = (ROOT / "launch" / "bringup.launch.py").read_text()
     rviz = (ROOT / "scripts" / "rviz.sh").read_text()
-    moveit = (ROOT / "launch" / "moveit.launch.py").read_text()
+    moveit = (ROOT / "lekiwi_rmf" / "moveit_config.py").read_text()
 
     assert 'property name="astra_mount_xyz"' in description
     assert 'property name="wrist_camera_xyz"' in description

@@ -16,7 +16,6 @@ from typing import Optional
 import numpy as np
 import rclpy
 from geometry_msgs.msg import TransformStamped
-from rclpy.duration import Duration
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
@@ -39,10 +38,28 @@ SCAN_TIMEOUT_S = 0.5
 # where nothing the robot drives under matters.
 MIN_HEIGHT_M = 0.03
 MAX_HEIGHT_M = 1.0
-TF_TIMEOUT = Duration(seconds=0.05)
+# Odometry arrives at the driver's tick rate, so a cloud stamped by the device
+# clock can be a few milliseconds newer than the newest odom->base transform.
+# Such a cloud is placed with that newest transform instead of being dropped;
+# a longer lead means odometry has stalled.
+MAX_ODOM_LEAD_S = 0.2
 # RTAB-Map subscribes reliably (qos_scan: 1); a reliable publisher also
 # serves best-effort readers such as the readiness gate and RViz.
 CLOUD_QOS = QoSProfile(depth=5, reliability=ReliabilityPolicy.RELIABLE)
+
+
+def clamp_to_newest(stamp: Time, newest: Time) -> Optional[Time]:
+    """``stamp``, or ``newest`` when it leads by less than ``MAX_ODOM_LEAD_S``.
+
+    tf2 reports ``newest`` on another clock type than message stamps, so the
+    comparison is on nanoseconds and the result keeps the stamp's clock.
+    """
+    lead_ns = stamp.nanoseconds - newest.nanoseconds
+    if lead_ns <= 0:
+        return stamp
+    if lead_ns > MAX_ODOM_LEAD_S * 1e9:
+        return None
+    return Time(nanoseconds=newest.nanoseconds, clock_type=stamp.clock_type)
 
 
 def scan_points(scan: LaserScan) -> np.ndarray:
@@ -97,9 +114,14 @@ class SlamCloud(Node):
         if abs((stamp - astra_time).nanoseconds) > ASTRA_MAX_AGE_S * 1e9:
             return np.empty((0, 3))
         try:
+            newest = self._tf.get_latest_common_time(ODOM_FRAME, BASE_FRAME)
+            target_time = clamp_to_newest(stamp, newest)
+            source_time = clamp_to_newest(astra_time, newest)
+            if target_time is None or source_time is None:
+                raise TransformException("odometry is stale")
             # Through odom, so robot motion between the two captures is undone.
             transform = self._tf.lookup_transform_full(
-                BASE_FRAME, stamp, astra.header.frame_id, astra_time, ODOM_FRAME, TF_TIMEOUT)
+                BASE_FRAME, target_time, astra.header.frame_id, source_time, ODOM_FRAME)
         except TransformException as error:
             self.get_logger().warning(f"skipping Astra cloud: {error}", throttle_duration_sec=10.0)
             return np.empty((0, 3))
@@ -116,7 +138,7 @@ class SlamCloud(Node):
         self._last_scan = self.get_clock().now()
         try:
             # The lidar is fixed to the base, so its latest mount transform is exact.
-            mount = self._tf.lookup_transform(BASE_FRAME, scan.header.frame_id, Time(), TF_TIMEOUT)
+            mount = self._tf.lookup_transform(BASE_FRAME, scan.header.frame_id, Time())
         except TransformException as error:
             self.get_logger().warning(f"skipping scan: {error}", throttle_duration_sec=10.0)
             return

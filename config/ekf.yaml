@@ -4,6 +4,10 @@ ekf_filter_node:
     sensor_timeout: 0.20
     two_d_mode: true
     transform_time_offset: 0.0
+    # Odometry arrives at the driver's tick rate. Predicting to the current time
+    # keeps odom->base_footprint at least as new as any device-stamped sensor
+    # message that SLAM and Nav2 look up against it.
+    predict_to_current_time: true
     transform_timeout: 0.10
     print_diagnostics: true
     publish_tf: true
@@ -26,8 +30,9 @@ ekf_filter_node:
     odom0_relative: false
 
     imu0: /imu/data
-    # The required base IMU constrains yaw rate. Absolute yaw is intentionally
-    # excluded until magnetic/environmental calibration has been validated.
+    # This robot has no IMU yet, so nothing publishes /imu/data and the filter
+    # fuses only wheel odometry. Once one exists it constrains yaw rate; absolute
+    # yaw stays excluded until magnetic/environmental calibration is validated.
     imu0_config: [false, false, false,
                   false, false, false,
                   false, false, false,
