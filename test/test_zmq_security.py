@@ -264,6 +264,9 @@ def test_repository_client_speaks_authenticated_state_protocol(tmp_path):
         client.connect()
         assert client.zmq_cmd_socket.getsockopt(zmq.SNDTIMEO) == 100
         assert client.zmq_cmd_socket.getsockopt(zmq.IMMEDIATE) == 1
+        for socket in (client.zmq_cmd_socket, client.zmq_observation_socket):
+            assert socket.getsockopt(zmq.HEARTBEAT_IVL) == 1000
+            assert socket.getsockopt(zmq.HEARTBEAT_TIMEOUT) == 5000
         publisher.join(timeout=2)
         assert not publisher.is_alive()
         assert client.get_observation() == {"joint.pos": 1.25}

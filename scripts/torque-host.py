@@ -29,7 +29,7 @@ from lekiwi_rmf.torque_control import (
     torque_readback_matches, validate_action_payload, validated_bind_address,
 )
 from lekiwi_rmf.arm_trajectory import ARM_JOINTS
-from lekiwi_rmf.zmq_security import CurveServerSecurity
+from lekiwi_rmf.zmq_security import CurveServerSecurity, configure_link_liveness
 from lekiwi_rmf.odometry import (
     TELEMETRY_MONOTONIC_NS_KEY, TELEMETRY_PROTOCOL_KEY,
     TELEMETRY_PROTOCOL_VERSION, TELEMETRY_SEQUENCE_KEY, TELEMETRY_SESSION_KEY,
@@ -90,17 +90,18 @@ class BoundLeKiwiHost:
             self.zmq_cmd_socket = self.zmq_context.socket(zmq.PULL)
             self.zmq_cmd_socket.setsockopt(zmq.LINGER, 0)
             self.zmq_cmd_socket.setsockopt(zmq.CONFLATE, 1)
+            configure_link_liveness(self.zmq_cmd_socket, zmq)
             self.security.configure_socket(self.zmq_cmd_socket)
             self.zmq_cmd_socket.bind(f"tcp://{address}:{config.port_zmq_cmd}")
             self.zmq_observation_socket = self.zmq_context.socket(zmq.PUSH)
             self.zmq_observation_socket.setsockopt(zmq.LINGER, 0)
             self.zmq_observation_socket.setsockopt(zmq.SNDHWM, 2)
+            configure_link_liveness(self.zmq_observation_socket, zmq)
             self.security.configure_socket(self.zmq_observation_socket)
             self.zmq_observation_socket.bind(f"tcp://{address}:{config.port_zmq_observations}")
         except Exception:
             self.disconnect()
             raise
-        self.connection_time_s = config.connection_time_s
         self.watchdog_timeout_ms = config.watchdog_timeout_ms
         self.max_loop_freq_hz = config.max_loop_freq_hz
 
@@ -435,8 +436,7 @@ def main(cfg: TorqueHostConfig):
         next_watchdog_attempt = 0.0
         telemetry_session = uuid.uuid4().hex
         telemetry_sequence = 0
-        start = time.perf_counter()
-        while time.perf_counter() - start < host.connection_time_s:
+        while True:
             loop_start = time.monotonic()
             try:
                 message = host.zmq_cmd_socket.recv_string(zmq.NOBLOCK)
@@ -444,8 +444,9 @@ def main(cfg: TorqueHostConfig):
                 last_cmd_time = time.monotonic()
                 watchdog_active = False
             except zmq.Again:
-                if not watchdog_active:
-                    logging.warning("No command available")
+                # Between commands is the normal state; silence past the
+                # watchdog timeout is handled below.
+                pass
             except Exception as error:
                 logging.error("Message fetching failed: %s", error)
 

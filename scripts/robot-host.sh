@@ -105,8 +105,7 @@ run_host_once() {
     --robot.num_read_retries="$READ_RETRIES" \
     --safety.bind_address="$BIND_ADDRESS" \
     --safety.disarm_on_failure="${LEKIWI_DISARM_ON_FAILURE:-false}" \
-    "${CURVE_ARGS[@]}" \
-    --host.connection_time_s=86400
+    "${CURVE_ARGS[@]}"
 }
 
 run_host() {
@@ -119,10 +118,9 @@ run_host() {
     exit 1
   fi
   # A dropped motor-bus packet used to terminate the host permanently and leave ROS
-  # connected to an empty ZMQ port. Keep this small supervisor alive instead. Each new
-  # initial startup may arm after telemetry, but a ROS driver that has observed a
-  # link loss requires an explicit safety/arm call after telemetry returns. A host
-  # reconnect can therefore never resume motion unexpectedly.
+  # connected to an empty ZMQ port. Keep this small supervisor alive instead. A restarted
+  # host starts torque-off; the ROS driver re-arms itself once telemetry returns, or in
+  # the strict mode (LEKIWI_DISARM_ON_FAILURE=true) waits for an explicit safety/arm.
   trap 'exit 0' INT TERM HUP
   while true; do
     if run_host_once "$1"; then

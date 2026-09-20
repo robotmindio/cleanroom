@@ -13,6 +13,7 @@ from lekiwi_rmf.odometry import TelemetrySequenceTracker, accept_validated_telem
 from lekiwi_rmf.motor_health import MOTOR_HEALTH_KEY, parse_motor_health
 from lekiwi_rmf.zmq_security import (
     CurveClientCredentials,
+    configure_link_liveness,
 )
 
 
@@ -84,6 +85,8 @@ class LeKiwiZmqClient:
             self.zmq_cmd_socket.setsockopt(zmq.IMMEDIATE, 1)
             self.zmq_observation_socket.setsockopt(zmq.LINGER, 0)
             self.zmq_observation_socket.setsockopt(zmq.RCVHWM, 2)
+            configure_link_liveness(self.zmq_cmd_socket, zmq)
+            configure_link_liveness(self.zmq_observation_socket, zmq)
             self.curve_credentials.configure_socket(self.zmq_cmd_socket)
             self.curve_credentials.configure_socket(self.zmq_observation_socket)
             self.zmq_cmd_socket.connect(f"tcp://{self.remote_ip}:{self.command_port}")

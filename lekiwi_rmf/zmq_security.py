@@ -12,6 +12,20 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+# A TCP link that silently dies (Wi-Fi drop, DHCP change) never errors on its
+# own, so the streaming sockets ping each other and ZeroMQ reconnects when the
+# peer stops answering. The timeout stays above the multi-second latency
+# bursts seen on the Wi-Fi link so a burst does not tear the connection down.
+LINK_HEARTBEAT_INTERVAL_MS = 1000
+LINK_HEARTBEAT_TIMEOUT_MS = 5000
+
+
+def configure_link_liveness(socket, zmq) -> None:
+    """Make a streaming socket detect a dead peer and let ZeroMQ reconnect."""
+    socket.setsockopt(zmq.HEARTBEAT_IVL, LINK_HEARTBEAT_INTERVAL_MS)
+    socket.setsockopt(zmq.HEARTBEAT_TIMEOUT, LINK_HEARTBEAT_TIMEOUT_MS)
+
+
 class CurveConfigurationError(ValueError):
     """CURVE key material is absent, incomplete, or unsafe to use."""
 
