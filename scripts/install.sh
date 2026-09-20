@@ -117,6 +117,7 @@ apt_get install -y \
   "ros-$ROS_DISTRO-v4l2-camera" \
   libgoogle-glog-dev \
   libuvc-dev \
+  iw \
   logrotate \
   python3-matplotlib \
   python3-opencv \
@@ -188,6 +189,9 @@ if [[ $install_mode == full ]]; then
 else
   log "Simulation-only installation: skipping Astra driver and udev setup"
 fi
+
+log "Setting the Wi-Fi regulatory country"
+"${SUDO[@]}" "$PROJECT_ROOT/scripts/install-wifi-regdom.sh"
 
 log "Installing the Zenoh ROS 2 bridge"
 install_zenoh_bridge "$HOME/.local/bin"
