@@ -144,10 +144,12 @@ class LeKiwiDriver(Node):
         self._base_permission_received_at_ns = None
         self._arm_permission_received_at_ns = None
         self._arm_permission_expired = False
-        # Startup is allowed to arm only after a complete, fresh observation. With
-        # disarm_on_failure, a link loss or an explicit disarm clears this one-shot flag,
-        # so recovery never resumes movement without an operator arming again. Without it
-        # the flag is set again after every failure, so the robot re-arms itself.
+        # Arming waits for a complete, fresh observation and current supervisor
+        # permission. By default the robot arms at startup whatever auto_arm_on_startup
+        # says, and the flag is set again after every failure so it re-arms itself.
+        # Only with disarm_on_failure does auto_arm_on_startup decide the startup arm,
+        # and then a link loss or an explicit disarm clears this one-shot flag, so
+        # recovery never resumes movement without an operator arming again.
         self.auto_arm_pending = bool(self.auto_arm_on_startup) or not self.disarm_on_failure
         # Set by an operator's safety/disarm and cleared only by a successful safety/arm,
         # so no later failure or telemetry recovery can re-arm a robot the operator disarmed.
@@ -1135,11 +1137,13 @@ class LeKiwiDriver(Node):
 
     def destroy_node(self):
         try:
-            # ROS-stack shutdown is a disarm event. The separately supervised
-            # host otherwise remains alive and could retain servo torque.
-            # SIGINT may already have invalidated the rcl context. Physical
-            # disarm must still run, but publishing through a dead context
-            # would turn a clean shutdown into exit code 1.
+            # ROS-stack shutdown disarms logically: commands stop and any
+            # trajectory is canceled. Like any other failure it cuts servo
+            # torque only with disarm_on_failure; by default the separately
+            # supervised host keeps the arm held with torque on and its command
+            # watchdog stops the base. SIGINT may already have invalidated the
+            # rcl context, so publish only while it is still valid; publishing
+            # through a dead context would turn a clean shutdown into exit code 1.
             self.set_disarmed(
                 "DISARMED", publish=rclpy.ok(context=self.context)
             )
