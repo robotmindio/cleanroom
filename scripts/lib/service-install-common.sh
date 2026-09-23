@@ -161,7 +161,11 @@ restart_changed_units() { # after daemon-reload; running units only
 install_log_rotation() {
   [[ -x /usr/sbin/logrotate ]] || \
     die "logrotate is required by lekiwi-ros-logrotate.service (sudo apt-get install logrotate)"
+  local group
   as_root install -d -m 0755 /etc/lekiwi
+  # The timer can fire before anything else creates logrotate's state directory.
+  group=$(id -gn "$LEKIWI_SERVICE_USER") || die "cannot determine service group"
+  as_root install -d -o "$LEKIWI_SERVICE_USER" -g "$group" -m 0755 "$LEKIWI_SERVICE_HOME/.ros/lekiwi"
   render_systemd_unit "$PROJECT_ROOT/systemd/lekiwi-ros-logrotate.conf" /etc/lekiwi/ros-logrotate.conf
   install_unit lekiwi-ros-logrotate.service
   install_unit lekiwi-ros-logrotate.timer

@@ -6,8 +6,12 @@ Type=oneshot
 User=@SERVICE_USER@
 Environment=HOME=@SERVICE_HOME@
 WorkingDirectory=@PROJECT_ROOT@
+# logrotate refuses to run when its state file's directory is missing.
+ExecStartPre=/usr/bin/mkdir -p @SERVICE_HOME@/.ros/lekiwi
 ExecStart=/usr/sbin/logrotate --state @SERVICE_HOME@/.ros/lekiwi/ros-logrotate.status /etc/lekiwi/ros-logrotate.conf
-ExecStart=-@PROJECT_ROOT@/scripts/prune-ros-logs.sh @SERVICE_HOME@/.ros/log
+# ExecStopPost runs even when logrotate failed, so a broken rotation cannot also stop
+# the age pruning that bounds the disk; the unit still reports the logrotate failure.
+ExecStopPost=-@PROJECT_ROOT@/scripts/prune-ros-logs.sh @SERVICE_HOME@/.ros/log
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full

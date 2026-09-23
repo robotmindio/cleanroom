@@ -620,7 +620,10 @@ def test_port_probes_match_the_exact_local_port(tmp_path):
 
 def test_log_pruning_removes_only_stale_files_under_the_ros_log_directory(tmp_path):
     unit = (ROOT / "systemd" / "lekiwi-ros-logrotate.service").read_text(encoding="utf-8")
-    assert "ExecStart=-@PROJECT_ROOT@/scripts/prune-ros-logs.sh @SERVICE_HOME@/.ros/log" in unit
+    # Pruning runs after logrotate even when logrotate fails, and logrotate gets its state directory.
+    assert "ExecStopPost=-@PROJECT_ROOT@/scripts/prune-ros-logs.sh @SERVICE_HOME@/.ros/log" in unit
+    assert "ExecStartPre=/usr/bin/mkdir -p @SERVICE_HOME@/.ros/lekiwi" in unit
+    assert "--state @SERVICE_HOME@/.ros/lekiwi/" in unit
     command = [str(ROOT / "scripts" / "prune-ros-logs.sh"), str(tmp_path / ".ros" / "log")]
 
     log = tmp_path / ".ros" / "log"
@@ -665,6 +668,33 @@ def test_log_pruning_removes_only_stale_files_under_the_ros_log_directory(tmp_pa
     assert not (log / "2026-01-01").exists()
     assert not (log / "2026-01-03").exists()
     assert (outside / "keep.log").exists()
+
+
+@pytest.mark.skipif(not os.access("/usr/sbin/logrotate", os.X_OK), reason="logrotate is required")
+def test_log_rotation_install_creates_the_state_directory_for_the_service_user(tmp_path):
+    user = getpass.getuser()
+    group = subprocess.run(["id", "-gn", user], check=True, capture_output=True, text=True).stdout.strip()
+    calls = tmp_path / "as_root.log"
+    script = r'''
+set -Eeuo pipefail
+PROJECT_ROOT=$1
+UNIT_DIR=$2/units
+LEKIWI_SERVICE_USER=$3
+LEKIWI_SERVICE_HOME=$2/home
+LEKIWI_SERVICE_WORKSPACE=$2/home/lekiwi_ws
+LEKIWI_SERVICE_LEROBOT_VENV=
+calls=$4
+as_root() { printf '%s\n' "$*" >> "$calls"; [[ $1 != tee ]] || cat >/dev/null; }
+die() { printf '%s\n' "$*" >&2; exit 1; }
+source "$PROJECT_ROOT/scripts/lib/service-install-common.sh"
+install_log_rotation
+'''
+    subprocess.run(["bash", "-c", script, "log-rotation", str(ROOT), str(tmp_path), user, str(calls)], check=True)
+    commands = calls.read_text(encoding="utf-8").splitlines()
+    assert f"install -d -o {user} -g {group} -m 0755 {tmp_path}/home/.ros/lekiwi" in commands
+    for installer in ("install-compute-services.sh", "install-device-services.sh"):
+        text = (ROOT / "scripts" / installer).read_text(encoding="utf-8")
+        assert text.index("install_log_rotation") < text.index("enable --now lekiwi-ros-logrotate.timer")
 
 
 def test_rotation_config_compresses_rotated_launch_logs_at_once():
