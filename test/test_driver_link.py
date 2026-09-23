@@ -23,7 +23,7 @@ _NODE.body = [
         "enforce_reported_torque_state",
         "arm_after_startup_telemetry", "on_command", "publish_safety", "publish_state", "publish_motor_health",
         "set_disarmed", "set_servo_torque", "cut_torque_after_failure", "_retry_rearm_soon",
-        "_enable_torque_and_arm", "_arm_permission_is_current",
+        "_enable_torque_and_arm", "_arm_permission_is_current", "_run_deferred_cut",
         "_permission_is_current",
         "_capability_permission_is_current", "enforce_permission_leases",
         "on_base_permission", "on_arm_permission",
@@ -66,6 +66,8 @@ def make_node(**overrides):
         "link_lost": False,
         "_healthy_telemetry_at": None,
         "stop_pending": True,
+        "_disarm_epoch": 0,
+        "_deferred_cut": False,
         "base_motion_permitted": False,
         "arm_motion_permitted": False,
         "_base_permission_received_at_ns": None,
@@ -157,7 +159,7 @@ def test_arm_permission_lease_expiry_disarms_and_base_expiry_zeros_command():
     node.get_logger = lambda: types.SimpleNamespace(error=lambda *_: None)
     node.cancel_trajectory = lambda _outcome: None
     disarms = []
-    node.set_disarmed = lambda state: disarms.append(state)
+    node.set_disarmed = lambda state, **_: disarms.append(state)
 
     assert node.enforce_permission_leases(now_monotonic_ns=1_101)
 
@@ -187,7 +189,7 @@ def test_explicit_arm_accepts_fresh_base_capability_lease():
     node.torque_fault = False
     node.set_servo_torque = lambda enabled: enabled
     states = []
-    node.publish_safety = states.append
+    node.publish_safety = lambda state=None, **_: states.append(state)
     response = types.SimpleNamespace()
 
     node.arm(None, response)
@@ -212,7 +214,7 @@ def test_arm_permission_withdrawal_keeps_torque_when_base_lease_is_current():
     cancellations = []
     node.cancel_trajectory = cancellations.append
     disarms = []
-    node.set_disarmed = lambda state: disarms.append(state)
+    node.set_disarmed = lambda state, **_: disarms.append(state)
 
     node.on_arm_permission(types.SimpleNamespace(data=False))
     # Repeated false heartbeats are lease refreshes, not repeated withdrawal events.
@@ -237,7 +239,7 @@ def test_base_permission_lease_expiry_does_not_require_arm_disarm():
     node.command = object()
     node.get_clock = lambda: types.SimpleNamespace(now=lambda: object())
     disarms = []
-    node.set_disarmed = lambda state: disarms.append(state)
+    node.set_disarmed = lambda state, **_: disarms.append(state)
 
     assert not node.enforce_permission_leases(now_monotonic_ns=1_101)
 
@@ -251,7 +253,7 @@ def test_host_session_restart_forces_disarm_and_odometry_reset():
     node.robot = types.SimpleNamespace(observation_session_changed=True)
     reset = []
     node.odom_samples = types.SimpleNamespace(reset=lambda: reset.append(True))
-    node.set_disarmed = lambda state: setattr(node, "disarmed_as", state)
+    node.set_disarmed = lambda state, **_: setattr(node, "disarmed_as", state)
     node.get_logger = lambda: types.SimpleNamespace(error=lambda *_: None)
 
     assert node.handle_host_session_change() is True
@@ -266,7 +268,7 @@ def test_authenticated_host_torque_cut_cannot_leave_driver_logically_armed():
     node.armed = True
     node.get_logger = lambda: types.SimpleNamespace(error=lambda *_: None)
     disarms = []
-    node.set_disarmed = lambda state: disarms.append(state)
+    node.set_disarmed = lambda state, **_: disarms.append(state)
 
     assert node.enforce_reported_torque_state()
     assert disarms == ["DISARMED"]
@@ -288,7 +290,7 @@ def test_link_loss_is_logged_and_disarmed_once():
     logs, resets, disarms = [], [], []
     node.get_logger = lambda: types.SimpleNamespace(error=logs.append)
     node.odom_samples = types.SimpleNamespace(reset=lambda: resets.append(True))
-    node.set_disarmed = disarms.append
+    node.set_disarmed = lambda state, **_: disarms.append(state)
 
     node.record_link_loss("telemetry failed")
     node.record_link_loss("telemetry failed again")
@@ -363,7 +365,7 @@ def test_configured_startup_arm_still_requires_supervisor_permission():
     node.action_lock = threading.Lock()
     node.torque_fault = False
     node.get_clock = lambda: types.SimpleNamespace(now=lambda: object())
-    node.publish_safety = lambda state: setattr(node, "safety", state)
+    node.publish_safety = lambda state=None, **_: setattr(node, "safety", state)
     node.set_servo_torque = lambda enabled: enabled
     node.get_logger = lambda: type("Logger", (), {"info": lambda *_: None})()
     driver.Twist = object
@@ -423,7 +425,7 @@ def test_unconfirmed_torque_enable_is_followed_by_fail_safe_disable():
     node.state_lock = threading.Lock()
     node.action_lock = threading.Lock()
     node.torque_fault = False
-    node.publish_safety = lambda _state: None
+    node.publish_safety = lambda _state=None, **_: None
     requests = []
     state_lock_was_free = []
 
@@ -462,7 +464,7 @@ def test_manual_arm_latches_fault_when_ambiguous_enable_cannot_be_cut():
     requests = []
     node.set_servo_torque = lambda enabled: requests.append(enabled) or False
     states = []
-    node.publish_safety = states.append
+    node.publish_safety = lambda state=None, **_: states.append(state)
     response = types.SimpleNamespace()
 
     node.arm(None, response)
@@ -486,7 +488,7 @@ def test_unconfirmed_startup_enable_cannot_leave_logical_arm_state_set():
     node.torque_fault = False
     requests = []
     node.set_servo_torque = lambda enabled: requests.append(enabled) or not enabled
-    node.publish_safety = lambda state: setattr(node, "safety", state)
+    node.publish_safety = lambda state=None, **_: setattr(node, "safety", state)
     node.get_logger = lambda: types.SimpleNamespace(error=lambda *_: None)
 
     assert node.arm_after_startup_telemetry() is False
@@ -590,7 +592,7 @@ def test_non_finite_twist_is_rejected_and_disarms():
     node.torque_fault = False
     node.auto_arm_pending = True
     node.get_logger = lambda: type("Logger", (), {"error": lambda *_: None})()
-    node.set_disarmed = lambda state: setattr(node, "disarmed_as", state)
+    node.set_disarmed = lambda state, **_: setattr(node, "disarmed_as", state)
     def vector(**values):
         return types.SimpleNamespace(x=values.get("x", 0.0), y=0.0, z=0.0)
 
@@ -610,7 +612,7 @@ def test_disarm_queues_a_stop():
     node.torque_fault = False
     node.get_clock = lambda: type("Clock", (), {"now": lambda _: object()})()
     node.cancel_trajectory = lambda outcome: setattr(node, "outcome", outcome)
-    node.publish_safety = lambda state: setattr(node, "safety", state)
+    node.publish_safety = lambda state=None, **_: setattr(node, "safety", state)
     node.get_logger = lambda: type("Logger", (), {"warn": lambda *_: None})()
     torque_requests = []
     node.set_servo_torque = lambda enabled: torque_requests.append(enabled) or not enabled
@@ -644,7 +646,7 @@ def test_unconfirmed_cut_latches_torque_fault_until_explicit_confirmed_disarm():
     node.get_clock = lambda: types.SimpleNamespace(now=lambda: Now())
     node.cancel_trajectory = lambda _outcome: None
     states = []
-    node.publish_safety = states.append
+    node.publish_safety = lambda state=None, **_: states.append(state)
     node.get_logger = lambda: types.SimpleNamespace(warn=lambda *_: None)
     cuts_confirmed = iter((False, True))
     node.set_servo_torque = lambda enabled: not enabled and next(cuts_confirmed)
@@ -681,7 +683,7 @@ def test_shutdown_style_disarm_latches_fault_without_publishing_on_rpc_exception
     node.auto_arm_pending = False
     node.get_clock = lambda: types.SimpleNamespace(now=lambda: object())
     node.cancel_trajectory = lambda _outcome: None
-    node.publish_safety = lambda _state: pytest.fail("shutdown published into a dead context")
+    node.publish_safety = lambda _state=None, **_: pytest.fail("shutdown published into a dead context")
     node.torque = types.SimpleNamespace(
         set_enabled=lambda _enabled: (_ for _ in ()).throw(RuntimeError("transport died"))
     )
@@ -700,7 +702,7 @@ def test_disarm_keeps_state_observable_while_serializing_physical_actions():
     node.auto_arm_pending = True
     node.get_clock = lambda: type("Clock", (), {"now": lambda _: object()})()
     node.cancel_trajectory = lambda _outcome: None
-    node.publish_safety = lambda _state: None
+    node.publish_safety = lambda _state=None, **_: None
     node.get_logger = lambda: type("Logger", (), {"warn": lambda *_: None})()
     entered = threading.Event()
     release = threading.Event()
@@ -759,7 +761,7 @@ def test_disarmed_driver_sends_zero_velocity_once_but_publishes_measured_motion(
     node.xy_scale = node.yaw_scale = 1.0
     node.publish_state = lambda *args: published.append(args)
     safety_refreshes = []
-    node.publish_safety = lambda *args: safety_refreshes.append(args)
+    node.publish_safety = lambda *args, **_: safety_refreshes.append(args)
     node.enforce_reported_torque_state = lambda: False
 
     state_lock_was_free = []
@@ -828,7 +830,7 @@ def hold_mode_node(unreachable_host=True):
     node.get_clock = lambda: types.SimpleNamespace(now=lambda: object())
     node.cancel_trajectory = lambda _outcome: None
     node.states = []
-    node.publish_safety = node.states.append
+    node.publish_safety = lambda state=None, **_: node.states.append(state)
     node.get_logger = lambda: types.SimpleNamespace(warn=lambda *_: None)
     node.torque_requests = []
     node.set_servo_torque = lambda enabled: node.torque_requests.append(enabled) or not unreachable_host
@@ -879,7 +881,7 @@ def test_torque_held_after_a_failure_is_not_treated_as_an_outside_change():
     node.robot = types.SimpleNamespace(observation_torque_enabled=True)
     node.get_logger = lambda: types.SimpleNamespace(error=lambda *_: None)
     disarms = []
-    node.set_disarmed = disarms.append
+    node.set_disarmed = lambda state, **_: disarms.append(state)
 
     assert node.enforce_reported_torque_state() is False
     assert disarms == []
@@ -1068,7 +1070,7 @@ def control_loop_node(**overrides):
         accept=lambda *_: None, reset=lambda: None, discontinuity=None
     )
     node.publish_state = lambda *_: None
-    node.publish_safety = lambda *args: node.heartbeats.append(args)
+    node.publish_safety = lambda *args, **_: node.heartbeats.append(args)
     return node
 
 
@@ -1130,7 +1132,7 @@ def test_host_torque_readback_is_not_enforced_during_a_transition():
     node = make_node(armed=False)
     node.robot = types.SimpleNamespace(observation_torque_enabled=True)
     disarms = []
-    node.set_disarmed = disarms.append
+    node.set_disarmed = lambda state, **_: disarms.append(state)
     node.get_logger = lambda: types.SimpleNamespace(error=lambda *_: None)
 
     node.action_lock.acquire()  # an arm transaction has enabled torque but not committed
@@ -1195,7 +1197,7 @@ def test_a_failed_command_send_is_a_recorded_link_loss():
     logs, resets, disarms = [], [], []
     node.get_logger = lambda: types.SimpleNamespace(error=logs.append)
     node.odom_samples.reset = lambda: resets.append(True)
-    node.set_disarmed = disarms.append
+    node.set_disarmed = lambda state, **_: disarms.append(state)
 
     node.update()
 
@@ -1209,7 +1211,7 @@ def test_manual_arm_measures_telemetry_age_after_waiting_for_a_transition():
     node = make_node(last_fresh=_Stamp(), last_observation={"complete": True})
     grant_fresh_arm_permission(node)
     node.set_servo_torque = lambda _enabled: True
-    node.publish_safety = lambda _state: None
+    node.publish_safety = lambda _state=None, **_: None
     driver.Twist = object
     measured_under_lock = []
 
@@ -1259,3 +1261,83 @@ def test_trajectory_header_stamps_must_start_close_to_now(offset_ns, expected):
     assert aborted == [True]
     assert result.error_code == expected
     assert node.trajectory is None
+
+
+def _disarmable(node):
+    driver.Twist = object
+    node.get_clock = lambda: types.SimpleNamespace(now=lambda: object())
+    node.cancel_trajectory = lambda _outcome: None
+    node.get_logger = lambda: types.SimpleNamespace(warn=lambda *_: None, error=lambda *_: None)
+    node.states = []
+    node.publish_safety = lambda state=None, **_: node.states.append(state)
+    return node
+
+
+def test_control_loop_disarm_never_waits_for_a_torque_transaction_and_defers_the_strict_cut():
+    node = _disarmable(make_node(armed=True))
+    cuts = []
+    node.set_servo_torque = lambda enabled: cuts.append(enabled) or True
+    node.action_lock.acquire()  # an arm/disarm RPC is in flight
+    finished = threading.Event()
+    worker = threading.Thread(
+        target=lambda: (node.set_disarmed("LINK_LOST", defer_cut=True), finished.set())
+    )
+    worker.start()
+    try:
+        assert finished.wait(1), "the control loop blocked behind the torque transaction"
+        assert node.armed is False and node.stop_pending is True
+        assert node.states == ["LINK_LOST"] and node._deferred_cut is True
+        assert cuts == [], "the control loop must not run the torque RPC"
+    finally:
+        node.action_lock.release()
+        worker.join(1)
+
+    node.auto_arm_tick()
+    assert cuts == [False] and node._deferred_cut is False and node.torque_fault is False
+
+
+def test_a_deferred_cut_that_fails_latches_the_fault_before_any_arm():
+    node = _disarmable(make_node(armed=True))
+    node.set_servo_torque = lambda enabled: False
+    node.set_disarmed("DISARMED", defer_cut=True)
+    grant_fresh_arm_permission(node)
+
+    class Now:
+        def __sub__(self, _other):
+            return types.SimpleNamespace(nanoseconds=0)
+
+    node.get_clock = lambda: types.SimpleNamespace(now=lambda: Now())
+    node.last_fresh = Now()
+
+    response = node.arm(None, types.SimpleNamespace())
+    assert response.success is False and "fault-latched" in response.message
+    assert node.states[-1] == "TORQUE_FAULT"
+
+
+def test_default_mode_control_loop_disarm_defers_no_cut():
+    node = _disarmable(make_node(armed=True, disarm_on_failure=False))
+    node.set_servo_torque = lambda _enabled: pytest.fail("default mode keeps torque on")
+    node.set_disarmed("LINK_LOST", defer_cut=True)
+    assert node.armed is False and node._deferred_cut is False
+    node.auto_arm_tick()
+
+
+def test_a_disarm_during_an_in_flight_enable_wins_and_armed_is_never_published():
+    node = _disarmable(make_node())
+    grant_fresh_arm_permission(node)
+    requests = []
+
+    def enable_while_the_loop_disarms(enabled):
+        requests.append(enabled)
+        if enabled:
+            node.set_disarmed("LINK_LOST", defer_cut=True)
+        return True
+
+    node.set_servo_torque = enable_while_the_loop_disarms
+    epoch = node._disarm_epoch
+    outcome, _cut = node._enable_torque_and_arm(
+        node._arm_permission_is_current, operator=False, disarm_epoch=epoch
+    )
+    assert outcome == "unsafe" and node.armed is False
+    assert "ARMED" not in node.states
+    assert requests == [True, False], "the rolled-back enable is followed by the strict cut"
