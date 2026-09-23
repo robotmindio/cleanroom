@@ -107,7 +107,7 @@ installs the ROS/Gazebo stack and builds this workspace, but deliberately omits
 the LeRobot motor/camera environment:
 
 ```bash
-./scripts/install-sim-host.sh
+./scripts/install.sh --simulation
 ```
 
 The server still needs a GPU whose driver exposes OpenGL 3.3 or newer to

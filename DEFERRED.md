@@ -187,7 +187,7 @@ Requirements:
 Provision and test:
 
 ```bash
-./scripts/install-sim-host.sh
+./scripts/install.sh --simulation
 source scripts/setup.bash
 scripts/sim-qualification.py \
   --build-dir build/lekiwi_rmf \

@@ -16,7 +16,7 @@ Start with one of these:
 ## Installation and deployment
 
 - `install.sh` installs a workstation; `install-pi.sh` installs a device host.
-- `install-sim-host.sh` installs a simulation-only machine.
+- `install.sh --simulation` installs a simulation-only machine.
 - `install-device-services.sh` and `install-compute-services.sh` install boot services.
   The device installer also turns off Wi-Fi power saving (it adds hundreds of
   milliseconds of latency), sets the Wi-Fi regulatory country (`ID`; the default world

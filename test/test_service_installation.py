@@ -313,7 +313,7 @@ def test_standard_installers_start_and_relay_the_host_lidar_without_an_opt_in():
 
     assert "--remote-lidar" not in installer
     assert "units=(lekiwi-host.service lekiwi-lidar.service)" in device
-    assert "as_root systemctl enable --now lekiwi-lidar.service" in device
+    assert 'as_root systemctl enable --now "${units[@]}"' in device
     assert "ldlidar_stl_ros2 is unavailable; the standard device installation requires the LD06 driver" in device
     assert 'install-deploy-sudoers.sh" device --user "$LEKIWI_SERVICE_USER"' in device
     assert 'install-deploy-sudoers.sh" compute --user "$LEKIWI_SERVICE_USER"' in installer
@@ -768,7 +768,7 @@ install_log_rotation
     assert f"install -d -o {user} -g {group} -m 0755 {tmp_path}/home/.ros/lekiwi" in commands
     for installer in ("install-compute-services.sh", "install-device-services.sh"):
         text = (ROOT / "scripts" / installer).read_text(encoding="utf-8")
-        assert text.index("install_log_rotation") < text.index("enable --now lekiwi-ros-logrotate.timer")
+        assert text.index("install_log_rotation") < text.index("systemctl daemon-reload")
 
 
 def test_rotation_config_compresses_rotated_launch_logs_at_once():
