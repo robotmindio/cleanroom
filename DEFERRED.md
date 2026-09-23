@@ -70,9 +70,9 @@ intrusion stop are in the acceptance record. Tracked in
 [#7](https://github.com/robotmindio/cleanroom/issues/7).
 
 - Measure the real joint-zero calibration and a mechanically safe, collision-
-  checked stow pose. Replace the placeholder zero stow in
-  `config/safety_production.yaml`; the accepted stow mapping must match it
-  exactly.
+  checked stow pose. With the arm held there, `scripts/capture_stow.py`
+  replaces the placeholder zero stow in both `config/safety_production.yaml`
+  and the accepted stow mapping, which must match exactly.
 - Find and record a physically collision-free calibration pose, then review
   the production CAD/SRDF collision matrix against the assembled robot. The
   loopback MoveIt test uses that production matrix, but simulated clearance is
