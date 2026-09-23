@@ -27,11 +27,19 @@ _NODE.body = [
         "on_base_permission", "on_arm_permission",
         "twist_is_finite", "record_link_loss", "update", "validate_motion_parameters",
         "_poll_telemetry", "_hold_action", "_send_pending_stop", "_apply_trajectory",
-        "_send_armed_command", "auto_arm_tick",
+        "_send_armed_command", "auto_arm_tick", "execute_trajectory",
     )
 ]
+_CONSTANTS = [
+    node for node in _TREE.body
+    if isinstance(node, ast.Assign)
+    and getattr(node.targets[0], "id", "") == "MAX_TRAJECTORY_START_DELAY_NS"
+]
 driver = types.ModuleType("driver_under_test")
-exec(compile(ast.Module(body=[_NODE], type_ignores=[]), "driver.py", "exec"), driver.__dict__)
+exec(
+    compile(ast.Module(body=[*_CONSTANTS, _NODE], type_ignores=[]), "driver.py", "exec"),
+    driver.__dict__,
+)
 driver.math = math
 driver.time = time
 
@@ -1173,3 +1181,77 @@ def test_torque_transitions_run_outside_the_control_loop_callback_group():
         assert f"{registration} callback_group=self.transition_callback_group" in source
     # update() stays in the node's default group, apart from every torque RPC.
     assert "self.create_timer(0.05, self.update)" in source
+
+
+def test_a_failed_command_send_is_a_recorded_link_loss():
+    node = control_loop_node(armed=True)
+    grant_fresh_arm_permission(node)
+    grant_fresh_base_permission(node)
+    node.robot.send_action = lambda _action: (_ for _ in ()).throw(RuntimeError("socket closed"))
+    logs, resets, disarms = [], [], []
+    node.get_logger = lambda: types.SimpleNamespace(error=logs.append)
+    node.odom_samples.reset = lambda: resets.append(True)
+    node.set_disarmed = disarms.append
+
+    node.update()
+
+    assert node.link_lost is True
+    assert logs == ["LeKiwi command failed: socket closed"]
+    assert resets == [True]
+    assert disarms == ["LINK_LOST"]
+
+
+def test_manual_arm_measures_telemetry_age_after_waiting_for_a_transition():
+    node = make_node(last_fresh=_Stamp(), last_observation={"complete": True})
+    grant_fresh_arm_permission(node)
+    node.set_servo_torque = lambda _enabled: True
+    node.publish_safety = lambda _state: None
+    driver.Twist = object
+    measured_under_lock = []
+
+    def now():
+        measured_under_lock.append(node.action_lock.locked())
+        return _Stamp()
+
+    node.get_clock = lambda: types.SimpleNamespace(now=now)
+
+    response = node.arm(None, types.SimpleNamespace())
+
+    assert response.success is True
+    assert measured_under_lock and all(measured_under_lock)
+
+
+class _Result:
+    SUCCESSFUL, INVALID_GOAL, OLD_HEADER_TIMESTAMP = 0, -1, -6
+
+    def __init__(self, error_code, error_string=""):
+        self.error_code, self.error_string = error_code, error_string
+
+
+@pytest.mark.parametrize("offset_ns, expected", [
+    (-1_000_000_000, _Result.OLD_HEADER_TIMESTAMP),
+    (60_000_000_000, _Result.INVALID_GOAL),
+])
+def test_trajectory_header_stamps_must_start_close_to_now(offset_ns, expected):
+    now_ns = 100_000_000_000
+    driver.FollowJointTrajectory = types.SimpleNamespace(Result=_Result)
+    driver.trajectory_rows = lambda _trajectory: []
+    driver.stamp_nanoseconds = lambda stamp: stamp
+    node = make_node(armed=True)
+    node.requested_tolerances = lambda *_: ({}, {}, 1.0)
+    node.get_clock = lambda: types.SimpleNamespace(
+        now=lambda: types.SimpleNamespace(nanoseconds=now_ns)
+    )
+    aborted = []
+    goal = types.SimpleNamespace(
+        request=types.SimpleNamespace(trajectory=types.SimpleNamespace(
+            joint_names=["joint"], header=types.SimpleNamespace(stamp=now_ns + offset_ns),
+        )),
+        abort=lambda: aborted.append(True),
+    )
+
+    result = node.execute_trajectory(goal)
+
+    assert aborted == [True]
+    assert result.error_code == expected
+    assert node.trajectory is None

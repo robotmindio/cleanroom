@@ -33,6 +33,9 @@ from lekiwi_rmf.torque_control import TorqueControlClient
 from lekiwi_rmf.zmq_client import LeKiwiZmqClient
 from lekiwi_rmf.zmq_security import CurveClientCredentials
 
+# MoveIt stamps zero (start now). Anything scheduled further ahead than this is
+# a clock mismatch or a mistake, not a plan to wait.
+MAX_TRAJECTORY_START_DELAY_NS = 2_000_000_000
 
 class LeKiwiDriver(Node):
     def __init__(self):
@@ -548,9 +551,10 @@ class LeKiwiDriver(Node):
 
     def arm(self, request, response):
         del request
-        now = self.get_clock().now()
-        telemetry_age = (now - self.last_fresh).nanoseconds / 1e9
         with self.action_lock:
+            # Measured after any transition ahead of this one has finished, so
+            # a wait for action_lock cannot make stale telemetry look fresh.
+            telemetry_age = (self.get_clock().now() - self.last_fresh).nanoseconds / 1e9
             with self.state_lock:
                 if self.torque_fault:
                     response.success = False
@@ -637,16 +641,30 @@ class LeKiwiDriver(Node):
             goal_handle.request, names
         )
         scheduled_ns = stamp_nanoseconds(goal_handle.request.trajectory.header.stamp)
+        # The header is ROS time, but execution is timed on the monotonic clock so a
+        # wall-clock step cannot stretch or skip a trajectory. Read both together and
+        # convert the offset once.
         now_ns = self.get_clock().now().nanoseconds
-        if scheduled_ns and scheduled_ns < now_ns - 100_000_000:
+        now_monotonic = time.monotonic()
+        start_delay_ns = scheduled_ns - now_ns if scheduled_ns else 0
+        if start_delay_ns < -100_000_000:
             goal_handle.abort()
             return FollowJointTrajectory.Result(
                 error_code=FollowJointTrajectory.Result.OLD_HEADER_TIMESTAMP,
                 error_string="trajectory header timestamp is in the past",
             )
-        start_delay = max(0.0, (scheduled_ns - now_ns) / 1e9) if scheduled_ns else 0.0
+        if start_delay_ns > MAX_TRAJECTORY_START_DELAY_NS:
+            # A far-future stamp would hold the arm and block this goal for as long.
+            goal_handle.abort()
+            return FollowJointTrajectory.Result(
+                error_code=FollowJointTrajectory.Result.INVALID_GOAL,
+                error_string=(
+                    "trajectory header timestamp is more than "
+                    f"{MAX_TRAJECTORY_START_DELAY_NS / 1e9:.0f}s in the future"
+                ),
+            )
         trajectory = {
-            "start": time.monotonic() + start_delay,
+            "start": now_monotonic + max(0, start_delay_ns) / 1e9,
             "done": threading.Event(),
             "path_tolerances": path_tolerances,
             "goal_tolerances": goal_tolerances,
@@ -679,8 +697,8 @@ class LeKiwiDriver(Node):
                 trajectory["names"] = tuple(names)
                 trajectory["points"] = points
                 self.trajectory = trajectory
-        self.command = Twist()
-        self.command_stamp = self.get_clock().now()
+            self.command = Twist()
+            self.command_stamp = self.get_clock().now()
 
         while not trajectory["done"].wait(0.05):
             if goal_handle.is_cancel_requested:
@@ -1000,9 +1018,7 @@ class LeKiwiDriver(Node):
             finally:
                 self.action_lock.release()
         if send_error is not None:
-            self.get_logger().error(f"LeKiwi stop command failed: {send_error}")
-            self.link_lost = True
-            self.set_disarmed("LINK_LOST")
+            self.record_link_loss(f"LeKiwi stop command failed: {send_error}")
             return
         # Torque state is not motion state: retain measured odometry if the
         # robot is pushed or coasts while commands are inhibited.
@@ -1108,9 +1124,7 @@ class LeKiwiDriver(Node):
         finally:
             self.action_lock.release()
         if send_error is not None:
-            self.get_logger().error(f"LeKiwi command failed: {send_error}")
-            self.link_lost = True
-            self.set_disarmed("LINK_LOST")
+            self.record_link_loss(f"LeKiwi command failed: {send_error}")
             return
 
         self.publish_state(now.to_msg(), observation, velocity)
