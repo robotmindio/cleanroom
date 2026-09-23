@@ -620,6 +620,9 @@ class SafetySupervisor(Node):
         self.declare_parameter("acceptance_file", "")
         self.declare_parameter("nav2_params_file", "")
 
+        # Read once: fault latching is fixed at construction, so permission
+        # enforcement must not change independently at runtime.
+        self._strict = bool(self.get_parameter("strict").value)
         sensor_timeout = _seconds_to_ns(float(self.get_parameter("sensor_timeout").value), "sensor_timeout")
         state_timeout = _seconds_to_ns(float(self.get_parameter("state_timeout").value), "state_timeout")
         permission_timeout = _seconds_to_ns(
@@ -673,7 +676,7 @@ class SafetySupervisor(Node):
             requirements,
             driver_state="DISARMED" if require_driver_state else "ARMED",
             arm_stowed=not require_joint_states,
-            latch_faults=bool(self.get_parameter("strict").value),
+            latch_faults=self._strict,
         )
         if bool(self.get_parameter("require_acceptance").value):
             requirements["acceptance"] = Requirement(2**62)
@@ -859,9 +862,7 @@ class SafetySupervisor(Node):
         return response
 
     def _publish(self) -> None:
-        decision = permit_unless_strict(
-            self._machine.decision(self._now()), bool(self.get_parameter("strict").value)
-        )
+        decision = permit_unless_strict(self._machine.decision(self._now()), self._strict)
         state = String()
         state.data = decision.state.value
         base = Bool()
