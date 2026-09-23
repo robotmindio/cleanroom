@@ -313,7 +313,7 @@ def test_standard_installers_start_and_relay_the_host_lidar_without_an_opt_in():
 
     assert "--remote-lidar" not in installer
     assert "units=(lekiwi-host.service lekiwi-lidar.service)" in device
-    assert 'as_root systemctl enable --now "${units[@]}"' in device
+    assert 'as_root systemctl enable --now --no-block "${units[@]}"' in device
     assert "ldlidar_stl_ros2 is unavailable; the standard device installation requires the LD06 driver" in device
     assert 'install-deploy-sudoers.sh" device --user "$LEKIWI_SERVICE_USER"' in device
     assert 'install-deploy-sudoers.sh" compute --user "$LEKIWI_SERVICE_USER"' in installer
@@ -362,8 +362,28 @@ install_unit lekiwi-host.service
     subprocess.run(["bash", "-c", script, "unit-change", str(ROOT), str(tmp_path)], check=True)
     assert "restart_changed_units" in device
     # A stopped, changed unit must start once, not start and then restart.
-    assert device.index("restart_changed_units\n") < device.index('enable --now "${units[@]}"')
+    assert device.index("restart_changed_units --no-block\n") < device.index(
+        'enable --now --no-block "${units[@]}"'
+    )
 
+
+
+def test_device_restart_does_not_wait_for_hardware_units(tmp_path):
+    # Unpowered servos keep lekiwi-host from starting; the installer must still
+    # reach the sudoers grant, the Wi-Fi country and the fingerprint.
+    script = r'''
+set -Eeuo pipefail
+PROJECT_ROOT=$1
+calls=$2/calls
+log() { :; }
+as_root() { printf '%s\n' "$*" >> "$calls"; }
+source "$PROJECT_ROOT/scripts/lib/service-install-common.sh"
+CHANGED_UNITS=(lekiwi-host.service)
+restart_changed_units --no-block
+'''
+    subprocess.run(["bash", "-c", script, "no-block", str(ROOT), str(tmp_path)], check=True)
+    calls = (tmp_path / "calls").read_text(encoding="utf-8")
+    assert calls == "systemctl try-restart --no-block lekiwi-host.service\n"
 
 def test_compute_stack_restarts_only_when_its_configuration_changes(tmp_path):
     """Replays the compute installer's configuration and start sequence against a fake systemctl."""
