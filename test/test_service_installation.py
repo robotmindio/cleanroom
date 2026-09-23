@@ -361,6 +361,8 @@ install_unit lekiwi-host.service
 '''
     subprocess.run(["bash", "-c", script, "unit-change", str(ROOT), str(tmp_path)], check=True)
     assert "restart_changed_units" in device
+    # A stopped, changed unit must start once, not start and then restart.
+    assert device.index("restart_changed_units\n") < device.index('enable --now "${units[@]}"')
 
 
 def test_compute_stack_restarts_only_when_its_configuration_changes(tmp_path):
