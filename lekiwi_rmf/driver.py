@@ -166,6 +166,11 @@ class LeKiwiDriver(Node):
         calibration_path = os.path.expanduser(calibration_file)
         self.arm_calibrated = os.path.isfile(calibration_path)
         self.stop_pending = True
+        # Bumped by every disarm. An arm commits only if no disarm happened since
+        # it checked its preconditions, so a disarm never waits behind its RPC.
+        self._disarm_epoch = 0
+        # Strict mode: a torque cut the control loop handed to the transition group.
+        self._deferred_cut = False
         self.state_lock = threading.Lock()
         self.arm_zero_positions, self.arm_directions = load_calibration(calibration_file)
         if not self.arm_calibrated:
@@ -329,13 +334,14 @@ class LeKiwiDriver(Node):
             self.get_logger().error(
                 "All motion capability permission leases expired; cutting actuator torque"
             )
-            self.set_disarmed("DISARMED")
+            self.set_disarmed("DISARMED", defer_cut=True)
         return arm_expired
 
     def on_command(self, message):
         if not twist_is_finite(message):
             self.get_logger().error("Rejecting non-finite base command and disarming")
-            self.set_disarmed("DISARMED")
+            # Shares update()'s callback group, so it must not wait on a torque RPC.
+            self.set_disarmed("DISARMED", defer_cut=True)
             return
         with self.state_lock:
             if not self.armed or not self._permission_is_current(
@@ -345,11 +351,17 @@ class LeKiwiDriver(Node):
             self.command = message
             self.command_stamp = self.get_clock().now()
 
-    def publish_safety(self, state=None):
+    def publish_safety(self, state=None, disarm_epoch=None):
         # The supervisor treats this as a live driver heartbeat. Serialize
         # state transitions with refreshes so an older ARMED refresh can never
         # overtake a concurrent DISARMED/LINK_LOST transition.
         with self.safety_publish_lock:
+            if disarm_epoch is not None:
+                # An arm publishes ARMED only if no disarm has happened since it
+                # committed; that disarm publishes after us or already did.
+                with self.state_lock:
+                    if self._disarm_epoch != disarm_epoch:
+                        return
             if state is not None:
                 self.safety_state = state
             state = self.safety_state
@@ -388,25 +400,46 @@ class LeKiwiDriver(Node):
                 self.trajectory["done"].set()
                 self.trajectory = None
 
-    def set_disarmed(self, state, publish=True, clear_torque_fault=False, deliberate=False):
+    def set_disarmed(
+        self, state, publish=True, clear_torque_fault=False, deliberate=False, defer_cut=False
+    ):
+        """Disarm now; cut torque here, or with ``defer_cut`` in the transition group.
+
+        The logical disarm never waits for an in-flight arm/disarm RPC: bumping
+        ``_disarm_epoch`` makes that arm roll back instead of committing. The
+        control loop passes ``defer_cut`` so its heartbeat never waits on a torque
+        RPC; in strict mode ``_run_deferred_cut`` then performs the cut. Returns
+        None when the cut was deferred.
+        """
+        with self.state_lock:
+            was_armed = self.armed
+            self.armed = False
+            self._disarm_epoch += 1
+            # An operator's disarm must hold, and in the strict mode so must a failure.
+            # Otherwise the driver re-arms itself once telemetry and permission allow.
+            if deliberate:
+                self.operator_disarmed = True
+            self.auto_arm_pending = not self.operator_disarmed and not self.disarm_on_failure
+            self.command = Twist()
+            self.command_stamp = self.get_clock().now()
+            self.stop_pending = True
+            if defer_cut:
+                # Only strict mode cuts torque after a failure.
+                self._deferred_cut = self._deferred_cut or bool(self.disarm_on_failure)
+                published_state = "TORQUE_FAULT" if self.torque_fault else state
+        if defer_cut:
+            self.cancel_trajectory("safety disarmed")
+            if was_armed:
+                self.get_logger().warn(f"Robot disarmed: {published_state}")
+            if publish:
+                self.publish_safety(published_state)
+            return None
+
         with self.action_lock:
             with self.state_lock:
-                was_armed = self.armed
-                self.armed = False
-                # An operator's disarm must hold, and in the strict mode so must a failure.
-                # Otherwise the driver re-arms itself once telemetry and permission allow.
-                if deliberate:
-                    self.operator_disarmed = True
-                self.auto_arm_pending = not self.operator_disarmed and not self.disarm_on_failure
-                self.command = Twist()
-                self.command_stamp = self.get_clock().now()
-                self.stop_pending = True
-
-            # Never hold state_lock across a service/network operation. action_lock
-            # still guarantees that an arm or command cannot overtake this cut.
-            # DEBT(#5): with disarm_on_failure, a failure found by update() runs this
-            # cut on the control loop, stalling its heartbeat for up to the RPC
-            # timeout. Revisit when strict mode is used on hardware.
+                # This cut supersedes one the control loop deferred.
+                self._deferred_cut = False
+            # Never hold state_lock across a service/network operation.
             torque_cut = self.cut_torque_after_failure() if not deliberate else self.set_servo_torque(False)
             with self.state_lock:
                 if not torque_cut:
@@ -436,6 +469,19 @@ class LeKiwiDriver(Node):
             return True
         return self.set_servo_torque(False)
 
+    def _run_deferred_cut(self):
+        """Perform a strict-mode cut the control loop deferred; caller holds action_lock."""
+        with self.state_lock:
+            pending = self._deferred_cut
+            self._deferred_cut = False
+        if not pending:
+            return
+        if self.set_servo_torque(False):
+            return
+        with self.state_lock:
+            self.torque_fault = True
+        self.publish_safety("TORQUE_FAULT")
+
     def set_servo_torque(self, enabled):
         """Synchronously require the serial-bus owner to change physical torque."""
         can_log = rclpy.ok(context=self.context)
@@ -459,10 +505,11 @@ class LeKiwiDriver(Node):
             self.arm_motion_permitted, self._arm_permission_received_at_ns
         )
 
-    def _enable_torque_and_arm(self, permission_is_current, operator):
+    def _enable_torque_and_arm(self, permission_is_current, operator, disarm_epoch):
         """Enable servo torque, then commit ARMED only if it is still safe.
 
-        The caller holds action_lock and has checked its own preconditions. Returns
+        The caller holds action_lock and has checked its own preconditions, reading
+        ``disarm_epoch`` with them; any disarm since then makes the arm unsafe. Returns
         ``(outcome, torque_cut)`` with outcome ``"armed"``, ``"enable_failed"`` or
         ``"unsafe"``; ``torque_cut`` reports the fail-safe disable after a failure.
         """
@@ -473,6 +520,7 @@ class LeKiwiDriver(Node):
                     permission_is_current()
                     and not self.link_lost
                     and not self.torque_fault
+                    and self._disarm_epoch == disarm_epoch
                 )
                 if still_safe:
                     self.armed = True
@@ -481,7 +529,7 @@ class LeKiwiDriver(Node):
                     self.command = Twist()
                     self.command_stamp = self.get_clock().now()
             if still_safe:
-                self.publish_safety("ARMED")
+                self.publish_safety("ARMED", disarm_epoch=disarm_epoch)
                 return "armed", True
             outcome = "unsafe"
         # An enable reply can be lost after the host applied it. A separate
@@ -498,6 +546,11 @@ class LeKiwiDriver(Node):
     def auto_arm_tick(self):
         """Attempt the automatic arm off the control loop: its torque RPC can take seconds."""
         with self.state_lock:
+            deferred_cut = self._deferred_cut
+        if deferred_cut:
+            with self.action_lock:
+                self._run_deferred_cut()
+        with self.state_lock:
             # Checked first so an idle tick never contends for action_lock.
             if not self.auto_arm_pending or self.armed or self._healthy_telemetry_at is None:
                 return False
@@ -510,6 +563,7 @@ class LeKiwiDriver(Node):
     def arm_after_startup_telemetry(self):
         """Arm after validated telemetry: at startup, and by default after every failure."""
         with self.action_lock:
+            self._run_deferred_cut()
             with self.state_lock:
                 if (
                     not self.auto_arm_pending
@@ -521,8 +575,9 @@ class LeKiwiDriver(Node):
                 ):
                     return False
                 self.auto_arm_pending = False
+                disarm_epoch = self._disarm_epoch
             outcome, _torque_cut = self._enable_torque_and_arm(
-                self._arm_permission_is_current, operator=False
+                self._arm_permission_is_current, operator=False, disarm_epoch=disarm_epoch
             )
             if outcome == "armed":
                 self.get_logger().info("Armed after initial healthy LeKiwi telemetry")
@@ -544,6 +599,8 @@ class LeKiwiDriver(Node):
     def arm(self, request, response):
         del request
         with self.action_lock:
+            # A deferred strict-mode cut runs first, so its fault latch is seen here.
+            self._run_deferred_cut()
             # Measured after any transition ahead of this one has finished, so
             # a wait for action_lock cannot make stale telemetry look fresh.
             telemetry_age = (self.get_clock().now() - self.last_fresh).nanoseconds / 1e9
@@ -568,8 +625,9 @@ class LeKiwiDriver(Node):
                     response.success = False
                     response.message = "no fresh LeKiwi telemetry"
                     return response
+                disarm_epoch = self._disarm_epoch
             outcome, torque_cut = self._enable_torque_and_arm(
-                self._capability_permission_is_current, operator=True
+                self._capability_permission_is_current, operator=True, disarm_epoch=disarm_epoch
             )
             response.success = outcome == "armed"
             if outcome == "armed":
@@ -827,7 +885,7 @@ class LeKiwiDriver(Node):
         # even if downtime was shorter than the telemetry watchdog threshold; the
         # robot then re-arms itself, or waits for an operator in the strict mode.
         self.odom_samples.reset()
-        self.set_disarmed("DISARMED")
+        self.set_disarmed("DISARMED", defer_cut=True)
         self.get_logger().error(
             "LeKiwi host session changed; "
             + (
@@ -859,7 +917,7 @@ class LeKiwiDriver(Node):
         self.get_logger().error(
             "Motor host torque state changed outside the driver's arm/disarm transaction; disarming"
         )
-        self.set_disarmed("DISARMED")
+        self.set_disarmed("DISARMED", defer_cut=True)
         return True
 
     @staticmethod
@@ -883,7 +941,7 @@ class LeKiwiDriver(Node):
         self.get_logger().error(reason)
         self.link_lost = True
         self.odom_samples.reset()
-        self.set_disarmed("LINK_LOST")
+        self.set_disarmed("LINK_LOST", defer_cut=True)
 
     def update(self):
         # Run before telemetry polling so a silent supervisor still revokes

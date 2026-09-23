@@ -192,8 +192,10 @@ verify_systemd_units lekiwi-ros-logrotate.service lekiwi-ros-logrotate.timer
 
 log "Reloading systemd and enabling services"
 as_root systemctl daemon-reload
-as_root systemctl enable --now "${units[@]}" lekiwi-ros-logrotate.timer
+# Restart first: try-restart skips a stopped unit, which enable --now then starts
+# once, already with the new configuration, instead of starting it twice.
 restart_changed_units
+as_root systemctl enable --now "${units[@]}" lekiwi-ros-logrotate.timer
 
 log "Granting $LEKIWI_SERVICE_USER non-interactive deployment control"
 as_root "$PROJECT_ROOT/scripts/install-deploy-sudoers.sh" device --user "$LEKIWI_SERVICE_USER"

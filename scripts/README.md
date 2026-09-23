@@ -60,8 +60,10 @@ units refer to them directly.
 - `sync-calibration.sh` copies this robot's calibration files from the machine that produced them.
 - `arm-jog.sh` and `arm_jog.py` send one bounded physical arm-joint jog.
 - `arm_calibration.py` captures raw joint values for the SO-101 zero pose.
+- `capture_stow.py` records the held arm's stow pose into both `safety_production.yaml` and `safety_acceptance.yaml`.
 - `gripper-calibrate.py` records and applies a gripper-only calibration; `gripper-diagnose.py` reads its registers.
 - `odom_scale.py` measures the odometry scale against a checkerboard.
+- `lidar-self-mask.py` measures the LD06 returns from the stationary robot's own body and proposes `config/lidar_self_mask.yaml`.
 - `rearm-robot.sh` explicitly re-arms a running real-robot stack.
 - `generate-zmq-keys.py` generates the CURVE server identity and authorized client keys.
 - `host-health-check.py` checks that the motor host serves both protocols (the host unit's start gate).

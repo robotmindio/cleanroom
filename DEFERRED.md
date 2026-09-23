@@ -18,8 +18,6 @@ Done when `config/safety_acceptance.yaml` holds a reviewed record with
 fault test, and the production profile requires every physical input it names.
 Tracked in [#6](https://github.com/robotmindio/cleanroom/issues/6).
 
-- Install and independently wire a hardwired E-stop that removes actuator
-  energy without depending on ROS, the motor host, DDS, or the compute OS.
 - Install bumper/contact sensing, publish its real state on
   `safety/bumper_active`, and set `require_bumper: true` in
   `config/safety_production.yaml`.
@@ -28,10 +26,11 @@ Tracked in [#6](https://github.com/robotmindio/cleanroom/issues/6).
   profile's 6-radian scan requirement. The camera floor-scan fallback is not a
   360-degree scanner and cannot satisfy that requirement or reliably detect
   side, rear, low-contrast and overhanging obstacles.
-- Re-measure `config/lidar_self_mask.yaml` with the RPi 5 table installed.
-  The CAD puts its 9 mm legs across the 88.5 mm LD06 scan plane at roughly
-  90-145 laser-frame degrees and 0.08-0.21 m, outside the current single
-  255-345 degree sector; the filter would need a second sector.
+- Once the RPi 5 table is fitted, run `scripts/lidar-self-mask.py` on the
+  stationary robot with nothing else within 30 cm and copy its proposal into
+  `config/lidar_self_mask.yaml`. The CAD puts the table legs across the LD06
+  scan plane at roughly 90-145 laser-frame degrees and 0.08-0.21 m, which needs
+  a second sector (the filter accepts a list).
 - Measure the Astra Pro's optical-centre correction and prove that its
   `/camera/depth/points` cloud covers the arm workspace; the driver publishes
   the cloud, but coverage is not established.
@@ -50,7 +49,7 @@ Tracked in [#6](https://github.com/robotmindio/cleanroom/issues/6).
   counter-clockwise rotation on every accepted surface/payload combination.
   Record worst distances, timing and measurement uncertainty.
 - Fault-inject every item required by `config/safety_acceptance.yaml`: scan,
-  depth, IMU, battery, diagnostics, bumper, independent E-stop, telemetry loss
+  depth, IMU, battery, diagnostics, bumper, telemetry loss
   and replay, host and ROS restart, unauthorized ZMQ, DDS and rosbridge policy,
   Nav2 obstacle stop, and arm-workspace intrusion stop.
 - Confirm the enabled Nav2 StopZone contains the accepted footprint plus the
@@ -71,9 +70,9 @@ intrusion stop are in the acceptance record. Tracked in
 [#7](https://github.com/robotmindio/cleanroom/issues/7).
 
 - Measure the real joint-zero calibration and a mechanically safe, collision-
-  checked stow pose. Replace the placeholder zero stow in
-  `config/safety_production.yaml`; the accepted stow mapping must match it
-  exactly.
+  checked stow pose. With the arm held there, `scripts/capture_stow.py`
+  replaces the placeholder zero stow in both `config/safety_production.yaml`
+  and the accepted stow mapping, which must match exactly.
 - Find and record a physically collision-free calibration pose, then review
   the production CAD/SRDF collision matrix against the assembled robot. The
   loopback MoveIt test uses that production matrix, but simulated clearance is
@@ -152,8 +151,6 @@ today is described once, in the README's
   unique CURVE identities, transfer secret keys through an approved channel,
   restrict key permissions, pin `--bind-address` to the control interface,
   install firewall rules and prove unauthorized ZMQ clients are rejected.
-- Done: the device zenoh bridge (`7447/tcp`) requires mutual TLS with the
-  robot's private CA (`config/zenoh_device.json5`, `scripts/setup-zenoh-tls.sh`).
 - Do not copy private keys, tokens or site firewall secrets into this
   repository.
 - Optional Hugging Face dataset upload still requires the `core-scripts`
