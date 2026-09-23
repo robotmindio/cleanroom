@@ -754,7 +754,7 @@ def generate_launch_description():
                 remappings=[("safety/state", "safety/driver_state")],
                 # A ZMQ connect() timeout can be transient, but an offline
                 # robot host must not churn a driver process every few seconds.
-                # ponytail: fixed 60s backoff; use exponential backoff if host outages become frequent.
+                # ponytail: fixed 60s backoff; use exponential backoff if host outages become frequent (#4).
                 respawn=True,
                 respawn_delay=60.0,
                 output="screen",
