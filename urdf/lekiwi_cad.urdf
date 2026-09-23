@@ -349,6 +349,30 @@
             </geometry>
         </visual>
     </link>
+    <link name="rpi5_through_plate">
+        <visual name="rpi5_through_plate_visual">
+            <origin xyz="0 0 0" rpy="0 0 0" />
+            <geometry>
+                <mesh filename="package://lekiwi_rmf/urdf/meshes/rpi5_through_plate.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </visual>
+    </link>
+    <link name="rpi5_usb_carrier">
+        <visual name="rpi5_usb_carrier_visual">
+            <origin xyz="0 0 0" rpy="0 0 0" />
+            <geometry>
+                <mesh filename="package://lekiwi_rmf/urdf/meshes/rpi5_usb_carrier.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </visual>
+    </link>
+    <link name="rpi5_table">
+        <visual name="rpi5_table_visual">
+            <origin xyz="0 0 0" rpy="0 0 0" />
+            <geometry>
+                <mesh filename="package://lekiwi_rmf/urdf/meshes/rpi5_table.stl" scale="0.001 0.001 0.001" />
+            </geometry>
+        </visual>
+    </link>
     <joint name="base_plate_layer1-v5_baseplate2bottom_mount" type="fixed">
         <origin xyz="0.02375 -0.06895 0" rpy="1.57079632679 0 -1.57079632679" />
         <parent link="base_plate_layer1-v5" />
@@ -486,6 +510,21 @@
         <origin xyz="-0.09 -0.04 0.007" rpy="0.0 0.0 2.0344439357957027" />
         <parent link="base_plate_layer2-v3" />
         <child link="astra_pro_compact_mount" />
+    </joint>
+    <joint name="rpi5_through_plate_joint" type="fixed">
+        <origin xyz="0.125 -0.075 0.007" rpy="0.0 0.0 -1.5707963267948966" />
+        <parent link="base_plate_layer2-v3" />
+        <child link="rpi5_through_plate" />
+    </joint>
+    <joint name="rpi5_usb_carrier_joint" type="fixed">
+        <origin xyz="0.0 0.0 0.004" rpy="0 0 0" />
+        <parent link="rpi5_through_plate" />
+        <child link="rpi5_usb_carrier" />
+    </joint>
+    <joint name="rpi5_table_joint" type="fixed">
+        <origin xyz="0.0 0.0 0.004" rpy="0 0 0" />
+        <parent link="rpi5_through_plate" />
+        <child link="rpi5_table" />
     </joint>
     <material name="3d_printed">
         <color rgba="1.0 0.82 0.12 1.0" />
