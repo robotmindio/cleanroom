@@ -67,7 +67,8 @@ class _OccupancyMap:
         occupancy = value if self.negate else 1.0 - value
         # Unknown cells are deliberately not traversable for a deployment
         # graph.  A graph validated on unknown space is not a safe graph.
-        return occupancy <= self.free_threshold and occupancy <= self.occupied_threshold
+        # nav2_map_server marks a cell free only strictly below free_thresh.
+        return occupancy < self.free_threshold and occupancy <= self.occupied_threshold
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
