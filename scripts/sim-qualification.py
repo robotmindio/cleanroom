@@ -33,7 +33,9 @@ EXPECTED_CTESTS = (
     "test_launch_validation", "test_rtabmap_session_guard", "test_fake_host",
     "test_zmq_security", "test_simulation_model", "test_service_installation",
     "test_rmf_owner_guard", "test_moveit_shutdown_probe",
-    "test_sim_qualification",
+    "test_sim_qualification", "test_slam_cloud", "test_motion_guards",
+    "test_scan_self_filter", "test_self_heal", "test_zenoh_tls",
+    "test_foxglove_configuration",
     "test_test_cmd_vel_mux_launch.py", "test_test_driver_fake_host_launch.py",
     "test_test_simulation_physics_launch.py", "test_test_sim_native_failsafe_launch.py",
     "test_test_sim_sensor_frames_launch.py",
@@ -345,8 +347,10 @@ def main() -> int:
             *files,
         ]))
 
+    # The same files and severity as CI (.github/workflows/ros-jazzy.yml).
+    shell_scripts = (path for pattern in ("*.sh", "*.bash") for path in (ROOT / "scripts").rglob(pattern))
     results.append(run_command(evidence, "shellcheck", [
-        "shellcheck", "--severity=warning", *sorted(str(path) for path in (ROOT / "scripts").glob("*.sh")),
+        "shellcheck", *sorted(str(path) for path in shell_scripts if path.is_file()),
     ], note="ShellCheck is a required deployment-image dependency."))
 
     python_for_tests = configured_python(args.build_dir)

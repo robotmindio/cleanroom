@@ -2,6 +2,7 @@
 
 import importlib.util
 from pathlib import Path
+import re
 import sys
 
 import pytest
@@ -99,3 +100,20 @@ def test_runner_rejects_evidence_inside_the_source_checkout(monkeypatch):
     with pytest.raises(SystemExit) as error:
         qualification.main()
     assert error.value.code == 2
+
+
+def test_expected_ctests_match_every_test_the_package_registers():
+    cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+    registered = set(re.findall(r"add_lekiwi_pytest\((\w+)", cmake))
+    registered |= {f"test_{name}" for name in re.findall(r"add_launch_test\(test/(\S+)", cmake)}
+    assert registered == set(_load().EXPECTED_CTESTS)
+    unit_tests = {path.stem for path in (ROOT / "test").glob("test_*.py") if not path.stem.endswith("_launch")}
+    assert unit_tests <= registered
+
+
+def test_every_ctest_ros_domain_is_unique():
+    cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
+    domains = re.findall(r"add_lekiwi_pytest\(\w+ (\d+)\)", cmake)
+    domains += re.findall(r"ROS_DOMAIN_ID=(\d+)", cmake)
+    assert len(domains) == len(set(domains))
+    assert all(180 <= int(domain) <= 232 for domain in domains)

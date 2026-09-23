@@ -25,6 +25,15 @@ load_lekiwi_env() {
         }
         [[ -n ${LEKIWI_DISARM_ON_FAILURE:-} ]] || export LEKIWI_DISARM_ON_FAILURE=$value
         ;;
+      LEKIWI_WIFI_COUNTRY=*)
+        value=${line#*=}
+        value=${value%$'\r'}
+        [[ $value =~ ^[A-Z]{2}$ ]] || {
+          echo "$file: LEKIWI_WIFI_COUNTRY must be two uppercase letters (ISO 3166)" >&2
+          return 1
+        }
+        [[ -n ${LEKIWI_WIFI_COUNTRY:-} ]] || export LEKIWI_WIFI_COUNTRY=$value
+        ;;
     esac
   done < "$file"
 }

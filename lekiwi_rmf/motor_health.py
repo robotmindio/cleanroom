@@ -25,7 +25,7 @@ class MotorHealthStatus:
     values: tuple[tuple[str, str], ...]
 
 
-def make_status(name: str, level: int, message: str, **values) -> dict:
+def make_status(level: int, message: str, **values) -> dict:
     """Create a JSON-safe status used only by the motor-host boundary."""
     return {
         "level": int(level),
@@ -40,7 +40,7 @@ def healthy_snapshot(
 ) -> dict:
     """Build an all-OK snapshot for a complete successful grouped bus read."""
     entries = {
-        "motor_bus": make_status("motor_bus", OK, "all configured servos responded",
+        "motor_bus": make_status(OK, "all configured servos responded",
                                  torque_enabled=torque_enabled),
     }
     for motor in motors:
@@ -49,7 +49,7 @@ def healthy_snapshot(
             values.update(detail[motor])
         warning = warnings.get(motor) if warnings else None
         entries[f"servo/{motor}"] = make_status(
-            f"servo/{motor}", WARN if warning else OK,
+            WARN if warning else OK,
             warning or "servo responded", **values
         )
     return {"version": MOTOR_HEALTH_VERSION, "statuses": entries}
@@ -58,11 +58,11 @@ def healthy_snapshot(
 def fault_snapshot(motors, message: str, *, failed_motor: str | None = None) -> dict:
     """Build a fail-closed snapshot after a bus/readback failure."""
     entries = {
-        "motor_bus": make_status("motor_bus", ERROR, message),
+        "motor_bus": make_status(ERROR, message),
     }
     for motor in motors:
         detail = message if failed_motor in (None, motor) else "bus health unavailable"
-        entries[f"servo/{motor}"] = make_status(f"servo/{motor}", ERROR, detail)
+        entries[f"servo/{motor}"] = make_status(ERROR, detail)
     return {"version": MOTOR_HEALTH_VERSION, "statuses": entries}
 
 

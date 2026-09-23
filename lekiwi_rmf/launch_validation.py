@@ -12,8 +12,12 @@ import ipaddress
 import math
 from pathlib import Path
 import subprocess
+from typing import TYPE_CHECKING
 
 import yaml
+
+if TYPE_CHECKING:
+    from lekiwi_rmf.map_bundle import ValidatedMapBundle
 
 # RFC 6598 CGNAT space, which Tailscale allocates every tailnet address from.
 # A rosbridge bound here is only reachable over the authenticated, encrypted
@@ -34,6 +38,7 @@ ARGUMENT_NAMES = (
     "curve_client_secret_key_file",
     "curve_server_public_key_file",
     "auto_arm_on_startup",
+    "disarm_on_failure",
     "start_rmf",
     "rmf_domain",
     "start_moveit",
@@ -147,8 +152,11 @@ def validate_launch_arguments(
     arguments: Mapping[str, object],
     *,
     trusted_rosbridge_addresses: frozenset[str] = frozenset(),
-) -> None:
-    """Raise ``ValueError`` unless resolved bringup arguments are coherent."""
+) -> ValidatedMapBundle | None:
+    """Raise ``ValueError`` unless resolved bringup arguments are coherent.
+
+    Returns the validated map bundle when the configuration uses one, else ``None``.
+    """
     missing = [name for name in ARGUMENT_NAMES if name not in arguments]
     if missing:
         raise ValueError(f"missing launch arguments: {', '.join(missing)}")
@@ -179,6 +187,7 @@ def validate_launch_arguments(
 
     start_rmf = _bool(arguments["start_rmf"], "start_rmf")
     _bool(arguments["auto_arm_on_startup"], "auto_arm_on_startup")
+    _bool(arguments["disarm_on_failure"], "disarm_on_failure")
     _bool(arguments["start_moveit"], "start_moveit")
     start_foxglove = _bool(arguments["start_foxglove"], "start_foxglove")
     foxglove_address = str(arguments["foxglove_address"]).strip()
@@ -242,7 +251,8 @@ def validate_launch_arguments(
         raise ValueError("camera_source:=remote is unsupported in simulation")
     if mode == "sim" and lidar_source == "remote":
         raise ValueError("lidar_source:=remote is unsupported in simulation")
-    if start_rmf and slam_mode == "mapping":
+    # slam_mode configures RTAB-Map only; amcl always localizes on a fixed map.
+    if start_rmf and localization == "visual_slam" and slam_mode == "mapping":
         raise ValueError("start_rmf:=true requires slam_mode:=localization and a validated map bundle")
     if start_rmf and localization != "amcl":
         raise ValueError("RMF operation requires amcl with the immutable occupancy-map bundle")
@@ -253,7 +263,8 @@ def validate_launch_arguments(
     if start_rmf or localization == "amcl" or static_map:
         from lekiwi_rmf.map_bundle import validate_map_bundle
 
-        validate_map_bundle(map_bundle, require_approved=True)
+        return validate_map_bundle(map_bundle, require_approved=True)
+    return None
 
 
 def _tailscale_ipv4_addresses() -> frozenset[str]:
@@ -288,7 +299,9 @@ def validate_context(context, *_args, **_kwargs):
     from launch.substitutions import LaunchConfiguration
 
     values = {name: LaunchConfiguration(name).perform(context) for name in ARGUMENT_NAMES}
-    validate_launch_arguments(values, trusted_rosbridge_addresses=_tailscale_ipv4_addresses())
+    bundle = validate_launch_arguments(
+        values, trusted_rosbridge_addresses=_tailscale_ipv4_addresses()
+    )
     # Resolve key existence and secret-file permissions in the preflight
     # OpaqueFunction, before any camera, mapper, or driver process starts.
     from lekiwi_rmf.zmq_security import CurveClientCredentials
@@ -309,20 +322,11 @@ def validate_context(context, *_args, **_kwargs):
     from launch.actions import SetLaunchConfiguration
 
     selected = [SetLaunchConfiguration("astra_serial", astra_serial)]
-    uses_bundle = (
-        _bool(values["start_rmf"], "start_rmf")
-        or str(values["localization"]) == "amcl"
-        or _bool(values["static_map"], "static_map")
-    )
-    if uses_bundle:
-        from lekiwi_rmf.map_bundle import validate_map_bundle
-
-        bundle = validate_map_bundle(str(values["map_bundle"]), require_approved=True)
+    if bundle is not None:
         selected.append(SetLaunchConfiguration("selected_map", str(bundle.occupancy_yaml)))
         if _bool(values["start_rmf"], "start_rmf"):
             selected.extend([
-            SetLaunchConfiguration("selected_nav_graph", str(bundle.navigation_graph)),
-            SetLaunchConfiguration("selected_fleet_config", str(bundle.fleet_config)),
+                SetLaunchConfiguration("selected_nav_graph", str(bundle.navigation_graph)),
+                SetLaunchConfiguration("selected_fleet_config", str(bundle.fleet_config)),
             ])
-        return selected
     return selected

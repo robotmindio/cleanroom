@@ -7,15 +7,22 @@ marked complete from unit tests or loopback simulation alone.
 
 The repository remains deliberately default-deny while these blockers exist.
 In particular, `config/safety_acceptance.yaml` must remain `validated: false`.
+Each section names its completion condition and its tracking issue.
 
 ## Physical safety hardware and acceptance
 
 Owner: robot integrator and safety reviewer at the deployment site.
 
+Done when `config/safety_acceptance.yaml` holds a reviewed record with
+`validated: true` for the deployed revision, including every stopping trial and
+fault test, and the production profile requires every physical input it names.
+Tracked in [#6](https://github.com/robotmindio/cleanroom/issues/6).
+
 - Install and independently wire a hardwired E-stop that removes actuator
   energy without depending on ROS, the motor host, DDS, or the compute OS.
-- Install bumper/contact sensing and publish its real state on
-  `safety/bumper_active`.
+- Install bumper/contact sensing, publish its real state on
+  `safety/bumper_active`, and set `require_bumper: true` in
+  `config/safety_production.yaml`.
 - Accept the LD06 as the production scan source: verify its 360-degree
   coverage, mounting-plane height and self-occlusion against the production
   profile's 6-radian scan requirement. The camera floor-scan fallback is not a
@@ -25,7 +32,9 @@ Owner: robot integrator and safety reviewer at the deployment site.
   `/camera/depth/points` cloud covers the arm workspace; the driver publishes
   the cloud, but coverage is not established.
 - Provide stamped `/imu/data` and `/battery_state` from accepted physical
-  sources. Servo voltage alone is not a qualified battery state-of-charge
+  sources, then set `require_imu` / `require_battery` true in
+  `config/safety_production.yaml` and add the IMU back to `config/ekf.yaml`.
+  Servo voltage alone is not a qualified battery state-of-charge
   source. `/hardware/diagnostics` comes from the driver's motor telemetry; its
   voltage, temperature, current and load thresholds still need the bench
   qualification in [docs/safety.md](docs/safety.md).
@@ -52,6 +61,11 @@ Owner: robot integrator and safety reviewer at the deployment site.
 Owner: arm integrator with the physical robot supported and the sweep area
 cleared.
 
+Done when the measured stow and calibration poses are committed, the collision
+matrix review is recorded, and the physical MoveIt trials and arm-workspace
+intrusion stop are in the acceptance record. Tracked in
+[#7](https://github.com/robotmindio/cleanroom/issues/7).
+
 - Measure the real joint-zero calibration and a mechanically safe, collision-
   checked stow pose. Replace the placeholder zero stow in
   `config/safety_production.yaml`; the accepted stow mapping must match it
@@ -75,6 +89,11 @@ cleared.
 ## Physical calibration, mapping and RMF
 
 Owner: site mapping and fleet integrator.
+
+Done when an approved, SHA-256-pinned bundle of the real site (0.05 m or finer,
+with RMF graph and approval report) is committed and selected by default, and
+the calibration and RTAB-Map shutdown trials are recorded. Tracked in
+[#8](https://github.com/robotmindio/cleanroom/issues/8).
 
 - Revalidate front/wrist camera intrinsics, camera height/pitch, wheel scale,
   yaw scale and odometry against physical measurements.
@@ -106,6 +125,14 @@ Owner: site mapping and fleet integrator.
 
 Owner: deployment/network administrator.
 
+Done when the deployment records, with test evidence, how DDS is isolated or
+secured, that rosbridge is loopback-only or behind an authenticated TLS proxy,
+and either CURVE plus a firewall on `5555`-`5557/tcp` or an accepted
+trusted-network decision. Tracked in
+[#9](https://github.com/robotmindio/cleanroom/issues/9). What each port exposes
+today is described once, in the README's
+[Network security](README.md#network-security).
+
 - Decide whether ROS 2 DDS will use a physically isolated control network or
   DDS Security. Provision identities, governance/permissions, secret storage,
   rotation and recovery; then prove an unauthorized participant cannot publish
@@ -116,20 +143,13 @@ Owner: deployment/network administrator.
   binds it to the host's `tailscale0` address: WireGuard authenticates and
   encrypts the link, but rosbridge itself remains no authorization boundary, so
   decide which tailnet peers may command the robot.
-- The motor host's ZMQ endpoints (`5555`-`5557/tcp`) bind all interfaces by
-  default and are unauthenticated unless CURVE is enabled. For remote motor
-  control, generate unique CURVE client/server identities, transfer secret keys
-  through an approved channel, restrict key permissions, pin `--bind-address`
-  to the control interface, install firewall rules and prove unauthorized ZMQ
-  clients are rejected.
-- Device zenoh bridge (`7447/tcp`, `config/zenoh_device.json5`): it listens on
-  all interfaces with plaintext, unauthenticated transport. Its allow-list is
-  export-only (`/pi/lidar/scan`, `/pi/camera/*`, `/camera/depth/points`, the
-  Astra colour `image_raw` and `camera_info`), so nothing that connects can
-  publish into the device's DDS, but anyone who can reach the port can read the
-  lidar, camera and depth streams. Enable zenoh mTLS (`transport.link.tls`) on
-  both bridge halves, or firewall the port to the compute host, before the
-  robot joins an untrusted network.
+- The motor host's ZMQ endpoints (`5555`-`5557/tcp`) accept any client unless
+  CURVE is enabled. For remote motor control on an untrusted network, generate
+  unique CURVE identities, transfer secret keys through an approved channel,
+  restrict key permissions, pin `--bind-address` to the control interface,
+  install firewall rules and prove unauthorized ZMQ clients are rejected.
+- Done: the device zenoh bridge (`7447/tcp`) requires mutual TLS with the
+  robot's private CA (`config/zenoh_device.json5`, `scripts/setup-zenoh-tls.sh`).
 - Do not copy private keys, tokens or site firewall secrets into this
   repository.
 - Optional Hugging Face dataset upload still requires the `core-scripts`
@@ -138,6 +158,11 @@ Owner: deployment/network administrator.
 ## Deployment and external package qualification
 
 Owner: deployment image maintainer.
+
+Done when the services are verified on the target hosts, the MoveIt shutdown
+probe passes with a fixed package, and a green hosted CI run of the deployed
+revision is retained. Tracked in
+[#10](https://github.com/robotmindio/cleanroom/issues/10).
 
 - Install the repository's device and compute systemd services with the actual
   non-root accounts, workspace paths, serial/camera groups and key locations.
@@ -171,6 +196,11 @@ Owner: deployment image maintainer.
 
 Owner: simulation-server administrator.
 
+Done when `scripts/sim-qualification.py` writes a passing `summary.json` for an
+exact revision on a qualified GPU host and its runtime checklist, with the
+manual observations below attached, has been reviewed. Tracked in
+[#11](https://github.com/robotmindio/cleanroom/issues/11).
+
 Requirements:
 
 - Ubuntu 24.04 with this exact repository revision.
@@ -184,7 +214,7 @@ Requirements:
 Provision and test:
 
 ```bash
-./scripts/install-sim-host.sh
+./scripts/install.sh --simulation
 source scripts/setup.bash
 scripts/sim-qualification.py \
   --build-dir build/lekiwi_rmf \
@@ -264,6 +294,10 @@ the generated checklist remains incomplete until the manual mux, obstacle,
 RViz and heartbeat-loss observations above are attached and reviewed.
 
 ## Evidence to collect on the deployed revision
+
+Done when every measurement below has been taken on the deployed revision and
+attached to the formal acceptance artifacts. Tracked in
+[#12](https://github.com/robotmindio/cleanroom/issues/12).
 
 Only measurements taken on the final deployed revision can support
 `validated: true`. Collect these and copy the results into the formal acceptance

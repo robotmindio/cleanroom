@@ -12,6 +12,14 @@ LDLIDAR_STL_REV=cac5d3d4c15522c6126ef65cfa8a65b08531a66b
 # shellcheck disable=SC2034
 LDLIDAR_STL_REPOSITORY=https://github.com/ldrobotSensorTeam/ldlidar_stl_ros2.git
 
+download_verified() { # download_verified <url> <sha256> <destination>
+  curl -fL -o "$3" "$1"
+  printf '%s  %s\n' "$2" "$3" | sha256sum --check --quiet - || {
+    rm -f -- "$3"
+    die "checksum mismatch for $1"
+  }
+}
+
 checkout_pinned() { # checkout_pinned <url> <destination> <revision> [known-patch]
   local url=$1 destination=$2 revision=$3 expected_patch=${4:-}
   if [[ ! -d $destination/.git ]]; then

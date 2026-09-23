@@ -12,6 +12,7 @@ def valid_arguments(**overrides):
         "curve_client_secret_key_file": "/tmp/client.key_secret",
         "curve_server_public_key_file": "/tmp/server.key",
         "auto_arm_on_startup": "true",
+        "disarm_on_failure": "false",
         "start_rmf": "false",
         "rmf_domain": "0",
         "start_moveit": "false",
@@ -54,6 +55,7 @@ def test_accepts_a_coherent_real_mapping_configuration():
         ({"laser_source": "none"}, "real navigation requires"),
         ({"localization": "amcl", "publish_camera": "false", "laser_source": "camera"}, "laser_source:=camera requires"),
         ({"start_rmf": "true"}, "requires slam_mode:=localization"),
+        ({"disarm_on_failure": "maybe"}, "disarm_on_failure must be true or false"),
         ({"start_rmf": "true", "slam_mode": "localization", "localization": "amcl", "rmf_domain": "55"}, "rmf_domain must be 0"),
         ({"mode": "sim", "camera_source": "remote"}, "unsupported in simulation"),
         ({"mode": "sim", "lidar_source": "remote"}, "unsupported in simulation"),
@@ -158,3 +160,26 @@ def test_a_remote_lidar_needs_the_ld06_laser_source_not_auto():
         validate_launch_arguments(valid_arguments(laser_source="auto", lidar_source="remote"))
 
     validate_launch_arguments(valid_arguments(laser_source="ld06", lidar_source="remote"))
+
+
+def test_slam_mode_matters_to_rmf_only_with_visual_slam():
+    # amcl ignores slam_mode, so RMF with amcl gets past that rule and reaches
+    # the map-bundle check instead.
+    with pytest.raises(ValueError, match="cannot read YAML"):
+        validate_launch_arguments(valid_arguments(
+            start_rmf="true", localization="amcl", slam_mode="mapping",
+            laser_source="ld06", publish_camera="false",
+        ))
+
+
+def test_the_map_bundle_is_validated_once_and_returned(monkeypatch):
+    import lekiwi_rmf.map_bundle as map_bundle
+
+    calls = []
+    monkeypatch.setattr(
+        map_bundle, "validate_map_bundle",
+        lambda path, require_approved: calls.append((path, require_approved)) or "bundle",
+    )
+    assert validate_launch_arguments(valid_arguments(static_map="true")) == "bundle"
+    assert calls == [("/tmp/not-used-without-rmf.yaml", True)]
+    assert validate_launch_arguments(valid_arguments()) is None

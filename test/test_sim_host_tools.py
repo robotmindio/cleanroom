@@ -1,8 +1,12 @@
 """Unit checks for scripts that qualify a remote simulation host."""
 
 import importlib.util
+import os
 import pathlib
+import shutil
+import subprocess
 import sys
+import time
 
 import pytest
 
@@ -43,3 +47,37 @@ def test_gripper_calibration_requires_an_explicit_apply_flag(monkeypatch):
 
     with pytest.raises(RuntimeError, match="without --apply"):
         calibration.main()
+
+
+def test_sim_up_records_one_launch_session_and_passes_arguments_through(tmp_path):
+    checkout = tmp_path / "checkout"
+    (checkout / "scripts").mkdir(parents=True)
+    shutil.copy2(ROOT / "scripts" / "sim-up.sh", checkout / "scripts" / "sim-up.sh")
+    (checkout / "scripts" / "setup.bash").write_text("export FROM_SETUP=1\n")
+    check = checkout / "scripts" / "sim-renderer-check.py"
+    check.write_text("#!/bin/sh\nexit 0\n")
+    check.chmod(0o755)
+    fakes = tmp_path / "bin"
+    fakes.mkdir()
+    record = tmp_path / "ros2.args"
+    ros2 = fakes / "ros2"
+    ros2.write_text(f'#!/bin/sh\necho "$FROM_SETUP $$ $*" > "{record}"\n')
+    ros2.chmod(0o755)
+    logs = tmp_path / "logs"
+    environment = {**os.environ, "PATH": f"{fakes}:{os.environ['PATH']}", "LEKIWI_LOGS": str(logs)}
+    environment.pop("LEKIWI_RUNTIME_DIR", None)
+
+    result = subprocess.run(
+        ["bash", str(checkout / "scripts" / "sim-up.sh"), "slam_mode:=localization", "gui:=false"],
+        env=environment, capture_output=True, text=True, timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr
+    deadline = time.monotonic() + 10
+    while not record.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    setup, pid, *command = record.read_text().split()
+    assert setup == "1"
+    assert command == ["launch", "lekiwi_rmf", "bringup.launch.py", "mode:=sim", "slam_mode:=localization", "gui:=false"]
+    # The recorded stack PID is the process that became ros2 launch.
+    assert (logs / "runtime" / "stack.pid").read_text().strip() == pid

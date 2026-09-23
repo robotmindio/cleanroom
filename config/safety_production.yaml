@@ -16,14 +16,21 @@ safety_supervisor:
     minimum_depth_valid_fraction: 0.01
     minimum_depth_range: 0.05
     maximum_depth_range: 10.0
-    require_bumper: true
-    # The labelled physical motor-power stop must also report its real state
-    # on safety/estop_active; absence or staleness denies motion.
-    require_estop: true
-    require_battery: true
+    # Missing, stale, or unhealthy required inputs deny motion only when the
+    # supervisor runs strict (disarm_on_failure:=true). By default it reports
+    # them on /diagnostics and still permits motion.
+    #
+    # The shipped robot has no bumper, IMU, or battery monitor, and its e-stop
+    # cuts motor power outside the electronics, so nothing publishes
+    # safety/bumper_active, /imu/data, /battery_state, or safety/estop_active.
+    # Requiring them would keep strict mode denying motion forever. Set each
+    # true only once real hardware publishes it (see docs/safety.md).
+    require_bumper: false
+    require_estop: false
+    require_battery: false
     require_motor_health: true
     require_odometry: true
-    require_imu: true
+    require_imu: false
     require_joint_states: true
     # Arm motion remains denied until the execution-time MoveIt collision gate
     # is running. Because this requirement is arm-only, omitting MoveIt still

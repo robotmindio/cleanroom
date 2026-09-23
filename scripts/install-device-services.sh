@@ -27,6 +27,7 @@ PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 UNIT_DIR=/etc/systemd/system
 # shellcheck source=/dev/null
 source "$PROJECT_ROOT/scripts/lib/runtime-common.sh"
+load_lekiwi_env "$PROJECT_ROOT/.env"
 
 log() { printf '\n==> %s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
@@ -94,16 +95,22 @@ fi
 export LEKIWI_CURVE_SERVER_SECRET LEKIWI_CURVE_SERVER_PUBLIC
 export LEKIWI_CURVE_AUTHORIZED_CLIENTS LEKIWI_CURVE_HEALTH_CLIENT_SECRET
 
-if ! (
-  set +u
-  # shellcheck source=/dev/null
-  source /opt/ros/jazzy/setup.bash
-  if [[ -f $LEKIWI_SERVICE_WORKSPACE/install/setup.bash ]]; then
+ros_package_available() { # ros_package_available <package>
+  (
+    set +u
+    # The documented sudo invocation has root's minimal PATH. Source ROS in a
+    # subshell before probing or an installed package is silently missed.
     # shellcheck source=/dev/null
-    source "$LEKIWI_SERVICE_WORKSPACE/install/setup.bash"
-  fi
-  ros2 pkg prefix ldlidar_stl_ros2 >/dev/null 2>&1
-) ; then
+    source /opt/ros/jazzy/setup.bash
+    if [[ -f $LEKIWI_SERVICE_WORKSPACE/install/setup.bash ]]; then
+      # shellcheck source=/dev/null
+      source "$LEKIWI_SERVICE_WORKSPACE/install/setup.bash"
+    fi
+    ros2 pkg prefix "$1" >/dev/null 2>&1
+  )
+}
+
+if ! ros_package_available ldlidar_stl_ros2; then
   die "ldlidar_stl_ros2 is unavailable; the standard device installation requires the LD06 driver"
 fi
 
@@ -117,20 +124,7 @@ if [[ -f /etc/default/lekiwi-host ]]; then
 fi
 
 camera_ros_available=false
-if (
-  set +u
-  # The documented sudo invocation has root's minimal PATH. Source ROS in a
-  # subshell before probing or an installed camera package is silently missed.
-  # shellcheck source=/dev/null
-  source /opt/ros/jazzy/setup.bash
-  if [[ -f $LEKIWI_SERVICE_WORKSPACE/install/setup.bash ]]; then
-    # shellcheck source=/dev/null
-    source "$LEKIWI_SERVICE_WORKSPACE/install/setup.bash"
-  fi
-  ros2 pkg prefix v4l2_camera >/dev/null 2>&1
-); then
-  camera_ros_available=true
-fi
+ros_package_available v4l2_camera && camera_ros_available=true
 if [[ $camera_ros_available == true ]]; then
   log "Installing lekiwi-cameras.service"
   install_unit lekiwi-cameras.service
@@ -144,18 +138,7 @@ else
   fi
 fi
 astra_ros_available=false
-if (
-  set +u
-  # shellcheck source=/dev/null
-  source /opt/ros/jazzy/setup.bash
-  if [[ -f $LEKIWI_SERVICE_WORKSPACE/install/setup.bash ]]; then
-    # shellcheck source=/dev/null
-    source "$LEKIWI_SERVICE_WORKSPACE/install/setup.bash"
-  fi
-  ros2 pkg prefix astra_camera >/dev/null 2>&1
-); then
-  astra_ros_available=true
-fi
+ros_package_available astra_camera && astra_ros_available=true
 if [[ $astra_ros_available == true ]]; then
   log "Installing lekiwi-astra.service"
   install_unit lekiwi-astra.service
@@ -209,27 +192,14 @@ verify_systemd_units lekiwi-ros-logrotate.service lekiwi-ros-logrotate.timer
 
 log "Reloading systemd and enabling services"
 as_root systemctl daemon-reload
-if [[ $camera_ros_available == true && $astra_ros_available == true ]]; then
-  as_root systemctl enable --now lekiwi-host.service lekiwi-astra.service lekiwi-cameras.service
-elif [[ $camera_ros_available == true ]]; then
-  as_root systemctl enable --now lekiwi-host.service lekiwi-cameras.service
-elif [[ $astra_ros_available == true ]]; then
-  as_root systemctl enable --now lekiwi-host.service lekiwi-astra.service
-else
-  as_root systemctl enable --now lekiwi-host.service
-fi
-as_root systemctl enable --now lekiwi-lidar.service
-[[ $zenoh_available != true ]] || as_root systemctl enable --now lekiwi-zenoh.service
-as_root systemctl enable --now lekiwi-ros-logrotate.timer
-if (( ${#CHANGED_UNITS[@]} )); then
-  log "Restarting units whose installed configuration changed: ${CHANGED_UNITS[*]}"
-  as_root systemctl try-restart "${CHANGED_UNITS[@]}"
-fi
+as_root systemctl enable --now "${units[@]}" lekiwi-ros-logrotate.timer
+restart_changed_units
 
 log "Granting $LEKIWI_SERVICE_USER non-interactive deployment control"
 as_root "$PROJECT_ROOT/scripts/install-deploy-sudoers.sh" device --user "$LEKIWI_SERVICE_USER"
-log "Disabling Wi-Fi power saving and granting network control"
-as_root "$PROJECT_ROOT/scripts/install-device-network.sh" --user "$LEKIWI_SERVICE_USER"
+log "Setting the Wi-Fi country, disabling power saving and granting network control"
+as_root "$PROJECT_ROOT/scripts/install-device-network.sh" --user "$LEKIWI_SERVICE_USER" \
+  --country "${LEKIWI_WIFI_COUNTRY:-ID}"
 record_service_fingerprint device
 
 if [[ -f $UNIT_DIR/lekiwi-stack.service ]]; then

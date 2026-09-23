@@ -5,6 +5,8 @@ from pathlib import Path
 
 import yaml
 
+from lekiwi_rmf.motion_guards import stamp_ns
+
 
 ARM_JOINTS = (
     "arm_shoulder_pan",
@@ -255,7 +257,7 @@ def duration_seconds(duration):
 def stamp_nanoseconds(stamp):
     if stamp.sec < 0 or not 0 <= stamp.nanosec < 1_000_000_000:
         raise ValueError("trajectory header timestamp is malformed")
-    return int(stamp.sec) * 1_000_000_000 + int(stamp.nanosec)
+    return stamp_ns(stamp)
 
 
 def trajectory_rows(trajectory):

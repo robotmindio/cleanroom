@@ -88,7 +88,9 @@ if(BUILD_TESTING)
     ament_add_pytest_test(${name} test/${name}.py ENV "${test_environment}")
   endfunction()
   # Never let a test discover a running robot or a parallel test. These are
-  # distinct valid DDS domains, intentionally away from the live default (0).
+  # distinct valid DDS domains (180-220), intentionally away from the live
+  # default (0) and below Cyclone DDS's highest usable domain (232). Tests
+  # without one never open a DDS participant.
   add_lekiwi_pytest(test_odometry 180)
   add_lekiwi_pytest(test_motor_health 216)
   add_lekiwi_pytest(test_odom_scale 181)
@@ -104,6 +106,7 @@ if(BUILD_TESTING)
   add_lekiwi_pytest(test_vendor_lekiwi_model)
   add_lekiwi_pytest(test_driver_link 186)
   add_lekiwi_pytest(test_cmd_vel_mux 187)
+  add_lekiwi_pytest(test_motion_guards)
   add_lekiwi_pytest(test_teleop 188)
   add_lekiwi_pytest(test_readiness_gate 189)
   add_lekiwi_pytest(test_sim_host_tools 190)
@@ -124,6 +127,10 @@ if(BUILD_TESTING)
   add_lekiwi_pytest(test_zmq_security 201)
   add_lekiwi_pytest(test_simulation_model 203)
   add_lekiwi_pytest(test_service_installation 200)
+  add_lekiwi_pytest(test_scan_self_filter 220)
+  add_lekiwi_pytest(test_self_heal)
+  add_lekiwi_pytest(test_zenoh_tls)
+  add_lekiwi_pytest(test_foxglove_configuration)
   add_launch_test(test/test_cmd_vel_mux_launch.py
     TIMEOUT 30
     ENV "${test_launch_environment};ROS_DOMAIN_ID=199")
@@ -146,7 +153,7 @@ if(BUILD_TESTING)
     ENV "${test_launch_environment};ROS_DOMAIN_ID=206")
   add_launch_test(test/test_sim_sensor_frames_launch.py
     TIMEOUT 35
-    ENV "${test_launch_environment};ROS_DOMAIN_ID=219")
+    ENV "${test_launch_environment};ROS_DOMAIN_ID=207")
   # Both tests own a Gazebo server and make assertions against simulated-time
   # progress. Running the two servers concurrently on a small host can starve
   # physics updates and produce false motion/failsafe failures even though DDS

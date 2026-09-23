@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Reinstall the split compute service from this checkout's .env. The installer
-# restarts lekiwi-stack.service itself.
+# restarts a running lekiwi-stack.service itself when its configuration changed.
+# Extra arguments (e.g. --no-start) go to scripts/install-compute-services.sh.
 set -Eeuo pipefail
 
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
@@ -24,5 +25,5 @@ as_root=()
 "${as_root[@]}" "$PROJECT_ROOT/scripts/install-compute-services.sh" \
   --service-user "$service_user" --workspace "$workspace" --remote "$remote" "$@"
 grep -Fq 'start_moveit:=true' /etc/default/lekiwi-stack
-systemctl is-active --quiet lekiwi-stack.service
+[[ " $* " == *" --no-start "* ]] || systemctl is-active --quiet lekiwi-stack.service
 echo "compute service reinstalled; MoveIt enabled by default"

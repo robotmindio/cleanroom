@@ -26,6 +26,18 @@ def test_pgm_rows_are_mirrored_into_occupancy_grid_coordinates():
     assert not grid.cell_free(0, 1)
 
 
+def test_a_cell_exactly_at_free_thresh_is_unknown_as_in_nav2_map_server():
+    grid = _OccupancyMap(
+        width=2, height=1,
+        # With negate, occupancy is pixel / maximum: 0.25 and 0.0.
+        pixels=(1, 0), maximum=4,
+        resolution=1.0, origin_x=0.0, origin_y=0.0, origin_yaw=0.0,
+        occupied_threshold=0.65, free_threshold=0.25, negate=True,
+    )
+    assert not grid.cell_free(0, 0)
+    assert grid.cell_free(1, 0)
+
+
 def _write(path: Path, content: str) -> str:
     path.write_text(content, encoding="utf-8")
     return hashlib.sha256(path.read_bytes()).hexdigest()

@@ -350,6 +350,8 @@ def generate_launch_description():
                 choices=["mapping", "localization"],
             ),
             DeclareLaunchArgument("publish_camera", default_value="true"),
+            # Only consulted with disarm_on_failure:=true. By default the driver arms
+            # itself after the first healthy telemetry whatever this is set to.
             DeclareLaunchArgument(
                 "auto_arm_on_startup", default_value="false", choices=["true", "false"]
             ),
@@ -735,9 +737,10 @@ def generate_launch_description():
                     "xy_velocity_scale": ParameterValue(xy_velocity_scale, value_type=float),
                     "yaw_velocity_scale": ParameterValue(yaw_velocity_scale, value_type=float),
                     "permission_timeout": 0.5,
-                    # The driver still requires current, explicit supervisor
-                    # permission and fresh host telemetry before energizing
-                    # servos; this only removes the manual arm RPC at startup.
+                    # The driver still requires current supervisor permission
+                    # and fresh host telemetry before energizing servos. Without
+                    # disarm_on_failure it arms at startup regardless; with it,
+                    # this removes the manual arm RPC at startup.
                     "auto_arm_on_startup": ParameterValue(
                         auto_arm_on_startup, value_type=bool
                     ),
@@ -751,7 +754,7 @@ def generate_launch_description():
                 remappings=[("safety/state", "safety/driver_state")],
                 # A ZMQ connect() timeout can be transient, but an offline
                 # robot host must not churn a driver process every few seconds.
-                # ponytail: fixed 60s backoff; use exponential backoff if host outages become frequent.
+                # ponytail: fixed 60s backoff; use exponential backoff if host outages become frequent (#4).
                 respawn=True,
                 respawn_delay=60.0,
                 output="screen",
@@ -772,11 +775,12 @@ def generate_launch_description():
                 respawn_delay=2.0,
                 output="screen",
             ),
-            # Unlike the one-shot readiness gates, this authority continuously
-            # withdraws both base and arm permission when a required input is
-            # missing, stale, or unhealthy. Real mode selects the production
-            # profile, which intentionally remains default-deny until the
-            # tracked hardware safety inputs are installed and configured.
+            # Unlike the one-shot readiness gates, this authority evaluates every
+            # required input continuously. It withholds base and arm permission
+            # for a missing, stale, or unhealthy input only in strict mode:
+            # always in simulation, and on the real robot only with
+            # disarm_on_failure:=true. By default (real, non-strict) it reports
+            # its findings on /diagnostics but permits motion.
             Node(
                 package="lekiwi_rmf",
                 executable="safety_supervisor",

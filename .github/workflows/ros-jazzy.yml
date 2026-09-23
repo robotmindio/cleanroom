@@ -8,6 +8,11 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same branch or pull request supersedes a running check.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-test-lint:
     runs-on: ubuntu-24.04
@@ -17,7 +22,8 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      # Actions are pinned to commit SHAs; the comment names the release.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Install build and validation tools
         run: |
           apt-get update
@@ -32,6 +38,7 @@ jobs:
             shellcheck \
             ros-jazzy-launch-testing-ament-cmake \
             ros-jazzy-xacro
+          python3 -m pip install --break-system-packages ruff==0.15.9
           rosdep update
           # Free Fleet, Astra, and the LD06 driver are pinned and built by the
           # repository installer; none is an apt/rosdep package or needed to
@@ -40,7 +47,8 @@ jobs:
             --skip-keys "free_fleet_adapter astra_camera ldlidar_stl_ros2"
       - name: Build and test
         env:
-          ROS_DOMAIN_ID: 237
+          # Each DDS test sets its own domain in CMakeLists.txt; this covers the rest.
+          ROS_DOMAIN_ID: 221
         run: |
           . /opt/ros/jazzy/setup.sh
           colcon build --symlink-install --event-handlers console_cohesion+
@@ -68,6 +76,7 @@ jobs:
           PY
           python3 -m compileall -q lekiwi_rmf scripts test
           ament_flake8 --config config/flake8.ini lekiwi_rmf scripts test
+          ruff check --config config/ruff.toml lekiwi_rmf scripts test
           non_executable=$(find scripts -type f \
             \( -name '*.py' -o -name '*.sh' -o -name '*.bash' \) \
             ! -perm /111 -print -quit)
@@ -79,10 +88,9 @@ jobs:
             xargs -0 -r shellcheck
       - name: Python coverage report
         env:
-          # Cyclone DDS uses domain IDs in its UDP port calculation; 238
-          # exceeds the valid port range. Keep coverage isolated from the
-          # CTest domains (180-205) while remaining valid for Cyclone DDS.
-          ROS_DOMAIN_ID: 206
+          # Cyclone DDS derives UDP ports from the domain ID, so it must stay
+          # at or below 232. 221 is outside the CTest domains (180-220).
+          ROS_DOMAIN_ID: 221
         run: |
           . /opt/ros/jazzy/setup.sh
           set -euo pipefail
@@ -91,4 +99,5 @@ jobs:
           )
           PYTHONPATH="$GITHUB_WORKSPACE${PYTHONPATH:+:$PYTHONPATH}" \
             python3 -m coverage run --source=lekiwi_rmf -m pytest -q "${unit_tests[@]}"
-          python3 -m coverage report
+          # The measured total was 52.9%; raise the floor as tests are added.
+          python3 -m coverage report --fail-under=52

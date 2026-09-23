@@ -29,16 +29,6 @@ ekf_filter_node:
     odom0_differential: false
     odom0_relative: false
 
-    imu0: /imu/data
-    # This robot has no IMU yet, so nothing publishes /imu/data and the filter
-    # fuses only wheel odometry. Once one exists it constrains yaw rate; absolute
-    # yaw stays excluded until magnetic/environmental calibration is validated.
-    imu0_config: [false, false, false,
-                  false, false, false,
-                  false, false, false,
-                  false, false, true,
-                  false, false, false]
-    imu0_queue_size: 10
-    imu0_differential: false
-    imu0_relative: false
-    imu0_remove_gravitational_acceleration: true
+    # There is no IMU on this robot, so the filter fuses only wheel odometry.
+    # When one is fitted, add it as imu0 fusing yaw rate only; absolute yaw
+    # stays excluded until magnetic/environmental calibration is validated.

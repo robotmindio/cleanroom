@@ -32,6 +32,8 @@ from sensor_msgs.msg import BatteryState, Imu, JointState, LaserScan, PointCloud
 from std_msgs.msg import Bool, String
 from std_srvs.srv import Trigger
 
+from lekiwi_rmf.motion_guards import positive_seconds_ns, stamp_ns
+
 
 class SafetyState(str, Enum):
     BOOT = "BOOT"
@@ -178,12 +180,6 @@ def permit_unless_strict(decision: SafetyDecision, strict: bool) -> SafetyDecisi
     if strict:
         return decision
     return replace(decision, base_permitted=True, arm_permitted=True)
-
-
-def _seconds_to_ns(value: float, name: str) -> int:
-    if not math.isfinite(value) or value <= 0.0:
-        raise ValueError(f"{name} must be finite and positive")
-    return int(value * 1_000_000_000)
 
 
 def _valid_scan_ranges(message: LaserScan, minimum_valid_fraction: float) -> bool:
@@ -391,6 +387,15 @@ def _polygon_boundary_distance(first, second) -> float:
     )
 
 
+def _finite_number(value: object) -> bool:
+    """A real YAML number: not a bool, NaN, or infinity."""
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+    )
+
+
 def _nav2_stop_zone_clearance(nav2_path: str | Path, acceptance: dict) -> tuple[bool, str]:
     """Bind acceptance to Nav2's footprint and measured StopZone clearance."""
     try:
@@ -403,9 +408,7 @@ def _nav2_stop_zone_clearance(nav2_path: str | Path, acceptance: dict) -> tuple[
         )
         expected_padding = acceptance.get("expected_footprint_padding_m")
         if (
-            not isinstance(expected_padding, (int, float))
-            or isinstance(expected_padding, bool)
-            or not math.isfinite(expected_padding)
+            not _finite_number(expected_padding)
             or expected_padding < 0.0
         ):
             return False, "accepted footprint padding is invalid"
@@ -419,9 +422,7 @@ def _nav2_stop_zone_clearance(nav2_path: str | Path, acceptance: dict) -> tuple[
                 return False, f"Nav2 {costmap_name} footprint differs from accepted footprint"
             padding = parameters.get("footprint_padding", 0.0)
             if (
-                not isinstance(padding, (int, float))
-                or isinstance(padding, bool)
-                or not math.isfinite(padding)
+                not _finite_number(padding)
                 or abs(float(padding) - float(expected_padding)) > 1e-9
             ):
                 return False, f"Nav2 {costmap_name} footprint padding differs from acceptance"
@@ -476,13 +477,11 @@ def validate_acceptance_file(
     if isinstance(minimum_trials, bool) or not isinstance(minimum_trials, int) or minimum_trials < 30:
         return False, "at least 30 trials per direction are required"
     latency = data.get("maximum_command_stop_latency_s")
-    if not isinstance(latency, (int, float)) or isinstance(latency, bool) or not math.isfinite(latency) or latency <= 0:
+    if not _finite_number(latency) or latency <= 0:
         return False, "measured stop latency is invalid"
     allowed_latency = data.get("maximum_allowed_command_stop_latency_s")
     if (
-        not isinstance(allowed_latency, (int, float))
-        or isinstance(allowed_latency, bool)
-        or not math.isfinite(allowed_latency)
+        not _finite_number(allowed_latency)
         or allowed_latency <= 0
         or latency > allowed_latency
     ):
@@ -490,13 +489,9 @@ def validate_acceptance_file(
     allowed_distance = data.get("maximum_allowed_stopping_distance_m")
     uncertainty = data.get("measurement_uncertainty_m")
     if (
-        not isinstance(allowed_distance, (int, float))
-        or isinstance(allowed_distance, bool)
-        or not math.isfinite(allowed_distance)
+        not _finite_number(allowed_distance)
         or allowed_distance <= 0
-        or not isinstance(uncertainty, (int, float))
-        or isinstance(uncertainty, bool)
-        or not math.isfinite(uncertainty)
+        or not _finite_number(uncertainty)
         or uncertainty < 0
     ):
         return False, "stopping-distance limit or measurement uncertainty is invalid"
@@ -515,7 +510,7 @@ def validate_acceptance_file(
         ):
             return False, f"{direction} has too few stopping trials"
         distance = result.get("worst_stopping_distance_m")
-        if not isinstance(distance, (int, float)) or isinstance(distance, bool) or not math.isfinite(distance) or distance <= 0:
+        if not _finite_number(distance) or distance <= 0:
             return False, f"{direction} stopping distance is invalid"
         if distance + uncertainty > allowed_distance:
             return False, f"{direction} stopping distance plus uncertainty exceeds its acceptance limit"
@@ -539,8 +534,7 @@ def validate_acceptance_file(
         return False, "required fault-response tests have not all passed"
     payload = data.get("payload_kg")
     if (
-        not isinstance(payload, (int, float)) or isinstance(payload, bool)
-        or not math.isfinite(payload) or payload < 0
+        not _finite_number(payload) or payload < 0
         or not isinstance(data.get("surface"), str) or not data["surface"].strip()
     ):
         return False, "acceptance must identify a valid payload and test surface"
@@ -557,9 +551,7 @@ def validate_acceptance_file(
     for name, configured in expected_stow.items():
         accepted = accepted_stow[name]
         if (
-            not isinstance(accepted, (int, float))
-            or isinstance(accepted, bool)
-            or not math.isfinite(accepted)
+            not _finite_number(accepted)
             or not math.isfinite(configured)
             or abs(float(accepted) - float(configured)) > 1e-9
         ):
@@ -620,14 +612,17 @@ class SafetySupervisor(Node):
         self.declare_parameter("acceptance_file", "")
         self.declare_parameter("nav2_params_file", "")
 
-        sensor_timeout = _seconds_to_ns(float(self.get_parameter("sensor_timeout").value), "sensor_timeout")
-        state_timeout = _seconds_to_ns(float(self.get_parameter("state_timeout").value), "state_timeout")
-        permission_timeout = _seconds_to_ns(
+        # Read once: fault latching is fixed at construction, so permission
+        # enforcement must not change independently at runtime.
+        self._strict = bool(self.get_parameter("strict").value)
+        sensor_timeout = positive_seconds_ns(float(self.get_parameter("sensor_timeout").value), "sensor_timeout")
+        state_timeout = positive_seconds_ns(float(self.get_parameter("state_timeout").value), "state_timeout")
+        permission_timeout = positive_seconds_ns(
             float(self.get_parameter("permission_timeout").value), "permission_timeout"
         )
         if permission_timeout >= state_timeout:
             raise ValueError("permission_timeout must be shorter than state_timeout")
-        battery_timeout = _seconds_to_ns(float(self.get_parameter("battery_timeout").value), "battery_timeout")
+        battery_timeout = positive_seconds_ns(float(self.get_parameter("battery_timeout").value), "battery_timeout")
         requirements: dict[str, Requirement] = {}
         require_driver_state = bool(self.get_parameter("require_driver_state").value)
         if require_driver_state:
@@ -673,7 +668,7 @@ class SafetySupervisor(Node):
             requirements,
             driver_state="DISARMED" if require_driver_state else "ARMED",
             arm_stowed=not require_joint_states,
-            latch_faults=bool(self.get_parameter("strict").value),
+            latch_faults=self._strict,
         )
         if bool(self.get_parameter("require_acceptance").value):
             requirements["acceptance"] = Requirement(2**62)
@@ -751,12 +746,6 @@ class SafetySupervisor(Node):
     def _now(self) -> int:
         return self.get_clock().now().nanoseconds
 
-    @staticmethod
-    def _source_stamp(message) -> int:
-        stamp = message.header.stamp
-        value = int(stamp.sec) * 1_000_000_000 + int(stamp.nanosec)
-        return value
-
     def _on_driver(self, message: String) -> None:
         self._machine.driver_state = message.data
         healthy = message.data in {"DISARMED", "ARMED"}
@@ -773,9 +762,9 @@ class SafetySupervisor(Node):
             and 0.0 <= message.range_min < message.range_max
             and _valid_scan_ranges(message, self._minimum_scan_valid_fraction)
             and (not self._require_full_scan or coverage >= self._minimum_scan_coverage)
-            and self._source_stamp(message) > 0
+            and stamp_ns(message.header.stamp) > 0
         )
-        self._machine.update("scan", healthy, self._source_stamp(message) or self._now(), f"coverage={coverage:.2f} rad")
+        self._machine.update("scan", healthy, stamp_ns(message.header.stamp) or self._now(), f"coverage={coverage:.2f} rad")
 
     def _on_depth(self, message: PointCloud2) -> None:
         healthy = (
@@ -786,10 +775,10 @@ class SafetySupervisor(Node):
                 self._minimum_depth_range,
                 self._maximum_depth_range,
             )
-            and self._source_stamp(message) > 0
+            and stamp_ns(message.header.stamp) > 0
         )
         self._machine.update(
-            "depth", healthy, self._source_stamp(message) or self._now(),
+            "depth", healthy, stamp_ns(message.header.stamp) or self._now(),
             "invalid, blind, or stampless point cloud",
         )
 
@@ -800,8 +789,8 @@ class SafetySupervisor(Node):
             message.twist.twist.linear.x, message.twist.twist.linear.y,
             message.twist.twist.angular.z,
         )
-        healthy = all(math.isfinite(value) for value in values) and self._source_stamp(message) > 0
-        self._machine.update("odometry", healthy, self._source_stamp(message) or self._now(), "non-finite/stampless odometry")
+        healthy = all(math.isfinite(value) for value in values) and stamp_ns(message.header.stamp) > 0
+        self._machine.update("odometry", healthy, stamp_ns(message.header.stamp) or self._now(), "non-finite/stampless odometry")
 
     def _on_imu(self, message: Imu) -> None:
         values = (
@@ -810,20 +799,20 @@ class SafetySupervisor(Node):
             message.linear_acceleration.x, message.linear_acceleration.y,
             message.linear_acceleration.z,
         )
-        healthy = all(math.isfinite(value) for value in values) and self._source_stamp(message) > 0
-        self._machine.update("imu", healthy, self._source_stamp(message) or self._now(), "non-finite/stampless IMU feedback")
+        healthy = all(math.isfinite(value) for value in values) and stamp_ns(message.header.stamp) > 0
+        self._machine.update("imu", healthy, stamp_ns(message.header.stamp) or self._now(), "non-finite/stampless IMU feedback")
 
     def _on_joints(self, message: JointState) -> None:
         positions = dict(zip(message.name, message.position))
         healthy = (
-            self._source_stamp(message) > 0
+            stamp_ns(message.header.stamp) > 0
             and all(name in positions and math.isfinite(positions[name]) for name in self._stow)
         )
         self._machine.arm_stowed = healthy and all(
             abs(positions[name] - expected) <= self._stow_tolerance
             for name, expected in self._stow.items()
         )
-        self._machine.update("joints", healthy, self._source_stamp(message) or self._now(), "incomplete/stampless joint feedback")
+        self._machine.update("joints", healthy, stamp_ns(message.header.stamp) or self._now(), "incomplete/stampless joint feedback")
 
     def _on_bumper(self, message: Bool) -> None:
         self._machine.update("bumper", not message.data, self._now(), "bumper active")
@@ -840,18 +829,18 @@ class SafetySupervisor(Node):
     def _on_battery(self, message: BatteryState) -> None:
         healthy = _valid_battery(
             message, self._minimum_battery_voltage, self._minimum_battery_percentage
-        ) and self._source_stamp(message) > 0
-        self._machine.update("battery", healthy, self._source_stamp(message) or self._now(), "battery below threshold or stampless")
+        ) and stamp_ns(message.header.stamp) > 0
+        self._machine.update("battery", healthy, stamp_ns(message.header.stamp) or self._now(), "battery below threshold or stampless")
 
     def _on_hardware_diagnostics(self, message: DiagnosticArray) -> None:
-        healthy = self._source_stamp(message) > 0 and bool(message.status) and all(
+        healthy = stamp_ns(message.header.stamp) > 0 and bool(message.status) and all(
             status.level < DiagnosticStatus.ERROR for status in message.status
         )
         detail = "; ".join(
             f"{status.name}: {status.message}"
             for status in message.status if status.level >= DiagnosticStatus.ERROR
         ) or "no motor diagnostics"
-        self._machine.update("motor_health", healthy, self._source_stamp(message) or self._now(), detail)
+        self._machine.update("motor_health", healthy, stamp_ns(message.header.stamp) or self._now(), detail)
 
     def _reset(self, _request: Trigger.Request, response: Trigger.Response) -> Trigger.Response:
         response.success, response.message = self._machine.reset(self._now())
@@ -859,9 +848,7 @@ class SafetySupervisor(Node):
         return response
 
     def _publish(self) -> None:
-        decision = permit_unless_strict(
-            self._machine.decision(self._now()), bool(self.get_parameter("strict").value)
-        )
+        decision = permit_unless_strict(self._machine.decision(self._now()), self._strict)
         state = String()
         state.data = decision.state.value
         base = Bool()

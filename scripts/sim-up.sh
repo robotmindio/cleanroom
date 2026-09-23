@@ -24,9 +24,13 @@ fi
 
 scripts/sim-renderer-check.py
 
-# sim-start.sh execs ros2 launch in this new session, making its PID both the
-# recorded stack identity and its process-group leader for ros-stop.sh.
-setsid scripts/sim-start.sh "$@" 9>&- >"$logs_dir/sim-stack.log" 2>&1 &
+# The new session execs ros2 launch, making its PID both the recorded stack
+# identity and its process-group leader for ros-stop.sh, which then force-stops
+# a stuck Gazebo child without sweeping unrelated ROS processes on a shared server.
+# ROS setup scripts reference optional variables, so -u stays off in there.
+# shellcheck disable=SC2016 # Expanded by the launched shell.
+setsid bash -c 'source scripts/setup.bash && exec ros2 launch lekiwi_rmf bringup.launch.py mode:=sim "$@"' \
+  sim-stack "$@" 9>&- >"$logs_dir/sim-stack.log" 2>&1 &
 stack_pid=$!
 printf '%s\n' "$stack_pid" > "$runtime_dir/stack.pid"
 

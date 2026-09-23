@@ -1,0 +1,1 @@
+install -d -o nex -g nex -m 0755 /tmp/pytest-of-nex/pytest-1295/test_log_rotation_install_crea0/home/.ros/lekiwi

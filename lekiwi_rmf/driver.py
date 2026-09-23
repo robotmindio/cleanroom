@@ -10,7 +10,7 @@ from control_msgs.action import FollowJointTrajectory
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from geometry_msgs.msg import TransformStamped, Twist
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
-from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
 from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
@@ -26,6 +26,7 @@ from lekiwi_rmf.arm_trajectory import (
     duration_seconds, position_tolerances, prepare_trajectory, sample_trajectory,
     stamp_nanoseconds, trajectory_rows,
 )
+from lekiwi_rmf.motion_guards import lease_is_fresh, twist_is_finite
 from lekiwi_rmf.odometry import (
     OdometrySampleClock, integrate_pose,
 )
@@ -33,6 +34,9 @@ from lekiwi_rmf.torque_control import TorqueControlClient
 from lekiwi_rmf.zmq_client import LeKiwiZmqClient
 from lekiwi_rmf.zmq_security import CurveClientCredentials
 
+# MoveIt stamps zero (start now). Anything scheduled further ahead than this is
+# a clock mismatch or a mistake, not a plan to wait.
+MAX_TRAJECTORY_START_DELAY_NS = 2_000_000_000
 
 class LeKiwiDriver(Node):
     def __init__(self):
@@ -137,6 +141,9 @@ class LeKiwiDriver(Node):
         self.last_observation_token = None
         self.last_fresh = now
         self.link_lost = False
+        # When update() last accepted telemetry that passed the host-session and
+        # torque-readback checks; the automatic arm acts only on such telemetry.
+        self._healthy_telemetry_at = None
         self.armed = False
         self.torque_fault = False
         self.base_motion_permitted = False
@@ -144,14 +151,18 @@ class LeKiwiDriver(Node):
         self._base_permission_received_at_ns = None
         self._arm_permission_received_at_ns = None
         self._arm_permission_expired = False
-        # Startup is allowed to arm only after a complete, fresh observation. With
-        # disarm_on_failure, a link loss or an explicit disarm clears this one-shot flag,
-        # so recovery never resumes movement without an operator arming again. Without it
-        # the flag is set again after every failure, so the robot re-arms itself.
+        # Arming waits for a complete, fresh observation and current supervisor
+        # permission. By default the robot arms at startup whatever auto_arm_on_startup
+        # says, and the flag is set again after every failure so it re-arms itself.
+        # Only with disarm_on_failure does auto_arm_on_startup decide the startup arm,
+        # and then a link loss or an explicit disarm clears this one-shot flag, so
+        # recovery never resumes movement without an operator arming again.
         self.auto_arm_pending = bool(self.auto_arm_on_startup) or not self.disarm_on_failure
         # Set by an operator's safety/disarm and cleared only by a successful safety/arm,
         # so no later failure or telemetry recovery can re-arm a robot the operator disarmed.
         self.operator_disarmed = False
+        # A failed automatic arm is retried no earlier than this monotonic time.
+        self._next_rearm_at = 0.0
         calibration_path = os.path.expanduser(calibration_file)
         self.arm_calibrated = os.path.isfile(calibration_path)
         self.stop_pending = True
@@ -190,8 +201,22 @@ class LeKiwiDriver(Node):
             Bool, self.arm_permission_topic, self.on_arm_permission, safety_qos,
             callback_group=self.safety_callback_group,
         )
-        self.create_service(Trigger, "safety/arm", self.arm)
-        self.create_service(Trigger, "safety/disarm", self.disarm)
+        # A torque RPC blocks for up to torque_control_timeout_ms per attempt, twice.
+        # Arm, disarm and the automatic arm run in their own group so they serialize
+        # with each other but never stall update(), its safety/state heartbeat or
+        # permission-lease enforcement; update() skips a send while one is in flight.
+        self.transition_callback_group = MutuallyExclusiveCallbackGroup()
+        self.create_service(
+            Trigger, "safety/arm", self.arm,
+            callback_group=self.transition_callback_group,
+        )
+        self.create_service(
+            Trigger, "safety/disarm", self.disarm,
+            callback_group=self.transition_callback_group,
+        )
+        self.create_timer(
+            0.1, self.auto_arm_tick, callback_group=self.transition_callback_group
+        )
         self.trajectory_server = ActionServer(
             self, FollowJointTrajectory, "arm_controller/follow_joint_trajectory",
             execute_callback=self.execute_trajectory, goal_callback=self.accept_trajectory,
@@ -215,7 +240,7 @@ class LeKiwiDriver(Node):
             armed = self.armed
             arm_current = self._permission_is_current(
                 self.arm_motion_permitted,
-                getattr(self, "_arm_permission_received_at_ns", None),
+                self._arm_permission_received_at_ns,
                 received_at_ns,
             )
         if not permitted and armed and not arm_current:
@@ -236,7 +261,7 @@ class LeKiwiDriver(Node):
             armed = self.armed
             base_current = self._permission_is_current(
                 self.base_motion_permitted,
-                getattr(self, "_base_permission_received_at_ns", None),
+                self._base_permission_received_at_ns,
                 received_at_ns,
             )
         newly_withdrawn = not permitted and (was_permitted or not was_expired)
@@ -252,28 +277,19 @@ class LeKiwiDriver(Node):
                     "Arm safety permission withdrawn; canceling arm motion while base remains enabled"
                 )
 
-    @staticmethod
-    def _permission_is_fresh(received_at_ns, timeout_ns, now_ns=None):
-        """Return false when a Bool permission lease was not refreshed."""
-        if received_at_ns is None:
-            return False
-        current = time.monotonic_ns() if now_ns is None else now_ns
-        age = current - received_at_ns
-        return 0 <= age <= timeout_ns
-
     def _permission_is_current(self, permitted, received_at_ns, now_ns=None):
-        return bool(permitted) and self._permission_is_fresh(
-            received_at_ns, getattr(self, "permission_timeout_ns", 0), now_ns
+        return bool(permitted) and lease_is_fresh(
+            received_at_ns, self.permission_timeout_ns, now_ns
         )
 
     def _capability_permission_is_current(self, now_ns=None):
         return self._permission_is_current(
-            getattr(self, "base_motion_permitted", False),
-            getattr(self, "_base_permission_received_at_ns", None),
+            self.base_motion_permitted,
+            self._base_permission_received_at_ns,
             now_ns,
         ) or self._permission_is_current(
-            getattr(self, "arm_motion_permitted", False),
-            getattr(self, "_arm_permission_received_at_ns", None),
+            self.arm_motion_permitted,
+            self._arm_permission_received_at_ns,
             now_ns,
         )
 
@@ -283,29 +299,29 @@ class LeKiwiDriver(Node):
         arm_expired = False
         with self.state_lock:
             base_current = self._permission_is_current(
-                getattr(self, "base_motion_permitted", False),
-                getattr(self, "_base_permission_received_at_ns", None),
+                self.base_motion_permitted,
+                self._base_permission_received_at_ns,
                 current,
             )
             if not base_current:
-                if getattr(self, "base_motion_permitted", False):
+                if self.base_motion_permitted:
                     self.base_motion_permitted = False
                     self.command = Twist()
                     self.command_stamp = self.get_clock().now()
 
             arm_current = self._permission_is_current(
-                getattr(self, "arm_motion_permitted", False),
-                getattr(self, "_arm_permission_received_at_ns", None),
+                self.arm_motion_permitted,
+                self._arm_permission_received_at_ns,
                 current,
             )
             if not arm_current:
-                if not getattr(self, "_arm_permission_expired", False):
+                if not self._arm_permission_expired:
                     arm_expired = True
                 self.arm_motion_permitted = False
                 self._arm_permission_expired = True
             else:
                 self._arm_permission_expired = False
-            was_armed = bool(getattr(self, "armed", False))
+            was_armed = self.armed
 
         if arm_expired and was_armed:
             self.cancel_trajectory("arm safety permission lease expired")
@@ -317,13 +333,13 @@ class LeKiwiDriver(Node):
         return arm_expired
 
     def on_command(self, message):
-        if not self.twist_is_finite(message):
+        if not twist_is_finite(message):
             self.get_logger().error("Rejecting non-finite base command and disarming")
             self.set_disarmed("DISARMED")
             return
         with self.state_lock:
             if not self.armed or not self._permission_is_current(
-                self.base_motion_permitted, getattr(self, "_base_permission_received_at_ns", None)
+                self.base_motion_permitted, self._base_permission_received_at_ns
             ):
                 return
             self.command = message
@@ -388,6 +404,9 @@ class LeKiwiDriver(Node):
 
             # Never hold state_lock across a service/network operation. action_lock
             # still guarantees that an arm or command cannot overtake this cut.
+            # DEBT(#5): with disarm_on_failure, a failure found by update() runs this
+            # cut on the control loop, stalling its heartbeat for up to the RPC
+            # timeout. Revisit when strict mode is used on hardware.
             torque_cut = self.cut_torque_after_failure() if not deliberate else self.set_servo_torque(False)
             with self.state_lock:
                 if not torque_cut:
@@ -419,7 +438,7 @@ class LeKiwiDriver(Node):
 
     def set_servo_torque(self, enabled):
         """Synchronously require the serial-bus owner to change physical torque."""
-        can_log = not hasattr(self, "context") or rclpy.ok(context=self.context)
+        can_log = rclpy.ok(context=self.context)
         try:
             with self.torque_lock:
                 self.torque.set_enabled(enabled)
@@ -435,61 +454,85 @@ class LeKiwiDriver(Node):
             )
         return True
 
+    def _arm_permission_is_current(self):
+        return self._permission_is_current(
+            self.arm_motion_permitted, self._arm_permission_received_at_ns
+        )
+
+    def _enable_torque_and_arm(self, permission_is_current, operator):
+        """Enable servo torque, then commit ARMED only if it is still safe.
+
+        The caller holds action_lock and has checked its own preconditions. Returns
+        ``(outcome, torque_cut)`` with outcome ``"armed"``, ``"enable_failed"`` or
+        ``"unsafe"``; ``torque_cut`` reports the fail-safe disable after a failure.
+        """
+        outcome = "enable_failed"
+        if self.set_servo_torque(True):
+            with self.state_lock:
+                still_safe = (
+                    permission_is_current()
+                    and not self.link_lost
+                    and not self.torque_fault
+                )
+                if still_safe:
+                    self.armed = True
+                    if operator:
+                        self.operator_disarmed = False
+                    self.command = Twist()
+                    self.command_stamp = self.get_clock().now()
+            if still_safe:
+                self.publish_safety("ARMED")
+                return "armed", True
+            outcome = "unsafe"
+        # An enable reply can be lost after the host applied it. A separate
+        # disable transaction resolves that ambiguous state toward torque-off
+        # (strict mode only) before reporting the arm request failed.
+        torque_cut = self.cut_torque_after_failure()
+        with self.state_lock:
+            if not torque_cut:
+                self.torque_fault = True
+            state = "TORQUE_FAULT" if self.torque_fault else "DISARMED"
+        self.publish_safety(state)
+        return outcome, torque_cut
+
+    def auto_arm_tick(self):
+        """Attempt the automatic arm off the control loop: its torque RPC can take seconds."""
+        with self.state_lock:
+            # Checked first so an idle tick never contends for action_lock.
+            if not self.auto_arm_pending or self.armed or self._healthy_telemetry_at is None:
+                return False
+            healthy_at = self._healthy_telemetry_at
+        age = (self.get_clock().now() - healthy_at).nanoseconds / 1e9
+        if not 0.0 <= age <= self.link_timeout:
+            return False
+        return self.arm_after_startup_telemetry()
+
     def arm_after_startup_telemetry(self):
         """Arm after validated telemetry: at startup, and by default after every failure."""
         with self.action_lock:
             with self.state_lock:
                 if (
                     not self.auto_arm_pending
-                    or time.monotonic() < getattr(self, "_next_rearm_at", 0.0)
+                    or time.monotonic() < self._next_rearm_at
                     or self.link_lost
                     or self.armed
-                    or not self._permission_is_current(
-                        self.arm_motion_permitted,
-                        getattr(self, "_arm_permission_received_at_ns", None),
-                    )
+                    or not self._arm_permission_is_current()
                     or self.torque_fault
                 ):
                     return False
                 self.auto_arm_pending = False
-            if not self.set_servo_torque(True):
-                # A reply can be lost after the host applied the enable.  A
-                # separate disable transaction resolves that ambiguous state
-                # toward torque-off before reporting the arm request failed.
-                torque_cut = self.cut_torque_after_failure()
-                with self.state_lock:
-                    if not torque_cut:
-                        self.torque_fault = True
-                    state = "TORQUE_FAULT" if self.torque_fault else "DISARMED"
-                self.publish_safety(state)
-                self.get_logger().error("Initial telemetry is healthy, but the motor host would not enable torque")
-                self._retry_rearm_soon()
-                return False
-            with self.state_lock:
-                still_safe = (
-                    not self.link_lost
-                    and self._permission_is_current(
-                        self.arm_motion_permitted,
-                        getattr(self, "_arm_permission_received_at_ns", None),
-                    )
-                    and not self.torque_fault
+            outcome, _torque_cut = self._enable_torque_and_arm(
+                self._arm_permission_is_current, operator=False
+            )
+            if outcome == "armed":
+                self.get_logger().info("Armed after initial healthy LeKiwi telemetry")
+                return True
+            if outcome == "enable_failed":
+                self.get_logger().error(
+                    "Initial telemetry is healthy, but the motor host would not enable torque"
                 )
-            if not still_safe:
-                torque_cut = self.cut_torque_after_failure()
-                with self.state_lock:
-                    if not torque_cut:
-                        self.torque_fault = True
-                    state = "TORQUE_FAULT" if self.torque_fault else "DISARMED"
-                self.publish_safety(state)
-                self._retry_rearm_soon()
-                return False
-            with self.state_lock:
-                self.armed = True
-                self.command = Twist()
-                self.command_stamp = self.get_clock().now()
-            self.publish_safety("ARMED")
-            self.get_logger().info("Armed after initial healthy LeKiwi telemetry")
-            return True
+            self._retry_rearm_soon()
+            return False
 
     def _retry_rearm_soon(self):
         """Unless strict, a failed automatic arm is retried, at a bounded rate."""
@@ -500,9 +543,10 @@ class LeKiwiDriver(Node):
 
     def arm(self, request, response):
         del request
-        now = self.get_clock().now()
-        telemetry_age = (now - self.last_fresh).nanoseconds / 1e9
         with self.action_lock:
+            # Measured after any transition ahead of this one has finished, so
+            # a wait for action_lock cannot make stale telemetry look fresh.
+            telemetry_age = (self.get_clock().now() - self.last_fresh).nanoseconds / 1e9
             with self.state_lock:
                 if self.torque_fault:
                     response.success = False
@@ -524,16 +568,15 @@ class LeKiwiDriver(Node):
                     response.success = False
                     response.message = "no fresh LeKiwi telemetry"
                     return response
-            if not self.set_servo_torque(True):
-                # Treat an enable timeout as physically ambiguous: the host
-                # may have completed the write before its reply was lost.
-                torque_cut = self.cut_torque_after_failure()
-                with self.state_lock:
-                    if not torque_cut:
-                        self.torque_fault = True
-                    state = "TORQUE_FAULT" if self.torque_fault else "DISARMED"
-                self.publish_safety(state)
-                response.success = False
+            outcome, torque_cut = self._enable_torque_and_arm(
+                self._capability_permission_is_current, operator=True
+            )
+            response.success = outcome == "armed"
+            if outcome == "armed":
+                response.message = "armed at current measured position; send a new command"
+            elif outcome == "unsafe":
+                response.message = "safety state changed while enabling torque"
+            else:
                 response.message = (
                     "motor host did not confirm servo torque enabled; "
                     + (
@@ -544,31 +587,6 @@ class LeKiwiDriver(Node):
                         else "a fail-safe disable was confirmed"
                     )
                 )
-                return response
-            with self.state_lock:
-                still_safe = (
-                    self._capability_permission_is_current()
-                    and not self.link_lost
-                    and not self.torque_fault
-                )
-            if not still_safe:
-                torque_cut = self.cut_torque_after_failure()
-                with self.state_lock:
-                    if not torque_cut:
-                        self.torque_fault = True
-                    state = "TORQUE_FAULT" if self.torque_fault else "DISARMED"
-                self.publish_safety(state)
-                response.success = False
-                response.message = "safety state changed while enabling torque"
-                return response
-            with self.state_lock:
-                self.armed = True
-                self.operator_disarmed = False
-                self.command = Twist()
-                self.command_stamp = now
-            self.publish_safety("ARMED")
-            response.success = True
-            response.message = "armed at current measured position; send a new command"
             return response
 
     def disarm(self, request, response):
@@ -583,10 +601,7 @@ class LeKiwiDriver(Node):
         return response
 
     def accept_trajectory(self, goal):
-        if not self.armed or not self._permission_is_current(
-            self.arm_motion_permitted,
-            getattr(self, "_arm_permission_received_at_ns", None),
-        ):
+        if not self.armed or not self._arm_permission_is_current():
             # MoveIt surfaces this only as an unexplained "goal was rejected"; say why here.
             self.get_logger().warn(
                 "Rejecting arm trajectory: driver is disarmed or arm safety permission is absent"
@@ -618,26 +633,37 @@ class LeKiwiDriver(Node):
             goal_handle.request, names
         )
         scheduled_ns = stamp_nanoseconds(goal_handle.request.trajectory.header.stamp)
+        # The header is ROS time, but execution is timed on the monotonic clock so a
+        # wall-clock step cannot stretch or skip a trajectory. Read both together and
+        # convert the offset once.
         now_ns = self.get_clock().now().nanoseconds
-        if scheduled_ns and scheduled_ns < now_ns - 100_000_000:
+        now_monotonic = time.monotonic()
+        start_delay_ns = scheduled_ns - now_ns if scheduled_ns else 0
+        if start_delay_ns < -100_000_000:
             goal_handle.abort()
             return FollowJointTrajectory.Result(
                 error_code=FollowJointTrajectory.Result.OLD_HEADER_TIMESTAMP,
                 error_string="trajectory header timestamp is in the past",
             )
-        start_delay = max(0.0, (scheduled_ns - now_ns) / 1e9) if scheduled_ns else 0.0
+        if start_delay_ns > MAX_TRAJECTORY_START_DELAY_NS:
+            # A far-future stamp would hold the arm and block this goal for as long.
+            goal_handle.abort()
+            return FollowJointTrajectory.Result(
+                error_code=FollowJointTrajectory.Result.INVALID_GOAL,
+                error_string=(
+                    "trajectory header timestamp is more than "
+                    f"{MAX_TRAJECTORY_START_DELAY_NS / 1e9:.0f}s in the future"
+                ),
+            )
         trajectory = {
-            "start": time.monotonic() + start_delay,
+            "start": now_monotonic + max(0, start_delay_ns) / 1e9,
             "done": threading.Event(),
             "path_tolerances": path_tolerances,
             "goal_tolerances": goal_tolerances,
             "goal_time_tolerance": goal_time_tolerance,
         }
         with self.state_lock:
-            if not self.armed or not self._permission_is_current(
-                self.arm_motion_permitted,
-                getattr(self, "_arm_permission_received_at_ns", None),
-            ):
+            if not self.armed or not self._arm_permission_is_current():
                 goal_handle.abort()
                 return FollowJointTrajectory.Result(
                     error_code=FollowJointTrajectory.Result.INVALID_GOAL,
@@ -663,8 +689,8 @@ class LeKiwiDriver(Node):
                 trajectory["names"] = tuple(names)
                 trajectory["points"] = points
                 self.trajectory = trajectory
-        self.command = Twist()
-        self.command_stamp = self.get_clock().now()
+            self.command = Twist()
+            self.command_stamp = self.get_clock().now()
 
         while not trajectory["done"].wait(0.05):
             if goal_handle.is_cancel_requested:
@@ -736,13 +762,6 @@ class LeKiwiDriver(Node):
         scale = limit / magnitude
         return x * scale, y * scale
 
-    @staticmethod
-    def twist_is_finite(message):
-        return all(math.isfinite(value) for value in (
-            message.linear.x, message.linear.y, message.linear.z,
-            message.angular.x, message.angular.y, message.angular.z,
-        ))
-
     def validate_motion_parameters(self):
         """Reject values that would make a command unsafe or undefined."""
         positive = {
@@ -778,7 +797,7 @@ class LeKiwiDriver(Node):
         # fresh telemetry for a dropout. The client sequence advances only when its ZMQ
         # socket consumed a new multipart observation; cached observations leave it
         # unchanged, which is the signal the driver actually needs for link safety.
-        robot = getattr(self, "robot", None)
+        robot = self.robot
         token_marker = object()
         token = getattr(robot, "observation_token", token_marker)
         if token is None:
@@ -796,7 +815,7 @@ class LeKiwiDriver(Node):
                 for name, value in observation.items()
                 if name.endswith((".pos", ".vel"))
             ))
-        fresh = token != getattr(self, "last_observation_token", None)
+        fresh = token != self.last_observation_token
         self.last_observation_token = token
         self.last_observation = observation
         return fresh
@@ -824,6 +843,10 @@ class LeKiwiDriver(Node):
         reported = getattr(self.robot, "observation_torque_enabled", None)
         if reported is None:
             # No accepted telemetry has reported physical state yet.
+            return False
+        if self.action_lock.locked():
+            # An arm or disarm transaction is changing torque right now and
+            # settles the logical state itself once the host confirms.
             return False
         with self.state_lock:
             logical = self.armed
@@ -867,11 +890,24 @@ class LeKiwiDriver(Node):
         # arm torque even when the motor host is returning cached data.
         self.enforce_permission_leases()
         now = self.get_clock().now()
+        polled = self._poll_telemetry(now)
+        if polled is None:
+            return
+        observation, velocity = polled
+        with self.state_lock:
+            armed = self.armed
+        if armed:
+            self._send_armed_command(now, observation, velocity)
+        else:
+            self._send_pending_stop(now, observation, velocity)
+
+    def _poll_telemetry(self, now):
+        """Accept one fresh, valid observation; return it with the base velocity."""
         try:
             observation = self.robot.get_observation()
         except Exception as error:
             self.record_link_loss(f"LeKiwi telemetry failed: {error}")
-            return
+            return None
 
         missing_state_keys = getattr(self.robot, "missing_state_keys", ())
         if not self.observation_is_valid(observation, missing_state_keys):
@@ -879,7 +915,7 @@ class LeKiwiDriver(Node):
             if missing_state_keys:
                 reason = f"LeKiwi telemetry is missing: {', '.join(missing_state_keys)}"
             self.record_link_loss(reason)
-            return
+            return None
 
         if not self.observation_is_fresh(observation):
             quiet = (now - self.last_fresh).nanoseconds / 1e9
@@ -887,7 +923,7 @@ class LeKiwiDriver(Node):
                 self.record_link_loss(
                     f"No fresh LeKiwi telemetry for {quiet:.1f}s; waiting for recovery"
                 )
-            return
+            return None
 
         self.last_fresh = now
         self.publish_motor_health(now.to_msg())
@@ -898,7 +934,8 @@ class LeKiwiDriver(Node):
             self.arm_positions = arm_positions
         self.handle_host_session_change()
         self.enforce_reported_torque_state()
-        self.arm_after_startup_telemetry()
+        with self.state_lock:
+            self._healthy_telemetry_at = now
         if self.link_lost:
             # The recovered sample establishes a new origin. Never integrate
             # a reported velocity across an interval with no telemetry.
@@ -929,92 +966,104 @@ class LeKiwiDriver(Node):
             self.get_logger().warn(
                 f"Odometry discontinuity: {self.odom_samples.discontinuity}; not integrating this sample"
             )
-        with self.state_lock:
-            armed = self.armed
-        if not armed:
-            send_error = None
+        return observation, velocity
+
+    @staticmethod
+    def _hold_action(observation):
+        return {
+            f"{joint}.pos": float(observation.get(f"{joint}.pos", 0.0)) for joint in ARM_JOINTS
+        }
+
+    def _send_pending_stop(self, now, observation, velocity):
+        """While disarmed, send one zero-velocity hold after each disarm."""
+        send_error = None
+        # A torque transition in flight owns the actuators: skip this cycle's
+        # stop (it stays pending) rather than stall the loop behind its RPC.
+        if self.action_lock.acquire(blocking=False):
             try:
-                with self.action_lock:
+                with self.state_lock:
+                    # An arm request may have completed after the snapshot.
+                    # In that case, skip this cycle rather than sending a
+                    # stale zero action after torque was enabled.
+                    if self.armed:
+                        return
+                    send_stop = self.stop_pending
+                if send_stop:
+                    self.robot.send_action({
+                        **self._hold_action(observation),
+                        "x.vel": 0.0,
+                        "y.vel": 0.0,
+                        "theta.vel": 0.0,
+                    })
                     with self.state_lock:
-                        # An arm request may have completed after the snapshot.
-                        # In that case, skip this cycle rather than sending a
-                        # stale zero action after torque was enabled.
-                        if self.armed:
-                            return
-                        send_stop = self.stop_pending
-                    if send_stop:
-                        self.robot.send_action({
-                            **{f"{joint}.pos": float(observation.get(f"{joint}.pos", 0.0)) for joint in ARM_JOINTS},
-                            "x.vel": 0.0,
-                            "y.vel": 0.0,
-                            "theta.vel": 0.0,
-                        })
-                        with self.state_lock:
-                            if not self.armed:
-                                self.stop_pending = False
+                        if not self.armed:
+                            self.stop_pending = False
             except Exception as error:
                 send_error = error
-            if send_error is not None:
-                self.get_logger().error(f"LeKiwi stop command failed: {send_error}")
-                self.link_lost = True
-                self.set_disarmed("LINK_LOST")
-                return
-            # Torque state is not motion state: retain measured odometry if the
-            # robot is pushed or coasts while commands are inhibited.
-            self.publish_state(now.to_msg(), observation, velocity)
-            self.publish_safety()
+            finally:
+                self.action_lock.release()
+        if send_error is not None:
+            self.record_link_loss(f"LeKiwi stop command failed: {send_error}")
             return
+        # Torque state is not motion state: retain measured odometry if the
+        # robot is pushed or coasts while commands are inhibited.
+        self.publish_state(now.to_msg(), observation, velocity)
+        self.publish_safety()
 
+    def _apply_trajectory(self, action, hold_action):
+        """Put the active trajectory's setpoint into ``action``; return whether one ran."""
+        with self.trajectory_lock:
+            trajectory = self.trajectory
+            if not trajectory:
+                return False
+            elapsed = time.monotonic() - trajectory["start"]
+            positions, _velocities, _accelerations = sample_trajectory(
+                trajectory["names"], trajectory["start_positions"],
+                trajectory["points"], elapsed,
+            )
+            action.update({
+                f"{name}.pos": value for name, value in action_positions(
+                    positions.keys(), positions.values(),
+                    self.arm_zero_positions, self.arm_directions,
+                ).items()
+            })
+            final_point = trajectory["points"][-1]
+            path_violation = next((
+                name for name, tolerance in trajectory["path_tolerances"].items()
+                if elapsed < final_point.time
+                and abs(self.arm_positions[name] - positions[name]) > tolerance
+            ), None)
+            if path_violation:
+                trajectory["outcome"] = f"path tolerance exceeded for {path_violation}"
+                trajectory["result_code"] = FollowJointTrajectory.Result.PATH_TOLERANCE_VIOLATED
+                trajectory["done"].set()
+                self.trajectory = None
+                # The setpoint that failed the check must not reach the servos.
+                action.update(hold_action)
+            elif elapsed >= final_point.time and all(
+                abs(self.arm_positions[name] - final_point.positions[name]) <= tolerance
+                for name, tolerance in trajectory["goal_tolerances"].items()
+            ):
+                trajectory["outcome"] = "succeeded"
+                trajectory["done"].set()
+                self.trajectory = None
+            elif elapsed > final_point.time + trajectory["goal_time_tolerance"]:
+                trajectory["outcome"] = "goal tolerance exceeded"
+                trajectory["result_code"] = FollowJointTrajectory.Result.GOAL_TOLERANCE_VIOLATED
+                trajectory["done"].set()
+                self.trajectory = None
+            return True
+
+    def _send_armed_command(self, now, observation, velocity):
         with self.state_lock:
             stale = (now - self.command_stamp).nanoseconds / 1e9 > self.command_timeout
             cmd = Twist() if stale or not self._permission_is_current(
                 self.base_motion_permitted,
-                getattr(self, "_base_permission_received_at_ns", None),
+                self._base_permission_received_at_ns,
             ) else self.command
-        hold_action = {
-            f"{joint}.pos": float(observation.get(f"{joint}.pos", 0.0)) for joint in ARM_JOINTS
-        }
+        hold_action = self._hold_action(observation)
         action = dict(hold_action)
-        with self.trajectory_lock:
-            trajectory = self.trajectory
-            if trajectory:
-                elapsed = time.monotonic() - trajectory["start"]
-                positions, _velocities, _accelerations = sample_trajectory(
-                    trajectory["names"], trajectory["start_positions"],
-                    trajectory["points"], elapsed,
-                )
-                action.update({
-                    f"{name}.pos": value for name, value in action_positions(
-                        positions.keys(), positions.values(),
-                        self.arm_zero_positions, self.arm_directions,
-                    ).items()
-                })
-                final_point = trajectory["points"][-1]
-                path_violation = next((
-                    name for name, tolerance in trajectory["path_tolerances"].items()
-                    if elapsed < final_point.time
-                    and abs(self.arm_positions[name] - positions[name]) > tolerance
-                ), None)
-                if path_violation:
-                    trajectory["outcome"] = f"path tolerance exceeded for {path_violation}"
-                    trajectory["result_code"] = FollowJointTrajectory.Result.PATH_TOLERANCE_VIOLATED
-                    trajectory["done"].set()
-                    self.trajectory = None
-                    # The setpoint that failed the check must not reach the servos.
-                    action.update(hold_action)
-                elif elapsed >= final_point.time and all(
-                    abs(self.arm_positions[name] - final_point.positions[name]) <= tolerance
-                    for name, tolerance in trajectory["goal_tolerances"].items()
-                ):
-                    trajectory["outcome"] = "succeeded"
-                    trajectory["done"].set()
-                    self.trajectory = None
-                elif elapsed > final_point.time + trajectory["goal_time_tolerance"]:
-                    trajectory["outcome"] = "goal tolerance exceeded"
-                    trajectory["result_code"] = FollowJointTrajectory.Result.GOAL_TOLERANCE_VIOLATED
-                    trajectory["done"].set()
-                    self.trajectory = None
-        if trajectory:
+        if self._apply_trajectory(action, hold_action):
             cmd = Twist()
         # The scales divide here and multiply below: LeRobot's kinematics use a nominal
         # base_radius of 0.125 m, so a robot whose wheels sit elsewhere both under-turns
@@ -1030,30 +1079,37 @@ class LeKiwiDriver(Node):
                 self.clamp(cmd.angular.z, self.max_angular) / self.yaw_scale
             ),
         })
+        # Serialize the final armed check with disarm. Once disarm returns, no
+        # in-flight update can submit a previously prepared non-zero action. Any
+        # other holder is an arm or disarm transaction: skip this cycle's send
+        # rather than stall the loop behind its torque RPC (a disarm queues a stop).
+        if not self.action_lock.acquire(blocking=False):
+            self.publish_state(now.to_msg(), observation, velocity)
+            self.publish_safety()
+            return
+        send_error = None
         try:
-            # Serialize the final armed check with disarm. Once disarm returns, no
-            # in-flight update can submit a previously prepared non-zero action.
-            with self.action_lock:
-                with self.state_lock:
-                    if not self.armed:
-                        return
-                    arm_permitted = self._permission_is_current(
-                        self.arm_motion_permitted,
-                        getattr(self, "_arm_permission_received_at_ns", None),
-                    )
-                    base_permitted = self._permission_is_current(
-                        self.base_motion_permitted,
-                        getattr(self, "_base_permission_received_at_ns", None),
-                    )
-                if not arm_permitted:
-                    self.cancel_trajectory("arm safety permission withdrawn")
-                if not base_permitted:
-                    action["x.vel"] = action["y.vel"] = action["theta.vel"] = 0.0
-                self.robot.send_action(action)
+            with self.state_lock:
+                if not self.armed:
+                    return
+                arm_permitted = self._arm_permission_is_current()
+                base_permitted = self._permission_is_current(
+                    self.base_motion_permitted,
+                    self._base_permission_received_at_ns,
+                )
+            if not arm_permitted:
+                self.cancel_trajectory("arm safety permission withdrawn")
+                # The prepared action may carry that trajectory's setpoint.
+                action.update(hold_action)
+            if not base_permitted:
+                action["x.vel"] = action["y.vel"] = action["theta.vel"] = 0.0
+            self.robot.send_action(action)
         except Exception as error:
-            self.get_logger().error(f"LeKiwi command failed: {error}")
-            self.link_lost = True
-            self.set_disarmed("LINK_LOST")
+            send_error = error
+        finally:
+            self.action_lock.release()
+        if send_error is not None:
+            self.record_link_loss(f"LeKiwi command failed: {send_error}")
             return
 
         self.publish_state(now.to_msg(), observation, velocity)
@@ -1109,7 +1165,7 @@ class LeKiwiDriver(Node):
 
     def publish_motor_health(self, stamp):
         """Publish only the snapshot validated with this fresh host observation."""
-        if not getattr(self, "publish_motor_health_enabled", True):
+        if not self.publish_motor_health_enabled:
             return
         statuses = getattr(self.robot, "observation_motor_health", None)
         if not statuses:
@@ -1135,11 +1191,13 @@ class LeKiwiDriver(Node):
 
     def destroy_node(self):
         try:
-            # ROS-stack shutdown is a disarm event. The separately supervised
-            # host otherwise remains alive and could retain servo torque.
-            # SIGINT may already have invalidated the rcl context. Physical
-            # disarm must still run, but publishing through a dead context
-            # would turn a clean shutdown into exit code 1.
+            # ROS-stack shutdown disarms logically: commands stop and any
+            # trajectory is canceled. Like any other failure it cuts servo
+            # torque only with disarm_on_failure; by default the separately
+            # supervised host keeps the arm held with torque on and its command
+            # watchdog stops the base. SIGINT may already have invalidated the
+            # rcl context, so publish only while it is still valid; publishing
+            # through a dead context would turn a clean shutdown into exit code 1.
             self.set_disarmed(
                 "DISARMED", publish=rclpy.ok(context=self.context)
             )
@@ -1159,7 +1217,9 @@ def main():
 
     signal.signal(signal.SIGTERM, on_sigterm)
     node = LeKiwiDriver()
-    executor = MultiThreadedExecutor(num_threads=3)
+    # One thread each for update(), the arm/disarm transition group and a running
+    # trajectory goal, plus two so permission callbacks can revoke while those block.
+    executor = MultiThreadedExecutor(num_threads=5)
     executor.add_node(node)
     try:
         executor.spin()

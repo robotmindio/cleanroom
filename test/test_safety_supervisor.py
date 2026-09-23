@@ -3,7 +3,9 @@
 import math
 import struct
 from pathlib import Path
+import types
 
+import pytest
 import yaml
 from sensor_msgs.msg import BatteryState, LaserScan, PointCloud2, PointField
 from diagnostic_msgs.msg import DiagnosticStatus
@@ -40,6 +42,19 @@ def test_tracked_permission_lease_is_shorter_than_supervisor_state_deadline():
             (root / "config" / name).read_text(encoding="utf-8")
         )["safety_supervisor"]["ros__parameters"]
         assert 0.0 < parameters["permission_timeout"] < parameters["state_timeout"]
+
+
+def test_production_requires_only_inputs_the_shipped_robot_publishes():
+    # No bumper, IMU or battery monitor is fitted and the E-stop is a power cut
+    # outside the electronics: requiring them would keep strict mode denying forever.
+    root = Path(__file__).parents[1]
+    parameters = yaml.safe_load(
+        (root / "config" / "safety_production.yaml").read_text(encoding="utf-8")
+    )["safety_supervisor"]["ros__parameters"]
+    for name in ("require_bumper", "require_estop", "require_battery", "require_imu"):
+        assert parameters[name] is False, name
+    ekf = yaml.safe_load((root / "config" / "ekf.yaml").read_text(encoding="utf-8"))
+    assert not any(key.startswith("imu") for key in ekf["ekf_filter_node"]["ros__parameters"])
 
 
 def test_production_requires_arm_workspace_gate_but_simulation_profile_does_not():
@@ -473,3 +488,27 @@ def test_a_non_strict_supervisor_reports_faults_but_never_withholds_motion():
     assert domestic.state == SafetyState.BOOT and domestic.faults == denied.faults
 
     assert permit_unless_strict(denied, strict=True) == denied
+
+
+def test_strict_enforcement_is_fixed_when_the_supervisor_starts():
+    rclpy = pytest.importorskip("rclpy")
+    from rclpy.parameter import Parameter
+    from lekiwi_rmf.safety_supervisor import SafetySupervisor
+
+    rclpy.init(args=[
+        "--ros-args", "-p", "strict:=true", "-p", "require_acceptance:=false",
+    ])
+    node = None
+    try:
+        node = SafetySupervisor()
+        # Fault latching was chosen at construction; flipping the parameter later
+        # must not turn permission enforcement off underneath it.
+        node.set_parameters([Parameter("strict", value=False)])
+        published = []
+        node._base_pub = types.SimpleNamespace(publish=published.append)
+        node._publish()
+        assert published[-1].data is False  # nothing has reported: strict denies
+    finally:
+        if node is not None:
+            node.destroy_node()
+        rclpy.try_shutdown()
