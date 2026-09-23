@@ -26,6 +26,7 @@ EXPECTED_CTESTS = (
     "test_odometry", "test_motor_health", "test_odom_scale", "test_free_space",
     "test_camera_relay", "test_astra_pro_configuration", "test_astra_cloud_filter",
     "test_remote_astra_service", "test_arm_trajectory", "test_arm_calibration",
+    "test_capture_stow",
     "test_collision_model", "test_vendor_lekiwi_model", "test_driver_link",
     "test_cmd_vel_mux", "test_teleop", "test_readiness_gate", "test_sim_host_tools",
     "test_rtabmap_db_maintenance", "test_torque_control", "test_lidar_detection",
