@@ -10,7 +10,7 @@ from control_msgs.action import FollowJointTrajectory
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from geometry_msgs.msg import TransformStamped, Twist
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
-from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
 from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
@@ -137,6 +137,9 @@ class LeKiwiDriver(Node):
         self.last_observation_token = None
         self.last_fresh = now
         self.link_lost = False
+        # When update() last accepted telemetry that passed the host-session and
+        # torque-readback checks; the automatic arm acts only on such telemetry.
+        self._healthy_telemetry_at = None
         self.armed = False
         self.torque_fault = False
         self.base_motion_permitted = False
@@ -194,8 +197,22 @@ class LeKiwiDriver(Node):
             Bool, self.arm_permission_topic, self.on_arm_permission, safety_qos,
             callback_group=self.safety_callback_group,
         )
-        self.create_service(Trigger, "safety/arm", self.arm)
-        self.create_service(Trigger, "safety/disarm", self.disarm)
+        # A torque RPC blocks for up to torque_control_timeout_ms per attempt, twice.
+        # Arm, disarm and the automatic arm run in their own group so they serialize
+        # with each other but never stall update(), its safety/state heartbeat or
+        # permission-lease enforcement; update() skips a send while one is in flight.
+        self.transition_callback_group = MutuallyExclusiveCallbackGroup()
+        self.create_service(
+            Trigger, "safety/arm", self.arm,
+            callback_group=self.transition_callback_group,
+        )
+        self.create_service(
+            Trigger, "safety/disarm", self.disarm,
+            callback_group=self.transition_callback_group,
+        )
+        self.create_timer(
+            0.1, self.auto_arm_tick, callback_group=self.transition_callback_group
+        )
         self.trajectory_server = ActionServer(
             self, FollowJointTrajectory, "arm_controller/follow_joint_trajectory",
             execute_callback=self.execute_trajectory, goal_callback=self.accept_trajectory,
@@ -392,6 +409,9 @@ class LeKiwiDriver(Node):
 
             # Never hold state_lock across a service/network operation. action_lock
             # still guarantees that an arm or command cannot overtake this cut.
+            # DEBT(#5): with disarm_on_failure, a failure found by update() runs this
+            # cut on the control loop, stalling its heartbeat for up to the RPC
+            # timeout. Revisit when strict mode is used on hardware.
             torque_cut = self.cut_torque_after_failure() if not deliberate else self.set_servo_torque(False)
             with self.state_lock:
                 if not torque_cut:
@@ -479,6 +499,18 @@ class LeKiwiDriver(Node):
             state = "TORQUE_FAULT" if self.torque_fault else "DISARMED"
         self.publish_safety(state)
         return outcome, torque_cut
+
+    def auto_arm_tick(self):
+        """Attempt the automatic arm off the control loop: its torque RPC can take seconds."""
+        with self.state_lock:
+            # Checked first so an idle tick never contends for action_lock.
+            if not self.auto_arm_pending or self.armed or self._healthy_telemetry_at is None:
+                return False
+            healthy_at = self._healthy_telemetry_at
+        age = (self.get_clock().now() - healthy_at).nanoseconds / 1e9
+        if not 0.0 <= age <= self.link_timeout:
+            return False
+        return self.arm_after_startup_telemetry()
 
     def arm_after_startup_telemetry(self):
         """Arm after validated telemetry: at startup, and by default after every failure."""
@@ -809,6 +841,10 @@ class LeKiwiDriver(Node):
         if reported is None:
             # No accepted telemetry has reported physical state yet.
             return False
+        if self.action_lock.locked():
+            # An arm or disarm transaction is changing torque right now and
+            # settles the logical state itself once the host confirms.
+            return False
         with self.state_lock:
             logical = self.armed
         if reported == logical:
@@ -895,7 +931,8 @@ class LeKiwiDriver(Node):
             self.arm_positions = arm_positions
         self.handle_host_session_change()
         self.enforce_reported_torque_state()
-        self.arm_after_startup_telemetry()
+        with self.state_lock:
+            self._healthy_telemetry_at = now
         if self.link_lost:
             # The recovered sample establishes a new origin. Never integrate
             # a reported velocity across an interval with no telemetry.
@@ -937,8 +974,10 @@ class LeKiwiDriver(Node):
     def _send_pending_stop(self, now, observation, velocity):
         """While disarmed, send one zero-velocity hold after each disarm."""
         send_error = None
-        try:
-            with self.action_lock:
+        # A torque transition in flight owns the actuators: skip this cycle's
+        # stop (it stays pending) rather than stall the loop behind its RPC.
+        if self.action_lock.acquire(blocking=False):
+            try:
                 with self.state_lock:
                     # An arm request may have completed after the snapshot.
                     # In that case, skip this cycle rather than sending a
@@ -956,8 +995,10 @@ class LeKiwiDriver(Node):
                     with self.state_lock:
                         if not self.armed:
                             self.stop_pending = False
-        except Exception as error:
-            send_error = error
+            except Exception as error:
+                send_error = error
+            finally:
+                self.action_lock.release()
         if send_error is not None:
             self.get_logger().error(f"LeKiwi stop command failed: {send_error}")
             self.link_lost = True
@@ -1037,27 +1078,37 @@ class LeKiwiDriver(Node):
                 self.clamp(cmd.angular.z, self.max_angular) / self.yaw_scale
             ),
         })
+        # Serialize the final armed check with disarm. Once disarm returns, no
+        # in-flight update can submit a previously prepared non-zero action. Any
+        # other holder is an arm or disarm transaction: skip this cycle's send
+        # rather than stall the loop behind its torque RPC (a disarm queues a stop).
+        if not self.action_lock.acquire(blocking=False):
+            self.publish_state(now.to_msg(), observation, velocity)
+            self.publish_safety()
+            return
+        send_error = None
         try:
-            # Serialize the final armed check with disarm. Once disarm returns, no
-            # in-flight update can submit a previously prepared non-zero action.
-            with self.action_lock:
-                with self.state_lock:
-                    if not self.armed:
-                        return
-                    arm_permitted = self._arm_permission_is_current()
-                    base_permitted = self._permission_is_current(
-                        self.base_motion_permitted,
-                        self._base_permission_received_at_ns,
-                    )
-                if not arm_permitted:
-                    self.cancel_trajectory("arm safety permission withdrawn")
-                    # The prepared action may carry that trajectory's setpoint.
-                    action.update(hold_action)
-                if not base_permitted:
-                    action["x.vel"] = action["y.vel"] = action["theta.vel"] = 0.0
-                self.robot.send_action(action)
+            with self.state_lock:
+                if not self.armed:
+                    return
+                arm_permitted = self._arm_permission_is_current()
+                base_permitted = self._permission_is_current(
+                    self.base_motion_permitted,
+                    self._base_permission_received_at_ns,
+                )
+            if not arm_permitted:
+                self.cancel_trajectory("arm safety permission withdrawn")
+                # The prepared action may carry that trajectory's setpoint.
+                action.update(hold_action)
+            if not base_permitted:
+                action["x.vel"] = action["y.vel"] = action["theta.vel"] = 0.0
+            self.robot.send_action(action)
         except Exception as error:
-            self.get_logger().error(f"LeKiwi command failed: {error}")
+            send_error = error
+        finally:
+            self.action_lock.release()
+        if send_error is not None:
+            self.get_logger().error(f"LeKiwi command failed: {send_error}")
             self.link_lost = True
             self.set_disarmed("LINK_LOST")
             return
@@ -1167,7 +1218,9 @@ def main():
 
     signal.signal(signal.SIGTERM, on_sigterm)
     node = LeKiwiDriver()
-    executor = MultiThreadedExecutor(num_threads=3)
+    # One thread each for update(), the arm/disarm transition group and a running
+    # trajectory goal, plus two so permission callbacks can revoke while those block.
+    executor = MultiThreadedExecutor(num_threads=5)
     executor.add_node(node)
     try:
         executor.spin()

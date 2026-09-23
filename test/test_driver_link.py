@@ -27,7 +27,7 @@ _NODE.body = [
         "on_base_permission", "on_arm_permission",
         "twist_is_finite", "record_link_loss", "update", "validate_motion_parameters",
         "_poll_telemetry", "_hold_action", "_send_pending_stop", "_apply_trajectory",
-        "_send_armed_command",
+        "_send_armed_command", "auto_arm_tick",
     )
 ]
 driver = types.ModuleType("driver_under_test")
@@ -52,6 +52,7 @@ def make_node(**overrides):
         "armed": False,
         "torque_fault": False,
         "link_lost": False,
+        "_healthy_telemetry_at": None,
         "stop_pending": True,
         "base_motion_permitted": False,
         "arm_motion_permitted": False,
@@ -1014,16 +1015,18 @@ def test_a_failed_automatic_rearm_is_retried_at_a_bounded_rate():
     assert node.arm_after_startup_telemetry() is True
 
 
-def test_arm_permission_withdrawn_at_the_final_check_holds_the_arm():
-    class Stamp:
-        nanoseconds = 0
+class _Stamp:
+    nanoseconds = 0
 
-        def __sub__(self, _other):
-            return self
+    def __sub__(self, _other):
+        return self
 
-        def to_msg(self):
-            return object()
+    def to_msg(self):
+        return object()
 
+
+def control_loop_node(**overrides):
+    """A driver whose update() runs against one healthy observation of joint ``joint``."""
     def vector():
         return types.SimpleNamespace(x=0.0, y=0.0, z=0.0)
 
@@ -1031,21 +1034,39 @@ def test_arm_permission_withdrawn_at_the_final_check_holds_the_arm():
     driver.ARM_JOINTS = ("joint",)
     driver.joint_positions = lambda *_: {"joint": 0.0}
     driver.integrate_pose = lambda pose, _velocity, _dt: pose
-    # The active trajectory's setpoint is well away from the measured position.
-    driver.sample_trajectory = lambda *_: ({"joint": 0.5}, {}, {})
-    driver.action_positions = lambda names, values, *_: dict(zip(names, values))
-    sent = []
-    canceled = []
     node = make_node(
-        armed=True,
         command=driver.Twist(),
-        command_stamp=Stamp(),
-        last_fresh=Stamp(),
+        command_stamp=_Stamp(),
+        last_fresh=_Stamp(),
         arm_zero_positions={},
         arm_directions={},
         arm_positions={"joint": 0.0},
         pose=(0.0, 0.0, 0.0),
         xy_scale=1.0, yaw_scale=1.0, max_linear=1.0, max_angular=1.0,
+        **overrides,
+    )
+    node.sent = []
+    node.heartbeats = []
+    node.get_clock = lambda: types.SimpleNamespace(now=_Stamp)
+    node.robot = types.SimpleNamespace(
+        get_observation=lambda: {"joint.pos": 0.0, "x.vel": 0.0, "y.vel": 0.0, "theta.vel": 0.0},
+        send_action=node.sent.append,
+    )
+    node.odom_samples = types.SimpleNamespace(
+        accept=lambda *_: None, reset=lambda: None, discontinuity=None
+    )
+    node.publish_state = lambda *_: None
+    node.publish_safety = lambda *args: node.heartbeats.append(args)
+    return node
+
+
+def test_arm_permission_withdrawn_at_the_final_check_holds_the_arm():
+    # The active trajectory's setpoint is well away from the measured position.
+    driver.sample_trajectory = lambda *_: ({"joint": 0.5}, {}, {})
+    driver.action_positions = lambda names, values, *_: dict(zip(names, values))
+    canceled = []
+    node = control_loop_node(
+        armed=True,
         trajectory={
             "start": time.monotonic(),
             "done": threading.Event(),
@@ -1061,19 +1082,94 @@ def test_arm_permission_withdrawn_at_the_final_check_holds_the_arm():
     # The withdrawal lands after this cycle's lease check but before the final
     # armed/permission check under action_lock.
     node.enforce_permission_leases = lambda: False
-    node.get_clock = lambda: types.SimpleNamespace(now=Stamp)
-    node.robot = types.SimpleNamespace(
-        get_observation=lambda: {"joint.pos": 0.0, "x.vel": 0.0, "y.vel": 0.0, "theta.vel": 0.0},
-        send_action=sent.append,
-    )
-    node.odom_samples = types.SimpleNamespace(
-        accept=lambda *_: None, reset=lambda: None, discontinuity=None
-    )
     node.cancel_trajectory = canceled.append
-    node.publish_state = lambda *_: None
-    node.publish_safety = lambda *_: None
 
     node.update()
 
     assert canceled == ["arm safety permission withdrawn"]
-    assert sent == [{"joint.pos": 0.0, "x.vel": 0.0, "y.vel": 0.0, "theta.vel": 0.0}]
+    assert node.sent == [{"joint.pos": 0.0, "x.vel": 0.0, "y.vel": 0.0, "theta.vel": 0.0}]
+
+
+@pytest.mark.parametrize("armed", [False, True])
+def test_control_loop_keeps_its_heartbeat_while_a_torque_transition_is_in_flight(armed):
+    node = control_loop_node(armed=armed, stop_pending=True)
+    grant_fresh_arm_permission(node)
+    grant_fresh_base_permission(node)
+    node.action_lock.acquire()  # an arm/disarm RPC that has not answered yet
+    try:
+        worker = threading.Thread(target=node.update)
+        worker.start()
+        worker.join(1.0)
+        assert not worker.is_alive(), "update() waited for the torque transition"
+    finally:
+        node.action_lock.release()
+
+    assert node.sent == []
+    assert node.heartbeats == [()]
+    assert node.stop_pending is True
+    assert node._healthy_telemetry_at is not None
+
+    node.last_observation_token = None  # the next packet from the host
+    node.update()  # once the transition is done, the loop sends again
+    assert len(node.sent) == 1
+
+
+def test_host_torque_readback_is_not_enforced_during_a_transition():
+    node = make_node(armed=False)
+    node.robot = types.SimpleNamespace(observation_torque_enabled=True)
+    disarms = []
+    node.set_disarmed = disarms.append
+    node.get_logger = lambda: types.SimpleNamespace(error=lambda *_: None)
+
+    node.action_lock.acquire()  # an arm transaction has enabled torque but not committed
+    try:
+        assert node.enforce_reported_torque_state() is False
+    finally:
+        node.action_lock.release()
+    assert disarms == []
+
+    assert node.enforce_reported_torque_state() is True
+    assert disarms == ["DISARMED"]
+
+
+def test_automatic_arm_tick_acts_only_on_recent_healthy_telemetry():
+    class Time:
+        def __init__(self, ns):
+            self.nanoseconds = ns
+
+        def __sub__(self, other):
+            return Time(self.nanoseconds - other.nanoseconds)
+
+    current = {"ns": 0}
+    attempts = []
+    node = make_node(auto_arm_pending=True)
+    node.get_clock = lambda: types.SimpleNamespace(now=lambda: Time(current["ns"]))
+    node.arm_after_startup_telemetry = lambda: attempts.append(True) or True
+
+    assert node.auto_arm_tick() is False  # no telemetry has passed the checks yet
+    node._healthy_telemetry_at = Time(0)
+    current["ns"] = 2_000_000_000
+    assert node.auto_arm_tick() is False  # older than link_timeout
+    current["ns"] = 500_000_000
+    assert node.auto_arm_tick() is True
+    assert attempts == [True]
+
+    node.auto_arm_pending = False
+    node.action_lock.acquire()  # an idle tick must not even contend for the lock
+    try:
+        assert node.auto_arm_tick() is False
+    finally:
+        node.action_lock.release()
+    assert attempts == [True]
+
+
+def test_torque_transitions_run_outside_the_control_loop_callback_group():
+    source = " ".join(_SOURCE.split())
+    for registration in (
+        'Trigger, "safety/arm", self.arm,',
+        'Trigger, "safety/disarm", self.disarm,',
+        "0.1, self.auto_arm_tick,",
+    ):
+        assert f"{registration} callback_group=self.transition_callback_group" in source
+    # update() stays in the node's default group, apart from every torque RPC.
+    assert "self.create_timer(0.05, self.update)" in source
