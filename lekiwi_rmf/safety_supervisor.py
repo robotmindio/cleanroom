@@ -387,6 +387,15 @@ def _polygon_boundary_distance(first, second) -> float:
     )
 
 
+def _finite_number(value: object) -> bool:
+    """A real YAML number: not a bool, NaN, or infinity."""
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+    )
+
+
 def _nav2_stop_zone_clearance(nav2_path: str | Path, acceptance: dict) -> tuple[bool, str]:
     """Bind acceptance to Nav2's footprint and measured StopZone clearance."""
     try:
@@ -399,9 +408,7 @@ def _nav2_stop_zone_clearance(nav2_path: str | Path, acceptance: dict) -> tuple[
         )
         expected_padding = acceptance.get("expected_footprint_padding_m")
         if (
-            not isinstance(expected_padding, (int, float))
-            or isinstance(expected_padding, bool)
-            or not math.isfinite(expected_padding)
+            not _finite_number(expected_padding)
             or expected_padding < 0.0
         ):
             return False, "accepted footprint padding is invalid"
@@ -415,9 +422,7 @@ def _nav2_stop_zone_clearance(nav2_path: str | Path, acceptance: dict) -> tuple[
                 return False, f"Nav2 {costmap_name} footprint differs from accepted footprint"
             padding = parameters.get("footprint_padding", 0.0)
             if (
-                not isinstance(padding, (int, float))
-                or isinstance(padding, bool)
-                or not math.isfinite(padding)
+                not _finite_number(padding)
                 or abs(float(padding) - float(expected_padding)) > 1e-9
             ):
                 return False, f"Nav2 {costmap_name} footprint padding differs from acceptance"
@@ -472,13 +477,11 @@ def validate_acceptance_file(
     if isinstance(minimum_trials, bool) or not isinstance(minimum_trials, int) or minimum_trials < 30:
         return False, "at least 30 trials per direction are required"
     latency = data.get("maximum_command_stop_latency_s")
-    if not isinstance(latency, (int, float)) or isinstance(latency, bool) or not math.isfinite(latency) or latency <= 0:
+    if not _finite_number(latency) or latency <= 0:
         return False, "measured stop latency is invalid"
     allowed_latency = data.get("maximum_allowed_command_stop_latency_s")
     if (
-        not isinstance(allowed_latency, (int, float))
-        or isinstance(allowed_latency, bool)
-        or not math.isfinite(allowed_latency)
+        not _finite_number(allowed_latency)
         or allowed_latency <= 0
         or latency > allowed_latency
     ):
@@ -486,13 +489,9 @@ def validate_acceptance_file(
     allowed_distance = data.get("maximum_allowed_stopping_distance_m")
     uncertainty = data.get("measurement_uncertainty_m")
     if (
-        not isinstance(allowed_distance, (int, float))
-        or isinstance(allowed_distance, bool)
-        or not math.isfinite(allowed_distance)
+        not _finite_number(allowed_distance)
         or allowed_distance <= 0
-        or not isinstance(uncertainty, (int, float))
-        or isinstance(uncertainty, bool)
-        or not math.isfinite(uncertainty)
+        or not _finite_number(uncertainty)
         or uncertainty < 0
     ):
         return False, "stopping-distance limit or measurement uncertainty is invalid"
@@ -511,7 +510,7 @@ def validate_acceptance_file(
         ):
             return False, f"{direction} has too few stopping trials"
         distance = result.get("worst_stopping_distance_m")
-        if not isinstance(distance, (int, float)) or isinstance(distance, bool) or not math.isfinite(distance) or distance <= 0:
+        if not _finite_number(distance) or distance <= 0:
             return False, f"{direction} stopping distance is invalid"
         if distance + uncertainty > allowed_distance:
             return False, f"{direction} stopping distance plus uncertainty exceeds its acceptance limit"
@@ -535,8 +534,7 @@ def validate_acceptance_file(
         return False, "required fault-response tests have not all passed"
     payload = data.get("payload_kg")
     if (
-        not isinstance(payload, (int, float)) or isinstance(payload, bool)
-        or not math.isfinite(payload) or payload < 0
+        not _finite_number(payload) or payload < 0
         or not isinstance(data.get("surface"), str) or not data["surface"].strip()
     ):
         return False, "acceptance must identify a valid payload and test surface"
@@ -553,9 +551,7 @@ def validate_acceptance_file(
     for name, configured in expected_stow.items():
         accepted = accepted_stow[name]
         if (
-            not isinstance(accepted, (int, float))
-            or isinstance(accepted, bool)
-            or not math.isfinite(accepted)
+            not _finite_number(accepted)
             or not math.isfinite(configured)
             or abs(float(accepted) - float(configured)) > 1e-9
         ):
