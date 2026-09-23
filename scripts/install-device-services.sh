@@ -27,6 +27,7 @@ PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 UNIT_DIR=/etc/systemd/system
 # shellcheck source=/dev/null
 source "$PROJECT_ROOT/scripts/lib/runtime-common.sh"
+load_lekiwi_env "$PROJECT_ROOT/.env"
 
 log() { printf '\n==> %s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
@@ -225,8 +226,9 @@ restart_changed_units
 
 log "Granting $LEKIWI_SERVICE_USER non-interactive deployment control"
 as_root "$PROJECT_ROOT/scripts/install-deploy-sudoers.sh" device --user "$LEKIWI_SERVICE_USER"
-log "Disabling Wi-Fi power saving and granting network control"
-as_root "$PROJECT_ROOT/scripts/install-device-network.sh" --user "$LEKIWI_SERVICE_USER"
+log "Setting the Wi-Fi country, disabling power saving and granting network control"
+as_root "$PROJECT_ROOT/scripts/install-device-network.sh" --user "$LEKIWI_SERVICE_USER" \
+  --country "${LEKIWI_WIFI_COUNTRY:-ID}"
 record_service_fingerprint device
 
 if [[ -f $UNIT_DIR/lekiwi-stack.service ]]; then

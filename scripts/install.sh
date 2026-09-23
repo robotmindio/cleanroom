@@ -13,6 +13,9 @@ die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 trap 'printf "error: installer failed at line %s\n" "$LINENO" >&2' ERR
 # shellcheck source=/dev/null
 source "$PROJECT_ROOT/scripts/thirdparty-common.sh"
+# shellcheck source=/dev/null
+source "$PROJECT_ROOT/scripts/lib/runtime-common.sh"
+load_lekiwi_env "$PROJECT_ROOT/.env"
 
 if [[ ${1:-} == --help ]]; then
   printf 'Usage: LEKIWI_WS=/path/to/workspace %s [--simulation]\n' "$0"
@@ -191,7 +194,7 @@ else
 fi
 
 log "Setting the Wi-Fi regulatory country"
-"${SUDO[@]}" "$PROJECT_ROOT/scripts/install-wifi-regdom.sh"
+"${SUDO[@]}" "$PROJECT_ROOT/scripts/install-wifi-regdom.sh" "${LEKIWI_WIFI_COUNTRY:-ID}"
 
 log "Installing the Zenoh ROS 2 bridge"
 install_zenoh_bridge "$HOME/.local/bin"

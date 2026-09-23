@@ -9,8 +9,9 @@
 #     password (nmcli connection up/modify, Wi-Fi scans). It grants no shell access.
 #
 # Usage: sudo scripts/install-device-network.sh --user USER [--country CC]
-#   --country  two-letter ISO 3166 regulatory country (default ID)
-# LEKIWI_NETWORK_ROOT=DIR writes under DIR and skips NetworkManager checks (tests only).
+#   --country  two-letter ISO 3166 regulatory country; default LEKIWI_WIFI_COUNTRY
+#              from the repository .env, else ID (see install-wifi-regdom.sh)
+# LEKIWI_NETWORK_ROOT=DIR writes under DIR and skips the NetworkManager reload (tests only).
 set -Eeuo pipefail
 
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
@@ -18,33 +19,33 @@ die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 usage="usage: $0 --user USER [--country CC]"
 [[ ${1:-} == --user && $# -ge 2 ]] || die "$usage"
 deploy_user=$2
-country=ID
+country_args=()
 if [[ $# -eq 4 && $3 == --country ]]; then
-  country=$4
+  [[ $4 =~ ^[A-Z]{2}$ ]] || die "--country must be two uppercase letters, not '$4'"
+  country_args=("$4")
 elif [[ $# -ne 2 ]]; then
   die "$usage"
 fi
-[[ $country =~ ^[A-Z]{2}$ ]] || die "--country must be two uppercase letters, not '$country'"
 if [[ ! $deploy_user =~ ^[a-z_][a-z0-9_-]*$ ]] || ! getent passwd "$deploy_user" >/dev/null; then
   die "a valid non-root deployment user is required"
 fi
 [[ $(id -u "$deploy_user") -ne 0 ]] || die "refusing to grant network control to root"
 
 root=${LEKIWI_NETWORK_ROOT:-}
-if [[ -z $root ]]; then
-  [[ $EUID -eq 0 ]] || die "run as root"
-  if ! command -v nmcli >/dev/null; then
-    printf 'NetworkManager is not installed -- nothing to configure\n'
-    exit 0
-  fi
+[[ -n $root || $EUID -eq 0 ]] || die "run as root"
+
+# The radio needs its country with or without NetworkManager.
+"$(dirname -- "${BASH_SOURCE[0]}")/install-wifi-regdom.sh" "${country_args[@]}"
+
+if ! command -v nmcli >/dev/null; then
+  printf 'NetworkManager is not installed -- no power-saving or polkit settings to install\n'
+  exit 0
 fi
 
 nm_conf=$root/etc/NetworkManager/conf.d/zz-lekiwi-wifi-powersave-off.conf
 polkit_rule=$root/etc/polkit-1/rules.d/50-lekiwi-networkmanager.rules
 
 install -d -m 0755 "${nm_conf%/*}" "${polkit_rule%/*}"
-
-"$(dirname -- "${BASH_SOURCE[0]}")/install-wifi-regdom.sh" "$country"
 
 # wifi.powersave: 2 = disable. The zz- prefix sorts after the distribution's
 # default-wifi-powersave-on.conf, and later files win.

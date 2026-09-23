@@ -454,50 +454,117 @@ def test_service_fingerprint_covers_installed_service_behavior():
         assert source in revision
 
 
-def test_device_network_installer_sets_wifi_country_disables_power_saving_and_scopes_polkit(tmp_path):
-    user = getpass.getuser()
-    if user == "root":
-        return  # the installer refuses to grant network control to root
+def _network_checkout(tmp_path: pathlib.Path, env_file: str | None = None) -> pathlib.Path:
+    """A copy of the network installers, so the developer's own .env cannot leak in."""
+    checkout = tmp_path / "checkout"
+    for name in ("install-device-network.sh", "install-wifi-regdom.sh", "lib/runtime-common.sh"):
+        target = checkout / "scripts" / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / "scripts" / name, target)
+    if env_file is not None:
+        (checkout / ".env").write_text(env_file, encoding="utf-8")
+    return checkout
 
-    def install(*extra):
-        return subprocess.run(
-            [str(ROOT / "scripts" / "install-device-network.sh"), "--user", user, *extra],
-            env={**os.environ, "LEKIWI_NETWORK_ROOT": str(tmp_path)},
-            check=True, capture_output=True, text=True,
-        )
 
-    install()
-    install()  # re-running is idempotent
+def _network_path(tmp_path: pathlib.Path, *, nmcli: bool) -> tuple[str, pathlib.Path]:
+    """A PATH of only what the installers need, with iw and nmcli replaced by fakes."""
+    tools = tmp_path / "tools"
+    tools.mkdir(exist_ok=True)
+    for command in ("bash", "cat", "dirname", "getent", "grep", "id", "install"):
+        link = tools / command
+        if not link.exists():
+            link.symlink_to(shutil.which(command))
+    iw_log = tmp_path / "iw.log"
+    _executable(tools / "iw", f'echo "$*" >> "{iw_log}"\n')
+    if nmcli:
+        _executable(tools / "nmcli", "exit 0\n")
+    elif (tools / "nmcli").exists():
+        (tools / "nmcli").unlink()
+    return str(tools), iw_log
 
-    regdom = tmp_path / "etc/modprobe.d/lekiwi-cfg80211-regdom.conf"
-    assert "options cfg80211 ieee80211_regdom=ID" in regdom.read_text()
-    install("--country", "MX")
-    assert "ieee80211_regdom=MX" in regdom.read_text()
-    bad_country = subprocess.run(
-        [str(ROOT / "scripts" / "install-device-network.sh"), "--user", user, "--country", "idn"],
-        env={**os.environ, "LEKIWI_NETWORK_ROOT": str(tmp_path)},
-        capture_output=True, text=True,
+
+def _network_install(tmp_path, checkout, *args, nmcli=True, user=None):
+    path, _ = _network_path(tmp_path, nmcli=nmcli)
+    environment = {k: v for k, v in os.environ.items() if k != "LEKIWI_WIFI_COUNTRY"}
+    environment.update(PATH=path, LEKIWI_NETWORK_ROOT=str(tmp_path / "root"))
+    return subprocess.run(
+        [str(checkout / "scripts" / "install-device-network.sh"), "--user", user or getpass.getuser(), *args],
+        env=environment, capture_output=True, text=True,
     )
-    assert bad_country.returncode != 0
-    assert "ieee80211_regdom=MX" in regdom.read_text()
-    install()
 
-    powersave = (tmp_path / "etc/NetworkManager/conf.d/zz-lekiwi-wifi-powersave-off.conf").read_text()
+
+@pytest.mark.skipif(getpass.getuser() == "root", reason="the installer refuses to grant network control to root")
+def test_wifi_country_follows_the_configuration_on_every_rerun(tmp_path):
+    regdom = tmp_path / "root/etc/modprobe.d/lekiwi-cfg80211-regdom.conf"
+    iw_log = tmp_path / "iw.log"
+
+    default = _network_checkout(tmp_path / "default")
+    assert _network_install(tmp_path, default).returncode == 0
+    assert "options cfg80211 ieee80211_regdom=ID" in regdom.read_text()
+    assert iw_log.read_text().splitlines() == ["reg set ID"]
+
+    configured = _network_checkout(tmp_path / "configured", "LEKIWI_WIFI_COUNTRY=MX\n")
+    for _ in range(2):  # a rerun without --country keeps the configured country
+        result = _network_install(tmp_path, configured)
+        assert result.returncode == 0, result.stderr
+        assert "ieee80211_regdom=MX" in regdom.read_text()
+    assert iw_log.read_text().splitlines()[-2:] == ["reg set MX", "reg set MX"]
+
+    assert _network_install(tmp_path, configured, "--country", "DE").returncode == 0
+    assert "ieee80211_regdom=DE" in regdom.read_text()
+    rejected = _network_install(tmp_path, configured, "--country", "idn")
+    assert rejected.returncode != 0
+    assert "ieee80211_regdom=DE" in regdom.read_text()
+
+    invalid = _network_checkout(tmp_path / "invalid", "LEKIWI_WIFI_COUNTRY=id\n")
+    assert _network_install(tmp_path, invalid).returncode != 0
+    assert "ieee80211_regdom=DE" in regdom.read_text()
+
+    # The installers hand the configured country on explicitly.
+    device = (ROOT / "scripts" / "install-device-services.sh").read_text(encoding="utf-8")
+    workstation = (ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
+    assert '--country "${LEKIWI_WIFI_COUNTRY:-ID}"' in device
+    assert 'install-wifi-regdom.sh" "${LEKIWI_WIFI_COUNTRY:-ID}"' in workstation
+    assert device.count('load_lekiwi_env "$PROJECT_ROOT/.env"') == 1
+    assert workstation.count('load_lekiwi_env "$PROJECT_ROOT/.env"') == 1
+
+
+@pytest.mark.skipif(getpass.getuser() == "root", reason="the installer refuses to grant network control to root")
+def test_wifi_country_is_set_without_network_manager_and_boot_overrides_are_reported(tmp_path):
+    checkout = _network_checkout(tmp_path)
+    cmdline = tmp_path / "root/proc/cmdline"
+    cmdline.parent.mkdir(parents=True)
+    cmdline.write_text("console=tty1 cfg80211.ieee80211_regdom=GB rootwait\n")
+
+    result = _network_install(tmp_path, checkout, nmcli=False)
+
+    assert result.returncode == 0, result.stderr
+    assert "ieee80211_regdom=ID" in (tmp_path / "root/etc/modprobe.d/lekiwi-cfg80211-regdom.conf").read_text()
+    assert (tmp_path / "iw.log").read_text().splitlines() == ["reg set ID"]
+    assert "cfg80211.ieee80211_regdom=GB" in result.stderr
+    assert not (tmp_path / "root/etc/NetworkManager").exists()
+    assert not (tmp_path / "root/etc/polkit-1").exists()
+
+
+@pytest.mark.skipif(getpass.getuser() == "root", reason="the installer refuses to grant network control to root")
+def test_device_network_installer_disables_power_saving_and_scopes_polkit(tmp_path):
+    user = getpass.getuser()
+    checkout = _network_checkout(tmp_path)
+    for _ in range(2):  # re-running is idempotent
+        result = _network_install(tmp_path, checkout)
+        assert result.returncode == 0, result.stderr
+
+    powersave = (tmp_path / "root/etc/NetworkManager/conf.d/zz-lekiwi-wifi-powersave-off.conf").read_text()
     assert "[connection]" in powersave and "wifi.powersave = 2" in powersave
 
-    rule = (tmp_path / "etc/polkit-1/rules.d/50-lekiwi-networkmanager.rules").read_text()
+    rule = (tmp_path / "root/etc/polkit-1/rules.d/50-lekiwi-networkmanager.rules").read_text()
     assert f'subject.user == "{user}"' in rule
     assert "org.freedesktop.NetworkManager.network-control" in rule
     assert "org.freedesktop.NetworkManager.settings.modify.system" in rule
     # Only the three named actions: no wildcard match on the NetworkManager namespace.
     assert "indexOf" in rule and "startsWith" not in rule
 
-    refused = subprocess.run(
-        [str(ROOT / "scripts" / "install-device-network.sh"), "--user", "root"],
-        env={**os.environ, "LEKIWI_NETWORK_ROOT": str(tmp_path)},
-        capture_output=True, text=True,
-    )
-    assert refused.returncode != 0
+    assert _network_install(tmp_path, checkout, user="root").returncode != 0
 
 
 def test_torque_on_failure_key_is_validated_and_reaches_both_machines(tmp_path):
