@@ -116,17 +116,46 @@ verify_systemd_units() {
   done
 }
 
-# Units whose rendered file replaced a different installed one. A running
-# service keeps its old environment until restarted, so installers restart
-# these after enabling; a first installation is started by enable --now.
+# Units whose installed configuration differs from what was there before. A
+# running service keeps its old environment until restarted, so installers
+# try-restart these; a first installation is started by enable --now.
 CHANGED_UNITS=()
+
+queue_restart() { # queue_restart <unit>
+  [[ " ${CHANGED_UNITS[*]} " == *" $1 "* ]] || CHANGED_UNITS+=("$1")
+}
 
 install_unit() { # install_unit <unit-file-name>
   local before after
   before=$(as_root sha256sum "$UNIT_DIR/$1" 2>/dev/null || true)
   render_systemd_unit "$PROJECT_ROOT/systemd/$1" "$UNIT_DIR/$1"
   after=$(as_root sha256sum "$UNIT_DIR/$1")
-  [[ -z $before || $before == "$after" ]] || CHANGED_UNITS+=("$1")
+  [[ -z $before || $before == "$after" ]] || queue_restart "$1"
+}
+
+# A unit's configuration outside its unit file (an EnvironmentFile, a drop-in).
+# Creating, changing or removing it queues <unit>: try-restart leaves a stopped
+# unit alone, so the installer's later enable --now starts that one fresh.
+# Content is an argument, not stdin: a pipeline would run this in a subshell and
+# lose the queued restart.
+install_unit_config() { # install_unit_config <destination> <unit> <content>
+  local before after
+  before=$(as_root sha256sum "$1" 2>/dev/null || true)
+  printf '%s' "$3" | as_root tee "$1" >/dev/null
+  after=$(as_root sha256sum "$1")
+  [[ $before == "$after" ]] || queue_restart "$2"
+}
+
+remove_unit_config() { # remove_unit_config <path> <unit>
+  [[ -e $1 ]] || return 0
+  as_root rm -f "$1"
+  queue_restart "$2"
+}
+
+restart_changed_units() { # after daemon-reload; running units only
+  (( ${#CHANGED_UNITS[@]} )) || return 0
+  log "Restarting units whose installed configuration changed: ${CHANGED_UNITS[*]}"
+  as_root systemctl try-restart "${CHANGED_UNITS[@]}"
 }
 
 install_log_rotation() {

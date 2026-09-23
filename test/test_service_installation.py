@@ -207,8 +207,8 @@ def test_split_compute_installs_and_starts_moveit_by_default():
     assert "load_lekiwi_env" in reinstall
     assert "install-compute-services.sh" in reinstall
     assert '--remote "$remote"' in reinstall
-    # The installer restarts the stack; the wrapper must not restart it twice.
-    assert "systemctl restart lekiwi-stack.service" in compute
+    # The installer restarts a changed stack; the wrapper must not restart it again.
+    assert "systemctl restart" not in compute
     assert "systemctl restart" not in reinstall
     assert "start_moveit:=true" in workstation
 
@@ -286,7 +286,54 @@ install_unit lekiwi-host.service
 [[ ${CHANGED_UNITS[*]} == lekiwi-host.service ]]
 '''
     subprocess.run(["bash", "-c", script, "unit-change", str(ROOT), str(tmp_path)], check=True)
-    assert 'systemctl try-restart "${CHANGED_UNITS[@]}"' in device
+    assert "restart_changed_units" in device
+
+
+def test_compute_stack_restarts_only_when_its_configuration_changes(tmp_path):
+    """Replays the compute installer's configuration and start sequence against a fake systemctl."""
+    compute = (ROOT / "scripts" / "install-compute-services.sh").read_text(encoding="utf-8")
+    assert 'install_unit_config "$stack_env" lekiwi-stack.service' in compute
+    assert 'install_unit_config "$topology_conf" lekiwi-stack.service' in compute
+    assert 'remove_unit_config "$topology_conf" lekiwi-stack.service' in compute
+    assert compute.index("restart_changed_units") < compute.index("enable --now lekiwi-stack.service")
+
+    calls = tmp_path / "systemctl.log"
+    fakes = tmp_path / "bin"
+    _executable(fakes / "systemctl", f'echo "$*" >> "{calls}"\n')
+    script = r'''
+set -Eeuo pipefail
+PROJECT_ROOT=$1
+etc=$2
+as_root() { "$@"; }
+log() { :; }
+die() { printf '%s\n' "$*" >&2; exit 1; }
+source "$PROJECT_ROOT/scripts/lib/service-install-common.sh"
+install() { # install <launch arguments> [drop-in]
+  CHANGED_UNITS=()
+  install_unit_config "$etc/lekiwi-stack" lekiwi-stack.service "LEKIWI_STACK_ARGS=$1"
+  if [[ -n ${2:-} ]]; then
+    install_unit_config "$etc/topology.conf" lekiwi-stack.service "[Unit]"
+  else
+    remove_unit_config "$etc/topology.conf" lekiwi-stack.service
+  fi
+  restart_changed_units
+  echo "--"  >> "$etc/../systemctl.log"
+}
+install "remote_ip:=10.0.0.2"             # first installation
+install "remote_ip:=10.0.0.2"             # identical rerun
+install "remote_ip:=10.0.0.3"             # new device address
+install "remote_ip:=10.0.0.3" local       # topology drop-in added
+install "remote_ip:=10.0.0.3" local       # identical rerun
+install "remote_ip:=10.0.0.3"             # drop-in removed
+'''
+    (tmp_path / "etc").mkdir()
+    subprocess.run(
+        ["bash", "-c", script, "compute-restart", str(ROOT), str(tmp_path / "etc")],
+        env={**os.environ, "PATH": f"{fakes}:{os.environ['PATH']}"}, check=True,
+    )
+    runs = calls.read_text(encoding="utf-8").split("--\n")[:-1]
+    restart = "try-restart lekiwi-stack.service\n"
+    assert runs == [restart, "", restart, restart, "", restart]
 
 
 def test_sensor_services_keep_retrying_after_intermittent_usb_resets():

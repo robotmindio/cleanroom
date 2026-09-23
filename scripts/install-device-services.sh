@@ -221,10 +221,7 @@ fi
 as_root systemctl enable --now lekiwi-lidar.service
 [[ $zenoh_available != true ]] || as_root systemctl enable --now lekiwi-zenoh.service
 as_root systemctl enable --now lekiwi-ros-logrotate.timer
-if (( ${#CHANGED_UNITS[@]} )); then
-  log "Restarting units whose installed configuration changed: ${CHANGED_UNITS[*]}"
-  as_root systemctl try-restart "${CHANGED_UNITS[@]}"
-fi
+restart_changed_units
 
 log "Granting $LEKIWI_SERVICE_USER non-interactive deployment control"
 as_root "$PROJECT_ROOT/scripts/install-deploy-sudoers.sh" device --user "$LEKIWI_SERVICE_USER"

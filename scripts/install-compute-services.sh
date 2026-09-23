@@ -5,7 +5,7 @@
 # device half (motors + cameras) can sit on either one.
 #
 # Usage: scripts/install-compute-services.sh [--remote DEVICE_ADDR] [--rosbridge-tailnet]
-#        [--service-user USER] [--workspace PATH] [--curve-dir PATH]
+#        [--service-user USER] [--workspace PATH] [--curve-dir PATH] [--no-start]
 #   no --remote and no LEKIWI_ROBOT_HOST in .env: the device side runs here too; the stack is
 #                 ordered after lekiwi-host.service and starts once its ZMQ
 #                 port answers (camera_source:=local).
@@ -13,8 +13,11 @@
 #                 frames stream from there and relays in the bringup expand
 #                 them into the same canonical topics. The device-side LD06
 #                 service is relayed by default too.
+#   --no-start  : enable the stack but leave a stopped one stopped (deploy-split.sh
+#                 refreshes it between stopping and restarting the robot).
 #
-# Re-run any time the split changes; both installers are idempotent.
+# Re-run any time the split changes; both installers are idempotent. A running
+# stack is restarted only when its unit, drop-in or launch arguments changed.
 set -Eeuo pipefail
 
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
@@ -32,6 +35,7 @@ SERVICE_USER_ARG=""
 WORKSPACE_ARG=""
 CURVE_DIR_ARG=""
 ROSBRIDGE_TAILNET=false
+START_STACK=true
 while [[ $# -gt 0 ]]; do
   case $1 in
     --remote)
@@ -58,7 +62,11 @@ while [[ $# -gt 0 ]]; do
       ROSBRIDGE_TAILNET=true
       shift
       ;;
-    *) die "unknown argument: $1 (usage: $0 [--remote DEVICE_ADDR] [--service-user USER] [--workspace PATH] [--curve-dir PATH] [--rosbridge-tailnet])" ;;
+    --no-start)
+      START_STACK=false
+      shift
+      ;;
+    *) die "unknown argument: $1 (usage: $0 [--remote DEVICE_ADDR] [--service-user USER] [--workspace PATH] [--curve-dir PATH] [--rosbridge-tailnet] [--no-start])" ;;
   esac
 done
 [[ -z $REMOTE || $REMOTE =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || \
@@ -92,9 +100,7 @@ if [[ -n $REMOTE ]]; then
   # There is no local host to depend on. The base unit is remote-safe; remove
   # any local-topology dependency left by an earlier installation.
   log "Remote topology: stack reaches the host at $REMOTE over the network"
-  if [[ -e $topology_conf ]]; then
-    as_root rm -f "$topology_conf"
-  fi
+  remove_unit_config "$topology_conf" lekiwi-stack.service
   if [[ -f $host_unit ]]; then
     log "warning: device services are also installed on this machine -- an"
     log "unusual split. If the devices are actually here, drop --remote."
@@ -104,9 +110,9 @@ else
   # All-in-one: add the local motor host dependency. systemd dependencies
   # cannot be removed by an empty drop-in, so the base unit has none.
   as_root mkdir -p "$topology_dir"
-  printf '%s\n' "[Unit]" "Requires=lekiwi-host.service" \
-    "PartOf=lekiwi-host.service" "After=lekiwi-host.service" |
-    as_root tee "$topology_conf" >/dev/null
+  printf -v topology '%s\n' "[Unit]" "Requires=lekiwi-host.service" \
+    "PartOf=lekiwi-host.service" "After=lekiwi-host.service"
+  install_unit_config "$topology_conf" lekiwi-stack.service "$topology"
   if [[ -f $cameras_unit ]]; then
     # The camera publisher service owns this machine's USB cameras. Letting the
     # stack open them again would fight it for the devices (v4l2 allows one
@@ -159,13 +165,19 @@ verify_systemd_units lekiwi-stack.service
 verify_systemd_units lekiwi-ros-logrotate.service lekiwi-ros-logrotate.timer
 
 stack_env=/etc/default/lekiwi-stack
-printf '# Written by scripts/install-compute-services.sh.\nLEKIWI_STACK_ARGS=%s\n' \
-  "$STACK_ARGS" | as_root tee "$stack_env" >/dev/null
+printf -v stack_config '# Written by scripts/install-compute-services.sh.\nLEKIWI_STACK_ARGS=%s\n' "$STACK_ARGS"
+install_unit_config "$stack_env" lekiwi-stack.service "$stack_config"
 
-log "Reloading systemd and enabling/restarting lekiwi-stack.service"
+log "Reloading systemd and enabling lekiwi-stack.service"
 as_root systemctl daemon-reload
-as_root systemctl enable lekiwi-stack.service
-as_root systemctl restart lekiwi-stack.service
+# Restart first: try-restart skips a stopped stack, which enable --now then starts
+# once, already with the new configuration. An unchanged running stack is left alone.
+restart_changed_units
+if [[ $START_STACK == true ]]; then
+  as_root systemctl enable --now lekiwi-stack.service
+else
+  as_root systemctl enable lekiwi-stack.service
+fi
 as_root systemctl enable --now lekiwi-ros-logrotate.timer
 
 log "Granting $LEKIWI_SERVICE_USER non-interactive deployment control"
