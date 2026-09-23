@@ -111,6 +111,47 @@ def test_missing_lerobot_environment_fails_once_as_configuration_error(tmp_path)
     assert "retrying" not in result.stderr
 
 
+def test_headless_host_refuses_to_answer_the_calibration_prompt_without_a_calibration(tmp_path):
+    venv = tmp_path / "venv"
+    calibration = tmp_path / "home/.cache/huggingface/lerobot/calibration/robots/lekiwi/lekiwi_1.json"
+    stdin_log = tmp_path / "host-stdin"
+    # The fake host records what it was piped, then loses the calibration and exits
+    # like a dropped motor bus: the next attempt must stop instead of prompting.
+    _executable(venv / "bin" / "python", f'cat > "{stdin_log}"\nrm -f "{calibration}"\nexit 1\n')
+    _executable(venv / "bin" / "lerobot-calibrate", "exit 1\n")
+    fakes = tmp_path / "bin"
+    _executable(fakes / "fuser", "exit 1\n")
+    _executable(fakes / "sleep", "exit 0\n")
+    port = tmp_path / "ttyACM0"
+    port.write_text("", encoding="utf-8")
+    environment = {k: v for k, v in os.environ.items() if not k.startswith(("HF_", "LEKIWI_"))}
+    environment.update(
+        HOME=str(tmp_path / "home"), LEKIWI_LEROBOT_VENV=str(venv), LEKIWI_PORT=str(port),
+        PATH=f"{fakes}:{os.environ['PATH']}",
+    )
+
+    def run():
+        return subprocess.run(
+            ["bash", str(ROOT / "scripts" / "robot-host.sh"), "--no-cameras"],
+            cwd=ROOT, env=environment, text=True, capture_output=True, timeout=10,
+        )
+
+    missing = run()
+    assert missing.returncode == 78
+    assert "motor calibration is missing" in missing.stderr
+    assert not stdin_log.exists()
+
+    calibration.parent.mkdir(parents=True)
+    calibration.write_text("{}", encoding="utf-8")
+    lost = run()
+    assert lost.returncode == 78
+    assert stdin_log.read_text(encoding="utf-8") == "\n"
+    assert "retrying the motor-bus connection" in lost.stderr
+
+    unit = (ROOT / "systemd" / "lekiwi-host.service").read_text(encoding="utf-8")
+    assert "RestartPreventExitStatus=78" in unit
+
+
 def test_installer_never_uses_effective_root_as_implicit_service_user():
     helper = (ROOT / "scripts" / "lib" / "service-install-common.sh").read_text(encoding="utf-8")
     assert "SUDO_USER" in helper

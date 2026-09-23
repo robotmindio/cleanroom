@@ -99,7 +99,14 @@ CAMERAS="{$entries}"
 run_host_once() {
   # The servos lose their calibration registers on every power cycle, so connect() stops
   # to ask whether to reuse ~/.cache/.../lekiwi_1.json. Empty answer = reuse it. Without
-  # this the host dies on EOFError whenever it runs without a terminal.
+  # this the host dies on EOFError whenever it runs without a terminal. Without the file
+  # that same answer would start an unattended calibration of a moving robot: refuse, and
+  # exit 78 so systemd (RestartPreventExitStatus=78) stops retrying.
+  [ -f "$CALIBRATION_FILE" ] || {
+    echo "$0: motor calibration is missing: $CALIBRATION_FILE" >&2
+    echo "Calibrate at the robot first: scripts/calibrate.sh motor" >&2
+    exit 78
+  }
   printf '\n' | "$BIN/python" scripts/torque-host.py \
     --robot.id="$ID" --robot.port="$PORT" --robot.cameras="$1" \
     --robot.num_read_retries="$READ_RETRIES" \

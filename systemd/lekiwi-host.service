@@ -58,6 +58,9 @@ RestrictSUIDSGID=true
 UMask=0077
 Restart=on-failure
 RestartSec=10s
+# robot-host.sh exits 78 for configuration a restart cannot fix: a missing LeRobot
+# environment or motor calibration.
+RestartPreventExitStatus=78
 # The ExecStartPost gate retries for up to 120 x (1 s probe + 1 s sleep); the
 # 90 s default would kill a host that is merely slow to find its servos.
 TimeoutStartSec=300s
