@@ -40,7 +40,8 @@ jobs:
             --skip-keys "free_fleet_adapter astra_camera ldlidar_stl_ros2"
       - name: Build and test
         env:
-          ROS_DOMAIN_ID: 237
+          # Each DDS test sets its own domain in CMakeLists.txt; this covers the rest.
+          ROS_DOMAIN_ID: 221
         run: |
           . /opt/ros/jazzy/setup.sh
           colcon build --symlink-install --event-handlers console_cohesion+
@@ -79,10 +80,9 @@ jobs:
             xargs -0 -r shellcheck
       - name: Python coverage report
         env:
-          # Cyclone DDS uses domain IDs in its UDP port calculation; 238
-          # exceeds the valid port range. Keep coverage isolated from the
-          # CTest domains (180-205) while remaining valid for Cyclone DDS.
-          ROS_DOMAIN_ID: 206
+          # Cyclone DDS derives UDP ports from the domain ID, so it must stay
+          # at or below 232. 221 is outside the CTest domains (180-220).
+          ROS_DOMAIN_ID: 221
         run: |
           . /opt/ros/jazzy/setup.sh
           set -euo pipefail
