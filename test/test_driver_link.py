@@ -16,7 +16,7 @@ _NODE.bases = []
 _NODE.body = [
     item for item in _NODE.body
     if getattr(item, "name", None) in (
-        "arm", "disarm", "clamp_planar", "observation_is_fresh", "observation_is_valid",
+        "arm", "disarm", "clamp", "clamp_planar", "observation_is_fresh", "observation_is_valid",
         "handle_host_session_change",
         "enforce_reported_torque_state",
         "arm_after_startup_telemetry", "on_command", "publish_safety", "publish_state", "publish_motor_health",
@@ -1009,3 +1009,68 @@ def test_a_failed_automatic_rearm_is_retried_at_a_bounded_rate():
     node._next_rearm_at = 0.0
     node.set_servo_torque = lambda enabled: node.torque_requests.append(enabled) or True
     assert node.arm_after_startup_telemetry() is True
+
+
+def test_arm_permission_withdrawn_at_the_final_check_holds_the_arm():
+    class Stamp:
+        nanoseconds = 0
+
+        def __sub__(self, _other):
+            return self
+
+        def to_msg(self):
+            return object()
+
+    def vector():
+        return types.SimpleNamespace(x=0.0, y=0.0, z=0.0)
+
+    driver.Twist = lambda: types.SimpleNamespace(linear=vector(), angular=vector())
+    driver.ARM_JOINTS = ("joint",)
+    driver.joint_positions = lambda *_: {"joint": 0.0}
+    driver.integrate_pose = lambda pose, _velocity, _dt: pose
+    # The active trajectory's setpoint is well away from the measured position.
+    driver.sample_trajectory = lambda *_: ({"joint": 0.5}, {}, {})
+    driver.action_positions = lambda names, values, *_: dict(zip(names, values))
+    sent = []
+    canceled = []
+    node = make_node(
+        armed=True,
+        command=driver.Twist(),
+        command_stamp=Stamp(),
+        last_fresh=Stamp(),
+        arm_zero_positions={},
+        arm_directions={},
+        arm_positions={"joint": 0.0},
+        pose=(0.0, 0.0, 0.0),
+        xy_scale=1.0, yaw_scale=1.0, max_linear=1.0, max_angular=1.0,
+        trajectory={
+            "start": time.monotonic(),
+            "done": threading.Event(),
+            "names": ("joint",),
+            "start_positions": {"joint": 0.0},
+            "points": [types.SimpleNamespace(time=10.0, positions={"joint": 0.5})],
+            "path_tolerances": {"joint": 1.0},
+            "goal_tolerances": {"joint": 0.01},
+            "goal_time_tolerance": 1.0,
+        },
+    )
+    grant_fresh_base_permission(node)
+    # The withdrawal lands after this cycle's lease check but before the final
+    # armed/permission check under action_lock.
+    node.enforce_permission_leases = lambda: False
+    node.get_clock = lambda: types.SimpleNamespace(now=Stamp)
+    node.robot = types.SimpleNamespace(
+        get_observation=lambda: {"joint.pos": 0.0, "x.vel": 0.0, "y.vel": 0.0, "theta.vel": 0.0},
+        send_action=sent.append,
+    )
+    node.odom_samples = types.SimpleNamespace(
+        accept=lambda *_: None, reset=lambda: None, discontinuity=None
+    )
+    node.cancel_trajectory = canceled.append
+    node.publish_state = lambda *_: None
+    node.publish_safety = lambda *_: None
+
+    node.update()
+
+    assert canceled == ["arm safety permission withdrawn"]
+    assert sent == [{"joint.pos": 0.0, "x.vel": 0.0, "y.vel": 0.0, "theta.vel": 0.0}]

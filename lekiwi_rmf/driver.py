@@ -1051,6 +1051,8 @@ class LeKiwiDriver(Node):
                     )
                 if not arm_permitted:
                     self.cancel_trajectory("arm safety permission withdrawn")
+                    # The prepared action may carry that trajectory's setpoint.
+                    action.update(hold_action)
                 if not base_permitted:
                     action["x.vel"] = action["y.vel"] = action["theta.vel"] = 0.0
                 self.robot.send_action(action)
