@@ -162,7 +162,7 @@ python3 -c 'import zmq' || die "python3-zmq was not installed for the system Pyt
 if [[ ! -e /etc/ros/rosdep/sources.list.d/20-default.list ]]; then
   "${SUDO[@]}" rosdep init
 fi
-# ponytail: rosdep update has no retry flag and its index fetch times out on slow links
+# ponytail: rosdep update has no retry flag and its index fetch times out on slow links (#13)
 for attempt in 1 2 3; do
   rosdep update && break
   [[ $attempt -lt 3 ]] || die "rosdep update failed after 3 attempts"
@@ -215,7 +215,7 @@ install_zenoh_bridge "$HOME/.local/bin"
 
 log "Creating the ROS-compatible Python environment"
 python3 -m venv --system-site-packages "$WORKSPACE/.venv"
-# ponytail: ROS setup.bash and venv activate both read unset vars; -u must be off for them
+# ponytail: ROS setup.bash and venv activate both read unset vars; -u must be off for them (#14)
 set +u
 # shellcheck disable=SC1090,SC1091
 source "/opt/ros/$ROS_DISTRO/setup.bash"
@@ -238,7 +238,7 @@ python -m pip install \
 if [[ $install_mode == full ]]; then
   log "Creating the LeRobot Python environment"
   # ponytail: LeRobot requires numpy>=2, which cannot coexist with ROS's numpy 1.26 in one
-  # interpreter. Separate venv; only the hardware driver runs in it (see bringup.launch.py).
+  # interpreter. Separate venv; only the hardware driver runs in it (see bringup.launch.py) (#15).
   python3 -m venv --system-site-packages "$WORKSPACE/.venv-lerobot"
   (
     set +u

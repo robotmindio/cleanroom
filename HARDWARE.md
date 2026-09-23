@@ -17,12 +17,11 @@ Motor commands travel over LeRobot ZMQ `5555/tcp`; observations and joint state
 travel over `5556/tcp`. The repository-owned torque safety endpoint is
 `5557/tcp`. The device sensor bridge listens on `7447/tcp` (zenoh, export-only).
 The motor host binds all interfaces by default so the workstation can reach it,
-and none of these listeners is authenticated unless CURVE is configured for the
-ZMQ sockets (`7447` is always plaintext). Keep them on a trusted robot network
-or behind a firewall; see the README's
-[Network exposure](README.md#network-exposure). CURVE protects only the ZMQ
-sockets; it does not secure ROS 2 DDS or zenoh, which remain separate exposures
-unless the deployment isolates them.
+and the ZMQ listeners accept any client unless CURVE is configured; the zenoh
+bridge accepts only mutually authenticated TLS peers. Keep the ZMQ ports on a
+trusted robot network or behind a firewall; see the README's
+[Network security](README.md#network-security). ROS 2 DDS is not secured by
+either and remains a separate exposure unless the deployment isolates it.
 
 In ROS operation the motor host is started camera-less (`--no-cameras`). A
 separate `v4l2_camera` service owns each USB camera and publishes the front and
@@ -304,8 +303,8 @@ For unattended startup, install the device services on the machine that owns
 the serial adapter and USB cameras (`sudo scripts/install-device-services.sh`)
 and the compute service where the ROS workspace runs
 (`sudo scripts/install-compute-services.sh --remote DEVICE_IP`). For the units,
-their options, CURVE keys, and the split-deployment workflow, see the README's
-[Boot services](README.md#boot-services); the installers render, verify, reload
+their options, CURVE keys, and the split-deployment workflow, see
+[Boot services](docs/real-robot.md#boot-services); the installers render, verify, reload
 and enable the units. Inspect them with:
 
 ```bash
@@ -510,7 +509,7 @@ auto-arms. An operator's `/safety/disarm` cuts torque and holds until
 `/safety/arm`. With `LEKIWI_DISARM_ON_FAILURE=true` (larger robots) every
 failure disarms, cuts torque, latches, and waits for an operator to inspect the
 robot and call `/safety/arm`; after a fault, call `/safety/reset_fault` only
-once the driver is disarmed and every required input is healthy. See the
-README's [Arming and recovery](README.md#arming-and-recovery). Keep a
+once the driver is disarmed and every required input is healthy. See
+[Arming and recovery](docs/launch-options.md#arming-and-recovery). Keep a
 hardwired physical E-stop reachable: ROS topics and software torque control
 cannot remove energy after a process, electrical, or mechanical failure.

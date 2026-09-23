@@ -23,7 +23,7 @@ if [ -z "${LEKIWI_WS:-}" ] && [ ! -f "$_lekiwi_workspace/.venv/bin/activate" ] \
 fi
 # ponytail: zsh must use the .zsh variants -- the .bash ones read ${BASH_SOURCE[0]},
 # which is unset in zsh, and the .zsh ones use `builtin cd -q` so a chpwd hook that
-# prints (eza, ls) cannot pollute the command substitution that resolves the prefix.
+# prints (eza, ls) cannot pollute the command substitution that resolves the prefix (#16).
 if [ -n "${ZSH_VERSION:-}" ]; then
   _lekiwi_shell=zsh
 else

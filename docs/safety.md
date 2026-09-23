@@ -35,8 +35,8 @@ failure, but it cannot energize the servos until it has fresh host telemetry and
 current safety-supervisor permission; a failure stops the base and freezes the
 arm with torque on. In strict mode a failed or missing safety input disarms the
 driver, cuts torque, and leaves it disarmed until an operator calls
-`/safety/arm`. An operator's `/safety/disarm` holds in either mode. See the
-[README](../README.md#arming-and-recovery).
+`/safety/arm`. An operator's `/safety/disarm` holds in either mode. See
+[Arming and recovery](launch-options.md#arming-and-recovery).
 
 The diagnostics use these units:
 
