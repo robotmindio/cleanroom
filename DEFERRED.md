@@ -28,6 +28,10 @@ Tracked in [#6](https://github.com/robotmindio/cleanroom/issues/6).
   profile's 6-radian scan requirement. The camera floor-scan fallback is not a
   360-degree scanner and cannot satisfy that requirement or reliably detect
   side, rear, low-contrast and overhanging obstacles.
+- Re-measure `config/lidar_self_mask.yaml` with the RPi 5 table installed.
+  The CAD puts its 9 mm legs across the 88.5 mm LD06 scan plane at roughly
+  90-145 laser-frame degrees and 0.08-0.21 m, outside the current single
+  255-345 degree sector; the filter would need a second sector.
 - Measure the Astra Pro's optical-centre correction and prove that its
   `/camera/depth/points` cloud covers the arm workspace; the driver publishes
   the cloud, but coverage is not established.

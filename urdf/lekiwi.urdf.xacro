@@ -165,6 +165,17 @@
     <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
 
+  <!-- RPi 5 stack: 12x10 through plate, USB carrier and 30 mm-clearance table.
+       The table encloses both PCBs, so its plate-frame bounds plus 4 mm cover
+       the whole stack (test_collision_model). -->
+  <link name="rpi5_stack_collision_proxy">
+    <collision><geometry><box size="0.128 0.108 0.046"/></geometry></collision>
+  </link>
+  <joint name="rpi5_stack_collision_proxy_mount" type="fixed">
+    <parent link="rpi5_through_plate"/><child link="rpi5_stack_collision_proxy"/>
+    <origin xyz="0 0 0.019" rpy="0 0 0"/>
+  </joint>
+
   <!-- Gazebo-only contact and actuator model.  The CAD wheel meshes and their
        measured mass remain vendored and untouched.  These small invisible
        spheres supply the roller contact that the visual-only CAD lacks.  Each

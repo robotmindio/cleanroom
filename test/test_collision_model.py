@@ -47,6 +47,24 @@ def test_arm_has_complete_link_and_servo_collision_envelopes():
     assert all(links[name].find("collision") is not None for name in expected)
 
 
+def test_rpi5_stack_box_encloses_plate_carrier_and_table_with_clearance():
+    robot = _real_robot()
+    joints = {joint.find("child").get("link"): joint for joint in robot.findall("joint")}
+    box = robot.find("link[@name='rpi5_stack_collision_proxy']/collision/geometry/box")
+    assert joints["rpi5_stack_collision_proxy"].find("parent").get("link") == "rpi5_through_plate"
+    half_size = np.fromstring(box.get("size"), sep=" ") / 2
+    centre = np.fromstring(joints["rpi5_stack_collision_proxy"].find("origin").get("xyz"), sep=" ")
+    for name in ("rpi5_through_plate", "rpi5_usb_carrier", "rpi5_table"):
+        offset = np.zeros(3)
+        if name != "rpi5_through_plate":
+            origin = joints[name].find("origin")
+            assert joints[name].find("parent").get("link") == "rpi5_through_plate"
+            assert not np.any(np.fromstring(origin.get("rpy"), sep=" "))
+            offset = np.fromstring(origin.get("xyz"), sep=" ")
+        vertices = _visual_vertices(robot.find(f"link[@name='{name}']/visual")) + offset
+        assert np.all(np.abs(vertices - centre) + 0.004 <= half_size + 1e-6), name
+
+
 def test_long_arm_sections_use_capsules_not_joint_center_spheres():
     robot = _real_robot()
     links = {link.attrib["name"]: link for link in robot.findall("link")}
@@ -74,6 +92,25 @@ def test_srdf_collision_exemptions_reference_real_links_only():
         assert exemption.attrib["link2"] in links
 
 
+def _visual_vertices(visual: ET.Element) -> np.ndarray:
+    """Binary-STL visual vertices in their link frame."""
+    mesh = visual.find("geometry/mesh")
+    data = (ROOT / mesh.get("filename").removeprefix("package://lekiwi_rmf/")).read_bytes()
+    assert len(data) == 84 + int.from_bytes(data[80:84], "little") * 50
+    vertices = np.frombuffer(data, offset=84, dtype=np.dtype([
+        ("normal", "<f4", (3,)), ("vertices", "<f4", (3, 3)), ("attr", "<u2")
+    ]))["vertices"].reshape(-1, 3)
+    origin = visual.find("origin")
+    r, p, y = np.fromstring(origin.get("rpy", "0 0 0"), sep=" ")
+    cr, cp, cy = np.cos([r, p, y])
+    sr, sp, sy = np.sin([r, p, y])
+    rotation = np.array([[cy*cp, cy*sp*sr-sy*cr, cy*sp*cr+sy*sr],
+                         [sy*cp, sy*sp*sr+cy*cr, sy*sp*cr-cy*sr],
+                         [-sp, cp*sr, cp*cr]])
+    vertices = vertices * np.fromstring(mesh.get("scale", "1 1 1"), sep=" ")
+    return vertices @ rotation.T + np.fromstring(origin.get("xyz", "0 0 0"), sep=" ")
+
+
 def test_native_wrist_box_encloses_visual_meshes_with_clearance():
     robot = _real_robot()
     box = robot.find("link[@name='wrist_collision_proxy']/collision/geometry/box")
@@ -81,21 +118,7 @@ def test_native_wrist_box_encloses_visual_meshes_with_clearance():
     half_size = np.fromstring(box.get("size"), sep=" ") / 2
     centre = np.fromstring(mount.get("xyz"), sep=" ")
     for visual in robot.find("link[@name='so101_wrist_link']").findall("visual"):
-        mesh = visual.find("geometry/mesh")
-        data = (ROOT / mesh.get("filename").removeprefix("package://lekiwi_rmf/")).read_bytes()
-        assert len(data) == 84 + int.from_bytes(data[80:84], "little") * 50
-        vertices = np.frombuffer(data, offset=84, dtype=np.dtype([
-            ("normal", "<f4", (3,)), ("vertices", "<f4", (3, 3)), ("attr", "<u2")
-        ]))["vertices"].reshape(-1, 3)
-        origin = visual.find("origin")
-        r, p, y = np.fromstring(origin.get("rpy", "0 0 0"), sep=" ")
-        cr, cp, cy = np.cos([r, p, y])
-        sr, sp, sy = np.sin([r, p, y])
-        rotation = np.array([[cy*cp, cy*sp*sr-sy*cr, cy*sp*cr+sy*sr],
-                             [sy*cp, sy*sp*sr+cy*cr, sy*sp*cr-cy*sr],
-                             [-sp, cp*sr, cp*cr]])
-        vertices = vertices * np.fromstring(mesh.get("scale", "1 1 1"), sep=" ")
-        vertices = vertices @ rotation.T + np.fromstring(origin.get("xyz", "0 0 0"), sep=" ")
+        vertices = _visual_vertices(visual)
         assert np.all(np.abs(vertices - centre) + 0.004 <= half_size)
     # A coordinate frame is not an extra sphere of physical material.
     assert robot.find("link[@name='tool0']/collision") is None
