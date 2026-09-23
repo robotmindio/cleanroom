@@ -102,8 +102,26 @@ has_nopasswd_systemctl() { # has_nopasswd_systemctl <sudo -l output> <action> <u
 }
 refresh_compute_service() {
   log "Refreshing stale compute service configuration"
+  # --no-start: the stack is stopped here and starts after both builds below.
   LEKIWI_ROBOT_HOST=${device#*@} LEKIWI_WS=$workspace \
-    "$project_root/scripts/reinstall-compute.sh"
+    "$project_root/scripts/reinstall-compute.sh" --no-start
+}
+compute_configuration_current() {
+  grep -Fq "remote_ip:=$device_address" /etc/default/lekiwi-stack &&
+    grep -Fq 'laser_source:=ld06 lidar_source:=remote' /etc/default/lekiwi-stack &&
+    [[ $(cat "$service_marker" 2>/dev/null || true) == "$expected_service_fingerprint" ]]
+}
+verify_compute_configuration() {
+  local file
+  compute_configuration_current || die "compute service configuration did not refresh"
+  # The sensor bridge is mutual TLS; a missing identity would leave the robot without sensors.
+  for file in ca.crt compute.crt compute.key; do
+    [[ -r /etc/lekiwi/zenoh-tls/$file ]] || die "missing /etc/lekiwi/zenoh-tls/$file; run scripts/reinstall-compute.sh"
+  done
+  for file in ca.crt device.crt device.key; do
+    "${ssh_command[@]}" test -r "/etc/lekiwi/zenoh-tls/$file" || \
+      die "missing /etc/lekiwi/zenoh-tls/$file on $device; run scripts/reinstall-compute.sh"
+  done
 }
 # The device installer skips Astra and the cameras when their ROS package is
 # missing, so those two are deployed only where they are installed.
@@ -149,20 +167,27 @@ done
 for unit in lekiwi-astra.service lekiwi-cameras.service; do
   if remote_unit_exists "$unit"; then device_units+=("$unit"); fi
 done
-if ! grep -Fq "remote_ip:=$device_address" /etc/default/lekiwi-stack \
-  || ! grep -Fq 'laser_source:=ld06 lidar_source:=remote' /etc/default/lekiwi-stack; then
-  refresh_compute_service
-fi
-if ! grep -Fq "remote_ip:=$device_address" /etc/default/lekiwi-stack \
-  || ! grep -Fq 'laser_source:=ld06 lidar_source:=remote' /etc/default/lekiwi-stack; then
-  die "compute service configuration did not refresh"
+
+expected_service_fingerprint=$(service_fingerprint compute) || die "cannot calculate service configuration fingerprint"
+service_marker=$logs/service-fingerprint-compute
+remote_service_marker=$remote_home/.ros/lekiwi/service-fingerprint-device
+# A stale compute configuration is reinstalled only after the robot is disarmed and
+# its stack stopped (below). Reinstalling needs full sudo, which the deployment
+# grant does not give; check it now rather than prompt or fail mid-deployment.
+refresh_compute=false
+if ! compute_configuration_current; then
+  refresh_compute=true
+  sudo -n true 2>/dev/null || die "the compute service configuration is stale and refreshing it needs \
+full sudo without a password prompt; run scripts/reinstall-compute.sh on this machine, then deploy again"
 fi
 
-compute_sudoers=$(sudo -n -l) || die "compute sudoers grant is missing; rerun scripts/install-compute-services.sh"
 device_sudoers=$("${ssh_command[@]}" sudo -n -l) || \
   die "device sudoers grant is missing; rerun scripts/install-device-services.sh on $device"
+if [[ $refresh_compute == false ]]; then
+  compute_sudoers=$(sudo -n -l) || die "compute sudoers grant is missing; rerun scripts/install-compute-services.sh"
+fi
 for action in start stop reset-failed; do
-  has_nopasswd_systemctl "$compute_sudoers" "$action" lekiwi-stack.service || \
+  [[ $refresh_compute == true ]] || has_nopasswd_systemctl "$compute_sudoers" "$action" lekiwi-stack.service || \
     die "compute sudoers grant is missing; rerun scripts/install-compute-services.sh"
   for unit in "${device_units[@]}"; do
     has_nopasswd_systemctl "$device_sudoers" "$action" "$unit" || \
@@ -170,22 +195,7 @@ for action in start stop reset-failed; do
   done
 done
 
-expected_service_fingerprint=$(service_fingerprint compute) || die "cannot calculate service configuration fingerprint"
-service_marker=$logs/service-fingerprint-compute
-remote_service_marker=$remote_home/.ros/lekiwi/service-fingerprint-device
-if [[ $(cat "$service_marker" 2>/dev/null || true) != "$expected_service_fingerprint" ]]; then
-  refresh_compute_service
-fi
-[[ $(cat "$service_marker" 2>/dev/null || true) == "$expected_service_fingerprint" ]] || \
-  die "compute service configuration did not refresh"
-# The sensor bridge is mutual TLS; a missing identity would leave the robot without sensors.
-for file in ca.crt compute.crt compute.key; do
-  [[ -r /etc/lekiwi/zenoh-tls/$file ]] || die "missing /etc/lekiwi/zenoh-tls/$file; run scripts/reinstall-compute.sh"
-done
-for file in ca.crt device.crt device.key; do
-  "${ssh_command[@]}" test -r "/etc/lekiwi/zenoh-tls/$file" || \
-    die "missing /etc/lekiwi/zenoh-tls/$file on $device; run scripts/reinstall-compute.sh"
-done
+[[ $refresh_compute == true ]] || verify_compute_configuration
 expected_device_service_fingerprint=$(service_fingerprint device) || die "cannot calculate device service configuration fingerprint"
 [[ $("${ssh_command[@]}" "cat '$remote_service_marker' 2>/dev/null || true") == "$expected_device_service_fingerprint" ]] || \
   die "device service configuration is stale; rerun scripts/install-device-services.sh on $device"
@@ -196,7 +206,8 @@ workspace_revision() { cat "$1/install/lekiwi_rmf/.lekiwi-source-revision" 2>/de
 remote_workspace_revision() {
   "${ssh_command[@]}" "cat '$remote_workspace/install/lekiwi_rmf/.lekiwi-source-revision' 2>/dev/null || true"
 }
-if [[ $(cat "$marker" 2>/dev/null || true) == "$target" && \
+if [[ $refresh_compute == false && \
+      $(cat "$marker" 2>/dev/null || true) == "$target" && \
       $("${ssh_command[@]}" "cat '$remote_marker' 2>/dev/null || true") == "$target" && \
       $(workspace_revision "$workspace") == "$target" && \
       $(remote_workspace_revision) == "$target" ]] && \
@@ -220,6 +231,10 @@ log "Confirming torque-off and stopping the compute stack"
 ros_setup
 disarm
 sudo -n /usr/bin/systemctl stop lekiwi-stack.service
+if [[ $refresh_compute == true ]]; then
+  refresh_compute_service
+  verify_compute_configuration
+fi
 
 log "Stopping device services"
 if remote_unit_active lekiwi-cameras.service; then

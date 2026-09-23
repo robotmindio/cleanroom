@@ -375,6 +375,13 @@ def test_deploy_order_fails_closed_around_the_device_restart():
     start_host = deploy.index("start lekiwi-host.service", stop_host)
     start_stack = deploy.index("start lekiwi-stack.service", start_host)
     assert disarm < stop_stack < stop_host < start_host < start_stack
+    # A stale compute configuration is reinstalled only once the robot is disarmed and
+    # its stack stopped, never started early, and its sudo need is checked up front.
+    refresh = deploy.index("\n  refresh_compute_service\n")
+    assert stop_stack < refresh < stop_host
+    assert deploy.count("refresh_compute_service\n") == 1
+    assert '"$project_root/scripts/reinstall-compute.sh" --no-start' in deploy
+    assert deploy.index("sudo -n true") < disarm
     assert "lekiwi-lidar.service" in deploy
     # The zenoh bridge is required and preflighted before anything is stopped;
     # Astra and the cameras are skipped by the device installer without their ROS packages.
