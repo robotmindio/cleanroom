@@ -194,8 +194,11 @@ log "Reloading systemd and enabling services"
 as_root systemctl daemon-reload
 # Restart first: try-restart skips a stopped unit, which enable --now then starts
 # once, already with the new configuration, instead of starting it twice.
-restart_changed_units
-as_root systemctl enable --now "${units[@]}" lekiwi-ros-logrotate.timer
+# --no-block: lekiwi-host only starts once every servo answers, and systemd keeps
+# retrying it. Unpowered servos must not abort the installation before the sudoers
+# grant, the Wi-Fi country and the configuration fingerprint below.
+restart_changed_units --no-block
+as_root systemctl enable --now --no-block "${units[@]}" lekiwi-ros-logrotate.timer
 
 log "Granting $LEKIWI_SERVICE_USER non-interactive deployment control"
 as_root "$PROJECT_ROOT/scripts/install-deploy-sudoers.sh" device --user "$LEKIWI_SERVICE_USER"
@@ -203,6 +206,9 @@ log "Setting the Wi-Fi country, disabling power saving and granting network cont
 as_root "$PROJECT_ROOT/scripts/install-device-network.sh" --user "$LEKIWI_SERVICE_USER" \
   --country "${LEKIWI_WIFI_COUNTRY:-ID}"
 record_service_fingerprint device
+for unit in "${units[@]}"; do
+  log "$unit: $(systemctl is-active "$unit" 2>/dev/null || true)"
+done
 
 if [[ -f $UNIT_DIR/lekiwi-stack.service ]]; then
   log "A ROS stack service is also installed here -- re-run"

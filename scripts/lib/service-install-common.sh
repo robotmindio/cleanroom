@@ -152,10 +152,10 @@ remove_unit_config() { # remove_unit_config <path> <unit>
   queue_restart "$2"
 }
 
-restart_changed_units() { # after daemon-reload; running units only
+restart_changed_units() { # [systemctl option...]; after daemon-reload; running units only
   (( ${#CHANGED_UNITS[@]} )) || return 0
   log "Restarting units whose installed configuration changed: ${CHANGED_UNITS[*]}"
-  as_root systemctl try-restart "${CHANGED_UNITS[@]}"
+  as_root systemctl try-restart "$@" "${CHANGED_UNITS[@]}"
 }
 
 install_log_rotation() {

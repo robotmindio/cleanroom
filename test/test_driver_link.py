@@ -29,7 +29,7 @@ _NODE.body = [
         "on_base_permission", "on_arm_permission",
         "record_link_loss", "update", "validate_motion_parameters",
         "_poll_telemetry", "_hold_action", "_send_pending_stop", "_apply_trajectory",
-        "_send_armed_command", "auto_arm_tick", "execute_trajectory",
+        "_send_armed_command", "auto_arm_tick", "execute_trajectory", "destroy_node",
     )
 ]
 _CONSTANTS = [
@@ -1341,3 +1341,45 @@ def test_a_disarm_during_an_in_flight_enable_wins_and_armed_is_never_published()
     assert outcome == "unsafe" and node.armed is False
     assert "ARMED" not in node.states
     assert requests == [True, False], "the rolled-back enable is followed by the strict cut"
+
+
+
+class _NodeBase:
+    def destroy_node(self):
+        self.calls.append("node")
+
+
+class _ShutdownDriver(driver.LeKiwiDriver, _NodeBase):
+    pass
+
+
+def make_shutdown_node(monkeypatch, liveness, disarm_error):
+    node = make_node()
+    node.__class__ = _ShutdownDriver
+    node.calls = []
+    monkeypatch.setattr(
+        driver, "rclpy", types.SimpleNamespace(ok=lambda context=None: next(liveness)),
+        raising=False,
+    )
+
+    def failing_disarm(state, publish=True):
+        raise RuntimeError(disarm_error)
+
+    node.set_disarmed = failing_disarm
+    node.trajectory_server = types.SimpleNamespace(destroy=lambda: node.calls.append("server"))
+    node.robot = types.SimpleNamespace(disconnect=lambda: node.calls.append("robot"))
+    return node
+
+
+def test_shutdown_tolerates_the_context_dying_during_the_disarm_publish(monkeypatch):
+    # rclpy.ok() said the context was alive, then SIGINT invalidated it mid-publish.
+    node = make_shutdown_node(monkeypatch, iter([True, False]), "publisher's context is invalid")
+    node.destroy_node()
+    assert node.calls == ["server", "robot", "node"]
+
+
+def test_shutdown_still_raises_a_disarm_failure_while_ros_is_up(monkeypatch):
+    node = make_shutdown_node(monkeypatch, iter([True, True]), "real failure")
+    with pytest.raises(RuntimeError, match="real failure"):
+        node.destroy_node()
+    assert node.calls == ["server", "robot"]

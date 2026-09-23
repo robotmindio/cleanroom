@@ -172,6 +172,7 @@ log "Reloading systemd and enabling lekiwi-stack.service"
 as_root systemctl daemon-reload
 # Restart first: try-restart skips a stopped stack, which enable --now then starts
 # once, already with the new configuration. An unchanged running stack is left alone.
+# shellcheck disable=SC2119 # blocking on purpose: the stack must be up before enable --now
 restart_changed_units
 if [[ $START_STACK == true ]]; then
   as_root systemctl enable --now lekiwi-stack.service

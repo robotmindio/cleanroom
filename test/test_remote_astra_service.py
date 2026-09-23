@@ -18,7 +18,7 @@ def test_remote_astra_service_publishes_the_canonical_cloud_without_other_hardwa
     assert "lekiwi-host.service" not in service
     assert 'install_unit lekiwi-astra.service' in installer
     assert '[[ $astra_ros_available == true ]] && units+=(lekiwi-astra.service)' in installer
-    assert 'systemctl enable --now "${units[@]}"' in installer
+    assert 'systemctl enable --now --no-block "${units[@]}"' in installer
 
 
 def test_optional_2d_cameras_wait_without_blocking_the_independent_astra_service():
