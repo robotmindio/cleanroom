@@ -1,0 +1,6 @@
+# Ruff's default rules (pyflakes and pycodestyle errors), run by CI beside the
+# narrower config/flake8.ini. Tests import the package after adjusting sys.path.
+target-version = "py312"
+
+[lint.per-file-ignores]
+"test/*" = ["E402"]
