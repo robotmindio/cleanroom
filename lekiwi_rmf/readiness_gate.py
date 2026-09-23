@@ -161,10 +161,12 @@ def main(args: Optional[list[str]] = None) -> None:
     rclpy.init(args=args)
     node: Optional[ReadinessGate] = None
     interrupted = False
+    ready = False
     try:
         node = ReadinessGate()
         while rclpy.ok() and not node._ready:
             rclpy.spin_once(node, timeout_sec=0.2)
+        ready = node._ready
     except (KeyboardInterrupt, ExternalShutdownException):
         # A gate returning zero means its dependency is ready. SIGINT is not
         # readiness: make the launch OnProcessExit success handler leave all
@@ -176,6 +178,9 @@ def main(args: Optional[list[str]] = None) -> None:
         rclpy.try_shutdown()
     if interrupted:
         raise SystemExit(130)
+    if not ready:
+        # The context shut down before the dependency became ready.
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

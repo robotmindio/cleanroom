@@ -4,6 +4,8 @@ import importlib.util
 import pathlib
 import types
 
+import pytest
+
 from rclpy.qos import DurabilityPolicy, ReliabilityPolicy
 from lifecycle_msgs.msg import State
 from nav_msgs.msg import OccupancyGrid, Odometry
@@ -213,3 +215,23 @@ def test_real_driver_restart_is_rate_limited():
     start = source.index('executable="lekiwi_driver"')
     driver = source[start:source.index("arm_ready_gate", start)]
     assert "respawn_delay=60.0" in driver
+
+
+def test_readiness_gate_exits_nonzero_when_ros_shuts_down_before_ready(monkeypatch):
+    import lekiwi_rmf.readiness_gate as gate
+
+    node = types.SimpleNamespace(_ready=False, destroy_node=lambda: None)
+    monkeypatch.setattr(gate, "ReadinessGate", lambda: node)
+    monkeypatch.setattr(gate, "rclpy", types.SimpleNamespace(
+        init=lambda args=None: None,
+        ok=lambda: False,  # the context is already shut down
+        spin_once=lambda *_args, **_kwargs: None,
+        try_shutdown=lambda: None,
+    ))
+
+    with pytest.raises(SystemExit) as exited:
+        gate.main()
+    assert exited.value.code == 1
+
+    node._ready = True
+    gate.main()  # a ready dependency is the only successful exit
