@@ -75,3 +75,15 @@ def test_vectorised_compaction_matches_the_per_point_reference(stride, big_endia
     expected = _reference_compact(cloud, stride)
     assert compact is not None and bytes(compact.data) == expected
     assert compact.width * compact.point_step == len(expected)
+
+
+def test_a_field_that_overruns_the_point_is_rejected():
+    cloud = PointCloud2()
+    cloud.height, cloud.width, cloud.point_step, cloud.row_step = 1, 1, 12, 12
+    cloud.fields = [
+        PointField(name=name, offset=offset, datatype=PointField.FLOAT32, count=1)
+        for name, offset in (("x", 0), ("y", 4), ("z", 10))
+    ]
+    cloud.data = bytes(12)
+
+    assert compact_cloud(cloud, 1) is None

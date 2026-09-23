@@ -8,6 +8,7 @@ import time
 
 import numpy as np
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from rclpy.serialization import deserialize_message
@@ -19,7 +20,10 @@ def compact_cloud(message: PointCloud2, stride: int) -> PointCloud2 | None:
     if stride < 1 or message.point_step <= 0 or message.row_step < message.width * message.point_step:
         return None
     offsets = {field.name: field.offset for field in message.fields if field.datatype == PointField.FLOAT32}
-    if not all(name in offsets for name in ("x", "y", "z")):
+    if not all(
+        name in offsets and 0 <= offsets[name] and offsets[name] + 4 <= message.point_step
+        for name in ("x", "y", "z")
+    ):
         return None
     required = message.height * message.row_step
     if len(message.data) < required:
@@ -87,7 +91,7 @@ def main(args=None) -> None:
     node = AstraCloudFilter()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         node.destroy_node()
