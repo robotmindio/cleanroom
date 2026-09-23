@@ -7,6 +7,10 @@
 #   - The Wi-Fi regulatory country, through install-wifi-regdom.sh (which explains why).
 #   - A polkit rule that lets the deployment user manage NetworkManager over SSH without a
 #     password (nmcli connection up/modify, Wi-Fi scans). It grants no shell access.
+#     Scope: NetworkManager passes polkit no connection details, so this cannot be narrowed
+#     to one connection. The user can add, change or delete every system connection
+#     (settings.modify.system) and bring any of them up or down (network-control), and so
+#     can cut the robot off its network; that is the intended remote Wi-Fi administration.
 #
 # Usage: sudo scripts/install-device-network.sh --user USER [--country CC]
 #   --country  two-letter ISO 3166 regulatory country; default LEKIWI_WIFI_COUNTRY
