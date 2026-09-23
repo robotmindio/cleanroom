@@ -51,6 +51,7 @@ def test_foxglove_bridge_and_desktop_are_installed_with_the_stack():
     assert '"ros-$ROS_DISTRO-foxglove-bridge"' in installer
     assert "FOXGLOVE_ARCH=amd64" in installer
     assert "FOXGLOVE_ARCH=arm64" in installer
-    assert "https://get.foxglove.dev/desktop/latest/foxglove-studio-latest-linux-${FOXGLOVE_ARCH}.deb" in installer
+    assert "foxglove-studio-${FOXGLOVE_VERSION}-linux-${FOXGLOVE_ARCH}.deb" in installer
+    assert '"$FOXGLOVE_SHA256"' in installer
     assert "foxglove-studio" in desktop_launcher
     assert "ds.url=ws://127.0.0.1:8765/" in desktop_launcher

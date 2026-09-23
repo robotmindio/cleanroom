@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import getpass
+import hashlib
 import os
 import pathlib
 import re
@@ -192,6 +193,38 @@ def test_installer_reapplies_the_pinned_free_fleet_patch_on_rerun():
     # One implementation of the pinned checkout, shared with install-pi.sh.
     assert "checkout_pinned() {" not in installer
     assert "reset --hard" not in installer
+
+
+def test_downloads_are_pinned_and_rejected_on_a_checksum_mismatch(tmp_path):
+    payload = tmp_path / "upstream.deb"
+    payload.write_bytes(b"package")
+    fakes = tmp_path / "bin"
+    _executable(fakes / "curl", f'cp "{payload}" "$3"\n')  # curl -fL -o DEST URL
+    script = r'''
+set -Eeuo pipefail
+die() { printf '%s\n' "$*" >&2; exit 1; }
+source "$1/scripts/thirdparty-common.sh"
+download_verified https://example.invalid/a.deb "$2" "$3"
+'''
+    good = hashlib.sha256(b"package").hexdigest()
+
+    def download(digest):
+        return subprocess.run(
+            ["bash", "-c", script, "download", str(ROOT), digest, str(tmp_path / "out.deb")],
+            env={**os.environ, "PATH": f"{fakes}:{os.environ['PATH']}"}, capture_output=True, text=True,
+        )
+
+    assert download(good).returncode == 0
+    assert (tmp_path / "out.deb").read_bytes() == b"package"
+    rejected = download("0" * 64)
+    assert rejected.returncode != 0 and "checksum mismatch" in rejected.stderr
+    assert not (tmp_path / "out.deb").exists()
+
+    installer = (ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
+    assert "api.github.com" not in installer and "/latest/" not in installer
+    assert installer.count("download_verified") == 2
+    for package in ("nudged", "pycdr2", "rosbags"):
+        assert re.search(rf"\b{package}==[0-9.]+", installer), package
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git is required")

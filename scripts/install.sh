@@ -5,6 +5,10 @@ LEROBOT_VERSION=0.6.1
 FREE_FLEET_REV=e178db662720e36116a5559e4c13847466d5be2d
 RMF_DEMOS_REV=2.3.0
 ASTRA_CAMERA_REV=f7e71d9ce806e788cb48d8580aac2c778fba4214
+# Downloaded packages are pinned by version and SHA-256; bump both together.
+ROS_APT_SOURCE_VERSION=1.3.0
+ROS_APT_SOURCE_SHA256=f31d84adf5054c7d60ded0e82c0f776a77ea33af53d08f40b9ad7c94cca55296 # noble
+FOXGLOVE_VERSION=3.2.1
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 WORKSPACE=${LEKIWI_WS:-"$HOME/lekiwi_ws"}
 
@@ -36,8 +40,14 @@ source /etc/os-release
 ROS_DISTRO=jazzy
 
 case $(uname -m) in
-  x86_64) FOXGLOVE_ARCH=amd64 ;;
-  aarch64|arm64) FOXGLOVE_ARCH=arm64 ;;
+  x86_64)
+    FOXGLOVE_ARCH=amd64
+    FOXGLOVE_SHA256=057074c1f40d7e42d2eaaac9f34b52f3034d2c1dccb264e2c37d30dbe7588352
+    ;;
+  aarch64|arm64)
+    FOXGLOVE_ARCH=arm64
+    FOXGLOVE_SHA256=2af1754454edc480399f771bb747c7e89c38ee72f9c761db5073dbcf8caf63f3
+    ;;
   *) die "unsupported CPU architecture: $(uname -m)" ;;
 esac
 
@@ -84,11 +94,9 @@ fi
 
 if [[ ! -e $modern_ros_source ]]; then
   tmp_dir=$(mktemp -d)
-  ros_apt_version=$(curl -fsSL https://api.github.com/repos/ros-infrastructure/ros-apt-source/releases/latest |
-    sed -n 's/.*"tag_name": "\([^"]*\)".*/\1/p')
-  [[ -n $ros_apt_version ]] || die "could not determine ros-apt-source release"
-  curl -fL -o "$tmp_dir/ros2-apt-source.deb" \
-    "https://github.com/ros-infrastructure/ros-apt-source/releases/download/${ros_apt_version}/ros2-apt-source_${ros_apt_version}.${VERSION_CODENAME}_all.deb"
+  download_verified \
+    "https://github.com/ros-infrastructure/ros-apt-source/releases/download/${ROS_APT_SOURCE_VERSION}/ros2-apt-source_${ROS_APT_SOURCE_VERSION}.${VERSION_CODENAME}_all.deb" \
+    "$ROS_APT_SOURCE_SHA256" "$tmp_dir/ros2-apt-source.deb"
   "${SUDO[@]}" dpkg -i "$tmp_dir/ros2-apt-source.deb"
   find "$tmp_dir" -type f -delete
   rmdir "$tmp_dir"
@@ -129,14 +137,20 @@ apt_get install -y \
   psmisc \
   v4l-utils
 
-log "Installing Foxglove Desktop"
-foxglove_tmp_dir=$(mktemp -d)
-foxglove_deb="$foxglove_tmp_dir/foxglove-studio.deb"
-curl -fL -o "$foxglove_deb" \
-  "https://get.foxglove.dev/desktop/latest/foxglove-studio-latest-linux-${FOXGLOVE_ARCH}.deb"
-apt_get install -y "$foxglove_deb"
-rm -f -- "$foxglove_deb"
-rmdir "$foxglove_tmp_dir"
+if [[ $(dpkg-query -W -f='${Version}' foxglove-studio 2>/dev/null || true) == "$FOXGLOVE_VERSION" ]]; then
+  log "Foxglove Desktop $FOXGLOVE_VERSION is already installed"
+else
+  log "Installing Foxglove Desktop $FOXGLOVE_VERSION"
+  foxglove_tmp_dir=$(mktemp -d)
+  foxglove_deb="$foxglove_tmp_dir/foxglove-studio.deb"
+  download_verified \
+    "https://get.foxglove.dev/desktop/v${FOXGLOVE_VERSION}/foxglove-studio-${FOXGLOVE_VERSION}-linux-${FOXGLOVE_ARCH}.deb" \
+    "$FOXGLOVE_SHA256" "$foxglove_deb"
+  # --allow-downgrades: the pinned version wins over a newer one installed by hand.
+  apt_get install -y --allow-downgrades "$foxglove_deb"
+  rm -f -- "$foxglove_deb"
+  rmdir "$foxglove_tmp_dir"
+fi
 
 # Qualification invokes these through the system interpreter and PATH.  Check
 # that exact contract now so an incomplete deployment image fails during
@@ -218,7 +232,7 @@ python -m pip install \
   "setuptools<80" \
   "numpy<2" \
   "eclipse-zenoh==${ZENOH_VERSION}" \
-  nudged pycdr2 rosbags \
+  nudged==0.3.1 pycdr2==1.0.0 rosbags==0.11.4 \
   "transforms3d>=0.4.2"
 
 if [[ $install_mode == full ]]; then
