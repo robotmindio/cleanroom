@@ -340,7 +340,9 @@ def test_deploy_order_fails_closed_around_the_device_restart():
     assert 'awk \'NF && $1 != "---" { print $1; exit }\'' in deploy
     assert "has_nopasswd_systemctl" in deploy
     assert 'compute_sudoers=$(sudo -n -l)' in deploy
-    assert "git merge --ff-only" in deploy
+    assert 'git -C "$project_root" merge --ff-only' in deploy
+    # The deployer runs from any directory: every git call names its repository.
+    assert not re.search(r"(?<![\w-])git (?!-C )", deploy)
     assert "cannot fetch origin within 30 seconds" in deploy
     assert "LEKIWI_ROBOT_HOST" in deploy
     assert "load_lekiwi_env" in deploy

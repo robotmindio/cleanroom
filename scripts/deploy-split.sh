@@ -112,18 +112,18 @@ has_device_unit() { [[ " ${device_units[*]} " == *" $1 "* ]]; }
 
 log "Preflighting source revisions and deployment permissions"
 require_clean "$project_root" "local repository"
-branch=$(git symbolic-ref --quiet --short HEAD) || die "local repository must be on a branch"
-timeout 30 git fetch --quiet origin || die "cannot fetch origin within 30 seconds"
-upstream=$(git rev-parse --verify '@{upstream}') || die "$branch has no upstream"
-before=$(git rev-parse HEAD)
-git merge --ff-only "$upstream"
-if [[ $before != $(git rev-parse HEAD) && ${LEKIWI_DEPLOY_REFRESHED:-} != 1 ]]; then
+branch=$(git -C "$project_root" symbolic-ref --quiet --short HEAD) || die "local repository must be on a branch"
+timeout 30 git -C "$project_root" fetch --quiet origin || die "cannot fetch origin within 30 seconds"
+upstream=$(git -C "$project_root" rev-parse --verify '@{upstream}') || die "$branch has no upstream"
+before=$(git -C "$project_root" rev-parse HEAD)
+git -C "$project_root" merge --ff-only "$upstream"
+if [[ $before != $(git -C "$project_root" rev-parse HEAD) && ${LEKIWI_DEPLOY_REFRESHED:-} != 1 ]]; then
   export LEKIWI_DEPLOY_REFRESHED=1
   exec "$project_root/scripts/deploy-split.sh" "${original_args[@]}"
 fi
 require_clean "$project_root" "updated local repository"
-target=$(git rev-parse HEAD)
-[[ $target == $(git rev-parse '@{upstream}') ]] || die "local HEAD is not the pushed upstream revision"
+target=$(git -C "$project_root" rev-parse HEAD)
+[[ $target == $(git -C "$project_root" rev-parse '@{upstream}') ]] || die "local HEAD is not the pushed upstream revision"
 
 "${ssh_command[@]}" test -d "$remote_repo/.git" || die "remote repository not found: $remote_repo"
 [[ -z $("${ssh_command[@]}" git -C "$remote_repo" status --porcelain) ]] || \
