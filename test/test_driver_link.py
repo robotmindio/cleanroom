@@ -21,6 +21,7 @@ _NODE.body = [
         "enforce_reported_torque_state",
         "arm_after_startup_telemetry", "on_command", "publish_safety", "publish_state", "publish_motor_health",
         "set_disarmed", "set_servo_torque", "cut_torque_after_failure", "_retry_rearm_soon",
+        "_enable_torque_and_arm", "_arm_permission_is_current",
         "_permission_is_fresh", "_permission_is_current",
         "_capability_permission_is_current", "enforce_permission_leases",
         "on_base_permission", "on_arm_permission",

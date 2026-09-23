@@ -439,6 +439,47 @@ class LeKiwiDriver(Node):
             )
         return True
 
+    def _arm_permission_is_current(self):
+        return self._permission_is_current(
+            self.arm_motion_permitted, self._arm_permission_received_at_ns
+        )
+
+    def _enable_torque_and_arm(self, permission_is_current, operator):
+        """Enable servo torque, then commit ARMED only if it is still safe.
+
+        The caller holds action_lock and has checked its own preconditions. Returns
+        ``(outcome, torque_cut)`` with outcome ``"armed"``, ``"enable_failed"`` or
+        ``"unsafe"``; ``torque_cut`` reports the fail-safe disable after a failure.
+        """
+        outcome = "enable_failed"
+        if self.set_servo_torque(True):
+            with self.state_lock:
+                still_safe = (
+                    permission_is_current()
+                    and not self.link_lost
+                    and not self.torque_fault
+                )
+                if still_safe:
+                    self.armed = True
+                    if operator:
+                        self.operator_disarmed = False
+                    self.command = Twist()
+                    self.command_stamp = self.get_clock().now()
+            if still_safe:
+                self.publish_safety("ARMED")
+                return "armed", True
+            outcome = "unsafe"
+        # An enable reply can be lost after the host applied it. A separate
+        # disable transaction resolves that ambiguous state toward torque-off
+        # (strict mode only) before reporting the arm request failed.
+        torque_cut = self.cut_torque_after_failure()
+        with self.state_lock:
+            if not torque_cut:
+                self.torque_fault = True
+            state = "TORQUE_FAULT" if self.torque_fault else "DISARMED"
+        self.publish_safety(state)
+        return outcome, torque_cut
+
     def arm_after_startup_telemetry(self):
         """Arm after validated telemetry: at startup, and by default after every failure."""
         with self.action_lock:
@@ -448,52 +489,23 @@ class LeKiwiDriver(Node):
                     or time.monotonic() < self._next_rearm_at
                     or self.link_lost
                     or self.armed
-                    or not self._permission_is_current(
-                        self.arm_motion_permitted,
-                        self._arm_permission_received_at_ns,
-                    )
+                    or not self._arm_permission_is_current()
                     or self.torque_fault
                 ):
                     return False
                 self.auto_arm_pending = False
-            if not self.set_servo_torque(True):
-                # A reply can be lost after the host applied the enable.  A
-                # separate disable transaction resolves that ambiguous state
-                # toward torque-off before reporting the arm request failed.
-                torque_cut = self.cut_torque_after_failure()
-                with self.state_lock:
-                    if not torque_cut:
-                        self.torque_fault = True
-                    state = "TORQUE_FAULT" if self.torque_fault else "DISARMED"
-                self.publish_safety(state)
-                self.get_logger().error("Initial telemetry is healthy, but the motor host would not enable torque")
-                self._retry_rearm_soon()
-                return False
-            with self.state_lock:
-                still_safe = (
-                    not self.link_lost
-                    and self._permission_is_current(
-                        self.arm_motion_permitted,
-                        self._arm_permission_received_at_ns,
-                    )
-                    and not self.torque_fault
+            outcome, _torque_cut = self._enable_torque_and_arm(
+                self._arm_permission_is_current, operator=False
+            )
+            if outcome == "armed":
+                self.get_logger().info("Armed after initial healthy LeKiwi telemetry")
+                return True
+            if outcome == "enable_failed":
+                self.get_logger().error(
+                    "Initial telemetry is healthy, but the motor host would not enable torque"
                 )
-            if not still_safe:
-                torque_cut = self.cut_torque_after_failure()
-                with self.state_lock:
-                    if not torque_cut:
-                        self.torque_fault = True
-                    state = "TORQUE_FAULT" if self.torque_fault else "DISARMED"
-                self.publish_safety(state)
-                self._retry_rearm_soon()
-                return False
-            with self.state_lock:
-                self.armed = True
-                self.command = Twist()
-                self.command_stamp = self.get_clock().now()
-            self.publish_safety("ARMED")
-            self.get_logger().info("Armed after initial healthy LeKiwi telemetry")
-            return True
+            self._retry_rearm_soon()
+            return False
 
     def _retry_rearm_soon(self):
         """Unless strict, a failed automatic arm is retried, at a bounded rate."""
@@ -528,16 +540,15 @@ class LeKiwiDriver(Node):
                     response.success = False
                     response.message = "no fresh LeKiwi telemetry"
                     return response
-            if not self.set_servo_torque(True):
-                # Treat an enable timeout as physically ambiguous: the host
-                # may have completed the write before its reply was lost.
-                torque_cut = self.cut_torque_after_failure()
-                with self.state_lock:
-                    if not torque_cut:
-                        self.torque_fault = True
-                    state = "TORQUE_FAULT" if self.torque_fault else "DISARMED"
-                self.publish_safety(state)
-                response.success = False
+            outcome, torque_cut = self._enable_torque_and_arm(
+                self._capability_permission_is_current, operator=True
+            )
+            response.success = outcome == "armed"
+            if outcome == "armed":
+                response.message = "armed at current measured position; send a new command"
+            elif outcome == "unsafe":
+                response.message = "safety state changed while enabling torque"
+            else:
                 response.message = (
                     "motor host did not confirm servo torque enabled; "
                     + (
@@ -548,31 +559,6 @@ class LeKiwiDriver(Node):
                         else "a fail-safe disable was confirmed"
                     )
                 )
-                return response
-            with self.state_lock:
-                still_safe = (
-                    self._capability_permission_is_current()
-                    and not self.link_lost
-                    and not self.torque_fault
-                )
-            if not still_safe:
-                torque_cut = self.cut_torque_after_failure()
-                with self.state_lock:
-                    if not torque_cut:
-                        self.torque_fault = True
-                    state = "TORQUE_FAULT" if self.torque_fault else "DISARMED"
-                self.publish_safety(state)
-                response.success = False
-                response.message = "safety state changed while enabling torque"
-                return response
-            with self.state_lock:
-                self.armed = True
-                self.operator_disarmed = False
-                self.command = Twist()
-                self.command_stamp = now
-            self.publish_safety("ARMED")
-            response.success = True
-            response.message = "armed at current measured position; send a new command"
             return response
 
     def disarm(self, request, response):
@@ -587,10 +573,7 @@ class LeKiwiDriver(Node):
         return response
 
     def accept_trajectory(self, goal):
-        if not self.armed or not self._permission_is_current(
-            self.arm_motion_permitted,
-            self._arm_permission_received_at_ns,
-        ):
+        if not self.armed or not self._arm_permission_is_current():
             # MoveIt surfaces this only as an unexplained "goal was rejected"; say why here.
             self.get_logger().warn(
                 "Rejecting arm trajectory: driver is disarmed or arm safety permission is absent"
@@ -638,10 +621,7 @@ class LeKiwiDriver(Node):
             "goal_time_tolerance": goal_time_tolerance,
         }
         with self.state_lock:
-            if not self.armed or not self._permission_is_current(
-                self.arm_motion_permitted,
-                self._arm_permission_received_at_ns,
-            ):
+            if not self.armed or not self._arm_permission_is_current():
                 goal_handle.abort()
                 return FollowJointTrajectory.Result(
                     error_code=FollowJointTrajectory.Result.INVALID_GOAL,
@@ -1041,10 +1021,7 @@ class LeKiwiDriver(Node):
                 with self.state_lock:
                     if not self.armed:
                         return
-                    arm_permitted = self._permission_is_current(
-                        self.arm_motion_permitted,
-                        self._arm_permission_received_at_ns,
-                    )
+                    arm_permitted = self._arm_permission_is_current()
                     base_permitted = self._permission_is_current(
                         self.base_motion_permitted,
                         self._base_permission_received_at_ns,
