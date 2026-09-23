@@ -26,6 +26,8 @@ _NODE.body = [
         "_capability_permission_is_current", "enforce_permission_leases",
         "on_base_permission", "on_arm_permission",
         "twist_is_finite", "record_link_loss", "update", "validate_motion_parameters",
+        "_poll_telemetry", "_hold_action", "_send_pending_stop", "_apply_trajectory",
+        "_send_armed_command",
     )
 ]
 driver = types.ModuleType("driver_under_test")

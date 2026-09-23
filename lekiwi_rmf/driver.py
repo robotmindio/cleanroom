@@ -851,11 +851,24 @@ class LeKiwiDriver(Node):
         # arm torque even when the motor host is returning cached data.
         self.enforce_permission_leases()
         now = self.get_clock().now()
+        polled = self._poll_telemetry(now)
+        if polled is None:
+            return
+        observation, velocity = polled
+        with self.state_lock:
+            armed = self.armed
+        if armed:
+            self._send_armed_command(now, observation, velocity)
+        else:
+            self._send_pending_stop(now, observation, velocity)
+
+    def _poll_telemetry(self, now):
+        """Accept one fresh, valid observation; return it with the base velocity."""
         try:
             observation = self.robot.get_observation()
         except Exception as error:
             self.record_link_loss(f"LeKiwi telemetry failed: {error}")
-            return
+            return None
 
         missing_state_keys = getattr(self.robot, "missing_state_keys", ())
         if not self.observation_is_valid(observation, missing_state_keys):
@@ -863,7 +876,7 @@ class LeKiwiDriver(Node):
             if missing_state_keys:
                 reason = f"LeKiwi telemetry is missing: {', '.join(missing_state_keys)}"
             self.record_link_loss(reason)
-            return
+            return None
 
         if not self.observation_is_fresh(observation):
             quiet = (now - self.last_fresh).nanoseconds / 1e9
@@ -871,7 +884,7 @@ class LeKiwiDriver(Node):
                 self.record_link_loss(
                     f"No fresh LeKiwi telemetry for {quiet:.1f}s; waiting for recovery"
                 )
-            return
+            return None
 
         self.last_fresh = now
         self.publish_motor_health(now.to_msg())
@@ -913,92 +926,102 @@ class LeKiwiDriver(Node):
             self.get_logger().warn(
                 f"Odometry discontinuity: {self.odom_samples.discontinuity}; not integrating this sample"
             )
-        with self.state_lock:
-            armed = self.armed
-        if not armed:
-            send_error = None
-            try:
-                with self.action_lock:
-                    with self.state_lock:
-                        # An arm request may have completed after the snapshot.
-                        # In that case, skip this cycle rather than sending a
-                        # stale zero action after torque was enabled.
-                        if self.armed:
-                            return
-                        send_stop = self.stop_pending
-                    if send_stop:
-                        self.robot.send_action({
-                            **{f"{joint}.pos": float(observation.get(f"{joint}.pos", 0.0)) for joint in ARM_JOINTS},
-                            "x.vel": 0.0,
-                            "y.vel": 0.0,
-                            "theta.vel": 0.0,
-                        })
-                        with self.state_lock:
-                            if not self.armed:
-                                self.stop_pending = False
-            except Exception as error:
-                send_error = error
-            if send_error is not None:
-                self.get_logger().error(f"LeKiwi stop command failed: {send_error}")
-                self.link_lost = True
-                self.set_disarmed("LINK_LOST")
-                return
-            # Torque state is not motion state: retain measured odometry if the
-            # robot is pushed or coasts while commands are inhibited.
-            self.publish_state(now.to_msg(), observation, velocity)
-            self.publish_safety()
-            return
+        return observation, velocity
 
+    @staticmethod
+    def _hold_action(observation):
+        return {
+            f"{joint}.pos": float(observation.get(f"{joint}.pos", 0.0)) for joint in ARM_JOINTS
+        }
+
+    def _send_pending_stop(self, now, observation, velocity):
+        """While disarmed, send one zero-velocity hold after each disarm."""
+        send_error = None
+        try:
+            with self.action_lock:
+                with self.state_lock:
+                    # An arm request may have completed after the snapshot.
+                    # In that case, skip this cycle rather than sending a
+                    # stale zero action after torque was enabled.
+                    if self.armed:
+                        return
+                    send_stop = self.stop_pending
+                if send_stop:
+                    self.robot.send_action({
+                        **self._hold_action(observation),
+                        "x.vel": 0.0,
+                        "y.vel": 0.0,
+                        "theta.vel": 0.0,
+                    })
+                    with self.state_lock:
+                        if not self.armed:
+                            self.stop_pending = False
+        except Exception as error:
+            send_error = error
+        if send_error is not None:
+            self.get_logger().error(f"LeKiwi stop command failed: {send_error}")
+            self.link_lost = True
+            self.set_disarmed("LINK_LOST")
+            return
+        # Torque state is not motion state: retain measured odometry if the
+        # robot is pushed or coasts while commands are inhibited.
+        self.publish_state(now.to_msg(), observation, velocity)
+        self.publish_safety()
+
+    def _apply_trajectory(self, action, hold_action):
+        """Put the active trajectory's setpoint into ``action``; return whether one ran."""
+        with self.trajectory_lock:
+            trajectory = self.trajectory
+            if not trajectory:
+                return False
+            elapsed = time.monotonic() - trajectory["start"]
+            positions, _velocities, _accelerations = sample_trajectory(
+                trajectory["names"], trajectory["start_positions"],
+                trajectory["points"], elapsed,
+            )
+            action.update({
+                f"{name}.pos": value for name, value in action_positions(
+                    positions.keys(), positions.values(),
+                    self.arm_zero_positions, self.arm_directions,
+                ).items()
+            })
+            final_point = trajectory["points"][-1]
+            path_violation = next((
+                name for name, tolerance in trajectory["path_tolerances"].items()
+                if elapsed < final_point.time
+                and abs(self.arm_positions[name] - positions[name]) > tolerance
+            ), None)
+            if path_violation:
+                trajectory["outcome"] = f"path tolerance exceeded for {path_violation}"
+                trajectory["result_code"] = FollowJointTrajectory.Result.PATH_TOLERANCE_VIOLATED
+                trajectory["done"].set()
+                self.trajectory = None
+                # The setpoint that failed the check must not reach the servos.
+                action.update(hold_action)
+            elif elapsed >= final_point.time and all(
+                abs(self.arm_positions[name] - final_point.positions[name]) <= tolerance
+                for name, tolerance in trajectory["goal_tolerances"].items()
+            ):
+                trajectory["outcome"] = "succeeded"
+                trajectory["done"].set()
+                self.trajectory = None
+            elif elapsed > final_point.time + trajectory["goal_time_tolerance"]:
+                trajectory["outcome"] = "goal tolerance exceeded"
+                trajectory["result_code"] = FollowJointTrajectory.Result.GOAL_TOLERANCE_VIOLATED
+                trajectory["done"].set()
+                self.trajectory = None
+            return True
+
+    def _send_armed_command(self, now, observation, velocity):
         with self.state_lock:
             stale = (now - self.command_stamp).nanoseconds / 1e9 > self.command_timeout
             cmd = Twist() if stale or not self._permission_is_current(
                 self.base_motion_permitted,
                 self._base_permission_received_at_ns,
             ) else self.command
-        hold_action = {
-            f"{joint}.pos": float(observation.get(f"{joint}.pos", 0.0)) for joint in ARM_JOINTS
-        }
+        hold_action = self._hold_action(observation)
         action = dict(hold_action)
-        with self.trajectory_lock:
-            trajectory = self.trajectory
-            if trajectory:
-                elapsed = time.monotonic() - trajectory["start"]
-                positions, _velocities, _accelerations = sample_trajectory(
-                    trajectory["names"], trajectory["start_positions"],
-                    trajectory["points"], elapsed,
-                )
-                action.update({
-                    f"{name}.pos": value for name, value in action_positions(
-                        positions.keys(), positions.values(),
-                        self.arm_zero_positions, self.arm_directions,
-                    ).items()
-                })
-                final_point = trajectory["points"][-1]
-                path_violation = next((
-                    name for name, tolerance in trajectory["path_tolerances"].items()
-                    if elapsed < final_point.time
-                    and abs(self.arm_positions[name] - positions[name]) > tolerance
-                ), None)
-                if path_violation:
-                    trajectory["outcome"] = f"path tolerance exceeded for {path_violation}"
-                    trajectory["result_code"] = FollowJointTrajectory.Result.PATH_TOLERANCE_VIOLATED
-                    trajectory["done"].set()
-                    self.trajectory = None
-                    # The setpoint that failed the check must not reach the servos.
-                    action.update(hold_action)
-                elif elapsed >= final_point.time and all(
-                    abs(self.arm_positions[name] - final_point.positions[name]) <= tolerance
-                    for name, tolerance in trajectory["goal_tolerances"].items()
-                ):
-                    trajectory["outcome"] = "succeeded"
-                    trajectory["done"].set()
-                    self.trajectory = None
-                elif elapsed > final_point.time + trajectory["goal_time_tolerance"]:
-                    trajectory["outcome"] = "goal tolerance exceeded"
-                    trajectory["result_code"] = FollowJointTrajectory.Result.GOAL_TOLERANCE_VIOLATED
-                    trajectory["done"].set()
-                    self.trajectory = None
-        if trajectory:
+        if self._apply_trajectory(action, hold_action):
             cmd = Twist()
         # The scales divide here and multiply below: LeRobot's kinematics use a nominal
         # base_radius of 0.125 m, so a robot whose wheels sit elsewhere both under-turns
