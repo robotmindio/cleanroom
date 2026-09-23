@@ -18,8 +18,6 @@ Done when `config/safety_acceptance.yaml` holds a reviewed record with
 fault test, and the production profile requires every physical input it names.
 Tracked in [#6](https://github.com/robotmindio/cleanroom/issues/6).
 
-- Install and independently wire a hardwired E-stop that removes actuator
-  energy without depending on ROS, the motor host, DDS, or the compute OS.
 - Install bumper/contact sensing, publish its real state on
   `safety/bumper_active`, and set `require_bumper: true` in
   `config/safety_production.yaml`.
@@ -51,7 +49,7 @@ Tracked in [#6](https://github.com/robotmindio/cleanroom/issues/6).
   counter-clockwise rotation on every accepted surface/payload combination.
   Record worst distances, timing and measurement uncertainty.
 - Fault-inject every item required by `config/safety_acceptance.yaml`: scan,
-  depth, IMU, battery, diagnostics, bumper, independent E-stop, telemetry loss
+  depth, IMU, battery, diagnostics, bumper, telemetry loss
   and replay, host and ROS restart, unauthorized ZMQ, DDS and rosbridge policy,
   Nav2 obstacle stop, and arm-workspace intrusion stop.
 - Confirm the enabled Nav2 StopZone contains the accepted footprint plus the
@@ -153,8 +151,6 @@ today is described once, in the README's
   unique CURVE identities, transfer secret keys through an approved channel,
   restrict key permissions, pin `--bind-address` to the control interface,
   install firewall rules and prove unauthorized ZMQ clients are rejected.
-- Done: the device zenoh bridge (`7447/tcp`) requires mutual TLS with the
-  robot's private CA (`config/zenoh_device.json5`, `scripts/setup-zenoh-tls.sh`).
 - Do not copy private keys, tokens or site firewall secrets into this
   repository.
 - Optional Hugging Face dataset upload still requires the `core-scripts`
