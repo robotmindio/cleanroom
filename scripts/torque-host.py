@@ -119,36 +119,16 @@ class BoundLeKiwiHost:
 
 
 class TorqueLatch:
-    """Persist an explicit disarm across a host crash or systemd restart."""
+    """Record the last confirmed torque state in a file an operator can inspect.
+
+    The host never reads it back: a process or machine restart is never
+    permission to restore actuator energy, so the host always starts
+    torque-off and the ROS driver arms it explicitly once it has complete,
+    fresh telemetry.
+    """
 
     def __init__(self, path: str):
         self.path = Path(path).expanduser()
-
-    def initial_enabled(self) -> bool:
-        try:
-            state = self.path.read_text(encoding="ascii").strip()
-        except FileNotFoundError:
-            # No prior safety decision is never permission to energize motors.
-            # The ROS driver will explicitly arm after it receives complete,
-            # fresh telemetry and has sent its initial zero command.
-            return False
-        except OSError as error:
-            logging.error("Cannot read torque latch %s: %s; keeping torque off", self.path, error)
-            return False
-        if state == "enabled":
-            # A process or machine restart is never permission to restore
-            # actuator energy. Keep the value only as crash evidence; the ROS
-            # driver must receive healthy telemetry and an explicit arm request.
-            logging.warning("Previous host exited while torque was enabled; restarting torque-off")
-            try:
-                self.save(False)
-            except OSError as error:
-                logging.error("Could not persist restart disarm latch: %s", error)
-            return False
-        if state == "disabled":
-            return False
-        logging.error("Invalid torque latch %s; keeping torque off", self.path)
-        return False
 
     def save(self, enabled: bool) -> None:
         self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -159,16 +139,12 @@ class TorqueLatch:
 
 
 class SafetyLeKiwi(LeKiwi):
-    """Configure the vendor robot without overriding a persisted disarm latch."""
-
-    def __init__(self, config: LeKiwiConfig, torque_enabled: bool):
-        self.torque_enabled = torque_enabled
-        super().__init__(config)
+    """Configure the vendor robot but leave torque off until an explicit arm request."""
 
     def configure(self):
-        # This is LeRobot 0.6.1's LeKiwi.configure(), with its final
-        # enable_torque() guarded by the persisted safety latch. Keep its
-        # modes and gains identical to the supported vendor implementation.
+        # This is LeRobot 0.6.1's LeKiwi.configure() without its final
+        # enable_torque(). Keep its modes and gains identical to the supported
+        # vendor implementation.
         self.bus.disable_torque()
         self.bus.configure_motors()
         for name in self.arm_motors:
@@ -178,14 +154,12 @@ class SafetyLeKiwi(LeKiwi):
             self.bus.write("D_Coefficient", name, 32)
         for name in self.base_motors:
             self.bus.write("Operating_Mode", name, OperatingMode.VELOCITY.value)
-        if self.torque_enabled:
-            self.bus.enable_torque()
 
 
 class TorqueControlServer:
     def __init__(
         self, context, config: TorqueSafetyConfig, latch: TorqueLatch,
-        torque_enabled: bool, security: CurveServerSecurity,
+        security: CurveServerSecurity,
     ):
         if not 1 <= config.port_zmq <= 65535:
             raise ValueError("safety.port_zmq must be between 1 and 65535")
@@ -194,7 +168,7 @@ class TorqueControlServer:
         security.configure_socket(self.socket)
         self.socket.bind(f"tcp://{validated_bind_address(config.bind_address)}:{config.port_zmq}")
         self.latch = latch
-        self.torque_enabled = torque_enabled
+        self.torque_enabled = False
 
     def disconnect(self):
         self.socket.close()
@@ -236,7 +210,6 @@ class TorqueControlServer:
             ),
         )
         self.torque_enabled = True
-        robot.torque_enabled = True
 
     def _disable(self, robot: SafetyLeKiwi) -> None:
         # Persistence, stopping, the bus write, and readback are independent
@@ -252,7 +225,6 @@ class TorqueControlServer:
         } for name, _error in failures)
         if not physical_failure:
             self.torque_enabled = False
-            robot.torque_enabled = False
         if failures:
             raise RuntimeError("; ".join(f"{name}: {error}" for name, error in failures))
 
@@ -401,6 +373,121 @@ class MotorHealthCollector:
         return self._snapshot
 
 
+class HostLoop:
+    """One pass of the motor host: motion commands, torque requests, the command
+    watchdog, and the telemetry that reports all of them."""
+
+    def __init__(
+        self, robot: SafetyLeKiwi, host: BoundLeKiwiHost, control: TorqueControlServer,
+        health: MotorHealthCollector, disarm_on_failure: bool, clock=time.monotonic,
+    ):
+        self.robot = robot
+        self.host = host
+        self.control = control
+        self.health = health
+        self.disarm_on_failure = disarm_on_failure
+        self.clock = clock
+        self.last_cmd_time = clock()
+        self.watchdog_active = False
+        self.next_watchdog_attempt = 0.0
+        self.telemetry_session = uuid.uuid4().hex
+        self.telemetry_sequence = 0
+        self._last_command_error = None
+
+    def step(self) -> None:
+        self.receive_command()
+        self.handle_control_request()
+        self.enforce_watchdog()
+        self.publish_observation()
+
+    def receive_command(self) -> None:
+        try:
+            message = self.host.zmq_cmd_socket.recv_string(zmq.NOBLOCK)
+            self.robot.send_action(validate_action_payload(message, ACTION_KEYS))
+        except zmq.Again:
+            # Between commands is the normal state; silence past the watchdog
+            # timeout is handled by enforce_watchdog().
+            return
+        except Exception as error:
+            # A client repeating one malformed command would otherwise log at the
+            # loop rate. Report each distinct failure once, until a command succeeds.
+            detail = f"{type(error).__name__}: {error}"
+            if detail != self._last_command_error:
+                logging.error("Motion command rejected: %s", detail)
+                self._last_command_error = detail
+            return
+        self._last_command_error = None
+        self.last_cmd_time = self.clock()
+        self.watchdog_active = False
+
+    def handle_control_request(self) -> None:
+        command = self.control.process_one(self.robot)
+        if command == "enable":
+            # _enable() held the measured arm pose and stopped the base. Treat
+            # that physical hold as the start of a short grace period in which
+            # the newly armed driver must submit a fresh action.
+            self.last_cmd_time = self.clock()
+            self.watchdog_active = False
+        elif command == "disable":
+            self.watchdog_active = True
+
+    def enforce_watchdog(self) -> None:
+        now = self.clock()
+        if (
+            now - self.last_cmd_time <= self.host.watchdog_timeout_ms / 1000
+            or self.watchdog_active
+            or now < self.next_watchdog_attempt
+        ):
+            return
+        self.next_watchdog_attempt = now + 0.25
+        try:
+            outcome = react_to_command_silence(
+                self.disarm_on_failure,
+                lambda: self.control._disable(self.robot),
+                lambda: self.control._hold_present_arm_position(self.robot),
+            )
+        except Exception:
+            # A failed bus transaction is retried at a bounded rate; it must not
+            # permanently suppress the host's autonomous fail-safe.
+            logging.exception("Command watchdog action was not confirmed")
+            return
+        logging.warning(
+            "Command watchdog elapsed; %s",
+            "cut all servo torque" if outcome == "cut"
+            else "stopped the base and froze the arm, torque unchanged",
+        )
+        self.watchdog_active = True
+
+    def publish_observation(self) -> None:
+        observation = self.robot.get_observation()
+        sample_monotonic_ns = time.monotonic_ns()
+        motor_health = self.health.collect(self.robot, self.control.torque_enabled)
+        camera_keys = list(self.robot.cameras.keys())
+        jpeg_frames = []
+        for camera_key in camera_keys:
+            valid, jpeg = cv2.imencode(
+                ".jpg", observation.pop(camera_key), [int(cv2.IMWRITE_JPEG_QUALITY), 90]
+            )
+            jpeg_frames.append(jpeg if valid else b"")
+        payload = {
+            "_cams": camera_keys,
+            **observation,
+            TELEMETRY_PROTOCOL_KEY: TELEMETRY_PROTOCOL_VERSION,
+            TELEMETRY_SESSION_KEY: self.telemetry_session,
+            TELEMETRY_SEQUENCE_KEY: self.telemetry_sequence,
+            TELEMETRY_MONOTONIC_NS_KEY: sample_monotonic_ns,
+            TELEMETRY_TORQUE_ENABLED_KEY: self.control.torque_enabled,
+            "_lekiwi_motor_health": motor_health,
+        }
+        try:
+            self.host.zmq_observation_socket.send_multipart(
+                [json.dumps(payload).encode()] + jpeg_frames, flags=zmq.NOBLOCK,
+            )
+        except zmq.Again:
+            logging.info("Dropping observation, no client connected")
+        self.telemetry_sequence += 1
+
+
 def _shutdown_signal(_signum, _frame):
     # LeRobot's stock main only runs its disconnect/finally path for a
     # KeyboardInterrupt. systemd uses SIGTERM, so translate it and guarantee
@@ -411,107 +498,26 @@ def _shutdown_signal(_signum, _frame):
 @draccus.wrap()
 def main(cfg: TorqueHostConfig):
     latch = TorqueLatch(cfg.safety.state_file)
-    initial_torque = latch.initial_enabled()
-    robot = SafetyLeKiwi(cfg.robot, initial_torque)
+    robot = SafetyLeKiwi(cfg.robot)
     host = None
     control = None
     signal.signal(signal.SIGTERM, _shutdown_signal)
     signal.signal(signal.SIGHUP, _shutdown_signal)
     try:
-        logging.info("Connecting LeKiwi (initial torque: %s)", "enabled" if initial_torque else "disabled")
+        logging.info("Connecting LeKiwi with torque off")
         robot.connect()
-        # configure() requests torque-off, but a write returning successfully
+        # configure() leaves torque off, but a write returning successfully
         # is not proof. Reissue it and require every servo's register readback
         # before opening any network control endpoint.
         robot.bus.disable_torque(num_retry=TORQUE_RETRIES)
         TorqueControlServer._verify_torque(robot, False)
         latch.save(False)
         host = BoundLeKiwiHost(cfg.host, cfg.safety.bind_address, cfg.curve)
-        control = TorqueControlServer(
-            host.zmq_context, cfg.safety, latch, initial_torque, host.security
-        )
-        health = MotorHealthCollector(robot)
-        last_cmd_time = time.monotonic()
-        watchdog_active = False
-        next_watchdog_attempt = 0.0
-        telemetry_session = uuid.uuid4().hex
-        telemetry_sequence = 0
+        control = TorqueControlServer(host.zmq_context, cfg.safety, latch, host.security)
+        loop = HostLoop(robot, host, control, MotorHealthCollector(robot), cfg.safety.disarm_on_failure)
         while True:
             loop_start = time.monotonic()
-            try:
-                message = host.zmq_cmd_socket.recv_string(zmq.NOBLOCK)
-                robot.send_action(validate_action_payload(message, ACTION_KEYS))
-                last_cmd_time = time.monotonic()
-                watchdog_active = False
-            except zmq.Again:
-                # Between commands is the normal state; silence past the
-                # watchdog timeout is handled below.
-                pass
-            except Exception as error:
-                logging.error("Message fetching failed: %s", error)
-
-            control_command = control.process_one(robot)
-            if control_command == "enable":
-                # _enable() held the measured arm pose and stopped the base.
-                # Treat that physical hold as the start of a short grace period
-                # in which the newly armed driver must submit a fresh action.
-                last_cmd_time = time.monotonic()
-                watchdog_active = False
-            elif control_command == "disable":
-                watchdog_active = True
-
-            watchdog_now = time.monotonic()
-            if (
-                watchdog_now - last_cmd_time > host.watchdog_timeout_ms / 1000
-                and not watchdog_active
-                and watchdog_now >= next_watchdog_attempt
-            ):
-                next_watchdog_attempt = watchdog_now + 0.25
-                try:
-                    outcome = react_to_command_silence(
-                        cfg.safety.disarm_on_failure,
-                        lambda: control._disable(robot),
-                        lambda: control._hold_present_arm_position(robot),
-                    )
-                    logging.warning(
-                        "Command watchdog elapsed; %s",
-                        "cut all servo torque" if outcome == "cut"
-                        else "stopped the base and froze the arm, torque unchanged",
-                    )
-                    watchdog_active = True
-                except Exception:
-                    # A failed bus transaction is retried at a bounded rate; it
-                    # must not permanently suppress the host's autonomous fail-safe.
-                    logging.exception("Command watchdog action was not confirmed")
-
-            observation = robot.get_observation()
-            sample_monotonic_ns = time.monotonic_ns()
-            motor_health = health.collect(robot, control.torque_enabled)
-            camera_keys = list(robot.cameras.keys())
-            jpeg_frames = []
-            for camera_key in camera_keys:
-                valid, jpeg = cv2.imencode(
-                    ".jpg", observation.pop(camera_key), [int(cv2.IMWRITE_JPEG_QUALITY), 90]
-                )
-                jpeg_frames.append(jpeg if valid else b"")
-            try:
-                payload = {
-                    "_cams": camera_keys,
-                    **observation,
-                    TELEMETRY_PROTOCOL_KEY: TELEMETRY_PROTOCOL_VERSION,
-                    TELEMETRY_SESSION_KEY: telemetry_session,
-                    TELEMETRY_SEQUENCE_KEY: telemetry_sequence,
-                    TELEMETRY_MONOTONIC_NS_KEY: sample_monotonic_ns,
-                    TELEMETRY_TORQUE_ENABLED_KEY: control.torque_enabled,
-                    "_lekiwi_motor_health": motor_health,
-                }
-                host.zmq_observation_socket.send_multipart(
-                    [json.dumps(payload).encode()] + jpeg_frames,
-                    flags=zmq.NOBLOCK,
-                )
-            except zmq.Again:
-                logging.info("Dropping observation, no client connected")
-            telemetry_sequence += 1
+            loop.step()
             time.sleep(max(1 / host.max_loop_freq_hz - (time.monotonic() - loop_start), 0))
     except KeyboardInterrupt:
         logging.info("Stopping LeKiwi torque host")
