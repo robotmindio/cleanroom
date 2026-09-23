@@ -317,8 +317,12 @@ electrical, mechanical, or process failure.
 ### Production safety prerequisites
 
 Real mode loads `config/safety_production.yaml`. With `LEKIWI_DISARM_ON_FAILURE=true`
-(larger robots) it denies base and arm motion until the following current, stamped
-inputs are present and healthy. By default the supervisor only reports them:
+(larger robots) it denies base and arm motion until the required inputs below are
+current, stamped and healthy. By default the supervisor only reports them. The
+shipped robot has no IMU, bumper or battery monitor, and its E-stop cuts motor
+power outside the electronics, so those four inputs are not required
+(`require_imu`, `require_bumper`, `require_battery`, `require_estop` are false)
+until hardware publishes them:
 
 | Input | Topic | Purpose |
 | --- | --- | --- |
@@ -326,11 +330,11 @@ inputs are present and healthy. By default the supervisor only reports them:
 | Full scan | `/scan` | Obstacle coverage and freshness |
 | Depth | `/camera/depth/points` | Arm-workspace obstacles |
 | Odometry | `/odom` | Base state |
-| IMU | `/imu/data` | Base dynamics |
+| IMU (not required) | `/imu/data` | Base dynamics |
 | Joint state | `/joint_states` | Arm feedback and stow interlock |
-| Bumper | `safety/bumper_active` | Contact stop |
-| E-stop | `safety/estop_active` | Independent emergency stop state |
-| Battery | `/battery_state` | Voltage and charge limits |
+| Bumper (not required) | `safety/bumper_active` | Contact stop |
+| E-stop (not required) | `safety/estop_active` | Independent emergency stop state |
+| Battery (not required) | `/battery_state` | Voltage and charge limits |
 | Motor health | `/hardware/diagnostics` | Servo/bus faults |
 | Arm collision gate | `/safety/arm_workspace_clear` | Live MoveIt scene/state validity |
 
@@ -982,9 +986,9 @@ Symptoms and fixes are collected in [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
   The ROS E-stop topic and software torque cut are status/control interfaces,
   not substitutes for removing actuator energy independently of ROS.
 - The production profile requires `/scan`, `/camera/depth/points`, `/odom`,
-  `/imu/data`, `/joint_states`, `/battery_state`,
-  `/hardware/diagnostics`, `safety/bumper_active`, and
-  `safety/estop_active`, plus `safety/driver_state`. The supplied
+  `/joint_states`, `/hardware/diagnostics`, and `safety/driver_state`. It does
+  not require `/imu/data`, `/battery_state`, `safety/bumper_active`, or
+  `safety/estop_active`, because the shipped robot has no source for them. The supplied
   `config/safety_acceptance.yaml` is deliberately unvalidated; physical
   stopping and fault trials must populate it before production arming.
 - The acceptance record is schema version 2. It remains invalid until it has

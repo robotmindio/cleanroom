@@ -14,8 +14,9 @@ Owner: robot integrator and safety reviewer at the deployment site.
 
 - Install and independently wire a hardwired E-stop that removes actuator
   energy without depending on ROS, the motor host, DDS, or the compute OS.
-- Install bumper/contact sensing and publish its real state on
-  `safety/bumper_active`.
+- Install bumper/contact sensing, publish its real state on
+  `safety/bumper_active`, and set `require_bumper: true` in
+  `config/safety_production.yaml`.
 - Accept the LD06 as the production scan source: verify its 360-degree
   coverage, mounting-plane height and self-occlusion against the production
   profile's 6-radian scan requirement. The camera floor-scan fallback is not a
@@ -25,7 +26,9 @@ Owner: robot integrator and safety reviewer at the deployment site.
   `/camera/depth/points` cloud covers the arm workspace; the driver publishes
   the cloud, but coverage is not established.
 - Provide stamped `/imu/data` and `/battery_state` from accepted physical
-  sources. Servo voltage alone is not a qualified battery state-of-charge
+  sources, then set `require_imu` / `require_battery` true in
+  `config/safety_production.yaml` and add the IMU back to `config/ekf.yaml`.
+  Servo voltage alone is not a qualified battery state-of-charge
   source. `/hardware/diagnostics` comes from the driver's motor telemetry; its
   voltage, temperature, current and load thresholds still need the bench
   qualification in [docs/safety.md](docs/safety.md).

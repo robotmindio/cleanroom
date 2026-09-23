@@ -9,11 +9,11 @@ reports them. A ROS topic alone is not evidence of a real safety function.
 
 | Function | Software support exists? | What is required for a real implementation |
 | --- | --- | --- |
-| Bumper | Yes. The supervisor monitors `safety/bumper_active`. | Install physical contact switches or an equivalent contact sensor, then add a hardware bridge that publishes its actual state. |
-| E-stop | Yes. The supervisor monitors `safety/estop_active`, and the driver can request servo torque-off. | Install a hardwired, independently wired emergency stop that removes actuator energy without ROS, the motor host, DDS, or the compute OS. Software torque-off is not an E-stop. |
-| Battery | Yes. The supervisor validates `/battery_state`. | Add a BMS or voltage/current monitor that publishes real, stamped battery data. Servo voltage alone is not a qualified state-of-charge source. |
+| Bumper | Yes. The supervisor monitors `safety/bumper_active` when `require_bumper` is true; the production profile leaves it false because no bumper is fitted. | Install physical contact switches or an equivalent contact sensor, then add a hardware bridge that publishes its actual state. |
+| E-stop | Yes. The supervisor monitors `safety/estop_active` when `require_estop` is true; the production profile leaves it false because the fitted E-stop cuts motor power outside the electronics and reports nothing. The driver can request servo torque-off. | Install a hardwired, independently wired emergency stop that removes actuator energy without ROS, the motor host, DDS, or the compute OS. Software torque-off is not an E-stop. |
+| Battery | Yes. The supervisor validates `/battery_state` when `require_battery` is true; the production profile leaves it false because no battery monitor is fitted. | Add a BMS or voltage/current monitor that publishes real, stamped battery data. Servo voltage alone is not a qualified state-of-charge source. |
 | Motor health | Yes, for bus/servo telemetry. | Bench-validate the electrical and thermal thresholds before they are allowed to stop motion. |
-| IMU | Yes. The EKF and safety supervisor consume `/imu/data`. | Add, mount, and calibrate a physical IMU and its ROS driver. |
+| IMU | Yes. The safety supervisor can consume `/imu/data`; it is not required, and the EKF does not fuse it, until an IMU exists. | Add, mount, and calibrate a physical IMU and its ROS driver. |
 
 Motor-health telemetry is the only item that can be materially extended using
 the installed robot hardware plus repository software. The other items need a

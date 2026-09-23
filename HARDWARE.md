@@ -470,21 +470,24 @@ relays both feeds; navigation and RTAB-Map use only the front camera.
 The ROS production profile is default-deny in strict mode
 (`LEKIWI_DISARM_ON_FAILURE=true`); by default it reports the same conditions
 without withholding motion. It requires current, stamped feedback for the motor
-host, full scan, depth point cloud, odometry, IMU, joint states, battery, motor
-diagnostics, bumper, and E-stop inputs before granting base or arm permission. The arm must also be inside the configured stow pose
-for base motion. These interfaces are:
+host, full scan, depth point cloud, odometry, joint states and motor diagnostics
+before granting base or arm permission. The arm must also be inside the configured stow pose
+for base motion. This robot has no IMU, bumper or battery monitor, and its E-stop
+cuts motor power outside the electronics, so the IMU, battery, bumper and E-stop
+inputs are not required until hardware publishes them. The interfaces are:
 
 ```text
 safety/driver_state             motor-link and torque state
 /scan                           obstacle coverage
 /camera/depth/points            arm-workspace obstacles
-/odom, /imu/data                base state
+/odom                           base state
+/imu/data                       base dynamics (not required: no IMU)
 /joint_states                   arm feedback and stow interlock
-/battery_state                  voltage and charge limits
+/battery_state                  voltage and charge limits (not required)
 /hardware/diagnostics           servo and bus health
 safety/arm_workspace_clear      live MoveIt scene/state validity
-safety/bumper_active            contact stop
-safety/estop_active             E-stop state
+safety/bumper_active            contact stop (not required: no bumper)
+safety/estop_active             E-stop state (not required: hardware cut)
 ```
 
 `config/safety_acceptance.yaml` is a schema-version-2 template shipped with
