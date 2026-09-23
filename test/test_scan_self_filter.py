@@ -67,3 +67,63 @@ def test_the_node_refuses_a_range_that_could_hide_more_than_the_robot(value):
             ScanSelfFilter()
     finally:
         rclpy.shutdown()
+
+
+def test_several_sectors_each_blank_only_within_their_own_reach():
+    from lekiwi_rmf.scan_self_filter import blank_body_sectors
+
+    scan = _scan([0.1] * 12)
+    scan.ranges[1] = 0.25     # 30 deg: beyond the first sector's 0.2 m reach
+    scan.ranges[8] = 0.25     # 240 deg: inside the second sector's 0.3 m reach
+    out = blank_body_sectors(scan, [(0.0, 60.0, 0.2), (210.0, 270.0, 0.3)])
+    assert [i for i, r in enumerate(out.ranges) if math.isinf(r)] == [0, 2, 7, 8, 9]
+    assert out.ranges[1] == pytest.approx(0.25)
+
+
+def test_one_number_or_matching_lists_describe_the_sectors():
+    from lekiwi_rmf.scan_self_filter import parse_sectors
+
+    assert parse_sectors(255.0, 345.0, 0.2) == [(255.0, 345.0, 0.2)]
+    assert parse_sectors([255.0, 85.0], [345.0, 150.0], [0.2, 0.25]) == [
+        (255.0, 345.0, 0.2), (85.0, 150.0, 0.25)]
+    with pytest.raises(ValueError, match="one entry per sector"):
+        parse_sectors([255.0, 85.0], [345.0], [0.2, 0.25])
+    with pytest.raises(ValueError, match="at most"):
+        parse_sectors([0.0, 120.0], [100.0, 230.0], [0.2, 0.2])
+
+
+def test_the_node_accepts_a_list_of_sectors():
+    import rclpy
+
+    from lekiwi_rmf.scan_self_filter import ScanSelfFilter
+
+    rclpy.init(args=["--ros-args",
+                     "-p", "body_start_deg:=[255.0, 85.0]",
+                     "-p", "body_end_deg:=[345.0, 150.0]",
+                     "-p", "body_max_range_m:=[0.2, 0.25]"])
+    try:
+        node = ScanSelfFilter()
+        assert node.sectors == [(255.0, 345.0, 0.2), (85.0, 150.0, 0.25)]
+        node.destroy_node()
+    finally:
+        rclpy.shutdown()
+
+
+def test_proposed_sectors_cover_steady_body_returns_and_ignore_far_or_rare_ones():
+    from lekiwi_rmf.scan_self_filter import parse_sectors, propose_sectors
+
+    increment = math.radians(1.0)
+    scans = []
+    for index in range(100):
+        ranges = [5.0] * 360
+        for degree in range(259, 307):           # a steady body part
+            ranges[degree] = 0.15
+        for degree in (355, 356, 357, 358, 359, 0, 1, 2):  # another, across 0 deg
+            ranges[degree] = 0.08
+        if index == 0:
+            ranges[100] = 0.10                    # one stray return: ignored
+        scans.append((0.0, increment, ranges))
+
+    sectors = propose_sectors(scans)
+    assert sectors == [(254.0, 312.0, 0.17), (350.0, 8.0, 0.1)]
+    parse_sectors(*zip(*sectors))  # the proposal is a valid filter configuration
