@@ -154,6 +154,8 @@ class LeKiwiDriver(Node):
         # Set by an operator's safety/disarm and cleared only by a successful safety/arm,
         # so no later failure or telemetry recovery can re-arm a robot the operator disarmed.
         self.operator_disarmed = False
+        # A failed automatic arm is retried no earlier than this monotonic time.
+        self._next_rearm_at = 0.0
         calibration_path = os.path.expanduser(calibration_file)
         self.arm_calibrated = os.path.isfile(calibration_path)
         self.stop_pending = True
@@ -217,7 +219,7 @@ class LeKiwiDriver(Node):
             armed = self.armed
             arm_current = self._permission_is_current(
                 self.arm_motion_permitted,
-                getattr(self, "_arm_permission_received_at_ns", None),
+                self._arm_permission_received_at_ns,
                 received_at_ns,
             )
         if not permitted and armed and not arm_current:
@@ -238,7 +240,7 @@ class LeKiwiDriver(Node):
             armed = self.armed
             base_current = self._permission_is_current(
                 self.base_motion_permitted,
-                getattr(self, "_base_permission_received_at_ns", None),
+                self._base_permission_received_at_ns,
                 received_at_ns,
             )
         newly_withdrawn = not permitted and (was_permitted or not was_expired)
@@ -265,17 +267,17 @@ class LeKiwiDriver(Node):
 
     def _permission_is_current(self, permitted, received_at_ns, now_ns=None):
         return bool(permitted) and self._permission_is_fresh(
-            received_at_ns, getattr(self, "permission_timeout_ns", 0), now_ns
+            received_at_ns, self.permission_timeout_ns, now_ns
         )
 
     def _capability_permission_is_current(self, now_ns=None):
         return self._permission_is_current(
-            getattr(self, "base_motion_permitted", False),
-            getattr(self, "_base_permission_received_at_ns", None),
+            self.base_motion_permitted,
+            self._base_permission_received_at_ns,
             now_ns,
         ) or self._permission_is_current(
-            getattr(self, "arm_motion_permitted", False),
-            getattr(self, "_arm_permission_received_at_ns", None),
+            self.arm_motion_permitted,
+            self._arm_permission_received_at_ns,
             now_ns,
         )
 
@@ -285,29 +287,29 @@ class LeKiwiDriver(Node):
         arm_expired = False
         with self.state_lock:
             base_current = self._permission_is_current(
-                getattr(self, "base_motion_permitted", False),
-                getattr(self, "_base_permission_received_at_ns", None),
+                self.base_motion_permitted,
+                self._base_permission_received_at_ns,
                 current,
             )
             if not base_current:
-                if getattr(self, "base_motion_permitted", False):
+                if self.base_motion_permitted:
                     self.base_motion_permitted = False
                     self.command = Twist()
                     self.command_stamp = self.get_clock().now()
 
             arm_current = self._permission_is_current(
-                getattr(self, "arm_motion_permitted", False),
-                getattr(self, "_arm_permission_received_at_ns", None),
+                self.arm_motion_permitted,
+                self._arm_permission_received_at_ns,
                 current,
             )
             if not arm_current:
-                if not getattr(self, "_arm_permission_expired", False):
+                if not self._arm_permission_expired:
                     arm_expired = True
                 self.arm_motion_permitted = False
                 self._arm_permission_expired = True
             else:
                 self._arm_permission_expired = False
-            was_armed = bool(getattr(self, "armed", False))
+            was_armed = self.armed
 
         if arm_expired and was_armed:
             self.cancel_trajectory("arm safety permission lease expired")
@@ -325,7 +327,7 @@ class LeKiwiDriver(Node):
             return
         with self.state_lock:
             if not self.armed or not self._permission_is_current(
-                self.base_motion_permitted, getattr(self, "_base_permission_received_at_ns", None)
+                self.base_motion_permitted, self._base_permission_received_at_ns
             ):
                 return
             self.command = message
@@ -421,7 +423,7 @@ class LeKiwiDriver(Node):
 
     def set_servo_torque(self, enabled):
         """Synchronously require the serial-bus owner to change physical torque."""
-        can_log = not hasattr(self, "context") or rclpy.ok(context=self.context)
+        can_log = rclpy.ok(context=self.context)
         try:
             with self.torque_lock:
                 self.torque.set_enabled(enabled)
@@ -443,12 +445,12 @@ class LeKiwiDriver(Node):
             with self.state_lock:
                 if (
                     not self.auto_arm_pending
-                    or time.monotonic() < getattr(self, "_next_rearm_at", 0.0)
+                    or time.monotonic() < self._next_rearm_at
                     or self.link_lost
                     or self.armed
                     or not self._permission_is_current(
                         self.arm_motion_permitted,
-                        getattr(self, "_arm_permission_received_at_ns", None),
+                        self._arm_permission_received_at_ns,
                     )
                     or self.torque_fault
                 ):
@@ -472,7 +474,7 @@ class LeKiwiDriver(Node):
                     not self.link_lost
                     and self._permission_is_current(
                         self.arm_motion_permitted,
-                        getattr(self, "_arm_permission_received_at_ns", None),
+                        self._arm_permission_received_at_ns,
                     )
                     and not self.torque_fault
                 )
@@ -587,7 +589,7 @@ class LeKiwiDriver(Node):
     def accept_trajectory(self, goal):
         if not self.armed or not self._permission_is_current(
             self.arm_motion_permitted,
-            getattr(self, "_arm_permission_received_at_ns", None),
+            self._arm_permission_received_at_ns,
         ):
             # MoveIt surfaces this only as an unexplained "goal was rejected"; say why here.
             self.get_logger().warn(
@@ -638,7 +640,7 @@ class LeKiwiDriver(Node):
         with self.state_lock:
             if not self.armed or not self._permission_is_current(
                 self.arm_motion_permitted,
-                getattr(self, "_arm_permission_received_at_ns", None),
+                self._arm_permission_received_at_ns,
             ):
                 goal_handle.abort()
                 return FollowJointTrajectory.Result(
@@ -780,7 +782,7 @@ class LeKiwiDriver(Node):
         # fresh telemetry for a dropout. The client sequence advances only when its ZMQ
         # socket consumed a new multipart observation; cached observations leave it
         # unchanged, which is the signal the driver actually needs for link safety.
-        robot = getattr(self, "robot", None)
+        robot = self.robot
         token_marker = object()
         token = getattr(robot, "observation_token", token_marker)
         if token is None:
@@ -798,7 +800,7 @@ class LeKiwiDriver(Node):
                 for name, value in observation.items()
                 if name.endswith((".pos", ".vel"))
             ))
-        fresh = token != getattr(self, "last_observation_token", None)
+        fresh = token != self.last_observation_token
         self.last_observation_token = token
         self.last_observation = observation
         return fresh
@@ -971,7 +973,7 @@ class LeKiwiDriver(Node):
             stale = (now - self.command_stamp).nanoseconds / 1e9 > self.command_timeout
             cmd = Twist() if stale or not self._permission_is_current(
                 self.base_motion_permitted,
-                getattr(self, "_base_permission_received_at_ns", None),
+                self._base_permission_received_at_ns,
             ) else self.command
         hold_action = {
             f"{joint}.pos": float(observation.get(f"{joint}.pos", 0.0)) for joint in ARM_JOINTS
@@ -1041,11 +1043,11 @@ class LeKiwiDriver(Node):
                         return
                     arm_permitted = self._permission_is_current(
                         self.arm_motion_permitted,
-                        getattr(self, "_arm_permission_received_at_ns", None),
+                        self._arm_permission_received_at_ns,
                     )
                     base_permitted = self._permission_is_current(
                         self.base_motion_permitted,
-                        getattr(self, "_base_permission_received_at_ns", None),
+                        self._base_permission_received_at_ns,
                     )
                 if not arm_permitted:
                     self.cancel_trajectory("arm safety permission withdrawn")
@@ -1111,7 +1113,7 @@ class LeKiwiDriver(Node):
 
     def publish_motor_health(self, stamp):
         """Publish only the snapshot validated with this fresh host observation."""
-        if not getattr(self, "publish_motor_health_enabled", True):
+        if not self.publish_motor_health_enabled:
             return
         statuses = getattr(self.robot, "observation_motor_health", None)
         if not statuses:

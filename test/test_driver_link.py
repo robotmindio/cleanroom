@@ -31,11 +31,50 @@ driver = types.ModuleType("driver_under_test")
 exec(compile(ast.Module(body=[_NODE], type_ignores=[]), "driver.py", "exec"), driver.__dict__)
 driver.math = math
 driver.time = time
-# The tests below written before staying armed became the default cover the opt-in strict
-# mode (disarm, cut torque and wait for an operator on every failure). The default has its
-# own tests at the end.
-driver.LeKiwiDriver.disarm_on_failure = True
-driver.LeKiwiDriver.operator_disarmed = False
+
+
+def make_node(**overrides):
+    """A driver in the state ``__init__`` leaves it, without ROS or a motor host.
+
+    The tests below written before staying armed became the default cover the opt-in
+    strict mode (disarm, cut torque and wait for an operator on every failure), so that
+    is the baseline here. The default has its own tests at the end.
+    """
+    node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
+    state = {
+        "disarm_on_failure": True,
+        "operator_disarmed": False,
+        "auto_arm_pending": False,
+        "_next_rearm_at": 0.0,
+        "armed": False,
+        "torque_fault": False,
+        "link_lost": False,
+        "stop_pending": True,
+        "base_motion_permitted": False,
+        "arm_motion_permitted": False,
+        "_base_permission_received_at_ns": None,
+        "_arm_permission_received_at_ns": None,
+        "_arm_permission_expired": False,
+        "permission_timeout_ns": 10_000_000_000,
+        "link_timeout": 1.0,
+        "command_timeout": 0.4,
+        "robot": None,
+        "context": None,
+        "last_observation": None,
+        "last_observation_token": None,
+        "trajectory": None,
+        "publish_motor_health_enabled": True,
+        "safety_state": "DISARMED",
+        "state_lock": threading.Lock(),
+        "action_lock": threading.Lock(),
+        "torque_lock": threading.Lock(),
+        "trajectory_lock": threading.Lock(),
+        "safety_publish_lock": threading.Lock(),
+    }
+    state.update(overrides)
+    for name, value in state.items():
+        setattr(node, name, value)
+    return node
 
 
 def grant_fresh_arm_permission(node, permitted=True):
@@ -51,7 +90,7 @@ def grant_fresh_base_permission(node, permitted=True):
 
 
 def test_repeated_cached_observation_is_not_fresh():
-    node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
+    node = make_node()
     node.last_observation = None
     node.last_observation_token = None
     cached = {"arm_shoulder_pan.pos": 12.0}
@@ -61,7 +100,7 @@ def test_repeated_cached_observation_is_not_fresh():
 
 
 def test_mutated_cached_observation_is_fresh():
-    node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
+    node = make_node()
     node.last_observation = None
     node.last_observation_token = None
     cached = {"arm_shoulder_pan.pos": 12.0}
@@ -72,7 +111,7 @@ def test_mutated_cached_observation_is_fresh():
 
 
 def test_client_without_an_accepted_packet_is_not_fresh():
-    node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
+    node = make_node()
     node.robot = types.SimpleNamespace(observation_token=None, observation_sequence=0)
     node.last_observation_token = None
 
@@ -88,7 +127,7 @@ def test_permission_lease_uses_receive_monotonic_time_and_expires():
 
 def test_arm_permission_lease_expiry_disarms_and_base_expiry_zeros_command():
     driver.Twist = object
-    node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
+    node = make_node()
     node.permission_timeout_ns = 100
     node.state_lock = threading.Lock()
     node.armed = True
@@ -118,7 +157,7 @@ def test_explicit_arm_accepts_fresh_base_capability_lease():
             return types.SimpleNamespace(nanoseconds=0)
 
     driver.Twist = object
-    node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
+    node = make_node()
     node.get_clock = lambda: types.SimpleNamespace(now=lambda: Now())
     node.last_fresh = object()
     node.link_timeout = 1.0
@@ -144,7 +183,7 @@ def test_explicit_arm_accepts_fresh_base_capability_lease():
 
 def test_arm_permission_withdrawal_keeps_torque_when_base_lease_is_current():
     driver.Twist = object
-    node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
+    node = make_node()
     node.permission_timeout_ns = 10_000_000_000
     node.state_lock = threading.Lock()
     node.armed = True
@@ -170,7 +209,7 @@ def test_arm_permission_withdrawal_keeps_torque_when_base_lease_is_current():
 
 def test_base_permission_lease_expiry_does_not_require_arm_disarm():
     driver.Twist = object
-    node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
+    node = make_node()
     node.permission_timeout_ns = 100
     node.state_lock = threading.Lock()
     node.armed = True
@@ -192,7 +231,7 @@ def test_base_permission_lease_expiry_does_not_require_arm_disarm():
 
 
 def test_host_session_restart_forces_disarm_and_odometry_reset():
-    node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
+    node = make_node()
     node.robot = types.SimpleNamespace(observation_session_changed=True)
     reset = []
     node.odom_samples = types.SimpleNamespace(reset=lambda: reset.append(True))
@@ -205,7 +244,7 @@ def test_host_session_restart_forces_disarm_and_odometry_reset():
 
 
 def test_authenticated_host_torque_cut_cannot_leave_driver_logically_armed():
-    node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
+    node = make_node()
     node.robot = types.SimpleNamespace(observation_torque_enabled=False)
     node.state_lock = threading.Lock()
     node.armed = True
@@ -228,7 +267,7 @@ def test_incomplete_or_non_finite_telemetry_is_rejected():
 
 
 def test_link_loss_is_logged_and_disarmed_once():
-    node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
+    node = make_node()
     node.link_lost = False
     logs, resets, disarms = [], [], []
     node.get_logger = lambda: types.SimpleNamespace(error=logs.append)
@@ -244,7 +283,7 @@ def test_link_loss_is_logged_and_disarmed_once():
 
 
 def test_invalid_motion_scale_is_rejected():
-    node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
+    node = make_node()
     node.xy_scale = 0.0
     node.yaw_scale = 1.0
     node.command_timeout = node.link_timeout = node.permission_timeout = 1.0
@@ -264,7 +303,7 @@ def test_invalid_motion_scale_is_rejected():
 
 
 def test_nonpositive_default_path_tolerance_is_rejected():
-    node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
+    node = make_node()
     node.xy_scale = node.yaw_scale = 1.0
     node.command_timeout = node.link_timeout = node.permission_timeout = 1.0
     node.trajectory_path_tolerance = 0.0
@@ -280,7 +319,7 @@ def test_nonpositive_default_path_tolerance_is_rejected():
 
 def test_guarded_command_topic_is_the_default_and_must_not_be_empty():
     assert 'declare_parameter("cmd_vel_topic", "/cmd_vel_safe")' in _SOURCE
-    node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
+    node = make_node()
     node.xy_scale = node.yaw_scale = 1.0
     node.command_timeout = node.link_timeout = node.permission_timeout = 1.0
     node.trajectory_path_tolerance = 1.0
@@ -299,7 +338,7 @@ def test_guarded_command_topic_is_the_default_and_must_not_be_empty():
 
 
 def test_configured_startup_arm_still_requires_supervisor_permission():
-    node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
+    node = make_node()
     node.auto_arm_pending = True
     node.link_lost = False
     node.armed = False
@@ -335,7 +374,7 @@ def test_manual_arm_rejects_telemetry_older_than_link_timeout():
         def __sub__(self, other):
             return types.SimpleNamespace(nanoseconds=2_000_000_000)
 
-    node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
+    node = make_node()
     node.get_clock = lambda: types.SimpleNamespace(now=lambda: Now())
     node.last_fresh = object()
     node.link_timeout = 1.0
@@ -358,7 +397,7 @@ def test_unconfirmed_torque_enable_is_followed_by_fail_safe_disable():
         def __sub__(self, other):
             return types.SimpleNamespace(nanoseconds=0)
 
-    node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
+    node = make_node()
     node.get_clock = lambda: types.SimpleNamespace(now=lambda: Now())
     node.last_fresh = object()
     node.link_timeout = 1.0
@@ -394,7 +433,7 @@ def test_manual_arm_latches_fault_when_ambiguous_enable_cannot_be_cut():
         def __sub__(self, _other):
             return types.SimpleNamespace(nanoseconds=0)
 
-    node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
+    node = make_node()
     node.get_clock = lambda: types.SimpleNamespace(now=lambda: Now())
     node.last_fresh = object()
     node.link_timeout = 1.0
@@ -421,7 +460,7 @@ def test_manual_arm_latches_fault_when_ambiguous_enable_cannot_be_cut():
 
 def test_unconfirmed_startup_enable_cannot_leave_logical_arm_state_set():
     driver.Twist = object
-    node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
+    node = make_node()
     node.auto_arm_pending = True
     node.link_lost = False
     node.armed = False
@@ -470,7 +509,7 @@ def test_odometry_covariance_never_claims_perfect_pose_or_twist():
     driver.JointState = lambda: types.SimpleNamespace(header=types.SimpleNamespace())
     driver.ARM_JOINTS = ("joint",)
     odometry, transform, joints = [], [], []
-    node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
+    node = make_node()
     node.pose = (1.0, 2.0, 0.0)
     node.odom_xy_stddev, node.odom_yaw_stddev = 0.05, 0.10
     node.twist_xy_stddev, node.twist_yaw_stddev = 0.10, 0.20
@@ -510,7 +549,7 @@ def test_validated_motor_health_is_published_as_diagnostics():
     driver.DiagnosticStatus = DiagnosticStatus
     driver.KeyValue = KeyValue
     published = []
-    node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
+    node = make_node()
     node.robot = types.SimpleNamespace(observation_motor_health=(
         types.SimpleNamespace(
             name="motor_bus", level=0, message="OK",
@@ -528,7 +567,7 @@ def test_validated_motor_health_is_published_as_diagnostics():
 
 
 def test_non_finite_twist_is_rejected_and_disarms():
-    node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
+    node = make_node()
     node.state_lock = threading.Lock()
     node.action_lock = threading.Lock()
     node.armed = True
@@ -536,7 +575,9 @@ def test_non_finite_twist_is_rejected_and_disarms():
     node.auto_arm_pending = True
     node.get_logger = lambda: type("Logger", (), {"error": lambda *_: None})()
     node.set_disarmed = lambda state: setattr(node, "disarmed_as", state)
-    vector = lambda **values: types.SimpleNamespace(x=values.get("x", 0.0), y=0.0, z=0.0)
+    def vector(**values):
+        return types.SimpleNamespace(x=values.get("x", 0.0), y=0.0, z=0.0)
+
     message = types.SimpleNamespace(linear=vector(x=math.nan), angular=vector())
 
     node.on_command(message)
@@ -546,7 +587,7 @@ def test_non_finite_twist_is_rejected_and_disarms():
 
 def test_disarm_queues_a_stop():
     driver.Twist = object
-    node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
+    node = make_node()
     node.state_lock = threading.Lock()
     node.action_lock = threading.Lock()
     node.armed = True
@@ -573,7 +614,7 @@ def test_unconfirmed_cut_latches_torque_fault_until_explicit_confirmed_disarm():
             return types.SimpleNamespace(nanoseconds=0)
 
     driver.Twist = object
-    node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
+    node = make_node()
     node.state_lock = threading.Lock()
     node.action_lock = threading.Lock()
     node.armed = True
@@ -614,7 +655,7 @@ def test_unconfirmed_cut_latches_torque_fault_until_explicit_confirmed_disarm():
 def test_shutdown_style_disarm_latches_fault_without_publishing_on_rpc_exception():
     driver.Twist = object
     driver.rclpy = types.SimpleNamespace(ok=lambda **_kwargs: False)
-    node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
+    node = make_node()
     node.context = object()
     node.state_lock = threading.Lock()
     node.action_lock = threading.Lock()
@@ -635,7 +676,7 @@ def test_shutdown_style_disarm_latches_fault_without_publishing_on_rpc_exception
 
 def test_disarm_keeps_state_observable_while_serializing_physical_actions():
     driver.Twist = object
-    node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
+    node = make_node()
     node.state_lock = threading.Lock()
     node.action_lock = threading.Lock()
     node.armed = True
@@ -675,7 +716,7 @@ def test_disarmed_driver_sends_zero_velocity_once_but_publishes_measured_motion(
     driver.joint_positions = lambda *_: {"joint": 0.0}
     driver.integrate_pose = lambda pose, _velocity, _dt: pose
     published = []
-    node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
+    node = make_node()
     node.get_clock = lambda: type("Clock", (), {"now": lambda _: Stamp()})()
     node.robot = type("Robot", (), {
         "get_observation": lambda _: {
@@ -740,7 +781,7 @@ def test_safety_marker_matches_the_safety_state():
     markers = []
     driver.String = lambda: types.SimpleNamespace()
     driver.Marker = Marker
-    node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
+    node = make_node()
     node.get_clock = lambda: type("Clock", (), {"now": lambda _: type("Now", (), {"to_msg": lambda _: object()})()})()
     node.safety_pub = types.SimpleNamespace(publish=messages.append)
     node.safety_marker_pub = types.SimpleNamespace(publish=markers.append)
@@ -761,7 +802,7 @@ def test_safety_marker_matches_the_safety_state():
 def hold_mode_node(unreachable_host=True):
     """A driver with the default policy whose torque host never answers a cut."""
     driver.Twist = object
-    node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
+    node = make_node()
     node.disarm_on_failure = False
     node.state_lock = threading.Lock()
     node.action_lock = threading.Lock()
