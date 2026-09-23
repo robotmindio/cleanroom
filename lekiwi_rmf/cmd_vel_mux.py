@@ -27,28 +27,13 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from std_msgs.msg import Bool
 
+from lekiwi_rmf.motion_guards import lease_is_fresh, positive_seconds_ns, twist_is_finite
+
 
 @dataclass(frozen=True)
 class _Command:
     message: Twist
     received_at: int
-
-
-def _finite_twist(message: Twist) -> bool:
-    """Return whether every Twist field is finite.
-
-    Checking all six fields is deliberate.  Consumers should not assume that
-    unused axes are zero: a malformed remote client can populate any field.
-    """
-
-    return all(math.isfinite(value) for value in (
-        message.linear.x,
-        message.linear.y,
-        message.linear.z,
-        message.angular.x,
-        message.angular.y,
-        message.angular.z,
-    ))
 
 
 def _zero_twist() -> Twist:
@@ -111,10 +96,7 @@ class CmdVelMux(Node):
         self.create_timer(1.0 / publish_frequency, self._publish_selected)
 
     def _positive_seconds(self, name: str) -> int:
-        value = float(self.get_parameter(name).value)
-        if not math.isfinite(value) or value <= 0.0:
-            raise ValueError(f"{name} must be finite and positive")
-        return int(value * 1_000_000_000)
+        return positive_seconds_ns(float(self.get_parameter(name).value), name)
 
     def _manual_callback(self, message: Twist) -> None:
         if self._accept(message, "manual"):
@@ -128,19 +110,8 @@ class CmdVelMux(Node):
         self._motion_permitted = bool(message.data)
         self._permission_received_at_ns = time.monotonic_ns()
 
-    @staticmethod
-    def _permission_is_fresh(
-        received_at_ns: Optional[int], timeout_ns: int, now_ns: Optional[int] = None
-    ) -> bool:
-        """Require a recent decision even when DDS replays a latched sample."""
-        if received_at_ns is None:
-            return False
-        current = time.monotonic_ns() if now_ns is None else now_ns
-        age = current - received_at_ns
-        return 0 <= age <= timeout_ns
-
     def _accept(self, message: Twist, source: str) -> bool:
-        if _finite_twist(message):
+        if twist_is_finite(message):
             return True
         self.get_logger().warning(
             f"discarded non-finite {source} Twist", throttle_duration_sec=1.0
@@ -149,10 +120,7 @@ class CmdVelMux(Node):
 
     @staticmethod
     def _fresh(command: Optional[_Command], now: int, timeout_ns: int) -> bool:
-        if command is None:
-            return False
-        age = now - command.received_at
-        return 0 <= age <= timeout_ns
+        return command is not None and lease_is_fresh(command.received_at, timeout_ns, now)
 
     def selected_command(
         self, now: Optional[int] = None, permission_now: Optional[int] = None
@@ -160,7 +128,8 @@ class CmdVelMux(Node):
         """Return a current command; stale inputs always become an explicit stop."""
 
         current_time = time.monotonic_ns() if now is None else now
-        permission_fresh = self._permission_is_fresh(
+        # Require a recent decision even when DDS replays a latched sample.
+        permission_fresh = lease_is_fresh(
             self._permission_received_at_ns, self._permission_timeout_ns, permission_now
         )
         if not self._motion_permitted or not permission_fresh:

@@ -32,6 +32,8 @@ from sensor_msgs.msg import BatteryState, Imu, JointState, LaserScan, PointCloud
 from std_msgs.msg import Bool, String
 from std_srvs.srv import Trigger
 
+from lekiwi_rmf.motion_guards import positive_seconds_ns, stamp_ns
+
 
 class SafetyState(str, Enum):
     BOOT = "BOOT"
@@ -178,12 +180,6 @@ def permit_unless_strict(decision: SafetyDecision, strict: bool) -> SafetyDecisi
     if strict:
         return decision
     return replace(decision, base_permitted=True, arm_permitted=True)
-
-
-def _seconds_to_ns(value: float, name: str) -> int:
-    if not math.isfinite(value) or value <= 0.0:
-        raise ValueError(f"{name} must be finite and positive")
-    return int(value * 1_000_000_000)
 
 
 def _valid_scan_ranges(message: LaserScan, minimum_valid_fraction: float) -> bool:
@@ -623,14 +619,14 @@ class SafetySupervisor(Node):
         # Read once: fault latching is fixed at construction, so permission
         # enforcement must not change independently at runtime.
         self._strict = bool(self.get_parameter("strict").value)
-        sensor_timeout = _seconds_to_ns(float(self.get_parameter("sensor_timeout").value), "sensor_timeout")
-        state_timeout = _seconds_to_ns(float(self.get_parameter("state_timeout").value), "state_timeout")
-        permission_timeout = _seconds_to_ns(
+        sensor_timeout = positive_seconds_ns(float(self.get_parameter("sensor_timeout").value), "sensor_timeout")
+        state_timeout = positive_seconds_ns(float(self.get_parameter("state_timeout").value), "state_timeout")
+        permission_timeout = positive_seconds_ns(
             float(self.get_parameter("permission_timeout").value), "permission_timeout"
         )
         if permission_timeout >= state_timeout:
             raise ValueError("permission_timeout must be shorter than state_timeout")
-        battery_timeout = _seconds_to_ns(float(self.get_parameter("battery_timeout").value), "battery_timeout")
+        battery_timeout = positive_seconds_ns(float(self.get_parameter("battery_timeout").value), "battery_timeout")
         requirements: dict[str, Requirement] = {}
         require_driver_state = bool(self.get_parameter("require_driver_state").value)
         if require_driver_state:
@@ -754,12 +750,6 @@ class SafetySupervisor(Node):
     def _now(self) -> int:
         return self.get_clock().now().nanoseconds
 
-    @staticmethod
-    def _source_stamp(message) -> int:
-        stamp = message.header.stamp
-        value = int(stamp.sec) * 1_000_000_000 + int(stamp.nanosec)
-        return value
-
     def _on_driver(self, message: String) -> None:
         self._machine.driver_state = message.data
         healthy = message.data in {"DISARMED", "ARMED"}
@@ -776,9 +766,9 @@ class SafetySupervisor(Node):
             and 0.0 <= message.range_min < message.range_max
             and _valid_scan_ranges(message, self._minimum_scan_valid_fraction)
             and (not self._require_full_scan or coverage >= self._minimum_scan_coverage)
-            and self._source_stamp(message) > 0
+            and stamp_ns(message.header.stamp) > 0
         )
-        self._machine.update("scan", healthy, self._source_stamp(message) or self._now(), f"coverage={coverage:.2f} rad")
+        self._machine.update("scan", healthy, stamp_ns(message.header.stamp) or self._now(), f"coverage={coverage:.2f} rad")
 
     def _on_depth(self, message: PointCloud2) -> None:
         healthy = (
@@ -789,10 +779,10 @@ class SafetySupervisor(Node):
                 self._minimum_depth_range,
                 self._maximum_depth_range,
             )
-            and self._source_stamp(message) > 0
+            and stamp_ns(message.header.stamp) > 0
         )
         self._machine.update(
-            "depth", healthy, self._source_stamp(message) or self._now(),
+            "depth", healthy, stamp_ns(message.header.stamp) or self._now(),
             "invalid, blind, or stampless point cloud",
         )
 
@@ -803,8 +793,8 @@ class SafetySupervisor(Node):
             message.twist.twist.linear.x, message.twist.twist.linear.y,
             message.twist.twist.angular.z,
         )
-        healthy = all(math.isfinite(value) for value in values) and self._source_stamp(message) > 0
-        self._machine.update("odometry", healthy, self._source_stamp(message) or self._now(), "non-finite/stampless odometry")
+        healthy = all(math.isfinite(value) for value in values) and stamp_ns(message.header.stamp) > 0
+        self._machine.update("odometry", healthy, stamp_ns(message.header.stamp) or self._now(), "non-finite/stampless odometry")
 
     def _on_imu(self, message: Imu) -> None:
         values = (
@@ -813,20 +803,20 @@ class SafetySupervisor(Node):
             message.linear_acceleration.x, message.linear_acceleration.y,
             message.linear_acceleration.z,
         )
-        healthy = all(math.isfinite(value) for value in values) and self._source_stamp(message) > 0
-        self._machine.update("imu", healthy, self._source_stamp(message) or self._now(), "non-finite/stampless IMU feedback")
+        healthy = all(math.isfinite(value) for value in values) and stamp_ns(message.header.stamp) > 0
+        self._machine.update("imu", healthy, stamp_ns(message.header.stamp) or self._now(), "non-finite/stampless IMU feedback")
 
     def _on_joints(self, message: JointState) -> None:
         positions = dict(zip(message.name, message.position))
         healthy = (
-            self._source_stamp(message) > 0
+            stamp_ns(message.header.stamp) > 0
             and all(name in positions and math.isfinite(positions[name]) for name in self._stow)
         )
         self._machine.arm_stowed = healthy and all(
             abs(positions[name] - expected) <= self._stow_tolerance
             for name, expected in self._stow.items()
         )
-        self._machine.update("joints", healthy, self._source_stamp(message) or self._now(), "incomplete/stampless joint feedback")
+        self._machine.update("joints", healthy, stamp_ns(message.header.stamp) or self._now(), "incomplete/stampless joint feedback")
 
     def _on_bumper(self, message: Bool) -> None:
         self._machine.update("bumper", not message.data, self._now(), "bumper active")
@@ -843,18 +833,18 @@ class SafetySupervisor(Node):
     def _on_battery(self, message: BatteryState) -> None:
         healthy = _valid_battery(
             message, self._minimum_battery_voltage, self._minimum_battery_percentage
-        ) and self._source_stamp(message) > 0
-        self._machine.update("battery", healthy, self._source_stamp(message) or self._now(), "battery below threshold or stampless")
+        ) and stamp_ns(message.header.stamp) > 0
+        self._machine.update("battery", healthy, stamp_ns(message.header.stamp) or self._now(), "battery below threshold or stampless")
 
     def _on_hardware_diagnostics(self, message: DiagnosticArray) -> None:
-        healthy = self._source_stamp(message) > 0 and bool(message.status) and all(
+        healthy = stamp_ns(message.header.stamp) > 0 and bool(message.status) and all(
             status.level < DiagnosticStatus.ERROR for status in message.status
         )
         detail = "; ".join(
             f"{status.name}: {status.message}"
             for status in message.status if status.level >= DiagnosticStatus.ERROR
         ) or "no motor diagnostics"
-        self._machine.update("motor_health", healthy, self._source_stamp(message) or self._now(), detail)
+        self._machine.update("motor_health", healthy, stamp_ns(message.header.stamp) or self._now(), detail)
 
     def _reset(self, _request: Trigger.Request, response: Trigger.Response) -> Trigger.Response:
         response.success, response.message = self._machine.reset(self._now())

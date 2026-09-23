@@ -9,6 +9,8 @@ import types
 
 import pytest
 
+from lekiwi_rmf.motion_guards import lease_is_fresh, twist_is_finite
+
 _SOURCE = (pathlib.Path(__file__).parents[1] / "lekiwi_rmf" / "driver.py").read_text()
 _TREE = ast.parse(_SOURCE)
 _NODE = next(node for node in _TREE.body if getattr(node, "name", None) == "LeKiwiDriver")
@@ -22,10 +24,10 @@ _NODE.body = [
         "arm_after_startup_telemetry", "on_command", "publish_safety", "publish_state", "publish_motor_health",
         "set_disarmed", "set_servo_torque", "cut_torque_after_failure", "_retry_rearm_soon",
         "_enable_torque_and_arm", "_arm_permission_is_current",
-        "_permission_is_fresh", "_permission_is_current",
+        "_permission_is_current",
         "_capability_permission_is_current", "enforce_permission_leases",
         "on_base_permission", "on_arm_permission",
-        "twist_is_finite", "record_link_loss", "update", "validate_motion_parameters",
+        "record_link_loss", "update", "validate_motion_parameters",
         "_poll_telemetry", "_hold_action", "_send_pending_stop", "_apply_trajectory",
         "_send_armed_command", "auto_arm_tick", "execute_trajectory",
     )
@@ -42,6 +44,8 @@ exec(
 )
 driver.math = math
 driver.time = time
+driver.lease_is_fresh = lease_is_fresh
+driver.twist_is_finite = twist_is_finite
 
 
 def make_node(**overrides):
@@ -131,10 +135,10 @@ def test_client_without_an_accepted_packet_is_not_fresh():
 
 
 def test_permission_lease_uses_receive_monotonic_time_and_expires():
-    assert driver.LeKiwiDriver._permission_is_fresh(1_000, 100, 1_100)
-    assert not driver.LeKiwiDriver._permission_is_fresh(1_000, 100, 1_101)
-    assert not driver.LeKiwiDriver._permission_is_fresh(1_000, 100, 999)
-    assert not driver.LeKiwiDriver._permission_is_fresh(None, 100, 1_000)
+    assert lease_is_fresh(1_000, 100, 1_100)
+    assert not lease_is_fresh(1_000, 100, 1_101)
+    assert not lease_is_fresh(1_000, 100, 999)
+    assert not lease_is_fresh(None, 100, 1_000)
 
 
 def test_arm_permission_lease_expiry_disarms_and_base_expiry_zeros_command():

@@ -17,6 +17,7 @@ from sensor_msgs.msg import JointState, PointCloud2
 from std_msgs.msg import Bool
 
 from lekiwi_rmf.arm_trajectory import ARM_JOINTS
+from lekiwi_rmf.motion_guards import positive_seconds_ns, stamp_ns
 
 
 @dataclass
@@ -61,8 +62,7 @@ def complete_joint_snapshot(message: JointState, expected_names) -> JointState |
         for name in expected_names
     ):
         return None
-    stamp_ns = int(message.header.stamp.sec) * 1_000_000_000 + int(message.header.stamp.nanosec)
-    if stamp_ns <= 0:
+    if stamp_ns(message.header.stamp) <= 0:
         return None
     snapshot = JointState()
     snapshot.header = message.header
@@ -73,9 +73,7 @@ def complete_joint_snapshot(message: JointState, expected_names) -> JointState |
 
 def _positive_seconds(node: Node, name: str) -> tuple[float, int]:
     value = float(node.get_parameter(name).value)
-    if not math.isfinite(value) or value <= 0.0:
-        raise ValueError(f"{name} must be finite and positive")
-    return value, int(value * 1_000_000_000)
+    return value, positive_seconds_ns(value, name)
 
 
 class ArmWorkspaceMonitor(Node):
@@ -148,10 +146,7 @@ class ArmWorkspaceMonitor(Node):
 
     def _on_joint_state(self, message: JointState) -> None:
         snapshot = complete_joint_snapshot(message, self._joint_names)
-        source_ns = (
-            int(message.header.stamp.sec) * 1_000_000_000
-            + int(message.header.stamp.nanosec)
-        )
+        source_ns = stamp_ns(message.header.stamp)
         source_age_ns = self.get_clock().now().nanoseconds - source_ns
         if (
             snapshot is None

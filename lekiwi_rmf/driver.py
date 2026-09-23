@@ -26,6 +26,7 @@ from lekiwi_rmf.arm_trajectory import (
     duration_seconds, position_tolerances, prepare_trajectory, sample_trajectory,
     stamp_nanoseconds, trajectory_rows,
 )
+from lekiwi_rmf.motion_guards import lease_is_fresh, twist_is_finite
 from lekiwi_rmf.odometry import (
     OdometrySampleClock, integrate_pose,
 )
@@ -276,17 +277,8 @@ class LeKiwiDriver(Node):
                     "Arm safety permission withdrawn; canceling arm motion while base remains enabled"
                 )
 
-    @staticmethod
-    def _permission_is_fresh(received_at_ns, timeout_ns, now_ns=None):
-        """Return false when a Bool permission lease was not refreshed."""
-        if received_at_ns is None:
-            return False
-        current = time.monotonic_ns() if now_ns is None else now_ns
-        age = current - received_at_ns
-        return 0 <= age <= timeout_ns
-
     def _permission_is_current(self, permitted, received_at_ns, now_ns=None):
-        return bool(permitted) and self._permission_is_fresh(
+        return bool(permitted) and lease_is_fresh(
             received_at_ns, self.permission_timeout_ns, now_ns
         )
 
@@ -341,7 +333,7 @@ class LeKiwiDriver(Node):
         return arm_expired
 
     def on_command(self, message):
-        if not self.twist_is_finite(message):
+        if not twist_is_finite(message):
             self.get_logger().error("Rejecting non-finite base command and disarming")
             self.set_disarmed("DISARMED")
             return
@@ -769,13 +761,6 @@ class LeKiwiDriver(Node):
             return x, y
         scale = limit / magnitude
         return x * scale, y * scale
-
-    @staticmethod
-    def twist_is_finite(message):
-        return all(math.isfinite(value) for value in (
-            message.linear.x, message.linear.y, message.linear.z,
-            message.angular.x, message.angular.y, message.angular.z,
-        ))
 
     def validate_motion_parameters(self):
         """Reject values that would make a command unsafe or undefined."""

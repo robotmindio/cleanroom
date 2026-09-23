@@ -5,7 +5,8 @@ import time
 
 from geometry_msgs.msg import Twist
 
-from lekiwi_rmf.cmd_vel_mux import CmdVelMux, _Command, _finite_twist
+from lekiwi_rmf.cmd_vel_mux import CmdVelMux, _Command
+from lekiwi_rmf.motion_guards import lease_is_fresh, twist_is_finite
 
 
 def _twist(x: float) -> Twist:
@@ -29,7 +30,7 @@ def _bare_mux() -> CmdVelMux:
 def test_rejects_non_finite_values_in_unused_axes_too():
     message = _twist(0.1)
     message.angular.z = nan
-    assert not _finite_twist(message)
+    assert not twist_is_finite(message)
 
 
 def test_fresh_manual_command_preempts_navigation():
@@ -99,6 +100,6 @@ def test_permission_callback_refreshes_receive_time():
     node._permission_callback(type("BoolMessage", (), {"data": True})())
 
     assert node._motion_permitted is True
-    assert node._permission_is_fresh(
+    assert lease_is_fresh(
         node._permission_received_at_ns, node._permission_timeout_ns
     )

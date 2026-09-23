@@ -22,6 +22,7 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import Float64
 from tf2_ros import TransformBroadcaster
 
+from lekiwi_rmf.motion_guards import stamp_ns
 from lekiwi_rmf.sim_topics import WHEEL_COMMAND_TOPICS, WHEEL_JOINTS
 
 
@@ -175,8 +176,7 @@ class SimOmniController(Node):
 
     @staticmethod
     def _message_stamp_ns(message: JointState) -> int:
-        stamp = message.header.stamp
-        return stamp.sec * 1_000_000_000 + stamp.nanosec
+        return stamp_ns(message.header.stamp)
 
     def _joint_state(self, message: JointState) -> None:
         positions = dict(zip(message.name, message.position))
