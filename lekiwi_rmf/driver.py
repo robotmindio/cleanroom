@@ -1256,9 +1256,15 @@ class LeKiwiDriver(Node):
             # watchdog stops the base. SIGINT may already have invalidated the
             # rcl context, so publish only while it is still valid; publishing
             # through a dead context would turn a clean shutdown into exit code 1.
-            self.set_disarmed(
-                "DISARMED", publish=rclpy.ok(context=self.context)
-            )
+            # The check races the signal handler, so a publish that fails because
+            # the context died in between is part of a clean shutdown too.
+            try:
+                self.set_disarmed(
+                    "DISARMED", publish=rclpy.ok(context=self.context)
+                )
+            except Exception:
+                if rclpy.ok(context=self.context):
+                    raise
         finally:
             self.trajectory_server.destroy()
             self.robot.disconnect()
