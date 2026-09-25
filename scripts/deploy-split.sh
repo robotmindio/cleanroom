@@ -192,7 +192,8 @@ if [[ $remote_model == *"Raspberry Pi 5"* ]]; then
   remote_is_pi5=true
   if [[ $device_sudoers != *"/usr/local/sbin/lekiwi-enable-pi5-usb-current"* || \
         $device_sudoers != *"/usr/bin/systemctl reboot"* ]] || \
-    ! "${ssh_command[@]}" test -x /usr/local/sbin/lekiwi-enable-pi5-usb-current; then
+    ! "${ssh_command[@]}" cmp -s "$remote_repo/scripts/enable-pi5-usb-current.sh" \
+      /usr/local/sbin/lekiwi-enable-pi5-usb-current; then
     bootstrap_ssh=("${ssh_command[@]}")
     bootstrap_sudo=(sudo -n)
     if ! "${ssh_command[@]}" sudo -n true 2>/dev/null; then
@@ -200,7 +201,7 @@ if [[ $remote_model == *"Raspberry Pi 5"* ]]; then
       bootstrap_ssh=("${ssh_interactive[@]}")
       bootstrap_sudo=(sudo)
     fi
-    log "One-time Pi 5 privilege setup (enter the Pi sudo password if requested)"
+    log "Ensuring Pi 5 USB helper and deployment permissions (sudo may prompt)"
     "${bootstrap_ssh[@]}" "${bootstrap_sudo[*]} /usr/bin/install -o root -g root -m 0755 '$remote_repo/scripts/enable-pi5-usb-current.sh' /usr/local/sbin/lekiwi-enable-pi5-usb-current && ${bootstrap_sudo[*]} '$remote_repo/scripts/install-deploy-sudoers.sh' device --user \"\$(id -un)\"" || \
       die "could not install the Pi 5 USB helper and deployment permission"
     device_sudoers=$("${ssh_command[@]}" sudo -n -l) || die "Pi deployment sudo grant did not install"
