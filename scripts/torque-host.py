@@ -51,6 +51,20 @@ def broadcast_torque_off(bus):
     bus.sync_write("Torque_Enable", 0, num_retry=TORQUE_RETRIES)
 
 
+def disable_torque_per_motor(bus):
+    failures = run_all_safety_steps(
+        (
+            (
+                f"disable motor torque on {motor}",
+                lambda motor=motor: bus.disable_torque(motor, num_retry=TORQUE_RETRIES),
+            )
+            for motor in bus.motors
+        )
+    )
+    if failures:
+        raise RuntimeError("; ".join(f"{name}: {error}" for name, error in failures))
+
+
 @dataclass
 class TorqueSafetyConfig:
     port_zmq: int = 5557
@@ -259,6 +273,21 @@ class TorqueControlServer:
             return None
 
 
+def cut_torque_for_shutdown(robot: SafetyLeKiwi) -> None:
+    try:
+        broadcast_torque_off(robot.bus)
+        TorqueControlServer._verify_torque(robot, False)
+    except Exception as error:
+        try:
+            disable_torque_per_motor(robot.bus)
+        except Exception as fallback_error:
+            logging.error(
+                "Broadcast torque cut failed (%s); per-motor fallback failed: %s",
+                error, fallback_error,
+            )
+        raise
+
+
 class MotorHealthCollector:
     """Read only health collector run by the process that already owns the bus."""
 
@@ -409,7 +438,10 @@ class HostLoop:
     def receive_command(self) -> None:
         try:
             message = self.host.zmq_cmd_socket.recv_string(zmq.NOBLOCK)
-            self.robot.send_action(validate_action_payload(message, ACTION_KEYS))
+            action = validate_action_payload(message, ACTION_KEYS)
+            if not self.control.torque_enabled:
+                raise RuntimeError("servo torque is disabled")
+            self.robot.send_action(action)
         except zmq.Again:
             # Between commands is the normal state; silence past the watchdog
             # timeout is handled by enforce_watchdog().
@@ -444,6 +476,9 @@ class HostLoop:
             or self.watchdog_active
             or now < self.next_watchdog_attempt
         ):
+            return
+        if not self.control.torque_enabled:
+            self.watchdog_active = True
             return
         self.next_watchdog_attempt = now + 0.25
         try:
@@ -495,9 +530,7 @@ class HostLoop:
 
 
 def _shutdown_signal(_signum, _frame):
-    # LeRobot's stock main only runs its disconnect/finally path for a
-    # KeyboardInterrupt. systemd uses SIGTERM, so translate it and guarantee
-    # its configured disconnect disables torque as the process exits.
+    # Translate systemd's SIGTERM so the finally block cuts and verifies torque.
     raise KeyboardInterrupt
 
 
@@ -543,17 +576,18 @@ def main(cfg: TorqueHostConfig):
         torque_cut = False
         try:
             if robot.is_connected:
-                broadcast_torque_off(robot.bus)
-                TorqueControlServer._verify_torque(robot, False)
+                cut_torque_for_shutdown(robot)
                 torque_cut = True
         finally:
-            # Keep the vendor's per-servo cut as a fallback if the broadcast
-            # could not be verified, despite its first-error abort behavior.
-            if torque_cut:
-                robot.config.disable_torque_on_disconnect = False
             try:
                 if robot.is_connected:
-                    robot.disconnect()
+                    # LeRobot.disconnect() writes zero wheel goals, which
+                    # re-enables Feetech torque after our verified cut.
+                    try:
+                        robot.bus.disconnect(disable_torque=not torque_cut)
+                    finally:
+                        for camera in robot.cameras.values():
+                            camera.disconnect()
             finally:
                 if control is not None:
                     control.disconnect()

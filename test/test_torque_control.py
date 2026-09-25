@@ -319,11 +319,16 @@ class _Bus:
         for motor in MOTORS:
             if motor not in self.enable_skips:
                 self.torque[motor] = 1
+            else:
+                self.torque[motor] = 0
 
-    def disable_torque(self, num_retry=0):
-        self.calls.append("disable_torque")
-        self._fault("disable_torque")
-        self.torque = dict.fromkeys(MOTORS, 0)
+    def disable_torque(self, motors=None, num_retry=0):
+        selected = MOTORS if motors is None else [motors] if isinstance(motors, str) else motors
+        for motor in selected:
+            self.calls.append(f"disable_torque {motor}")
+            self._fault(f"disable_torque:{motor}")
+            self._fault("disable_torque")
+            self.torque[motor] = 0
 
     def sync_read(self, register, motors, normalize=True, num_retry=0):
         self.calls.append(f"read {register}")
@@ -339,6 +344,8 @@ class _Bus:
             self.torque.update({
                 motor: values for motor in MOTORS if motor not in self.torque_off_skips
             })
+        elif register in ("Goal_Position", "Goal_Velocity"):
+            self.torque.update({motor: 1 for motor in values})
 
     def write(self, register, motor, value):
         self.calls.append(f"write {register} {motor}")
@@ -499,6 +506,21 @@ def test_disable_broadcast_reaches_every_motor_past_an_overloaded_gripper(monkey
     assert "disable_torque" not in bus.calls
 
 
+def test_shutdown_fallback_attempts_every_motor_after_an_overload(monkeypatch):
+    host = _host_module(monkeypatch)
+    bus = _Bus()
+    bus.torque = dict.fromkeys(MOTORS, 1)
+    bus.faults["Torque_Enable_write"] = RuntimeError("broadcast failed")
+    bus.faults["disable_torque:arm_gripper"] = RuntimeError("overload")
+
+    with pytest.raises(RuntimeError, match="broadcast failed"):
+        host.cut_torque_for_shutdown(_Robot(bus))
+
+    assert bus.calls[0] == "write Torque_Enable"
+    assert bus.calls[1:] == [f"disable_torque {motor}" for motor in MOTORS]
+    assert bus.torque == {motor: int(motor == "arm_gripper") for motor in MOTORS}
+
+
 def test_disable_reports_torque_on_until_the_bus_confirms_the_cut(monkeypatch, tmp_path):
     host = _host_module(monkeypatch)
     control, socket, robot, latch = _control(host, tmp_path)
@@ -589,6 +611,7 @@ def test_valid_commands_reach_the_robot_and_refresh_the_watchdog(monkeypatch, tm
     host = _host_module(monkeypatch)
     assert set(json.loads(_action())) == set(host.ACTION_KEYS)
     loop, clock, _socket, robot = _loop(host, tmp_path)
+    loop.control.torque_enabled = True
 
     clock.now += 0.4
     loop.host.zmq_cmd_socket.messages.append(_action(**{"x.vel": 0.1}))
@@ -604,6 +627,7 @@ def test_valid_commands_reach_the_robot_and_refresh_the_watchdog(monkeypatch, tm
 def test_a_repeated_malformed_command_is_logged_once_per_distinct_error(monkeypatch, tmp_path, caplog):
     host = _host_module(monkeypatch)
     loop, _clock, _socket, robot = _loop(host, tmp_path)
+    loop.control.torque_enabled = True
     commands = loop.host.zmq_cmd_socket.messages
 
     def rejections():
@@ -657,6 +681,7 @@ def test_command_silence_cuts_torque_only_in_strict_mode(monkeypatch, tmp_path):
 def test_an_unconfirmed_watchdog_action_is_retried_at_a_bounded_rate(monkeypatch, tmp_path):
     host = _host_module(monkeypatch)
     loop, clock, _socket, robot = _loop(host, tmp_path)
+    loop.control.torque_enabled = True
     robot.bus.faults["Present_Position"] = OSError("bus timeout")
 
     clock.now += 0.6
@@ -684,6 +709,19 @@ def test_a_disarm_request_stops_the_watchdog_from_acting_again(monkeypatch, tmp_
     loop.enforce_watchdog()
 
     assert robot.bus.calls == []
+
+
+def test_disarmed_host_never_sends_goals_that_reenable_servo_torque(monkeypatch, tmp_path):
+    host = _host_module(monkeypatch)
+    loop, clock, _socket, robot = _loop(host, tmp_path)
+    clock.now += 1
+    loop.enforce_watchdog()
+    loop.host.zmq_cmd_socket.messages.append(_action())
+    loop.receive_command()
+
+    assert robot.bus.calls == []
+    assert robot.actions == []
+    assert robot.bus.torque == dict.fromkeys(MOTORS, 0)
 
 
 def test_telemetry_reports_torque_state_health_and_a_gapless_sequence(monkeypatch, tmp_path):
