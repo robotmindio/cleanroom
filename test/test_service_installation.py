@@ -467,7 +467,7 @@ def test_deploy_order_fails_closed_around_the_device_restart():
 
     disarm = deploy.index("\ndisarm\n")
     stop_stack = deploy.index("stop lekiwi-stack.service", disarm)
-    stop_host = deploy.index("stop lekiwi-host.service", stop_stack)
+    stop_host = deploy.index("lekiwi-zenoh.service lekiwi-host.service; do", stop_stack)
     start_host = deploy.index("start lekiwi-host.service", stop_host)
     start_stack = deploy.index("start lekiwi-stack.service", start_host)
     assert disarm < stop_stack < stop_host < start_host < start_stack
@@ -476,6 +476,11 @@ def test_deploy_order_fails_closed_around_the_device_restart():
     refresh = deploy.index("\n  refresh_compute_service\n")
     assert stop_stack < refresh < stop_host
     assert deploy.count("refresh_compute_service\n") == 1
+    refresh_device = deploy.index('"${ssh_command[@]}" sudo -n "${remote_installer[@]}"', stop_host)
+    assert stop_host < refresh_device < start_host
+    assert '--bind-address "$remote_bind_address" --no-start' in deploy
+    device_installer = (ROOT / "scripts" / "install-device-services.sh").read_text(encoding="utf-8")
+    assert 'as_root systemctl enable "${units[@]}" lekiwi-ros-logrotate.timer' in device_installer
     assert '"$project_root/scripts/reinstall-compute.sh" --no-start' in deploy
     assert deploy.index("sudo -n true") < disarm
     assert "lekiwi-lidar.service" in deploy

@@ -47,6 +47,7 @@ if [[ ${LEKIWI_DEPLOY_LOCKED:-} != 1 ]]; then
 fi
 
 ssh_command=(ssh -o BatchMode=yes -o ConnectTimeout=10 "$device")
+ssh_interactive=(ssh -tt -o BatchMode=yes -o ConnectTimeout=10 "$device")
 # shellcheck disable=SC2016 # HOME must expand on the device, not compute.
 remote_home=$("${ssh_command[@]}" 'printf %s "$HOME"') || die "cannot reach $device with key-based SSH"
 : "${remote_repo:=$remote_home/cleanroom}"
@@ -111,17 +112,18 @@ compute_configuration_current() {
     grep -Fq 'laser_source:=ld06 lidar_source:=remote' /etc/default/lekiwi-stack &&
     [[ $(cat "$service_marker" 2>/dev/null || true) == "$expected_service_fingerprint" ]]
 }
-verify_compute_configuration() {
+compute_tls_current() {
   local file
-  compute_configuration_current || die "compute service configuration did not refresh"
-  # The sensor bridge is mutual TLS; a missing identity would leave the robot without sensors.
   for file in ca.crt compute.crt compute.key; do
-    [[ -r /etc/lekiwi/zenoh-tls/$file ]] || die "missing /etc/lekiwi/zenoh-tls/$file; run scripts/reinstall-compute.sh"
+    [[ -r /etc/lekiwi/zenoh-tls/$file ]] || return 1
   done
   for file in ca.crt device.crt device.key; do
-    "${ssh_command[@]}" test -r "/etc/lekiwi/zenoh-tls/$file" || \
-      die "missing /etc/lekiwi/zenoh-tls/$file on $device; run scripts/reinstall-compute.sh"
+    "${ssh_command[@]}" test -r "/etc/lekiwi/zenoh-tls/$file" || return 1
   done
+}
+verify_compute_configuration() {
+  compute_configuration_current || die "compute service configuration did not refresh"
+  compute_tls_current || die "zenoh TLS identities did not refresh"
 }
 # The device installer skips Astra and the cameras when their ROS package is
 # missing, so those two are deployed only where they are installed.
@@ -172,13 +174,14 @@ expected_service_fingerprint=$(service_fingerprint compute) || die "cannot calcu
 service_marker=$logs/service-fingerprint-compute
 remote_service_marker=$remote_home/.ros/lekiwi/service-fingerprint-device
 # A stale compute configuration is reinstalled only after the robot is disarmed and
-# its stack stopped (below). Reinstalling needs full sudo, which the deployment
-# grant does not give; check it now rather than prompt or fail mid-deployment.
+# its stack stopped (below). Check sudo access before changing the robot state.
 refresh_compute=false
-if ! compute_configuration_current; then
+if ! compute_configuration_current || ! compute_tls_current; then
   refresh_compute=true
-  sudo -n true 2>/dev/null || die "the compute service configuration is stale and refreshing it needs \
-full sudo without a password prompt; run scripts/reinstall-compute.sh on this machine, then deploy again"
+  if ! sudo -n true 2>/dev/null; then
+    [[ -t 0 ]] || die "compute service refresh needs an interactive terminal for sudo"
+    sudo -v || die "compute service refresh needs sudo access"
+  fi
 fi
 
 device_sudoers=$("${ssh_command[@]}" sudo -n -l) || \
@@ -191,7 +194,6 @@ if [[ $remote_model == *"Raspberry Pi 5"* ]]; then
     ! "${ssh_command[@]}" test -x /usr/local/sbin/lekiwi-enable-pi5-usb-current; then
     [[ -t 0 ]] || die "first Pi 5 USB setup needs an interactive terminal for the Pi sudo prompt"
     log "One-time Pi 5 privilege setup (enter the Pi sudo password if requested)"
-    ssh_interactive=(ssh -tt -o BatchMode=yes -o ConnectTimeout=10 "$device")
     "${ssh_interactive[@]}" \
       "sudo /usr/bin/install -o root -g root -m 0755 '$remote_repo/scripts/enable-pi5-usb-current.sh' /usr/local/sbin/lekiwi-enable-pi5-usb-current && sudo '$remote_repo/scripts/install-deploy-sudoers.sh' device --user \"\$(id -un)\"" || \
       die "could not install the Pi 5 USB helper and deployment permission"
@@ -218,8 +220,35 @@ if [[ $remote_is_pi5 == true ]]; then
   "${ssh_command[@]}" sudo -n /usr/local/sbin/lekiwi-enable-pi5-usb-current
 fi
 expected_device_service_fingerprint=$(service_fingerprint device) || die "cannot calculate device service configuration fingerprint"
-[[ $("${ssh_command[@]}" "cat '$remote_service_marker' 2>/dev/null || true") == "$expected_device_service_fingerprint" ]] || \
-  die "device service configuration is stale; rerun scripts/install-device-services.sh on $device"
+refresh_device=false
+if [[ $("${ssh_command[@]}" "cat '$remote_service_marker' 2>/dev/null || true") != "$expected_device_service_fingerprint" ]]; then
+  refresh_device=true
+  if ! "${ssh_command[@]}" sudo -n true 2>/dev/null; then
+    [[ -t 0 ]] || die "device service refresh needs an interactive terminal for sudo"
+  fi
+  remote_service_user=$("${ssh_command[@]}" systemctl show -P User lekiwi-host.service)
+  [[ $remote_service_user =~ ^[a-z_][a-z0-9_-]*$ ]] || die "invalid device service user: $remote_service_user"
+  read -r -a remote_environment <<<"$("${ssh_command[@]}" systemctl show -P Environment lekiwi-host.service)"
+  remote_lerobot_venv=""
+  remote_bind_address=0.0.0.0
+  remote_curve_dir=""
+  for setting in "${remote_environment[@]}"; do
+    case $setting in
+      LEKIWI_LEROBOT_VENV=*) remote_lerobot_venv=${setting#*=} ;;
+      LEKIWI_BIND_ADDRESS=*) remote_bind_address=${setting#*=} ;;
+      LEKIWI_CURVE_SERVER_SECRET=*)
+        [[ -z ${setting#*=} ]] || remote_curve_dir=${setting#*=}
+        ;;
+    esac
+  done
+  [[ $remote_lerobot_venv =~ ^/[A-Za-z0-9._/-]+$ ]] || die "invalid device LeRobot venv path"
+  [[ $remote_bind_address =~ ^[0-9.]+$ ]] || die "invalid device bind address"
+  if [[ -n $remote_curve_dir ]]; then
+    [[ $remote_curve_dir == */server.key_secret ]] || die "invalid device CURVE key path"
+    remote_curve_dir=${remote_curve_dir%/server.key_secret}
+    [[ $remote_curve_dir =~ ^/[A-Za-z0-9._/-]+$ ]] || die "invalid device CURVE directory"
+  fi
+fi
 
 marker=$logs/deployed-revision
 remote_marker=$remote_home/.ros/lekiwi/deployed-revision
@@ -227,7 +256,7 @@ workspace_revision() { cat "$1/install/lekiwi_rmf/.lekiwi-source-revision" 2>/de
 remote_workspace_revision() {
   "${ssh_command[@]}" "cat '$remote_workspace/install/lekiwi_rmf/.lekiwi-source-revision' 2>/dev/null || true"
 }
-if [[ $refresh_compute == false && \
+if [[ $refresh_compute == false && $refresh_device == false && \
       $(cat "$marker" 2>/dev/null || true) == "$target" && \
       $("${ssh_command[@]}" "cat '$remote_marker' 2>/dev/null || true") == "$target" && \
       $(workspace_revision "$workspace") == "$target" && \
@@ -258,16 +287,31 @@ if [[ $refresh_compute == true ]]; then
 fi
 
 log "Stopping device services"
-if remote_unit_active lekiwi-cameras.service; then
-  "${ssh_command[@]}" sudo -n /usr/bin/systemctl stop lekiwi-cameras.service
-fi
-if remote_unit_active lekiwi-lidar.service; then
-  "${ssh_command[@]}" sudo -n /usr/bin/systemctl stop lekiwi-lidar.service
-fi
-"${ssh_command[@]}" sudo -n /usr/bin/systemctl stop lekiwi-host.service
+for unit in lekiwi-cameras.service lekiwi-astra.service lekiwi-lidar.service lekiwi-zenoh.service lekiwi-host.service; do
+  if has_device_unit "$unit" && remote_unit_active "$unit"; then
+    "${ssh_command[@]}" sudo -n /usr/bin/systemctl stop "$unit"
+  fi
+done
 
 log "Building revision ${target:0:12} on the device"
 "${ssh_command[@]}" env LEKIWI_WS="$remote_workspace" "$remote_repo/scripts/build-lekiwi.sh"
+if [[ $refresh_device == true ]]; then
+  log "Refreshing stale device service configuration"
+  remote_installer=("$remote_repo/scripts/install-device-services.sh" --service-user "$remote_service_user" \
+    --workspace "$remote_workspace" --lerobot-venv "$remote_lerobot_venv" \
+    --bind-address "$remote_bind_address" --no-start)
+  [[ -z $remote_curve_dir ]] || remote_installer+=(--curve-dir "$remote_curve_dir")
+  if "${ssh_command[@]}" sudo -n true 2>/dev/null; then
+    "${ssh_command[@]}" sudo -n "${remote_installer[@]}"
+  else
+    "${ssh_interactive[@]}" sudo "${remote_installer[@]}"
+  fi
+  [[ $("${ssh_command[@]}" "cat '$remote_service_marker' 2>/dev/null || true") == "$expected_device_service_fingerprint" ]] || \
+    die "device service configuration did not refresh"
+  for unit in lekiwi-astra.service lekiwi-cameras.service; do
+    if remote_unit_exists "$unit" && ! has_device_unit "$unit"; then device_units+=("$unit"); fi
+  done
+fi
 
 log "Building revision ${target:0:12} on compute"
 LEKIWI_WS=$workspace "$project_root/scripts/build-lekiwi.sh"

@@ -20,7 +20,7 @@
 # unit changed (new --bind-address or --curve-dir) is restarted to pick it up.
 # Usage: scripts/install-device-services.sh [--service-user USER]
 #        [--workspace PATH] [--lerobot-venv PATH] [--bind-address IPV4]
-#        [--curve-dir PATH]
+#        [--curve-dir PATH] [--no-start]
 set -Eeuo pipefail
 
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
@@ -38,6 +38,7 @@ WORKSPACE_ARG=""
 LEROBOT_VENV_ARG=""
 HOST_BIND_ADDRESS_ARG=""
 CURVE_DIR_ARG=""
+START_SERVICES=true
 while [[ $# -gt 0 ]]; do
   case $1 in
     --service-user)
@@ -55,7 +56,8 @@ while [[ $# -gt 0 ]]; do
     --curve-dir)
       [[ $# -ge 2 ]] || die "--curve-dir needs an absolute key directory"
       CURVE_DIR_ARG=$2; shift 2 ;;
-    *) die "unknown argument: $1 (usage: $0 [--service-user USER] [--workspace PATH] [--lerobot-venv PATH] [--bind-address IPV4] [--curve-dir PATH])" ;;
+    --no-start) START_SERVICES=false; shift ;;
+    *) die "unknown argument: $1 (usage: $0 [--service-user USER] [--workspace PATH] [--lerobot-venv PATH] [--bind-address IPV4] [--curve-dir PATH] [--no-start])" ;;
   esac
 done
 
@@ -202,7 +204,11 @@ as_root systemctl daemon-reload
 # retrying it. Unpowered servos must not abort the installation before the sudoers
 # grant, the Wi-Fi country and the configuration fingerprint below.
 restart_changed_units --no-block
-as_root systemctl enable --now --no-block "${units[@]}" lekiwi-ros-logrotate.timer
+if [[ $START_SERVICES == true ]]; then
+  as_root systemctl enable --now --no-block "${units[@]}" lekiwi-ros-logrotate.timer
+else
+  as_root systemctl enable "${units[@]}" lekiwi-ros-logrotate.timer
+fi
 
 log "Granting $LEKIWI_SERVICE_USER non-interactive deployment control"
 as_root "$PROJECT_ROOT/scripts/install-deploy-sudoers.sh" device --user "$LEKIWI_SERVICE_USER"
