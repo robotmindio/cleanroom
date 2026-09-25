@@ -22,7 +22,7 @@ units refer to them directly.
 ## Installation and deployment
 
 - `install.sh [--simulation]` installs a workstation, or with `--simulation` a simulation-only machine.
-- `install-pi.sh [--enable-pi5-usb-max-current]` installs the Pi host; the optional flag persists the Pi 5 USB current setting and requires a 5 V / 5 A supply.
+- `install-pi.sh` installs the Pi host and enables the Pi 5 USB current setting by default; this requires a 5 V / 5 A supply.
 - `install-device-services.sh` installs the device boot services (motor host, cameras, Astra, LD06, zenoh bridge).
 - `install-compute-services.sh [--remote DEVICE] [--no-start]` installs `lekiwi-stack.service`; it restarts a running stack only when its configuration changed.
 - `install-device-network.sh --user USER [--country CC]` sets the Wi-Fi country, turns off Wi-Fi power saving and grants the deploy user NetworkManager control.

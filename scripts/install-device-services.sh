@@ -191,6 +191,10 @@ verify_systemd_units "${units[@]}"
 verify_systemd_units lekiwi-ros-logrotate.service lekiwi-ros-logrotate.timer
 
 log "Reloading systemd and enabling services"
+log "Enabling Pi 5 USB current setting by default (5 V / 5 A supply required)"
+as_root install -o root -g root -m 0755 \
+  "$PROJECT_ROOT/scripts/enable-pi5-usb-current.sh" /usr/local/sbin/lekiwi-enable-pi5-usb-current
+as_root /usr/local/sbin/lekiwi-enable-pi5-usb-current
 as_root systemctl daemon-reload
 # Restart first: try-restart skips a stopped unit, which enable --now then starts
 # once, already with the new configuration, instead of starting it twice.

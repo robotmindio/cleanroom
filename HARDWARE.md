@@ -71,11 +71,11 @@ git clone <this-repo> ~/cleanroom
 ~/cleanroom/scripts/install-pi.sh
 ```
 
-On a Raspberry Pi 5 powered by a **5 V / 5 A supply**, add
-`--enable-pi5-usb-max-current` to persist `usb_max_current_enable=1` in the
-firmware config and allow up to 1.6 A across USB ports. Reboot after installation.
-Do not enable this with a lower-rated supply; use a powered USB hub instead.
-After reboot, confirm it with `vcgencmd get_config usb_max_current_enable`.
+On a Raspberry Pi 5, installation and every `scripts/deploy-split.sh` deployment
+persist `usb_max_current_enable=1` in the firmware config, allowing up to 1.6 A
+across USB ports. This requires a **5 V / 5 A supply**. Use a powered USB hub
+with a lower-rated supply. Reboot once after the setting is written; verify with
+`vcgencmd get_config usb_max_current_enable`.
 
 It verifies the architecture and Python version up front, installs the system
 prerequisites, removes `brltty` if present (it claims CH34x adapters and steals

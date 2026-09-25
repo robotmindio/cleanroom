@@ -183,6 +183,10 @@ fi
 
 device_sudoers=$("${ssh_command[@]}" sudo -n -l) || \
   die "device sudoers grant is missing; rerun scripts/install-device-services.sh on $device"
+if [[ $("${ssh_command[@]}" 'tr -d "\0" </proc/device-tree/model 2>/dev/null || true') == *"Raspberry Pi 5"* ]]; then
+  [[ $device_sudoers == *"/usr/local/sbin/lekiwi-enable-pi5-usb-current"* ]] || \
+    die "Pi 5 USB power setup is missing from device sudoers; rerun scripts/install-device-services.sh on $device"
+fi
 if [[ $refresh_compute == false ]]; then
   compute_sudoers=$(sudo -n -l) || die "compute sudoers grant is missing; rerun scripts/install-compute-services.sh"
 fi
@@ -196,6 +200,10 @@ for action in start stop reset-failed; do
 done
 
 [[ $refresh_compute == true ]] || verify_compute_configuration
+if [[ $("${ssh_command[@]}" 'tr -d "\0" </proc/device-tree/model 2>/dev/null || true') == *"Raspberry Pi 5"* ]]; then
+  log "Persisting Pi 5 USB current setting (5 V / 5 A supply required)"
+  "${ssh_command[@]}" sudo -n /usr/local/sbin/lekiwi-enable-pi5-usb-current
+fi
 expected_device_service_fingerprint=$(service_fingerprint device) || die "cannot calculate device service configuration fingerprint"
 [[ $("${ssh_command[@]}" "cat '$remote_service_marker' 2>/dev/null || true") == "$expected_device_service_fingerprint" ]] || \
   die "device service configuration is stale; rerun scripts/install-device-services.sh on $device"
