@@ -495,6 +495,18 @@ def _shutdown_signal(_signum, _frame):
     raise KeyboardInterrupt
 
 
+def connect_when_servos_powered(robot: SafetyLeKiwi) -> None:
+    """Wait on one servo without restarting this LeRobot process every few seconds."""
+    robot.bus.connect(handshake=False)
+    try:
+        while robot.bus.ping("arm_shoulder_pan") is None:
+            logging.info("Waiting for servo power")
+            time.sleep(1)
+    finally:
+        robot.bus.disconnect(disable_torque=False)
+    robot.connect()
+
+
 @draccus.wrap()
 def main(cfg: TorqueHostConfig):
     latch = TorqueLatch(cfg.safety.state_file)
@@ -504,8 +516,8 @@ def main(cfg: TorqueHostConfig):
     signal.signal(signal.SIGTERM, _shutdown_signal)
     signal.signal(signal.SIGHUP, _shutdown_signal)
     try:
-        logging.info("Connecting LeKiwi with torque off")
-        robot.connect()
+        logging.info("Waiting for servo power")
+        connect_when_servos_powered(robot)
         # configure() leaves torque off, but a write returning successfully
         # is not proof. Reissue it and require every servo's register readback
         # before opening any network control endpoint.
