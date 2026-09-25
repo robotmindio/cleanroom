@@ -443,9 +443,9 @@ class LeKiwiDriver(Node):
             torque_cut = self.cut_torque_after_failure() if not deliberate else self.set_servo_torque(False)
             with self.state_lock:
                 if not torque_cut:
-                    # The latch blocks arming, so it exists only in the opt-in mode that
-                    # treats torque as safety-critical; by default torque is never blocked.
-                    self.torque_fault = self.disarm_on_failure
+                    # An operator's failed cut must be visible and block re-arming
+                    # even when automatic failure handling normally holds torque.
+                    self.torque_fault = self.disarm_on_failure or deliberate
                 elif clear_torque_fault:
                     # Only a deliberate disarm request may acknowledge recovery;
                     # incidental watchdog cuts cannot silently clear this latch.

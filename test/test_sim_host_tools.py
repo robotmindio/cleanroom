@@ -49,6 +49,13 @@ def test_gripper_calibration_requires_an_explicit_apply_flag(monkeypatch):
         calibration.main()
 
 
+def test_gripper_calibration_keeps_goals_clear_of_measured_stops():
+    calibration = _load("gripper_calibrate_limits", "scripts/gripper-calibrate.py")
+    assert calibration.calibration_limits(3491, 2054) == (2074, 3471, 1)
+    with pytest.raises(RuntimeError, match="too close"):
+        calibration.calibration_limits(2054, 2038)
+
+
 def test_sim_up_records_one_launch_session_and_passes_arguments_through(tmp_path):
     checkout = tmp_path / "checkout"
     (checkout / "scripts").mkdir(parents=True)

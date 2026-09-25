@@ -307,6 +307,7 @@ class _Bus:
         self.calls = []
         self.faults = {}
         self.enable_skips = ()
+        self.torque_off_skips = ()
 
     def _fault(self, name):
         if name in self.faults:
@@ -318,11 +319,16 @@ class _Bus:
         for motor in MOTORS:
             if motor not in self.enable_skips:
                 self.torque[motor] = 1
+            else:
+                self.torque[motor] = 0
 
-    def disable_torque(self, num_retry=0):
-        self.calls.append("disable_torque")
-        self._fault("disable_torque")
-        self.torque = dict.fromkeys(MOTORS, 0)
+    def disable_torque(self, motors=None, num_retry=0):
+        selected = MOTORS if motors is None else [motors] if isinstance(motors, str) else motors
+        for motor in selected:
+            self.calls.append(f"disable_torque {motor}")
+            self._fault(f"disable_torque:{motor}")
+            self._fault("disable_torque")
+            self.torque[motor] = 0
 
     def sync_read(self, register, motors, normalize=True, num_retry=0):
         self.calls.append(f"read {register}")
@@ -332,7 +338,14 @@ class _Bus:
 
     def sync_write(self, register, values, num_retry=0):
         self.calls.append(f"write {register}")
-        self.written = (register, dict(values))
+        self._fault(f"{register}_write")
+        self.written = (register, dict(values) if isinstance(values, dict) else values)
+        if register == "Torque_Enable":
+            self.torque.update({
+                motor: values for motor in MOTORS if motor not in self.torque_off_skips
+            })
+        elif register in ("Goal_Position", "Goal_Velocity"):
+            self.torque.update({motor: 1 for motor in values})
 
     def write(self, register, motor, value):
         self.calls.append(f"write {register} {motor}")
@@ -423,7 +436,9 @@ def test_configure_never_energizes_the_servos(monkeypatch):
 
     robot.configure()
 
-    assert robot.bus.calls[:2] == ["disable_torque", "configure_motors"]
+    assert robot.bus.calls[:4] == [
+        "write Torque_Enable", "read Torque_Enable", "write Lock", "configure_motors",
+    ]
     assert "enable_torque" not in robot.bus.calls
 
 
@@ -439,10 +454,10 @@ def test_enable_holds_the_measured_arm_pose_before_confirming_torque(monkeypatch
     assert calls[4] == "read Torque_Enable"
     assert robot.bus.written == ("Goal_Position", dict.fromkeys(ARM, 12.5))
     assert latch.path.read_text() == "enabled\n"
-    # A second enable is a confirmed no-op, not another hold-and-enable.
+    # A second enable verifies the hardware rather than trusting the host flag.
     robot.bus.calls.clear()
     assert _request(control, socket, robot, {"command": "enable"})[1]["torque_enabled"] is True
-    assert robot.bus.calls == []
+    assert robot.bus.calls == ["read Torque_Enable"]
 
 
 def test_enable_rolls_torque_back_off_when_a_servo_does_not_confirm(monkeypatch, tmp_path):
@@ -457,7 +472,7 @@ def test_enable_rolls_torque_back_off_when_a_servo_does_not_confirm(monkeypatch,
     assert reply["ok"] is False and reply["torque_enabled"] is False
     assert "enable transaction failed" in reply["error"]
     assert bus.torque == dict.fromkeys(MOTORS, 0)
-    assert "disable_torque" in bus.calls
+    assert "write Torque_Enable" in bus.calls
     assert latch.path.read_text() == "disabled\n"
     assert control.torque_enabled is False
 
@@ -477,16 +492,50 @@ def test_disable_cuts_torque_even_when_the_latch_cannot_be_written(monkeypatch, 
     assert reply["torque_enabled"] is False and control.torque_enabled is False
 
 
+def test_disable_broadcast_reaches_every_motor_past_an_overloaded_gripper(monkeypatch, tmp_path):
+    host = _host_module(monkeypatch)
+    bus = _Bus()
+    bus.faults["disable_torque"] = RuntimeError("gripper overload aborts per-servo write")
+    control, socket, robot, _latch = _control(host, tmp_path, bus)
+    _request(control, socket, robot, {"command": "enable"})
+
+    command, reply = _request(control, socket, robot, {"command": "disable"})
+
+    assert (command, reply) == ("disable", {"ok": True, "torque_enabled": False})
+    assert bus.torque == dict.fromkeys(MOTORS, 0)
+    assert "disable_torque" not in bus.calls
+
+
+def test_shutdown_fallback_attempts_every_motor_after_an_overload(monkeypatch):
+    host = _host_module(monkeypatch)
+    bus = _Bus()
+    bus.torque = dict.fromkeys(MOTORS, 1)
+    bus.faults["Torque_Enable_write"] = RuntimeError("broadcast failed")
+    bus.faults["disable_torque:arm_gripper"] = RuntimeError("overload")
+
+    with pytest.raises(RuntimeError, match="broadcast failed"):
+        host.cut_torque_for_shutdown(_Robot(bus))
+
+    assert bus.calls[0] == "write Torque_Enable"
+    assert bus.calls[1:] == [f"disable_torque {motor}" for motor in MOTORS]
+    assert bus.torque == {motor: int(motor == "arm_gripper") for motor in MOTORS}
+
+
 def test_disable_reports_torque_on_until_the_bus_confirms_the_cut(monkeypatch, tmp_path):
     host = _host_module(monkeypatch)
-    control, socket, robot, _latch = _control(host, tmp_path)
+    control, socket, robot, latch = _control(host, tmp_path)
     _request(control, socket, robot, {"command": "enable"})
-    robot.bus.faults["disable_torque"] = OSError("bus timeout")
+    robot.bus.torque_off_skips = ("arm_gripper",)
 
     reply = _request(control, socket, robot, {"command": "disable"})[1]
     assert reply["ok"] is False and reply["torque_enabled"] is True
+    assert latch.path.read_text() == "enabled\n"
 
-    del robot.bus.faults["disable_torque"]
+    # The failed cut left only the gripper energized; re-arm cannot succeed
+    # using the host's old torque_enabled flag.
+    assert _request(control, socket, robot, {"command": "enable"})[1]["ok"] is False
+
+    robot.bus.torque_off_skips = ()
     command, reply = _request(control, socket, robot, {"command": "disable"})
     assert (command, reply) == ("disable", {"ok": True, "torque_enabled": False})
 
@@ -562,6 +611,7 @@ def test_valid_commands_reach_the_robot_and_refresh_the_watchdog(monkeypatch, tm
     host = _host_module(monkeypatch)
     assert set(json.loads(_action())) == set(host.ACTION_KEYS)
     loop, clock, _socket, robot = _loop(host, tmp_path)
+    loop.control.torque_enabled = True
 
     clock.now += 0.4
     loop.host.zmq_cmd_socket.messages.append(_action(**{"x.vel": 0.1}))
@@ -577,6 +627,7 @@ def test_valid_commands_reach_the_robot_and_refresh_the_watchdog(monkeypatch, tm
 def test_a_repeated_malformed_command_is_logged_once_per_distinct_error(monkeypatch, tmp_path, caplog):
     host = _host_module(monkeypatch)
     loop, _clock, _socket, robot = _loop(host, tmp_path)
+    loop.control.torque_enabled = True
     commands = loop.host.zmq_cmd_socket.messages
 
     def rejections():
@@ -630,6 +681,7 @@ def test_command_silence_cuts_torque_only_in_strict_mode(monkeypatch, tmp_path):
 def test_an_unconfirmed_watchdog_action_is_retried_at_a_bounded_rate(monkeypatch, tmp_path):
     host = _host_module(monkeypatch)
     loop, clock, _socket, robot = _loop(host, tmp_path)
+    loop.control.torque_enabled = True
     robot.bus.faults["Present_Position"] = OSError("bus timeout")
 
     clock.now += 0.6
@@ -657,6 +709,19 @@ def test_a_disarm_request_stops_the_watchdog_from_acting_again(monkeypatch, tmp_
     loop.enforce_watchdog()
 
     assert robot.bus.calls == []
+
+
+def test_disarmed_host_never_sends_goals_that_reenable_servo_torque(monkeypatch, tmp_path):
+    host = _host_module(monkeypatch)
+    loop, clock, _socket, robot = _loop(host, tmp_path)
+    clock.now += 1
+    loop.enforce_watchdog()
+    loop.host.zmq_cmd_socket.messages.append(_action())
+    loop.receive_command()
+
+    assert robot.bus.calls == []
+    assert robot.actions == []
+    assert robot.bus.torque == dict.fromkeys(MOTORS, 0)
 
 
 def test_telemetry_reports_torque_state_health_and_a_gapless_sequence(monkeypatch, tmp_path):

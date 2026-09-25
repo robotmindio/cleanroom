@@ -2,19 +2,22 @@
 """Record and apply a LeKiwi gripper-only calibration.
 
 This utility changes only servo ID 6's two hardware position limits and its
-matching LeRobot calibration cache.  It deliberately requires a person to
-place the free gripper at the open and closed endpoints: driving an unknown
-gripper into its mechanical end stops is neither a safe nor a reliable way to
-calibrate it.
+matching LeRobot calibration cache. A person must measure the free gripper's
+open and closed endpoints. By default, the limits stay 20 ticks inside them.
+A separately tested contact command can replace the closed-side margin.
+Driving an unknown gripper into its mechanical end stops is unsafe.
 
 Before using it, support the arm, clear the jaws, and stop
 ``lekiwi-host.service``.  The tool refuses a serial port already owned by a
-process.  It disables torque only on the gripper while endpoints are recorded,
-then restores the prior torque state before it closes the port.
+process. It disables torque only on the gripper while endpoints are recorded
+and leaves it off; the managed host owns re-arming.
 
 Run with the LeRobot virtual environment:
 
     "$HOME/lekiwi_ws/.venv-lerobot/bin/python" scripts/gripper-calibrate.py --apply
+
+Previously measured endpoints can be supplied with --recorded-open and
+--recorded-closed instead of repeating the manual capture.
 """
 
 import argparse
@@ -31,6 +34,7 @@ import time
 GRIPPER = "arm_gripper"
 SERVO_ID = 6
 MINIMUM_SPAN_TICKS = 100
+ENDPOINT_MARGIN_TICKS = 20
 
 
 def default_port():
@@ -82,6 +86,23 @@ def read_position(bus):
     return int(bus.read("Present_Position", GRIPPER, normalize=False, num_retry=2))
 
 
+def calibration_limits(open_position, closed_position, verified_closed_goal=None):
+    lower, upper = sorted((open_position, closed_position))
+    if not 0 <= lower < upper <= 4095 or upper - lower < MINIMUM_SPAN_TICKS + 2 * ENDPOINT_MARGIN_TICKS:
+        raise RuntimeError("gripper endpoints are invalid or too close; nothing was written")
+    lower += ENDPOINT_MARGIN_TICKS
+    upper -= ENDPOINT_MARGIN_TICKS
+    if verified_closed_goal is not None:
+        offset = verified_closed_goal - closed_position
+        if not 0 <= verified_closed_goal <= 4095 or abs(offset) > 64 or offset * (open_position - closed_position) > 0:
+            raise RuntimeError("verified closed goal must be within 64 ticks beyond the measured closed endpoint")
+        if open_position > closed_position:
+            lower = verified_closed_goal
+        else:
+            upper = verified_closed_goal
+    return lower, upper, int(open_position > closed_position)
+
+
 def atomic_write_calibration(path, calibration):
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(calibration, indent=2, sort_keys=True) + "\n"
@@ -97,7 +118,7 @@ def atomic_write_calibration(path, calibration):
             temporary.unlink()
 
 
-def calibrate(port, calibration_path):
+def calibrate(port, calibration_path, recorded_open=None, recorded_closed=None, verified_closed_goal=None):
     try:
         from lerobot.motors import Motor, MotorNormMode
         from lerobot.motors.feetech.feetech import FeetechMotorsBus
@@ -112,9 +133,6 @@ def calibrate(port, calibration_path):
         port=port,
         motors={GRIPPER: Motor(SERVO_ID, "sts3215", MotorNormMode.RANGE_0_100)},
     )
-    original_torque = None
-    original_lock = None
-    initial_goal = None
     try:
         bus.connect(handshake=True)
         status = int(bus.read("Status", GRIPPER, normalize=False, num_retry=2))
@@ -125,9 +143,6 @@ def calibrate(port, calibration_path):
             raise RuntimeError(
                 f"servo is in Operating_Mode={operating_mode}, not position mode; do not calibrate it"
             )
-        original_torque = int(bus.read("Torque_Enable", GRIPPER, normalize=False, num_retry=2))
-        original_lock = int(bus.read("Lock", GRIPPER, normalize=False, num_retry=2))
-        initial_goal = int(bus.read("Goal_Position", GRIPPER, normalize=False, num_retry=2))
         homing_offset = int(bus.read("Homing_Offset", GRIPPER, normalize=False, num_retry=2))
 
         print(
@@ -135,17 +150,19 @@ def calibrate(port, calibration_path):
             "and keep fingers and objects clear of the jaws."
         )
         bus.disable_torque(GRIPPER, num_retry=2)
-        confirm("Place the jaws at their fully OPEN mechanical endpoint, without forcing them, then press Enter: ")
-        open_position = read_position(bus)
-        confirm("Place the jaws at their fully CLOSED mechanical endpoint, without forcing them, then press Enter: ")
-        closed_position = read_position(bus)
-        lower, upper = sorted((open_position, closed_position))
-        span = upper - lower
-        if span < MINIMUM_SPAN_TICKS:
-            raise RuntimeError(
-                f"recorded gripper span is only {span} ticks; expected at least "
-                f"{MINIMUM_SPAN_TICKS}. Nothing was written."
-            )
+        if bus.read("Torque_Enable", GRIPPER, normalize=False, num_retry=2) != 0:
+            raise RuntimeError("gripper torque did not turn off; refusing to record endpoints")
+        if recorded_open is None:
+            confirm("Open the jaw as far as it moves gently, then press Enter: ")
+            open_position = read_position(bus)
+            confirm("Close the jaw as far as it moves gently, then press Enter: ")
+            closed_position = read_position(bus)
+        else:
+            open_position, closed_position = recorded_open, recorded_closed
+        lower, upper, drive_mode = calibration_limits(open_position, closed_position, verified_closed_goal)
+        if not min(open_position, closed_position) <= read_position(bus) <= max(open_position, closed_position):
+            raise RuntimeError("gripper is outside the recorded travel; nothing was written")
+        span = abs(open_position - closed_position)
 
         # Range_0_100 maps a zero command to range_min.  Preserve the physical
         # endpoint ordering in the servo limits and flip just the LeRobot mapping
@@ -153,7 +170,7 @@ def calibrate(port, calibration_path):
         cached["homing_offset"] = homing_offset
         cached["range_min"] = lower
         cached["range_max"] = upper
-        cached["drive_mode"] = 0 if open_position == lower else 1
+        cached["drive_mode"] = drive_mode
 
         backup = calibration_path.with_name(
             f"{calibration_path.name}.before-gripper-{time.strftime('%Y%m%d-%H%M%S')}.bak"
@@ -179,25 +196,16 @@ def calibrate(port, calibration_path):
         }
     finally:
         if bus.is_connected:
-            try:
-                # Restoring the current measured target avoids a jump when the
-                # gripper is re-energized. The managed host configures it again
-                # after this tool exits.
-                if original_torque:
-                    position = read_position(bus)
-                    bus.write("Goal_Position", GRIPPER, position, normalize=False, num_retry=2)
-                    bus.write("Torque_Enable", GRIPPER, original_torque, normalize=False, num_retry=2)
-                    bus.write("Lock", GRIPPER, original_lock, normalize=False, num_retry=2)
-                elif initial_goal is not None:
-                    bus.write("Goal_Position", GRIPPER, initial_goal, normalize=False, num_retry=2)
-            finally:
-                bus.disconnect(disable_torque=False)
+            bus.disconnect(disable_torque=False)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true", help="perform the guided calibration")
     parser.add_argument("--port", help="motor serial path (default: detected /dev/serial/by-id device)")
+    parser.add_argument("--recorded-open", type=int, help="previously measured open encoder position")
+    parser.add_argument("--recorded-closed", type=int, help="previously measured closed encoder position")
+    parser.add_argument("--verified-closed-goal", type=int, help="previously tested contact command, within 64 ticks beyond the closed encoder position")
     parser.add_argument(
         "--calibration-file", type=Path, default=default_calibration_file(),
         help="LeRobot calibration JSON to update",
@@ -205,13 +213,18 @@ def main():
     args = parser.parse_args()
     if not args.apply:
         raise RuntimeError("refusing to change hardware without --apply")
-    if not sys.stdin.isatty():
+    if (args.recorded_open is None) != (args.recorded_closed is None):
+        raise RuntimeError("--recorded-open and --recorded-closed must be given together")
+    if args.recorded_open is None and not sys.stdin.isatty():
         raise RuntimeError("interactive input is required; run this from a terminal")
     port = args.port or default_port()
     if not os.path.exists(port):
         raise RuntimeError(f"motor serial device does not exist: {port}")
     require_unowned(os.path.realpath(port))
-    result = calibrate(os.path.realpath(port), args.calibration_file.expanduser())
+    result = calibrate(
+        os.path.realpath(port), args.calibration_file.expanduser(),
+        args.recorded_open, args.recorded_closed, args.verified_closed_goal,
+    )
     print(json.dumps(result, indent=2, sort_keys=True))
 
 

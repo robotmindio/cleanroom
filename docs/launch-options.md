@@ -107,9 +107,11 @@ By default (`disarm_on_failure` off, the domestic robot) the robot stays armed:
 a host session change, stale or failed telemetry, or withdrawn permission
 cancels the interrupted trajectory, stops the base and freezes the arm at its
 present position with servo torque on, and the driver re-arms itself every 2 s
-until telemetry and permission are healthy again. Nothing latches `TORQUE_FAULT`.
-Only an operator's `/safety/disarm` cuts torque; it stays disarmed, across later
-link losses too, until an operator calls `/safety/arm`. The ZMQ command,
+until telemetry and permission are healthy again. Ordinary failures do not latch
+`TORQUE_FAULT`. An operator's `/safety/disarm` cuts torque; if any servo does not
+confirm torque-off, the service fails and `TORQUE_FAULT` latches even in this
+mode. A confirmed disarm clears that fault. The robot stays disarmed across
+later link losses until an operator calls `/safety/arm`. The ZMQ command,
 observation and torque sockets use heartbeat and TCP keepalive, so a half-open
 link is detected and reconnected instead of hanging.
 

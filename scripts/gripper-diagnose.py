@@ -19,6 +19,17 @@ import sys
 
 
 REGISTERS = (
+    "Model_Number",
+    "Firmware_Major_Version",
+    "Firmware_Minor_Version",
+    "Min_Position_Limit",
+    "Max_Position_Limit",
+    "Homing_Offset",
+    "Unloading_Condition",
+    "LED_Alarm_Condition",
+    "Protection_Current",
+    "Protection_Time",
+    "Overload_Torque",
     "Torque_Enable",
     "Lock",
     "Operating_Mode",

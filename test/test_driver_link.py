@@ -848,7 +848,7 @@ def test_failure_stops_motion_but_never_cuts_or_latches_torque_by_default():
     assert node.states == ["LINK_LOST"]
 
 
-def test_explicit_disarm_cuts_torque_and_reports_but_never_latches_an_unconfirmed_cut():
+def test_explicit_disarm_latches_an_unconfirmed_cut_in_every_mode():
     node = hold_mode_node()
     response = types.SimpleNamespace()
 
@@ -856,9 +856,16 @@ def test_explicit_disarm_cuts_torque_and_reports_but_never_latches_an_unconfirme
 
     assert node.torque_requests == [False]
     assert response.success is False
-    assert node.torque_fault is False
-    assert node.states == ["DISARMED"]
+    assert node.torque_fault is True
+    assert node.states == ["TORQUE_FAULT"]
 
+    node.set_servo_torque = lambda enabled: not enabled
+    node.disarm(None, response)
+    assert response.success is True
+    assert node.torque_fault is False
+    assert node.states[-1] == "DISARMED"
+
+    node.set_servo_torque = lambda enabled: False
     node.disarm_on_failure = True
     node.disarm(None, response)
     assert node.torque_fault is True
