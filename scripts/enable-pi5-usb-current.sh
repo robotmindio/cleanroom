@@ -25,6 +25,8 @@ for line in lines:
     if line == begin:
         if inside:
             raise SystemExit(f"duplicate managed USB setting in {path}")
+        while kept and kept[-1] in ("", "[all]"):
+            kept.pop()
         inside = True
     elif line == end:
         if not inside:

@@ -18,6 +18,19 @@ import pytest
 ROOT = pathlib.Path(__file__).parents[1]
 
 
+def test_pi5_usb_current_config_is_idempotent(tmp_path):
+    script = (ROOT / "scripts" / "enable-pi5-usb-current.sh").read_text(encoding="utf-8")
+    update = script.split("<<'PY'\n", 1)[1].split("\nPY", 1)[0]
+    config = tmp_path / "config.txt"
+    config.write_text("[all]\nother_setting=1\n", encoding="utf-8")
+    subprocess.run(["python3", "-c", update, str(config)], check=True)
+    first = config.read_text(encoding="utf-8")
+    config.write_text(first.replace("# BEGIN cleanroom", "[all]\n\n[all]\n# BEGIN cleanroom"), encoding="utf-8")
+    subprocess.run(["python3", "-c", update, str(config)], check=True)
+    assert config.read_text(encoding="utf-8") == first
+    assert first.count("usb_max_current_enable=1") == 1
+
+
 def test_runtime_helpers_share_device_and_calibration_checks(tmp_path):
     calibration = tmp_path / "camera.yaml"
     calibration.write_text("image_width: 640\ncamera_matrix:\n  rows: 3\n  cols: 3\n  data: [1, 0, 0, 0, 1, 0, 0, 0, 1]\n")
