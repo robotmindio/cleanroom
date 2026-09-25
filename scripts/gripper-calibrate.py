@@ -100,7 +100,9 @@ def calibration_limits(open_position, closed_position, verified_closed_goal=None
             lower = verified_closed_goal
         else:
             upper = verified_closed_goal
-    return lower, upper, int(open_position > closed_position)
+    # The ROS gripper joint maps closed to 0 and open to 100. LeRobot's
+    # drive_mode flips that range only when closed has the higher encoder value.
+    return lower, upper, int(closed_position > open_position)
 
 
 def atomic_write_calibration(path, calibration):
@@ -164,9 +166,7 @@ def calibrate(port, calibration_path, recorded_open=None, recorded_closed=None, 
             raise RuntimeError("gripper is outside the recorded travel; nothing was written")
         span = abs(open_position - closed_position)
 
-        # Range_0_100 maps a zero command to range_min.  Preserve the physical
-        # endpoint ordering in the servo limits and flip just the LeRobot mapping
-        # when the mechanically open endpoint is numerically higher.
+        # Keep zero at physical closure, matching the ROS gripper joint.
         cached["homing_offset"] = homing_offset
         cached["range_min"] = lower
         cached["range_max"] = upper
