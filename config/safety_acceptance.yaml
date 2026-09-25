@@ -31,11 +31,11 @@ expected_footprint_padding_m: 0.0
 # Must exactly match safety_production.yaml. This binds measured clearance and
 # stopping trials to the physical arm configuration used for base motion.
 accepted_stow_joint_positions:
-  arm_shoulder_pan: 0.0
-  arm_shoulder_lift: 0.0
-  arm_elbow_flex: 0.0
-  arm_wrist_flex: 0.0
-  arm_wrist_roll: 0.0
+  arm_shoulder_pan: -0.0061
+  arm_shoulder_lift: 0.0384
+  arm_elbow_flex: -1.5359
+  arm_wrist_flex: -0.1304
+  arm_wrist_roll: -0.0184
   arm_gripper: 0.0
 minimum_trials_per_direction: 30
 maximum_command_stop_latency_s: null

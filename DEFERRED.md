@@ -78,10 +78,10 @@ matrix review is recorded, and the physical MoveIt trials and arm-workspace
 intrusion stop are in the acceptance record. Tracked in
 [#7](https://github.com/robotmindio/cleanroom/issues/7).
 
-- Measure the real joint-zero calibration and a mechanically safe, collision-
-  checked stow pose. With the arm held there, `scripts/capture_stow.py`
-  replaces the placeholder zero stow in both `config/safety_production.yaml`
-  and the accepted stow mapping, which must match exactly.
+- The real joint-zero calibration is measured. A manually positioned upright
+  stow candidate is captured in both tracked safety files and is collision-free
+  in MoveIt. Measure its physical arm and cable envelope against the base
+  footprint before accepting it; the CAD check alone does not prove clearance.
 - Find and record a physically collision-free calibration pose, then review
   the production CAD/SRDF collision matrix against the assembled robot. The
   loopback MoveIt test uses that production matrix, but simulated clearance is

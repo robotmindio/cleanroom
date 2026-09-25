@@ -23,7 +23,7 @@ def test_both_files_receive_the_same_pose_and_keep_their_comments():
     configured = dict(zip(params["stow_joint_names"], params["stow_joint_positions"]))
     accepted = yaml.safe_load(acceptance)["accepted_stow_joint_positions"]
     assert configured == accepted == stow
-    assert "measured, collision-checked" in production
+    assert "Manually positioned, measured upright candidate" in production
     assert yaml.safe_load(acceptance)["validated"] is False
 
 
