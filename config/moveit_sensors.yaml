@@ -5,7 +5,7 @@ sensors:
   - point_cloud
 point_cloud:
   sensor_plugin: occupancy_map_monitor/PointCloudOctomapUpdater
-  point_cloud_topic: /camera/depth/points
+  point_cloud_topic: /moveit/depth/points_ready
   max_range: 3.0
   point_subsample: 1
   padding_offset: 0.03

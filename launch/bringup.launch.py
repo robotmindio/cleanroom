@@ -819,6 +819,14 @@ def generate_launch_description():
                 condition=IfCondition(start_moveit),
                 output="screen",
             ),
+            Node(
+                package="lekiwi_rmf",
+                executable="moveit_cloud_gate",
+                name="moveit_cloud_gate",
+                parameters=[{"use_sim_time": ParameterValue(sim, value_type=bool)}],
+                condition=IfCondition(start_moveit),
+                output="screen",
+            ),
             # Join Nav2's smoothed stream and the manually requested stream
             # before collision monitoring. The mux is intentionally live before
             # Nav2 lifecycle activation, so an early controller command cannot

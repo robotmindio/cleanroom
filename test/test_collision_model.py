@@ -257,7 +257,7 @@ def test_moveit_and_rviz_share_tracked_scaling_and_depth_defaults():
     assert planning_display["Acceleration_Scaling_Factor"] == pytest.approx(
         limits["default_acceleration_scaling_factor"]
     )
-    assert sensors["point_cloud"]["point_cloud_topic"] == "/camera/depth/points"
+    assert sensors["point_cloud"]["point_cloud_topic"] == "/moveit/depth/points_ready"
     assert sensors["point_cloud"]["sensor_plugin"] == (
         "occupancy_map_monitor/PointCloudOctomapUpdater"
     )
