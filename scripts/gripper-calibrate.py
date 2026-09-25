@@ -9,8 +9,8 @@ calibrate it.
 
 Before using it, support the arm, clear the jaws, and stop
 ``lekiwi-host.service``.  The tool refuses a serial port already owned by a
-process.  It disables torque only on the gripper while endpoints are recorded,
-then restores the prior torque state before it closes the port.
+process. It disables torque only on the gripper while endpoints are recorded
+and leaves it off; the managed host owns re-arming.
 
 Run with the LeRobot virtual environment:
 
@@ -112,9 +112,6 @@ def calibrate(port, calibration_path):
         port=port,
         motors={GRIPPER: Motor(SERVO_ID, "sts3215", MotorNormMode.RANGE_0_100)},
     )
-    original_torque = None
-    original_lock = None
-    initial_goal = None
     try:
         bus.connect(handshake=True)
         status = int(bus.read("Status", GRIPPER, normalize=False, num_retry=2))
@@ -125,9 +122,6 @@ def calibrate(port, calibration_path):
             raise RuntimeError(
                 f"servo is in Operating_Mode={operating_mode}, not position mode; do not calibrate it"
             )
-        original_torque = int(bus.read("Torque_Enable", GRIPPER, normalize=False, num_retry=2))
-        original_lock = int(bus.read("Lock", GRIPPER, normalize=False, num_retry=2))
-        initial_goal = int(bus.read("Goal_Position", GRIPPER, normalize=False, num_retry=2))
         homing_offset = int(bus.read("Homing_Offset", GRIPPER, normalize=False, num_retry=2))
 
         print(
@@ -135,6 +129,8 @@ def calibrate(port, calibration_path):
             "and keep fingers and objects clear of the jaws."
         )
         bus.disable_torque(GRIPPER, num_retry=2)
+        if bus.read("Torque_Enable", GRIPPER, normalize=False, num_retry=2) != 0:
+            raise RuntimeError("gripper torque did not turn off; refusing to record endpoints")
         confirm("Place the jaws at their fully OPEN mechanical endpoint, without forcing them, then press Enter: ")
         open_position = read_position(bus)
         confirm("Place the jaws at their fully CLOSED mechanical endpoint, without forcing them, then press Enter: ")
@@ -179,19 +175,7 @@ def calibrate(port, calibration_path):
         }
     finally:
         if bus.is_connected:
-            try:
-                # Restoring the current measured target avoids a jump when the
-                # gripper is re-energized. The managed host configures it again
-                # after this tool exits.
-                if original_torque:
-                    position = read_position(bus)
-                    bus.write("Goal_Position", GRIPPER, position, normalize=False, num_retry=2)
-                    bus.write("Torque_Enable", GRIPPER, original_torque, normalize=False, num_retry=2)
-                    bus.write("Lock", GRIPPER, original_lock, normalize=False, num_retry=2)
-                elif initial_goal is not None:
-                    bus.write("Goal_Position", GRIPPER, initial_goal, normalize=False, num_retry=2)
-            finally:
-                bus.disconnect(disable_torque=False)
+            bus.disconnect(disable_torque=False)
 
 
 def main():
