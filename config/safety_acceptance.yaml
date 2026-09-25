@@ -1,13 +1,23 @@
-schema_version: 2
+schema_version: 3
 robot_id: lekiwi_1
+# This scope permits attended autonomous base motion only after every applicable
+# trial below passes. The operator must remain next to the physical motor-power
+# stop. The robot has no contact, tilt, or battery-state safety input.
+operating_scope:
+  mode: attended_autonomous_base
+  operator_at_motor_power_stop: true
+installed_hardware:
+  bumper: false
+  imu: false
+  battery_monitor: false
 # Set true only after the controlled hardware procedure has populated all
 # measurements below and the configured collision zones have been updated from
 # the measured worst case plus uncertainty.
 validated: false
 software_revision: null
 sensor_configuration: null
-payload_kg: null
-surface: null
+payload_kg: 0.0
+surface: dry tile
 validated_at: null
 # Must exactly match both tracked Nav2 costmap footprints. The supervisor also
 # checks that the collision StopZone encloses this polygon plus the measured
@@ -44,10 +54,10 @@ directions:
 fault_tests:
   scan_disconnect: false
   depth_disconnect: false
-  imu_disconnect: false
-  battery_low_or_disconnect: false
+  imu_disconnect: null # Not applicable: no IMU is fitted.
+  battery_low_or_disconnect: null # Not applicable: no battery monitor is fitted.
   motor_diagnostic_fault: false
-  bumper: false
+  bumper: null # Not applicable: no bumper is fitted.
   # The labelled physical motor-power stop has been tested to remove actuator
   # energy without ROS.
   estop_independent_of_ros: true

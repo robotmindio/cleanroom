@@ -5,8 +5,10 @@ checkout without physical hardware, site measurements, deployment credentials,
 an external service, or a qualified GPU host. None of the items below may be
 marked complete from unit tests or loopback simulation alone.
 
-The repository remains deliberately default-deny while these blockers exist.
-In particular, `config/safety_acceptance.yaml` must remain `validated: false`.
+The physical acceptance record remains `validated: false` while these blockers
+exist. The default nonstrict runtime reports that fault but still permits
+motion; strict mode denies motion. Do not treat nonstrict motion permission as
+physical safety acceptance.
 Each section names its completion condition and its tracking issue.
 
 ## Physical safety hardware and acceptance
@@ -17,6 +19,13 @@ Done when `config/safety_acceptance.yaml` holds a reviewed record with
 `validated: true` for the deployed revision, including every stopping trial and
 fault test, and the production profile requires every physical input it names.
 Tracked in [#6](https://github.com/robotmindio/cleanroom/issues/6).
+
+The current reduced scope is attended autonomous base motion with no payload on
+dry tile. It records bumper, IMU, and battery monitoring as absent, so their
+fault tests are inapplicable; all other listed tests remain required. Keep the
+operator at the physical motor-power stop throughout any accepted run. The
+full-hardware items below remain necessary before claiming those functions or
+expanding to unattended operation.
 
 - Install bumper/contact sensing, publish its real state on
   `safety/bumper_active`, and set `require_bumper: true` in
@@ -48,8 +57,8 @@ Tracked in [#6](https://github.com/robotmindio/cleanroom/issues/6).
   30 trials in each of forward, reverse, left, right, clockwise rotation and
   counter-clockwise rotation on every accepted surface/payload combination.
   Record worst distances, timing and measurement uncertainty.
-- Fault-inject every item required by `config/safety_acceptance.yaml`: scan,
-  depth, IMU, battery, diagnostics, bumper, telemetry loss
+- Fault-inject every applicable item required by `config/safety_acceptance.yaml`: scan,
+  depth, diagnostics, telemetry loss
   and replay, host and ROS restart, unauthorized ZMQ, DDS and rosbridge policy,
   Nav2 obstacle stop, and arm-workspace intrusion stop.
 - Confirm the enabled Nav2 StopZone contains the accepted footprint plus the

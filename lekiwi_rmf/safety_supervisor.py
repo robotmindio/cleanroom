@@ -463,16 +463,29 @@ def _nav2_stop_zone_clearance(nav2_path: str | Path, acceptance: dict) -> tuple[
 def validate_acceptance_file(
     path: str | Path, nav2_params_file: str | Path = "",
     expected_stow: dict[str, float] | None = None,
+    installed_hardware: dict[str, bool] | None = None,
 ) -> tuple[bool, str]:
     """Validate the measured physical stopping/fault acceptance record."""
     try:
         data = yaml.safe_load(Path(path).expanduser().read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError) as error:
         return False, f"cannot read safety acceptance: {error}"
-    if not isinstance(data, dict) or data.get("schema_version") != 2:
+    if not isinstance(data, dict) or data.get("schema_version") != 3:
         return False, "unsupported safety acceptance schema"
     if data.get("validated") is not True:
         return False, "physical safety acceptance is not validated"
+    scope = data.get("operating_scope")
+    if not isinstance(scope, dict) or scope.get("mode") != "attended_autonomous_base" or (
+        scope.get("operator_at_motor_power_stop") is not True
+    ):
+        return False, "acceptance requires an attended operator at the physical motor-power stop"
+    hardware = data.get("installed_hardware")
+    if not isinstance(hardware, dict) or set(hardware) != {"bumper", "imu", "battery_monitor"} or (
+        not all(type(value) is bool for value in hardware.values())
+    ):
+        return False, "accepted installed hardware must identify bumper, IMU, and battery monitor"
+    if installed_hardware is not None and hardware != installed_hardware:
+        return False, "accepted installed hardware differs from the production safety profile"
     minimum_trials = data.get("minimum_trials_per_direction")
     if isinstance(minimum_trials, bool) or not isinstance(minimum_trials, int) or minimum_trials < 30:
         return False, "at least 30 trials per direction are required"
@@ -516,8 +529,7 @@ def validate_acceptance_file(
             return False, f"{direction} stopping distance plus uncertainty exceeds its acceptance limit"
     fault_tests = data.get("fault_tests")
     required_fault_tests = {
-        "scan_disconnect", "depth_disconnect", "imu_disconnect",
-        "battery_low_or_disconnect", "motor_diagnostic_fault", "bumper",
+        "scan_disconnect", "depth_disconnect", "motor_diagnostic_fault",
         "estop_independent_of_ros", "telemetry_loss",
         "telemetry_replay_or_duplicate", "host_restart_stays_disarmed",
         "ros_restart_stays_disarmed", "zmq_unauthorized_client_rejected",
@@ -526,12 +538,18 @@ def validate_acceptance_file(
         "collision_monitor_obstacle_stop",
         "arm_workspace_intrusion_stop",
     }
-    if (
-        not isinstance(fault_tests, dict)
-        or not required_fault_tests.issubset(fault_tests)
-        or not all(fault_tests[name] is True for name in required_fault_tests)
+    if not isinstance(fault_tests, dict) or not all(
+        fault_tests.get(name) is True for name in required_fault_tests
     ):
         return False, "required fault-response tests have not all passed"
+    for hardware_name, test_name in (
+        ("imu", "imu_disconnect"),
+        ("battery_monitor", "battery_low_or_disconnect"),
+        ("bumper", "bumper"),
+    ):
+        expected = True if hardware[hardware_name] else None
+        if test_name not in fault_tests or fault_tests[test_name] is not expected:
+            return False, f"{test_name} result does not match installed hardware"
     payload = data.get("payload_kg")
     if (
         not _finite_number(payload) or payload < 0
@@ -676,6 +694,11 @@ class SafetySupervisor(Node):
                 str(self.get_parameter("acceptance_file").value),
                 str(self.get_parameter("nav2_params_file").value),
                 self._stow,
+                {
+                    "bumper": bool(self.get_parameter("require_bumper").value),
+                    "imu": bool(self.get_parameter("require_imu").value),
+                    "battery_monitor": bool(self.get_parameter("require_battery").value),
+                },
             )
             self._machine.update("acceptance", healthy, 0, detail)
         self._minimum_scan_coverage = float(self.get_parameter("minimum_scan_coverage").value)

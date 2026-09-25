@@ -271,12 +271,16 @@ def test_physical_acceptance_requires_measured_all_direction_and_fault_results(t
             },
         }},
     }), encoding="utf-8")
-    path.write_text(yaml.safe_dump({"schema_version": 2, "validated": False}), encoding="utf-8")
+    path.write_text(yaml.safe_dump({"schema_version": 3, "validated": False}), encoding="utf-8")
     assert not validate_acceptance_file(path)[0]
 
     path.write_text(yaml.safe_dump({
-        "schema_version": 2,
+        "schema_version": 3,
         "validated": True,
+        "operating_scope": {
+            "mode": "attended_autonomous_base", "operator_at_motor_power_stop": True,
+        },
+        "installed_hardware": {"bumper": True, "imu": True, "battery_monitor": True},
         "software_revision": "abc123",
         "sensor_configuration": "scanner-v1",
         "validated_at": "2026-08-27T12:00:00Z",
@@ -328,6 +332,30 @@ def test_physical_acceptance_requires_measured_all_direction_and_fault_results(t
     assert validate_acceptance_file(path, nav2_path, expected_stow)[0]
 
     acceptance = yaml.safe_load(path.read_text(encoding="utf-8"))
+    acceptance["installed_hardware"] = {
+        "bumper": False, "imu": False, "battery_monitor": False,
+    }
+    for name in ("bumper", "imu_disconnect", "battery_low_or_disconnect"):
+        acceptance["fault_tests"][name] = None
+    path.write_text(yaml.safe_dump(acceptance), encoding="utf-8")
+    assert validate_acceptance_file(
+        path, nav2_path, expected_stow, acceptance["installed_hardware"]
+    )[0]
+    assert not validate_acceptance_file(
+        path, nav2_path, expected_stow, {"bumper": True, "imu": False, "battery_monitor": False}
+    )[0]
+    acceptance["fault_tests"]["bumper"] = False
+    path.write_text(yaml.safe_dump(acceptance), encoding="utf-8")
+    assert not validate_acceptance_file(
+        path, nav2_path, expected_stow, acceptance["installed_hardware"]
+    )[0]
+    acceptance["fault_tests"]["bumper"] = None
+    acceptance["operating_scope"]["operator_at_motor_power_stop"] = False
+    path.write_text(yaml.safe_dump(acceptance), encoding="utf-8")
+    assert not validate_acceptance_file(
+        path, nav2_path, expected_stow, acceptance["installed_hardware"]
+    )[0]
+    acceptance["operating_scope"]["operator_at_motor_power_stop"] = True
     acceptance["accepted_stow_joint_positions"]["arm_elbow_flex"] = 0.1
     path.write_text(yaml.safe_dump(acceptance), encoding="utf-8")
     valid, detail = validate_acceptance_file(path, nav2_path, expected_stow)
@@ -349,8 +377,12 @@ def test_physical_acceptance_requires_measured_all_direction_and_fault_results(t
 def test_physical_acceptance_rejects_self_selected_weak_limits(tmp_path):
     path = tmp_path / "acceptance.yaml"
     template = {
-        "schema_version": 2,
+        "schema_version": 3,
         "validated": True,
+        "operating_scope": {
+            "mode": "attended_autonomous_base", "operator_at_motor_power_stop": True,
+        },
+        "installed_hardware": {"bumper": True, "imu": True, "battery_monitor": True},
         "software_revision": "abc123",
         "sensor_configuration": "scanner-v1",
         "validated_at": "2026-08-27T12:00:00Z",
