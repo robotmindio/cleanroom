@@ -48,6 +48,18 @@ def test_the_scan_still_passes_the_supervisors_validity_check():
     assert _valid_scan_ranges(blank_body_returns(_scan([0.1, 2.0] * 6), 0.0, 90.0, 0.2), 0.05)
 
 
+def test_nan_no_returns_are_normalized_for_the_canonical_scan():
+    from lekiwi_rmf.safety_supervisor import _valid_scan_ranges
+
+    scan = _scan([math.nan, 2.0, math.nan, -math.inf])
+    out = blank_body_returns(scan, 0.0, 90.0, 0.0)
+    assert list(out.ranges) == [math.inf, 2.0, math.inf, -math.inf]
+    assert math.isnan(scan.ranges[0])
+    assert not _valid_scan_ranges(out, 0.05)
+    out.ranges[3] = math.inf
+    assert _valid_scan_ranges(out, 0.05)
+
+
 def test_the_tracked_mask_covers_the_measured_body_returns_and_nothing_far():
     node = yaml.safe_load((ROOT / "config" / "lidar_self_mask.yaml").read_text())["scan_self_filter"]["ros__parameters"]
     # Measured on the stationary robot: 259-306 deg at up to 0.18 m, edge returns to 340 deg.
