@@ -178,6 +178,7 @@ class LeKiwiDriver(Node):
                 f"No URDF arm calibration at {calibration_file}; arm trajectories are disabled"
             )
         self.arm_positions = {name: 0.0 for name in ARM_JOINTS}
+        self.arm_hold_action = None
         self.trajectory = None
         self.trajectory_lock = threading.Lock()
         self.safety_publish_lock = threading.Lock()
@@ -423,6 +424,7 @@ class LeKiwiDriver(Node):
             self.command = Twist()
             self.command_stamp = self.get_clock().now()
             self.stop_pending = True
+            self.arm_hold_action = None
             if defer_cut:
                 # Only strict mode cuts torque after a failure.
                 self._deferred_cut = self._deferred_cut or bool(self.disarm_on_failure)
@@ -1110,18 +1112,27 @@ class LeKiwiDriver(Node):
                 trajectory["result_code"] = FollowJointTrajectory.Result.GOAL_TOLERANCE_VIOLATED
                 trajectory["done"].set()
                 self.trajectory = None
+                action.update(hold_action)
             return True
 
     def _send_armed_command(self, now, observation, velocity):
         with self.state_lock:
+            if not self.armed:
+                return
             stale = (now - self.command_stamp).nanoseconds / 1e9 > self.command_timeout
             cmd = Twist() if stale or not self._permission_is_current(
                 self.base_motion_permitted,
                 self._base_permission_received_at_ns,
             ) else self.command
-        hold_action = self._hold_action(observation)
+            # Latch the first measured pose after torque is enabled. Reusing each
+            # new observation as the goal lets gravity walk an idle arm down.
+            if self.arm_hold_action is None:
+                self.arm_hold_action = self._hold_action(observation)
+            hold_action = self.arm_hold_action.copy()
+        measured_hold = self._hold_action(observation)
         action = dict(hold_action)
-        if self._apply_trajectory(action, hold_action):
+        trajectory_ran = self._apply_trajectory(action, measured_hold)
+        if trajectory_ran:
             cmd = Twist()
         # The scales divide here and multiply below: LeRobot's kinematics use a nominal
         # base_radius of 0.125 m, so a robot whose wheels sit elsewhere both under-turns
@@ -1158,10 +1169,16 @@ class LeKiwiDriver(Node):
             if not arm_permitted:
                 self.cancel_trajectory("arm safety permission withdrawn")
                 # The prepared action may carry that trajectory's setpoint.
-                action.update(hold_action)
+                action.update(measured_hold)
             if not base_permitted:
                 action["x.vel"] = action["y.vel"] = action["theta.vel"] = 0.0
             self.robot.send_action(action)
+            if trajectory_ran or not arm_permitted:
+                with self.state_lock:
+                    if self.armed:
+                        self.arm_hold_action = {
+                            key: action[key] for key in measured_hold
+                        }
         except Exception as error:
             send_error = error
         finally:

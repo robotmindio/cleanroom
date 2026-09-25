@@ -80,6 +80,7 @@ def make_node(**overrides):
         "context": None,
         "last_observation": None,
         "last_observation_token": None,
+        "arm_hold_action": None,
         "trajectory": None,
         "publish_motor_health_enabled": True,
         "safety_state": "DISARMED",
@@ -1079,6 +1080,41 @@ def control_loop_node(**overrides):
     node.publish_state = lambda *_: None
     node.publish_safety = lambda *args, **_: node.heartbeats.append(args)
     return node
+
+
+def test_idle_arm_hold_keeps_its_goal_when_feedback_sags():
+    node = control_loop_node(armed=True)
+    grant_fresh_arm_permission(node)
+    grant_fresh_base_permission(node)
+    observation = {"joint.pos": 10.0}
+
+    node._send_armed_command(_Stamp(), observation, (0.0, 0.0, 0.0))
+    observation["joint.pos"] = 7.0
+    node._send_armed_command(_Stamp(), observation, (0.0, 0.0, 0.0))
+
+    assert [action["joint.pos"] for action in node.sent] == [10.0, 10.0]
+
+
+def test_arm_hold_follows_last_trajectory_goal(monkeypatch):
+    node = control_loop_node(armed=True)
+    grant_fresh_arm_permission(node)
+    grant_fresh_base_permission(node)
+    monkeypatch.setattr(driver, "sample_trajectory", lambda *_: ({"joint": 0.5}, {}, {}), raising=False)
+    monkeypatch.setattr(driver, "action_positions", lambda *_: {"joint": 20.0}, raising=False)
+    node.trajectory = {
+        "start": time.monotonic(), "done": threading.Event(),
+        "names": ("joint",), "start_positions": {"joint": 0.0},
+        "points": [types.SimpleNamespace(time=10.0, positions={"joint": 0.5})],
+        "path_tolerances": {"joint": 1.0},
+        "goal_tolerances": {"joint": 0.01},
+        "goal_time_tolerance": 1.0,
+    }
+
+    node._send_armed_command(_Stamp(), {"joint.pos": 10.0}, (0.0, 0.0, 0.0))
+    node.trajectory = None
+    node._send_armed_command(_Stamp(), {"joint.pos": 15.0}, (0.0, 0.0, 0.0))
+
+    assert [action["joint.pos"] for action in node.sent] == [20.0, 20.0]
 
 
 def test_arm_permission_withdrawn_at_the_final_check_holds_the_arm():
