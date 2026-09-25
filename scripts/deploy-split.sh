@@ -221,20 +221,12 @@ for action in start stop reset-failed; do
 done
 
 [[ $refresh_compute == true ]] || verify_compute_configuration
+pi_reboot_needed=false
 if [[ $remote_is_pi5 == true ]]; then
   log "Persisting Pi 5 USB current setting (5 V / 5 A supply required)"
   "${ssh_command[@]}" sudo -n /usr/local/sbin/lekiwi-enable-pi5-usb-current
   if [[ $("${ssh_command[@]}" vcgencmd get_config usb_max_current_enable) != usb_max_current_enable=1 ]]; then
-    log "Rebooting the Pi to apply its USB current setting"
-    "${ssh_command[@]}" sudo -n /usr/bin/systemctl reboot || true
-    deadline=$((SECONDS + 60))
-    until ! "${ssh_command[@]}" true >/dev/null 2>&1; do
-      (( SECONDS < deadline )) || die "Pi did not begin rebooting"
-      sleep 2
-    done
-    wait_for 180 "${ssh_command[@]}" true || die "Pi did not reconnect after reboot"
-    [[ $("${ssh_command[@]}" vcgencmd get_config usb_max_current_enable) == usb_max_current_enable=1 ]] || \
-      die "Pi USB current setting did not apply after reboot"
+    pi_reboot_needed=true
   fi
 fi
 expected_device_service_fingerprint=$(service_fingerprint device) || die "cannot calculate device service configuration fingerprint"
@@ -299,6 +291,18 @@ log "Confirming torque-off and stopping the compute stack"
 ros_setup
 disarm
 sudo -n /usr/bin/systemctl stop lekiwi-stack.service
+if [[ $pi_reboot_needed == true ]]; then
+  log "Rebooting the Pi to apply its USB current setting"
+  "${ssh_command[@]}" sudo -n /usr/bin/systemctl reboot || true
+  deadline=$((SECONDS + 60))
+  until ! "${ssh_command[@]}" true >/dev/null 2>&1; do
+    (( SECONDS < deadline )) || die "Pi did not begin rebooting"
+    sleep 2
+  done
+  wait_for 180 "${ssh_command[@]}" true || die "Pi did not reconnect after reboot"
+  [[ $("${ssh_command[@]}" vcgencmd get_config usb_max_current_enable) == usb_max_current_enable=1 ]] || \
+    die "Pi USB current setting did not apply after reboot"
+fi
 if [[ $refresh_compute == true ]]; then
   refresh_compute_service
   verify_compute_configuration
@@ -306,7 +310,7 @@ fi
 
 log "Stopping device services"
 for unit in lekiwi-cameras.service lekiwi-astra.service lekiwi-lidar.service lekiwi-zenoh.service lekiwi-host.service; do
-  if has_device_unit "$unit" && remote_unit_active "$unit"; then
+  if has_device_unit "$unit"; then
     "${ssh_command[@]}" sudo -n /usr/bin/systemctl stop "$unit"
   fi
 done

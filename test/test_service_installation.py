@@ -483,7 +483,7 @@ def test_deploy_order_fails_closed_around_the_device_restart():
     assert 'as_root systemctl enable "${units[@]}" lekiwi-ros-logrotate.timer' in device_installer
     assert '"$project_root/scripts/reinstall-compute.sh" --no-start' in deploy
     assert deploy.index("sudo -n true") < disarm
-    assert deploy.index('sudo -n /usr/bin/systemctl reboot') < disarm
+    assert disarm < deploy.index('sudo -n /usr/bin/systemctl reboot') < stop_host
     assert 'vcgencmd get_config usb_max_current_enable' in deploy
     sudoers = (ROOT / "scripts" / "install-deploy-sudoers.sh").read_text(encoding="utf-8")
     assert 'commands+=("$systemctl reboot")' in sudoers
