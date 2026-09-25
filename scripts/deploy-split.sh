@@ -183,9 +183,22 @@ fi
 
 device_sudoers=$("${ssh_command[@]}" sudo -n -l) || \
   die "device sudoers grant is missing; rerun scripts/install-device-services.sh on $device"
-if [[ $("${ssh_command[@]}" 'tr -d "\0" </proc/device-tree/model 2>/dev/null || true') == *"Raspberry Pi 5"* ]]; then
-  [[ $device_sudoers == *"/usr/local/sbin/lekiwi-enable-pi5-usb-current"* ]] || \
-    die "Pi 5 USB power setup is missing from device sudoers; rerun scripts/install-device-services.sh on $device"
+remote_model=$("${ssh_command[@]}" 'tr -d "\0" </proc/device-tree/model 2>/dev/null || true')
+remote_is_pi5=false
+if [[ $remote_model == *"Raspberry Pi 5"* ]]; then
+  remote_is_pi5=true
+  if [[ $device_sudoers != *"/usr/local/sbin/lekiwi-enable-pi5-usb-current"* ]] || \
+    ! "${ssh_command[@]}" test -x /usr/local/sbin/lekiwi-enable-pi5-usb-current; then
+    [[ -t 0 ]] || die "first Pi 5 USB setup needs an interactive terminal for the Pi sudo prompt"
+    log "One-time Pi 5 privilege setup (enter the Pi sudo password if requested)"
+    ssh_interactive=(ssh -tt -o BatchMode=yes -o ConnectTimeout=10 "$device")
+    "${ssh_interactive[@]}" \
+      "sudo /usr/bin/install -o root -g root -m 0755 '$remote_repo/scripts/enable-pi5-usb-current.sh' /usr/local/sbin/lekiwi-enable-pi5-usb-current && sudo '$remote_repo/scripts/install-deploy-sudoers.sh' device --user \"\$(id -un)\"" || \
+      die "could not install the Pi 5 USB helper and deployment permission"
+    device_sudoers=$("${ssh_command[@]}" sudo -n -l) || die "Pi deployment sudo grant did not install"
+    [[ $device_sudoers == *"/usr/local/sbin/lekiwi-enable-pi5-usb-current"* ]] || \
+      die "Pi deployment sudo grant does not include the USB helper"
+  fi
 fi
 if [[ $refresh_compute == false ]]; then
   compute_sudoers=$(sudo -n -l) || die "compute sudoers grant is missing; rerun scripts/install-compute-services.sh"
@@ -200,7 +213,7 @@ for action in start stop reset-failed; do
 done
 
 [[ $refresh_compute == true ]] || verify_compute_configuration
-if [[ $("${ssh_command[@]}" 'tr -d "\0" </proc/device-tree/model 2>/dev/null || true') == *"Raspberry Pi 5"* ]]; then
+if [[ $remote_is_pi5 == true ]]; then
   log "Persisting Pi 5 USB current setting (5 V / 5 A supply required)"
   "${ssh_command[@]}" sudo -n /usr/local/sbin/lekiwi-enable-pi5-usb-current
 fi
