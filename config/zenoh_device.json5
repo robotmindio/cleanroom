@@ -27,7 +27,7 @@
       },
       // Raw Astra color is only an RViz preview; cap it so it never crowds
       // the lidar and depth cloud out of the Wi-Fi link.
-      pub_max_frequencies: ["^/camera/astra/color/image_raw$=2"],
+      pub_max_frequencies: ["^/camera/astra/color/image_raw$=0.5"],
       // One TCP link carries everything, and a scan queued behind a multi-MB
       // frame arrived over a second late, which stops the base (collision
       // monitor source timeout). Zenoh priorities: 1 is highest, 5 the default,
