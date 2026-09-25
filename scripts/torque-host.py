@@ -45,6 +45,12 @@ ACTION_KEYS = tuple(f"{joint}.pos" for joint in ARM_JOINTS) + (
 )
 
 
+def broadcast_torque_off(bus):
+    # Feetech's per-servo disable aborts on an overload response and skips
+    # every later motor. Broadcast to all nine; callers verify each readback.
+    bus.sync_write("Torque_Enable", 0, num_retry=TORQUE_RETRIES)
+
+
 @dataclass
 class TorqueSafetyConfig:
     port_zmq: int = 5557
@@ -145,7 +151,9 @@ class SafetyLeKiwi(LeKiwi):
         # This is LeRobot 0.6.1's LeKiwi.configure() without its final
         # enable_torque(). Keep its modes and gains identical to the supported
         # vendor implementation.
-        self.bus.disable_torque()
+        broadcast_torque_off(self.bus)
+        TorqueControlServer._verify_torque(self, False)
+        self.bus.sync_write("Lock", 0, num_retry=TORQUE_RETRIES)
         self.bus.configure_motors()
         for name in self.arm_motors:
             self.bus.write("Operating_Mode", name, OperatingMode.POSITION.value)
@@ -192,6 +200,9 @@ class TorqueControlServer:
 
     def _enable(self, robot: SafetyLeKiwi) -> None:
         if self.torque_enabled:
+            # A failed cut can leave this cached flag true with only some
+            # motors energized; never acknowledge an arm from the flag alone.
+            self._verify_torque(robot, True)
             return
         # A torque-off arm may have sagged. Never re-enable against its old
         # target: first command each arm joint to its measured current position
@@ -203,28 +214,23 @@ class TorqueControlServer:
                 ("verify motor torque enabled", lambda: self._verify_torque(robot, True)),
                 ("persist enabled latch", lambda: self.latch.save(True)),
             ),
-            (
-                ("disable motor torque", lambda: robot.bus.disable_torque(num_retry=TORQUE_RETRIES)),
-                ("verify motor torque disabled", lambda: self._verify_torque(robot, False)),
-                ("persist disabled latch", lambda: self.latch.save(False)),
-            ),
+            (("disable motor torque", lambda: self._disable(robot)),),
         )
         self.torque_enabled = True
 
     def _disable(self, robot: SafetyLeKiwi) -> None:
-        # Persistence, stopping, the bus write, and readback are independent
-        # safety layers. A filesystem failure must never skip the physical cut.
+        # Attempt the physical cut even if stopping fails; record "disabled"
+        # only after every servo confirms its torque register is zero.
         failures = run_all_safety_steps((
-            ("persist disabled latch", lambda: self.latch.save(False)),
             ("stop base", robot.stop_base),
-            ("disable motor torque", lambda: robot.bus.disable_torque(num_retry=TORQUE_RETRIES)),
+            ("disable motor torque", lambda: broadcast_torque_off(robot.bus)),
             ("verify motor torque disabled", lambda: self._verify_torque(robot, False)),
         ))
-        physical_failure = any(name in {
-            "disable motor torque", "verify motor torque disabled",
-        } for name, _error in failures)
-        if not physical_failure:
+        if not any(name == "verify motor torque disabled" for name, _error in failures):
             self.torque_enabled = False
+            failures.extend(run_all_safety_steps((
+                ("persist disabled latch", lambda: self.latch.save(False)),
+            )))
         if failures:
             raise RuntimeError("; ".join(f"{name}: {error}" for name, error in failures))
 
@@ -521,7 +527,7 @@ def main(cfg: TorqueHostConfig):
         # configure() leaves torque off, but a write returning successfully
         # is not proof. Reissue it and require every servo's register readback
         # before opening any network control endpoint.
-        robot.bus.disable_torque(num_retry=TORQUE_RETRIES)
+        broadcast_torque_off(robot.bus)
         TorqueControlServer._verify_torque(robot, False)
         latch.save(False)
         host = BoundLeKiwiHost(cfg.host, cfg.safety.bind_address, cfg.curve)
@@ -534,17 +540,25 @@ def main(cfg: TorqueHostConfig):
     except KeyboardInterrupt:
         logging.info("Stopping LeKiwi torque host")
     finally:
-        # disconnect() calls bus.disconnect(disable_torque=True) in the
-        # supported LeRobot version. This remains the last line of defence for
-        # a clean host shutdown, independently of the persisted latch.
+        torque_cut = False
         try:
             if robot.is_connected:
-                robot.disconnect()
+                broadcast_torque_off(robot.bus)
+                TorqueControlServer._verify_torque(robot, False)
+                torque_cut = True
         finally:
-            if control is not None:
-                control.disconnect()
-            if host is not None:
-                host.disconnect()
+            # Keep the vendor's per-servo cut as a fallback if the broadcast
+            # could not be verified, despite its first-error abort behavior.
+            if torque_cut:
+                robot.config.disable_torque_on_disconnect = False
+            try:
+                if robot.is_connected:
+                    robot.disconnect()
+            finally:
+                if control is not None:
+                    control.disconnect()
+                if host is not None:
+                    host.disconnect()
 
 
 if __name__ == "__main__":
