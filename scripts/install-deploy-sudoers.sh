@@ -49,6 +49,7 @@ fi
 commands=()
 if [[ $role == device ]]; then
   commands+=("/usr/local/sbin/lekiwi-enable-pi5-usb-current")
+  commands+=("$systemctl reboot")
 fi
 for action in start stop restart reset-failed; do
   for unit in "${units[@]}"; do

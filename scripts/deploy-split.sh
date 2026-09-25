@@ -190,16 +190,22 @@ remote_model=$("${ssh_command[@]}" 'tr -d "\0" </proc/device-tree/model 2>/dev/n
 remote_is_pi5=false
 if [[ $remote_model == *"Raspberry Pi 5"* ]]; then
   remote_is_pi5=true
-  if [[ $device_sudoers != *"/usr/local/sbin/lekiwi-enable-pi5-usb-current"* ]] || \
+  if [[ $device_sudoers != *"/usr/local/sbin/lekiwi-enable-pi5-usb-current"* || \
+        $device_sudoers != *"/usr/bin/systemctl reboot"* ]] || \
     ! "${ssh_command[@]}" test -x /usr/local/sbin/lekiwi-enable-pi5-usb-current; then
-    [[ -t 0 ]] || die "first Pi 5 USB setup needs an interactive terminal for the Pi sudo prompt"
+    bootstrap_ssh=("${ssh_command[@]}")
+    bootstrap_sudo=(sudo -n)
+    if ! "${ssh_command[@]}" sudo -n true 2>/dev/null; then
+      [[ -t 0 ]] || die "Pi 5 privilege setup needs an interactive terminal for sudo"
+      bootstrap_ssh=("${ssh_interactive[@]}")
+      bootstrap_sudo=(sudo)
+    fi
     log "One-time Pi 5 privilege setup (enter the Pi sudo password if requested)"
-    "${ssh_interactive[@]}" \
-      "sudo /usr/bin/install -o root -g root -m 0755 '$remote_repo/scripts/enable-pi5-usb-current.sh' /usr/local/sbin/lekiwi-enable-pi5-usb-current && sudo '$remote_repo/scripts/install-deploy-sudoers.sh' device --user \"\$(id -un)\"" || \
+    "${bootstrap_ssh[@]}" "${bootstrap_sudo[*]} /usr/bin/install -o root -g root -m 0755 '$remote_repo/scripts/enable-pi5-usb-current.sh' /usr/local/sbin/lekiwi-enable-pi5-usb-current && ${bootstrap_sudo[*]} '$remote_repo/scripts/install-deploy-sudoers.sh' device --user \"\$(id -un)\"" || \
       die "could not install the Pi 5 USB helper and deployment permission"
     device_sudoers=$("${ssh_command[@]}" sudo -n -l) || die "Pi deployment sudo grant did not install"
-    [[ $device_sudoers == *"/usr/local/sbin/lekiwi-enable-pi5-usb-current"* ]] || \
-      die "Pi deployment sudo grant does not include the USB helper"
+    [[ $device_sudoers == *"/usr/local/sbin/lekiwi-enable-pi5-usb-current"* && \
+       $device_sudoers == *"/usr/bin/systemctl reboot"* ]] || die "Pi deployment sudo grant is incomplete"
   fi
 fi
 if [[ $refresh_compute == false ]]; then
@@ -218,6 +224,18 @@ done
 if [[ $remote_is_pi5 == true ]]; then
   log "Persisting Pi 5 USB current setting (5 V / 5 A supply required)"
   "${ssh_command[@]}" sudo -n /usr/local/sbin/lekiwi-enable-pi5-usb-current
+  if [[ $("${ssh_command[@]}" vcgencmd get_config usb_max_current_enable) != usb_max_current_enable=1 ]]; then
+    log "Rebooting the Pi to apply its USB current setting"
+    "${ssh_command[@]}" sudo -n /usr/bin/systemctl reboot || true
+    deadline=$((SECONDS + 60))
+    until ! "${ssh_command[@]}" true >/dev/null 2>&1; do
+      (( SECONDS < deadline )) || die "Pi did not begin rebooting"
+      sleep 2
+    done
+    wait_for 180 "${ssh_command[@]}" true || die "Pi did not reconnect after reboot"
+    [[ $("${ssh_command[@]}" vcgencmd get_config usb_max_current_enable) == usb_max_current_enable=1 ]] || \
+      die "Pi USB current setting did not apply after reboot"
+  fi
 fi
 expected_device_service_fingerprint=$(service_fingerprint device) || die "cannot calculate device service configuration fingerprint"
 refresh_device=false
