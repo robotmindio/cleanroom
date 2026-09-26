@@ -98,12 +98,8 @@
     <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
 
-  <!-- Low-poly self-collision proxies. These are deliberately attached to the
-       CAD links, so their kinematics remain exact while planning stays
-       real-time.  The dimensions below enclose the vendored mesh bounding
-       vertices with a further 4 mm clearance; they are not substitute visual
-       geometry.  A capsule is a cylinder along local Z with a sphere on each
-       end, which covers a complete arm link instead of just its joint centre. -->
+  <!-- Collision proxies stay attached to their CAD links. Prefer exact
+       vendored meshes where enclosing primitives create false collisions. -->
   <xacro:macro name="collision_sphere_proxy" params="name parent xyz radius">
     <link name="${name}"><collision><geometry><sphere radius="${radius}"/></geometry></collision></link>
     <joint name="${name}_mount" type="fixed">
@@ -121,14 +117,29 @@
     </joint>
   </xacro:macro>
 
-  <!-- Pedestal and camera are part of the manipulator's swept volume. -->
-  <xacro:collision_sphere_proxy name="arm_pedestal_collision_proxy" parent="so101_base_link" xyz="0.0168 0 0.0336" radius="0.0857"/>
+  <!-- Exact CAD collision meshes avoid the pedestal sphere/upper-arm capsule
+       overlapping in poses where the physical parts are separated. -->
+  <link name="arm_pedestal_collision_proxy">
+    <collision><origin xyz="-0.00636471 -9.94414e-05 -0.0024" rpy="1.5708 -1.67685e-15 1.5708"/><geometry><mesh filename="package://lekiwi_rmf/urdf/meshes/so101/base_motor_holder_so101_v1.stl"/></geometry></collision>
+    <collision><origin xyz="-0.00636471 -8.97657e-09 -0.0024" rpy="1.5708 -2.78073e-29 1.5708"/><geometry><mesh filename="package://lekiwi_rmf/urdf/meshes/so101/base_so101_v2.stl"/></geometry></collision>
+    <collision><origin xyz="0.0263353 -8.97657e-09 0.0437" rpy="-8.21148e-16 7.84513e-18 1.249e-15"/><geometry><mesh filename="package://lekiwi_rmf/urdf/meshes/so101/sts3215_03a_v1.stl"/></geometry></collision>
+    <collision><origin xyz="-0.0309827 -0.000199441 0.0474" rpy="1.5708 -1.35493e-14 1.5708"/><geometry><mesh filename="package://lekiwi_rmf/urdf/meshes/so101/waveshare_mounting_plate_so101_v2.stl"/></geometry></collision>
+  </link>
+  <joint name="arm_pedestal_collision_proxy_mount" type="fixed">
+    <parent link="so101_base_link"/><child link="arm_pedestal_collision_proxy"/><origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
   <xacro:collision_sphere_proxy name="front_camera_collision_proxy" parent="Camera-Model-v3" xyz="-0.0158 0.0114 -0.0114" radius="0.0332"/>
 
   <!-- SO-101 aggregate links already contain their servo housings. These
        CAD-bounds-derived envelopes therefore cover each complete moving link. -->
   <xacro:collision_capsule_proxy name="shoulder_collision_proxy" parent="so101_shoulder_link" xyz="-0.0192 0.0012 -0.0091" rpy="0 0 0" radius="0.0458" cylinder_length="0.0190"/>
-  <xacro:collision_capsule_proxy name="upper_arm_collision_proxy" parent="so101_upper_arm_link" xyz="-0.0591 -0.0131 0.0202" rpy="0 1.5708 0" radius="0.0460" cylinder_length="0.0502"/>
+  <link name="upper_arm_collision_proxy">
+    <collision><origin xyz="-0.11257 -0.0155 0.0187" rpy="-3.14159 -5.27356e-16 -1.5708"/><geometry><mesh filename="package://lekiwi_rmf/urdf/meshes/so101/sts3215_03a_v1.stl"/></geometry></collision>
+    <collision><origin xyz="-0.065085 0.012 0.0182" rpy="3.14159 -0 -1.30911e-30"/><geometry><mesh filename="package://lekiwi_rmf/urdf/meshes/so101/upper_arm_so101_v1.stl"/></geometry></collision>
+  </link>
+  <joint name="upper_arm_collision_proxy_mount" type="fixed">
+    <parent link="so101_upper_arm_link"/><child link="upper_arm_collision_proxy"/><origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
   <xacro:collision_capsule_proxy name="forearm_collision_proxy" parent="so101_lower_arm_link" xyz="-0.0666 0.0035 0.0202" rpy="0 1.5708 0" radius="0.0411" cylinder_length="0.0749"/>
   <!-- Native wrist bounds plus 4 mm on each face. The old enclosing sphere
        extended into the moving jaw even in the reference pose. -->
