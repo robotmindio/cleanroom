@@ -248,7 +248,7 @@ def generate_launch_description():
             "subscribe_scan_cloud": ParameterValue(lidar_on, value_type=bool),
             # slam_cloud already removed the floor; project every point.
             "Grid/3D": "false", "Grid/NormalsSegmentation": "false", "Grid/RayTracing": "true",
-            "Grid/MaxObstacleHeight": "1.0",
+            "Grid/MaxObstacleHeight": "1.0", "Grid/MaxGroundHeight": "0.05",
             "subscribe_odom_info": False, "approx_sync": True, "publish_tf": True,
             "qos_image": 1, "qos_camera_info": 1, "qos_scan": 1, "qos_odom": 1,
             "Rtabmap/MemoryThr": ParameterValue(LaunchConfiguration("rtabmap_wm_nodes"), value_type=str),

@@ -65,7 +65,9 @@ fault_tests:
   telemetry_replay_or_duplicate: false
   host_restart_stays_disarmed: false
   ros_restart_stays_disarmed: false
-  zmq_unauthorized_client_rejected: false
+  # A client without a key received neither telemetry nor a health reply;
+  # authorized driver credentials received telemetry on 2026-09-26.
+  zmq_unauthorized_client_rejected: true
   # CycloneDDS uses only loopback on compute; a Pi participant bound to its
   # tailnet interface with compute as an explicit peer discovered no ROS nodes
   # on 2026-09-26 while the compute stack was running.
