@@ -188,6 +188,7 @@ def generate_launch_description():
     slam_cloud = Node(
         package="lekiwi_rmf", executable="slam_cloud", name="slam_cloud",
         parameters=[{"use_sim_time": ParameterValue(sim, value_type=bool)}],
+        additional_env={"OPENBLAS_NUM_THREADS": "1"},
         condition=IfCondition(PythonExpression([visual_slam, " and ", lidar_on])),
         output="screen",
     )
