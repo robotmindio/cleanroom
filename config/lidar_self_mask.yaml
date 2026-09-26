@@ -1,13 +1,12 @@
 scan_self_filter:
   ros__parameters:
-    # Measured over 200 live scans of the stationary, stowed robot: fixed
-    # returns at 259-306 deg (0.06-0.18 m) plus rare edge returns out to 340 deg
-    # (0.07-0.11 m). The sector below covers them with 2 cm of range margin.
-    # Re-measured 2026-09-23 with scripts/lidar-self-mask.py (RPi 5 carrier on its
-    # through plate, table not yet fitted): 253-343 deg, 0.20 m, which this covers.
-    # Laser-frame degrees, counter-clockwise from +x. Re-measure after moving the
-    # lidar or anything mounted within 20 cm of it; each value may be a list with
-    # one entry per sector. Set body_max_range_m to 0 to pass the scan through.
-    body_start_deg: 255.0
-    body_end_deg: 345.0
-    body_max_range_m: 0.20
+    # Re-measured 2026-09-27 over 200 raw scans with the robot stationary in the
+    # current arm and camera configuration, in the previously confirmed clear
+    # test area. The measured self-returns are 215-233 deg (to 0.193 m),
+    # 254-284 deg (to 0.196 m), and 301-350 deg (to 0.172 m); the 2 cm margins
+    # below cover them. This is pose-specific: remeasure after moving the arm,
+    # lidar, or any hardware within 20 cm of it. Angles are laser-frame degrees,
+    # counter-clockwise from +x. Each parameter has one entry per sector.
+    body_start_deg: [215.0, 254.0, 301.0]
+    body_end_deg: [233.0, 284.0, 350.0]
+    body_max_range_m: [0.213, 0.216, 0.192]

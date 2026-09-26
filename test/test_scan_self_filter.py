@@ -86,9 +86,9 @@ def test_simulation_mask_matches_the_measured_cad_returns_and_scan_gate():
 
 def test_the_tracked_mask_covers_the_measured_body_returns_and_nothing_far():
     node = yaml.safe_load((ROOT / "config" / "lidar_self_mask.yaml").read_text())["scan_self_filter"]["ros__parameters"]
-    # Measured on the stationary robot: 259-306 deg at up to 0.18 m, edge returns to 340 deg.
-    assert node["body_start_deg"] <= 259.0 and node["body_end_deg"] >= 340.0
-    assert 0.18 < node["body_max_range_m"] <= 0.25
+    assert node["body_start_deg"] == [215.0, 254.0, 301.0]
+    assert node["body_end_deg"] == [233.0, 284.0, 350.0]
+    assert node["body_max_range_m"] == [0.213, 0.216, 0.192]
 
 
 @pytest.mark.parametrize("value", ["-0.1", "1.5", ".nan"])
