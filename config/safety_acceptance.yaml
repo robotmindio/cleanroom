@@ -66,7 +66,10 @@ fault_tests:
   host_restart_stays_disarmed: false
   ros_restart_stays_disarmed: false
   zmq_unauthorized_client_rejected: false
-  dds_control_plane_isolated_or_authenticated: false
+  # CycloneDDS uses only loopback on compute; a Pi participant bound to its
+  # tailnet interface with compute as an explicit peer discovered no ROS nodes
+  # on 2026-09-26 while the compute stack was running.
+  dds_control_plane_isolated_or_authenticated: true
   # Disabled by the tracked launch default and installed stack arguments;
   # no rosbridge node or TCP listener was present on 2026-09-26.
   rosbridge_disabled_or_authenticated: true
