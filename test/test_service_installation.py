@@ -846,30 +846,82 @@ def test_long_running_startup_children_do_not_inherit_the_start_lock():
         assert "flock -n 9" in script
 
 
-def test_ros_stop_leaves_units_owned_by_systemd_alone(tmp_path):
+def test_ros_stop_leaves_unit_owned_stack_alone(tmp_path):
     runtime = tmp_path / "runtime"
     runtime.mkdir()
     fake_systemctl = tmp_path / "bin" / "systemctl"
-    _executable(fake_systemctl, 'exit 0\n')  # every unit reports active
-    sentinel = subprocess.Popen(["sleep", "60"], start_new_session=True)
+    unit_cgroup = next(
+        line.split("::", 1)[1]
+        for line in pathlib.Path(f"/proc/{os.getpid()}/cgroup").read_text().splitlines()
+        if line.startswith("0::")
+    )
+    _executable(
+        fake_systemctl,
+        'case "$1" in is-active) exit 0 ;; show) printf "%s\\n" "$FAKE_UNIT_CGROUP" ;; esac\n',
+    )
+    sentinel = subprocess.Popen(
+        ["bash", "-c", 'exec -a "ros2 launch lekiwi_rmf bringup.launch.py" sleep 60'],
+        start_new_session=True,
+    )
     try:
-        kinds = ("stack", "host", "astra", "cameras", "lidar", "zenoh")
-        for kind in kinds:
-            (runtime / f"{kind}.pid").write_text(f"{sentinel.pid}\n", encoding="utf-8")
+        (runtime / "stack.pid").write_text(f"{sentinel.pid}\n", encoding="utf-8")
         result = subprocess.run(
             ["bash", str(ROOT / "scripts" / "ros-stop.sh")],
             env={**os.environ, "LEKIWI_RUNTIME_DIR": str(runtime),
+                 "FAKE_UNIT_CGROUP": unit_cgroup,
                  "PATH": f"{fake_systemctl.parent}:{os.environ['PATH']}"},
             capture_output=True, text=True, timeout=30,
         )
         assert result.returncode == 0, result.stderr
-        for unit in ("stack", "host", "astra", "cameras", "lidar", "zenoh"):
-            assert f"lekiwi-{unit}.service is active -- left running" in result.stdout
+        assert "lekiwi-stack.service owns recorded stack" in result.stdout
         assert sentinel.poll() is None
-        assert all((runtime / f"{kind}.pid").exists() for kind in kinds)
+        assert (runtime / "stack.pid").exists()
     finally:
         sentinel.kill()
         sentinel.wait()
+
+
+def test_ros_stop_stops_recorded_sim_when_stack_unit_is_active(tmp_path):
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    fake_systemctl = tmp_path / "bin" / "systemctl"
+    _executable(
+        fake_systemctl,
+        'case "$1" in is-active) exit 0 ;; show) printf "%s\\n" "$FAKE_UNIT_CGROUP" ;; esac\n',
+    )
+    sentinel = subprocess.Popen(
+        ["bash", "-c", 'exec -a "ros2 launch lekiwi_rmf bringup.launch.py" sleep 60'],
+        start_new_session=True,
+    )
+    (runtime / "stack.pid").write_text(f"{sentinel.pid}\n", encoding="utf-8")
+    sentinel_cgroup = next(
+        line.split("::", 1)[1]
+        for line in pathlib.Path(f"/proc/{sentinel.pid}/cgroup").read_text().splitlines()
+        if line.startswith("0::")
+    )
+    stop = subprocess.Popen(
+        ["bash", str(ROOT / "scripts" / "ros-stop.sh")],
+        env={**os.environ, "LEKIWI_RUNTIME_DIR": str(runtime),
+             "FAKE_UNIT_CGROUP": f"{sentinel_cgroup}/unrelated.service",
+             "PATH": f"{fake_systemctl.parent}:{os.environ['PATH']}"},
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        deadline = time.monotonic() + 5
+        while sentinel.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert sentinel.poll() is not None
+        stdout, stderr = stop.communicate(timeout=5)
+        assert stop.returncode == 0, stderr
+        assert "stopping recorded stack" in stdout
+        assert not (runtime / "stack.pid").exists()
+    finally:
+        if sentinel.poll() is None:
+            sentinel.kill()
+            sentinel.wait()
+        if stop.poll() is None:
+            stop.kill()
+            stop.wait()
 
 
 def test_sync_calibration_uses_the_configured_robot_and_gives_up(tmp_path):
