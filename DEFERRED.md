@@ -40,7 +40,12 @@ expanding to unattended operation.
   coverage, and stationary scans still show 7-20 cm returns around 180-225
   laser-frame degrees. Reposition the lidar or nearby hardware, then rerun
   `scripts/lidar-self-mask.py` in a clear area and review the proposal; do not
-  blanket-mask additional sectors and claim full scan coverage.
+  blanket-mask additional sectors and claim full scan coverage. A CAD-only
+  starting point is a laser centre near `base_footprint` x=-0.18 m, y=0.005 m,
+  z=0.35 m (current: x=-0.135 m, y=0.005 m, z=0.182 m). At the measured arm
+  stow and its 0.04-rad tolerance, the arm spans roughly 12 degrees there;
+  the new bracket, cable, vibration, and real scan still need checking before
+  selecting a mount or changing the tracked self-mask.
 - Measure the Astra Pro's optical-centre correction and prove that its
   `/camera/depth/points` cloud covers the arm workspace; the driver publishes
   the cloud, but coverage is not established.
