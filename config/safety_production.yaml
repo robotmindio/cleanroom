@@ -9,7 +9,9 @@ safety_supervisor:
     require_acceptance: true
     require_scan: true
     require_full_scan: true
-    minimum_scan_coverage: 6.0
+    # The measured physical self-mask blanks 90 deg, leaving 270 deg (4.71 rad).
+    # Keep a 12 deg margin for scan-span variation while requiring broad coverage.
+    minimum_scan_coverage: 4.5
     minimum_scan_valid_fraction: 0.05
     require_depth: true
     minimum_depth_valid_points: 16

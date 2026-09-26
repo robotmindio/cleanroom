@@ -79,9 +79,14 @@ def test_simulation_coverage_allows_only_the_measured_model_self_mask():
     mask = _scan_masked_angle(str(root / "config" / "lidar_self_mask_simulation.yaml"))
     assert math.isclose(2 * math.pi - mask, math.radians(289.0), abs_tol=1e-9)
     assert 0.0 < simulation["minimum_scan_coverage"] <= 2 * math.pi - mask
-    assert yaml.safe_load(
+    production = yaml.safe_load(
         (root / "config" / "safety_production.yaml").read_text(encoding="utf-8")
-    )["safety_supervisor"]["ros__parameters"]["minimum_scan_coverage"] == 6.0
+    )["safety_supervisor"]["ros__parameters"]
+    production_coverage = 2 * math.pi - _scan_masked_angle(
+        str(root / "config" / "lidar_self_mask.yaml")
+    )
+    assert production["minimum_scan_coverage"] == 4.5
+    assert production["minimum_scan_coverage"] < production_coverage
 
 
 def test_missing_required_input_denies_all_motion():
