@@ -67,8 +67,8 @@ class AstraCloudFilter(Node):
         self._period = 1.0 / rate
         self._last_publish = 0.0
         self._publisher = self.create_publisher(PointCloud2, "/camera/depth/points", qos_profile_sensor_data)
-        # The driver publishes 4.9 MB clouds at 30 Hz and about one in six is kept, so
-        # take them serialised and only deserialise the ones that are used.
+        # QVGA clouds are about 1.2 MB at 30 Hz; decode only the frames published
+        # at the configured 3 Hz limit.
         self.create_subscription(
             PointCloud2, "/camera/depth/points_raw", self._on_cloud, qos_profile_sensor_data,
             raw=True,
