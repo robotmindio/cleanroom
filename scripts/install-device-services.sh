@@ -67,6 +67,10 @@ source "$PROJECT_ROOT/scripts/lib/service-install-common.sh"
 source "$PROJECT_ROOT/scripts/lib/service-install-revision.sh"
 resolve_service_user "$SERVICE_USER_ARG"
 resolve_service_paths "$WORKSPACE_ARG" "$LEROBOT_VENV_ARG" false
+
+# Keep CURVE enabled on routine service refreshes once keys are installed.
+[[ -n $CURVE_DIR_ARG || ! -d $LEKIWI_SERVICE_HOME/.config/lekiwi/curve ]] || \
+  CURVE_DIR_ARG=$LEKIWI_SERVICE_HOME/.config/lekiwi/curve
 LEKIWI_HOST_BIND_ADDRESS=${HOST_BIND_ADDRESS_ARG:-0.0.0.0}
 LEKIWI_HOST_BIND_ADDRESS=$(python3 -c '
 import ipaddress, sys

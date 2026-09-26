@@ -79,6 +79,10 @@ source "$PROJECT_ROOT/scripts/lib/service-install-revision.sh"
 resolve_service_user "$SERVICE_USER_ARG"
 resolve_service_paths "$WORKSPACE_ARG" "" true false
 
+# Keep CURVE enabled on routine service refreshes once keys are installed.
+[[ -n $CURVE_DIR_ARG || ! -d $LEKIWI_SERVICE_HOME/.config/lekiwi/curve ]] || \
+  CURVE_DIR_ARG=$LEKIWI_SERVICE_HOME/.config/lekiwi/curve
+
 host_unit="$UNIT_DIR/lekiwi-host.service"
 cameras_unit="$UNIT_DIR/lekiwi-cameras.service"
 lidar_unit="$UNIT_DIR/lekiwi-lidar.service"
