@@ -12,7 +12,8 @@ from diagnostic_msgs.msg import DiagnosticStatus
 
 from lekiwi_rmf.safety_supervisor import (
     Requirement, SafetyState, SafetyStateMachine, _valid_battery,
-    _valid_depth_points, _valid_scan_ranges, validate_acceptance_file,
+    _scan_masked_angle, _valid_depth_points, _valid_scan_ranges,
+    validate_acceptance_file,
 )
 
 
@@ -417,6 +418,20 @@ def test_scan_health_rejects_blind_and_malformed_payloads():
     for invalid in (math.nan, -math.inf, 50.0):
         scan.ranges[0] = invalid
         assert not _valid_scan_ranges(scan, 0.05)
+
+
+def test_full_scan_coverage_excludes_tracked_self_mask(tmp_path):
+    path = tmp_path / "lidar_self_mask.yaml"
+    path.write_text(yaml.safe_dump({"scan_self_filter": {"ros__parameters": {
+        "body_start_deg": 255.0,
+        "body_end_deg": 345.0,
+        "body_max_range_m": 0.2,
+    }}}), encoding="utf-8")
+    assert 2 * math.pi - _scan_masked_angle(str(path)) < 6.0
+    assert _scan_masked_angle("") == 0.0
+    path.write_text("scan_self_filter: {}", encoding="utf-8")
+    with pytest.raises(ValueError, match="invalid scan self-mask"):
+        _scan_masked_angle(str(path))
 
 
 def _cloud(points: list[tuple[float, float, float]]) -> PointCloud2:

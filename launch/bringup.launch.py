@@ -793,6 +793,14 @@ def generate_launch_description():
                         value_type=bool,
                     ),
                     "acceptance_file": safety_acceptance_file,
+                    "scan_self_mask_file": ParameterValue(
+                        PythonExpression([
+                            "'' if ", sim, " else '",
+                            PathJoinSubstitution([package, "config", "lidar_self_mask.yaml"]),
+                            "'",
+                        ]),
+                        value_type=str,
+                    ),
                     # A validated physical record is accepted only when its
                     # measured stopping distance still fits this exact tracked
                     # Nav2 footprint and collision-monitor StopZone.

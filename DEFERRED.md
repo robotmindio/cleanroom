@@ -35,11 +35,12 @@ expanding to unattended operation.
   profile's 6-radian scan requirement. The camera floor-scan fallback is not a
   360-degree scanner and cannot satisfy that requirement or reliably detect
   side, rear, low-contrast and overhanging obstacles.
-- Once the RPi 5 table is fitted, run `scripts/lidar-self-mask.py` on the
-  stationary robot with nothing else within 30 cm and copy its proposal into
-  `config/lidar_self_mask.yaml`. The CAD puts the table legs across the LD06
-  scan plane at roughly 90-145 laser-frame degrees and 0.08-0.21 m, which needs
-  a second sector (the filter accepts a list).
+- Resolve the LD06's physical self-occlusion before base trials. The current
+  90-degree body mask leaves less than the required 6 radians of effective
+  coverage, and stationary scans still show 7-20 cm returns around 180-225
+  laser-frame degrees. Reposition the lidar or nearby hardware, then rerun
+  `scripts/lidar-self-mask.py` in a clear area and review the proposal; do not
+  blanket-mask additional sectors and claim full scan coverage.
 - Measure the Astra Pro's optical-centre correction and prove that its
   `/camera/depth/points` cloud covers the arm workspace; the driver publishes
   the cloud, but coverage is not established.

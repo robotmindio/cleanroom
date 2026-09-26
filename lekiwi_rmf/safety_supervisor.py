@@ -33,6 +33,7 @@ from std_msgs.msg import Bool, String
 from std_srvs.srv import Trigger
 
 from lekiwi_rmf.motion_guards import positive_seconds_ns, stamp_ns
+from lekiwi_rmf.scan_self_filter import parse_sectors
 
 
 class SafetyState(str, Enum):
@@ -195,6 +196,24 @@ def _valid_scan_ranges(message: LaserScan, minimum_valid_fraction: float) -> boo
             return False
         finite_returns += 1
     return finite_returns / len(message.ranges) >= minimum_valid_fraction
+
+
+def _scan_masked_angle(path: str) -> float:
+    """Angular coverage hidden by the tracked robot-body scan filter."""
+    if not path:
+        return 0.0
+    try:
+        params = yaml.safe_load(Path(path).read_text(encoding="utf-8"))[
+            "scan_self_filter"
+        ]["ros__parameters"]
+        sectors = parse_sectors(*(params[name] for name in (
+            "body_start_deg", "body_end_deg", "body_max_range_m"
+        )))
+    except (OSError, yaml.YAMLError, KeyError, TypeError, ValueError) as error:
+        raise ValueError(f"invalid scan self-mask {path}: {error}") from error
+    return math.radians(sum(
+        (end - start) % 360.0 for start, end, reach in sectors if reach > 0.0
+    ))
 
 
 def _point_field_format(field: PointField) -> tuple[str, int] | None:
@@ -603,6 +622,7 @@ class SafetySupervisor(Node):
         self.declare_parameter("require_driver_state", True)
         self.declare_parameter("require_full_scan", True)
         self.declare_parameter("minimum_scan_coverage", 6.0)
+        self.declare_parameter("scan_self_mask_file", "")
         self.declare_parameter("minimum_scan_valid_fraction", 0.05)
         self.declare_parameter("require_depth", True)
         self.declare_parameter("minimum_depth_valid_points", 16)
@@ -702,6 +722,9 @@ class SafetySupervisor(Node):
             )
             self._machine.update("acceptance", healthy, 0, detail)
         self._minimum_scan_coverage = float(self.get_parameter("minimum_scan_coverage").value)
+        self._scan_masked_angle = _scan_masked_angle(
+            str(self.get_parameter("scan_self_mask_file").value)
+        )
         self._require_full_scan = bool(self.get_parameter("require_full_scan").value)
         self._minimum_scan_valid_fraction = float(
             self.get_parameter("minimum_scan_valid_fraction").value
@@ -775,7 +798,11 @@ class SafetySupervisor(Node):
         self._machine.update("driver", healthy, self._now(), message.data or "empty state")
 
     def _on_scan(self, message: LaserScan) -> None:
-        coverage = abs(float(message.angle_increment)) * max(0, len(message.ranges) - 1)
+        coverage = max(
+            0.0,
+            abs(float(message.angle_increment)) * max(0, len(message.ranges) - 1)
+            - self._scan_masked_angle,
+        )
         healthy = (
             bool(message.ranges)
             and math.isfinite(message.angle_increment)
