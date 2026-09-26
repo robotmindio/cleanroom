@@ -151,6 +151,7 @@ def test_cyclonedds_sends_rgbd_clouds_in_loopback_sized_datagrams():
 
     # DDS never crosses machines (multicast TTL 0), so datagrams can be loopback sized.
     assert "<MulticastTimeToLive>0</MulticastTimeToLive>" in cyclonedds
+    assert '<NetworkInterface name="lo"/>' in cyclonedds
     assert "<MaxMessageSize>65500B</MaxMessageSize>" in cyclonedds
     assert "<FragmentSize>65000B</FragmentSize>" in cyclonedds
     assert '<SocketReceiveBufferSize min="default" max="8MiB"/>' in cyclonedds

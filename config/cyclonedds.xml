@@ -5,11 +5,10 @@
 <CycloneDDS xmlns="https://cdds.io/config">
   <Domain id="any">
     <General>
-      <!-- DDS never leaves the machine: TTL 0 keeps discovery multicast on
-           this host, so no remote participant is ever found. Topics that must
-           cross (device sensors) ride zenoh over one TCP link instead
-           (config/zenoh_device.json5); DDS multicast discovery over Wi-Fi
-           silently lost any node that restarted after a router hiccup. -->
+      <!-- Bind DDS to loopback. Device sensors cross machines through the
+           mutual-TLS zenoh bridge, not DDS network discovery. -->
+      <Interfaces><NetworkInterface name="lo"/></Interfaces>
+      <!-- Keep discovery multicast on this host only. -->
       <MulticastTimeToLive>0</MulticastTimeToLive>
       <!-- Everything DDS carries stays on this host, so datagrams can use the
            loopback MTU. The Astra driver publishes 4.9 MB clouds at 30 Hz to

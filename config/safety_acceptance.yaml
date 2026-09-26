@@ -67,6 +67,8 @@ fault_tests:
   ros_restart_stays_disarmed: false
   zmq_unauthorized_client_rejected: false
   dds_control_plane_isolated_or_authenticated: false
-  rosbridge_disabled_or_authenticated: false
+  # Disabled by the tracked launch default and installed stack arguments;
+  # no rosbridge node or TCP listener was present on 2026-09-26.
+  rosbridge_disabled_or_authenticated: true
   collision_monitor_obstacle_stop: false
   arm_workspace_intrusion_stop: false
