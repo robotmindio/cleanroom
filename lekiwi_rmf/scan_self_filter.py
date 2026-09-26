@@ -41,8 +41,13 @@ def blank_body_sectors(scan: LaserScan, sectors) -> LaserScan:
     angles = np.degrees(scan.angle_min + np.arange(len(ranges)) * scan.angle_increment)
     finite = np.isfinite(ranges)
     for start_deg, end_deg, max_range in sectors:
+        if max_range == 0.0:
+            continue
         in_sector = (angles - start_deg) % 360.0 <= (end_deg - start_deg) % 360.0
-        ranges[in_sector & finite & (ranges < max_range)] = math.inf
+        body_returns = in_sector & (
+            (finite & (ranges < max_range)) | np.isneginf(ranges)
+        )
+        ranges[body_returns] = math.inf
     filtered = LaserScan()
     filtered.header = scan.header
     for field in (

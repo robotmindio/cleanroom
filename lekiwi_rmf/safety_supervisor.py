@@ -65,6 +65,7 @@ class SafetyDecision:
     base_permitted: bool
     arm_permitted: bool
     faults: tuple[str, ...] = ()
+    latched_faults: tuple[str, ...] = ()
 
 
 @dataclass
@@ -84,6 +85,14 @@ class SafetyStateMachine:
     latch_faults: bool = True
     base_ever_ready: bool = False
     arm_ever_ready: bool = False
+    latched_faults: list[str] = field(default_factory=list)
+    driver_state_required: bool = True
+
+    def _latch(self, faults: tuple[str, ...]) -> None:
+        self.fault_latched = True
+        self.latched_faults.extend(
+            fault for fault in faults if fault not in self.latched_faults
+        )
 
     def update(self, name: str, healthy: bool, stamp_ns: int, detail: str = "") -> None:
         if name not in self.requirements:
@@ -97,7 +106,7 @@ class SafetyStateMachine:
                 (requirement.base and self.base_ever_ready)
                 or (requirement.arm and self.arm_ever_ready)
             ):
-                self.fault_latched = True
+                self._latch((f"{name}: {detail or 'unhealthy'}",))
 
     def _faults(self, now_ns: int, for_base: bool, for_arm: bool) -> tuple[str, ...]:
         faults: list[str] = []
@@ -124,19 +133,27 @@ class SafetyStateMachine:
             base_faults = (*base_faults, "driver: link lost")
             arm_faults = (*arm_faults, "driver: link lost")
             if self.latch_faults and (self.base_ever_ready or self.arm_ever_ready):
-                self.fault_latched = True
+                self._latch(("driver: link lost",))
         elif self.latch_faults and (
             (base_faults and self.base_ever_ready)
             or (arm_faults and self.arm_ever_ready)
         ):
             # A dependency becoming stale after its scope was ready is a
             # global runtime fault, not a return to partial startup state.
-            self.fault_latched = True
+            faults = (
+                (base_faults if self.base_ever_ready else ())
+                + (arm_faults if self.arm_ever_ready else ())
+            )
+            self._latch(faults)
 
         if self.estop_latched:
-            return SafetyDecision(SafetyState.ESTOP, False, False, all_faults)
+            return SafetyDecision(
+                SafetyState.ESTOP, False, False, all_faults, tuple(self.latched_faults)
+            )
         if self.fault_latched:
-            return SafetyDecision(SafetyState.FAULT_LATCHED, False, False, all_faults)
+            return SafetyDecision(
+                SafetyState.FAULT_LATCHED, False, False, all_faults, tuple(self.latched_faults)
+            )
 
         base_ready = not base_faults
         arm_ready = not arm_faults
@@ -164,16 +181,19 @@ class SafetyStateMachine:
         )
 
     def reset(self, now_ns: int) -> tuple[bool, str]:
-        if self.driver_state == "ARMED":
+        if self.driver_state_required and self.driver_state == "ARMED":
             return False, "disarm the driver before resetting safety faults"
         faults = self._faults(now_ns, True, True)
         if faults:
             return False, "; ".join(faults)
         self.fault_latched = False
         self.estop_latched = False
+        self.latched_faults.clear()
         self.base_ever_ready = True
         self.arm_ever_ready = True
-        return True, "safety fault reset; robot remains disarmed"
+        if self.driver_state_required:
+            return True, "safety fault reset; robot remains disarmed"
+        return True, "safety fault reset; no hardware driver state is configured"
 
 
 def permit_unless_strict(decision: SafetyDecision, strict: bool) -> SafetyDecision:
@@ -707,6 +727,7 @@ class SafetySupervisor(Node):
             driver_state="DISARMED" if require_driver_state else "ARMED",
             arm_stowed=not require_joint_states,
             latch_faults=self._strict,
+            driver_state_required=require_driver_state,
         )
         if bool(self.get_parameter("require_acceptance").value):
             requirements["acceptance"] = Requirement(2**62)
@@ -918,6 +939,7 @@ class SafetySupervisor(Node):
             KeyValue(key="base_motion_permitted", value=str(decision.base_permitted).lower()),
             KeyValue(key="arm_motion_permitted", value=str(decision.arm_permitted).lower()),
             KeyValue(key="faults", value="; ".join(decision.faults)),
+            KeyValue(key="latched_faults", value="; ".join(decision.latched_faults)),
         ]
         diagnostics = DiagnosticArray()
         diagnostics.header.stamp = self.get_clock().now().to_msg()

@@ -124,8 +124,9 @@ The compute installer picks the topology:
   service's compressed frames over loopback (`camera_source:=remote`) — v4l2
   allows one reader per camera, and the service already holds them;
 - with `--remote <device-address>` it reaches a host on another machine;
-  compressed frames, the Astra cloud and the device LD06's `/pi/lidar/scan`
-  arrive through the zenoh bridge, and relays in the bringup expand them into
+  rate-limited compressed camera previews, the compact Astra cloud, and the
+  device LD06's `/pi/lidar/scan` arrive through the zenoh bridge; image relays
+  in the bringup expand them into
   the same canonical topics (`/scan` has the body-masked LD06 as its sole publisher
   by default), so nothing downstream can tell the topologies apart.
 

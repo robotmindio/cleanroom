@@ -9,7 +9,9 @@ safety_supervisor:
     require_acceptance: false
     require_scan: true
     require_full_scan: true
-    minimum_scan_coverage: 6.0
+    # The simulated robot's own CAD geometry occludes 71 degrees of its scan;
+    # 4.8 rad still requires 275 degrees of usable coverage. Production stays at 6.0.
+    minimum_scan_coverage: 4.8
     minimum_scan_valid_fraction: 0.01
     # Gazebo supplies delayed depth and physics-derived arm feedback. Keeping
     # both required exercises the same continuous permission withdrawal that

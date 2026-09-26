@@ -132,8 +132,10 @@ The supervisor publishes `safety/supervisor_state`,
 mode, domestic robot) it reports missing or unhealthy inputs in `/diagnostics` but
 does not withhold motion. With `LEKIWI_DISARM_ON_FAILURE=true`, and always in
 simulation, missing or unhealthy inputs deny motion and runtime faults latch until
-`/safety/reset_fault` is called while the driver is disarmed and all inputs are
-healthy. An e-stop always latches in that mode. `/safety/disarm` stops ROS commands
+`/safety/reset_fault` is called while the hardware driver is disarmed and all
+required inputs are healthy. Simulation has no hardware driver; it accepts the
+same explicit reset only after its required inputs recover. An e-stop always
+latches in that mode. `/safety/disarm` stops ROS commands
 and waits for the motor host to confirm that it cut torque on all nine servos.
 Arming, manual or automatic, holds each arm joint at its measured position and
 sends zero wheel velocity. The physical E-stop remains mandatory for any
@@ -202,8 +204,10 @@ still be camera-sensitive and should not be used as the ROS motor service.
 The front/wrist V4L2 cameras are also the supported remote-camera topology:
 frames are read by `v4l2_camera` on the machine where they are plugged in, then
 relayed as below. The Astra is read by `ros-astra.sh` (`lekiwi-astra.service`)
-on whichever machine holds its USB connection; on a split robot the device zenoh
-bridge carries its cloud and a 2 Hz colour preview to the workstation.
+on whichever machine holds its USB connection; on a split robot the bridge
+carries a decimated depth cloud, LD06 scan, front preview at up to 3 Hz, wrist
+preview at up to 2 Hz, and a JPEG Astra colour preview at up to 0.25 Hz. Raw
+Astra colour frames stay on the device.
 
 With a Pi on the robot, `ros-cameras.sh` reads each USB camera there and publishes a
 compressed `/pi/camera/...` stream. The device zenoh bridge carries it to the

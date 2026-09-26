@@ -16,6 +16,7 @@ def test_astra_pro_publishes_registered_rgbd_in_the_robot_camera_frame():
     assert parameters["depth_registration"] is True
     assert parameters["color_depth_synchronization"] is True
     assert parameters["enable_point_cloud"] is True
+    assert parameters["depth_fps"] == 15
     assert parameters["publish_tf"] is False
     assert parameters["color_optical_frame_id"] == "astra_camera_optical_frame"
     assert parameters["depth_optical_frame_id"] == "astra_camera_optical_frame"
@@ -53,6 +54,15 @@ def test_astra_has_its_own_tracked_robot_frame():
     assert camera.find("collision/origin").attrib == camera.find("visual/origin").attrib
     assert '<parent link="astra_pro_compact_mount"/><child link="astra_camera_link"/>' in description
     assert 'property name="astra_mount_xyz" value="0 0 0.0155"' in description
+
+
+def test_local_and_remote_astra_cloud_filters_share_the_bandwidth_profile():
+    filter_config = ROOT / "config" / "astra_cloud_filter.yaml"
+    values = yaml.safe_load(filter_config.read_text())["astra_cloud_filter"]["ros__parameters"]
+    assert values == {"pixel_stride": 12, "max_rate_hz": 3.0}
+    for launch in (ROOT / "launch" / "bringup.launch.py", ROOT / "launch" / "pi_astra.launch.py"):
+        assert "astra_cloud_filter.yaml" in launch.read_text()
+    assert 1.0 / values["max_rate_hz"] < 0.5  # production depth freshness timeout
 
 
 def test_so101_visuals_use_one_yellow_material():

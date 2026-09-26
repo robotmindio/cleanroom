@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import math
+import time
 
 from lekiwi_rmf.odometry import TelemetrySequenceTracker, accept_validated_telemetry
 from lekiwi_rmf.motor_health import MOTOR_HEALTH_KEY, parse_motor_health
@@ -85,11 +86,30 @@ class LeKiwiZmqClient:
                 f"tcp://{self.remote_ip}:{self.observation_port}"
             )
             poller = zmq.Poller()
+            poller.register(self.zmq_cmd_socket, zmq.POLLOUT)
             poller.register(self.zmq_observation_socket, zmq.POLLIN)
-            if dict(poller.poll(self.connect_timeout_s * 1000)).get(
-                self.zmq_observation_socket
-            ) != zmq.POLLIN:
-                raise ConnectionError("timeout waiting for LeKiwi host observation")
+            command_ready = observation_ready = False
+            deadline = time.monotonic() + self.connect_timeout_s
+            while not (command_ready and observation_ready):
+                timeout_ms = max(0, int((deadline - time.monotonic()) * 1000))
+                events = dict(poller.poll(timeout_ms))
+                if events.get(self.zmq_cmd_socket, 0) & zmq.POLLOUT:
+                    poller.unregister(self.zmq_cmd_socket)
+                    command_ready = True
+                if events.get(self.zmq_observation_socket, 0) & zmq.POLLIN:
+                    poller.unregister(self.zmq_observation_socket)
+                    observation_ready = True
+                if not events:
+                    break
+            if not (command_ready and observation_ready):
+                missing = []
+                if not command_ready:
+                    missing.append("command connection")
+                if not observation_ready:
+                    missing.append("host observation")
+                raise ConnectionError(
+                    "timeout waiting for LeKiwi " + " and ".join(missing)
+                )
         except Exception:
             self._close_sockets()
             raise

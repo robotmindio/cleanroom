@@ -1,15 +1,15 @@
 /**:
   ros__parameters:
     # The legacy Astra Pro uses OpenNI plus a separate UVC colour stream.
-    # Keep the two streams at the same modest rate so they do not fill the
-    # device machine's USB/CPU budget.
+    # Match registered colour/depth rates and keep point-cloud generation to
+    # 15 Hz; filtering and the Wi-Fi bridge use only a small subset of frames.
     camera_name: camera
     color_width: 640
     color_height: 480
     color_fps: 15
     depth_width: 640
     depth_height: 480
-    depth_fps: 30
+    depth_fps: 15
     enable_color: true
     enable_depth: true
     enable_ir: false

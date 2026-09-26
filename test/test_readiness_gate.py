@@ -140,8 +140,8 @@ def test_simulation_base_controller_consumes_only_the_guarded_velocity_topic():
     assert '"/cmd_vel_safe"' in controller
     assert '"/cmd_vel"' not in controller
     assert "/sim/sim_base_left_wheel/cmd_vel" in source
-    # Every real LD06 path reaches /scan only through the body-masking filter.
-    assert source.count('executable="scan_self_filter"') == 1
+    # Real LD06 and simulated Gazebo scans both pass through body masking.
+    assert source.count('executable="scan_self_filter"') == 2
     assert "'/pi/lidar/scan' if " in source
     assert '"topic_name": "/lidar/scan_raw"' in source
     assert '"topic_name": "/scan"' not in source

@@ -46,7 +46,7 @@ def _reference_compact(message, stride):
 
 
 @pytest.mark.parametrize("big_endian", [False, True])
-@pytest.mark.parametrize("stride", [1, 3, 4])
+@pytest.mark.parametrize("stride", [1, 3, 4, 12])
 def test_vectorised_compaction_matches_the_per_point_reference(stride, big_endian):
     rng = np.random.default_rng(7)
     height, width, point_step, padding = 11, 14, 20, 8

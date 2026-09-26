@@ -11,9 +11,9 @@
       <!-- Keep discovery multicast on this host only. -->
       <MulticastTimeToLive>0</MulticastTimeToLive>
       <!-- Everything DDS carries stays on this host, so datagrams can use the
-           loopback MTU. The Astra driver publishes 4.9 MB clouds at 30 Hz to
-           its filter; with 1,200 B fragments that is about 4,100 datagrams per
-           sample, which capped delivery near 20 Hz at twice the CPU. -->
+           loopback MTU. The Astra driver publishes 4.9 MB clouds at 15 Hz to
+           its filter; compacting them before the Wi-Fi bridge avoids sending
+           the multi-megabyte raster to the workstation. -->
       <MaxMessageSize>65500B</MaxMessageSize>
       <FragmentSize>65000B</FragmentSize>
     </General>

@@ -309,6 +309,45 @@ def generate_launch_description():
         Node(package="rmf_task_ros2", executable="rmf_task_dispatcher", parameters=[{"bidding_time_window": 2.0}], additional_env={"ROS_DOMAIN_ID": rmf_domain}, output="screen"),
         rmf_owner_guard,
     ]
+    # Start the continuously latched safety evaluator only after RTAB-Map has
+    # produced the first map. By then the simulated Gazebo joint-state stream
+    # has settled; observing its spawn-time gap after arm readiness would latch
+    # a stale-joints fault before any test could run.
+    safety_supervisor_node = Node(
+        package="lekiwi_rmf",
+        executable="safety_supervisor",
+        name="safety_supervisor",
+        parameters=[safety_params_file, {
+            "use_sim_time": ParameterValue(sim, value_type=bool),
+            # Simulation keeps its qualified enforcement; real mode is strict only
+            # for larger robots that opt in with disarm_on_failure.
+            "strict": ParameterValue(
+                PythonExpression([sim, " or '", disarm_on_failure, "' == 'true'"]),
+                value_type=bool,
+            ),
+            "acceptance_file": safety_acceptance_file,
+            "scan_self_mask_file": ParameterValue(
+                PathJoinSubstitution([
+                    package,
+                    "config",
+                    PythonExpression([
+                        "'lidar_self_mask_simulation.yaml' if ",
+                        sim,
+                        " else 'lidar_self_mask.yaml'",
+                    ]),
+                ]),
+                value_type=str,
+            ),
+            # A validated physical record is accepted only when its measured stopping
+            # distance still fits this exact tracked Nav2 footprint and StopZone.
+            "nav2_params_file": params_file,
+        }],
+        # This node is the one continuously-enforced source of motion permission; a
+        # crash must not leave the driver believing its last lease is current.
+        respawn=True,
+        respawn_delay=2.0,
+        output="screen",
+    )
 
     return LaunchDescription(
         [
@@ -536,6 +575,20 @@ def generate_launch_description():
                 name="sim_lidar_bridge",
                 arguments=["/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan"],
                 parameters=[{"override_frame_id": "laser"}],
+                remappings=[("/scan", "/sim/scan_raw")],
+                condition=IfCondition(sim),
+                output="screen",
+            ),
+            Node(
+                package="lekiwi_rmf",
+                executable="scan_self_filter",
+                name="scan_self_filter",
+                parameters=[
+                    PathJoinSubstitution([
+                        package, "config", "lidar_self_mask_simulation.yaml",
+                    ]),
+                    {"input_topic": "/sim/scan_raw"},
+                ],
                 condition=IfCondition(sim),
                 output="screen",
             ),
@@ -598,6 +651,7 @@ def generate_launch_description():
             ),
             Node(
                 package="lekiwi_rmf", executable="astra_cloud_filter", name="astra_cloud_filter",
+                parameters=[PathJoinSubstitution([package, "config", "astra_cloud_filter.yaml"])],
                 condition=IfCondition(astra_here), output="screen",
             ),
             # A V4L2 front camera is read straight off the device rather than relayed through the
@@ -775,47 +829,6 @@ def generate_launch_description():
                 respawn_delay=2.0,
                 output="screen",
             ),
-            # Unlike the one-shot readiness gates, this authority evaluates every
-            # required input continuously. It withholds base and arm permission
-            # for a missing, stale, or unhealthy input only in strict mode:
-            # always in simulation, and on the real robot only with
-            # disarm_on_failure:=true. By default (real, non-strict) it reports
-            # its findings on /diagnostics but permits motion.
-            Node(
-                package="lekiwi_rmf",
-                executable="safety_supervisor",
-                name="safety_supervisor",
-                parameters=[safety_params_file, {
-                    # Simulation keeps its qualified enforcement; real mode is strict only
-                    # for larger robots that opt in with disarm_on_failure.
-                    "strict": ParameterValue(
-                        PythonExpression([sim, " or '", disarm_on_failure, "' == 'true'"]),
-                        value_type=bool,
-                    ),
-                    "acceptance_file": safety_acceptance_file,
-                    "scan_self_mask_file": ParameterValue(
-                        PythonExpression([
-                            "'' if ", sim, " else '",
-                            PathJoinSubstitution([package, "config", "lidar_self_mask.yaml"]),
-                            "'",
-                        ]),
-                        value_type=str,
-                    ),
-                    # A validated physical record is accepted only when its
-                    # measured stopping distance still fits this exact tracked
-                    # Nav2 footprint and collision-monitor StopZone.
-                    "nav2_params_file": params_file,
-                }],
-                # This node is the one continuously-enforced source of motion
-                # permission; a crash here must not leave the driver believing
-                # its last-received permission is still current for good. It
-                # already fails safe (driver.py's permission leases expire
-                # and auto-disarm without fresh Bool messages), so restarting
-                # it is strictly a recovery, never a new risk.
-                respawn=True,
-                respawn_delay=2.0,
-                output="screen",
-            ),
             Node(
                 package="lekiwi_rmf",
                 executable="arm_workspace_monitor",
@@ -887,7 +900,9 @@ def generate_launch_description():
             )),
             RegisterEventHandler(OnProcessExit(
                 target_action=map_ready_gate,
-                on_exit=_after_success("map", [initial_pose, navigation_launch, nav_ready_gate]),
+                on_exit=_after_success("map", [
+                    safety_supervisor_node, initial_pose, navigation_launch, nav_ready_gate,
+                ]),
             )),
             RegisterEventHandler(OnProcessExit(
                 target_action=nav_ready_gate,

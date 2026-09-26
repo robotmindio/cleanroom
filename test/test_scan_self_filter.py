@@ -60,6 +60,30 @@ def test_nan_no_returns_are_normalized_for_the_canonical_scan():
     assert _valid_scan_ranges(out, 0.05)
 
 
+def test_negative_infinity_is_removed_only_inside_a_measured_body_sector():
+    from lekiwi_rmf.scan_self_filter import blank_body_sectors
+
+    scan = _scan([math.inf] * 360, angle_min=math.radians(-180), increment=math.radians(1))
+    scan.ranges[38] = -math.inf   # -141.9 deg, inside the simulated body mask
+    scan.ranges[20] = -math.inf   # -160 deg, outside it
+    out = blank_body_sectors(scan, [(208.0, 221.0, 0.218)])
+    assert math.isinf(out.ranges[38]) and out.ranges[38] > 0.0
+    assert out.ranges[20] == -math.inf
+
+
+def test_simulation_mask_matches_the_measured_cad_returns_and_scan_gate():
+    from lekiwi_rmf.safety_supervisor import _scan_masked_angle
+
+    path = ROOT / "config" / "lidar_self_mask_simulation.yaml"
+    node = yaml.safe_load(path.read_text())["scan_self_filter"]["ros__parameters"]
+    assert node["body_start_deg"] == [87.0, 119.0, 139.0, 163.0, 208.0]
+    coverage = 2 * math.pi - _scan_masked_angle(str(path))
+    safety = yaml.safe_load((ROOT / "config" / "safety_simulation.yaml").read_text())
+    minimum = safety["safety_supervisor"]["ros__parameters"]["minimum_scan_coverage"]
+    assert coverage > minimum
+    assert math.isclose(coverage, math.radians(289.0), abs_tol=1e-9)
+
+
 def test_the_tracked_mask_covers_the_measured_body_returns_and_nothing_far():
     node = yaml.safe_load((ROOT / "config" / "lidar_self_mask.yaml").read_text())["scan_self_filter"]["ros__parameters"]
     # Measured on the stationary robot: 259-306 deg at up to 0.18 m, edge returns to 340 deg.

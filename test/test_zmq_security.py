@@ -239,6 +239,8 @@ def test_repository_client_speaks_authenticated_state_protocol(tmp_path):
         socket.setsockopt(zmq.LINGER, 0)
         security.configure_socket(socket)
     command_port = command.bind_to_random_port("tcp://127.0.0.1")
+    command_endpoint = f"tcp://127.0.0.1:{command_port}"
+    command.unbind(command_endpoint)
     observation_port = observation.bind_to_random_port("tcp://127.0.0.1")
     payload = {
         "_cams": [],
@@ -260,20 +262,42 @@ def test_repository_client_speaks_authenticated_state_protocol(tmp_path):
         curve_credentials=CurveClientCredentials(client_secret, server_public),
         connect_timeout_s=2,
     )
+    connected = threading.Event()
+    connect_errors = []
+
+    def connect_client():
+        try:
+            client.connect()
+        except Exception as error:
+            connect_errors.append(error)
+        finally:
+            connected.set()
+
+    connector = threading.Thread(target=connect_client)
+    command_bound = False
     try:
-        client.connect()
+        connector.start()
+        publisher.join(timeout=2)
+        assert not publisher.is_alive()
+        assert not connected.wait(0.2), "connect returned before its command peer was ready"
+        command.bind(command_endpoint)
+        command_bound = True
+        assert connected.wait(2), "connect did not wait for the command connection"
+        connector.join(timeout=1)
+        assert not connect_errors, connect_errors
         assert client.zmq_cmd_socket.getsockopt(zmq.IMMEDIATE) == 1
         for socket in (client.zmq_cmd_socket, client.zmq_observation_socket):
             assert socket.getsockopt(zmq.HEARTBEAT_IVL) == 1000
             assert socket.getsockopt(zmq.HEARTBEAT_TIMEOUT) == 5000
-        publisher.join(timeout=2)
-        assert not publisher.is_alive()
         assert client.get_observation() == {"joint.pos": 1.25}
         assert client.observation_token == ("host", "test-session", 0)
         client.send_action({"joint.pos": 2.5})
         assert command.poll(2000) & zmq.POLLIN
         assert command.recv_json() == {"joint.pos": 2.5}
     finally:
+        if not command_bound:
+            command.bind(command_endpoint)
+        connector.join(timeout=3)
         client.disconnect()
         command.close()
         observation.close()

@@ -17,7 +17,8 @@
           "^/pi/lidar/scan$",
           "^/pi/camera/(front|wrist)/(image_raw/compressed|camera_info)$",
           "^/camera/depth/points$",
-          "^/camera/astra/color/(image_raw|camera_info)$",
+          "^/camera/astra/color/image_raw/compressed$",
+          "^/camera/astra/color/camera_info$",
         ],
         subscribers: [],
         service_servers: [],
@@ -25,16 +26,24 @@
         action_servers: [],
         action_clients: [],
       },
-      // Raw Astra color is only an RViz preview; cap it so it never crowds
-      // the lidar and depth cloud out of the Wi-Fi link.
-      pub_max_frequencies: ["^/camera/astra/color/image_raw$=0.5"],
-      // One TCP link carries everything, and a scan queued behind a multi-MB
-      // frame arrived over a second late, which stops the base (collision
-      // monitor source timeout). Zenoh priorities: 1 is highest, 5 the default,
-      // 7 the lowest. The scan goes first and the preview last.
+      // The raw Astra frame stays local. The device launch compresses its optional
+      // preview before this bridge. Downsample small preview messages here; large
+      // point clouds are compacted on the Pi before they reach Zenoh.
+      pub_max_frequencies: [
+        "^/pi/camera/front/image_raw/compressed$=3",
+        "^/pi/camera/wrist/image_raw/compressed$=2",
+        "^/camera/astra/color/image_raw/compressed$=0.25",
+      ],
+      // This is a sensor-only bridge. Congestion must drop an old sample rather
+      // than block a reliable DDS writer and make every later scan stale.
+      reliable_routes_blocking: false,
+      // Zenoh priorities: 1 is highest, 5 the default, 7 the lowest. Send each
+      // small scan immediately; depth follows it and optional images go last.
       pub_priorities: [
-        "^/pi/lidar/scan$=2",
-        "^/camera/astra/color/(image_raw|camera_info)$=7",
+        "^/pi/lidar/scan$=1:express",
+        "^/camera/depth/points$=2",
+        "^/pi/camera/(front|wrist)/image_raw/compressed$=7",
+        "^/camera/astra/color/image_raw/compressed$=7",
       ],
     },
   },

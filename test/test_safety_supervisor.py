@@ -71,6 +71,19 @@ def test_production_requires_arm_workspace_gate_but_simulation_profile_does_not(
     assert production["arm_workspace_monitor"]["ros__parameters"]["group_name"] == "arm"
 
 
+def test_simulation_coverage_allows_only_the_measured_model_self_mask():
+    root = Path(__file__).parents[1]
+    simulation = yaml.safe_load(
+        (root / "config" / "safety_simulation.yaml").read_text(encoding="utf-8")
+    )["safety_supervisor"]["ros__parameters"]
+    mask = _scan_masked_angle(str(root / "config" / "lidar_self_mask_simulation.yaml"))
+    assert math.isclose(2 * math.pi - mask, math.radians(289.0), abs_tol=1e-9)
+    assert 0.0 < simulation["minimum_scan_coverage"] <= 2 * math.pi - mask
+    assert yaml.safe_load(
+        (root / "config" / "safety_production.yaml").read_text(encoding="utf-8")
+    )["safety_supervisor"]["ros__parameters"]["minimum_scan_coverage"] == 6.0
+
+
 def test_missing_required_input_denies_all_motion():
     machine = _machine()
     decision = machine.decision(SECOND)
@@ -183,6 +196,48 @@ def test_stale_scan_removes_only_base_permission_and_latches_after_ready():
     assert decision.state == SafetyState.FAULT_LATCHED
     assert not decision.base_permitted
     assert not decision.arm_permitted
+    assert "scan: stale" in decision.latched_faults
+
+
+def test_latched_fault_reason_survives_input_recovery_and_clears_on_reset():
+    machine = _machine()
+    _healthy(machine)
+    machine.driver_state = "ARMED"
+    machine.decision(SECOND)
+    machine.update("scan", False, SECOND, "invalid range")
+    assert machine.decision(SECOND).state == SafetyState.FAULT_LATCHED
+
+    for name in machine.requirements:
+        machine.update(name, True, 2 * SECOND)
+    decision = machine.decision(2 * SECOND)
+    assert decision.state == SafetyState.FAULT_LATCHED
+    assert decision.faults == ()
+    assert decision.latched_faults == ("scan: invalid range",)
+
+    machine.driver_state = "DISARMED"
+    success, _ = machine.reset(2 * SECOND)
+    assert success
+    assert machine.decision(2 * SECOND).latched_faults == ()
+
+
+def test_simulation_without_driver_can_explicitly_reset_a_recovered_fault():
+    machine = _machine()
+    machine.driver_state_required = False
+    _healthy(machine)
+    machine.driver_state = "ARMED"
+    machine.decision(SECOND)
+    machine.update("scan", False, SECOND, "invalid range")
+    assert machine.decision(SECOND).state == SafetyState.FAULT_LATCHED
+    for name in machine.requirements:
+        machine.update(name, True, 2 * SECOND)
+
+    success, message = machine.reset(2 * SECOND)
+
+    assert success
+    assert "no hardware driver" in message
+    decision = machine.decision(2 * SECOND)
+    assert decision.state == SafetyState.ARMED
+    assert decision.base_permitted and decision.arm_permitted
 
 
 def test_estop_latches_and_cannot_reset_until_healthy_and_disarmed():

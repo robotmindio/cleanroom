@@ -1,0 +1,6 @@
+astra_cloud_filter:
+  ros__parameters:
+    # The measured wireless path cannot carry the 4.9 MB raster cloud. Sample
+    # every 12 pixels per axis, at 3 Hz; the LiDAR remains the dense 2-D source.
+    pixel_stride: 12
+    max_rate_hz: 3.0

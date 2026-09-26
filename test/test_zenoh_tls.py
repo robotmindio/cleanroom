@@ -56,6 +56,20 @@ def test_bridge_configs_require_the_same_private_ca_and_never_use_plaintext():
     assert '["tls/", remote_ip, ":7447"]' in launch and '["tcp/"' not in launch
 
 
+def test_sensor_bridge_caps_previews_and_drops_stale_sensor_samples_on_congestion():
+    device = (ROOT / "config" / "zenoh_device.json5").read_text()
+    compute = (ROOT / "config" / "zenoh_compute.json5").read_text()
+    assert "reliable_routes_blocking: false" in device
+    assert '"^/pi/lidar/scan$=1:express"' in device
+    assert '"^/camera/depth/points$=2"' in device
+    assert '"^/pi/camera/front/image_raw/compressed$=3"' in device
+    assert '"^/pi/camera/wrist/image_raw/compressed$=2"' in device
+    assert '"^/camera/astra/color/image_raw/compressed$=0.25"' in device
+    assert '"^/camera/astra/color/image_raw/compressed$"' in device
+    assert '"^/camera/astra/color/image_raw$"' not in device
+    assert '"^/camera/astra/color/image_raw/compressed$"' in compute
+
+
 def test_main_installers_provision_the_identities():
     compute = (ROOT / "scripts" / "install-compute-services.sh").read_text()
     assert 'setup-zenoh-tls.sh" --user "$LEKIWI_SERVICE_USER" "${REMOTE:-local}"' in compute

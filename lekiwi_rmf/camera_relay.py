@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
 """Expand compressed camera frames from the device machine into canonical topics.
 
-When the cameras live on another machine, pi_cameras.launch.py reads them there
-and publishes compressed frames under /pi/camera/...; only that crosses the
-network. This node re-creates what a local v4l2_camera would have published --
-raw images plus CameraInfo on the /camera/... topics -- so nothing downstream
-can tell the topologies apart. Frames keep their original stamps: RTAB-Map
-syncs approximately, which ordinary NTP-synced clocks comfortably satisfy.
+When cameras live on another machine, compressed frames cross the network and
+this node recreates the canonical raw image topics. Astra CameraInfo is bridged
+directly and is not republished. Frames keep their original stamps.
 """
 import cv2
 import numpy as np
@@ -34,10 +31,16 @@ def decoder_error(bridge) -> str | None:
 
 
 class CameraRelay(Node):
-    # Both cameras may now be calibrated. If the optional wrist calibration has
+    # The front camera is calibrated. If the optional wrist calibration has
     # not been captured yet, its v4l2 node still publishes a zero CameraInfo;
     # consumers must opt in to using it for geometry.
-    CAMERAS = [("front", True), ("wrist", True)]
+    CAMERAS = (
+        ("front", "/pi/camera/front", "/camera/front", True),
+        ("wrist", "/pi/camera/wrist", "/camera/wrist", True),
+        # Astra CameraInfo crosses directly; only its optional compressed image
+        # needs expansion here.
+        ("astra", "/camera/astra/color", "/camera/astra/color", False),
+    )
 
     def __init__(self):
         super().__init__("camera_relay")
@@ -56,18 +59,18 @@ class CameraRelay(Node):
         # decoded images on the Pi, making valid scans arrive more than the
         # collision source timeout after their camera timestamp.
         self.raw_qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE)
-        for name, with_info in self.CAMERAS:
+        for name, source, output, with_info in self.CAMERAS:
             self.create_subscription(
-                CompressedImage, f"/pi/camera/{name}/image_raw/compressed",
-                self.make_image_callback(name, with_info), qos_profile_sensor_data)
+                CompressedImage, f"{source}/image_raw/compressed",
+                self.make_image_callback(name, output, with_info), qos_profile_sensor_data)
             if with_info:
                 self.create_subscription(
-                    CameraInfo, f"/pi/camera/{name}/camera_info",
+                    CameraInfo, f"{source}/camera_info",
                     self.make_info_callback(name), qos_profile_sensor_data)
 
-    def make_image_callback(self, name, with_info):
-        pub = self.create_publisher(Image, f"/camera/{name}/image_raw", self.raw_qos)
-        info_pub = self.create_publisher(CameraInfo, f"/camera/{name}/camera_info", self.raw_qos) if with_info else None
+    def make_image_callback(self, name, output, with_info):
+        pub = self.create_publisher(Image, f"{output}/image_raw", self.raw_qos)
+        info_pub = self.create_publisher(CameraInfo, f"{output}/camera_info", self.raw_qos) if with_info else None
 
         def on_image(msg):
             # Decoding and re-encoding every frame is wasted work while nothing
