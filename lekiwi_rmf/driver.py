@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import asyncio
 import math
 import os
 import signal
@@ -692,7 +693,7 @@ class LeKiwiDriver(Node):
             return GoalResponse.REJECT
         return GoalResponse.ACCEPT
 
-    def execute_trajectory(self, goal_handle):
+    async def execute_trajectory(self, goal_handle):
         names = goal_handle.request.trajectory.joint_names
         requested_points = trajectory_rows(goal_handle.request.trajectory)
         path_tolerances, goal_tolerances, goal_time_tolerance = self.requested_tolerances(
@@ -761,7 +762,7 @@ class LeKiwiDriver(Node):
             self.command = Twist()
             self.command_stamp = self.get_clock().now()
 
-        while not trajectory["done"].wait(0.05):
+        while not trajectory["done"].is_set():
             if goal_handle.is_cancel_requested:
                 with self.trajectory_lock:
                     if self.trajectory is trajectory:
@@ -771,6 +772,9 @@ class LeKiwiDriver(Node):
                 goal_handle.canceled()
                 return FollowJointTrajectory.Result(error_code=FollowJointTrajectory.Result.SUCCESSFUL)
             self.publish_trajectory_feedback(goal_handle, trajectory)
+            # Keep control-loop timers, safety updates, and action cancellation
+            # serviceable while this goal waits for measured servo feedback.
+            await asyncio.sleep(0.05)
 
         if trajectory.get("outcome") == "succeeded":
             goal_handle.succeed()

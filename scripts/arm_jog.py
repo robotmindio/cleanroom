@@ -54,6 +54,28 @@ class ArmJogger(rclpy.node.Node):
         raise RuntimeError("no fresh joint state from the real robot")
 
 
+def wait_for_result(node, handle, result_future, timeout):
+    rclpy.spin_until_future_complete(node, result_future, timeout_sec=timeout)
+    if result_future.done():
+        return result_future.result()
+
+    cancel_future = handle.cancel_goal_async()
+    rclpy.spin_until_future_complete(node, cancel_future, timeout_sec=3.0)
+    if not cancel_future.done():
+        raise RuntimeError("jog timed out; controller did not confirm a cancellation request")
+    response = cancel_future.result()
+    if not response.goals_canceling:
+        rclpy.spin_until_future_complete(node, result_future, timeout_sec=2.0)
+        if result_future.done():
+            return result_future.result()
+        raise RuntimeError("jog timed out; controller neither canceled nor completed the goal")
+
+    rclpy.spin_until_future_complete(node, result_future, timeout_sec=2.0)
+    if not result_future.done():
+        raise RuntimeError("jog timed out; cancellation was acknowledged but no final result arrived")
+    raise RuntimeError("jog timed out; controller acknowledged cancellation")
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Move exactly one real arm joint by a small delta through the safety-limited controller."
@@ -104,10 +126,12 @@ def main():
         if handle is None or not handle.accepted:
             raise RuntimeError("controller rejected jog (the arm may be disarmed)")
         result_future = handle.get_result_async()
-        rclpy.spin_until_future_complete(node, result_future, timeout_sec=args.duration + 7.0)
-        result = result_future.result()
-        if result is None or result.result.error_code != FollowJointTrajectory.Result.SUCCESSFUL:
-            detail = "no result" if result is None else result.result.error_string
+        try:
+            result = wait_for_result(node, handle, result_future, args.duration + 7.0)
+        except RuntimeError as error:
+            raise RuntimeError(f"jog failed: {error}") from error
+        if result.result.error_code != FollowJointTrajectory.Result.SUCCESSFUL:
+            detail = result.result.error_string
             raise RuntimeError(f"jog failed: {detail}")
         print("Jog completed.")
         return 0

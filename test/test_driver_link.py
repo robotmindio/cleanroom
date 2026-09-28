@@ -1,6 +1,7 @@
 """Pure checks for the driver's stale-telemetry detector."""
 
 import ast
+import asyncio
 import math
 import pathlib
 import threading
@@ -46,6 +47,7 @@ exec(
 )
 driver.math = math
 driver.time = time
+driver.asyncio = asyncio
 driver.lease_is_fresh = lease_is_fresh
 driver.twist_is_finite = twist_is_finite
 driver.duration_seconds = duration_seconds
@@ -1320,7 +1322,7 @@ def test_trajectory_header_stamps_must_start_close_to_now(offset_ns, expected):
         abort=lambda: aborted.append(True),
     )
 
-    result = node.execute_trajectory(goal)
+    result = asyncio.run(node.execute_trajectory(goal))
 
     assert aborted == [True]
     assert result.error_code == expected

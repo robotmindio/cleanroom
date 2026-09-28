@@ -26,6 +26,8 @@ pytest.importorskip("zmq")
 
 import rclpy
 from action_msgs.msg import GoalStatus
+from builtin_interfaces.msg import Duration
+from control_msgs.action import FollowJointTrajectory
 from moveit_configs_utils import MoveItConfigsBuilder
 from moveit_msgs.action import MoveGroup
 from moveit_msgs.msg import Constraints, JointConstraint, MoveItErrorCodes
@@ -35,6 +37,7 @@ from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool
 from std_srvs.srv import Trigger
+from trajectory_msgs.msg import JointTrajectoryPoint
 
 from lekiwi_rmf.arm_trajectory import ARM_JOINTS
 from lekiwi_rmf.fake_host import FakeLeKiwiHost
@@ -143,6 +146,10 @@ class TestMoveItDriverEndToEnd(unittest.TestCase):
         self.node.create_subscription(JointState, "/joint_states", self.joint_states.append, 10)
         self.arm_client = self.node.create_client(Trigger, "/safety/arm")
         self.move_group = ActionClient(self.node, MoveGroup, "/move_action")
+        self.trajectory_client = ActionClient(
+            self.node, FollowJointTrajectory,
+            "/arm_controller/follow_joint_trajectory",
+        )
         # Permissions are receive-time leases, so this timer models the safety
         # supervisor's continuous authorization for the whole action.
         self.permission_timer = self.node.create_timer(0.05, self._publish_permission)
@@ -277,6 +284,42 @@ class TestMoveItDriverEndToEnd(unittest.TestCase):
             timeout=10.0,
         ))
         success.set()
+
+    def test_canceling_a_trajectory_keeps_feedback_live(self, fake_host):
+        self.assertTrue(self._until(
+            lambda: bool(self.joint_states), timeout=15.0
+        ))
+        self.assertTrue(self._until(
+            self.trajectory_client.server_is_ready, timeout=15.0
+        ))
+        self._arm()
+        joint = "arm_shoulder_pan"
+        latest = self.joint_states[-1]
+        start = latest.position[latest.name.index(joint)]
+        goal = FollowJointTrajectory.Goal()
+        goal.trajectory.joint_names = [joint]
+        goal.trajectory.points = [JointTrajectoryPoint(
+            positions=[start + 0.1],
+            time_from_start=Duration(sec=3),
+        )]
+
+        before = len(self.joint_states)
+        goal_future = self.trajectory_client.send_goal_async(goal)
+        self.assertTrue(self._until(goal_future.done, timeout=5.0))
+        handle = goal_future.result()
+        self.assertTrue(handle.accepted)
+        self._spin_for(0.25)
+        self.assertGreater(len(self.joint_states), before + 2)
+
+        cancel_future = handle.cancel_goal_async()
+        self.assertTrue(self._until(cancel_future.done, timeout=5.0))
+        self.assertTrue(cancel_future.result().goals_canceling)
+        result_future = handle.get_result_async()
+        self.assertTrue(self._until(result_future.done, timeout=5.0))
+        self.assertEqual(result_future.result().status, GoalStatus.STATUS_CANCELED)
+        self.assertTrue(self._until(
+            lambda: len(self.joint_states) > before + 5, timeout=3.0
+        ))
 
 
 @launch_testing.post_shutdown_test()
