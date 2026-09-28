@@ -20,7 +20,7 @@ def moveit_config_builder(sim):
 
 
 def apply_gripper_calibration(parameters, calibration_file):
-    """Keep MoveIt's gripper limits and named endpoints inside the driver's range."""
+    """Keep MoveIt's gripper limits and endpoints aligned with calibration."""
     calibration = Path(calibration_file).expanduser()
     if not calibration.is_file():
         return
@@ -34,10 +34,14 @@ def apply_gripper_calibration(parameters, calibration_file):
     upper = min(float(configured["max_position"]), max(endpoints))
     if not math.isfinite(lower) or not math.isfinite(upper) or lower >= upper:
         raise ValueError(f"arm gripper calibration has no reachable MoveIt range: {calibration}")
+    if not lower <= 0.0 <= upper:
+        raise ValueError(f"arm gripper calibrated closed position is outside MoveIt's range: {calibration}")
     configured["min_position"], configured["max_position"] = lower, upper
 
     semantic = ET.fromstring(parameters["robot_description_semantic"])
-    for name, value in (("closed", lower), ("open", upper)):
+    # Gripper calibration records zero at physical jaw contact. The driver's
+    # raw servo minimum sits beyond contact under load and cannot be reached.
+    for name, value in (("closed", 0.0), ("open", upper)):
         state = semantic.find(
             f"group_state[@name='{name}'][@group='gripper']/joint[@name='arm_gripper']"
         )

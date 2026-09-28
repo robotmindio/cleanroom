@@ -51,7 +51,7 @@ def test_moveit_close_state_and_limits_follow_the_reachable_servo_range(tmp_path
     closed = states.find("group_state[@name='closed']/joint").get("value")
     opened = states.find("group_state[@name='open']/joint").get("value")
     assert float(limits["min_position"]) == pytest.approx(-0.03689510226492793)
-    assert float(closed) == pytest.approx(limits["min_position"])
+    assert float(closed) == pytest.approx(0.0)
     assert float(opened) == pytest.approx(limits["max_position"])
 
 
@@ -72,4 +72,12 @@ def test_moveit_rejects_calibration_that_has_no_intersection_with_urdf_limits(tm
     path = calibration_file(tmp_path, 20.0)
 
     with pytest.raises(ValueError, match="no reachable MoveIt range"):
+        apply_gripper_calibration(config, path)
+
+
+def test_moveit_rejects_calibration_with_unreachable_physical_closed_position(tmp_path):
+    config = parameters()
+    path = calibration_file(tmp_path, -0.2)
+
+    with pytest.raises(ValueError, match="calibrated closed position is outside"):
         apply_gripper_calibration(config, path)
