@@ -9,7 +9,7 @@ import pytest
 from rclpy.qos import DurabilityPolicy, ReliabilityPolicy
 from lifecycle_msgs.msg import State
 from nav_msgs.msg import OccupancyGrid, Odometry
-from sensor_msgs.msg import Image, LaserScan, PointCloud2
+from sensor_msgs.msg import Image, JointState, LaserScan, PointCloud2
 
 from lekiwi_rmf.readiness_gate import ReadinessGate, TOPIC_TYPES, topic_qos
 
@@ -62,6 +62,32 @@ def test_topic_gate_requires_semantically_usable_messages():
     cloud.width, cloud.height, cloud.data = 1, 1, b"\0" * 12
     gate._on_message(cloud)
     assert gate._ready
+
+
+def test_joint_state_gate_waits_for_fresh_complete_samples():
+    gate = ReadinessGate.__new__(ReadinessGate)
+    gate._required_joint_names = ("arm_shoulder_lift", "arm_gripper")
+    gate._minimum_joint_samples = 2
+    gate._joint_samples = 0
+    gate._last_joint_stamp = 0
+    gate._ready = False
+    message = JointState()
+    message.name = list(gate._required_joint_names)
+    message.position = [0.2, 0.0]
+
+    message.header.stamp.sec = 1
+    gate._on_joint_states(message)
+    assert not gate._ready
+    message.header.stamp.nanosec = 1
+    gate._on_joint_states(message)
+    assert gate._ready
+
+    message.name = ["arm_shoulder_lift"]
+    message.position = [0.2]
+    message.header.stamp.nanosec = 2
+    gate._on_joint_states(message)
+    assert not gate._ready
+    assert gate._joint_samples == 0
 
 
 def test_scan_readiness_matches_best_effort_laser_drivers():
@@ -118,6 +144,14 @@ def test_failed_gate_does_not_start_its_dependents():
     failure = after_camera(types.SimpleNamespace(returncode=1), running_context)
     assert len(failure) == 1
     assert "dependents remain stopped" in failure[0].msg[0].text
+
+
+def test_safety_supervisor_is_not_blocked_by_map_relocalization():
+    source = (ROOT / "launch" / "bringup.launch.py").read_text()
+    joint_gate = source[source.index("target_action=joint_state_ready_gate"):]
+    map_gate = source[source.index("target_action=map_ready_gate"):]
+    assert "safety_supervisor_node" in joint_gate.split("RegisterEventHandler", 1)[0]
+    assert "safety_supervisor_node" not in map_gate.split("RegisterEventHandler", 1)[0]
 
 
 def test_shutdown_gate_does_not_start_dependents():

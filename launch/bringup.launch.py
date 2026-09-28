@@ -224,6 +224,19 @@ def generate_launch_description():
         condition=IfCondition(start_moveit),
         output="screen",
     )
+    joint_state_ready_gate = Node(
+        package="lekiwi_rmf", executable="readiness_gate", name="wait_for_stable_joint_states",
+        parameters=[{
+            "kind": "joint_states",
+            "topic": "/joint_states",
+            "joint_names": [
+                "arm_shoulder_pan", "arm_shoulder_lift", "arm_elbow_flex",
+                "arm_wrist_flex", "arm_wrist_roll", "arm_gripper",
+            ],
+            "minimum_joint_samples": 20,
+        }],
+        output="screen",
+    )
     moveit_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(PathJoinSubstitution([package, "launch", "moveit.launch.py"])),
         launch_arguments={"sim": PythonExpression([
@@ -317,10 +330,9 @@ def generate_launch_description():
         Node(package="rmf_task_ros2", executable="rmf_task_dispatcher", parameters=[{"bidding_time_window": 2.0}], additional_env={"ROS_DOMAIN_ID": rmf_domain}, output="screen"),
         rmf_owner_guard,
     ]
-    # Start the continuously latched safety evaluator only after RTAB-Map has
-    # produced the first map. By then the simulated Gazebo joint-state stream
-    # has settled; observing its spawn-time gap after arm readiness would latch
-    # a stale-joints fault before any test could run.
+    # Start safety once feedback is genuinely flowing. It does not depend on a
+    # map: RTAB-Map may wait for relocalization after an odometry reset, while
+    # Nav2 must remain gated until a usable map exists.
     safety_supervisor_node = Node(
         package="lekiwi_rmf",
         executable="safety_supervisor",
@@ -900,6 +912,11 @@ def generate_launch_description():
             # components race slow sensors and telemetry reconnects.
             slam_cloud,
             slam_sensor_gate,
+            joint_state_ready_gate,
+            RegisterEventHandler(OnProcessExit(
+                target_action=joint_state_ready_gate,
+                on_exit=_after_success("joint states", [safety_supervisor_node]),
+            )),
             RegisterEventHandler(OnProcessExit(
                 target_action=slam_sensor_gate,
                 on_exit=_after_success("SLAM sensor", [rtabmap_node, mapping_guard]),
@@ -916,7 +933,7 @@ def generate_launch_description():
             RegisterEventHandler(OnProcessExit(
                 target_action=map_ready_gate,
                 on_exit=_after_success("map", [
-                    safety_supervisor_node, initial_pose, navigation_launch, nav_ready_gate,
+                    initial_pose, navigation_launch, nav_ready_gate,
                 ]),
             )),
             RegisterEventHandler(OnProcessExit(
