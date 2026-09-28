@@ -475,11 +475,16 @@ def test_pi_and_manual_split_startup_include_the_ld06():
 
     assert "Installing the pinned LD06 ROS driver" in pi_installer
     assert "0002-latest-scan-qos.patch" in installer
+    assert "0003-initialize-ld06-baudrate.patch" in installer
     assert "0002-latest-scan-qos.patch" in pi_installer
+    assert "0003-initialize-ld06-baudrate.patch" in pi_installer
     assert 'apply_pinned_patch "$ldlidar_source" "$ldlidar_qos_patch"' in installer
+    assert 'apply_pinned_patch "$ldlidar_source" "$ldlidar_baud_patch"' in installer
     assert 'apply_pinned_patch "$lidar_source" "$lidar_qos_patch"' in pi_installer
+    assert 'apply_pinned_patch "$lidar_source" "$lidar_baud_patch"' in pi_installer
     build = (ROOT / "scripts" / "build-lekiwi.sh").read_text(encoding="utf-8")
     assert 'apply_pinned_patch "$lidar_source" "$lidar_qos_patch"' in build
+    assert 'apply_pinned_patch "$lidar_source" "$lidar_baud_patch"' in build
     assert 'packages+=(ldlidar_stl_ros2)' in build
     assert "ldlidar_stl_ros2_node" in pi_installer
     assert "start_recorded lidar scripts/ros-lidar.sh" in pi_up

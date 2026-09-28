@@ -25,4 +25,8 @@ bump.
 QoS. During Wi-Fi congestion, this drops queued old samples so consumers can
 get the newest scan or trip their existing stale-source stop.
 
+`0003-initialize-ld06-baudrate.patch` initializes upstream's serial baud-rate
+default to 230400 before declaring the ROS parameter. The launch also supplies
+230400, but the uninitialized C++ default was evaluated before that override.
+
 Drop these patches once a release supersedes all of them.

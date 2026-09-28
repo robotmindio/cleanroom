@@ -1,0 +1,7 @@
+diff --git a/src/demo.cpp b/src/demo.cpp
+--- a/src/demo.cpp
++++ b/src/demo.cpp
+@@ -36,2 +36,2 @@ int main(int argc, char **argv) {
+-  int serial_port_baudrate;
++  int serial_port_baudrate = 230400;
+   ldlidar::LDType type_name;
