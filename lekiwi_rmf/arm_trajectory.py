@@ -64,6 +64,8 @@ def _configured_limits():
 JOINT_LIMITS, JOINT_VELOCITY_LIMITS, JOINT_ACCELERATION_LIMITS = _configured_limits()
 GRIPPER_LOWER, GRIPPER_UPPER = JOINT_LIMITS["arm_gripper"]
 GRIPPER_RANGE = GRIPPER_UPPER - GRIPPER_LOWER
+# ponytail: only recover small torque-off sag; larger overrun needs physical inspection.
+MAX_BOUNDARY_RECOVERY_OVERRUN = 0.15
 
 
 @dataclass(frozen=True)
@@ -380,7 +382,35 @@ def prepare_trajectory(names, points, start_positions, zero_positions=None, dire
                     None if current_point.accelerations is None else current_point.accelerations[name],
                     duration,
                 )
-                _check_segment_limits(name, coefficients, duration, position_limits[name])
+                segment_limits = position_limits[name]
+                if point_index == 0:
+                    lower, upper = segment_limits
+                    start = previous[name]
+                    if start < lower:
+                        if lower - start > MAX_BOUNDARY_RECOVERY_OVERRUN:
+                            raise ValueError(
+                                f"{name} starts too far outside limits for recovery"
+                            )
+                        segment_limits = (start, upper)
+                        if not _polynomial_within(
+                            _derivative(coefficients), 0.0, math.inf
+                        ):
+                            raise ValueError(
+                                f"{name} recovery must move monotonically into its limits"
+                            )
+                    elif start > upper:
+                        if start - upper > MAX_BOUNDARY_RECOVERY_OVERRUN:
+                            raise ValueError(
+                                f"{name} starts too far outside limits for recovery"
+                            )
+                        segment_limits = (lower, start)
+                        if not _polynomial_within(
+                            _derivative(coefficients), -math.inf, 0.0
+                        ):
+                            raise ValueError(
+                                f"{name} recovery must move monotonically into its limits"
+                            )
+                _check_segment_limits(name, coefficients, duration, segment_limits)
         normalized.append(current_point)
         previous_time, previous, previous_point = point_time, current, current_point
     if len({point.velocities is None for point in normalized}) > 1:

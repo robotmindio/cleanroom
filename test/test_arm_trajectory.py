@@ -156,6 +156,41 @@ def test_trajectory_rejects_acceleration_and_interpolated_limit_violations():
         )
 
 
+@pytest.mark.parametrize("side", ["low", "high"])
+def test_slightly_out_of_bounds_start_can_only_recover_monotonically(side):
+    lower, upper = JOINT_LIMITS["arm_shoulder_lift"]
+    start = lower - 0.07 if side == "low" else upper + 0.07
+    target = lower + 0.04 if side == "low" else upper - 0.04
+    names = ("arm_shoulder_lift",)
+    start_positions = {names[0]: start}
+    trajectory = prepare_trajectory(
+        names, [(1.0, (target,), ())], start_positions
+    )
+    positions = [
+        sample_trajectory(names, start_positions, trajectory, step / 4)[0][names[0]]
+        for step in range(5)
+    ]
+    assert positions[-1] == pytest.approx(target)
+    assert positions == sorted(positions, reverse=(side == "high"))
+
+    with pytest.raises(ValueError, match="too far outside limits"):
+        prepare_trajectory(
+            names,
+            [(1.0, (target,), ())],
+            {names[0]: start + (-0.1 if side == "low" else 0.1)},
+        )
+
+
+def test_boundary_recovery_rejects_a_nonmonotonic_interpolation():
+    upper = JOINT_LIMITS["arm_shoulder_lift"][1]
+    with pytest.raises(ValueError, match="monotonically"):
+        prepare_trajectory(
+            ("arm_shoulder_lift",),
+            [(1.0, (upper - 0.04,), (0.0,), (3.0,), ())],
+            {"arm_shoulder_lift": upper + 0.07},
+        )
+
+
 def test_bounded_terminal_acceleration_is_allowed_but_terminal_velocity_is_not():
     names = ("arm_shoulder_pan",)
     start = {"arm_shoulder_pan": 0.0}
