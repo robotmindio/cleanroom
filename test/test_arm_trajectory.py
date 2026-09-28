@@ -52,6 +52,25 @@ def test_action_positions_rejects_invalid_joint_lists():
         action_positions(("arm_wrist_roll",), (math.nan,))
 
 
+def test_gripper_calibration_rejects_goals_outside_reachable_servo_range():
+    zeros = dict.fromkeys(JOINT_LIMITS, 0.0)
+    directions = dict.fromkeys(JOINT_LIMITS, 1.0)
+    zeros["arm_gripper"] = -0.13763789773507207
+    lower = JOINT_LIMITS["arm_gripper"][0]
+    reachable_closed = lower - zeros["arm_gripper"]
+
+    assert action_positions(
+        ("arm_gripper",), (reachable_closed,), zeros, directions
+    )["arm_gripper"] == pytest.approx(0.0)
+    with pytest.raises(ValueError, match="outside the servo's 0-100 range"):
+        action_positions(("arm_gripper",), (lower,), zeros, directions)
+    with pytest.raises(ValueError, match="outside the servo's 0-100 range"):
+        prepare_trajectory(
+            ("arm_gripper",), [(1.0, (lower,), ())], {"arm_gripper": 0.0},
+            zeros, directions,
+        )
+
+
 def test_trajectory_timing_and_reported_velocities_are_bounded():
     start = {"arm_shoulder_pan": 0.0}
     prepare_trajectory(

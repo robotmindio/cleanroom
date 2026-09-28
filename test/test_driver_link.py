@@ -9,6 +9,7 @@ import types
 
 import pytest
 
+from lekiwi_rmf.arm_trajectory import duration_seconds, position_tolerances
 from lekiwi_rmf.motion_guards import lease_is_fresh, twist_is_finite
 
 _SOURCE = (pathlib.Path(__file__).parents[1] / "lekiwi_rmf" / "driver.py").read_text()
@@ -29,7 +30,8 @@ _NODE.body = [
         "on_base_permission", "on_arm_permission",
         "record_link_loss", "update", "validate_motion_parameters",
         "_poll_telemetry", "_hold_action", "_send_pending_stop", "_apply_trajectory",
-        "_send_armed_command", "auto_arm_tick", "execute_trajectory", "destroy_node",
+        "_send_armed_command", "auto_arm_tick", "execute_trajectory",
+        "requested_tolerances", "destroy_node",
     )
 ]
 _CONSTANTS = [
@@ -46,6 +48,8 @@ driver.math = math
 driver.time = time
 driver.lease_is_fresh = lease_is_fresh
 driver.twist_is_finite = twist_is_finite
+driver.duration_seconds = duration_seconds
+driver.position_tolerances = position_tolerances
 
 
 def make_node(**overrides):
@@ -76,6 +80,10 @@ def make_node(**overrides):
         "permission_timeout_ns": 10_000_000_000,
         "link_timeout": 1.0,
         "command_timeout": 0.4,
+        "trajectory_path_tolerance": 0.20,
+        "trajectory_tolerance": 0.05,
+        "gripper_trajectory_tolerance": 0.005,
+        "trajectory_timeout": 5.0,
         "robot": None,
         "context": None,
         "last_observation": None,
@@ -334,6 +342,19 @@ def test_nonpositive_default_path_tolerance_is_rejected():
 
     with pytest.raises(ValueError, match="trajectory_path_tolerance"):
         node.validate_motion_parameters()
+
+
+def test_gripper_trajectory_uses_its_tighter_completion_tolerance():
+    node = make_node()
+    goal = types.SimpleNamespace(
+        component_path_tolerance=[], component_goal_tolerance=[],
+        path_tolerance=[], goal_tolerance=[],
+        goal_time_tolerance=types.SimpleNamespace(sec=0, nanosec=0),
+    )
+    _, tolerances, _ = node.requested_tolerances(
+        goal, ("arm_shoulder_lift", "arm_gripper")
+    )
+    assert tolerances == {"arm_shoulder_lift": 0.05, "arm_gripper": 0.005}
 
 
 def test_guarded_command_topic_is_the_default_and_must_not_be_empty():

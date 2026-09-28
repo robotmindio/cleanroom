@@ -64,6 +64,9 @@ class LeKiwiDriver(Node):
             "trajectory_path_tolerance", 0.20
         ).value
         self.trajectory_tolerance = self.declare_parameter("trajectory_tolerance", 0.05).value
+        self.gripper_trajectory_tolerance = self.declare_parameter(
+            "gripper_trajectory_tolerance", 0.005
+        ).value
         self.trajectory_timeout = self.declare_parameter("trajectory_timeout", 5.0).value
         # This is velocity-integrated odometry, not an encoder/SLAM pose
         # measurement. Never publish the ROS all-zero covariance (perfect
@@ -676,7 +679,10 @@ class LeKiwiDriver(Node):
             points = trajectory_rows(goal.trajectory)
             with self.trajectory_lock:
                 start_positions = self.arm_positions.copy()
-            prepare_trajectory(goal.trajectory.joint_names, points, start_positions)
+            prepare_trajectory(
+                goal.trajectory.joint_names, points, start_positions,
+                self.arm_zero_positions, self.arm_directions,
+            )
             self.requested_tolerances(goal, goal.trajectory.joint_names)
             stamp_nanoseconds(goal.trajectory.header.stamp)
             if goal.multi_dof_trajectory.joint_names or goal.multi_dof_trajectory.points:
@@ -734,7 +740,10 @@ class LeKiwiDriver(Node):
                 try:
                     # Feedback can change between goal acceptance and this callback.
                     # Recheck the first segment against its actual execution start.
-                    points = prepare_trajectory(names, requested_points, start_positions)
+                    points = prepare_trajectory(
+                        names, requested_points, start_positions,
+                        self.arm_zero_positions, self.arm_directions,
+                    )
                 except ValueError as error:
                     goal_handle.abort()
                     return FollowJointTrajectory.Result(
@@ -779,7 +788,11 @@ class LeKiwiDriver(Node):
             raise ValueError("component tolerances are unsupported for revolute arm joints")
         default_path = dict.fromkeys(names, self.trajectory_path_tolerance)
         path = position_tolerances(names, goal.path_tolerance, default_path)
-        default_goal = dict.fromkeys(names, self.trajectory_tolerance)
+        default_goal = {
+            name: self.gripper_trajectory_tolerance if name == "arm_gripper"
+            else self.trajectory_tolerance
+            for name in names
+        }
         goal_tolerances = position_tolerances(names, goal.goal_tolerance, default_goal)
         goal_time = duration_seconds(goal.goal_time_tolerance)
         return path, goal_tolerances, goal_time or self.trajectory_timeout
@@ -832,6 +845,7 @@ class LeKiwiDriver(Node):
             "permission_timeout": self.permission_timeout,
             "trajectory_path_tolerance": self.trajectory_path_tolerance,
             "trajectory_tolerance": self.trajectory_tolerance,
+            "gripper_trajectory_tolerance": self.gripper_trajectory_tolerance,
             "trajectory_timeout": self.trajectory_timeout,
             "odom_xy_stddev": self.odom_xy_stddev,
             "odom_yaw_stddev": self.odom_yaw_stddev,
