@@ -235,16 +235,18 @@ def generate_launch_description():
         parameters=[{
             "use_sim_time": ParameterValue(sim, value_type=bool),
             "frame_id": "base_footprint", "map_frame_id": "map", "odom_frame_id": "odom",
-            # With a laser, map from the merged lidar/Astra cloud (ICP), which
-            # keeps flowing while either sensor is alive. RGB over this Wi-Fi
-            # is too slow for visual SLAM and would stall it on every camera
-            # dropout. Without a laser, fall back to RGB so there is still
-            # something to map with.
+            # With a laser, use ICP on the merged lidar/Astra cloud so mapping
+            # survives camera dropouts. This disables appearance-based loop
+            # closure; revisits are matched against nearby scan paths instead.
+            # Without a laser, fall back to RGB so there is still something to map.
             "database_path": rtabmap_database,
             "subscribe_rgb": ParameterValue(PythonExpression(["not ", lidar_on]), value_type=bool),
             "Reg/Strategy": ParameterValue(PythonExpression(["'1' if ", lidar_on, " else '0'"]), value_type=str),
             "Icp/VoxelSize": "0.05", "Icp/MaxCorrespondenceDistance": "0.1",
             "Icp/PointToPlane": "false", "RGBD/ProximityPathMaxNeighbors": "10",
+            "Mem/NotLinkedNodesKept": "false",
+            "RGBD/LinearUpdate": "0.04", "RGBD/ProximityMaxGraphDepth": "0",
+            "RGBD/ProximityOdomGuess": "true",
             "subscribe_depth": False,
             "subscribe_rgbd": False, "subscribe_scan": False,
             "subscribe_scan_cloud": ParameterValue(lidar_on, value_type=bool),

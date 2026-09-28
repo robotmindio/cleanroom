@@ -318,6 +318,10 @@ def test_full_stack_boots_in_mapping_mode_so_loop_closure_can_run():
     launch = (ROOT / "launch" / "bringup.launch.py").read_text(encoding="utf-8")
 
     assert '"slam_mode",\n                default_value="mapping"' in launch
+    assert '"RGBD/LinearUpdate": "0.04"' in launch
+    assert '"RGBD/ProximityMaxGraphDepth": "0"' in launch
+    assert '"RGBD/ProximityOdomGuess": "true"' in launch
+    assert '"Mem/NotLinkedNodesKept": "false"' in launch
 
 
 def test_service_installers_support_an_unauthenticated_split_zmq_transport():
