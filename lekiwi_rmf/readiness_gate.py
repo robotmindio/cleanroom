@@ -66,7 +66,7 @@ class ReadinessGate(Node):
         self.declare_parameter("topic_type", "")
         self.declare_parameter("action", "")
         self.declare_parameter("lifecycle_node", "/bt_navigator")
-        self.declare_parameter("joint_names", [])
+        self.declare_parameter("joint_names", [""])
         self.declare_parameter("minimum_joint_samples", 20)
         self._ready = False
         kind = str(self.get_parameter("kind").value)
@@ -84,6 +84,7 @@ class ReadinessGate(Node):
             self._minimum_joint_samples = int(self.get_parameter("minimum_joint_samples").value)
             if (
                 not topic or not self._required_joint_names
+                or any(not name for name in self._required_joint_names)
                 or len(set(self._required_joint_names)) != len(self._required_joint_names)
                 or self._minimum_joint_samples < 1
             ):
