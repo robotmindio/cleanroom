@@ -3,7 +3,15 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
-from lekiwi_rmf.moveit_config import apply_gripper_calibration
+from lekiwi_rmf.moveit_config import apply_gripper_calibration, moveit_config_builder
+
+
+def test_moveit_execution_budget_allows_real_servo_timing_margin():
+    execution = moveit_config_builder("false").to_moveit_configs().trajectory_execution
+    assert execution["trajectory_execution"] == {
+        "allowed_execution_duration_scaling": 1.5,
+        "allowed_goal_duration_margin": 1.0,
+    }
 
 
 def parameters():
