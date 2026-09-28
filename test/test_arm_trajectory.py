@@ -62,6 +62,14 @@ def test_gripper_calibration_rejects_goals_outside_reachable_servo_range():
     assert action_positions(
         ("arm_gripper",), (reachable_closed,), zeros, directions
     )["arm_gripper"] == pytest.approx(0.0)
+    configured_closed = -0.036895102265
+    assert action_positions(
+        ("arm_gripper",), (configured_closed,), zeros, directions
+    )["arm_gripper"] == pytest.approx(0.0)
+    prepare_trajectory(
+        ("arm_gripper",), [(1.0, (configured_closed,), ())],
+        {"arm_gripper": 0.0}, zeros, directions,
+    )
     with pytest.raises(ValueError, match="outside the servo's 0-100 range"):
         action_positions(("arm_gripper",), (lower,), zeros, directions)
     with pytest.raises(ValueError, match="outside the servo's 0-100 range"):

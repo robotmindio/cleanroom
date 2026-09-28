@@ -141,8 +141,11 @@ def action_positions(names, positions, zero_positions=None, directions=None):
     for name, position in raw_positions.items():
         if name == "arm_gripper":
             position = (position - GRIPPER_LOWER) / GRIPPER_RANGE * 100
-            if not 0.0 <= position <= 100.0:
+            # Calibration decimals can put an exact endpoint a few ulps outside
+            # the normalized range. Clamp only that floating-point noise.
+            if not -1e-9 <= position <= 100.0 + 1e-9:
                 raise ValueError("calibrated gripper position is outside the servo's 0-100 range")
+            position = min(100.0, max(0.0, position))
         else:
             position = math.degrees(position)
         actions[name] = position
