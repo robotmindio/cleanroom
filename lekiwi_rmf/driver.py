@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import asyncio
 import math
 import os
 import signal
@@ -16,6 +15,7 @@ from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
+from rclpy.task import Future
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool, String
 from std_srvs.srv import Trigger
@@ -23,7 +23,8 @@ from tf2_ros import TransformBroadcaster
 from visualization_msgs.msg import Marker
 
 from lekiwi_rmf.arm_trajectory import (
-    ARM_JOINTS, action_positions, joint_positions, raw_joint_positions, load_calibration,
+    ARM_JOINTS, JOINT_LIMITS, action_positions, joint_positions,
+    raw_joint_positions, load_calibration,
     duration_seconds, position_tolerances, prepare_trajectory, sample_trajectory,
     stamp_nanoseconds, trajectory_rows,
 )
@@ -774,7 +775,7 @@ class LeKiwiDriver(Node):
             self.publish_trajectory_feedback(goal_handle, trajectory)
             # Keep control-loop timers, safety updates, and action cancellation
             # serviceable while this goal waits for measured servo feedback.
-            await asyncio.sleep(0.05)
+            await self._yield_for_control(0.05)
 
         if trajectory.get("outcome") == "succeeded":
             goal_handle.succeed()
@@ -826,6 +827,21 @@ class LeKiwiDriver(Node):
             point.time_from_start.sec = seconds
             point.time_from_start.nanosec = nanoseconds
         goal_handle.publish_feedback(feedback)
+
+    async def _yield_for_control(self, delay):
+        future = Future(executor=self.executor)
+        timer = None
+
+        def resume():
+            timer.cancel()
+            future.set_result(None)
+
+        timer = self.create_timer(delay, resume)
+        try:
+            await future
+        finally:
+            timer.cancel()
+            self.destroy_timer(timer)
 
     @staticmethod
     def clamp(value, limit):
@@ -1099,9 +1115,18 @@ class LeKiwiDriver(Node):
                 trajectory["names"], trajectory["start_positions"],
                 trajectory["points"], elapsed,
             )
+            setpoints = {}
+            for name, value in positions.items():
+                lower, upper = JOINT_LIMITS[name]
+                start = trajectory["start_positions"][name]
+                if start < lower and value < lower:
+                    value = lower
+                elif start > upper and value > upper:
+                    value = upper
+                setpoints[name] = value
             action.update({
                 f"{name}.pos": value for name, value in action_positions(
-                    positions.keys(), positions.values(),
+                    setpoints.keys(), setpoints.values(),
                     self.arm_zero_positions, self.arm_directions,
                 ).items()
             })

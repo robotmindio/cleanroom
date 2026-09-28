@@ -40,3 +40,16 @@ def test_result_timeout_requests_and_confirms_goal_cancel(monkeypatch):
     monkeypatch.setattr(arm_jog.rclpy, "spin_until_future_complete", spin)
     with pytest.raises(RuntimeError, match="cancellation was acknowledged"):
         arm_jog.wait_for_result(object(), Handle(), result_future, 9.0)
+
+
+def test_result_requires_succeeded_action_status():
+    result = SimpleNamespace(
+        status=arm_jog.GoalStatus.STATUS_ABORTED,
+        result=SimpleNamespace(
+            error_code=arm_jog.FollowJointTrajectory.Result.SUCCESSFUL
+        ),
+    )
+    assert not arm_jog.result_is_successful(result)
+
+    result.status = arm_jog.GoalStatus.STATUS_SUCCEEDED
+    assert arm_jog.result_is_successful(result)

@@ -12,6 +12,7 @@ import sys
 import time
 
 import rclpy
+from action_msgs.msg import GoalStatus
 from builtin_interfaces.msg import Duration
 from control_msgs.action import FollowJointTrajectory
 from rclpy.action import ActionClient
@@ -76,6 +77,13 @@ def wait_for_result(node, handle, result_future, timeout):
     raise RuntimeError("jog timed out; controller acknowledged cancellation")
 
 
+def result_is_successful(result):
+    return (
+        result.status == GoalStatus.STATUS_SUCCEEDED
+        and result.result.error_code == FollowJointTrajectory.Result.SUCCESSFUL
+    )
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Move exactly one real arm joint by a small delta through the safety-limited controller."
@@ -130,8 +138,10 @@ def main():
             result = wait_for_result(node, handle, result_future, args.duration + 7.0)
         except RuntimeError as error:
             raise RuntimeError(f"jog failed: {error}") from error
-        if result.result.error_code != FollowJointTrajectory.Result.SUCCESSFUL:
-            detail = result.result.error_string
+        if not result_is_successful(result):
+            detail = result.result.error_string or (
+                f"action status {result.status}, error code {result.result.error_code}"
+            )
             raise RuntimeError(f"jog failed: {detail}")
         print("Jog completed.")
         return 0

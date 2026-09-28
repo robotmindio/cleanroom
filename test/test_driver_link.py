@@ -10,7 +10,10 @@ import types
 
 import pytest
 
-from lekiwi_rmf.arm_trajectory import duration_seconds, position_tolerances
+from lekiwi_rmf.arm_trajectory import (
+    ARM_JOINTS, JOINT_LIMITS, action_positions, duration_seconds,
+    position_tolerances,
+)
 from lekiwi_rmf.motion_guards import lease_is_fresh, twist_is_finite
 
 _SOURCE = (pathlib.Path(__file__).parents[1] / "lekiwi_rmf" / "driver.py").read_text()
@@ -48,6 +51,7 @@ exec(
 driver.math = math
 driver.time = time
 driver.asyncio = asyncio
+driver.JOINT_LIMITS = {**JOINT_LIMITS, "joint": (-2.0, 2.0)}
 driver.lease_is_fresh = lease_is_fresh
 driver.twist_is_finite = twist_is_finite
 driver.duration_seconds = duration_seconds
@@ -1327,6 +1331,33 @@ def test_trajectory_header_stamps_must_start_close_to_now(offset_ns, expected):
     assert aborted == [True]
     assert result.error_code == expected
     assert node.trajectory is None
+
+
+def test_recovery_setpoint_stays_inside_joint_limit(monkeypatch):
+    joint = "arm_shoulder_lift"
+    upper = JOINT_LIMITS[joint][1]
+    start = upper + 0.07
+    node = make_node()
+    node.trajectory = {
+        "start": 0.0,
+        "start_positions": {joint: start},
+        "names": (joint,),
+        "points": [types.SimpleNamespace(time=2.0, positions={joint: upper - 0.02})],
+        "path_tolerances": {joint: 0.2},
+        "goal_tolerances": {joint: 0.05},
+        "goal_time_tolerance": 5.0,
+        "done": threading.Event(),
+    }
+    node.arm_positions = {joint: start}
+    node.arm_zero_positions = dict.fromkeys(ARM_JOINTS, 0.0)
+    node.arm_directions = dict.fromkeys(ARM_JOINTS, 1.0)
+    driver.action_positions = action_positions
+    driver.sample_trajectory = lambda *_: ({joint: start}, {}, {})
+    monkeypatch.setattr(driver.time, "monotonic", lambda: 0.0)
+    action = {}
+
+    assert node._apply_trajectory(action, {})
+    assert action[f"{joint}.pos"] == pytest.approx(math.degrees(upper))
 
 
 def _disarmable(node):
