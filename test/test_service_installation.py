@@ -241,7 +241,7 @@ download_verified https://example.invalid/a.deb "$2" "$3"
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git is required")
-def test_pinned_checkout_reverses_only_its_patch_and_keeps_other_local_edits(tmp_path):
+def test_pinned_checkout_reverses_known_patches_and_keeps_other_local_edits(tmp_path):
     script = r'''
 set -Eeuo pipefail
 die() { printf '%s\n' "$*" >&2; exit 1; }
@@ -251,25 +251,39 @@ cd "$2"
 git init -q upstream
 printf 'one\n' > upstream/a.txt
 printf 'two\n' > upstream/b.txt
+printf 'three\n' > upstream/c.txt
 git -C upstream add .
 git -C upstream commit -qm base
 printf 'patched\n' > upstream/a.txt
-git -C upstream diff > fix.patch
+git -C upstream diff > first.patch
 git -C upstream checkout -q a.txt
+printf 'patched too\n' > upstream/b.txt
+git -C upstream diff > second.patch
+git -C upstream checkout -q b.txt
 revision=$(git -C upstream rev-parse HEAD)
 
-checkout_pinned "$PWD/upstream" "$PWD/dest" "$revision" "$PWD/fix.patch" >/dev/null 2>&1
-apply_pinned_patch dest "$PWD/fix.patch" "the test patch"
+checkout_pinned "$PWD/upstream" "$PWD/dest" "$revision" "$PWD/first.patch" "$PWD/second.patch" >/dev/null 2>&1
+apply_pinned_patch dest "$PWD/first.patch" "the first test patch"
+apply_pinned_patch dest "$PWD/first.patch" "the first test patch"
+apply_pinned_patch dest "$PWD/second.patch" "the second test patch"
 # A rerun over the patched tree, with an unrelated local edit beside it.
-printf 'mine\n' > dest/b.txt
-checkout_pinned "$PWD/upstream" "$PWD/dest" "$revision" "$PWD/fix.patch" >/dev/null 2>&1
-apply_pinned_patch dest "$PWD/fix.patch" "the test patch"
+printf 'mine\n' > dest/c.txt
+checkout_pinned "$PWD/upstream" "$PWD/dest" "$revision" "$PWD/first.patch" "$PWD/second.patch" >/dev/null 2>&1
+apply_pinned_patch dest "$PWD/first.patch" "the first test patch"
+apply_pinned_patch dest "$PWD/second.patch" "the second test patch"
 [[ $(cat dest/a.txt) == patched ]]
-[[ $(cat dest/b.txt) == mine ]]
+[[ $(cat dest/b.txt) == 'patched too' ]]
+[[ $(cat dest/c.txt) == mine ]]
 
 # Without the known patch, local changes are refused rather than discarded.
 if (checkout_pinned "$PWD/upstream" "$PWD/dest" "$revision" >/dev/null 2>&1); then exit 1; fi
-[[ $(cat dest/b.txt) == mine ]]
+[[ $(cat dest/c.txt) == mine ]]
+
+# An unrelated edit alone is not mistaken for an already-applied known patch.
+checkout_pinned "$PWD/upstream" "$PWD/other" "$revision" >/dev/null 2>&1
+printf 'mine\n' > other/c.txt
+if (checkout_pinned "$PWD/upstream" "$PWD/other" "$revision" "$PWD/first.patch" "$PWD/second.patch" >/dev/null 2>&1); then exit 1; fi
+[[ $(cat other/c.txt) == mine ]]
 '''
     subprocess.run(["bash", "-c", script, "pinned-checkout", str(ROOT), str(tmp_path)], check=True)
 
@@ -464,6 +478,9 @@ def test_pi_and_manual_split_startup_include_the_ld06():
     assert "0002-latest-scan-qos.patch" in pi_installer
     assert 'apply_pinned_patch "$ldlidar_source" "$ldlidar_qos_patch"' in installer
     assert 'apply_pinned_patch "$lidar_source" "$lidar_qos_patch"' in pi_installer
+    build = (ROOT / "scripts" / "build-lekiwi.sh").read_text(encoding="utf-8")
+    assert 'apply_pinned_patch "$lidar_source" "$lidar_qos_patch"' in build
+    assert 'packages+=(ldlidar_stl_ros2)' in build
     assert "ldlidar_stl_ros2_node" in pi_installer
     assert "start_recorded lidar scripts/ros-lidar.sh" in pi_up
     assert "start_recorded astra scripts/ros-astra.sh" in pi_up

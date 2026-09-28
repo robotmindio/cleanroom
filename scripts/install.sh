@@ -182,7 +182,8 @@ log "Fetching the pinned LDROBOT LD06 driver"
 ldlidar_source="$WORKSPACE/src/ldlidar_stl_ros2"
 ldlidar_patch="$PROJECT_ROOT/thirdparty/ldlidar_stl_ros2/0001-linux-build-fixes.patch"
 ldlidar_qos_patch="$PROJECT_ROOT/thirdparty/ldlidar_stl_ros2/0002-latest-scan-qos.patch"
-checkout_pinned "$LDLIDAR_STL_REPOSITORY" "$ldlidar_source" "$LDLIDAR_STL_REV" "$ldlidar_patch"
+checkout_pinned "$LDLIDAR_STL_REPOSITORY" "$ldlidar_source" "$LDLIDAR_STL_REV" \
+  "$ldlidar_patch" "$ldlidar_qos_patch"
 apply_pinned_patch "$ldlidar_source" "$ldlidar_patch" "the LDROBOT Linux build fixes"
 apply_pinned_patch "$ldlidar_source" "$ldlidar_qos_patch" "the LD06 latest-scan QoS fix"
 
