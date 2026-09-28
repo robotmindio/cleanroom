@@ -824,18 +824,31 @@ class SafetySupervisor(Node):
             abs(float(message.angle_increment)) * max(0, len(message.ranges) - 1)
             - self._scan_masked_angle,
         )
-        healthy = (
-            bool(message.ranges)
-            and math.isfinite(message.angle_increment)
-            and message.angle_increment != 0.0
-            and math.isfinite(message.range_min)
-            and math.isfinite(message.range_max)
-            and 0.0 <= message.range_min < message.range_max
-            and _valid_scan_ranges(message, self._minimum_scan_valid_fraction)
-            and (not self._require_full_scan or coverage >= self._minimum_scan_coverage)
-            and stamp_ns(message.header.stamp) > 0
+        stamp = stamp_ns(message.header.stamp)
+        failure = None
+        if not message.ranges:
+            failure = "scan has no ranges"
+        elif not math.isfinite(message.angle_increment) or message.angle_increment == 0.0:
+            failure = "scan angle increment is invalid"
+        elif (
+            not math.isfinite(message.range_min)
+            or not math.isfinite(message.range_max)
+            or not 0.0 <= message.range_min < message.range_max
+        ):
+            failure = "scan range bounds are invalid"
+        elif not _valid_scan_ranges(message, self._minimum_scan_valid_fraction):
+            failure = "scan contains invalid ranges or too few valid returns"
+        elif self._require_full_scan and coverage < self._minimum_scan_coverage:
+            failure = (
+                f"coverage={coverage:.2f} rad is below the "
+                f"{self._minimum_scan_coverage:.2f} rad minimum"
+            )
+        elif stamp <= 0:
+            failure = "scan timestamp is missing"
+        self._machine.update(
+            "scan", failure is None, stamp or self._now(),
+            failure or f"coverage={coverage:.2f} rad",
         )
-        self._machine.update("scan", healthy, stamp_ns(message.header.stamp) or self._now(), f"coverage={coverage:.2f} rad")
 
     def _on_depth(self, message: PointCloud2) -> None:
         healthy = (

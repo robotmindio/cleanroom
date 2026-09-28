@@ -11,7 +11,7 @@ from sensor_msgs.msg import BatteryState, LaserScan, PointCloud2, PointField
 from diagnostic_msgs.msg import DiagnosticStatus
 
 from lekiwi_rmf.safety_supervisor import (
-    Requirement, SafetyState, SafetyStateMachine, _valid_battery,
+    Requirement, SafetyState, SafetyStateMachine, SafetySupervisor, _valid_battery,
     _scan_masked_angle, _valid_depth_points, _valid_scan_ranges,
     validate_acceptance_file,
 )
@@ -478,6 +478,33 @@ def test_scan_health_rejects_blind_and_malformed_payloads():
     for invalid in (math.nan, -math.inf, 50.0):
         scan.ranges[0] = invalid
         assert not _valid_scan_ranges(scan, 0.05)
+
+
+def test_scan_diagnostic_reports_invalid_ranges_separately_from_coverage():
+    node = object.__new__(SafetySupervisor)
+    node._scan_masked_angle = 0.0
+    node._minimum_scan_valid_fraction = 0.05
+    node._require_full_scan = True
+    node._minimum_scan_coverage = 4.5
+    node._now = lambda: SECOND
+    updates = []
+    node._machine = types.SimpleNamespace(update=lambda *values: updates.append(values))
+
+    scan = LaserScan()
+    scan.header.stamp.sec = 1
+    scan.angle_increment = 0.01
+    scan.range_min = 0.1
+    scan.range_max = 10.0
+    scan.ranges = [1.0] * 629
+    scan.ranges[0] = math.nan
+    node._on_scan(scan)
+    assert updates[-1][1] is False
+    assert updates[-1][3] == "scan contains invalid ranges or too few valid returns"
+
+    scan.ranges[0] = 1.0
+    node._on_scan(scan)
+    assert updates[-1][1] is True
+    assert updates[-1][3].startswith("coverage=")
 
 
 def test_full_scan_coverage_excludes_tracked_self_mask(tmp_path):
