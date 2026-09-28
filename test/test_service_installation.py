@@ -453,12 +453,17 @@ def test_sensor_services_keep_retrying_after_intermittent_usb_resets():
 
 
 def test_pi_and_manual_split_startup_include_the_ld06():
+    installer = (ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
     pi_installer = (ROOT / "scripts" / "install-pi.sh").read_text(encoding="utf-8")
     pi_up = (ROOT / "scripts" / "pi-up.sh").read_text(encoding="utf-8")
     workstation_up = (ROOT / "scripts" / "workstation-up.sh").read_text(encoding="utf-8")
     lidar = (ROOT / "scripts" / "ros-lidar.sh").read_text(encoding="utf-8")
 
     assert "Installing the pinned LD06 ROS driver" in pi_installer
+    assert "0002-latest-scan-qos.patch" in installer
+    assert "0002-latest-scan-qos.patch" in pi_installer
+    assert 'apply_pinned_patch "$ldlidar_source" "$ldlidar_qos_patch"' in installer
+    assert 'apply_pinned_patch "$lidar_source" "$lidar_qos_patch"' in pi_installer
     assert "ldlidar_stl_ros2_node" in pi_installer
     assert "start_recorded lidar scripts/ros-lidar.sh" in pi_up
     assert "start_recorded astra scripts/ros-astra.sh" in pi_up

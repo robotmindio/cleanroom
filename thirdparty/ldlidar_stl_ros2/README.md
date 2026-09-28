@@ -2,7 +2,7 @@
 
 `scripts/install.sh` clones [LDROBOT's official ROS 2 driver](https://github.com/ldrobotSensorTeam/ldlidar_stl_ros2)
 into `$LEKIWI_WS/src/ldlidar_stl_ros2` at the revision pinned by `LDLIDAR_STL_REV` in
-`scripts/thirdparty-common.sh`, then applies the patch in this directory before building.
+`scripts/thirdparty-common.sh`, then applies the tracked patches in this directory before building.
 
 The patch carries three fixes; the first two are needed on Ubuntu 24.04 /
 GCC 13 and exist in upstream's unmerged pull requests (#24/#25/#28):
@@ -21,4 +21,8 @@ aborted with "bit out of range 0 - FD_SETSIZE" (SIGABRT, core dump).
 descriptor. Until upstream merges an equivalent, re-apply on any revision
 bump.
 
-Drop this patch once a release supersedes all of it.
+`0002-latest-scan-qos.patch` publishes scans with best-effort keep-last-one
+QoS. During Wi-Fi congestion, this drops queued old samples so consumers can
+get the newest scan or trip their existing stale-source stop.
+
+Drop these patches once a release supersedes all of them.

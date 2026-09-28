@@ -141,9 +141,11 @@ http://packages.ros.org/ros2/ubuntu $codename main" |
   log "Installing the pinned LD06 ROS driver"
   lidar_source="$WORKSPACE/src/ldlidar_stl_ros2"
   lidar_patch="$PROJECT_ROOT/thirdparty/ldlidar_stl_ros2/0001-linux-build-fixes.patch"
+  lidar_qos_patch="$PROJECT_ROOT/thirdparty/ldlidar_stl_ros2/0002-latest-scan-qos.patch"
   mkdir -p "$WORKSPACE/src"
   checkout_pinned "$LDLIDAR_STL_REPOSITORY" "$lidar_source" "$LDLIDAR_STL_REV" "$lidar_patch"
   apply_pinned_patch "$lidar_source" "$lidar_patch" "the LD06 Linux build fixes"
+  apply_pinned_patch "$lidar_source" "$lidar_qos_patch" "the LD06 latest-scan QoS fix"
   set +u
   # shellcheck source=/dev/null
   source /opt/ros/jazzy/setup.bash

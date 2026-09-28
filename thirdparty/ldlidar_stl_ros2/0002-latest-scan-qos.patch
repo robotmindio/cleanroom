@@ -1,0 +1,15 @@
+diff --git a/src/demo.cpp b/src/demo.cpp
+--- a/src/demo.cpp
++++ b/src/demo.cpp
+@@ -105,5 +105,8 @@ int main(int argc, char **argv) {
+   // create ldlidar data topic and publisher
++  // Scans are replaceable sensor data; don't replay stale samples after a Wi-Fi stall.
++  rclcpp::SensorDataQoS scan_qos;
++  scan_qos.keep_last(1);
+-  rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr publisher = 
++  rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr publisher =
+-      node->create_publisher<sensor_msgs::msg::LaserScan>(topic_name, 10);
++      node->create_publisher<sensor_msgs::msg::LaserScan>(topic_name, scan_qos);
+-  
++
+   rclcpp::WallRate r(10); //10hz
