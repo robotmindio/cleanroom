@@ -621,7 +621,23 @@ def test_a_non_strict_supervisor_reports_faults_but_never_withholds_motion():
     assert domestic.base_permitted and domestic.arm_permitted
     assert domestic.state == SafetyState.BOOT and domestic.faults == denied.faults
 
+    armed = permit_unless_strict(denied, strict=False, driver_state="ARMED")
+    assert armed.state == SafetyState.ARMED
+    assert armed.base_permitted and armed.arm_permitted and armed.faults == denied.faults
+
     assert permit_unless_strict(denied, strict=True) == denied
+
+
+def test_non_strict_permissions_never_override_an_estop():
+    from lekiwi_rmf.safety_supervisor import permit_unless_strict
+
+    machine = _machine()
+    machine.update("estop", False, SECOND)
+    estop = machine.decision(SECOND)
+
+    domestic = permit_unless_strict(estop, strict=False, driver_state="ARMED")
+    assert domestic.state == SafetyState.ESTOP
+    assert not domestic.base_permitted and not domestic.arm_permitted
 
 
 def test_strict_enforcement_is_fixed_when_the_supervisor_starts():

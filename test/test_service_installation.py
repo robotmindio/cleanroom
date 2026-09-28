@@ -179,7 +179,7 @@ def test_unit_validation_ignores_unrelated_systemd_units():
     assert 'systemd-analyze verify --recursive-errors=no "$UNIT_DIR/$unit"' in helper
 
 
-def test_startup_disarm_is_tracked_in_the_launch_default():
+def test_strict_startup_arm_requires_explicit_opt_in():
     launch = (ROOT / "launch" / "bringup.launch.py").read_text()
     assert '"auto_arm_on_startup", default_value="false"' in launch
 
@@ -312,6 +312,12 @@ def test_split_compute_installs_and_starts_moveit_by_default():
     assert "systemctl restart" not in compute
     assert "systemctl restart" not in reinstall
     assert "start_moveit:=true" in workstation
+
+
+def test_full_stack_boots_in_mapping_mode_so_loop_closure_can_run():
+    launch = (ROOT / "launch" / "bringup.launch.py").read_text(encoding="utf-8")
+
+    assert '"slam_mode",\n                default_value="mapping"' in launch
 
 
 def test_service_installers_support_an_unauthenticated_split_zmq_transport():

@@ -39,6 +39,17 @@
     <parent link="base_footprint"/><child link="base_link"/>
     <origin xyz="0 0 0.093" rpy="0 0 0"/>
   </joint>
+  <!-- Distal arm links stay outside the vertical airspace above the chassis.
+       The radius and lower plane come from the base collision model. -->
+  <link name="arm_workspace_keepout_proxy">
+    <xacro:unless value="$(arg sim)">
+      <collision><geometry><cylinder radius="0.145" length="0.650"/></geometry></collision>
+    </xacro:unless>
+  </link>
+  <joint name="arm_workspace_keepout_mount" type="fixed">
+    <parent link="base_footprint"/><child link="arm_workspace_keepout_proxy"/>
+    <origin xyz="0 0 0.463" rpy="0 0 0"/>
+  </joint>
   <joint name="base_link_to_cad" type="fixed">
     <parent link="base_link"/><child link="base_plate_layer1-v5"/>
     <origin xyz="0 0 0" rpy="0 0 -1.57079632679"/>

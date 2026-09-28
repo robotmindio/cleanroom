@@ -196,11 +196,16 @@ class SafetyStateMachine:
         return True, "safety fault reset; no hardware driver state is configured"
 
 
-def permit_unless_strict(decision: SafetyDecision, strict: bool) -> SafetyDecision:
+def permit_unless_strict(
+    decision: SafetyDecision, strict: bool, driver_state: str = ""
+) -> SafetyDecision:
     """Report the findings, but let a non-strict (domestic) robot move regardless."""
-    if strict:
+    if strict or decision.state in {SafetyState.ESTOP, SafetyState.FAULT_LATCHED}:
         return decision
-    return replace(decision, base_permitted=True, arm_permitted=True)
+    state = SafetyState.ARMED if driver_state == "ARMED" else decision.state
+    return replace(
+        decision, state=state, base_permitted=True, arm_permitted=True
+    )
 
 
 def _valid_scan_ranges(message: LaserScan, minimum_valid_fraction: float) -> bool:
@@ -932,7 +937,9 @@ class SafetySupervisor(Node):
         return response
 
     def _publish(self) -> None:
-        decision = permit_unless_strict(self._machine.decision(self._now()), self._strict)
+        decision = permit_unless_strict(
+            self._machine.decision(self._now()), self._strict, self._machine.driver_state
+        )
         state = String()
         state.data = decision.state.value
         base = Bool()

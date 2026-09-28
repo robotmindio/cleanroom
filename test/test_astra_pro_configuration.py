@@ -132,7 +132,8 @@ def test_sensor_calibration_has_one_xacro_source_for_all_model_consumers():
     assert 'property name="wrist_camera_xyz"' in description
     assert 'property name="lidar_offset_xyz"' in description
     assert "lidar_offset_x:=" not in bringup
-    assert 'xacro "$package_share/urdf/lekiwi.urdf.xacro" sim:=false' in rviz
+    assert "moveit_config_builder(\"false\")" in rviz
+    assert "apply_gripper_calibration(config" in rviz
     assert 'file_path="urdf/lekiwi.urdf.xacro"' in moveit
 
 

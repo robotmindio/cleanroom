@@ -47,6 +47,41 @@ def test_arm_has_complete_link_and_servo_collision_envelopes():
     assert all(links[name].find("collision") is not None for name in expected)
 
 
+def test_distal_arm_keepout_uses_the_cad_base_radius_and_checks_moving_links():
+    robot = _real_robot()
+    keepout = robot.find("link[@name='arm_workspace_keepout_proxy']/collision")
+    cylinder = keepout.find("geometry/cylinder")
+    mount = robot.find("joint[@name='arm_workspace_keepout_mount']/origin")
+    srdf = ET.parse(ROOT / "config" / "lekiwi.srdf").getroot()
+    exemptions = {
+        frozenset((item.get("link1"), item.get("link2")))
+        for item in srdf.findall("disable_collisions")
+    }
+
+    assert float(cylinder.get("radius")) == pytest.approx(0.145)
+    assert float(cylinder.get("length")) == pytest.approx(0.650)
+    assert np.fromstring(mount.get("xyz"), sep=" ") == pytest.approx([0.0, 0.0, 0.463])
+    for link in (
+        "base_link", "astra_camera_link", "arm_pedestal_collision_proxy",
+        "front_camera_collision_proxy", "shoulder_collision_proxy",
+        "upper_arm_collision_proxy", "lidar_collision_proxy", "rpi5_stack_collision_proxy",
+    ):
+        assert frozenset(("arm_workspace_keepout_proxy", link)) in exemptions
+    for link in (
+        "forearm_collision_proxy", "wrist_collision_proxy", "roll_collision_proxy",
+        "gripper_collision_proxy",
+    ):
+        assert frozenset(("arm_workspace_keepout_proxy", link)) not in exemptions
+
+
+def test_moveit_keepout_proxy_does_not_become_a_gazebo_contact_obstacle():
+    real = _real_robot()
+    simulated = _sim_robot()
+
+    assert real.find("link[@name='arm_workspace_keepout_proxy']/collision") is not None
+    assert simulated.find("link[@name='arm_workspace_keepout_proxy']/collision") is None
+
+
 def test_pedestal_and_upper_arm_proxies_match_their_vendored_cad_meshes():
     robot = _real_robot()
     links = {link.attrib["name"]: link for link in robot.findall("link")}

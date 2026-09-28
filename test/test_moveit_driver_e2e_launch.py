@@ -29,6 +29,7 @@ from action_msgs.msg import GoalStatus
 from moveit_configs_utils import MoveItConfigsBuilder
 from moveit_msgs.action import MoveGroup
 from moveit_msgs.msg import Constraints, JointConstraint, MoveItErrorCodes
+from moveit_msgs.srv import GetPositionFK, GetPositionIK
 from rclpy.action import ActionClient
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import JointState
@@ -54,7 +55,16 @@ def _identity_calibration() -> tuple[str, tempfile.TemporaryDirectory]:
 @pytest.mark.rostest
 def generate_test_description():
     fake_host = FakeLeKiwiHost()
-    # SO-101 new_calib zero is the reference L pose, not the legacy folded pose.
+    # Start outside the production keep-out so planning can test a valid transition.
+    fake_host.set_state(
+        **{
+            "arm_shoulder_pan.pos": math.degrees(-0.006),
+            "arm_shoulder_lift.pos": math.degrees(1.0),
+            "arm_elbow_flex.pos": math.degrees(-1.0),
+            "arm_wrist_flex.pos": math.degrees(0.0),
+            "arm_wrist_roll.pos": math.degrees(-0.02),
+        }
+    )
     fake_host.start(period_s=0.02)
     calibration, calibration_directory = _identity_calibration()
 
@@ -175,6 +185,34 @@ class TestMoveItDriverEndToEnd(unittest.TestCase):
             timeout=15.0,
         ))
         self.assertTrue(self._until(self.move_group.server_is_ready, timeout=15.0))
+
+        fk_client = self.node.create_client(GetPositionFK, "/compute_fk")
+        ik_client = self.node.create_client(GetPositionIK, "/compute_ik")
+        self.assertTrue(self._until(fk_client.service_is_ready, timeout=10.0))
+        self.assertTrue(self._until(ik_client.service_is_ready, timeout=10.0))
+        fk = GetPositionFK.Request()
+        fk.fk_link_names = ["tool0"]
+        fk.robot_state.joint_state.name = [
+            "arm_shoulder_pan", "arm_shoulder_lift", "arm_elbow_flex",
+            "arm_wrist_flex", "arm_wrist_roll",
+        ]
+        fk.robot_state.joint_state.position = [-0.006, 1.0, -1.0, 0.0, -0.02]
+        fk_future = fk_client.call_async(fk)
+        self.assertTrue(self._until(fk_future.done, timeout=10.0))
+        fk_result = fk_future.result()
+        self.assertEqual(fk_result.error_code.val, MoveItErrorCodes.SUCCESS)
+
+        ik = GetPositionIK.Request()
+        ik.ik_request.group_name = "arm"
+        ik.ik_request.ik_link_name = "tool0"
+        ik.ik_request.pose_stamped = fk_result.pose_stamped[0]
+        ik.ik_request.robot_state = fk.robot_state
+        ik.ik_request.avoid_collisions = True
+        ik.ik_request.timeout.sec = 1
+        ik_future = ik_client.call_async(ik)
+        self.assertTrue(self._until(ik_future.done, timeout=10.0))
+        self.assertEqual(ik_future.result().error_code.val, MoveItErrorCodes.SUCCESS)
+
         # Use the production collision matrix without test-only exemptions.
         # Drain the fake transport's pre-arm torque-off telemetry, then arm on
         # a fresh sample.  This models the explicit operator re-arm required
@@ -194,10 +232,10 @@ class TestMoveItDriverEndToEnd(unittest.TestCase):
         request.max_acceleration_scaling_factor = 0.15
         target_positions = {
             "arm_shoulder_pan": 0.12,
-            "arm_shoulder_lift": 0.0,
-            "arm_elbow_flex": 0.0,
+            "arm_shoulder_lift": 1.0,
+            "arm_elbow_flex": -1.0,
             "arm_wrist_flex": 0.0,
-            "arm_wrist_roll": 0.0,
+            "arm_wrist_roll": -0.02,
         }
         request.goal_constraints = [Constraints(joint_constraints=[
             JointConstraint(

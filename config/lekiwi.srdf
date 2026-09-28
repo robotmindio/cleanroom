@@ -74,4 +74,14 @@
   <disable_collisions link1="lidar_collision_proxy" link2="rpi5_stack_collision_proxy" reason="Never"/>
   <disable_collisions link1="arm_pedestal_collision_proxy" link2="rpi5_stack_collision_proxy" reason="Never"/>
   <disable_collisions link1="front_camera_collision_proxy" link2="rpi5_stack_collision_proxy" reason="Never"/>
+  <!-- The chassis, shoulder, and upper-arm root are mounted within this volume.
+       Every distal link stays collision-checked against the keep-out. -->
+  <disable_collisions link1="arm_workspace_keepout_proxy" link2="base_link" reason="Adjacent"/>
+  <disable_collisions link1="arm_workspace_keepout_proxy" link2="astra_camera_link" reason="Adjacent"/>
+  <disable_collisions link1="arm_workspace_keepout_proxy" link2="arm_pedestal_collision_proxy" reason="Adjacent"/>
+  <disable_collisions link1="arm_workspace_keepout_proxy" link2="front_camera_collision_proxy" reason="Adjacent"/>
+  <disable_collisions link1="arm_workspace_keepout_proxy" link2="shoulder_collision_proxy" reason="Adjacent"/>
+  <disable_collisions link1="arm_workspace_keepout_proxy" link2="upper_arm_collision_proxy" reason="Adjacent"/>
+  <disable_collisions link1="arm_workspace_keepout_proxy" link2="lidar_collision_proxy" reason="Adjacent"/>
+  <disable_collisions link1="arm_workspace_keepout_proxy" link2="rpi5_stack_collision_proxy" reason="Adjacent"/>
 </robot>

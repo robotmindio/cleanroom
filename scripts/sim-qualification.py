@@ -37,6 +37,7 @@ EXPECTED_CTESTS = (
     "test_rmf_owner_guard", "test_moveit_shutdown_probe",
     "test_sim_qualification", "test_slam_cloud", "test_motion_guards",
     "test_scan_self_filter", "test_camera_supervisor", "test_moveit_cloud_gate",
+    "test_moveit_gripper_calibration",
     "test_self_heal", "test_zenoh_tls",
     "test_foxglove_configuration",
     "test_test_cmd_vel_mux_launch.py", "test_test_driver_fake_host_launch.py",

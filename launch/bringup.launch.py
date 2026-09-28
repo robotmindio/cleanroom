@@ -78,6 +78,7 @@ def generate_launch_description():
     curve_client_secret = LaunchConfiguration("curve_client_secret_key_file")
     curve_server_public = LaunchConfiguration("curve_server_public_key_file")
     auto_arm_on_startup = LaunchConfiguration("auto_arm_on_startup")
+    arm_calibration_file = LaunchConfiguration("arm_calibration_file")
     disarm_on_failure = LaunchConfiguration("disarm_on_failure")
     start_rmf = LaunchConfiguration("start_rmf")
     rmf_domain = LaunchConfiguration("rmf_domain")
@@ -227,7 +228,7 @@ def generate_launch_description():
         PythonLaunchDescriptionSource(PathJoinSubstitution([package, "launch", "moveit.launch.py"])),
         launch_arguments={"sim": PythonExpression([
             "'true' if '", mode, "' == 'sim' else 'false'",
-        ])}.items(),
+        ]), "arm_calibration_file": arm_calibration_file}.items(),
     )
     rtabmap_node = Node(
         package="rtabmap_slam", executable="rtabmap", name="rtabmap",
@@ -375,6 +376,12 @@ def generate_launch_description():
             # co-run with RTAB-Map on the 4 GB robot computer. Enable it only
             # for an arm task, preferably from the workstation.
             DeclareLaunchArgument("start_moveit", default_value="false"),
+            DeclareLaunchArgument(
+                "arm_calibration_file",
+                default_value=PathJoinSubstitution([
+                    EnvironmentVariable("HOME"), ".ros", "lekiwi_arm_calibration.json",
+                ]),
+            ),
             DeclareLaunchArgument("rosbridge_address", default_value="127.0.0.1"),
             DeclareLaunchArgument("rosbridge_port", default_value="9090"),
             DeclareLaunchArgument("rosbridge_domain", default_value="0"),
@@ -783,6 +790,7 @@ def generate_launch_description():
                 executable="lekiwi_driver",
                 parameters=[{
                     "remote_ip": remote_ip,
+                    "arm_calibration_file": arm_calibration_file,
                     "curve_client_secret_key_file": curve_client_secret,
                     "curve_server_public_key_file": curve_server_public,
                     # Wheel odometry always starts in its local frame. AMCL or
