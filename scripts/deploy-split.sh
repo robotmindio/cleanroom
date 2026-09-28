@@ -281,6 +281,13 @@ fi
 /usr/bin/systemctl is-active --quiet lekiwi-stack.service || die "lekiwi-stack.service must be running before deployment"
 remote_unit_active lekiwi-host.service || die "lekiwi-host.service must be running before deployment"
 
+# Build at low CPU priority before torque-off. This shortens the unsupported-arm
+# interval, and a build failure leaves the running services untouched.
+log "Building revision ${target:0:12} on the device"
+"${ssh_command[@]}" nice -n 10 env LEKIWI_WS="$remote_workspace" "$remote_repo/scripts/build-lekiwi.sh"
+log "Building revision ${target:0:12} on compute"
+nice -n 10 env LEKIWI_WS="$workspace" "$project_root/scripts/build-lekiwi.sh"
+
 on_exit() {
   local code=$?
   echo "$0: deployment stopped safely; services are not automatically rolled back or resumed" >&2
@@ -316,8 +323,6 @@ for unit in lekiwi-cameras.service lekiwi-astra.service lekiwi-lidar.service lek
   fi
 done
 
-log "Building revision ${target:0:12} on the device"
-"${ssh_command[@]}" env LEKIWI_WS="$remote_workspace" "$remote_repo/scripts/build-lekiwi.sh"
 if [[ $refresh_device == true ]]; then
   log "Refreshing stale device service configuration"
   remote_installer=("$remote_repo/scripts/install-device-services.sh" --service-user "$remote_service_user" \
@@ -335,9 +340,6 @@ if [[ $refresh_device == true ]]; then
     if remote_unit_exists "$unit" && ! has_device_unit "$unit"; then device_units+=("$unit"); fi
   done
 fi
-
-log "Building revision ${target:0:12} on compute"
-LEKIWI_WS=$workspace "$project_root/scripts/build-lekiwi.sh"
 
 log "Starting and validating device services"
 "${ssh_command[@]}" sudo -n /usr/bin/systemctl reset-failed lekiwi-host.service
