@@ -248,13 +248,11 @@ def generate_launch_description():
         parameters=[{
             "use_sim_time": ParameterValue(sim, value_type=bool),
             "frame_id": "base_footprint", "map_frame_id": "map", "odom_frame_id": "odom",
-            # The front camera is monocular (no depth). With a LiDAR scan, its
-            # 2D features cannot provide RTAB-Map's visual-ICP registration;
-            # use proximity detection and ICP for loop closure instead.
+            # Keep appearance-based retrieval enabled alongside LiDAR ICP.
+            # A restarted odometry session cannot use proximity ICP until it
+            # has globally relocalized, so the camera must find that first link.
             "database_path": rtabmap_database,
-            "subscribe_rgb": ParameterValue(PythonExpression([
-                "'true' if ", camera_on, " and not ", lidar_on, " else 'false'",
-            ]), value_type=bool),
+            "subscribe_rgb": ParameterValue(camera_on, value_type=bool),
             "Reg/Strategy": ParameterValue(PythonExpression([
                 "'1' if ", lidar_on, " else '0'",
             ]), value_type=str),
