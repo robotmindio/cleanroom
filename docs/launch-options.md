@@ -141,6 +141,17 @@ Arming, manual or automatic, holds each arm joint at its measured position and
 sends zero wheel velocity. The physical E-stop remains mandatory for any
 electrical, mechanical, or process failure.
 
+If the unpowered arm rests on the floor, MoveIt rejects the colliding start
+state. With servo torque confirmed off, an operator must lift and support the
+arm forward of the base until the entire arm clears the floor (about 3 cm is a
+starting target) and `/safety/arm_workspace_clear` reports `true` for the live
+pose. Keep supporting it while the driver arms and holds the measured position;
+confirm `/safety/driver_state` is `ARMED` before releasing support. Then plan
+and execute the reviewed forward stow in MoveIt from that valid start, checking
+the displayed path and surroundings before execution. Do not command the base:
+its permission remains denied until the physical stopping trials and the other
+required checks in `config/safety_acceptance.yaml` are recorded and validated.
+
 ## Production safety prerequisites
 
 Real mode loads `config/safety_production.yaml`. With `LEKIWI_DISARM_ON_FAILURE=true`
