@@ -149,7 +149,6 @@ def test_long_arm_sections_use_capsules_not_joint_center_spheres():
     for name in (
         "shoulder_collision_proxy",
         "forearm_collision_proxy",
-        "roll_collision_proxy",
         "gripper_collision_proxy",
     ):
         geometries = [
@@ -157,6 +156,15 @@ def test_long_arm_sections_use_capsules_not_joint_center_spheres():
         ]
         assert any(geometry.find("cylinder") is not None for geometry in geometries)
         assert sum(geometry.find("sphere") is not None for geometry in geometries) == 2
+
+    roll_meshes = [
+        collision.find("geometry/mesh").get("filename")
+        for collision in links["roll_collision_proxy"].findall("collision")
+    ]
+    assert roll_meshes == [
+        visual.find("geometry/mesh").get("filename")
+        for visual in links["so101_gripper_link"].findall("visual")
+    ]
 
 
 def test_srdf_collision_exemptions_reference_real_links_only():

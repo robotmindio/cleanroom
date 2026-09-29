@@ -176,7 +176,13 @@
     <parent link="so101_wrist_link"/><child link="wrist_collision_proxy"/>
     <origin xyz="-0.00233 -0.026915 0.02215"/>
   </joint>
-  <xacro:collision_capsule_proxy name="roll_collision_proxy" parent="so101_gripper_link" xyz="-0.0024 -0.0020 -0.0517" rpy="0 0 0" radius="0.0459" cylinder_length="0.0136"/>
+  <link name="roll_collision_proxy">
+    <collision><origin xyz="0.0077 0.0001 -0.0234" rpy="-1.5708 -5.19179e-17 -1.66533e-16"/><geometry><mesh filename="package://lekiwi_rmf/urdf/meshes/so101/sts3215_03a_v1.stl"/></geometry></collision>
+    <collision><origin xyz="8.32667e-17 -0.000218214 0.000949706" rpy="-3.14159 -5.55112e-17 0"/><geometry><mesh filename="package://lekiwi_rmf/urdf/meshes/so101/wrist_roll_follower_so101_v1.stl"/></geometry></collision>
+  </link>
+  <joint name="roll_collision_proxy_mount" type="fixed">
+    <parent link="so101_gripper_link"/><child link="roll_collision_proxy"/>
+  </joint>
   <xacro:collision_capsule_proxy name="gripper_collision_proxy" parent="so101_moving_jaw_link" xyz="-0.0012 -0.0360 0.0189" rpy="1.5708 0 0" radius="0.0305" cylinder_length="0.0310"/>
 
   <!-- LD06 scan plane: the rear Pi-hole-mounted RobotSkin base puts it

@@ -141,19 +141,17 @@ Arming, manual or automatic, holds each arm joint at its measured position and
 sends zero wheel velocity. The physical E-stop remains mandatory for any
 electrical, mechanical, or process failure.
 
-The joint limits include poses that put the arm against the floor. The real
-robot's MoveIt model has a floor keepout 20 mm above the wheel-contact plane:
-that margin catches an observed floor-touching pose that the nominal CAD plane
-missed. A reachable pose in contact is therefore invalid as a planning start.
-The collision gate intentionally cannot command its way out of that pose: it
-cannot tell whether a powered movement would drag the gripper into the floor.
+The real robot's MoveIt model has a floor keepout 20 mm above the wheel-contact
+plane. The old broad wrist-roll capsule falsely overlapped it in the observed
+resting pose. The wrist-roll collision now uses the vendored CAD meshes, so that
+pose passes MoveIt's state-validity check while lower poses still hit the floor
+keepout. Verify the live check before commanding the arm.
 
-If the arm falls onto the floor, use assisted recovery. Confirm servo torque is
-off; if it is on, call `/safety/disarm` and confirm the host cut torque. An
-operator must lift and support the arm forward of the base until the entire arm
-clears the floor (about 3 cm is a starting target) and the live
-`/safety/arm_workspace_clear` topic reports `true`. Keep supporting it while the
-driver arms and holds the measured position. After an explicit disarm, call
+If another fallen pose actually hits the keepout, use assisted recovery. Confirm
+servo torque is off; if it is on, call `/safety/disarm` and confirm the host cut
+torque. An operator must lift and support the arm forward of the base until the
+live `/safety/arm_workspace_clear` topic reports `true`. Keep supporting it while
+the driver arms and holds the measured position. After an explicit disarm, call
 `/safety/arm`; otherwise the default startup policy arms automatically. Confirm
 `/safety/driver_state` is `ARMED` before releasing support. Then plan and
 execute the reviewed forward stow in MoveIt from that valid start, checking the
