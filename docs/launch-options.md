@@ -141,16 +141,25 @@ Arming, manual or automatic, holds each arm joint at its measured position and
 sends zero wheel velocity. The physical E-stop remains mandatory for any
 electrical, mechanical, or process failure.
 
-If the unpowered arm rests on the floor, MoveIt rejects the colliding start
-state. With servo torque confirmed off, an operator must lift and support the
-arm forward of the base until the entire arm clears the floor (about 3 cm is a
-starting target) and `/safety/arm_workspace_clear` reports `true` for the live
-pose. Keep supporting it while the driver arms and holds the measured position;
-confirm `/safety/driver_state` is `ARMED` before releasing support. Then plan
-and execute the reviewed forward stow in MoveIt from that valid start, checking
-the displayed path and surroundings before execution. Do not command the base:
-its permission remains denied until the physical stopping trials and the other
-required checks in `config/safety_acceptance.yaml` are recorded and validated.
+The joint limits include poses that put the arm against the floor. The real
+robot's MoveIt model has a floor keepout 20 mm above the wheel-contact plane:
+that margin catches an observed floor-touching pose that the nominal CAD plane
+missed. A reachable pose in contact is therefore invalid as a planning start.
+The collision gate intentionally cannot command its way out of that pose: it
+cannot tell whether a powered movement would drag the gripper into the floor.
+
+If the arm falls onto the floor, use assisted recovery. Confirm servo torque is
+off; if it is on, call `/safety/disarm` and confirm the host cut torque. An
+operator must lift and support the arm forward of the base until the entire arm
+clears the floor (about 3 cm is a starting target) and the live
+`/safety/arm_workspace_clear` topic reports `true`. Keep supporting it while the
+driver arms and holds the measured position. After an explicit disarm, call
+`/safety/arm`; otherwise the default startup policy arms automatically. Confirm
+`/safety/driver_state` is `ARMED` before releasing support. Then plan and
+execute the reviewed forward stow in MoveIt from that valid start, checking the
+displayed path and surroundings before execution. Base permission remains
+denied until the physical stopping trials and other required checks in
+`config/safety_acceptance.yaml` are recorded and validated.
 
 ## Production safety prerequisites
 
