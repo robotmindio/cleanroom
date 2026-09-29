@@ -322,6 +322,8 @@ def test_full_stack_boots_in_mapping_mode_so_loop_closure_can_run():
     assert "'true' if " in rgb and "and not " in rgb and "lidar_on" in rgb
     strategy = launch.split('"Reg/Strategy":', 1)[1].split('"Icp/VoxelSize"', 1)[0]
     assert "'1' if " in strategy and "lidar_on" in strategy and "'2'" not in strategy
+    init_memory = launch.split('"Mem/InitWMWithAllNodes":', 1)[1].split('"Rtabmap/StartNewMapOnLoopClosure"', 1)[0]
+    assert "slam_mode" in init_memory and "localization" in init_memory and "lidar_on" in init_memory
     assert '"Kp/MaxFeatures": "500"' in launch
     assert '"RGBD/LinearUpdate": "0.04"' in launch
     assert '"RGBD/ProximityMaxGraphDepth": "0"' in launch

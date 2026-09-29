@@ -276,7 +276,12 @@ def generate_launch_description():
             "qos_image": 1, "qos_camera_info": 1, "qos_scan": 1, "qos_odom": 1,
             "Rtabmap/MemoryThr": ParameterValue(LaunchConfiguration("rtabmap_wm_nodes"), value_type=str),
             "Mem/IncrementalMemory": ParameterValue(slam_mapping, value_type=str),
-            "Mem/InitWMWithAllNodes": ParameterValue(slam_localization, value_type=str),
+            # ICP proximity closure only searches working memory. Reload the
+            # saved scans for lidar mapping so a restart can relocalize before
+            # StartNewMapOnLoopClosure allows a new mapping session.
+            "Mem/InitWMWithAllNodes": ParameterValue(PythonExpression([
+                "'", slam_mode, "' == 'localization' or ", lidar_on,
+            ]), value_type=bool),
             # After a stack restart, wheel odometry starts at identity. Wait for
             # a global relocalization before opening another mapping session;
             # otherwise RTAB-Map leaves an unconnected map in the same database.
