@@ -331,6 +331,8 @@ def test_full_stack_boots_in_mapping_mode_so_loop_closure_can_run():
     assert '"RGBD/LinearUpdate": "0.04"' in launch
     assert '"RGBD/ProximityMaxGraphDepth": "0"' in launch
     assert '"RGBD/ProximityOdomGuess": "true"' in launch
+    assert '"Rtabmap/ImagesAlreadyRectified": "false"' in launch
+    assert '"Rtabmap/StartNewMapOnLoopClosure": "false"' in launch
     assert '"Mem/NotLinkedNodesKept": "false"' in launch
 
 

@@ -261,6 +261,9 @@ def generate_launch_description():
             "Kp/MaxFeatures": "500",
             "Icp/VoxelSize": "0.05", "Icp/MaxCorrespondenceDistance": "0.1",
             "Icp/PointToPlane": "false", "RGBD/ProximityPathMaxNeighbors": "10",
+            # The front topic is image_raw and its CameraInfo has nonzero lens
+            # distortion; RTAB-Map must rectify it before geometric verification.
+            "Rtabmap/ImagesAlreadyRectified": "false",
             "Mem/NotLinkedNodesKept": "false",
             "RGBD/LinearUpdate": "0.04", "RGBD/ProximityMaxGraphDepth": "0",
             "RGBD/ProximityOdomGuess": "true",
@@ -275,15 +278,13 @@ def generate_launch_description():
             "Rtabmap/MemoryThr": ParameterValue(LaunchConfiguration("rtabmap_wm_nodes"), value_type=str),
             "Mem/IncrementalMemory": ParameterValue(slam_mapping, value_type=str),
             # ICP proximity closure only searches working memory. Reload the
-            # saved scans for lidar mapping so a restart can relocalize before
-            # StartNewMapOnLoopClosure allows a new mapping session.
+            # saved scans for lidar mapping so a restart can relocalize against
+            # the existing graph.
             "Mem/InitWMWithAllNodes": ParameterValue(PythonExpression([
                 "'", slam_mode, "' == 'localization' or ", lidar_on,
             ]), value_type=str),
-            # After a stack restart, wheel odometry starts at identity. Wait for
-            # a global relocalization before opening another mapping session;
-            # otherwise RTAB-Map leaves an unconnected map in the same database.
-            "Rtabmap/StartNewMapOnLoopClosure": "true",
+            # Keep successful closures in the single persistent map.
+            "Rtabmap/StartNewMapOnLoopClosure": "false",
             "RGBD/NeighborLinkRefining": "true", "RGBD/ProximityBySpace": "true",
             "Reg/Force3DoF": "true", "Grid/Sensor": "0", "Grid/RangeMax": "3.0",
             "Grid/CellSize": "0.05", "sync_queue_size": 20, "topic_queue_size": 20,
