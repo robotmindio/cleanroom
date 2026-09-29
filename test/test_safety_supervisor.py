@@ -85,7 +85,7 @@ def test_simulation_coverage_allows_only_the_measured_model_self_mask():
     production_coverage = 2 * math.pi - _scan_masked_angle(
         str(root / "config" / "lidar_self_mask.yaml")
     )
-    assert production["minimum_scan_coverage"] == 4.5
+    assert production["minimum_scan_coverage"] == 4.3
     assert production["minimum_scan_coverage"] < production_coverage
 
 

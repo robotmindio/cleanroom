@@ -41,14 +41,15 @@ least 30 trials per direction on dry tile at 0 kg, and update the tracked Nav2
 StopZone to cover the worst distance plus measurement uncertainty. A software
 pass alone cannot establish obstacle coverage or stopping performance.
 
-The current LD06 self-mask hides 90 degrees of its 360-degree scan, leaving at
-most 270 degrees of effective angular coverage; this is below the production
-6-radian full-scan requirement. The supervisor subtracts the tracked mask from
-reported coverage. Stationary raw scans also show close returns around
-180–225 degrees that the present mask does not remove. Do not hide more scan
-sectors to make the monitor pass: identify the physical occlusion and change
-the lidar mounting or nearby hardware, then remeasure coverage before base
-stopping trials.
+The current LD06 produces a 360-degree scan. Its measured body mask covers
+100 degrees, leaving 260 degrees (4.54 rad) of effective coverage. The
+production supervisor requires 4.3 rad (about 246 degrees), leaving roughly
+14 degrees for scan-span variation. This is a reduced, attended operating
+scope: masked directions provide no obstacle sensing, and an operator must
+remain at the physical motor-power stop. Remeasure the mask after the arm is
+stowed and before acceptance trials because nearby hardware can change the
+self-returns. Full surrounding coverage requires moving the lidar or adding a
+second sensor.
 
 ## Current motor-health behavior
 

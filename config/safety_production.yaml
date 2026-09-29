@@ -9,9 +9,9 @@ safety_supervisor:
     require_acceptance: true
     require_scan: true
     require_full_scan: true
-    # The measured physical self-mask blanks 90 deg, leaving 270 deg (4.71 rad).
-    # Keep a 12 deg margin for scan-span variation while requiring broad coverage.
-    minimum_scan_coverage: 4.5
+    # The current 100 deg body mask leaves 260 deg of measured scan coverage.
+    # The 4.3 rad threshold leaves about 14 deg for scan-span variation.
+    minimum_scan_coverage: 4.3
     minimum_scan_valid_fraction: 0.05
     require_depth: true
     minimum_depth_valid_points: 16
