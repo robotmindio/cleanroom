@@ -31,7 +31,7 @@ from control_msgs.action import FollowJointTrajectory
 from moveit_configs_utils import MoveItConfigsBuilder
 from moveit_msgs.action import MoveGroup
 from moveit_msgs.msg import Constraints, JointConstraint, MoveItErrorCodes
-from moveit_msgs.srv import GetPositionFK, GetPositionIK
+from moveit_msgs.srv import GetPositionFK, GetPositionIK, GetStateValidity
 from rclpy.action import ActionClient
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import JointState
@@ -76,7 +76,10 @@ def generate_test_description():
     # lacks moveit_ros_perception; the production launch retains sensors_3d.
     moveit_config = (
         MoveItConfigsBuilder("lekiwi", package_name="lekiwi_rmf")
-        .robot_description(file_path="urdf/lekiwi.urdf.xacro", mappings={"sim": "false"})
+        .robot_description(
+            file_path=str(Path(__file__).parents[1] / "urdf" / "lekiwi.urdf.xacro"),
+            mappings={"sim": "false"},
+        )
         .robot_description_semantic(file_path="config/lekiwi.srdf")
         .robot_description_kinematics(file_path="config/kinematics.yaml")
         .joint_limits(file_path="config/joint_limits.yaml")
@@ -175,6 +178,31 @@ class TestMoveItDriverEndToEnd(unittest.TestCase):
         deadline = time.monotonic() + duration
         while time.monotonic() < deadline:
             rclpy.spin_once(self.node, timeout_sec=0.05)
+
+    def test_moveit_state_validity_includes_the_ground_keepout(self):
+        client = self.node.create_client(GetStateValidity, "/check_state_validity")
+        self.assertTrue(self._until(client.service_is_ready, timeout=15.0))
+
+        for shoulder_lift in (-1.74533, 1.82):
+            request = GetStateValidity.Request()
+            request.group_name = "arm"
+            request.robot_state.is_diff = True
+            request.robot_state.joint_state.name = list(ARM_JOINTS)
+            request.robot_state.joint_state.position = [
+                0.0, shoulder_lift, 0.0, 0.0, 0.0, 0.0,
+            ]
+            future = client.call_async(request)
+            self.assertTrue(self._until(future.done, timeout=10.0))
+            response = future.result()
+            if any(
+                "arm_ground_keepout_proxy" in (
+                    contact.contact_body_1, contact.contact_body_2,
+                )
+                for contact in response.contacts
+            ):
+                return
+
+        self.fail("MoveIt did not report the below-floor arm collision")
 
     def _arm(self):
         self.assertTrue(self.arm_client.wait_for_service(timeout_sec=10.0))

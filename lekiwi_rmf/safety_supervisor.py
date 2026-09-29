@@ -66,6 +66,7 @@ class SafetyDecision:
     arm_permitted: bool
     faults: tuple[str, ...] = ()
     latched_faults: tuple[str, ...] = ()
+    arm_workspace_clear: bool = True
 
 
 @dataclass
@@ -113,20 +114,30 @@ class SafetyStateMachine:
         for name, requirement in self.requirements.items():
             if not ((for_base and requirement.base) or (for_arm and requirement.arm)):
                 continue
-            sample = self.samples.get(name)
-            if sample is None:
-                faults.append(f"{name}: missing")
-                continue
-            age = now_ns - sample.stamp_ns
-            if age < 0 or age > requirement.max_age_ns:
-                faults.append(f"{name}: stale")
-            elif not sample.healthy:
-                faults.append(f"{name}: {sample.detail or 'unhealthy'}")
+            fault = self._requirement_fault(name, requirement, now_ns)
+            if fault is not None:
+                faults.append(fault)
         return tuple(faults)
+
+    def _requirement_fault(self, name: str, requirement: Requirement, now_ns: int) -> str | None:
+        sample = self.samples.get(name)
+        if sample is None:
+            return f"{name}: missing"
+        age = now_ns - sample.stamp_ns
+        if age < 0 or age > requirement.max_age_ns:
+            return f"{name}: stale"
+        if not sample.healthy:
+            return f"{name}: {sample.detail or 'unhealthy'}"
+        return None
 
     def decision(self, now_ns: int) -> SafetyDecision:
         base_faults = self._faults(now_ns, True, False)
         arm_faults = self._faults(now_ns, False, True)
+        workspace_requirement = self.requirements.get("arm_workspace")
+        arm_workspace_clear = (
+            workspace_requirement is None
+            or self._requirement_fault("arm_workspace", workspace_requirement, now_ns) is None
+        )
         all_faults = tuple(dict.fromkeys((*base_faults, *arm_faults)))
         if self.driver_state == "LINK_LOST":
             all_faults = (*all_faults, "driver: link lost")
@@ -148,17 +159,22 @@ class SafetyStateMachine:
 
         if self.estop_latched:
             return SafetyDecision(
-                SafetyState.ESTOP, False, False, all_faults, tuple(self.latched_faults)
+                SafetyState.ESTOP, False, False, all_faults, tuple(self.latched_faults),
+                arm_workspace_clear,
             )
         if self.fault_latched:
             return SafetyDecision(
-                SafetyState.FAULT_LATCHED, False, False, all_faults, tuple(self.latched_faults)
+                SafetyState.FAULT_LATCHED, False, False, all_faults, tuple(self.latched_faults),
+                arm_workspace_clear,
             )
 
         base_ready = not base_faults
         arm_ready = not arm_faults
         if not base_ready and not arm_ready:
-            return SafetyDecision(SafetyState.BOOT, False, False, all_faults)
+            return SafetyDecision(
+                SafetyState.BOOT, False, False, all_faults,
+                arm_workspace_clear=arm_workspace_clear,
+            )
 
         self.base_ever_ready = self.base_ever_ready or base_ready
         self.arm_ever_ready = self.arm_ever_ready or arm_ready
@@ -167,17 +183,19 @@ class SafetyStateMachine:
         arm_permitted = armed and arm_ready
         if armed:
             return SafetyDecision(
-                SafetyState.ARMED, base_permitted, arm_permitted, all_faults
+                SafetyState.ARMED, base_permitted, arm_permitted, all_faults,
+                arm_workspace_clear=arm_workspace_clear,
             )
         # In READY these are short-lived capability-readiness leases, not
         # evidence of motion or torque. The disarmed driver still rejects all
-        # commands, but its explicit arm transaction may use either healthy
-        # capability to bootstrap the shared physical torque bus.
+        # commands, but the explicit arm transaction requires the arm-specific
+        # lease because enabling torque can move a loaded arm.
         return SafetyDecision(
             SafetyState.READY,
             base_ready and self.arm_stowed,
             arm_ready,
             all_faults,
+            arm_workspace_clear=arm_workspace_clear,
         )
 
     def reset(self, now_ns: int) -> tuple[bool, str]:
@@ -199,12 +217,13 @@ class SafetyStateMachine:
 def permit_unless_strict(
     decision: SafetyDecision, strict: bool, driver_state: str = ""
 ) -> SafetyDecision:
-    """Report the findings, but let a non-strict (domestic) robot move regardless."""
+    """Keep the physical arm collision gate hard even in non-strict mode."""
     if strict or decision.state in {SafetyState.ESTOP, SafetyState.FAULT_LATCHED}:
         return decision
     state = SafetyState.ARMED if driver_state == "ARMED" else decision.state
     return replace(
-        decision, state=state, base_permitted=True, arm_permitted=True
+        decision, state=state, base_permitted=True,
+        arm_permitted=decision.arm_workspace_clear,
     )
 
 

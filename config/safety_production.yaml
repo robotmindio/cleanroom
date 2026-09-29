@@ -18,9 +18,9 @@ safety_supervisor:
     minimum_depth_valid_fraction: 0.01
     minimum_depth_range: 0.05
     maximum_depth_range: 10.0
-    # Missing, stale, or unhealthy required inputs deny motion only when the
-    # supervisor runs strict (disarm_on_failure:=true). By default it reports
-    # them on /diagnostics and still permits motion.
+    # Missing, stale, or unhealthy required inputs deny motion when the
+    # supervisor runs strict (disarm_on_failure:=true). In non-strict mode they
+    # remain diagnostics except arm workspace collision, which always blocks the arm.
     #
     # The shipped robot has no bumper, IMU, or battery monitor, and its e-stop
     # cuts motor power outside the electronics, so nothing publishes

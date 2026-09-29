@@ -184,7 +184,7 @@ def test_arm_permission_lease_expiry_disarms_and_base_expiry_zeros_command():
     assert disarms == ["DISARMED"]
 
 
-def test_explicit_arm_accepts_fresh_base_capability_lease():
+def test_explicit_arm_rejects_base_permission_without_arm_workspace_clear():
     class Now:
         def __sub__(self, _other):
             return types.SimpleNamespace(nanoseconds=0)
@@ -202,16 +202,19 @@ def test_explicit_arm_accepts_fresh_base_capability_lease():
     node.state_lock = threading.Lock()
     node.action_lock = threading.Lock()
     node.torque_fault = False
-    node.set_servo_torque = lambda enabled: enabled
+    torque_requests = []
+    node.set_servo_torque = lambda enabled: torque_requests.append(enabled) or enabled
     states = []
     node.publish_safety = lambda state=None, **_: states.append(state)
     response = types.SimpleNamespace()
 
     node.arm(None, response)
 
-    assert response.success is True
-    assert node.armed is True
-    assert states == ["ARMED"]
+    assert response.success is False
+    assert "arm permission" in response.message
+    assert node.armed is False
+    assert torque_requests == []
+    assert states == []
 
 
 def test_arm_permission_withdrawal_keeps_torque_when_base_lease_is_current():
@@ -1013,7 +1016,7 @@ def test_an_explicit_arm_hands_recovery_back_to_the_automatic_rearm():
     node.last_fresh = _Instant()
     node.last_observation = {"joint": 0.0}
     node.link_timeout = 1.0
-    node._capability_permission_is_current = lambda: True
+    node._arm_permission_is_current = lambda: True
 
     response = node.arm(None, types.SimpleNamespace())
 

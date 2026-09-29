@@ -619,9 +619,9 @@ class LeKiwiDriver(Node):
                         "and confirm torque-off before rearming"
                     )
                     return response
-                if not self._capability_permission_is_current():
+                if not self._arm_permission_is_current():
                     response.success = False
-                    response.message = "continuous safety supervisor has not granted any motion capability"
+                    response.message = "continuous safety supervisor has not granted arm permission"
                     return response
                 if (
                     self.link_lost
@@ -634,7 +634,7 @@ class LeKiwiDriver(Node):
                     return response
                 disarm_epoch = self._disarm_epoch
             outcome, torque_cut = self._enable_torque_and_arm(
-                self._capability_permission_is_current, operator=True, disarm_epoch=disarm_epoch
+                self._arm_permission_is_current, operator=True, disarm_epoch=disarm_epoch
             )
             response.success = outcome == "armed"
             if outcome == "armed":

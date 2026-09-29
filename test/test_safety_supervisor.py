@@ -609,7 +609,7 @@ def test_an_estop_still_latches_when_fault_latching_is_off():
     assert machine.decision(SECOND).state == SafetyState.ESTOP
 
 
-def test_a_non_strict_supervisor_reports_faults_but_never_withholds_motion():
+def test_non_strict_mode_can_allow_non_workspace_faults():
     from lekiwi_rmf.safety_supervisor import permit_unless_strict
 
     machine = _machine()  # nothing has reported: default-deny in the state machine
@@ -626,6 +626,49 @@ def test_a_non_strict_supervisor_reports_faults_but_never_withholds_motion():
     assert armed.base_permitted and armed.arm_permitted and armed.faults == denied.faults
 
     assert permit_unless_strict(denied, strict=True) == denied
+
+
+def test_non_strict_mode_still_blocks_arm_when_moveit_reports_floor_collision():
+    from lekiwi_rmf.safety_supervisor import permit_unless_strict
+
+    machine = SafetyStateMachine({
+        "driver": Requirement(SECOND),
+        "scan": Requirement(SECOND, base=True, arm=False),
+        "arm_workspace": Requirement(SECOND, base=False, arm=True),
+    })
+    machine.driver_state = "ARMED"
+    machine.arm_stowed = True
+    machine.update("driver", True, SECOND)
+    machine.update("scan", True, SECOND)
+    machine.update("arm_workspace", False, SECOND, "MoveIt reports ground collision")
+
+    decision = machine.decision(SECOND)
+    domestic = permit_unless_strict(decision, strict=False, driver_state="ARMED")
+
+    assert domestic.base_permitted
+    assert not domestic.arm_permitted
+    assert not domestic.arm_workspace_clear
+    assert any("arm_workspace" in fault for fault in domestic.faults)
+
+
+def test_non_strict_mode_keeps_arm_disarmed_until_workspace_monitor_is_ready():
+    from lekiwi_rmf.safety_supervisor import permit_unless_strict
+
+    machine = SafetyStateMachine({
+        "driver": Requirement(SECOND),
+        "scan": Requirement(SECOND, base=True, arm=False),
+        "arm_workspace": Requirement(SECOND, base=False, arm=True),
+    })
+    machine.driver_state = "DISARMED"
+    machine.arm_stowed = True
+    machine.update("driver", True, SECOND)
+    machine.update("scan", True, SECOND)
+
+    domestic = permit_unless_strict(machine.decision(SECOND), strict=False)
+
+    assert domestic.base_permitted
+    assert not domestic.arm_permitted
+    assert not domestic.arm_workspace_clear
 
 
 def test_non_strict_permissions_never_override_an_estop():
