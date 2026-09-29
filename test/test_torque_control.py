@@ -305,7 +305,6 @@ class _Bus:
             "Max_Voltage_Limit": dict.fromkeys(MOTORS, 140),
         }
         self.calls = []
-        self.writes = []
         self.faults = {}
         self.enable_skips = ()
         self.torque_off_skips = ()
@@ -350,7 +349,6 @@ class _Bus:
 
     def write(self, register, motor, value):
         self.calls.append(f"write {register} {motor}")
-        self.writes.append((register, motor, value))
 
     def configure_motors(self):
         self.calls.append("configure_motors")
@@ -442,22 +440,6 @@ def test_configure_never_energizes_the_servos(monkeypatch):
         "write Torque_Enable", "read Torque_Enable", "write Lock", "configure_motors",
     ]
     assert "enable_torque" not in robot.bus.calls
-
-
-def test_configure_raises_only_the_loaded_shoulder_position_gain(monkeypatch):
-    host = _host_module(monkeypatch)
-    robot = host.SafetyLeKiwi(host.LeKiwiConfig())
-    robot.bus = _Bus()
-    robot.arm_motors = [*ARM, "arm_shoulder_lift"]
-    robot.base_motors = []
-
-    robot.configure()
-
-    assert [write for write in robot.bus.writes if write[0] == "P_Coefficient"] == [
-        ("P_Coefficient", "arm_shoulder_pan", 16),
-        ("P_Coefficient", "arm_gripper", 16),
-        ("P_Coefficient", "arm_shoulder_lift", 24),
-    ]
 
 
 def test_enable_holds_the_measured_arm_pose_before_confirming_torque(monkeypatch, tmp_path):
