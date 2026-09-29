@@ -171,9 +171,8 @@ class SafetyLeKiwi(LeKiwi):
         self.bus.configure_motors()
         for name in self.arm_motors:
             self.bus.write("Operating_Mode", name, OperatingMode.POSITION.value)
-            # The load-bearing shoulder was not tracking a 0.1 rad goal at the
-            # vendor's reduced gain; raise only that joint, still below default 32.
-            self.bus.write("P_Coefficient", name, 24 if name == "arm_shoulder_lift" else 16)
+            # The shoulder remained under-torqued at 24; use its servo default.
+            self.bus.write("P_Coefficient", name, 32 if name == "arm_shoulder_lift" else 16)
             self.bus.write("I_Coefficient", name, 0)
             self.bus.write("D_Coefficient", name, 32)
         for name in self.base_motors:
