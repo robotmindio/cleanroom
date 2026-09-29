@@ -756,6 +756,8 @@ def _levels(snapshot):
 
 def test_motor_health_reports_every_servo_with_its_limits(monkeypatch):
     host = _host_module(monkeypatch)
+    now = [100.0]
+    monkeypatch.setattr(host.time, "monotonic", lambda: now[0])
     bus = _Bus()
     bus.registers["Present_Temperature"]["arm_gripper"] = 70
     collector, robot = _collector(host, bus)
@@ -772,6 +774,12 @@ def test_motor_health_reports_every_servo_with_its_limits(monkeypatch):
     reads = len(bus.calls)
     assert collector.collect(robot, torque_enabled=False) is snapshot
     assert len(bus.calls) == reads
+    now[0] += host.HEALTH_PERIOD_S / 2
+    assert collector.collect(robot, torque_enabled=False) is snapshot
+    assert len(bus.calls) == reads
+    now[0] += host.HEALTH_PERIOD_S / 2
+    assert collector.collect(robot, torque_enabled=False) is not snapshot
+    assert len(bus.calls) > reads
 
 
 @pytest.mark.parametrize("fault", ["torque mismatch", "status", "incomplete", "bus error"])

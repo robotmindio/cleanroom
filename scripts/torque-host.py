@@ -39,7 +39,9 @@ from lekiwi_rmf.motor_health import fault_snapshot, healthy_snapshot
 
 
 TORQUE_RETRIES = 5
-HEALTH_PERIOD_S = 0.10
+# Keep health polling from starving the position loop on the shared Feetech bus.
+# Position feedback remains at the host loop rate; diagnostics do not need 10 Hz.
+HEALTH_PERIOD_S = 1.0
 ACTION_KEYS = tuple(f"{joint}.pos" for joint in ARM_JOINTS) + (
     "x.vel", "y.vel", "theta.vel",
 )

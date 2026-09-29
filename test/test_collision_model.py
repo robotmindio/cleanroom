@@ -87,7 +87,11 @@ def test_real_arm_collision_model_includes_ground_keepout():
     }
 
     assert np.fromstring(box.get("size"), sep=" ") == pytest.approx([2.0, 2.0, 2.0])
-    assert np.fromstring(box_origin.get("xyz"), sep=" ") == pytest.approx([0.0, 0.0, -1.0])
+    assert box_origin is not None
+    box_centre = np.fromstring(box_origin.get("xyz"), sep=" ")
+    box_size = np.fromstring(box.get("size"), sep=" ")
+    assert box_centre == pytest.approx([0.0, 0.0, -0.98])
+    assert box_centre[2] + box_size[2] / 2 == pytest.approx(0.02)
     assert mount.find("parent").get("link") == "base_footprint"
     assert mount.find("child").get("link") == "arm_ground_keepout_proxy"
     assert sim.find("link[@name='arm_ground_keepout_proxy']/collision") is None

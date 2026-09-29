@@ -39,12 +39,13 @@
     <parent link="base_footprint"/><child link="base_link"/>
     <origin xyz="0 0 0.093" rpy="0 0 0"/>
   </joint>
-  <!-- base_footprint is the floor-contact plane on the level physical robot.
-       A live depth cloud is not a reliable substitute for this hard arm limit. -->
+  <!-- Keep arm collision geometry 20 mm above the wheel-contact plane. The
+       nominal CAD plane admitted a physically floor-touching pose, so this
+       margin covers the observed model-to-hardware offset. -->
   <link name="arm_ground_keepout_proxy">
     <xacro:unless value="$(arg sim)">
       <collision>
-        <origin xyz="0 0 -1.0"/>
+        <origin xyz="0 0 -0.98"/>
         <geometry><box size="2.0 2.0 2.0"/></geometry>
       </collision>
     </xacro:unless>

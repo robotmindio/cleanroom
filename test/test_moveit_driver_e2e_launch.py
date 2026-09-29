@@ -183,6 +183,7 @@ class TestMoveItDriverEndToEnd(unittest.TestCase):
         client = self.node.create_client(GetStateValidity, "/check_state_validity")
         self.assertTrue(self._until(client.service_is_ready, timeout=15.0))
 
+        below_floor_contacts = []
         for shoulder_lift in (-1.74533, 1.82):
             request = GetStateValidity.Request()
             request.group_name = "arm"
@@ -193,16 +194,31 @@ class TestMoveItDriverEndToEnd(unittest.TestCase):
             ]
             future = client.call_async(request)
             self.assertTrue(self._until(future.done, timeout=10.0))
-            response = future.result()
-            if any(
-                "arm_ground_keepout_proxy" in (
-                    contact.contact_body_1, contact.contact_body_2,
-                )
-                for contact in response.contacts
-            ):
-                return
+            below_floor_contacts.extend(future.result().contacts)
+        self.assertTrue(any(
+            "arm_ground_keepout_proxy" in (c.contact_body_1, c.contact_body_2)
+            for c in below_floor_contacts
+        ), "MoveIt did not report a below-floor arm collision")
 
-        self.fail("MoveIt did not report the below-floor arm collision")
+        request = GetStateValidity.Request()
+        request.group_name = "arm"
+        request.robot_state.is_diff = True
+        request.robot_state.joint_state.name = list(ARM_JOINTS)
+        # Physical incident pose: the gripper was visibly resting on the floor,
+        # while the old nominal-plane model reported it collision-free.
+        request.robot_state.joint_state.position = [
+            -0.01995, 1.81054, -1.05871, -0.19486, -0.01995, -0.00264,
+        ]
+        future = client.call_async(request)
+        self.assertTrue(self._until(future.done, timeout=10.0))
+        response = future.result()
+        self.assertFalse(response.valid)
+        self.assertTrue(any(
+            "arm_ground_keepout_proxy" in (
+                contact.contact_body_1, contact.contact_body_2,
+            )
+            for contact in response.contacts
+        ), "MoveIt must identify the floor keepout for the incident pose")
 
     def _arm(self):
         self.assertTrue(self.arm_client.wait_for_service(timeout_sec=10.0))
