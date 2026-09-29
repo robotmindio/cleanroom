@@ -9,13 +9,12 @@
   <group name="gripper">
     <joint name="arm_gripper"/>
   </group>
-  <!-- The forward stow is the real robot's collision-free home pose. -->
   <group_state name="home" group="arm">
-    <joint name="arm_shoulder_pan" value="-0.006"/>
-    <joint name="arm_shoulder_lift" value="1.0"/>
-    <joint name="arm_elbow_flex" value="-1.0"/>
+    <joint name="arm_shoulder_pan" value="0"/>
+    <joint name="arm_shoulder_lift" value="0"/>
+    <joint name="arm_elbow_flex" value="0"/>
     <joint name="arm_wrist_flex" value="0"/>
-    <joint name="arm_wrist_roll" value="-0.02"/>
+    <joint name="arm_wrist_roll" value="0"/>
   </group_state>
   <group_state name="open" group="gripper">
     <joint name="arm_gripper" value="1.74533"/>

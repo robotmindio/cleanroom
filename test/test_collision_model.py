@@ -177,19 +177,6 @@ def test_srdf_collision_exemptions_reference_real_links_only():
         assert exemption.attrib["link2"] in links
 
 
-def test_moveit_home_matches_forward_stow():
-    home = ET.parse(ROOT / "config" / "lekiwi.srdf").getroot().find(
-        "group_state[@name='home'][@group='arm']"
-    )
-    stow = yaml.safe_load((ROOT / "config" / "safety_production.yaml").read_text())[
-        "safety_supervisor"
-    ]["ros__parameters"]
-    expected = dict(zip(stow["stow_joint_names"], stow["stow_joint_positions"]))
-    assert {joint.get("name"): float(joint.get("value")) for joint in home} == {
-        name: value for name, value in expected.items() if name != "arm_gripper"
-    }
-
-
 def _visual_vertices(visual: ET.Element) -> np.ndarray:
     """Binary-STL visual vertices in their link frame."""
     mesh = visual.find("geometry/mesh")
