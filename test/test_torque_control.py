@@ -762,7 +762,10 @@ def test_motor_health_reports_every_servo_with_its_limits(monkeypatch):
     bus.registers["Present_Temperature"]["arm_gripper"] = 70
     collector, robot = _collector(host, bus)
 
-    snapshot = collector.collect(robot, torque_enabled=False)
+    for index, _read in enumerate(host.HEALTH_READS):
+        snapshot = collector.collect(robot, torque_enabled=False)
+        if index + 1 < len(host.HEALTH_READS):
+            now[0] += host.HEALTH_READ_PERIOD_S + 0.001
 
     levels = _levels(snapshot)
     assert levels["motor_bus"] == 0
@@ -774,12 +777,12 @@ def test_motor_health_reports_every_servo_with_its_limits(monkeypatch):
     reads = len(bus.calls)
     assert collector.collect(robot, torque_enabled=False) is snapshot
     assert len(bus.calls) == reads
-    now[0] += host.HEALTH_PERIOD_S / 2
+    now[0] += host.HEALTH_READ_PERIOD_S / 2
     assert collector.collect(robot, torque_enabled=False) is snapshot
     assert len(bus.calls) == reads
-    now[0] += host.HEALTH_PERIOD_S / 2
-    assert collector.collect(robot, torque_enabled=False) is not snapshot
-    assert len(bus.calls) > reads
+    now[0] += host.HEALTH_READ_PERIOD_S / 2 + 0.001
+    assert collector.collect(robot, torque_enabled=False) is snapshot
+    assert len(bus.calls) == reads + 1
 
 
 @pytest.mark.parametrize("fault", ["torque mismatch", "status", "incomplete", "bus error"])
@@ -796,7 +799,11 @@ def test_motor_health_fails_closed(monkeypatch, fault):
         bus.faults["Present_Current"] = OSError("no status packet")
     collector, robot = _collector(host, bus)
 
-    snapshot = collector.collect(robot, torque_enabled=False)
+    now = [100.0]
+    monkeypatch.setattr(host.time, "monotonic", lambda: now[0])
+    for _ in range(2 * len(host.HEALTH_READS)):
+        snapshot = collector.collect(robot, torque_enabled=False)
+        now[0] += host.HEALTH_READ_PERIOD_S + 0.001
 
     assert _levels(snapshot)["motor_bus"] == 2
     assert all(level == 2 for level in _levels(snapshot).values())

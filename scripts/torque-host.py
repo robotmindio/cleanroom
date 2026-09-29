@@ -39,9 +39,18 @@ from lekiwi_rmf.motor_health import fault_snapshot, healthy_snapshot
 
 
 TORQUE_RETRIES = 5
-# Keep health polling from starving the position loop on the shared Feetech bus.
-# Position feedback remains at the host loop rate; diagnostics do not need 10 Hz.
-HEALTH_PERIOD_S = 1.0
+# Spread grouped register reads across host cycles; one burst per snapshot can
+# starve the position loop on the shared Feetech bus.
+HEALTH_READ_PERIOD_S = 0.10
+HEALTH_READS = (
+    ("Present_Position", True),
+    ("Present_Load", False),
+    ("Present_Voltage", False),
+    ("Present_Temperature", False),
+    ("Present_Current", False),
+    ("Status", False),
+    ("Torque_Enable", False),
+)
 ACTION_KEYS = tuple(f"{joint}.pos" for joint in ARM_JOINTS) + (
     "x.vel", "y.vel", "theta.vel",
 )
@@ -299,6 +308,8 @@ class MotorHealthCollector:
         self._snapshot = fault_snapshot(self.motors, "health read has not completed")
         self._last_error = None
         self._limits = None
+        self._read_index = 0
+        self._readbacks = {}
 
     def _read_limits(self, robot: SafetyLeKiwi) -> None:
         """Read the servo-programmed protective limits once after connection."""
@@ -318,29 +329,35 @@ class MotorHealthCollector:
         envelope remain advisory until bench-qualified.
         """
         now = time.monotonic()
-        if now - self._last_read < HEALTH_PERIOD_S:
+        if now - self._last_read < HEALTH_READ_PERIOD_S:
             return self._snapshot
         self._last_read = now
         try:
             if self._limits is None:
                 self._read_limits(robot)
-            torque = robot.bus.sync_read(
-                "Torque_Enable", list(self.motors), normalize=False, num_retry=TORQUE_RETRIES,
+            register, normalize = HEALTH_READS[self._read_index]
+            values = robot.bus.sync_read(
+                register, list(self.motors), normalize=normalize,
+                num_retry=TORQUE_RETRIES,
             )
-            positions = robot.bus.sync_read(
-                "Present_Position", list(self.motors), num_retry=TORQUE_RETRIES,
-            )
+            if not isinstance(values, dict) or set(values) != set(self.motors):
+                raise RuntimeError(f"incomplete {register} readback")
+            self._readbacks[register] = values
+            self._read_index += 1
+            if self._read_index < len(HEALTH_READS):
+                return self._snapshot
+
+            all_readbacks = self._readbacks
+            self._readbacks = {}
+            self._read_index = 0
+            torque = all_readbacks["Torque_Enable"]
+            positions = all_readbacks["Present_Position"]
             feedback = {
-                "Present_Load": robot.bus.sync_read("Present_Load", list(self.motors), normalize=False, num_retry=TORQUE_RETRIES),
-                "Present_Voltage": robot.bus.sync_read("Present_Voltage", list(self.motors), normalize=False, num_retry=TORQUE_RETRIES),
-                "Present_Temperature": robot.bus.sync_read("Present_Temperature", list(self.motors), normalize=False, num_retry=TORQUE_RETRIES),
-                "Status": robot.bus.sync_read("Status", list(self.motors), normalize=False, num_retry=TORQUE_RETRIES),
-                "Present_Current": robot.bus.sync_read("Present_Current", list(self.motors), normalize=False, num_retry=TORQUE_RETRIES),
+                key: all_readbacks[key] for key in (
+                    "Present_Load", "Present_Voltage", "Present_Temperature",
+                    "Present_Current", "Status",
+                )
             }
-            all_readbacks = {"Torque_Enable": torque, "Present_Position": positions, **feedback}
-            for register, values in all_readbacks.items():
-                if not isinstance(values, dict) or set(values) != set(self.motors):
-                    raise RuntimeError(f"incomplete {register} readback")
             details = {}
             warnings = {}
             for motor in self.motors:
@@ -402,6 +419,8 @@ class MotorHealthCollector:
                 logging.info("Motor-health read recovered")
                 self._last_error = None
         except Exception as error:
+            self._readbacks = {}
+            self._read_index = 0
             detail = f"motor-health read failed: {error}"
             if detail != self._last_error:
                 logging.warning("%s", detail)
