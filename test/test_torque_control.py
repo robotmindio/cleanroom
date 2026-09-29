@@ -456,7 +456,7 @@ def test_configure_raises_only_the_loaded_shoulder_position_gain(monkeypatch):
     assert [write for write in robot.bus.writes if write[0] == "P_Coefficient"] == [
         ("P_Coefficient", "arm_shoulder_pan", 16),
         ("P_Coefficient", "arm_gripper", 16),
-        ("P_Coefficient", "arm_shoulder_lift", 32),
+        ("P_Coefficient", "arm_shoulder_lift", 24),
     ]
 
 
