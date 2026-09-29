@@ -22,6 +22,7 @@ from rclpy.action import ActionClient
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from rtabmap_msgs.srv import PublishMap
 from sensor_msgs.msg import Image, JointState, LaserScan, PointCloud2
 
 
@@ -69,6 +70,7 @@ class ReadinessGate(Node):
         self.declare_parameter("joint_names", [""])
         self.declare_parameter("minimum_joint_samples", 20)
         self._ready = False
+        self._map_publish_requested = False
         kind = str(self.get_parameter("kind").value)
 
         if kind == "topic":
@@ -78,6 +80,9 @@ class ReadinessGate(Node):
                 raise ValueError("topic readiness requires topic and a supported topic_type")
             self.create_subscription(TOPIC_TYPES[topic_type], topic, self._on_message, topic_qos(topic_type))
             self.get_logger().info(f"waiting for {topic_type} message on {topic}")
+            if topic_type == "map":
+                self._map_publish_client = self.create_client(PublishMap, "/rtabmap/publish_map")
+                self._map_publish_timer = self.create_timer(0.5, self._request_map_publication)
         elif kind == "joint_states":
             topic = str(self.get_parameter("topic").value)
             self._required_joint_names = tuple(self.get_parameter("joint_names").value)
@@ -148,6 +153,26 @@ class ReadinessGate(Node):
             self._ready = bool(message.child_frame_id) and all(
                 math.isfinite(value) for value in values
             )
+
+    def _request_map_publication(self) -> None:
+        if self._ready or self._map_publish_requested or not self._map_publish_client.service_is_ready():
+            return
+        request = PublishMap.Request()
+        request.global_map = True
+        request.optimized = True
+        request.graph_only = False
+        self._map_publish_requested = True
+        future = self._map_publish_client.call_async(request)
+        future.add_done_callback(self._map_publication_finished)
+
+    def _map_publication_finished(self, future) -> None:
+        try:
+            future.result()
+        except Exception as error:
+            self._map_publish_requested = False
+            self.get_logger().warning(f"RTAB-Map map publication request failed: {error}")
+        else:
+            self.get_logger().info("requested RTAB-Map to publish its saved map; waiting for /map")
 
     def _on_joint_states(self, message: JointState) -> None:
         positions = dict(zip(message.name, message.position))

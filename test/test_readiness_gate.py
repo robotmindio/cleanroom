@@ -19,6 +19,7 @@ ROOT = pathlib.Path(__file__).parents[1]
 
 def test_readiness_gate_supports_the_bringup_dependencies():
     assert set(TOPIC_TYPES) == {"image", "odom", "map", "scan", "cloud"}
+    assert '<exec_depend>rtabmap_msgs</exec_depend>' in (ROOT / "package.xml").read_text()
 
 
 def test_topic_gate_requires_semantically_usable_messages():
@@ -97,6 +98,50 @@ def test_scan_readiness_matches_best_effort_laser_drivers():
 def test_map_readiness_receives_rtabmaps_latched_grid():
     assert topic_qos("map").durability == DurabilityPolicy.TRANSIENT_LOCAL
     assert topic_qos("image").durability == DurabilityPolicy.VOLATILE
+
+
+def test_map_gate_requests_the_saved_rtabmap_grid_once():
+    class Future:
+        def add_done_callback(self, callback):
+            self.callback = callback
+
+    class Client:
+        def __init__(self):
+            self.requests = []
+
+        def service_is_ready(self):
+            return True
+
+        def call_async(self, request):
+            self.requests.append(request)
+            return Future()
+
+    gate = ReadinessGate.__new__(ReadinessGate)
+    gate._ready = False
+    gate._map_publish_requested = False
+    gate._map_publish_client = Client()
+
+    gate._request_map_publication()
+    gate._request_map_publication()
+
+    assert len(gate._map_publish_client.requests) == 1
+    request = gate._map_publish_client.requests[0]
+    assert (request.global_map, request.optimized, request.graph_only) == (True, True, False)
+
+
+def test_map_gate_retries_when_the_publish_service_call_fails():
+    warnings = []
+    gate = ReadinessGate.__new__(ReadinessGate)
+    gate._map_publish_requested = True
+    gate.get_logger = lambda: types.SimpleNamespace(warning=warnings.append)
+
+    def fail():
+        raise RuntimeError("service unavailable")
+
+    gate._map_publication_finished(types.SimpleNamespace(result=fail))
+
+    assert not gate._map_publish_requested
+    assert "service unavailable" in warnings[0]
 
 
 def test_nav_action_is_not_ready_until_lifecycle_node_is_active():

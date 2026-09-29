@@ -248,15 +248,15 @@ def generate_launch_description():
         parameters=[{
             "use_sim_time": ParameterValue(sim, value_type=bool),
             "frame_id": "base_footprint", "map_frame_id": "map", "odom_frame_id": "odom",
-            # Combine calibrated front-camera features with the merged laser/Astra
-            # cloud when both sources are enabled. Visual matches help relocalize
-            # after restart; ICP still anchors registration and the occupancy grid.
-            # Keep ICP-only mapping available when the optional camera is disabled.
+            # The front camera is monocular (no depth). With a LiDAR scan, its
+            # 2D features cannot provide RTAB-Map's visual-ICP registration;
+            # use proximity detection and ICP for loop closure instead.
             "database_path": rtabmap_database,
-            "subscribe_rgb": ParameterValue(camera_on, value_type=bool),
+            "subscribe_rgb": ParameterValue(PythonExpression([
+                "'true' if ", camera_on, " and not ", lidar_on, " else 'false'",
+            ]), value_type=bool),
             "Reg/Strategy": ParameterValue(PythonExpression([
-                "'2' if ", lidar_on, " and ", camera_on,
-                " else '1' if ", lidar_on, " else '0'",
+                "'1' if ", lidar_on, " else '0'",
             ]), value_type=str),
             # A prior ICP-only database can persist -1 here, which disables
             # visual word extraction even after RGB is enabled at launch.
