@@ -318,6 +318,9 @@ def test_full_stack_boots_in_mapping_mode_so_loop_closure_can_run():
     launch = (ROOT / "launch" / "bringup.launch.py").read_text(encoding="utf-8")
 
     assert '"slam_mode",\n                default_value="mapping"' in launch
+    assert '"subscribe_rgb": ParameterValue(camera_on, value_type=bool)' in launch
+    strategy = launch.split('"Reg/Strategy":', 1)[1].split('"Icp/VoxelSize"', 1)[0]
+    assert "'2' if " in strategy and "lidar_on" in strategy and "camera_on" in strategy
     assert '"RGBD/LinearUpdate": "0.04"' in launch
     assert '"RGBD/ProximityMaxGraphDepth": "0"' in launch
     assert '"RGBD/ProximityOdomGuess": "true"' in launch

@@ -248,13 +248,16 @@ def generate_launch_description():
         parameters=[{
             "use_sim_time": ParameterValue(sim, value_type=bool),
             "frame_id": "base_footprint", "map_frame_id": "map", "odom_frame_id": "odom",
-            # With a laser, use ICP on the merged lidar/Astra cloud so mapping
-            # survives camera dropouts. This disables appearance-based loop
-            # closure; revisits are matched against nearby scan paths instead.
-            # Without a laser, fall back to RGB so there is still something to map.
+            # Combine calibrated front-camera features with the merged laser/Astra
+            # cloud when both sources are enabled. Visual matches help relocalize
+            # after restart; ICP still anchors registration and the occupancy grid.
+            # Keep ICP-only mapping available when the optional camera is disabled.
             "database_path": rtabmap_database,
-            "subscribe_rgb": ParameterValue(PythonExpression(["not ", lidar_on]), value_type=bool),
-            "Reg/Strategy": ParameterValue(PythonExpression(["'1' if ", lidar_on, " else '0'"]), value_type=str),
+            "subscribe_rgb": ParameterValue(camera_on, value_type=bool),
+            "Reg/Strategy": ParameterValue(PythonExpression([
+                "'2' if ", lidar_on, " and ", camera_on,
+                " else '1' if ", lidar_on, " else '0'",
+            ]), value_type=str),
             "Icp/VoxelSize": "0.05", "Icp/MaxCorrespondenceDistance": "0.1",
             "Icp/PointToPlane": "false", "RGBD/ProximityPathMaxNeighbors": "10",
             "Mem/NotLinkedNodesKept": "false",
