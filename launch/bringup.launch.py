@@ -258,6 +258,9 @@ def generate_launch_description():
                 "'2' if ", lidar_on, " and ", camera_on,
                 " else '1' if ", lidar_on, " else '0'",
             ]), value_type=str),
+            # A prior ICP-only database can persist -1 here, which disables
+            # visual word extraction even after RGB is enabled at launch.
+            "Kp/MaxFeatures": "500",
             "Icp/VoxelSize": "0.05", "Icp/MaxCorrespondenceDistance": "0.1",
             "Icp/PointToPlane": "false", "RGBD/ProximityPathMaxNeighbors": "10",
             "Mem/NotLinkedNodesKept": "false",
