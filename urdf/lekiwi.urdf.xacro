@@ -44,8 +44,8 @@
   <link name="arm_ground_keepout_proxy">
     <xacro:unless value="$(arg sim)">
       <collision>
-        <origin xyz="0 0 -0.01"/>
-        <geometry><box size="2.0 2.0 0.02"/></geometry>
+        <origin xyz="0 0 -1.0"/>
+        <geometry><box size="2.0 2.0 2.0"/></geometry>
       </collision>
     </xacro:unless>
   </link>

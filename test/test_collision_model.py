@@ -86,8 +86,8 @@ def test_real_arm_collision_model_includes_ground_keepout():
         for item in ET.parse(ROOT / "config" / "lekiwi.srdf").getroot().findall("disable_collisions")
     }
 
-    assert np.fromstring(box.get("size"), sep=" ") == pytest.approx([2.0, 2.0, 0.02])
-    assert np.fromstring(box_origin.get("xyz"), sep=" ") == pytest.approx([0.0, 0.0, -0.01])
+    assert np.fromstring(box.get("size"), sep=" ") == pytest.approx([2.0, 2.0, 2.0])
+    assert np.fromstring(box_origin.get("xyz"), sep=" ") == pytest.approx([0.0, 0.0, -1.0])
     assert mount.find("parent").get("link") == "base_footprint"
     assert mount.find("child").get("link") == "arm_ground_keepout_proxy"
     assert sim.find("link[@name='arm_ground_keepout_proxy']/collision") is None
