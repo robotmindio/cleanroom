@@ -23,6 +23,7 @@ self-collision plans.
 by launch and MoveIt. The wrapper intentionally owns only ROS integration:
 
 - REP-103 `base_footprint` and `base_link` frames;
+- a fixed physical floor keep-out for MoveIt arm planning;
 - normalized front/wrist/Astra camera optical frames;
 - LD06 scan calibration and the `tool0` frame.
 

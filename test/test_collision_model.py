@@ -74,6 +74,30 @@ def test_distal_arm_keepout_uses_the_cad_base_radius_and_checks_moving_links():
         assert frozenset(("arm_workspace_keepout_proxy", link)) not in exemptions
 
 
+def test_real_arm_collision_model_includes_ground_keepout():
+    real = _real_robot()
+    sim = _sim_robot()
+    floor = real.find("link[@name='arm_ground_keepout_proxy']/collision")
+    box = floor.find("geometry/box")
+    box_origin = floor.find("origin")
+    mount = real.find("joint[@name='arm_ground_keepout_mount']")
+    exemptions = {
+        frozenset((item.get("link1"), item.get("link2")))
+        for item in ET.parse(ROOT / "config" / "lekiwi.srdf").getroot().findall("disable_collisions")
+    }
+
+    assert np.fromstring(box.get("size"), sep=" ") == pytest.approx([2.0, 2.0, 0.02])
+    assert np.fromstring(box_origin.get("xyz"), sep=" ") == pytest.approx([0.0, 0.0, -0.01])
+    assert mount.find("parent").get("link") == "base_footprint"
+    assert mount.find("child").get("link") == "arm_ground_keepout_proxy"
+    assert sim.find("link[@name='arm_ground_keepout_proxy']/collision") is None
+    for link in (
+        "shoulder_collision_proxy", "upper_arm_collision_proxy", "forearm_collision_proxy",
+        "wrist_collision_proxy", "roll_collision_proxy", "gripper_collision_proxy",
+    ):
+        assert frozenset(("arm_ground_keepout_proxy", link)) not in exemptions
+
+
 def test_moveit_keepout_proxy_does_not_become_a_gazebo_contact_obstacle():
     real = _real_robot()
     simulated = _sim_robot()

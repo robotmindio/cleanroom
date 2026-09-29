@@ -39,6 +39,20 @@
     <parent link="base_footprint"/><child link="base_link"/>
     <origin xyz="0 0 0.093" rpy="0 0 0"/>
   </joint>
+  <!-- base_footprint is the floor-contact plane on the level physical robot.
+       A live depth cloud is not a reliable substitute for this hard arm limit. -->
+  <link name="arm_ground_keepout_proxy">
+    <xacro:unless value="$(arg sim)">
+      <collision>
+        <origin xyz="0 0 -0.01"/>
+        <geometry><box size="2.0 2.0 0.02"/></geometry>
+      </collision>
+    </xacro:unless>
+  </link>
+  <joint name="arm_ground_keepout_mount" type="fixed">
+    <parent link="base_footprint"/><child link="arm_ground_keepout_proxy"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
   <!-- Distal arm links stay outside the vertical airspace above the chassis.
        The radius and lower plane come from the base collision model. -->
   <link name="arm_workspace_keepout_proxy">
