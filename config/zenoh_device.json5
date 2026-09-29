@@ -29,9 +29,13 @@
       // The raw Astra frame stays local. The device launch compresses its optional
       // preview before this bridge. Downsample small preview messages here; large
       // point clouds are compacted on the Pi before they reach Zenoh.
+      // The measured Pi-to-compute TCP path was saturated near 1.1 Mbit/s with
+      // a growing send queue, so cap the noncritical feeds and preserve fresh core data.
       pub_max_frequencies: [
+        "^/pi/lidar/scan$=5",
+        "^/camera/depth/points$=2",
         "^/pi/camera/front/image_raw/compressed$=3",
-        "^/pi/camera/wrist/image_raw/compressed$=2",
+        "^/pi/camera/wrist/image_raw/compressed$=0.5",
         "^/camera/astra/color/image_raw/compressed$=0.25",
       ],
       // This is a sensor-only bridge. Congestion must drop an old sample rather

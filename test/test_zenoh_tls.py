@@ -61,9 +61,10 @@ def test_sensor_bridge_caps_previews_and_drops_stale_sensor_samples_on_congestio
     compute = (ROOT / "config" / "zenoh_compute.json5").read_text()
     assert "reliable_routes_blocking: false" in device
     assert '"^/pi/lidar/scan$=1:express"' in device
+    assert '"^/pi/lidar/scan$=5"' in device
     assert '"^/camera/depth/points$=2"' in device
     assert '"^/pi/camera/front/image_raw/compressed$=3"' in device
-    assert '"^/pi/camera/wrist/image_raw/compressed$=2"' in device
+    assert '"^/pi/camera/wrist/image_raw/compressed$=0.5"' in device
     assert '"^/camera/astra/color/image_raw/compressed$=0.25"' in device
     assert '"^/camera/astra/color/image_raw/compressed$"' in device
     assert '"^/camera/astra/color/image_raw$"' not in device

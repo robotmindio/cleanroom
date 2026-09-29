@@ -262,6 +262,7 @@ def generate_launch_description():
             "Mem/NotLinkedNodesKept": "false",
             "RGBD/LinearUpdate": "0.04", "RGBD/ProximityMaxGraphDepth": "0",
             "RGBD/ProximityOdomGuess": "true",
+            "Rtabmap/DetectionRate": "2",
             "subscribe_depth": False,
             "subscribe_rgbd": False, "subscribe_scan": False,
             "subscribe_scan_cloud": ParameterValue(lidar_on, value_type=bool),
@@ -283,7 +284,10 @@ def generate_launch_description():
             "Rtabmap/StartNewMapOnLoopClosure": "true",
             "RGBD/NeighborLinkRefining": "true", "RGBD/ProximityBySpace": "true",
             "Reg/Force3DoF": "true", "Grid/Sensor": "0", "Grid/RangeMax": "3.0",
-            "Grid/CellSize": "0.05", "sync_queue_size": 20, "topic_queue_size": 20,
+            "Grid/CellSize": "0.05",
+            # Five-message sync queues keep temporary link jitter from turning
+            # the map into a several-second replay of stale sensor data.
+            "sync_queue_size": 5, "topic_queue_size": 5,
         }],
         remappings=[
             ("rgb/image", slam_rgb_topic), ("rgb/camera_info", slam_camera_info_topic),
