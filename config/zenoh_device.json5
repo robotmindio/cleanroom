@@ -33,7 +33,7 @@
       // a growing send queue, so cap the noncritical feeds and preserve fresh core data.
       pub_max_frequencies: [
         "^/pi/lidar/scan$=5",
-        "^/camera/depth/points$=2",
+        "^/camera/depth/points$=3",
         "^/pi/camera/front/image_raw/compressed$=2",
         "^/pi/camera/wrist/image_raw/compressed$=0.1",
         "^/camera/astra/color/image_raw/compressed$=0.25",
