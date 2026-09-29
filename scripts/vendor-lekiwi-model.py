@@ -26,6 +26,10 @@ ARM_EFFORT_LIMITS = {
     "arm_wrist_roll": "2",
     "arm_gripper": "1",
 }
+SOURCE_LIMIT_OVERRIDES = {
+    # The user confirmed this robot's valid pose exceeds the upstream +100 deg bound.
+    "arm_shoulder_lift": (-1.74533, 1.74533),
+}
 
 
 def validate_xacro(path: Path) -> None:
@@ -81,14 +85,15 @@ def transform(path: Path) -> tuple[ET.Element, dict[Path, Path]]:
             ):
                 raise ValueError(f"{name}: source joint needs lower and upper limits")
             expected = JOINT_LIMITS[name]
+            source_expected = SOURCE_LIMIT_OVERRIDES.get(name, expected)
             actual = tuple(float(limit.get(key)) for key in ("lower", "upper"))
-            if actual != expected:
+            if actual != source_expected:
                 raise ValueError(
-                    f"{name}: source limits {actual} do not match configured limits {expected}"
+                    f"{name}: source limits {actual} do not match expected source limits {source_expected}"
                 )
             limit.attrib = {
-                "lower": limit.get("lower"),
-                "upper": limit.get("upper"),
+                "lower": f"{expected[0]:g}",
+                "upper": f"{expected[1]:g}",
                 "effort": ARM_EFFORT_LIMITS[name],
                 "velocity": f"{JOINT_VELOCITY_LIMITS[name]:g}",
             }

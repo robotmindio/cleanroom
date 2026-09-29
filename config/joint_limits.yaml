@@ -10,10 +10,12 @@ default_acceleration_scaling_factor: 0.4
 # The URDF <limit> elements carry no acceleration attribute either, which makes these
 # overrides the only source. Values are conservative servo guesses, not measurements.
 joint_limits:
-  # SO-101 position ranges come from the pinned upstream follower model. Keep
-  # the lower velocity and acceleration values until measured on this robot.
+  # SO-101 position ranges come from the pinned upstream follower model. The
+  # installed shoulder's valid held pose reached 1.804 rad, so its local upper
+  # envelope is 1.82 rad; its mechanical endpoint still needs measurement.
+  # Keep velocity and acceleration limits until measured on this robot.
   arm_shoulder_pan: {has_position_limits: true, min_position: -1.91986, max_position: 1.91986, has_velocity_limits: true, max_velocity: 2.0, has_acceleration_limits: true, max_acceleration: 3.0}
-  arm_shoulder_lift: {has_position_limits: true, min_position: -1.74533, max_position: 1.74533, has_velocity_limits: true, max_velocity: 2.0, has_acceleration_limits: true, max_acceleration: 3.0}
+  arm_shoulder_lift: {has_position_limits: true, min_position: -1.74533, max_position: 1.82, has_velocity_limits: true, max_velocity: 2.0, has_acceleration_limits: true, max_acceleration: 3.0}
   arm_elbow_flex: {has_position_limits: true, min_position: -1.69, max_position: 1.69, has_velocity_limits: true, max_velocity: 2.0, has_acceleration_limits: true, max_acceleration: 3.0}
   arm_wrist_flex: {has_position_limits: true, min_position: -1.65806, max_position: 1.65806, has_velocity_limits: true, max_velocity: 3.0, has_acceleration_limits: true, max_acceleration: 5.0}
   # The wrapper makes wrist roll a bounded revolute joint because the physical
