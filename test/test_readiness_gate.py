@@ -129,6 +129,12 @@ def test_map_gate_requests_the_saved_rtabmap_grid_once():
     assert (request.global_map, request.optimized, request.graph_only) == (True, True, False)
 
 
+def test_rtabmap_restarts_after_a_runtime_exit():
+    source = (ROOT / "launch" / "bringup.launch.py").read_text()
+    node = source.split("rtabmap_node = Node(", 1)[1].split("mapping_guard = ExecuteProcess(", 1)[0]
+    assert "respawn=True, respawn_delay=2.0" in node
+
+
 def test_map_gate_retries_when_the_publish_service_call_fails():
     warnings = []
     gate = ReadinessGate.__new__(ReadinessGate)

@@ -104,7 +104,6 @@ def generate_launch_description():
     real = PythonExpression(["'", mode, "' == 'real'"])
     amcl = PythonExpression(["'", localization, "' == 'amcl'"])
     visual_slam = PythonExpression(["'", localization, "' == 'visual_slam'"])
-    slam_localization = PythonExpression(["'", slam_mode, "' == 'localization'"])
     camera_on = PythonExpression(["'", publish_camera, "' == 'true'"])
     camera_here = PythonExpression([camera_on, " and '", camera_source, "' == 'local'"])
     astra_here = PythonExpression([
@@ -279,8 +278,9 @@ def generate_launch_description():
             "Mem/InitWMWithAllNodes": ParameterValue(PythonExpression([
                 "'", slam_mode, "' == 'localization' or ", lidar_on,
             ]), value_type=str),
-            # Keep successful closures in the single persistent map.
-            "Rtabmap/StartNewMapOnLoopClosure": "false",
+            # Start a mapping session only after it globally relocalizes to the
+            # saved graph, preventing an unlinked map on every process restart.
+            "Rtabmap/StartNewMapOnLoopClosure": "true",
             "RGBD/NeighborLinkRefining": "true", "RGBD/ProximityBySpace": "true",
             "Reg/Force3DoF": "true", "Grid/Sensor": "0", "Grid/RangeMax": "3.0",
             "Grid/CellSize": "0.05", "sync_queue_size": 20, "topic_queue_size": 20,
@@ -290,6 +290,7 @@ def generate_launch_description():
             ("odom", "/odom"), ("scan_cloud", "/slam/cloud"), ("map", rtabmap_map_topic),
         ],
         condition=IfCondition(visual_slam), output="screen",
+        respawn=True, respawn_delay=2.0,
     )
     mapping_guard = ExecuteProcess(
         cmd=[
