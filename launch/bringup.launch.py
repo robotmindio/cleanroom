@@ -281,7 +281,7 @@ def generate_launch_description():
             # StartNewMapOnLoopClosure allows a new mapping session.
             "Mem/InitWMWithAllNodes": ParameterValue(PythonExpression([
                 "'", slam_mode, "' == 'localization' or ", lidar_on,
-            ]), value_type=bool),
+            ]), value_type=str),
             # After a stack restart, wheel odometry starts at identity. Wait for
             # a global relocalization before opening another mapping session;
             # otherwise RTAB-Map leaves an unconnected map in the same database.
