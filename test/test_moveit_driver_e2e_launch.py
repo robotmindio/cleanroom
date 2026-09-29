@@ -214,6 +214,32 @@ class TestMoveItDriverEndToEnd(unittest.TestCase):
         response = future.result()
         self.assertTrue(response.valid, response.contacts)
 
+    def test_stored_home_clears_physical_chassis(self):
+        client = self.node.create_client(GetStateValidity, "/check_state_validity")
+        self.assertTrue(self._until(client.service_is_ready, timeout=15.0))
+        request = GetStateValidity.Request()
+        request.group_name = "arm"
+        request.robot_state.is_diff = True
+        request.robot_state.joint_state.name = list(ARM_JOINTS)
+        request.robot_state.joint_state.position = [0.0] * len(ARM_JOINTS)
+        future = client.call_async(request)
+        self.assertTrue(self._until(future.done, timeout=10.0))
+        self.assertTrue(future.result().valid, future.result().contacts)
+
+    def test_open_gripper_can_reach_floor_object(self):
+        client = self.node.create_client(GetStateValidity, "/check_state_validity")
+        self.assertTrue(self._until(client.service_is_ready, timeout=15.0))
+        request = GetStateValidity.Request()
+        request.group_name = "arm"
+        request.robot_state.is_diff = True
+        request.robot_state.joint_state.name = list(ARM_JOINTS)
+        request.robot_state.joint_state.position = [
+            -0.01995, 1.81054, -1.05871, -0.10, -0.01995, 1.74533,
+        ]
+        future = client.call_async(request)
+        self.assertTrue(self._until(future.done, timeout=10.0))
+        self.assertTrue(future.result().valid, future.result().contacts)
+
     def _arm(self):
         self.assertTrue(self.arm_client.wait_for_service(timeout_sec=10.0))
         # Publish while discovery settles; the timer keeps this lease fresh

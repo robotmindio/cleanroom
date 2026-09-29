@@ -39,13 +39,12 @@
     <parent link="base_footprint"/><child link="base_link"/>
     <origin xyz="0 0 0.093" rpy="0 0 0"/>
   </joint>
-  <!-- Keep arm collision geometry 20 mm above the wheel-contact plane. The
-       nominal CAD plane admitted a physically floor-touching pose, so this
-       margin covers the observed model-to-hardware offset. -->
+  <!-- The wheel-contact plane is the floor. Keep modeled parts above it while
+       allowing the gripper to approach objects lying on the floor. -->
   <link name="arm_ground_keepout_proxy">
     <xacro:unless value="$(arg sim)">
       <collision>
-        <origin xyz="0 0 -0.98"/>
+        <origin xyz="0 0 -1.0"/>
         <geometry><box size="2.0 2.0 2.0"/></geometry>
       </collision>
     </xacro:unless>
@@ -53,17 +52,6 @@
   <joint name="arm_ground_keepout_mount" type="fixed">
     <parent link="base_footprint"/><child link="arm_ground_keepout_proxy"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
-  </joint>
-  <!-- Distal arm links stay outside the vertical airspace above the chassis.
-       The radius and lower plane come from the base collision model. -->
-  <link name="arm_workspace_keepout_proxy">
-    <xacro:unless value="$(arg sim)">
-      <collision><geometry><cylinder radius="0.145" length="0.650"/></geometry></collision>
-    </xacro:unless>
-  </link>
-  <joint name="arm_workspace_keepout_mount" type="fixed">
-    <parent link="base_footprint"/><child link="arm_workspace_keepout_proxy"/>
-    <origin xyz="0 0 0.463" rpy="0 0 0"/>
   </joint>
   <joint name="base_link_to_cad" type="fixed">
     <parent link="base_link"/><child link="base_plate_layer1-v5"/>
@@ -183,7 +171,12 @@
   <joint name="roll_collision_proxy_mount" type="fixed">
     <parent link="so101_gripper_link"/><child link="roll_collision_proxy"/>
   </joint>
-  <xacro:collision_capsule_proxy name="gripper_collision_proxy" parent="so101_moving_jaw_link" xyz="-0.0012 -0.0360 0.0189" rpy="1.5708 0 0" radius="0.0305" cylinder_length="0.0310"/>
+  <link name="gripper_collision_proxy">
+    <collision><origin xyz="-5.55112e-17 -5.55112e-17 0.0189" rpy="9.53145e-17 6.93889e-18 1.24077e-24"/><geometry><mesh filename="package://lekiwi_rmf/urdf/meshes/so101/moving_jaw_so101_v1.stl"/></geometry></collision>
+  </link>
+  <joint name="gripper_collision_proxy_mount" type="fixed">
+    <parent link="so101_moving_jaw_link"/><child link="gripper_collision_proxy"/>
+  </joint>
 
   <!-- LD06 scan plane: the rear Pi-hole-mounted RobotSkin base puts it
        135 mm behind the origin, 5 mm left,
