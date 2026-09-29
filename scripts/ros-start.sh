@@ -38,8 +38,8 @@ set +u
 source scripts/setup.bash
 set -u
 
-# systemd starts this script directly, not scripts/up.sh. Apply the same
-# bounded default-database policy in both startup paths.
+# systemd starts this script directly, not scripts/up.sh. Prune old archives
+# without replacing the active map database.
 scripts/rtabmap-db-maintenance.py "$@"
 
 # /dev/videoN shifts on every USB re-enumeration and on a laptop video0 is the built-in

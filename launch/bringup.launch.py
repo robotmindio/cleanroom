@@ -55,11 +55,7 @@ def _after_success(stage, actions):
 
 
 def _mapping_guard_exit(event, context):
-    """Freeze the map at its quota instead of stopping the robot.
-
-    Shutting the stack down would let startup maintenance rotate the full
-    database away, so an always-mapping robot would lose its map at every quota.
-    """
+    """Freeze map growth at its quota while keeping the robot and map available."""
     if context.is_shutdown or event.returncode in (0, 130, -2, -15):
         return []
     if event.returncode == 75:

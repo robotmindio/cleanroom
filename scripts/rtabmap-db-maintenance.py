@@ -1,16 +1,9 @@
 #!/usr/bin/env python3
-"""Bound the repository-managed RTAB-Map working database at startup.
-
-The default working database is deliberately disposable: mapping sessions can
-grow it without bound, while a deliberate ``rtabmap_database:=...`` argument
-is normally a map an operator wants to retain.  This helper is therefore run
-only by the repository launchers and never rotates an explicit database.
-"""
+"""Prune old RTAB-Map archives without replacing the active map database."""
 
 from __future__ import annotations
 
 import fcntl
-import os
 import re
 import sys
 import time
@@ -19,22 +12,19 @@ from typing import Iterable
 
 
 DEFAULT_DATABASE_NAME = "lekiwi_rtabmap.db"
-MAX_DATABASE_BYTES = 512 * 1024 * 1024
 MAX_ARCHIVES = 3
 MAX_ARCHIVED_BYTES = 1536 * 1024 * 1024
 ARCHIVE_RETENTION_SECONDS = 14 * 24 * 60 * 60
 SIDECARS = ("-wal", "-shm", "-journal")
 
 
-def launch_database(arguments: Iterable[str], home: Path) -> tuple[Path, bool]:
-    """Return the selected RTAB-Map database and whether it was explicit."""
+def launch_database(arguments: Iterable[str], home: Path) -> Path:
+    """Return the selected RTAB-Map database path."""
     database = home / ".ros" / DEFAULT_DATABASE_NAME
-    explicit = False
     for argument in arguments:
         if argument.startswith("rtabmap_database:="):
             database = Path(argument.split(":=", 1)[1]).expanduser()
-            explicit = True
-    return database, explicit
+    return database
 
 
 def archive_pattern(database: Path) -> re.Pattern[str]:
@@ -95,39 +85,15 @@ def prune_archives(database: Path, now: float | None = None) -> list[Path]:
     return sorted(removed)
 
 
-def rotate_if_oversized(database: Path, explicit: bool, now: float | None = None) -> Path | None:
-    """Archive an oversized default database and return its new archive path."""
-    if explicit or not database.is_file() or database.stat().st_size <= MAX_DATABASE_BYTES:
-        return None
-    stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime(time.time() if now is None else now))
-    archive = Path(f"{database}.stale-{stamp}")
-    # The timestamp collision is only possible for parallel launchers. The
-    # process-wide maintenance lock prevents it, but do not overwrite evidence
-    # if an interrupted manual invocation left the same name behind.
-    if archive.exists():
-        raise RuntimeError(f"refusing to overwrite RTAB-Map archive {archive}")
-    os.replace(database, archive)
-    for suffix in SIDECARS:
-        sidecar = Path(f"{database}{suffix}")
-        if sidecar.exists():
-            os.replace(sidecar, Path(f"{archive}{suffix}"))
-    return archive
-
-
-def maintain(
-    arguments: Iterable[str], home: Path | None = None, now: float | None = None, rotate: bool = True
-) -> list[str]:
-    """Rotate/prune the default database and return human-readable actions."""
+def maintain(arguments: Iterable[str], home: Path | None = None, now: float | None = None) -> list[str]:
+    """Prune expired or excess old archives; leave the active database untouched."""
     home = Path.home() if home is None else home
-    database, explicit = launch_database(arguments, home)
+    database = launch_database(arguments, home)
     database.parent.mkdir(parents=True, exist_ok=True)
     lock_path = database.parent / f".{DEFAULT_DATABASE_NAME}.maintenance.lock"
     messages: list[str] = []
     with lock_path.open("a+") as lock:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-        rotated = rotate_if_oversized(database, explicit, now) if rotate else None
-        if rotated:
-            messages.append(f"RTAB-Map: archived oversized working database to {rotated}")
         for archive in prune_archives(database, now):
             messages.append(f"RTAB-Map: removed expired/excess automatic archive {archive}")
     return messages
@@ -139,7 +105,7 @@ def main(arguments: list[str]) -> int:
         if "--prune-only" in arguments and not prune_only:
             print("--prune-only cannot be combined with ROS launch arguments", file=sys.stderr)
             return 2
-        for message in maintain([] if prune_only else arguments, rotate=not prune_only):
+        for message in maintain([] if prune_only else arguments):
             print(message)
     except OSError as error:
         print(f"RTAB-Map database maintenance failed: {error}", file=sys.stderr)

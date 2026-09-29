@@ -72,7 +72,7 @@ units refer to them directly.
 
 - `free_space.py` turns the front camera into a floor-edge `LaserScan`.
 - `validate-map-bundle.py` validates an immutable map/RMF bundle.
-- `rtabmap-db-maintenance.py` bounds the RTAB-Map working database at startup.
+- `rtabmap-db-maintenance.py` prunes old RTAB-Map archives without replacing the active map.
 - `rtabmap-session-guard.py` stops a mapping session at its database quota.
 - `sim-qualification.py` collects the fail-closed simulation qualification evidence.
 - `sim-renderer-check.py` fails fast without headless OpenGL 3.3.

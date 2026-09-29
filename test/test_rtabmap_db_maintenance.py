@@ -18,40 +18,30 @@ def database(home):
     return path
 
 
-def test_default_oversized_database_is_rotated_with_its_sqlite_sidecars(tmp_path):
+def test_oversized_active_database_and_sidecars_are_preserved(tmp_path):
     path = database(tmp_path)
     with path.open("wb") as handle:
-        handle.truncate(maintenance.MAX_DATABASE_BYTES + 1)
-    Path(f"{path}-wal").write_bytes(b"wal")
-    Path(f"{path}-shm").write_bytes(b"shm")
+        handle.truncate(512 * 1024 * 1024 + 1)
+    wal = Path(f"{path}-wal")
+    shm = Path(f"{path}-shm")
+    wal.write_bytes(b"wal")
+    shm.write_bytes(b"shm")
 
     actions = maintenance.maintain([], home=tmp_path, now=1_700_000_000)
 
-    archive = Path(f"{path}.stale-20231114-221320")
-    assert not path.exists()
-    assert archive.exists()
-    assert Path(f"{archive}-wal").read_bytes() == b"wal"
-    assert Path(f"{archive}-shm").read_bytes() == b"shm"
-    assert any(str(archive) in action for action in actions)
-
-
-def test_explicit_database_is_never_rotated(tmp_path):
-    path = database(tmp_path)
-    with path.open("wb") as handle:
-        handle.truncate(maintenance.MAX_DATABASE_BYTES + 1)
-
-    actions = maintenance.maintain([f"rtabmap_database:={path}"], home=tmp_path, now=1_700_000_000)
-
     assert path.exists()
+    assert path.stat().st_size == 512 * 1024 * 1024 + 1
+    assert wal.read_bytes() == b"wal"
+    assert shm.read_bytes() == b"shm"
     assert actions == []
 
 
-def test_prune_only_policy_leaves_an_oversized_active_database_in_place(tmp_path):
+def test_explicit_oversized_database_is_preserved(tmp_path):
     path = database(tmp_path)
     with path.open("wb") as handle:
-        handle.truncate(maintenance.MAX_DATABASE_BYTES + 1)
+        handle.truncate(512 * 1024 * 1024 + 1)
 
-    actions = maintenance.maintain([], home=tmp_path, now=1_700_000_000, rotate=False)
+    actions = maintenance.maintain([f"rtabmap_database:={path}"], home=tmp_path, now=1_700_000_000)
 
     assert path.exists()
     assert actions == []
