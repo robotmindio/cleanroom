@@ -34,8 +34,8 @@
       pub_max_frequencies: [
         "^/pi/lidar/scan$=5",
         "^/camera/depth/points$=2",
-        "^/pi/camera/front/image_raw/compressed$=3",
-        "^/pi/camera/wrist/image_raw/compressed$=0.5",
+        "^/pi/camera/front/image_raw/compressed$=2",
+        "^/pi/camera/wrist/image_raw/compressed$=0.1",
         "^/camera/astra/color/image_raw/compressed$=0.25",
       ],
       // This is a sensor-only bridge. Congestion must drop an old sample rather
