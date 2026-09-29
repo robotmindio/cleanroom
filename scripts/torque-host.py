@@ -42,6 +42,9 @@ TORQUE_RETRIES = 5
 # Spread grouped register reads across host cycles; one burst per snapshot can
 # starve the position loop on the shared Feetech bus.
 HEALTH_READ_PERIOD_S = 0.10
+# State and the full per-servo diagnostic snapshot share the narrow Pi uplink.
+# Ten hertz keeps feedback fresh while leaving command and watchdog handling at 30 Hz.
+OBSERVATION_PERIOD_S = 0.10
 HEALTH_READS = (
     ("Present_Position", True),
     ("Present_Load", False),
@@ -448,13 +451,17 @@ class HostLoop:
         self.next_watchdog_attempt = 0.0
         self.telemetry_session = uuid.uuid4().hex
         self.telemetry_sequence = 0
+        self.next_observation_at = None
         self._last_command_error = None
 
     def step(self) -> None:
         self.receive_command()
         self.handle_control_request()
         self.enforce_watchdog()
-        self.publish_observation()
+        now = self.clock()
+        if self.next_observation_at is None or now >= self.next_observation_at:
+            self.publish_observation()
+            self.next_observation_at = now + OBSERVATION_PERIOD_S
 
     def receive_command(self) -> None:
         try:

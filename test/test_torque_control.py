@@ -624,6 +624,27 @@ def test_valid_commands_reach_the_robot_and_refresh_the_watchdog(monkeypatch, tm
     assert "stop_base" not in robot.bus.calls
 
 
+def test_host_keeps_command_loop_fast_and_limits_observation_bandwidth(monkeypatch, tmp_path):
+    host = _host_module(monkeypatch)
+    loop, clock, _socket, robot = _loop(host, tmp_path)
+    loop.control.torque_enabled = True
+    commands = loop.host.zmq_cmd_socket.messages
+    commands.extend((
+        _action(**{"x.vel": 0.1}),
+        _action(**{"x.vel": 0.2}),
+        _action(**{"x.vel": 0.3}),
+    ))
+
+    loop.step()
+    loop.step()
+    assert len(loop.host.zmq_observation_socket.sent) == 1
+    clock.now += host.OBSERVATION_PERIOD_S
+    loop.step()
+
+    assert [action["x.vel"] for action in robot.actions] == [0.1, 0.2, 0.3]
+    assert len(loop.host.zmq_observation_socket.sent) == 2
+
+
 def test_a_repeated_malformed_command_is_logged_once_per_distinct_error(monkeypatch, tmp_path, caplog):
     host = _host_module(monkeypatch)
     loop, _clock, _socket, robot = _loop(host, tmp_path)
