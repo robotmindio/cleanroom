@@ -466,6 +466,21 @@ def test_physical_acceptance_rejects_self_selected_weak_limits(tmp_path):
     assert "latency" in detail
 
 
+def test_live_acceptance_requirement_is_base_only():
+    rclpy = pytest.importorskip("rclpy")
+    rclpy.init()
+    node = None
+    try:
+        node = SafetySupervisor()
+        assert node._machine.requirements["acceptance"] == Requirement(
+            2**62, base=True, arm=False
+        )
+    finally:
+        if node is not None:
+            node.destroy_node()
+        rclpy.shutdown()
+
+
 def test_scan_health_rejects_blind_and_malformed_payloads():
     scan = LaserScan()
     scan.range_min = 0.1
@@ -613,6 +628,7 @@ def test_non_strict_mode_can_allow_non_workspace_faults():
     from lekiwi_rmf.safety_supervisor import permit_unless_strict
 
     machine = _machine()  # nothing has reported: default-deny in the state machine
+    machine.arm_stowed = True
     denied = machine.decision(SECOND)
     assert denied.state == SafetyState.BOOT
     assert not denied.base_permitted and not denied.arm_permitted and denied.faults
@@ -626,6 +642,46 @@ def test_non_strict_mode_can_allow_non_workspace_faults():
     assert armed.base_permitted and armed.arm_permitted and armed.faults == denied.faults
 
     assert permit_unless_strict(denied, strict=True) == denied
+
+
+def test_non_strict_mode_keeps_acceptance_and_fresh_stow_as_base_gates():
+    from lekiwi_rmf.safety_supervisor import permit_unless_strict
+
+    machine = SafetyStateMachine({
+        "driver": Requirement(SECOND),
+        "scan": Requirement(SECOND, base=True, arm=False),
+        "acceptance": Requirement(SECOND, base=True, arm=False),
+        "joints": Requirement(SECOND),
+    })
+    machine.latch_faults = False
+    machine.driver_state = "ARMED"
+    machine.arm_stowed = True
+    machine.update("driver", True, SECOND)
+    machine.update("scan", True, SECOND)
+    machine.update("acceptance", False, SECOND, "stopping trials are incomplete")
+    machine.update("joints", True, SECOND)
+
+    decision = machine.decision(SECOND)
+    domestic = permit_unless_strict(decision, strict=False, driver_state="ARMED")
+    assert domestic.state == SafetyState.ARMED
+    assert not domestic.base_permitted
+    assert domestic.arm_permitted
+
+    machine.update("acceptance", True, SECOND)
+    machine.arm_stowed = False
+    decision = machine.decision(SECOND)
+    domestic = permit_unless_strict(decision, strict=False, driver_state="ARMED")
+    assert not domestic.base_permitted
+
+    machine.arm_stowed = True
+    machine.update("driver", True, 3 * SECOND)
+    machine.update("acceptance", True, 3 * SECOND)
+    machine.update("scan", False, 3 * SECOND, "scan unavailable")
+    domestic = permit_unless_strict(
+        machine.decision(3 * SECOND), strict=False, driver_state="ARMED"
+    )
+    assert not domestic.arm_stowed
+    assert not domestic.base_permitted
 
 
 def test_non_strict_mode_still_blocks_arm_when_moveit_reports_floor_collision():

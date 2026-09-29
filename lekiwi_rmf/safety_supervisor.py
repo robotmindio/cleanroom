@@ -67,6 +67,7 @@ class SafetyDecision:
     faults: tuple[str, ...] = ()
     latched_faults: tuple[str, ...] = ()
     arm_workspace_clear: bool = True
+    arm_stowed: bool = False
 
 
 @dataclass
@@ -138,6 +139,11 @@ class SafetyStateMachine:
             workspace_requirement is None
             or self._requirement_fault("arm_workspace", workspace_requirement, now_ns) is None
         )
+        joints_requirement = self.requirements.get("joints")
+        arm_stowed = self.arm_stowed and (
+            joints_requirement is None
+            or self._requirement_fault("joints", joints_requirement, now_ns) is None
+        )
         all_faults = tuple(dict.fromkeys((*base_faults, *arm_faults)))
         if self.driver_state == "LINK_LOST":
             all_faults = (*all_faults, "driver: link lost")
@@ -160,12 +166,12 @@ class SafetyStateMachine:
         if self.estop_latched:
             return SafetyDecision(
                 SafetyState.ESTOP, False, False, all_faults, tuple(self.latched_faults),
-                arm_workspace_clear,
+                arm_workspace_clear, arm_stowed,
             )
         if self.fault_latched:
             return SafetyDecision(
                 SafetyState.FAULT_LATCHED, False, False, all_faults, tuple(self.latched_faults),
-                arm_workspace_clear,
+                arm_workspace_clear, arm_stowed,
             )
 
         base_ready = not base_faults
@@ -173,18 +179,18 @@ class SafetyStateMachine:
         if not base_ready and not arm_ready:
             return SafetyDecision(
                 SafetyState.BOOT, False, False, all_faults,
-                arm_workspace_clear=arm_workspace_clear,
+                arm_workspace_clear=arm_workspace_clear, arm_stowed=arm_stowed,
             )
 
         self.base_ever_ready = self.base_ever_ready or base_ready
         self.arm_ever_ready = self.arm_ever_ready or arm_ready
         armed = self.driver_state == "ARMED"
-        base_permitted = armed and base_ready and self.arm_stowed
+        base_permitted = armed and base_ready and arm_stowed
         arm_permitted = armed and arm_ready
         if armed:
             return SafetyDecision(
                 SafetyState.ARMED, base_permitted, arm_permitted, all_faults,
-                arm_workspace_clear=arm_workspace_clear,
+                arm_workspace_clear=arm_workspace_clear, arm_stowed=arm_stowed,
             )
         # In READY these are short-lived capability-readiness leases, not
         # evidence of motion or torque. The disarmed driver still rejects all
@@ -192,10 +198,10 @@ class SafetyStateMachine:
         # lease because enabling torque can move a loaded arm.
         return SafetyDecision(
             SafetyState.READY,
-            base_ready and self.arm_stowed,
+            base_ready and arm_stowed,
             arm_ready,
             all_faults,
-            arm_workspace_clear=arm_workspace_clear,
+            arm_workspace_clear=arm_workspace_clear, arm_stowed=arm_stowed,
         )
 
     def reset(self, now_ns: int) -> tuple[bool, str]:
@@ -217,13 +223,17 @@ class SafetyStateMachine:
 def permit_unless_strict(
     decision: SafetyDecision, strict: bool, driver_state: str = ""
 ) -> SafetyDecision:
-    """Keep the physical arm collision gate hard even in non-strict mode."""
+    """Allow non-strict operation while keeping acceptance and stow gates hard."""
     if strict or decision.state in {SafetyState.ESTOP, SafetyState.FAULT_LATCHED}:
         return decision
     state = SafetyState.ARMED if driver_state == "ARMED" else decision.state
+    acceptance_failed = any(
+        fault.partition(":")[0] == "acceptance" for fault in decision.faults
+    )
     return replace(
-        decision, state=state, base_permitted=True,
+        decision, state=state,
         arm_permitted=decision.arm_workspace_clear,
+        base_permitted=decision.arm_stowed and not acceptance_failed,
     )
 
 
@@ -754,7 +764,7 @@ class SafetySupervisor(Node):
             driver_state_required=require_driver_state,
         )
         if bool(self.get_parameter("require_acceptance").value):
-            requirements["acceptance"] = Requirement(2**62)
+            requirements["acceptance"] = Requirement(2**62, base=True, arm=False)
             healthy, detail = validate_acceptance_file(
                 str(self.get_parameter("acceptance_file").value),
                 str(self.get_parameter("nav2_params_file").value),
