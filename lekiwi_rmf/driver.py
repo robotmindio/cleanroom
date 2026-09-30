@@ -65,7 +65,9 @@ class LeKiwiDriver(Node):
         self.trajectory_path_tolerance = self.declare_parameter(
             "trajectory_path_tolerance", 0.20
         ).value
-        self.trajectory_tolerance = self.declare_parameter("trajectory_tolerance", 0.05).value
+        # Match the production travel-stow gate: a successful MoveIt action
+        # must not leave the arm outside its base-motion stow tolerance.
+        self.trajectory_tolerance = self.declare_parameter("trajectory_tolerance", 0.02).value
         self.gripper_trajectory_tolerance = self.declare_parameter(
             "gripper_trajectory_tolerance", 0.005
         ).value

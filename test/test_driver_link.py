@@ -9,6 +9,7 @@ import time
 import types
 
 import pytest
+import yaml
 
 from lekiwi_rmf.arm_trajectory import (
     ARM_JOINTS, JOINT_LIMITS, action_positions, duration_seconds,
@@ -87,7 +88,7 @@ def make_node(**overrides):
         "link_timeout": 1.0,
         "command_timeout": 0.4,
         "trajectory_path_tolerance": 0.20,
-        "trajectory_tolerance": 0.05,
+        "trajectory_tolerance": 0.02,
         "gripper_trajectory_tolerance": 0.005,
         "trajectory_timeout": 5.0,
         "robot": None,
@@ -355,6 +356,9 @@ def test_nonpositive_default_path_tolerance_is_rejected():
 
 def test_gripper_trajectory_uses_its_tighter_completion_tolerance():
     node = make_node()
+    assert node.trajectory_tolerance == yaml.safe_load(
+        (pathlib.Path(__file__).parents[1] / "config" / "safety_production.yaml").read_text()
+    )["safety_supervisor"]["ros__parameters"]["stow_tolerance"]
     goal = types.SimpleNamespace(
         component_path_tolerance=[], component_goal_tolerance=[],
         path_tolerance=[], goal_tolerance=[],
@@ -363,7 +367,7 @@ def test_gripper_trajectory_uses_its_tighter_completion_tolerance():
     _, tolerances, _ = node.requested_tolerances(
         goal, ("arm_shoulder_lift", "arm_gripper")
     )
-    assert tolerances == {"arm_shoulder_lift": 0.05, "arm_gripper": 0.005}
+    assert tolerances == {"arm_shoulder_lift": 0.02, "arm_gripper": 0.005}
 
 
 def test_guarded_command_topic_is_the_default_and_must_not_be_empty():

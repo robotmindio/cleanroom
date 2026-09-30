@@ -445,7 +445,7 @@ def test_configure_never_energizes_the_servos(monkeypatch):
     assert "enable_torque" not in robot.bus.calls
 
 
-def test_loaded_arm_joints_get_factory_position_gain(monkeypatch):
+def test_loaded_arm_joints_get_tuned_position_gain(monkeypatch):
     host = _host_module(monkeypatch)
     robot = host.SafetyLeKiwi(host.LeKiwiConfig())
     robot.bus = _Bus()
@@ -455,8 +455,8 @@ def test_loaded_arm_joints_get_factory_position_gain(monkeypatch):
     robot.configure()
 
     assert robot.bus.writes[("P_Coefficient", "arm_shoulder_pan")] == 16
-    assert robot.bus.writes[("P_Coefficient", "arm_shoulder_lift")] == 32
-    assert robot.bus.writes[("P_Coefficient", "arm_elbow_flex")] == 32
+    assert robot.bus.writes[("P_Coefficient", "arm_shoulder_lift")] == 64
+    assert robot.bus.writes[("P_Coefficient", "arm_elbow_flex")] == 64
 
 
 def test_enable_holds_the_measured_arm_pose_before_confirming_torque(monkeypatch, tmp_path):
