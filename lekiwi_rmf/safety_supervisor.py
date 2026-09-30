@@ -89,6 +89,8 @@ class SafetyStateMachine:
     arm_ever_ready: bool = False
     latched_faults: list[str] = field(default_factory=list)
     driver_state_required: bool = True
+    # The Pi's scan clock was measured 7 ms ahead of compute; bound the grace.
+    future_stamp_tolerance_ns: int = 50_000_000
 
     def _latch(self, faults: tuple[str, ...]) -> None:
         self.fault_latched = True
@@ -125,7 +127,7 @@ class SafetyStateMachine:
         if sample is None:
             return f"{name}: missing"
         age = now_ns - sample.stamp_ns
-        if age < 0 or age > requirement.max_age_ns:
+        if age < -self.future_stamp_tolerance_ns or age > requirement.max_age_ns:
             return f"{name}: stale"
         if not sample.healthy:
             return f"{name}: {sample.detail or 'unhealthy'}"

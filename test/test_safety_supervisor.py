@@ -99,6 +99,16 @@ def test_missing_required_input_denies_all_motion():
     assert "scan: missing" in decision.faults
 
 
+def test_small_future_sensor_clock_skew_is_tolerated_but_large_skew_is_rejected():
+    machine = SafetyStateMachine({"scan": Requirement(500_000_000)})
+    machine.update("scan", True, SECOND + 7_000_000)
+    assert machine._requirement_fault("scan", machine.requirements["scan"], SECOND) is None
+    machine.update("scan", True, SECOND + 60_000_000)
+    assert machine._requirement_fault("scan", machine.requirements["scan"], SECOND) == "scan: stale"
+    machine.update("scan", True, SECOND - 600_000_000)
+    assert machine._requirement_fault("scan", machine.requirements["scan"], SECOND) == "scan: stale"
+
+
 def test_armed_driver_needs_stow_for_base_but_not_arm():
     machine = _machine()
     _healthy(machine)
