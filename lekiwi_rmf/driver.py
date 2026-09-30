@@ -147,6 +147,8 @@ class LeKiwiDriver(Node):
         self.last_observation = None
         self.last_observation_token = None
         self.last_fresh = now
+        self._last_fresh_monotonic = None
+        self._feedback_gap_started_at = None
         self.link_lost = False
         # When update() last accepted telemetry that passed the host-session and
         # torque-readback checks; the automatic arm acts only on such telemetry.
@@ -256,9 +258,9 @@ class LeKiwiDriver(Node):
                 self._arm_permission_received_at_ns,
                 received_at_ns,
             )
-        if not permitted and armed and not arm_current:
+        if not permitted and armed and not arm_current and not self._hold_feedback_gap():
             self.get_logger().error(
-                "All motion capability permissions withdrawn; cutting actuator torque"
+                "All motion capability permissions withdrawn; disarming"
             )
             self.set_disarmed("DISARMED")
 
@@ -271,6 +273,8 @@ class LeKiwiDriver(Node):
             self.arm_motion_permitted = permitted
             self._arm_permission_received_at_ns = received_at_ns
             self._arm_permission_expired = not permitted
+            if permitted:
+                self._feedback_gap_started_at = None
             armed = self.armed
             base_current = self._permission_is_current(
                 self.base_motion_permitted,
@@ -279,10 +283,12 @@ class LeKiwiDriver(Node):
             )
         newly_withdrawn = not permitted and (was_permitted or not was_expired)
         if newly_withdrawn and armed:
+            if self._hold_feedback_gap():
+                return
             self.cancel_trajectory("arm safety permission withdrawn")
             if not base_current:
                 self.get_logger().error(
-                    "All motion capability permissions withdrawn; cutting actuator torque"
+                    "All motion capability permissions withdrawn; disarming"
                 )
                 self.set_disarmed("DISARMED")
             else:
@@ -305,6 +311,32 @@ class LeKiwiDriver(Node):
             self._arm_permission_received_at_ns,
             now_ns,
         )
+
+    def _hold_feedback_gap(self):
+        """Pause an arm goal through a bounded motor-telemetry gap.
+
+        No trajectory setpoint is sent without fresh feedback and permission.
+        The Pi freezes the arm if commands stop. A collision or perception fault
+        with fresh motor feedback retains the ordinary immediate cancel path.
+        """
+        now = time.monotonic()
+        with self.state_lock:
+            if self.disarm_on_failure or not self.armed:
+                return False
+            started = self._feedback_gap_started_at
+            if started is None:
+                last = self._last_fresh_monotonic
+                if last is None or not 0.3 <= now - last < self.link_timeout:
+                    return False
+                started = last
+                self._feedback_gap_started_at = started
+            if now - started >= self.link_timeout:
+                return False
+        with self.trajectory_lock:
+            if self.trajectory and self.trajectory.get("paused_at") is None:
+                self.trajectory["paused_at"] = started
+                self.get_logger().warning("Holding arm goal through a brief motor-feedback gap")
+        return True
 
     def enforce_permission_leases(self, now_monotonic_ns=None):
         """Expire stale supervisor decisions independently of DDS delivery."""
@@ -336,11 +368,12 @@ class LeKiwiDriver(Node):
                 self._arm_permission_expired = False
             was_armed = self.armed
 
-        if arm_expired and was_armed:
+        holding_gap = was_armed and not arm_current and self._hold_feedback_gap()
+        if arm_expired and was_armed and not holding_gap:
             self.cancel_trajectory("arm safety permission lease expired")
-        if was_armed and not base_current and not arm_current:
+        if was_armed and not base_current and not arm_current and not holding_gap:
             self.get_logger().error(
-                "All motion capability permission leases expired; cutting actuator torque"
+                "All motion capability permission leases expired; disarming"
             )
             self.set_disarmed("DISARMED", defer_cut=True)
         return arm_expired
@@ -432,6 +465,7 @@ class LeKiwiDriver(Node):
             self.command_stamp = self.get_clock().now()
             self.stop_pending = True
             self.arm_hold_action = None
+            self._feedback_gap_started_at = None
             if defer_cut:
                 # Only strict mode cuts torque after a failure.
                 self._deferred_cut = self._deferred_cut or bool(self.disarm_on_failure)
@@ -668,7 +702,9 @@ class LeKiwiDriver(Node):
         return response
 
     def accept_trajectory(self, goal):
-        if not self.armed or not self._arm_permission_is_current():
+        if not self.armed or (
+            not self._arm_permission_is_current() and not self._hold_feedback_gap()
+        ):
             # MoveIt surfaces this only as an unexplained "goal was rejected"; say why here.
             self.get_logger().warn(
                 "Rejecting arm trajectory: driver is disarmed or arm safety permission is absent"
@@ -732,6 +768,17 @@ class LeKiwiDriver(Node):
             "goal_tolerances": goal_tolerances,
             "goal_time_tolerance": goal_time_tolerance,
         }
+        waiting_since = time.monotonic()
+        while self.armed and not self._arm_permission_is_current() and self._hold_feedback_gap():
+            # The plan has not started. Wait for measured joints and the full
+            # supervisor permission instead of failing a goal queued in the gap.
+            if goal_handle.is_cancel_requested:
+                goal_handle.canceled()
+                return FollowJointTrajectory.Result(
+                    error_code=FollowJointTrajectory.Result.SUCCESSFUL
+                )
+            await self._yield_for_control(0.05)
+        trajectory["start"] += time.monotonic() - waiting_since
         with self.state_lock:
             if not self.armed or not self._arm_permission_is_current():
                 goal_handle.abort()
@@ -805,7 +852,7 @@ class LeKiwiDriver(Node):
         return path, goal_tolerances, goal_time or self.trajectory_timeout
 
     def publish_trajectory_feedback(self, goal_handle, trajectory):
-        elapsed = max(0.0, time.monotonic() - trajectory["start"])
+        elapsed = max(0.0, trajectory.get("paused_at", time.monotonic()) - trajectory["start"])
         with self.trajectory_lock:
             actual = {
                 name: self.arm_positions[name] for name in trajectory["names"]
@@ -1015,6 +1062,7 @@ class LeKiwiDriver(Node):
 
         if not self.observation_is_fresh(observation):
             quiet = (now - self.last_fresh).nanoseconds / 1e9
+            self._hold_feedback_gap()
             if quiet > self.link_timeout:
                 self.record_link_loss(
                     f"No fresh LeKiwi telemetry for {quiet:.1f}s; waiting for recovery"
@@ -1022,6 +1070,8 @@ class LeKiwiDriver(Node):
             return None
 
         self.last_fresh = now
+        with self.state_lock:
+            self._last_fresh_monotonic = time.monotonic()
         self.publish_motor_health(now.to_msg())
         arm_positions = joint_positions(
             observation, self.arm_zero_positions, self.arm_directions
@@ -1112,6 +1162,17 @@ class LeKiwiDriver(Node):
             trajectory = self.trajectory
             if not trajectory:
                 return False
+            paused_at = trajectory.pop("paused_at", None)
+            if paused_at is not None:
+                pause = time.monotonic() - paused_at
+                if pause >= self.link_timeout:
+                    trajectory["outcome"] = "arm feedback gap exceeded link timeout"
+                    trajectory["result_code"] = FollowJointTrajectory.Result.INVALID_GOAL
+                    trajectory["done"].set()
+                    self.trajectory = None
+                    action.update(hold_action)
+                    return True
+                trajectory["start"] += max(0.0, pause)
             elapsed = time.monotonic() - trajectory["start"]
             positions, _velocities, _accelerations = sample_trajectory(
                 trajectory["names"], trajectory["start_positions"],
@@ -1186,7 +1247,11 @@ class LeKiwiDriver(Node):
             hold_action = self.arm_hold_action.copy()
         measured_hold = self._hold_action(observation)
         action = dict(hold_action)
-        trajectory_ran = self._apply_trajectory(action, measured_hold)
+        arm_permitted = self._arm_permission_is_current()
+        if arm_permitted:
+            with self.state_lock:
+                self._feedback_gap_started_at = None
+        trajectory_ran = self._apply_trajectory(action, measured_hold) if arm_permitted else False
         if trajectory_ran:
             cmd = Twist()
         # The scales divide here and multiply below: LeRobot's kinematics use a nominal
@@ -1222,7 +1287,8 @@ class LeKiwiDriver(Node):
                     self._base_permission_received_at_ns,
                 )
             if not arm_permitted:
-                self.cancel_trajectory("arm safety permission withdrawn")
+                if not self._hold_feedback_gap():
+                    self.cancel_trajectory("arm safety permission withdrawn")
                 # The prepared action may carry that trajectory's setpoint.
                 action.update(measured_hold)
             if not base_permitted:
