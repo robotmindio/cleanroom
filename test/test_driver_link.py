@@ -1367,6 +1367,37 @@ def test_recovery_setpoint_stays_inside_joint_limit(monkeypatch):
     assert action[f"{joint}.pos"] == pytest.approx(math.degrees(upper))
 
 
+def test_goal_timeout_names_the_joint_that_missed_tolerance(monkeypatch):
+    lift, elbow = "arm_shoulder_lift", "arm_elbow_flex"
+    node = make_node()
+    node.arm_positions = {lift: 1.0232, elbow: -0.988}
+    node.arm_zero_positions = dict.fromkeys(ARM_JOINTS, 0.0)
+    node.arm_directions = dict.fromkeys(ARM_JOINTS, 1.0)
+    node.trajectory = {
+        "start": 0.0,
+        "start_positions": {lift: 1.1, elbow: -0.9},
+        "names": (lift, elbow),
+        "points": [types.SimpleNamespace(time=1.0, positions={lift: 1.0, elbow: -1.0})],
+        "path_tolerances": {lift: 0.2, elbow: 0.2},
+        "goal_tolerances": {lift: 0.02, elbow: 0.02},
+        "goal_time_tolerance": 5.0,
+        "done": threading.Event(),
+    }
+    trajectory = node.trajectory
+    monkeypatch.setattr(driver, "sample_trajectory", lambda *_: ({lift: 1.0, elbow: -1.0}, {}, {}))
+    monkeypatch.setattr(driver, "action_positions", lambda *_: {lift: 57.3, elbow: -57.3})
+    monkeypatch.setattr(driver.time, "monotonic", lambda: 6.1)
+    monkeypatch.setattr(driver, "FollowJointTrajectory", types.SimpleNamespace(
+        Result=types.SimpleNamespace(GOAL_TOLERANCE_VIOLATED=-5)
+    ), raising=False)
+
+    assert node._apply_trajectory({}, {})
+    assert trajectory["outcome"] == (
+        "goal tolerance exceeded for arm_shoulder_lift: error=0.0232 rad, limit=0.0200 rad"
+    )
+    assert trajectory["done"].is_set()
+
+
 def _disarmable(node):
     driver.Twist = object
     node.get_clock = lambda: types.SimpleNamespace(now=lambda: object())

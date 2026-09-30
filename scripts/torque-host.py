@@ -39,9 +39,8 @@ from lekiwi_rmf.motor_health import fault_snapshot, healthy_snapshot
 
 
 TORQUE_RETRIES = 5
-# The lift and elbow still settled 0.035 rad short of travel stow at P=32.
-# Trial a firmer position gain on these two loaded joints only.
-ARM_P_COEFFICIENTS = {"arm_shoulder_lift": 64, "arm_elbow_flex": 64}
+# The lift still held 0.023 rad short at P=64; tune only that loaded joint.
+ARM_P_COEFFICIENTS = {"arm_shoulder_lift": 96, "arm_elbow_flex": 64}
 # Spread grouped register reads across host cycles; one burst per snapshot can
 # starve the position loop on the shared Feetech bus.
 HEALTH_READ_PERIOD_S = 0.10

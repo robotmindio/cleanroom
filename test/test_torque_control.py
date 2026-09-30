@@ -455,7 +455,7 @@ def test_loaded_arm_joints_get_tuned_position_gain(monkeypatch):
     robot.configure()
 
     assert robot.bus.writes[("P_Coefficient", "arm_shoulder_pan")] == 16
-    assert robot.bus.writes[("P_Coefficient", "arm_shoulder_lift")] == 64
+    assert robot.bus.writes[("P_Coefficient", "arm_shoulder_lift")] == 96
     assert robot.bus.writes[("P_Coefficient", "arm_elbow_flex")] == 64
 
 

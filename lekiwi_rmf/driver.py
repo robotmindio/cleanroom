@@ -1153,7 +1153,17 @@ class LeKiwiDriver(Node):
                 trajectory["done"].set()
                 self.trajectory = None
             elif elapsed > final_point.time + trajectory["goal_time_tolerance"]:
-                trajectory["outcome"] = "goal tolerance exceeded"
+                worst = max(
+                    trajectory["goal_tolerances"],
+                    key=lambda name: abs(
+                        self.arm_positions[name] - final_point.positions[name]
+                    ) / trajectory["goal_tolerances"][name],
+                )
+                error = abs(self.arm_positions[worst] - final_point.positions[worst])
+                trajectory["outcome"] = (
+                    f"goal tolerance exceeded for {worst}: "
+                    f"error={error:.4f} rad, limit={trajectory['goal_tolerances'][worst]:.4f} rad"
+                )
                 trajectory["result_code"] = FollowJointTrajectory.Result.GOAL_TOLERANCE_VIOLATED
                 trajectory["done"].set()
                 self.trajectory = None
