@@ -662,6 +662,18 @@ def test_host_keeps_command_loop_fast_and_limits_observation_bandwidth(monkeypat
     assert len(loop.host.zmq_observation_socket.sent) == 2
 
 
+def test_host_reports_the_stage_causing_a_slow_observation(monkeypatch, tmp_path, caplog):
+    host = _host_module(monkeypatch)
+    loop, _clock, _socket, _robot = _loop(host, tmp_path)
+    timings = iter((100.0, 100.01, 100.02, 100.03, 100.34))
+    monkeypatch.setattr(host.time, "perf_counter", lambda: next(timings))
+
+    with caplog.at_level(logging.WARNING):
+        loop.step()
+
+    assert "observation=0.310s" in caplog.text
+
+
 def test_a_repeated_malformed_command_is_logged_once_per_distinct_error(monkeypatch, tmp_path, caplog):
     host = _host_module(monkeypatch)
     loop, _clock, _socket, robot = _loop(host, tmp_path)

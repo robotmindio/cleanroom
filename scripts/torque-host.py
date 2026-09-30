@@ -462,15 +462,32 @@ class HostLoop:
         self.telemetry_sequence = 0
         self.next_observation_at = None
         self._last_command_error = None
+        self._last_step_started = None
+        self._last_slow_log = 0.0
 
     def step(self) -> None:
+        started = time.perf_counter()
         self.receive_command()
+        command_done = time.perf_counter()
         self.handle_control_request()
+        control_done = time.perf_counter()
         self.enforce_watchdog()
+        watchdog_done = time.perf_counter()
         now = self.clock()
         if self.next_observation_at is None or now >= self.next_observation_at:
             self.publish_observation()
             self.next_observation_at = now + OBSERVATION_PERIOD_S
+        finished = time.perf_counter()
+        gap = 0.0 if self._last_step_started is None else started - self._last_step_started
+        self._last_step_started = started
+        if (gap > 0.2 or finished - started > 0.15) and started - self._last_slow_log > 1.0:
+            logging.warning(
+                "Motor-host loop delay: gap=%.3fs command=%.3fs control=%.3fs "
+                "watchdog=%.3fs observation=%.3fs",
+                gap, command_done - started, control_done - command_done,
+                watchdog_done - control_done, finished - watchdog_done,
+            )
+            self._last_slow_log = started
 
     def receive_command(self) -> None:
         try:
