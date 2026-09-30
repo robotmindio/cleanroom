@@ -47,6 +47,9 @@ HEALTH_READ_PERIOD_S = 0.10
 OBSERVATION_PERIOD_S = 0.10
 HEALTH_READS = (
     ("Present_Position", True),
+    # Read back the register the servo actually received so tracking failures
+    # can be separated from command transport or calibration errors.
+    ("Goal_Position", True),
     ("Present_Load", False),
     ("Present_Voltage", False),
     ("Present_Temperature", False),
@@ -355,6 +358,7 @@ class MotorHealthCollector:
             self._read_index = 0
             torque = all_readbacks["Torque_Enable"]
             positions = all_readbacks["Present_Position"]
+            goals = all_readbacks["Goal_Position"]
             feedback = {
                 key: all_readbacks[key] for key in (
                     "Present_Load", "Present_Voltage", "Present_Temperature",
@@ -377,8 +381,9 @@ class MotorHealthCollector:
                     )
                     return self._snapshot
                 position = float(positions[motor])
-                if not math.isfinite(position):
-                    raise RuntimeError(f"non-finite present position from {motor}")
+                goal = float(goals[motor])
+                if not math.isfinite(position) or not math.isfinite(goal):
+                    raise RuntimeError(f"non-finite position readback from {motor}")
                 load = float(feedback["Present_Load"][motor])
                 voltage_raw = int(feedback["Present_Voltage"][motor])
                 temperature = int(feedback["Present_Temperature"][motor])
@@ -403,6 +408,7 @@ class MotorHealthCollector:
                     warnings[motor] = "temperature is at or beyond the configured servo limit"
                 details[motor] = {
                     "present_position": position,
+                    "goal_position": goal,
                     "torque_enabled": bool(reported_torque),
                     "present_load_raw": int(load),
                     "present_load_duty_cycle": load / 1000.0,

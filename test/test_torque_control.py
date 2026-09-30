@@ -295,6 +295,7 @@ class _Bus:
         self.torque = dict.fromkeys(MOTORS, 0)
         self.registers = {
             "Present_Position": dict.fromkeys(MOTORS, 12.5),
+            "Goal_Position": dict.fromkeys(MOTORS, 13.5),
             "Present_Load": dict.fromkeys(MOTORS, 100),
             "Present_Voltage": dict.fromkeys(MOTORS, 120),
             "Present_Temperature": dict.fromkeys(MOTORS, 35),
@@ -794,6 +795,7 @@ def test_motor_health_reports_every_servo_with_its_limits(monkeypatch):
     assert levels["servo/arm_shoulder_pan"] == 0
     values = snapshot["statuses"]["servo/base_left_wheel"]["values"]
     assert values["present_voltage_v"] == "12.0" and values["maximum_temperature_c"] == "70"
+    assert values["present_position"] == "12.5" and values["goal_position"] == "13.5"
     # Bounded rate: an immediate second call reuses the last read.
     reads = len(bus.calls)
     assert collector.collect(robot, torque_enabled=False) is snapshot
