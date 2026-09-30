@@ -34,8 +34,19 @@
        direction, so yaw -90 degrees aligns it with REP-103 +X forward. -->
   <link name="base_footprint"/>
   <link name="base_link">
-    <!-- Conservative planning proxy; CAD meshes are visual-only. -->
-    <collision><geometry><cylinder radius="0.145" length="0.090"/></geometry></collision>
+    <!-- Keep only the rear of the chassis guard. Its front cut is tangent to
+         the center-facing edge of the arm pedestal; the lower face stays at
+         z=48 mm above the floor, with a 50 mm height. -->
+    <collision>
+      <origin xyz="0 0 -0.020"/>
+      <geometry><mesh filename="package://lekiwi_rmf/urdf/chassis_guard.stl"/></geometry>
+    </collision>
+    <!-- Show the exact restricted volume in the default RViz RobotModel. -->
+    <visual>
+      <origin xyz="0 0 -0.020"/>
+      <geometry><mesh filename="package://lekiwi_rmf/urdf/chassis_guard.stl"/></geometry>
+      <material name="chassis_guard"><color rgba="1 0.2 0.1 0.5"/></material>
+    </visual>
   </link>
   <joint name="base_footprint_to_base_link" type="fixed">
     <parent link="base_footprint"/><child link="base_link"/>

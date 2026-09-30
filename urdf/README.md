@@ -24,6 +24,8 @@ by launch and MoveIt. The wrapper intentionally owns only ROS integration:
 
 - REP-103 `base_footprint` and `base_link` frames;
 - a fixed physical floor keep-out for MoveIt arm planning;
+- a translucent chassis guard in RViz, using the same 50 mm tall truncated
+  cylinder mesh as MoveIt collision checking (`scripts/generate-chassis-guard.py`);
 - normalized front/wrist/Astra camera optical frames;
 - LD06 scan calibration and the `tool0` frame.
 
