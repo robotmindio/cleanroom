@@ -17,7 +17,9 @@
   <xacro:property name="wrist_camera_xyz" value="0 0 0"/>
   <xacro:property name="wrist_camera_rpy" value="0 0 0"/>
   <xacro:property name="lidar_offset_xyz" value="0 0 0"/>
-  <xacro:property name="lidar_offset_yaw" value="0"/>
+  <!-- A shared bottle landmark in the LD06 scan and Astra cloud measured a
+       90-degree clockwise correction to the nominal CAD scan axis. -->
+  <xacro:property name="lidar_offset_yaw" value="-1.5707963267948966"/>
   <!-- The simulator now drives the same six bounded joints as the hardware.
        Keep the joint type identical in both descriptions so a plan validated
        in Gazebo has the same kinematic constraints on the physical robot. -->

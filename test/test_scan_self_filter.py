@@ -100,8 +100,9 @@ def test_live_self_return_inside_the_base_footprint_is_masked():
     sectors = list(sectors)
     for angle_deg, distance in ((219.6, 0.225), (214.6, 0.16), (300.5, 0.162)):
         angle = math.radians(angle_deg)
-        base_x = -0.135 - distance * math.cos(angle)
-        base_y = 0.005 - distance * math.sin(angle)
+        # Nominal yaw -180 degrees plus the measured -90-degree correction.
+        base_x = -0.135 - distance * math.sin(angle)
+        base_y = 0.005 + distance * math.cos(angle)
         assert abs(base_x) < 0.22 and abs(base_y) < 0.22
         scan = _scan([distance], angle_min=angle)
         assert math.isinf(blank_body_sectors(scan, sectors).ranges[0])

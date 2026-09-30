@@ -1,6 +1,7 @@
 """Keep the LD06 auto-selection tied to the actual stable CP2102 port."""
 
 import ast
+import math
 import pathlib
 import types
 import xml.etree.ElementTree as ET
@@ -46,6 +47,9 @@ def test_scan_filter_subscribes_before_the_pi_publisher_appears():
 def test_laser_frame_has_a_measured_correction_after_the_nominal_cad_pose():
     assert '<joint name="laser_calibration" type="fixed">' in _URDF_SOURCE
     assert '${lidar_offset_xyz}' in _URDF_SOURCE
+    root = ET.fromstring(_URDF_SOURCE)
+    yaw = root.find("{http://www.ros.org/wiki/xacro}property[@name='lidar_offset_yaw']")
+    assert math.isclose(float(yaw.get("value")), -math.pi / 2, abs_tol=1e-9)
 
 
 def test_ld06_stays_on_its_robotskin_mount_at_the_installed_plate_pose():
