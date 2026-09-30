@@ -65,7 +65,9 @@ arm_workspace_monitor:
       - arm_wrist_roll
       - arm_gripper
     check_frequency: 30.0
-    joint_timeout: 0.25
+    # Host feedback targets 10 Hz but measured serial/transport hiccups reach
+    # 0.40 s. Bound tolerance below the motor host's 0.50 s command watchdog.
+    joint_timeout: 0.45
     perception_timeout: 1.0
     validity_timeout: 0.15
     service_timeout: 0.10
