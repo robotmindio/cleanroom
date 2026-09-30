@@ -39,6 +39,9 @@ from lekiwi_rmf.motor_health import fault_snapshot, healthy_snapshot
 
 
 TORQUE_RETRIES = 5
+# The lift and elbow settled 3-5 degrees short of their received goals at
+# LeRobot's reduced P=16. Restore the servo factory gain for those loaded joints.
+ARM_P_COEFFICIENTS = {"arm_shoulder_lift": 32, "arm_elbow_flex": 32}
 # Spread grouped register reads across host cycles; one burst per snapshot can
 # starve the position loop on the shared Feetech bus.
 HEALTH_READ_PERIOD_S = 0.10
@@ -188,7 +191,7 @@ class SafetyLeKiwi(LeKiwi):
         self.bus.configure_motors()
         for name in self.arm_motors:
             self.bus.write("Operating_Mode", name, OperatingMode.POSITION.value)
-            self.bus.write("P_Coefficient", name, 16)
+            self.bus.write("P_Coefficient", name, ARM_P_COEFFICIENTS.get(name, 16))
             self.bus.write("I_Coefficient", name, 0)
             self.bus.write("D_Coefficient", name, 32)
         for name in self.base_motors:
