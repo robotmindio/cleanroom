@@ -459,6 +459,14 @@ def test_loaded_arm_joints_get_tuned_position_gain(monkeypatch):
     assert robot.bus.writes[("P_Coefficient", "arm_elbow_flex")] == 64
 
 
+def test_shutdown_signal_waits_for_the_serial_operation_to_finish(monkeypatch):
+    host = _host_module(monkeypatch)
+
+    host._shutdown_signal(None, None)
+
+    assert host._shutdown_requested is True
+
+
 def test_enable_holds_the_measured_arm_pose_before_confirming_torque(monkeypatch, tmp_path):
     host = _host_module(monkeypatch)
     control, socket, robot, latch = _control(host, tmp_path)

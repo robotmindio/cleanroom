@@ -583,25 +583,33 @@ class HostLoop:
         self.telemetry_sequence += 1
 
 
+_shutdown_requested = False
+
+
 def _shutdown_signal(_signum, _frame):
-    # Translate systemd's SIGTERM so the finally block cuts and verifies torque.
-    raise KeyboardInterrupt
+    # Finish an in-flight serial transaction before the torque-off readback.
+    # Raising inside Feetech's port handler leaves its port-in-use flag set.
+    global _shutdown_requested
+    _shutdown_requested = True
 
 
 def connect_when_servos_powered(robot: SafetyLeKiwi) -> None:
     """Wait on one servo without restarting this LeRobot process every few seconds."""
     robot.bus.connect(handshake=False)
     try:
-        while robot.bus.ping("arm_shoulder_pan") is None:
+        while not _shutdown_requested and robot.bus.ping("arm_shoulder_pan") is None:
             logging.info("Waiting for servo power")
             time.sleep(1)
     finally:
         robot.bus.disconnect(disable_torque=False)
-    robot.connect()
+    if not _shutdown_requested:
+        robot.connect()
 
 
 @draccus.wrap()
 def main(cfg: TorqueHostConfig):
+    global _shutdown_requested
+    _shutdown_requested = False
     latch = TorqueLatch(cfg.safety.state_file)
     robot = SafetyLeKiwi(cfg.robot)
     host = None
@@ -611,19 +619,24 @@ def main(cfg: TorqueHostConfig):
     try:
         logging.info("Waiting for servo power")
         connect_when_servos_powered(robot)
+        if _shutdown_requested:
+            raise KeyboardInterrupt
         # configure() leaves torque off, but a write returning successfully
         # is not proof. Reissue it and require every servo's register readback
         # before opening any network control endpoint.
         broadcast_torque_off(robot.bus)
         TorqueControlServer._verify_torque(robot, False)
         latch.save(False)
+        if _shutdown_requested:
+            raise KeyboardInterrupt
         host = BoundLeKiwiHost(cfg.host, cfg.safety.bind_address, cfg.curve)
         control = TorqueControlServer(host.zmq_context, cfg.safety, latch, host.security)
         loop = HostLoop(robot, host, control, MotorHealthCollector(robot), cfg.safety.disarm_on_failure)
-        while True:
+        while not _shutdown_requested:
             loop_start = time.monotonic()
             loop.step()
             time.sleep(max(1 / host.max_loop_freq_hz - (time.monotonic() - loop_start), 0))
+        logging.info("Stopping LeKiwi torque host")
     except KeyboardInterrupt:
         logging.info("Stopping LeKiwi torque host")
     finally:
