@@ -2,6 +2,7 @@ safety_supervisor:
   ros__parameters:
     publish_frequency: 20.0
     sensor_timeout: 0.75
+    depth_timeout: 0.75
     state_timeout: 1.0
     permission_timeout: 0.5
     # Gazebo currently owns base actuation directly and has no hardware driver.

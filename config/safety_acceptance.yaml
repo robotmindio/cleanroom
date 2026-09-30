@@ -1,4 +1,4 @@
-schema_version: 3
+schema_version: 4
 robot_id: lekiwi_1
 # This scope permits attended autonomous base motion only after every applicable
 # trial below passes. The operator must remain next to the physical motor-power
@@ -13,12 +13,12 @@ installed_hardware:
 # Set true only after the controlled hardware procedure has populated all
 # measurements below and the configured collision zones have been updated from
 # the measured worst case plus uncertainty.
-validated: true
+validated: false
 software_revision: null
 sensor_configuration: null
 payload_kg: 0.2
 surface: dry tile
-validated_at: "2026-09-30"
+validated_at: null
 # Must exactly match both tracked Nav2 costmap footprints. The supervisor also
 # checks that the collision StopZone encloses this polygon plus the measured
 # worst stopping distance and uncertainty.
@@ -63,8 +63,10 @@ fault_tests:
   estop_independent_of_ros: true
   telemetry_loss: false
   telemetry_replay_or_duplicate: false
-  host_restart_stays_disarmed: false
-  ros_restart_stays_disarmed: false
+  # A restart must stop commands; re-arm is allowed only with fresh telemetry
+  # and current arm permission in the configured automatic re-arm mode.
+  host_restart_stops_then_gated_rearm: false
+  ros_restart_stops_then_gated_rearm: false
   # A client without a key received neither telemetry nor a health reply;
   # authorized driver credentials received telemetry on 2026-09-26.
   zmq_unauthorized_client_rejected: true

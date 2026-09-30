@@ -45,7 +45,7 @@ def stow_from_samples(samples):
 
 
 def write_stow(production_text, acceptance_text, stow):
-    """Both files' text with ``stow`` in place of their stow values; comments are kept."""
+    """Replace the stow in both files and invalidate its old physical acceptance."""
     positions = ", ".join(repr(stow[joint]) for joint in STOW_JOINTS)
     production, count = re.subn(
         r"^(\s*stow_joint_positions:\s*)\[[^\]]*\]", rf"\g<1>[{positions}]",
@@ -61,6 +61,16 @@ def write_stow(production_text, acceptance_text, stow):
         )
         if count != 1:
             raise ValueError(f"safety_acceptance.yaml has no accepted stow entry for {joint}")
+    acceptance, count = re.subn(
+        r"^validated:.*$", "validated: false", acceptance, count=1, flags=re.MULTILINE,
+    )
+    if count != 1:
+        raise ValueError("safety_acceptance.yaml has no validated field")
+    acceptance, count = re.subn(
+        r"^validated_at:.*$", "validated_at: null", acceptance, count=1, flags=re.MULTILINE,
+    )
+    if count != 1:
+        raise ValueError("safety_acceptance.yaml has no validated_at field")
     return production, acceptance
 
 

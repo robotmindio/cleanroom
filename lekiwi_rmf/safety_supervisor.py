@@ -543,7 +543,7 @@ def validate_acceptance_file(
         data = yaml.safe_load(Path(path).expanduser().read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError) as error:
         return False, f"cannot read safety acceptance: {error}"
-    if not isinstance(data, dict) or data.get("schema_version") != 3:
+    if not isinstance(data, dict) or data.get("schema_version") != 4:
         return False, "unsupported safety acceptance schema"
     if data.get("validated") is not True:
         return False, "physical safety acceptance is not validated"
@@ -604,8 +604,8 @@ def validate_acceptance_file(
     required_fault_tests = {
         "scan_disconnect", "depth_disconnect", "motor_diagnostic_fault",
         "estop_independent_of_ros", "telemetry_loss",
-        "telemetry_replay_or_duplicate", "host_restart_stays_disarmed",
-        "ros_restart_stays_disarmed", "zmq_unauthorized_client_rejected",
+        "telemetry_replay_or_duplicate", "host_restart_stops_then_gated_rearm",
+        "ros_restart_stops_then_gated_rearm", "zmq_unauthorized_client_rejected",
         "dds_control_plane_isolated_or_authenticated",
         "rosbridge_disabled_or_authenticated",
         "collision_monitor_obstacle_stop",
@@ -662,6 +662,7 @@ class SafetySupervisor(Node):
         super().__init__("safety_supervisor")
         self.declare_parameter("publish_frequency", 20.0)
         self.declare_parameter("sensor_timeout", 0.75)
+        self.declare_parameter("depth_timeout", 0.75)
         self.declare_parameter("state_timeout", 1.0)
         # Consumers use this receive-time lease because Bool has no source
         # timestamp. Keep it shorter than the supervisor's input deadline so
@@ -708,6 +709,7 @@ class SafetySupervisor(Node):
         # enforcement must not change independently at runtime.
         self._strict = bool(self.get_parameter("strict").value)
         sensor_timeout = positive_seconds_ns(float(self.get_parameter("sensor_timeout").value), "sensor_timeout")
+        depth_timeout = positive_seconds_ns(float(self.get_parameter("depth_timeout").value), "depth_timeout")
         state_timeout = positive_seconds_ns(float(self.get_parameter("state_timeout").value), "state_timeout")
         permission_timeout = positive_seconds_ns(
             float(self.get_parameter("permission_timeout").value), "permission_timeout"
@@ -722,7 +724,7 @@ class SafetySupervisor(Node):
         if self.get_parameter("require_scan").value:
             requirements["scan"] = Requirement(sensor_timeout, base=True, arm=False)
         if self.get_parameter("require_depth").value:
-            requirements["depth"] = Requirement(sensor_timeout, base=False, arm=True)
+            requirements["depth"] = Requirement(depth_timeout, base=False, arm=True)
         if self.get_parameter("require_bumper").value:
             requirements["bumper"] = Requirement(state_timeout)
         if self.get_parameter("require_estop").value:

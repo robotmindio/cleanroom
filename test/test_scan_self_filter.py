@@ -42,6 +42,16 @@ def test_zero_range_disables_the_filter():
     assert list(blank_body_returns(scan, 0.0, 359.0, 0.0).ranges) == list(scan.ranges)
 
 
+def test_finite_out_of_range_samples_are_discarded_without_hiding_valid_returns():
+    from lekiwi_rmf.safety_supervisor import _valid_scan_ranges
+
+    scan = _scan([0.0, 12.993, 0.5, math.inf])
+    out = blank_body_returns(scan, 0.0, 90.0, 0.0)
+    assert list(out.ranges) == [math.inf, math.inf, 0.5, math.inf]
+    assert _valid_scan_ranges(out, 0.05)
+    assert not _valid_scan_ranges(blank_body_returns(_scan([0.0] * 12), 0.0, 90.0, 0.0), 0.05)
+
+
 def test_the_scan_still_passes_the_supervisors_validity_check():
     from lekiwi_rmf.safety_supervisor import _valid_scan_ranges
 

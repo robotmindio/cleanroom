@@ -56,6 +56,7 @@ def test_production_requires_only_inputs_the_shipped_robot_publishes():
         assert parameters[name] is False, name
     ekf = yaml.safe_load((root / "config" / "ekf.yaml").read_text(encoding="utf-8"))
     assert not any(key.startswith("imu") for key in ekf["ekf_filter_node"]["ros__parameters"])
+    assert parameters["sensor_timeout"] < parameters["depth_timeout"]
 
 
 def test_production_requires_arm_workspace_gate_but_simulation_profile_does_not():
@@ -332,11 +333,11 @@ def test_physical_acceptance_requires_measured_all_direction_and_fault_results(t
             },
         }},
     }), encoding="utf-8")
-    path.write_text(yaml.safe_dump({"schema_version": 3, "validated": False}), encoding="utf-8")
+    path.write_text(yaml.safe_dump({"schema_version": 4, "validated": False}), encoding="utf-8")
     assert not validate_acceptance_file(path)[0]
 
     path.write_text(yaml.safe_dump({
-        "schema_version": 3,
+        "schema_version": 4,
         "validated": True,
         "operating_scope": {
             "mode": "attended_autonomous_base", "operator_at_motor_power_stop": True,
@@ -372,8 +373,8 @@ def test_physical_acceptance_requires_measured_all_direction_and_fault_results(t
             "scan_disconnect": True, "depth_disconnect": True, "imu_disconnect": True,
             "battery_low_or_disconnect": True, "motor_diagnostic_fault": True,
             "bumper": True,
-            "estop_independent_of_ros": True, "host_restart_stays_disarmed": True,
-            "ros_restart_stays_disarmed": True,
+            "estop_independent_of_ros": True, "host_restart_stops_then_gated_rearm": True,
+            "ros_restart_stops_then_gated_rearm": True,
             "telemetry_loss": True, "telemetry_replay_or_duplicate": True,
             "zmq_unauthorized_client_rejected": True,
             "dds_control_plane_isolated_or_authenticated": True,
@@ -393,6 +394,11 @@ def test_physical_acceptance_requires_measured_all_direction_and_fault_results(t
     assert validate_acceptance_file(path, nav2_path, expected_stow)[0]
 
     acceptance = yaml.safe_load(path.read_text(encoding="utf-8"))
+    legacy = yaml.safe_load(path.read_text(encoding="utf-8"))
+    legacy["fault_tests"]["host_restart_stays_disarmed"] = True
+    del legacy["fault_tests"]["host_restart_stops_then_gated_rearm"]
+    path.write_text(yaml.safe_dump(legacy), encoding="utf-8")
+    assert not validate_acceptance_file(path, nav2_path, expected_stow)[0]
     acceptance["installed_hardware"] = {
         "bumper": False, "imu": False, "battery_monitor": False,
     }
@@ -438,7 +444,7 @@ def test_physical_acceptance_requires_measured_all_direction_and_fault_results(t
 def test_physical_acceptance_rejects_self_selected_weak_limits(tmp_path):
     path = tmp_path / "acceptance.yaml"
     template = {
-        "schema_version": 3,
+        "schema_version": 4,
         "validated": True,
         "operating_scope": {
             "mode": "attended_autonomous_base", "operator_at_motor_power_stop": True,
@@ -468,13 +474,16 @@ def test_physical_acceptance_rejects_self_selected_weak_limits(tmp_path):
 
 def test_live_acceptance_requirement_is_base_only():
     rclpy = pytest.importorskip("rclpy")
-    rclpy.init()
+    production = Path(__file__).parents[1] / "config" / "safety_production.yaml"
+    rclpy.init(args=["--ros-args", "--params-file", str(production)])
     node = None
     try:
         node = SafetySupervisor()
         assert node._machine.requirements["acceptance"] == Requirement(
             2**62, base=True, arm=False
         )
+        assert node._machine.requirements["scan"].max_age_ns == 500_000_000
+        assert node._machine.requirements["depth"].max_age_ns == 1_000_000_000
     finally:
         if node is not None:
             node.destroy_node()
