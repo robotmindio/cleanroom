@@ -767,6 +767,7 @@ class SafetySupervisor(Node):
             latch_faults=self._strict,
             driver_state_required=require_driver_state,
         )
+        self._last_arm_permitted: bool | None = None
         if bool(self.get_parameter("require_acceptance").value):
             requirements["acceptance"] = Requirement(2**62, base=True, arm=False)
             healthy, detail = validate_acceptance_file(
@@ -973,6 +974,12 @@ class SafetySupervisor(Node):
         decision = permit_unless_strict(
             self._machine.decision(self._now()), self._strict, self._machine.driver_state
         )
+        if self._last_arm_permitted is True and not decision.arm_permitted:
+            self.get_logger().warn(
+                f"Arm permission withdrawn: state={decision.state.value}; "
+                f"faults={'; '.join(decision.faults) or 'none'}"
+            )
+        self._last_arm_permitted = decision.arm_permitted
         state = String()
         state.data = decision.state.value
         base = Bool()

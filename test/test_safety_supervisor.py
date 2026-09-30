@@ -758,7 +758,7 @@ def test_non_strict_permissions_never_override_an_estop():
     assert not domestic.base_permitted and not domestic.arm_permitted
 
 
-def test_strict_enforcement_is_fixed_when_the_supervisor_starts():
+def test_strict_enforcement_is_fixed_when_the_supervisor_starts(monkeypatch):
     rclpy = pytest.importorskip("rclpy")
     from rclpy.parameter import Parameter
     from lekiwi_rmf.safety_supervisor import SafetySupervisor
@@ -774,8 +774,12 @@ def test_strict_enforcement_is_fixed_when_the_supervisor_starts():
         node.set_parameters([Parameter("strict", value=False)])
         published = []
         node._base_pub = types.SimpleNamespace(publish=published.append)
+        warnings = []
+        node._last_arm_permitted = True
+        monkeypatch.setattr(node, "get_logger", lambda: types.SimpleNamespace(warn=warnings.append))
         node._publish()
         assert published[-1].data is False  # nothing has reported: strict denies
+        assert warnings and "Arm permission withdrawn" in warnings[-1]
     finally:
         if node is not None:
             node.destroy_node()
