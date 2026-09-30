@@ -172,6 +172,9 @@ stack_env=/etc/default/lekiwi-stack
 printf -v stack_config '# Written by scripts/install-compute-services.sh.\nLEKIWI_STACK_ARGS=%s\n' "$STACK_ARGS"
 install_unit_config "$stack_env" lekiwi-stack.service "$stack_config"
 
+log "Disabling Wi-Fi power saving on the telemetry receiver"
+as_root "$PROJECT_ROOT/scripts/install-wifi-powersave.sh"
+
 log "Reloading systemd and enabling lekiwi-stack.service"
 as_root systemctl daemon-reload
 # Restart first: try-restart skips a stopped stack, which enable --now then starts
