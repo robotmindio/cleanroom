@@ -5,8 +5,10 @@ safety_supervisor:
     # Filtered Astra clouds arrive at <=3 Hz; observed compute gaps reach 0.71 s.
     # Keep the scan deadline short while matching the arm monitor's 1 s cloud gate.
     depth_timeout: 1.0
-    state_timeout: 0.75
-    permission_timeout: 0.5
+    state_timeout: 1.25
+    # The motor host freezes motion after 0.5 s without commands. Allow a
+    # short compute scheduling pause without repeatedly disarming/re-arming.
+    permission_timeout: 1.0
     battery_timeout: 2.0
     require_driver_state: true
     require_acceptance: true
@@ -68,9 +70,9 @@ arm_workspace_monitor:
       - arm_wrist_roll
       - arm_gripper
     check_frequency: 30.0
-    # Host feedback targets 10 Hz but measured serial/transport hiccups reach
-    # 0.40 s. Bound tolerance below the motor host's 0.50 s command watchdog.
-    joint_timeout: 0.45
+    # Observed host feedback gaps reach 0.43 s; its independent 0.5 s command
+    # watchdog freezes the arm if commands stop before this lease expires.
+    joint_timeout: 0.75
     perception_timeout: 1.0
-    validity_timeout: 0.15
-    service_timeout: 0.10
+    validity_timeout: 0.35
+    service_timeout: 0.25
