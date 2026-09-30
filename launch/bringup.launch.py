@@ -828,7 +828,7 @@ def generate_launch_description():
                     "initial_y": 0.0,
                     "xy_velocity_scale": ParameterValue(xy_velocity_scale, value_type=float),
                     "yaw_velocity_scale": ParameterValue(yaw_velocity_scale, value_type=float),
-                    "permission_timeout": 1.0,
+                    "permission_timeout": 0.5,
                     # The driver still requires current supervisor permission
                     # and fresh host telemetry before energizing servos. Without
                     # disarm_on_failure it arms at startup regardless; with it,
@@ -894,7 +894,7 @@ def generate_launch_description():
                 package="lekiwi_rmf",
                 executable="cmd_vel_mux",
                 name="cmd_vel_mux",
-                parameters=[{"permission_timeout": 1.0}],
+                parameters=[{"permission_timeout": 0.5}],
                 output="screen",
             ),
             IncludeLaunchDescription(
