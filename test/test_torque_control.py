@@ -684,6 +684,10 @@ def test_real_host_local_goal_holds_through_command_silence(monkeypatch, tmp_pat
     loop.step()
     assert loop.arm_executor.status["state"] == "running"
     assert loop.arm_executor.status["elapsed"] == elapsed
+    robot.get_observation = lambda: pytest.fail("state query must not read the motor bus")
+    command, reply = _request(loop.control, socket, robot, {"command": "state"})
+    assert command == "state" and reply["ok"]
+    assert reply["trajectory"] == loop.arm_executor.status
 
 
 def test_host_keeps_command_loop_fast_and_limits_observation_bandwidth(monkeypatch, tmp_path):

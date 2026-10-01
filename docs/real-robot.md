@@ -303,6 +303,10 @@ the retained goal without replaying elapsed time. Explicit cancellation, motor
 faults, and a host restart still invalidate the goal. MoveIt wall-clock duration
 monitoring is disabled in real mode because the Pi owns the settling deadline.
 Planning, collision checks, SLAM and Nav2 continue to run on compute.
+The observation stream on port 5556 has one consumer: the driver. A second PULL
+client takes some of its samples. Read-only diagnostics should query `state` on
+the authenticated port 5557 instead; that reply includes the retained trajectory
+status without another motor-bus read.
 
 ```bash
 "$HOME/lekiwi_ws/.venv-lerobot/bin/python" scripts/host-health-check.py \

@@ -308,7 +308,12 @@ class TorqueControlServer:
                 self.arm_executor.hold = {f"{name}.pos": measured[f"{name}.pos"] for name in ARM_JOINTS}
             elif command != "state":
                 raise ValueError("command must be enable, disable, or state")
-            self.socket.send_json({"ok": True, "torque_enabled": self.torque_enabled})
+            response = {"ok": True, "torque_enabled": self.torque_enabled}
+            if command == "state" and hasattr(self, "arm_executor"):
+                # Read-only observers must use REP. A second telemetry PULL
+                # steals samples from the driver's point-to-point PUSH stream.
+                response["trajectory"] = self.arm_executor.status
+            self.socket.send_json(response)
             return command
         except Exception as error:
             logging.exception("Torque-control request failed")
