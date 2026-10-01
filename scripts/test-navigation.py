@@ -9,6 +9,7 @@ import math
 import os
 from pathlib import Path
 import signal
+import shlex
 import subprocess
 import time
 
@@ -27,6 +28,18 @@ from tf2_ros import Buffer, TransformListener
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / '.benchmarks/navigation-test'
+
+
+def installed_stack_arguments(path=Path('/etc/default/lekiwi-stack')):
+    for line in path.read_text().splitlines():
+        if line.startswith('LEKIWI_STACK_ARGS='):
+            args = shlex.split(line.partition('=')[2])
+            # systemd EnvironmentFile permits an unquoted value with spaces.
+            if len(args)==1:args = shlex.split(args[0])
+            if not args or any(':=' not in arg for arg in args):
+                raise ValueError('invalid installed LEKIWI_STACK_ARGS')
+            return args
+    raise ValueError('installed LEKIWI_STACK_ARGS is missing')
 
 
 def yaw(q):
@@ -178,11 +191,12 @@ def main():
     stack = None
     node = None
     error = None
+    arguments = installed_stack_arguments()
     was_active = subprocess.run(['systemctl','is-active','--quiet','lekiwi-stack.service']).returncode==0
     subprocess.run(['sudo','-n','/usr/bin/systemctl','stop','lekiwi-stack.service'],check=True)
     try:
         with (OUTPUT/'stack.log').open('w') as log:
-            stack = subprocess.Popen([str(ROOT/'scripts/ros-start.sh'), 'start_moveit:=true',
+            stack = subprocess.Popen([str(ROOT/'scripts/ros-start.sh'), *arguments,
                 'bounded_base_test:=true'], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
                 env={**os.environ,'LEKIWI_RUNTIME_DIR':str(OUTPUT/'runtime')}, start_new_session=True)
             rclpy.init()
