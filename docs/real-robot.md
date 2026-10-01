@@ -295,6 +295,15 @@ bind all interfaces by default (see [Network exposure](../README.md#network-secu
 must be reachable from the ROS computer only; do not expose them to an untrusted
 network. Check the repository health handshake on the Pi before starting ROS:
 
+In real mode, MoveIt uploads each complete arm trajectory to the existing motor
+host on the Pi. That host interpolates targets and checks path and final-position
+tolerances against its local servo readings. Missing fresh compute permission
+pauses its execution clock and holds a fixed measured pose; reconnecting resumes
+the retained goal without replaying elapsed time. Explicit cancellation, motor
+faults, and a host restart still invalidate the goal. MoveIt wall-clock duration
+monitoring is disabled in real mode because the Pi owns the settling deadline.
+Planning, collision checks, SLAM and Nav2 continue to run on compute.
+
 ```bash
 "$HOME/lekiwi_ws/.venv-lerobot/bin/python" scripts/host-health-check.py \
   --host 127.0.0.1

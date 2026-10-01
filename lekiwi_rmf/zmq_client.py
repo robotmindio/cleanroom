@@ -12,6 +12,7 @@ import time
 
 from lekiwi_rmf.odometry import TelemetrySequenceTracker, accept_validated_telemetry
 from lekiwi_rmf.motor_health import MOTOR_HEALTH_KEY, parse_motor_health
+from lekiwi_rmf.local_arm_executor import STATUS_KEY, LEASE_KEYS, validate_status
 from lekiwi_rmf.zmq_security import (
     CurveClientCredentials,
     configure_link_liveness,
@@ -56,6 +57,7 @@ class LeKiwiZmqClient:
         self.observation_session_changed = False
         self.observation_torque_enabled = None
         self.observation_motor_health = None
+        self.arm_trajectory_status = None
         self.telemetry_sequences = TelemetrySequenceTracker()
 
     def connect(self):
@@ -174,6 +176,7 @@ class LeKiwiZmqClient:
                 self.telemetry_sequences, payload, self.state_keys
             )
             motor_health = parse_motor_health(payload.get(MOTOR_HEALTH_KEY))
+            arm_status = validate_status(payload.get(STATUS_KEY))
             state = {key: float(payload[key]) for key in self.state_keys}
         except (TypeError, ValueError, OverflowError):
             return self.last_remote_state
@@ -183,10 +186,11 @@ class LeKiwiZmqClient:
         self.observation_session_changed = accepted.session_changed
         self.observation_torque_enabled = accepted.torque_enabled
         self.observation_motor_health = motor_health
+        self.arm_trajectory_status = arm_status
         self.last_remote_state = state
         return state
 
-    def send_action(self, action):
+    def send_action(self, action, *, arm_goal_id=None, arm_permitted=False):
         if not self.connected:
             raise RuntimeError("LeKiwi client is not connected")
         if not isinstance(action, dict) or set(action) != set(self.state_keys):
@@ -199,6 +203,11 @@ class LeKiwiZmqClient:
             if not math.isfinite(number):
                 raise ValueError(f"action {key!r} is not finite")
             encoded[str(key)] = number
+        if arm_goal_id is not None:
+            if type(arm_goal_id) is not int or not 0 < arm_goal_id < 2**48 or type(arm_permitted) is not bool:
+                raise ValueError("invalid arm trajectory lease")
+            encoded[LEASE_KEYS[0]] = arm_goal_id
+            encoded[LEASE_KEYS[1]] = int(arm_permitted)
         try:
             self.zmq_cmd_socket.send_string(
                 json.dumps(encoded, allow_nan=False), flags=self._zmq.NOBLOCK

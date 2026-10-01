@@ -40,7 +40,7 @@ from std_srvs.srv import Trigger
 from trajectory_msgs.msg import JointTrajectoryPoint
 
 from lekiwi_rmf.arm_trajectory import ARM_JOINTS
-from lekiwi_rmf.fake_host import FakeLeKiwiHost
+from lekiwi_rmf.fake_host import FakeLeKiwiHost, ObservationFault
 
 
 def _identity_calibration() -> tuple[str, tempfile.TemporaryDirectory]:
@@ -88,6 +88,7 @@ def generate_test_description():
         .to_moveit_configs()
     )
     moveit_parameters = moveit_config.to_dict()
+    moveit_parameters.setdefault("trajectory_execution", {})["execution_duration_monitoring"] = False
     move_group = launch_ros.actions.Node(
         package="moveit_ros_move_group",
         executable="move_group",
@@ -102,6 +103,7 @@ def generate_test_description():
         output="screen",
         parameters=[{
             "remote_ip": "127.0.0.1",
+            "local_arm_execution": True,
             "remote_command_port": fake_host.command_endpoint_port,
             "remote_observation_port": fake_host.observation_endpoint_port,
             "torque_control_port": fake_host.torque_endpoint_port,
@@ -357,6 +359,10 @@ class TestMoveItDriverEndToEnd(unittest.TestCase):
             self.trajectory_client.server_is_ready, timeout=15.0
         ))
         self._arm()
+        # Drain torque-off telemetry queued before the arm RPC, as in the
+        # MoveGroup test, then start this cancellation test from a confirmed arm.
+        self._spin_for(0.30)
+        self._arm()
         joint = "arm_shoulder_pan"
         latest = self.joint_states[-1]
         start = latest.position[latest.name.index(joint)]
@@ -372,18 +378,49 @@ class TestMoveItDriverEndToEnd(unittest.TestCase):
         self.assertTrue(self._until(goal_future.done, timeout=5.0))
         handle = goal_future.result()
         self.assertTrue(handle.accepted)
+        result_future = handle.get_result_async()
         self._spin_for(0.25)
         self.assertGreater(len(self.joint_states), before + 2)
+        self.assertFalse(result_future.done(), result_future.result())
 
         cancel_future = handle.cancel_goal_async()
         self.assertTrue(self._until(cancel_future.done, timeout=5.0))
         self.assertTrue(cancel_future.result().goals_canceling)
-        result_future = handle.get_result_async()
         self.assertTrue(self._until(result_future.done, timeout=5.0))
         self.assertEqual(result_future.result().status, GoalStatus.STATUS_CANCELED)
         self.assertTrue(self._until(
             lambda: len(self.joint_states) > before + 5, timeout=3.0
         ))
+
+    def test_local_goal_recovers_after_three_seconds_without_telemetry(self, fake_host):
+        self.assertTrue(self._until(lambda: bool(self.joint_states), timeout=15.0))
+        self.assertTrue(self._until(self.trajectory_client.server_is_ready, timeout=15.0))
+        self._arm()
+        self._spin_for(0.30)
+        self._arm()
+        joint = "arm_shoulder_pan"
+        latest = self.joint_states[-1]
+        start = latest.position[latest.name.index(joint)]
+        goal = FollowJointTrajectory.Goal()
+        goal.trajectory.joint_names = [joint]
+        goal.trajectory.points = [JointTrajectoryPoint(
+            positions=[start + 0.08], time_from_start=Duration(sec=4),
+        )]
+        future = self.trajectory_client.send_goal_async(goal)
+        self.assertTrue(self._until(future.done, timeout=5.0))
+        handle = future.result()
+        self.assertTrue(handle.accepted)
+        result = handle.get_result_async()
+        self.assertTrue(self._until(lambda: fake_host.arm_executor.active, timeout=5.0))
+        fake_host.queue_observation_fault(ObservationFault.DROP, count=150)
+        self._spin_for(2.0)
+        self.assertFalse(result.done(), "telemetry gap aborted the retained local goal")
+        self.assertEqual(fake_host.arm_executor.status["state"], "paused")
+        elapsed = fake_host.arm_executor.status["elapsed"]
+        self._spin_for(0.5)
+        self.assertEqual(fake_host.arm_executor.status["elapsed"], elapsed)
+        self.assertTrue(self._until(result.done, timeout=12.0))
+        self.assertEqual(result.result().status, GoalStatus.STATUS_SUCCEEDED)
 
 
 @launch_testing.post_shutdown_test()

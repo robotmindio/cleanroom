@@ -243,7 +243,7 @@ class _Again(Exception):
 def _host_module(monkeypatch):
     fake_zmq = types.SimpleNamespace(
         Again=_Again, NOBLOCK=1, REP=4, PULL=7, PUSH=8, LINGER=17, CONFLATE=54, SNDHWM=23,
-        HEARTBEAT_IVL=75, HEARTBEAT_TIMEOUT=77,
+        HEARTBEAT_IVL=75, HEARTBEAT_TIMEOUT=77, MAXMSGSIZE=22,
     )
     fake_cv2 = types.SimpleNamespace(IMWRITE_JPEG_QUALITY=1, imencode=lambda *_args: (True, b"jpeg"))
     fake_draccus = types.SimpleNamespace(wrap=lambda: (lambda function: function))
@@ -647,6 +647,43 @@ def test_valid_commands_reach_the_robot_and_refresh_the_watchdog(monkeypatch, tm
     assert robot.actions[0]["x.vel"] == 0.1
     assert loop.watchdog_active is False
     assert "stop_base" not in robot.bus.calls
+
+
+def test_real_host_local_goal_holds_through_command_silence(monkeypatch, tmp_path):
+    from test_local_arm_executor import setup_executor
+
+    host = _host_module(monkeypatch)
+    loop, clock, socket, robot = _loop(host, tmp_path)
+    loop.control.torque_enabled = True
+    _executor, _now, observation, trajectory = setup_executor()
+    robot.get_observation = lambda: dict(observation)
+    command, reply = _request(loop.control, socket, robot, {
+        "command": "trajectory_start", "session": loop.telemetry_session,
+        "trajectory": trajectory,
+    })
+    assert command == "trajectory_start" and reply["ok"]
+    for _ in range(20):
+        clock.now += 0.033
+        loop.host.zmq_cmd_socket.messages.append(_action(**{
+            "_lekiwi_arm_goal": trajectory["id"], "_lekiwi_arm_permission": 1,
+            "x.vel": 0.1, "arm_shoulder_pan.pos": 100.0,
+        }))
+        loop.step()
+        observation.update({key: value for key, value in robot.actions[-1].items() if key.endswith(".pos")})
+    elapsed = loop.arm_executor.status["elapsed"]
+    clock.now += 12.0
+    loop.step()
+    assert loop.arm_executor.status["state"] == "paused"
+    assert loop.arm_executor.status["elapsed"] == elapsed
+    assert robot.actions[-1]["x.vel"] == 0
+    assert robot.actions[-1]["arm_shoulder_pan.pos"] != 100.0
+    clock.now += 0.033
+    loop.host.zmq_cmd_socket.messages.append(_action(**{
+        "_lekiwi_arm_goal": trajectory["id"], "_lekiwi_arm_permission": 1,
+    }))
+    loop.step()
+    assert loop.arm_executor.status["state"] == "running"
+    assert loop.arm_executor.status["elapsed"] == elapsed
 
 
 def test_host_keeps_command_loop_fast_and_limits_observation_bandwidth(monkeypatch, tmp_path):

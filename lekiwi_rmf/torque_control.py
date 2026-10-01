@@ -15,7 +15,7 @@ class TorqueControlError(RuntimeError):
     """The host did not confirm the requested physical torque state."""
 
 
-def validate_action_payload(message: str, expected_keys) -> dict[str, float]:
+def validate_action_payload(message: str, expected_keys, optional_keys=()) -> dict[str, float]:
     """Decode one complete finite action without JSON duplicate-key ambiguity."""
     def object_from_pairs(pairs):
         result = {}
@@ -35,7 +35,8 @@ def validate_action_payload(message: str, expected_keys) -> dict[str, float]:
         )
     except (TypeError, ValueError, json.JSONDecodeError) as error:
         raise ValueError("action must be valid strict JSON") from error
-    if not isinstance(decoded, dict) or set(decoded) != set(expected_keys):
+    if (not isinstance(decoded, dict) or not set(expected_keys) <= set(decoded)
+            or set(decoded) - set(expected_keys) - set(optional_keys)):
         raise ValueError("action must contain exactly every configured motor command")
     if any(isinstance(value, bool) for value in decoded.values()):
         raise ValueError("action values must be finite numbers")
@@ -176,3 +177,17 @@ class TorqueControlClient:
             raise TorqueControlError(f"torque host rejected the request: {detail}")
         if response.get("torque_enabled") is not enabled:
             raise TorqueControlError("torque host confirmed an unexpected torque state")
+
+    def trajectory_request(self, command, **fields):
+        """Goal ids make uploads and cancellations safe to retry after a lost reply."""
+        for attempt in range(self.ATTEMPTS):
+            try:
+                response = self._request({"command": command, **fields})
+                break
+            except Exception:
+                if attempt + 1 == self.ATTEMPTS:
+                    raise
+        if not isinstance(response, dict) or response.get("ok") is not True:
+            detail = response.get("error", "invalid reply") if isinstance(response, dict) else "invalid reply"
+            raise TorqueControlError(f"motor host rejected trajectory request: {detail}")
+        return response

@@ -4,6 +4,7 @@ import os
 import signal
 import threading
 import time
+import uuid
 
 import rclpy
 from control_msgs.action import FollowJointTrajectory
@@ -72,6 +73,7 @@ class LeKiwiDriver(Node):
             "gripper_trajectory_tolerance", 0.005
         ).value
         self.trajectory_timeout = self.declare_parameter("trajectory_timeout", 5.0).value
+        self.local_arm_execution = bool(self.declare_parameter("local_arm_execution", False).value)
         # This is velocity-integrated odometry, not an encoder/SLAM pose
         # measurement. Never publish the ROS all-zero covariance (perfect
         # certainty); these conservative values let consumers fuse it honestly.
@@ -313,7 +315,7 @@ class LeKiwiDriver(Node):
         )
 
     def _hold_feedback_gap(self):
-        """Pause an arm goal through a bounded motor-telemetry gap.
+        """Retain an arm goal during motor-telemetry gaps.
 
         No trajectory setpoint is sent without fresh feedback and permission.
         The Pi freezes the arm if commands stop. A collision or perception fault
@@ -326,16 +328,18 @@ class LeKiwiDriver(Node):
             started = self._feedback_gap_started_at
             if started is None:
                 last = self._last_fresh_monotonic
-                if last is None or not 0.3 <= now - last < self.link_timeout:
+                if last is None or now - last < 0.3:
+                    return False
+                if not self.local_arm_execution and now - last >= self.link_timeout:
                     return False
                 started = last
                 self._feedback_gap_started_at = started
-            if now - started >= self.link_timeout:
+            if not self.local_arm_execution and now - started >= self.link_timeout:
                 return False
         with self.trajectory_lock:
             if self.trajectory and self.trajectory.get("paused_at") is None:
                 self.trajectory["paused_at"] = started
-                self.get_logger().warning("Holding arm goal through a brief motor-feedback gap")
+                self.get_logger().warning("Holding arm goal through a motor-feedback gap")
         return True
 
     def enforce_permission_leases(self, now_monotonic_ns=None):
@@ -768,6 +772,10 @@ class LeKiwiDriver(Node):
             "goal_tolerances": goal_tolerances,
             "goal_time_tolerance": goal_time_tolerance,
         }
+        if self.local_arm_execution:
+            trajectory["host_id"] = (uuid.uuid4().int % (2**48 - 1)) + 1
+            trajectory["host_session"] = self.last_observation_token[1]
+            trajectory["host_elapsed"] = 0.0
         waiting_since = time.monotonic()
         while self.armed and not self._arm_permission_is_current() and self._hold_feedback_gap():
             # The plan has not started. Wait for measured joints and the full
@@ -812,6 +820,32 @@ class LeKiwiDriver(Node):
             self.command = Twist()
             self.command_stamp = self.get_clock().now()
 
+        if self.local_arm_execution:
+            try:
+                # Serialize uploads with torque transitions. A preempted callback
+                # must never upload its older goal after the replacement's upload.
+                with self.torque_lock:
+                    with self.trajectory_lock:
+                        current = self.trajectory is trajectory
+                    if current:
+                        response = self.torque.trajectory_request(
+                            "trajectory_start", session=trajectory["host_session"], trajectory={
+                                "id": trajectory["host_id"], "names": list(names), "points": requested_points,
+                                "zeros": self.arm_zero_positions, "directions": self.arm_directions,
+                                "path": path_tolerances, "goal": goal_tolerances,
+                                "settling": goal_time_tolerance, "delay": max(0.0, trajectory["start"] - time.monotonic()),
+                            },
+                        )
+                        if response.get("trajectory", {}).get("id") != trajectory["host_id"]:
+                            raise RuntimeError("motor host did not acknowledge this arm goal")
+            except Exception as error:
+                with self.trajectory_lock:
+                    if self.trajectory is trajectory:
+                        trajectory["outcome"] = f"local arm upload failed: {error}"
+                        trajectory["result_code"] = FollowJointTrajectory.Result.INVALID_GOAL
+                        trajectory["done"].set()
+                        self.trajectory = None
+
         while not trajectory["done"].is_set():
             if goal_handle.is_cancel_requested:
                 with self.trajectory_lock:
@@ -820,15 +854,37 @@ class LeKiwiDriver(Node):
                     trajectory["outcome"] = "canceled"
                     trajectory["done"].set()
                 goal_handle.canceled()
+                if self.local_arm_execution:
+                    self._cancel_host_trajectory(trajectory)
                 return FollowJointTrajectory.Result(error_code=FollowJointTrajectory.Result.SUCCESSFUL)
+            if self.local_arm_execution:
+                status = getattr(self.robot, "arm_trajectory_status", None)
+                if status is not None and status["id"] == trajectory["host_id"]:
+                    trajectory["host_elapsed"] = status["elapsed"]
+                    if status["state"] in {"succeeded", "aborted", "canceled"}:
+                        with self.trajectory_lock:
+                            if self.trajectory is trajectory and not trajectory["done"].is_set():
+                                trajectory["outcome"] = "succeeded" if status["state"] == "succeeded" else status["detail"]
+                                trajectory["result_code"] = status["code"]
+                                trajectory["done"].set()
+                                self.trajectory = None
             self.publish_trajectory_feedback(goal_handle, trajectory)
             # Keep control-loop timers, safety updates, and action cancellation
             # serviceable while this goal waits for measured servo feedback.
             await self._yield_for_control(0.05)
 
         if trajectory.get("outcome") == "succeeded":
+            if self.local_arm_execution:
+                final = trajectory["points"][-1].positions
+                with self.state_lock:
+                    if self.arm_hold_action is not None:
+                        self.arm_hold_action.update({f"{name}.pos": value for name, value in action_positions(
+                            final.keys(), final.values(), self.arm_zero_positions, self.arm_directions,
+                        ).items()})
             goal_handle.succeed()
             return FollowJointTrajectory.Result(error_code=FollowJointTrajectory.Result.SUCCESSFUL)
+        if self.local_arm_execution:
+            self._cancel_host_trajectory(trajectory)
         goal_handle.abort()
         return FollowJointTrajectory.Result(
             error_code=trajectory.get(
@@ -836,6 +892,16 @@ class LeKiwiDriver(Node):
             ),
             error_string=trajectory.get("outcome", "trajectory preempted"),
         )
+
+    def _cancel_host_trajectory(self, trajectory):
+        try:
+            self.torque.trajectory_request(
+                "trajectory_cancel", id=trajectory["host_id"], session=trajectory["host_session"],
+            )
+        except Exception as error:
+            # The bounded Pi lease has already stopped advancement; report the
+            # failed cancellation rather than assuming its retained goal is gone.
+            self.get_logger().error(f"Local arm cancellation was not confirmed: {error}")
 
     def requested_tolerances(self, goal, names):
         if goal.component_path_tolerance or goal.component_goal_tolerance:
@@ -853,6 +919,7 @@ class LeKiwiDriver(Node):
 
     def publish_trajectory_feedback(self, goal_handle, trajectory):
         elapsed = max(0.0, trajectory.get("paused_at", time.monotonic()) - trajectory["start"])
+        elapsed = trajectory.get("host_elapsed", elapsed)
         with self.trajectory_lock:
             actual = {
                 name: self.arm_positions[name] for name in trajectory["names"]
@@ -1026,6 +1093,14 @@ class LeKiwiDriver(Node):
         self.get_logger().error(reason)
         self.link_lost = True
         self.odom_samples.reset()
+        if (self.local_arm_execution and not self.disarm_on_failure
+                and reason.startswith("No fresh LeKiwi telemetry")):
+            # The Pi's lease expires and freezes motion independently. Preserve
+            # its goal through transport silence; invalid telemetry, motor faults,
+            # explicit disarm, and host-session changes still cancel normally.
+            self._hold_feedback_gap()
+            self.publish_safety("LINK_LOST")
+            return
         self.set_disarmed("LINK_LOST", defer_cut=True)
 
     def update(self):
@@ -1088,7 +1163,7 @@ class LeKiwiDriver(Node):
             self.odom_samples.reset()
             self.link_lost = False
             with self.state_lock:
-                recovered_state = "TORQUE_FAULT" if self.torque_fault else "DISARMED"
+                recovered_state = "TORQUE_FAULT" if self.torque_fault else "ARMED" if self.armed else "DISARMED"
             self.publish_safety(recovered_state)
             self.get_logger().warn(
                 "LeKiwi telemetry recovered; inspect robot, then call safety/arm"
@@ -1251,7 +1326,9 @@ class LeKiwiDriver(Node):
         if arm_permitted:
             with self.state_lock:
                 self._feedback_gap_started_at = None
-        trajectory_ran = self._apply_trajectory(action, measured_hold) if arm_permitted else False
+        trajectory_ran = bool(self.trajectory) if self.local_arm_execution else (
+            self._apply_trajectory(action, measured_hold) if arm_permitted else False
+        )
         if trajectory_ran:
             cmd = Twist()
         # The scales divide here and multiply below: LeRobot's kinematics use a nominal
@@ -1293,7 +1370,12 @@ class LeKiwiDriver(Node):
                 action.update(measured_hold)
             if not base_permitted:
                 action["x.vel"] = action["y.vel"] = action["theta.vel"] = 0.0
-            self.robot.send_action(action)
+            with self.trajectory_lock:
+                remote_goal = self.trajectory.get("host_id") if self.trajectory else None
+            if self.local_arm_execution and remote_goal is not None:
+                self.robot.send_action(action, arm_goal_id=remote_goal, arm_permitted=arm_permitted)
+            else:
+                self.robot.send_action(action)
             if trajectory_ran or not arm_permitted:
                 with self.state_lock:
                     if self.armed:

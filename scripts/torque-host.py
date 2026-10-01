@@ -29,6 +29,7 @@ from lekiwi_rmf.torque_control import (
     torque_readback_matches, validate_action_payload, validated_bind_address,
 )
 from lekiwi_rmf.arm_trajectory import ARM_JOINTS
+from lekiwi_rmf.local_arm_executor import LocalArmExecutor, STATUS_KEY, LEASE_KEYS
 from lekiwi_rmf.zmq_security import CurveServerSecurity, configure_link_liveness
 from lekiwi_rmf.odometry import (
     TELEMETRY_MONOTONIC_NS_KEY, TELEMETRY_PROTOCOL_KEY,
@@ -206,6 +207,7 @@ class TorqueControlServer:
             raise ValueError("safety.port_zmq must be between 1 and 65535")
         self.socket = context.socket(zmq.REP)
         self.socket.setsockopt(zmq.LINGER, 0)
+        self.socket.setsockopt(zmq.MAXMSGSIZE, 2 * 1024 * 1024)
         security.configure_socket(self.socket)
         self.socket.bind(f"tcp://{validated_bind_address(config.bind_address)}:{config.port_zmq}")
         self.latch = latch
@@ -282,6 +284,28 @@ class TorqueControlServer:
                 self._enable(robot)
             elif command == "disable":
                 self._disable(robot)
+                if hasattr(self, "arm_executor"):
+                    self.arm_executor.cancel()
+                    self.arm_executor.hold = {}
+            elif command == "trajectory_start":
+                if not self.torque_enabled or request.get("session") != self.host_session:
+                    raise ValueError("trajectory requires enabled torque and the current host session")
+                # Validation can take more than one loop tick. Stop the base and
+                # latch the measured arm before spending that time on the request.
+                self._hold_present_arm_position(robot)
+                observation = robot.get_observation()
+                status = self.arm_executor.start(request["trajectory"], observation)
+                self.socket.send_json({"ok": True, "trajectory": status})
+                return command
+            elif command == "trajectory_cancel":
+                if request.get("session") != self.host_session:
+                    raise ValueError("trajectory cancellation belongs to another host session")
+                if self.arm_executor.status is None or request.get("id") != self.arm_executor.status["id"]:
+                    raise ValueError("trajectory cancellation belongs to another arm goal")
+                self.arm_executor.cancel(request.get("id"))
+                self._hold_present_arm_position(robot)
+                measured = robot.get_observation()
+                self.arm_executor.hold = {f"{name}.pos": measured[f"{name}.pos"] for name in ARM_JOINTS}
             elif command != "state":
                 raise ValueError("command must be enable, disable, or state")
             self.socket.send_json({"ok": True, "torque_enabled": self.torque_enabled})
@@ -458,6 +482,11 @@ class HostLoop:
         self.watchdog_active = False
         self.next_watchdog_attempt = 0.0
         self.telemetry_session = uuid.uuid4().hex
+        self.arm_executor = LocalArmExecutor(clock, host.watchdog_timeout_ms / 1000)
+        control.arm_executor = self.arm_executor
+        control.host_session = self.telemetry_session
+        self.local_observation = None
+        self.local_feedback_at = None
         self.telemetry_sequence = 0
         self.next_observation_at = None
         self._last_command_error = None
@@ -476,6 +505,10 @@ class HostLoop:
         if self.next_observation_at is None or now >= self.next_observation_at:
             self.publish_observation()
             self.next_observation_at = now + OBSERVATION_PERIOD_S
+        if self.control.torque_enabled and self.arm_executor.active:
+            action = self.arm_executor.step(self.local_observation, self.local_feedback_at)
+            if action is not None:
+                self.robot.send_action(action)
         finished = time.perf_counter()
         gap = 0.0 if self._last_step_started is None else started - self._last_step_started
         self._last_step_started = started
@@ -491,10 +524,22 @@ class HostLoop:
     def receive_command(self) -> None:
         try:
             message = self.host.zmq_cmd_socket.recv_string(zmq.NOBLOCK)
-            action = validate_action_payload(message, ACTION_KEYS)
+            action = validate_action_payload(message, ACTION_KEYS, LEASE_KEYS)
             if not self.control.torque_enabled:
                 raise RuntimeError("servo torque is disabled")
-            self.robot.send_action(action)
+            goal_id = action.pop(LEASE_KEYS[0], None)
+            permission = action.pop(LEASE_KEYS[1], None)
+            if (goal_id is None) != (permission is None) or (
+                goal_id is not None and (not goal_id.is_integer() or not 0 < goal_id < 2**48 or permission not in (0, 1))
+            ):
+                raise ValueError("invalid arm trajectory lease")
+            if goal_id is not None:
+                self.arm_executor.renew(int(goal_id), bool(permission))
+            # While a local goal owns the arm, legacy streamed setpoints cannot
+            # overwrite it. The retained final target also survives reply latency.
+            if not self.arm_executor.active:
+                action.update(self.arm_executor.hold)
+                self.robot.send_action(action)
         except zmq.Again:
             # Between commands is the normal state; silence past the watchdog
             # timeout is handled by enforce_watchdog().
@@ -533,6 +578,11 @@ class HostLoop:
         if not self.control.torque_enabled:
             self.watchdog_active = True
             return
+        if self.arm_executor.status is not None:
+            self.arm_executor.renew(self.arm_executor.status["id"], False)
+        if self.disarm_on_failure:
+            self.arm_executor.cancel()
+            self.arm_executor.hold = {}
         self.next_watchdog_attempt = now + 0.25
         try:
             outcome = react_to_command_silence(
@@ -554,6 +604,8 @@ class HostLoop:
 
     def publish_observation(self) -> None:
         observation = self.robot.get_observation()
+        self.local_observation = dict(observation)
+        self.local_feedback_at = self.clock()
         sample_monotonic_ns = time.monotonic_ns()
         motor_health = self.health.collect(self.robot, self.control.torque_enabled)
         camera_keys = list(self.robot.cameras.keys())
@@ -572,6 +624,7 @@ class HostLoop:
             TELEMETRY_MONOTONIC_NS_KEY: sample_monotonic_ns,
             TELEMETRY_TORQUE_ENABLED_KEY: self.control.torque_enabled,
             "_lekiwi_motor_health": motor_health,
+            STATUS_KEY: self.arm_executor.status,
         }
         try:
             self.host.zmq_observation_socket.send_multipart(

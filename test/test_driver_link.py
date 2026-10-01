@@ -69,6 +69,7 @@ def make_node(**overrides):
     node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
     state = {
         "disarm_on_failure": True,
+        "local_arm_execution": False,
         "operator_disarmed": False,
         "auto_arm_pending": False,
         "_next_rearm_at": 0.0,
@@ -1473,6 +1474,23 @@ def test_permission_loss_with_fresh_motor_feedback_cancels_goal(monkeypatch):
     node.on_arm_permission(types.SimpleNamespace(data=False))
     assert canceled == ["arm safety permission withdrawn"]
     assert disarmed == ["DISARMED"]
+
+
+def test_local_goal_survives_telemetry_silence_beyond_link_timeout(monkeypatch):
+    node = make_node(armed=True, local_arm_execution=True, disarm_on_failure=False,
+                     _last_fresh_monotonic=10.0)
+    node.trajectory = {"done": threading.Event()}
+    node.odom_samples = types.SimpleNamespace(reset=lambda: None)
+    node.get_logger = lambda: types.SimpleNamespace(warning=lambda *_: None, error=lambda *_: None)
+    states, disarmed = [], []
+    node.publish_safety = states.append
+    node.set_disarmed = lambda *args, **kwargs: disarmed.append(args)
+    monkeypatch.setattr(driver.time, "monotonic", lambda: 22.0)
+    node.record_link_loss("No fresh LeKiwi telemetry for 12.0s; waiting for recovery")
+    assert node.link_lost and node.armed
+    assert node._hold_feedback_gap()
+    assert not node.trajectory["done"].is_set()
+    assert states == ["LINK_LOST"] and not disarmed
 
 
 def test_goal_timeout_names_the_joint_that_missed_tolerance(monkeypatch):
