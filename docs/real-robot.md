@@ -45,6 +45,12 @@ them.
 
 ## Configuration
 
+Real RGB-plus-scan SLAM accepts samples only with a fresh measured travel stow
+on `/safety/arm_stowed`; its first map must describe the room, not the gripper
+covering the camera. Mapping input pauses during manipulation and resumes at
+stow. Raw range and camera safety topics continue throughout. With an empty
+database, RTAB-Map/Nav2 startup waits for this posture; the arm remains usable.
+
 Copy `.env.example` to `.env` in the repository root. Scripts read exactly three
 keys from it: `LEKIWI_ROBOT_HOST` (the robot computer's hostname or IPv4 address,
 used by `workstation-up.sh`, `ros-start.sh`, `deploy-split.sh` and the compute

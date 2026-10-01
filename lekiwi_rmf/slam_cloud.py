@@ -12,6 +12,7 @@ the lidar plane misses: table tops, chair seats, low clutter.
 from __future__ import annotations
 
 from typing import Optional
+import time
 
 import numpy as np
 import rclpy
@@ -22,8 +23,9 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from rclpy.time import Time
 from sensor_msgs.msg import LaserScan, PointCloud2
 from sensor_msgs_py import point_cloud2
-from std_msgs.msg import Header
+from std_msgs.msg import Bool, Header
 from tf2_ros import Buffer, TransformException, TransformListener
+from lekiwi_rmf.motion_guards import lease_is_fresh
 
 
 BASE_FRAME = "base_footprint"
@@ -101,9 +103,17 @@ class SlamCloud(Node):
         self._tf_listener = TransformListener(self._tf, self)
         self._astra: Optional[PointCloud2] = None
         self._last_scan: Optional[Time] = None
+        self._require_stow = bool(self.declare_parameter("require_arm_stowed", False).value)
+        self._arm_stowed = False
+        self._stow_received_at = None
+        self.create_subscription(Bool, "/safety/arm_stowed", self._on_stow, 1)
         self._publisher = self.create_publisher(PointCloud2, "/slam/cloud", CLOUD_QOS)
         self.create_subscription(LaserScan, "/scan", self._on_scan, qos_profile_sensor_data)
         self.create_subscription(PointCloud2, "/camera/depth/points", self._on_astra, qos_profile_sensor_data)
+
+    def _on_stow(self, message: Bool) -> None:
+        self._arm_stowed = bool(message.data)
+        self._stow_received_at = time.monotonic_ns()
 
     def _astra_at(self, stamp: Time) -> np.ndarray:
         """Latest Astra points moved to where the base was at ``stamp``."""
@@ -128,6 +138,12 @@ class SlamCloud(Node):
         return obstacle_band(transform_points(cloud_points(astra), transform))
 
     def _publish(self, stamp: Time, points: np.ndarray) -> None:
+        if self._require_stow and not (
+            self._arm_stowed and lease_is_fresh(self._stow_received_at, 500_000_000)
+        ):
+            # The only saved visual reference once contained the robot's own
+            # gripper. Never feed RGB+scan mapping during arm manipulation.
+            return
         if len(points) == 0:
             return
         header = Header(stamp=stamp.to_msg(), frame_id=BASE_FRAME)

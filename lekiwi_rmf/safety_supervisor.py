@@ -818,6 +818,7 @@ class SafetySupervisor(Node):
         self._state_pub = self.create_publisher(String, "safety/supervisor_state", latched)
         self._base_pub = self.create_publisher(Bool, "safety/base_motion_permitted", latched)
         self._arm_pub = self.create_publisher(Bool, "safety/arm_motion_permitted", latched)
+        self._stow_pub = self.create_publisher(Bool, "safety/arm_stowed", latched)
         self._diagnostics_pub = self.create_publisher(DiagnosticArray, "/diagnostics", 10)
         self.create_subscription(String, "safety/driver_state", self._on_driver, latched)
         self.create_subscription(LaserScan, "/scan", self._on_scan, sensor_qos)
@@ -989,6 +990,7 @@ class SafetySupervisor(Node):
         self._state_pub.publish(state)
         self._base_pub.publish(base)
         self._arm_pub.publish(arm)
+        self._stow_pub.publish(Bool(data=decision.arm_stowed))
 
         status = DiagnosticStatus()
         status.name = "lekiwi/safety_supervisor"
@@ -998,6 +1000,7 @@ class SafetySupervisor(Node):
         status.values = [
             KeyValue(key="base_motion_permitted", value=str(decision.base_permitted).lower()),
             KeyValue(key="arm_motion_permitted", value=str(decision.arm_permitted).lower()),
+            KeyValue(key="arm_stowed", value=str(decision.arm_stowed).lower()),
             KeyValue(key="faults", value="; ".join(decision.faults)),
             KeyValue(key="latched_faults", value="; ".join(decision.latched_faults)),
         ]

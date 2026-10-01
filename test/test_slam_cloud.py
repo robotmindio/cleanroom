@@ -1,4 +1,5 @@
 import math
+import types
 
 import numpy as np
 from geometry_msgs.msg import TransformStamped
@@ -8,7 +9,7 @@ from rclpy.time import Time
 from sensor_msgs.msg import LaserScan
 
 from lekiwi_rmf.slam_cloud import (
-    CLOUD_QOS, clamp_to_newest, obstacle_band, scan_points, transform_points,
+    CLOUD_QOS, SlamCloud, clamp_to_newest, obstacle_band, scan_points, transform_points,
 )
 
 
@@ -46,3 +47,27 @@ def test_cloud_slightly_newer_than_odometry_uses_the_newest_transform():
     assert clamp_to_newest(Time(seconds=10.19), newest) == Time(seconds=10.000)
     # Odometry that stopped is not papered over.
     assert clamp_to_newest(Time(seconds=10.25), newest) is None
+
+
+def test_mapping_excludes_nonstowed_and_stale_arm_views(monkeypatch):
+    import lekiwi_rmf.slam_cloud as module
+    monkeypatch.setattr(module.time, "monotonic_ns", lambda: 1_000_000_000)
+    published = []
+    node = types.SimpleNamespace(
+        _require_stow=True, _arm_stowed=False, _stow_received_at=1_000_000_000,
+        _publisher=types.SimpleNamespace(publish=published.append),
+    )
+    points = np.array([[1.0, 0.0, 0.5]])
+    SlamCloud._publish(node, Time(seconds=1), points)
+    assert not published
+    node._arm_stowed = True
+    node._stow_received_at = 400_000_000
+    SlamCloud._publish(node, Time(seconds=1), points)
+    assert not published
+    node._stow_received_at = 1_000_000_000
+    SlamCloud._publish(node, Time(seconds=1), points)
+    assert len(published) == 1
+    node._require_stow = False  # Simulation/lidar-only operation keeps its input.
+    node._arm_stowed = False
+    SlamCloud._publish(node, Time(seconds=1), points)
+    assert len(published) == 2
