@@ -100,6 +100,10 @@ def test_rgb_encoding_is_eager_rate_limited_and_keeps_capture_stamp(monkeypatch)
     rclpy.init()
     node = AstraCloudFilter()
     try:
+        from rclpy.qos import ReliabilityPolicy
+        subscriptions = {s.topic_name: s.qos_profile.reliability for s in node.subscriptions}
+        assert subscriptions["/camera/astra/color/image_raw"] == ReliabilityPolicy.RELIABLE
+        assert subscriptions["/camera/astra/depth/image_raw"] == ReliabilityPolicy.BEST_EFFORT
         frames = []
         publisher = SimpleNamespace(publish=frames.append)
         clock = iter([10.0, 10.1, 10.6, 11.0])

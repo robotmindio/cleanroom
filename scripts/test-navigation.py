@@ -22,6 +22,7 @@ from geometry_msgs.msg import Twist
 from diagnostic_msgs.msg import DiagnosticArray
 from nav_msgs.msg import Odometry
 from nav2_msgs.action import NavigateToPose
+from nav2_msgs.srv import ManageLifecycleNodes
 from rtabmap_msgs.msg import Info
 from rtabmap_msgs.srv import GetMap
 from sensor_msgs.msg import Image, LaserScan, PointCloud2
@@ -84,6 +85,7 @@ class Test(Node):
         self.health = {}
         self.health_faults = []
         self.map_client = self.create_client(GetMap, '/rtabmap/get_map_data')
+        self.lifecycle_client = self.create_client(ManageLifecycleNodes, '/lifecycle_manager_navigation/manage_nodes')
         self.create_subscription(DiagnosticArray, '/diagnostics', self.diagnostics, 10)
 
     def diagnostics(self, m):
@@ -233,6 +235,8 @@ def main():
                     future=node.map_client.call_async(GetMap.Request(global_map=True,optimized=True,graph_only=False))
                     end=time.monotonic()+3
                     while not future.done() and time.monotonic()<end:node.tick(Twist(),check=False)
+                    if not future.done() or not future.result().success:
+                        print('Nav2 did not confirm graceful lifecycle shutdown',flush=True)
                     if future.done() and future.result():
                         data=future.result().data
                         graph={'nodes':[{'id':m.id,'session':m.map_id,'features':len(m.word_kpts),
@@ -243,6 +247,12 @@ def main():
                     'trace':node.trace,'slam':node.slam,'graph':graph,'health_faults':node.health_faults}
                 (OUTPUT/'result.json').write_text(json.dumps(report,indent=2)+'\n')
                 print('report',OUTPUT/'result.json',flush=True)
+                if node.lifecycle_client.wait_for_service(timeout_sec=1):
+                    future=node.lifecycle_client.call_async(ManageLifecycleNodes.Request(command=ManageLifecycleNodes.Request.SHUTDOWN))
+                    end=time.monotonic()+3
+                    while not future.done() and time.monotonic()<end:node.tick(Twist(),check=False)
+                node.listener.unregister()
+                node.navigation.destroy()
                 node.destroy_node()
                 rclpy.try_shutdown()
     finally:

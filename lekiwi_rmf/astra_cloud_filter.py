@@ -88,7 +88,9 @@ class AstraCloudFilter(Node):
             publisher = self.create_publisher(CompressedImage, f"/camera/astra/{camera}/image_raw/compressed", 1)
             self.create_subscription(Image, f"/camera/astra/{camera}/image_raw",
                 lambda msg,c=camera,e=extension,f=encoding,p=publisher:self._on_image(msg,c,e,f,p),
-                qos_profile_sensor_data, raw=True)
+                # UVC colour publishes reliably; its 0.9 MB raw frame needs
+                # fragment recovery while this process also receives clouds.
+                1 if camera == "color" else qos_profile_sensor_data, raw=True)
 
     def _on_image(self, serialized: bytes, camera: str, extension: str, encoding: str, publisher) -> None:
         now = time.monotonic()
