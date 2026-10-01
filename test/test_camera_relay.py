@@ -48,6 +48,7 @@ class DeviceMachine:
         jpeg.header.stamp.sec = 7
         self.front_jpeg = jpeg
         self.front_info = CameraInfo()
+        self.front_info.header = jpeg.header
         self.front_info.width = 640
         self.front_image_pub = self.node.create_publisher(
             CompressedImage, "/pi/camera/front/image_raw/compressed", SENSOR_QOS
@@ -218,3 +219,17 @@ def test_a_bridge_that_cannot_decode_is_reported_with_the_library_versions():
     problem = camera_relay.decoder_error(Broken())
     assert "KeyError(16)" in problem
     assert f"OpenCV {cv2.__version__}" in problem and f"NumPy {np.__version__}" in problem
+
+
+def test_calibration_is_forwarded_without_rgb_subscribers(graph):
+    device, _, executor = graph
+    checker = rclpy.create_node('calibration_only_consumer')
+    seen = []
+    checker.create_subscription(CameraInfo, '/camera/front/camera_info', seen.append, RELIABLE_QOS)
+    executor.add_node(checker)
+    try:
+        pump_until(executor, device, checker, lambda: bool(seen))
+        assert seen and seen[-1].header.stamp.sec == 7
+    finally:
+        executor.remove_node(checker)
+        checker.destroy_node()

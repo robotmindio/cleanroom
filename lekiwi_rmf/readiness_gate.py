@@ -50,9 +50,9 @@ def topic_qos(topic_type: str) -> QoSProfile:
             reliability=ReliabilityPolicy.RELIABLE,
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
         )
-    if topic_type in ("scan", "cloud"):
-        # Laser drivers publish sensor-data (best-effort) QoS; a reliable
-        # subscription would never match them.
+    if topic_type in ("scan", "cloud", "image"):
+        # Sensor producers can publish best-effort; this subscription also
+        # matches reliable relays without making startup depend on their QoS.
         return QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT)
     return QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE)
 

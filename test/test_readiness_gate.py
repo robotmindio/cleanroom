@@ -98,6 +98,7 @@ def test_scan_readiness_matches_best_effort_laser_drivers():
 def test_map_readiness_receives_rtabmaps_latched_grid():
     assert topic_qos("map").durability == DurabilityPolicy.TRANSIENT_LOCAL
     assert topic_qos("image").durability == DurabilityPolicy.VOLATILE
+    assert topic_qos("image").reliability == ReliabilityPolicy.BEST_EFFORT
 
 
 def test_map_gate_requests_the_saved_rtabmap_grid_once():

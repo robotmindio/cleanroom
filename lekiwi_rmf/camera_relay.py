@@ -51,7 +51,6 @@ class CameraRelay(Node):
                 f"cv_bridge cannot decode camera frames: {problem}; "
                 "the OpenCV/NumPy in this environment does not match ROS's cv_bridge"
             )
-        self.last_info = {}
         # Canonical raw camera topics are consumed by the floor scan and RTAB-Map.
         # Keep their delivery contract identical to the local v4l2 camera path.
         # Perception used for collision stopping must prefer the newest frame.
@@ -62,15 +61,14 @@ class CameraRelay(Node):
         for name, source, output, with_info in self.CAMERAS:
             self.create_subscription(
                 CompressedImage, f"{source}/image_raw/compressed",
-                self.make_image_callback(name, output, with_info), qos_profile_sensor_data)
+                self.make_image_callback(name, output), qos_profile_sensor_data)
             if with_info:
                 self.create_subscription(
                     CameraInfo, f"{source}/camera_info",
-                    self.make_info_callback(name), qos_profile_sensor_data)
+                    self.make_info_callback(output), qos_profile_sensor_data)
 
-    def make_image_callback(self, name, output, with_info):
+    def make_image_callback(self, name, output):
         pub = self.create_publisher(Image, f"{output}/image_raw", self.raw_qos)
-        info_pub = self.create_publisher(CameraInfo, f"{output}/camera_info", self.raw_qos) if with_info else None
 
         def on_image(msg):
             # Decoding and re-encoding every frame is wasted work while nothing
@@ -87,19 +85,15 @@ class CameraRelay(Node):
                 return
             image.header = msg.header
             pub.publish(image)
-            if info_pub is not None:
-                # The info message from the sensor node already carries the right
-                # stamp; republishing it here keeps image/info pairs together.
-                if self.last_info.get(name) is not None:
-                    info = self.last_info[name]
-                    info.header = msg.header
-                    info_pub.publish(info)
 
         return on_image
 
-    def make_info_callback(self, name):
+    def make_info_callback(self, output):
+        # Calibration consumers can start a perception pipeline before any RGB
+        # subscriber exists. Preserve the sensor stamp and avoid a startup cycle.
+        pub = self.create_publisher(CameraInfo, f"{output}/camera_info", self.raw_qos)
         def on_info(msg):
-            self.last_info[name] = msg
+            pub.publish(msg)
 
         return on_info
 
