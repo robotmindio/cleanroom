@@ -1,6 +1,8 @@
 from pathlib import Path
 import math
+import os
 import subprocess
+import sys
 import xml.etree.ElementTree as ET
 
 import pytest
@@ -175,7 +177,33 @@ def test_cyclonedds_sends_rgbd_clouds_in_loopback_sized_datagrams():
 
     # DDS never crosses machines (multicast TTL 0), so datagrams can be loopback sized.
     assert "<MulticastTimeToLive>0</MulticastTimeToLive>" in cyclonedds
-    assert '<NetworkInterface name="lo"/>' in cyclonedds
+    assert '<NetworkInterface name="lo" multicast="true"/>' in cyclonedds
+    assert '<ParticipantIndex>none</ParticipantIndex>' in cyclonedds
     assert "<MaxMessageSize>65500B</MaxMessageSize>" in cyclonedds
     assert "<FragmentSize>65000B</FragmentSize>" in cyclonedds
     assert '<SocketReceiveBufferSize min="default" max="8MiB"/>' in cyclonedds
+
+
+def test_loopback_multicast_discovers_another_process_without_index_fallback():
+    source = '''
+import sys,time,rclpy
+from std_msgs.msg import Bool
+rclpy.init(); node=rclpy.create_node("dds_check_"+sys.argv[1]); received=[]
+if sys.argv[1]=="pub": pub=node.create_publisher(Bool,"/dds_profile_check",10)
+else: node.create_subscription(Bool,"/dds_profile_check",lambda m:received.append(m.data),10)
+end=time.monotonic()+3
+while time.monotonic()<end:
+    if sys.argv[1]=="pub": pub.publish(Bool(data=True))
+    rclpy.spin_once(node,timeout_sec=.05)
+node.destroy_node(); rclpy.shutdown()
+assert sys.argv[1]=="pub" or received
+'''
+    env = {**os.environ, "ROS_DOMAIN_ID": "94", "RMW_IMPLEMENTATION": "rmw_cyclonedds_cpp",
+           "CYCLONEDDS_URI": f"file://{ROOT / 'config/cyclonedds.xml'}"}
+    with subprocess.Popen([sys.executable, "-c", source, "pub"], env=env,
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as publisher:
+        reader = subprocess.run([sys.executable, "-c", source, "sub"], env=env,
+                                capture_output=True, text=True, timeout=8)
+        _, errors = publisher.communicate(timeout=8)
+    assert reader.returncode == publisher.returncode == 0, reader.stderr + errors
+    assert "not multicast-capable" not in reader.stderr + errors
