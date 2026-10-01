@@ -127,17 +127,6 @@
 
   <!-- Collision proxies stay attached to their CAD links. Prefer exact
        vendored meshes where enclosing primitives create false collisions. -->
-  <xacro:macro name="collision_capsule_proxy" params="name parent xyz rpy radius cylinder_length">
-    <link name="${name}">
-      <collision><geometry><cylinder radius="${radius}" length="${cylinder_length}"/></geometry></collision>
-      <collision><origin xyz="0 0 ${cylinder_length / 2.0}"/><geometry><sphere radius="${radius}"/></geometry></collision>
-      <collision><origin xyz="0 0 ${-cylinder_length / 2.0}"/><geometry><sphere radius="${radius}"/></geometry></collision>
-    </link>
-    <joint name="${name}_mount" type="fixed">
-      <parent link="${parent}"/><child link="${name}"/><origin xyz="${xyz}" rpy="${rpy}"/>
-    </joint>
-  </xacro:macro>
-
   <!-- Exact CAD collision meshes avoid the pedestal sphere/upper-arm capsule
        overlapping in poses where the physical parts are separated. -->
   <link name="arm_pedestal_collision_proxy">
@@ -158,9 +147,17 @@
     <parent link="Camera-Model-v3"/><child link="front_camera_collision_proxy"/><origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
 
-  <!-- SO-101 aggregate links already contain their servo housings. These
-       CAD-bounds-derived envelopes therefore cover each complete moving link. -->
-  <xacro:collision_capsule_proxy name="shoulder_collision_proxy" parent="so101_shoulder_link" xyz="-0.0192 0.0012 -0.0091" rpy="0 0 0" radius="0.0458" cylinder_length="0.0190"/>
+  <!-- A single enclosing capsule fills the clearance between folded links.
+       Per-part hulls enclose each CAD part's occupied 1 mm cells, preserving
+       those gaps without loading the dense visual meshes into collision checks. -->
+  <link name="shoulder_collision_proxy">
+    <collision><origin xyz="-0.0303992 0.000422241 -0.0417" rpy="1.5708 1.5708 0"/><geometry><mesh filename="package://lekiwi_rmf/urdf/collision/so101_shoulder_link-0.stl"/></geometry></collision>
+    <collision><origin xyz="-0.0675992 -0.000177759 0.0158499" rpy="1.5708 -1.5708 0"/><geometry><mesh filename="package://lekiwi_rmf/urdf/collision/so101_shoulder_link-1.stl"/></geometry></collision>
+    <collision><origin xyz="0.0122008 2.22413e-05 0.0464" rpy="-1.5708 2.35221e-33 0"/><geometry><mesh filename="package://lekiwi_rmf/urdf/collision/so101_shoulder_link-2.stl"/></geometry></collision>
+  </link>
+  <joint name="shoulder_collision_proxy_mount" type="fixed">
+    <parent link="so101_shoulder_link"/><child link="shoulder_collision_proxy"/>
+  </joint>
   <link name="upper_arm_collision_proxy">
     <collision><origin xyz="-0.11257 -0.0155 0.0187" rpy="-3.14159 -5.27356e-16 -1.5708"/><geometry><mesh filename="package://lekiwi_rmf/urdf/meshes/so101/sts3215_03a_v1.stl"/></geometry></collision>
     <collision><origin xyz="-0.065085 0.012 0.0182" rpy="3.14159 -0 -1.30911e-30"/><geometry><mesh filename="package://lekiwi_rmf/urdf/meshes/so101/upper_arm_so101_v1.stl"/></geometry></collision>
@@ -168,15 +165,20 @@
   <joint name="upper_arm_collision_proxy_mount" type="fixed">
     <parent link="so101_upper_arm_link"/><child link="upper_arm_collision_proxy"/><origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
-  <xacro:collision_capsule_proxy name="forearm_collision_proxy" parent="so101_lower_arm_link" xyz="-0.0666 0.0035 0.0202" rpy="0 1.5708 0" radius="0.0411" cylinder_length="0.0749"/>
-  <!-- Native wrist bounds plus 4 mm on each face. The old enclosing sphere
-       extended into the moving jaw even in the reference pose. -->
+  <link name="forearm_collision_proxy">
+    <collision><origin xyz="-0.0648499 -0.032 0.0182" rpy="3.14159 -0 6.67202e-31"/><geometry><mesh filename="package://lekiwi_rmf/urdf/collision/so101_lower_arm_link-0.stl"/></geometry></collision>
+    <collision><origin xyz="-0.0648499 -0.032 0.018" rpy="-3.14159 -2.55351e-15 -1.83387e-30"/><geometry><mesh filename="package://lekiwi_rmf/urdf/collision/so101_lower_arm_link-1.stl"/></geometry></collision>
+    <collision><origin xyz="-0.1224 0.0052 0.0187" rpy="-3.14159 -7.88861e-31 -3.14159"/><geometry><mesh filename="package://lekiwi_rmf/urdf/collision/so101_lower_arm_link-2.stl"/></geometry></collision>
+  </link>
+  <joint name="forearm_collision_proxy_mount" type="fixed">
+    <parent link="so101_lower_arm_link"/><child link="forearm_collision_proxy"/>
+  </joint>
   <link name="wrist_collision_proxy">
-    <collision><geometry><box size="0.04335 0.08584 0.07031"/></geometry></collision>
+    <collision><origin xyz="8.32667e-17 -0.0424 0.0306" rpy="1.5708 1.5708 0"/><geometry><mesh filename="package://lekiwi_rmf/urdf/collision/so101_wrist_link-0.stl"/></geometry></collision>
+    <collision><origin xyz="0 -0.028 0.0181" rpy="-1.5708 -1.5708 0"/><geometry><mesh filename="package://lekiwi_rmf/urdf/collision/so101_wrist_link-1.stl"/></geometry></collision>
   </link>
   <joint name="wrist_collision_proxy_mount" type="fixed">
     <parent link="so101_wrist_link"/><child link="wrist_collision_proxy"/>
-    <origin xyz="-0.00233 -0.026915 0.02215"/>
   </joint>
   <link name="roll_collision_proxy">
     <collision><origin xyz="0.0077 0.0001 -0.0234" rpy="-1.5708 -5.19179e-17 -1.66533e-16"/><geometry><mesh filename="package://lekiwi_rmf/urdf/meshes/so101/sts3215_03a_v1.stl"/></geometry></collision>

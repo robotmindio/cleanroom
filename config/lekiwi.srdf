@@ -65,9 +65,8 @@
   <disable_collisions link1="roll_collision_proxy" link2="gripper_collision_proxy" reason="Adjacent"/>
   <!-- The jaw hinges on the gripper link, so the wrist meshes and the moving
        jaw meshes stay at least 9 mm apart over every wrist-roll and gripper
-       angle (test_collision_model). Their 4 mm-padded proxies still overlap
-       once the jaw opens, which would otherwise report a collision that
-       cannot happen. -->
+       angle (test_collision_model). Conservative collision hulls can still
+       fill empty space near the hinge, so retain this CAD-proven exemption. -->
   <disable_collisions link1="wrist_collision_proxy" link2="gripper_collision_proxy" reason="Never"/>
   <!-- The RPi 5 stack is fixed to the chassis like these bodies. -->
   <disable_collisions link1="base_link" link2="rpi5_stack_collision_proxy" reason="Never"/>

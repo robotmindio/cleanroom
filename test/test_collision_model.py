@@ -149,18 +149,31 @@ def test_rpi5_stack_box_encloses_plate_carrier_and_table_with_clearance():
         assert np.all(np.abs(vertices - centre) + 0.004 <= half_size + 1e-6), name
 
 
-def test_long_arm_sections_use_capsules_not_joint_center_spheres():
+def test_folded_link_hulls_enclose_every_cad_part_without_filling_the_whole_link():
+    from scipy.spatial import ConvexHull
+
     robot = _real_robot()
     links = {link.attrib["name"]: link for link in robot.findall("link")}
-    for name in (
-        "shoulder_collision_proxy",
-        "forearm_collision_proxy",
+    for source, proxy in (
+        ("so101_shoulder_link", "shoulder_collision_proxy"),
+        ("so101_lower_arm_link", "forearm_collision_proxy"),
+        ("so101_wrist_link", "wrist_collision_proxy"),
     ):
-        geometries = [
-            collision.find("geometry") for collision in links[name].findall("collision")
-        ]
-        assert any(geometry.find("cylinder") is not None for geometry in geometries)
-        assert sum(geometry.find("sphere") is not None for geometry in geometries) == 2
+        visuals = links[source].findall("visual")
+        collisions = links[proxy].findall("collision")
+        assert len(collisions) == len(visuals)
+        for visual, collision in zip(visuals, collisions):
+            assert collision.find("origin").attrib == visual.find("origin").attrib
+            assert "/urdf/collision/" in collision.find("geometry/mesh").get("filename")
+            envelope = _visual_vertices(collision)
+            vertices = np.unique(_visual_vertices(visual), axis=0)
+            hull = ConvexHull(envelope)
+            assert len(hull.simplices) < 400
+            # Chunk to keep the dense CAD check out of the runtime memory budget.
+            for chunk in np.array_split(vertices, 32):
+                assert np.max(chunk @ hull.equations[:, :3].T + hull.equations[:, 3]) < 1e-7
+            assert np.all(vertices.min(axis=0) - envelope.min(axis=0) < 0.002)
+            assert np.all(envelope.max(axis=0) - vertices.max(axis=0) < 0.002)
 
     for source, proxy in (
         ("so101_gripper_link", "roll_collision_proxy"),
@@ -203,16 +216,8 @@ def _visual_vertices(visual: ET.Element) -> np.ndarray:
     return vertices @ rotation.T + np.fromstring(origin.get("xyz", "0 0 0"), sep=" ")
 
 
-def test_native_wrist_box_encloses_visual_meshes_with_clearance():
+def test_tool_frame_adds_no_extra_collision_volume():
     robot = _real_robot()
-    box = robot.find("link[@name='wrist_collision_proxy']/collision/geometry/box")
-    mount = robot.find("joint[@name='wrist_collision_proxy_mount']/origin")
-    half_size = np.fromstring(box.get("size"), sep=" ") / 2
-    centre = np.fromstring(mount.get("xyz"), sep=" ")
-    for visual in robot.find("link[@name='so101_wrist_link']").findall("visual"):
-        vertices = _visual_vertices(visual)
-        assert np.all(np.abs(vertices - centre) + 0.004 <= half_size)
-    # A coordinate frame is not an extra sphere of physical material.
     assert robot.find("link[@name='tool0']/collision") is None
 
 

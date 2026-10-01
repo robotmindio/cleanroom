@@ -217,6 +217,22 @@ class TestMoveItDriverEndToEnd(unittest.TestCase):
         response = future.result()
         self.assertTrue(response.valid, response.contacts)
 
+    def test_folded_clearance_keeps_real_self_collision_checks(self):
+        client = self.node.create_client(GetStateValidity, "/check_state_validity")
+        self.assertTrue(self._until(client.service_is_ready, timeout=15.0))
+        for positions, expected in (
+            ([-0.0031, -1.6, 1.4, 1.15, -0.0153, 0.0], True),
+            ([-0.0031, -1.8182, 1.6295, 1.2382, -0.0153, 0.2148], False),
+        ):
+            request = GetStateValidity.Request()
+            request.group_name = "arm"
+            request.robot_state.is_diff = True
+            request.robot_state.joint_state.name = list(ARM_JOINTS)
+            request.robot_state.joint_state.position = positions
+            future = client.call_async(request)
+            self.assertTrue(self._until(future.done, timeout=10.0))
+            self.assertEqual(future.result().valid, expected, future.result().contacts)
+
     def test_stored_home_clears_physical_chassis(self):
         client = self.node.create_client(GetStateValidity, "/check_state_validity")
         self.assertTrue(self._until(client.service_is_ready, timeout=15.0))
