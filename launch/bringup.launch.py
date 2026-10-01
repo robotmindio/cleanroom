@@ -942,31 +942,23 @@ def generate_launch_description():
                 parameters=[{"permission_timeout": 0.5}],
                 output="screen",
             ),
-            # Reuse measured range points; full depth rasters stay on the Pi.
-            # Front RGB gets visible LiDAR/Astra returns, Astra RGB gets its own
-            # registered depth. Both views retain their physical extrinsics.
-            *[
-                Node(
-                    package="rtabmap_util", executable="pointcloud_to_depthimage",
-                    name=f"slam_{camera}_depth",
-                    parameters=[{
-                        "use_sim_time": ParameterValue(sim, value_type=bool),
-                        "fixed_frame_id": "odom", "approx": True,
-                        "decimation": 4, "fill_holes_size": 2, "fill_iterations": 1,
-                        "fill_holes_error": 0.05, "wait_for_transform": 0.1,
-                        "qos": 2, "qos_camera_info": info_qos,
-                        "topic_queue_size": 5, "sync_queue_size": 5,
-                    }],
-                    remappings=[("cloud", cloud), ("camera_info", info),
-                        ("image_raw", f"/slam/{camera}_depth/image_raw")],
-                    condition=IfCondition(PythonExpression([visual_slam, " and ", enabled])),
-                    output="screen",
-                )
-                for camera, cloud, info, info_qos, enabled in [
-                    ("front", "/slam/cloud", slam_camera_info_topic, 1, camera_on),
-                    ("astra", "/camera/depth/points", "/camera/astra/color/camera_info", 2, dual_rgbd),
-                ]
-            ],
+            # The front camera uses visible range returns. Astra uses its own
+            # dense registered depth, sent losslessly from the device at 2 Hz.
+            Node(
+                package="rtabmap_util", executable="pointcloud_to_depthimage", name="slam_front_depth",
+                parameters=[{
+                    "use_sim_time": ParameterValue(sim, value_type=bool),
+                    "fixed_frame_id": "odom", "approx": True,
+                    "decimation": 2, "fill_holes_size": 2, "fill_iterations": 1,
+                    "fill_holes_error": 0.05, "wait_for_transform": 0.1,
+                    "qos": 2, "qos_camera_info": 1,
+                    "topic_queue_size": 5, "sync_queue_size": 5,
+                }],
+                remappings=[("cloud", "/slam/cloud"), ("camera_info", slam_camera_info_topic),
+                    ("image_raw", "/slam/front_depth/image_raw")],
+                condition=IfCondition(PythonExpression([visual_slam, " and ", camera_on])),
+                output="screen",
+            ),
             *[
                 Node(
                     package="rtabmap_sync", executable="rgbd_sync", name=f"slam_{camera}_rgbd",
@@ -978,15 +970,16 @@ def generate_launch_description():
                     }],
                     remappings=[("rgb/image", f"/camera/{source}/image_raw"),
                         ("rgb/camera_info", f"/camera/{source}/camera_info"),
-                        ("depth/image", f"/slam/{camera}_depth/image_raw"),
+                        ("depth/image", depth),
                         ("rgbd_image", f"/slam/{camera}/rgbd_image")],
                     condition=IfCondition(PythonExpression([visual_slam, " and ", dual_rgbd])),
                     output="screen",
                 )
                 # RTAB-Map concatenates equal-sized camera rasters. Astra VGA
-                # becomes QVGA, matching the front RGB and its 80x60 depth.
-                for camera, source, info_qos, decimation in [
-                    ("front", "front", 1, 1), ("astra", "astra/color", 2, 2),
+                # becomes QVGA, matching the front RGB and its 160x120 depth.
+                for camera, source, info_qos, decimation, depth in [
+                    ("front", "front", 1, 1, "/slam/front_depth/image_raw"),
+                    ("astra", "astra/color", 2, 2, "/camera/astra/depth/image_raw"),
                 ]
             ],
             # The packaged mapper supports RGBDImages arrays, but was built

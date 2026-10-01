@@ -101,15 +101,19 @@ def test_rgb_encoding_is_eager_rate_limited_and_keeps_capture_stamp(monkeypatch)
     node = AstraCloudFilter()
     try:
         frames = []
-        node._rgb_publisher = SimpleNamespace(publish=frames.append)
-        clock = iter([10.0, 11.0, 14.1])
+        publisher = SimpleNamespace(publish=frames.append)
+        clock = iter([10.0, 10.1, 10.6, 11.0])
         monkeypatch.setattr("lekiwi_rmf.astra_cloud_filter.time.monotonic", lambda: next(clock))
         image = Image(width=2, height=2, encoding="bgr8", step=6, data=bytes(12))
         image.header.stamp.sec = 7
-        for _ in range(3): node._on_rgb(serialize_message(image))
+        for _ in range(3): node._on_image(serialize_message(image), "color", ".jpg", "jpeg", publisher)
         assert len(frames) == 2
         assert all(f.header.stamp.sec == 7 and f.format == "jpeg" for f in frames)
         assert cv2.imdecode(np.frombuffer(frames[0].data, np.uint8), cv2.IMREAD_COLOR).shape == (2, 2, 3)
+        depth = np.array([[0, 456], [1000, 2345]], dtype=np.uint16)
+        image = Image(width=2, height=2, encoding="16UC1", step=4, data=depth.tobytes())
+        node._on_image(serialize_message(image), "depth", ".png", "16UC1; png compressed", publisher)
+        assert np.array_equal(cv2.imdecode(np.frombuffer(frames[-1].data, np.uint8), cv2.IMREAD_UNCHANGED), depth)
     finally:
         node.destroy_node()
         rclpy.shutdown()

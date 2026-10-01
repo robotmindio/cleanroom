@@ -51,10 +51,11 @@ covering the camera. Mapping input pauses during manipulation and resumes at
 stow. Raw range and camera safety topics continue throughout. With an empty
 database, RTAB-Map/Nav2 startup waits for this posture; the arm remains usable.
 The cameras face different directions. Installed `pointcloud_to_depthimage` and
-`rgbd_sync` nodes provide two calibrated views: Astra RGB with its own measured
-depth, and front RGB with visible returns projected from the fused Astra/LD06
-cloud. Raw RGB is rectified inside RTAB-Map. Full depth rasters stay on the Pi;
-only compact points and compressed RGB cross the link. RTAB-Map receives both
+`rgbd_sync` nodes provide two calibrated views: Astra RGB with its own dense
+registered depth, and front RGB with visible returns projected from the fused
+Astra/LD06 cloud. Raw RGB is rectified inside RTAB-Map. The Pi sends compact
+points, JPEG RGB and lossless PNG depth; both Astra images are capped at 2 Hz.
+RTAB-Map receives both
 views and the fused range cloud. Visual registration supplies the global pose hypothesis
 and ICP refines it. RGB with an unregistered scan cloud alone does not create
 the metric visual features required for restart relocalization.

@@ -4,4 +4,5 @@ astra_cloud_filter:
     # raw raster. Sample every 8 pixels per axis and publish at most 3 Hz.
     pixel_stride: 8
     max_rate_hz: 3.0
-    rgb_max_rate_hz: 0.25
+    # Visual registration needs dense measured depth, paired with RGB.
+    image_max_rate_hz: 2.0

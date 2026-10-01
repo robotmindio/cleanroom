@@ -43,8 +43,8 @@ def test_real_bringup_maps_both_calibrated_views_with_measured_depth():
     assert '("rgbd_images", "/slam/rgbd_images")' in source
     assert '"Vis/EstimationType": ParameterValue' in source
     assert '"\'0\' if ", dual_rgbd, " else \'1\'"' in source
-    assert '("front", "/slam/cloud", slam_camera_info_topic, 1, camera_on)' in source
-    assert '("astra", "/camera/depth/points", "/camera/astra/color/camera_info", 2, dual_rgbd)' in source
+    assert '("cloud", "/slam/cloud")' in source
+    assert '("astra", "astra/color", 2, 2, "/camera/astra/depth/image_raw")' in source
     assert '"qos_image": 2' in source
     assert '"qos_depth"' not in source
 
@@ -74,7 +74,7 @@ def test_astra_has_its_own_tracked_robot_frame():
 def test_local_and_remote_astra_cloud_filters_share_the_bandwidth_profile():
     filter_config = ROOT / "config" / "astra_cloud_filter.yaml"
     values = yaml.safe_load(filter_config.read_text())["astra_cloud_filter"]["ros__parameters"]
-    assert values == {"pixel_stride": 8, "max_rate_hz": 3.0, "rgb_max_rate_hz": 0.25}
+    assert values == {"pixel_stride": 8, "max_rate_hz": 3.0, "image_max_rate_hz": 2.0}
     for launch in (ROOT / "launch" / "bringup.launch.py", ROOT / "launch" / "pi_astra.launch.py"):
         assert "astra_cloud_filter.yaml" in launch.read_text()
     assert 1.0 / values["max_rate_hz"] < 0.5  # production depth freshness timeout

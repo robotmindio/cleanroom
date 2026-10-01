@@ -40,6 +40,7 @@ class CameraRelay(Node):
         # Astra CameraInfo crosses directly; only its optional compressed image
         # needs expansion here.
         ("astra", "/camera/astra/color", "/camera/astra/color", False),
+        ("astra_depth", "/camera/astra/depth", "/camera/astra/depth", False),
     )
 
     def __init__(self):
@@ -76,8 +77,9 @@ class CameraRelay(Node):
             if pub.get_subscription_count() == 0:
                 return
             try:
-                cv_image = self.bridge.compressed_imgmsg_to_cv2(msg, "bgr8")
-                image = self.bridge.cv2_to_imgmsg(cv_image, "bgr8")
+                encoding = "passthrough" if name == "astra_depth" else "bgr8"
+                cv_image = self.bridge.compressed_imgmsg_to_cv2(msg, encoding)
+                image = self.bridge.cv2_to_imgmsg(cv_image, encoding)
             except Exception as error:  # a truncated JPEG is data damage, not fatal
                 self.get_logger().warn(
                     f"{name}: undecodable frame: {error}", throttle_duration_sec=5.0

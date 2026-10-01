@@ -15,7 +15,7 @@ def test_remote_astra_service_publishes_the_canonical_cloud_without_other_hardwa
     assert '"config" / "astra_cloud_filter.yaml"' in launch
     assert 'executable="republish"' not in launch
     preprocessing = (ROOT / "lekiwi_rmf/astra_cloud_filter.py").read_text()
-    assert '"/camera/astra/color/image_raw/compressed"' in preprocessing
+    assert 'f"/camera/astra/{camera}/image_raw/compressed"' in preprocessing
     assert 'raw=True' in preprocessing
     assert "astra_serial_from_hardware_config" in launch
     assert "ExecStart=@PROJECT_ROOT@/scripts/ros-astra.sh" in service

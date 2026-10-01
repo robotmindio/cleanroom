@@ -184,6 +184,30 @@ def test_astra_preview_is_decompressed_without_republishing_its_camera_info(grap
     assert seen_infos[-1].width == 640
 
 
+def test_astra_depth_png_preserves_millimetres_and_capture_stamp(graph):
+    device, _, executor = graph
+    depth = np.array([[0, 456], [1000, 2345]], dtype=np.uint16)
+    compressed = BRIDGE.cv2_to_compressed_imgmsg(depth, "png")
+    compressed.header.stamp.sec = 7
+    publisher = device.node.create_publisher(CompressedImage, "/camera/astra/depth/image_raw/compressed", SENSOR_QOS)
+    checker = rclpy.create_node("depth_png_checker")
+    images = []
+    checker.create_subscription(Image, "/camera/astra/depth/image_raw", images.append, SENSOR_QOS)
+    executor.add_node(checker)
+    try:
+        end = time.monotonic() + 3
+        while not images and time.monotonic() < end:
+            publisher.publish(compressed)
+            executor.spin_once(timeout_sec=0.05)
+        assert images and images[-1].encoding == "16UC1"
+        assert images[-1].header.stamp.sec == 7
+        assert np.array_equal(BRIDGE.imgmsg_to_cv2(images[-1], "passthrough"), depth)
+    finally:
+        executor.remove_node(checker)
+        checker.destroy_node()
+        device.node.destroy_publisher(publisher)
+
+
 def test_frames_are_not_decoded_while_nothing_consumes_the_raw_topic(graph):
     device, relay, executor = graph
     decoded = []

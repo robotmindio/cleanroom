@@ -62,14 +62,14 @@ class AstraCloudFilter(Node):
         super().__init__("astra_cloud_filter")
         self.declare_parameter("pixel_stride", 4)
         self.declare_parameter("max_rate_hz", 5.0)
-        self.declare_parameter("rgb_max_rate_hz", 0.25)
+        self.declare_parameter("image_max_rate_hz", 2.0)
         self._stride = int(self.get_parameter("pixel_stride").value)
         rate = float(self.get_parameter("max_rate_hz").value)
-        rgb_rate = float(self.get_parameter("rgb_max_rate_hz").value)
+        image_rate = float(self.get_parameter("image_max_rate_hz").value)
         if self._stride < 1 or not math.isfinite(rate) or rate <= 0.0:
             raise ValueError("pixel_stride must be positive and max_rate_hz must be finite and positive")
-        if not math.isfinite(rgb_rate) or rgb_rate <= 0:
-            raise ValueError("rgb_max_rate_hz must be finite and positive")
+        if not math.isfinite(image_rate) or image_rate <= 0:
+            raise ValueError("image_max_rate_hz must be finite and positive")
         self._period = 1.0 / rate
         self._last_publish = 0.0
         self._publisher = self.create_publisher(PointCloud2, "/camera/depth/points", qos_profile_sensor_data)
@@ -80,29 +80,33 @@ class AstraCloudFilter(Node):
             raw=True,
         )
         self._bridge = CvBridge()
-        self._rgb_period = 1.0 / rgb_rate
-        self._last_rgb_publish = 0.0
-        self._rgb_publisher = self.create_publisher(
-            CompressedImage, "/camera/astra/color/image_raw/compressed", 1)
+        self._image_period = 1.0 / image_rate
+        self._last_image_publish = {"color": 0.0, "depth": 0.0}
         # image_transport's lazy republisher does not remain subscribed for the
         # bridge's native DDS reader. Subscribe eagerly, encode only sent frames.
-        self.create_subscription(Image, "/camera/astra/color/image_raw", self._on_rgb,
-                                 qos_profile_sensor_data, raw=True)
+        for camera, extension, encoding in [("color", ".jpg", "jpeg"), ("depth", ".png", "16UC1; png compressed")]:
+            publisher = self.create_publisher(CompressedImage, f"/camera/astra/{camera}/image_raw/compressed", 1)
+            self.create_subscription(Image, f"/camera/astra/{camera}/image_raw",
+                lambda msg,c=camera,e=extension,f=encoding,p=publisher:self._on_image(msg,c,e,f,p),
+                qos_profile_sensor_data, raw=True)
 
-    def _on_rgb(self, serialized: bytes) -> None:
+    def _on_image(self, serialized: bytes, camera: str, extension: str, encoding: str, publisher) -> None:
         now = time.monotonic()
-        if now - self._last_rgb_publish < self._rgb_period:
+        if now - self._last_image_publish[camera] < self._image_period:
             return
         try:
             image = deserialize_message(serialized, Image)
-            ok, jpeg = cv2.imencode(".jpg", self._bridge.imgmsg_to_cv2(image, "bgr8"))
+            if camera == "depth" and image.encoding != "16UC1":
+                raise ValueError(f"expected depth in millimetres as 16UC1, got {image.encoding}")
+            desired = "passthrough" if camera == "depth" else "bgr8"
+            ok, compressed = cv2.imencode(extension, self._bridge.imgmsg_to_cv2(image, desired))
             if not ok:
-                raise RuntimeError("JPEG encoding failed")
+                raise RuntimeError(f"{extension} encoding failed")
         except Exception as error:
-            self.get_logger().warning(f"discarding invalid Astra RGB frame: {error}", throttle_duration_sec=5)
+            self.get_logger().warning(f"discarding invalid Astra {camera} frame: {error}", throttle_duration_sec=5)
             return
-        self._last_rgb_publish = now
-        self._rgb_publisher.publish(CompressedImage(header=image.header, format="jpeg", data=jpeg.tobytes()))
+        self._last_image_publish[camera] = now
+        publisher.publish(CompressedImage(header=image.header, format=encoding, data=compressed.tobytes()))
 
     def _on_cloud(self, serialized: bytes) -> None:
         now = time.monotonic()

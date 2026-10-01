@@ -11,6 +11,7 @@
           "^/pi/camera/(front|wrist)/(image_raw/compressed|camera_info)$",
           "^/camera/depth/points$",
           "^/camera/astra/color/image_raw/compressed$",
+          "^/camera/astra/depth/image_raw/compressed$",
           "^/camera/astra/color/camera_info$",
         ],
         service_servers: [],
