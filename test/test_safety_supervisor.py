@@ -817,3 +817,14 @@ def test_bounded_test_requires_lease_and_all_measured_inputs():
     finally:
         node.destroy_node()
         rclpy.shutdown()
+
+
+def test_navigation_test_inherits_all_installed_arguments(tmp_path):
+    import runpy
+    parse = runpy.run_path(str(Path(__file__).parents[1] / 'scripts/test-navigation.py'))['installed_stack_arguments']
+    path = tmp_path / 'stack-defaults'
+    expected = ['remote_ip:=robot', 'curve_client_secret_key_file:=/keys/client']
+    args = ' '.join(expected)
+    for value in [args, repr(args), '"'+args+'"']:
+        path.write_text('LEKIWI_STACK_ARGS='+value+'\n')
+        assert parse(path) == expected
