@@ -11,6 +11,8 @@ import subprocess
 import sys
 import xml.etree.ElementTree as ET
 
+# This source generator must use the source limits, not a previously installed package.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lekiwi_rmf.arm_trajectory import JOINT_LIMITS, JOINT_VELOCITY_LIMITS
 
 
@@ -27,7 +29,7 @@ ARM_EFFORT_LIMITS = {
     "arm_gripper": "1",
 }
 SOURCE_LIMIT_OVERRIDES = {
-    # The user confirmed this robot's valid pose exceeds the upstream +100 deg bound.
+    # Measured physical poses exceed the upstream shoulder's +/-100 deg bounds.
     "arm_shoulder_lift": (-1.74533, 1.74533),
 }
 

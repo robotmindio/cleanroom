@@ -51,7 +51,7 @@
   <disable_collisions link1="laser_nominal" link2="laser" reason="Adjacent"/>
   <!-- Mesh-enclosing proxies are only disabled against bolted neighbours.
        Every non-adjacent pair remains collision-checked by MoveIt, except
-       pairs proven below never to touch. -->
+       rigid neighbours and the confirmed resting interfaces below. -->
   <disable_collisions link1="base_link" link2="arm_pedestal_collision_proxy" reason="Adjacent"/>
   <disable_collisions link1="base_link" link2="front_camera_collision_proxy" reason="Adjacent"/>
   <!-- These oversized envelopes are on the same rigid chassis assembly;
@@ -73,4 +73,39 @@
   <disable_collisions link1="lidar_collision_proxy" link2="rpi5_stack_collision_proxy" reason="Never"/>
   <disable_collisions link1="arm_pedestal_collision_proxy" link2="rpi5_stack_collision_proxy" reason="Never"/>
   <disable_collisions link1="front_camera_collision_proxy" link2="rpi5_stack_collision_proxy" reason="Never"/>
+  <!-- Separate rigid parts retain the original assembly/hinge exemptions. -->
+  <disable_collisions link1="shoulder_collision_proxy" link2="shoulder_motor_collision_proxy" reason="Never"/>
+  <disable_collisions link1="shoulder_collision_proxy" link2="shoulder_holder_collision_proxy" reason="Never"/>
+  <disable_collisions link1="shoulder_motor_collision_proxy" link2="shoulder_holder_collision_proxy" reason="Never"/>
+  <disable_collisions link1="forearm_collision_proxy" link2="forearm_link_collision_proxy" reason="Never"/>
+  <disable_collisions link1="forearm_collision_proxy" link2="forearm_holder_collision_proxy" reason="Never"/>
+  <disable_collisions link1="forearm_link_collision_proxy" link2="forearm_holder_collision_proxy" reason="Never"/>
+  <disable_collisions link1="roll_collision_proxy" link2="roll_holder_collision_proxy" reason="Never"/>
+  <disable_collisions link1="arm_pedestal_collision_proxy" link2="shoulder_motor_collision_proxy" reason="Adjacent"/>
+  <disable_collisions link1="arm_pedestal_collision_proxy" link2="shoulder_holder_collision_proxy" reason="Adjacent"/>
+  <disable_collisions link1="shoulder_motor_collision_proxy" link2="upper_arm_collision_proxy" reason="Adjacent"/>
+  <disable_collisions link1="shoulder_holder_collision_proxy" link2="upper_arm_collision_proxy" reason="Adjacent"/>
+  <disable_collisions link1="upper_arm_collision_proxy" link2="forearm_link_collision_proxy" reason="Adjacent"/>
+  <disable_collisions link1="upper_arm_collision_proxy" link2="forearm_holder_collision_proxy" reason="Adjacent"/>
+  <disable_collisions link1="forearm_link_collision_proxy" link2="wrist_collision_proxy" reason="Adjacent"/>
+  <disable_collisions link1="forearm_holder_collision_proxy" link2="wrist_collision_proxy" reason="Adjacent"/>
+  <disable_collisions link1="wrist_collision_proxy" link2="roll_holder_collision_proxy" reason="Adjacent"/>
+  <disable_collisions link1="roll_holder_collision_proxy" link2="gripper_collision_proxy" reason="Adjacent"/>
+
+  <!-- Operator-confirmed resting interfaces in the compact folded posture.
+       Distal motor bodies still check the shoulder; jaw and surrounding hardware
+       retain collision checks. These permissions apply to the listed part pairs. -->
+  <disable_collisions link1="shoulder_motor_collision_proxy" link2="forearm_link_collision_proxy" reason="MechanicalRest"/>
+  <disable_collisions link1="shoulder_motor_collision_proxy" link2="forearm_holder_collision_proxy" reason="MechanicalRest"/>
+  <disable_collisions link1="shoulder_holder_collision_proxy" link2="roll_holder_collision_proxy" reason="MechanicalRest"/>
+  <group_state name="travel_stow" group="arm">
+    <joint name="arm_shoulder_pan" value="0.0" />
+    <joint name="arm_shoulder_lift" value="-1.8167" />
+    <joint name="arm_elbow_flex" value="1.6295" />
+    <joint name="arm_wrist_flex" value="1.2367" />
+    <joint name="arm_wrist_roll" value="-0.0169" />
+  </group_state>
+  <group_state name="travel_stow" group="gripper">
+    <joint name="arm_gripper" value="0.2095" />
+  </group_state>
 </robot>

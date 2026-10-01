@@ -31,7 +31,7 @@ from control_msgs.action import FollowJointTrajectory
 from moveit_configs_utils import MoveItConfigsBuilder
 from moveit_msgs.action import MoveGroup
 from moveit_msgs.msg import Constraints, JointConstraint, MoveItErrorCodes
-from moveit_msgs.srv import GetPositionFK, GetPositionIK, GetStateValidity
+from moveit_msgs.srv import GetMotionPlan, GetPositionFK, GetPositionIK, GetStateValidity
 from rclpy.action import ActionClient
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import JointState
@@ -222,7 +222,7 @@ class TestMoveItDriverEndToEnd(unittest.TestCase):
         self.assertTrue(self._until(client.service_is_ready, timeout=15.0))
         for positions, expected in (
             ([-0.0031, -1.6, 1.4, 1.15, -0.0153, 0.0], True),
-            ([-0.0031, -1.8182, 1.6295, 1.2382, -0.0153, 0.2148], False),
+            ([-0.0031, -1.8182, 1.6295, 1.2382, -0.0153, 0.2148], True),
         ):
             request = GetStateValidity.Request()
             request.group_name = "arm"
@@ -232,6 +232,23 @@ class TestMoveItDriverEndToEnd(unittest.TestCase):
             future = client.call_async(request)
             self.assertTrue(self._until(future.done, timeout=10.0))
             self.assertEqual(future.result().valid, expected, future.result().contacts)
+
+        # Bounds and planning adapters must accept the physical start too;
+        # GetStateValidity alone does not prove the planner accepts its range.
+        planner = self.node.create_client(GetMotionPlan, "/plan_kinematic_path")
+        self.assertTrue(self._until(planner.service_is_ready, timeout=10))
+        plan = GetMotionPlan.Request()
+        plan.motion_plan_request.group_name = "arm"
+        plan.motion_plan_request.allowed_planning_time = 5.0
+        plan.motion_plan_request.start_state.joint_state.name = list(ARM_JOINTS)
+        plan.motion_plan_request.start_state.joint_state.position = [-0.0031, -1.8182, 1.6295, 1.2382, -0.0153, 0.2148]
+        plan.motion_plan_request.goal_constraints = [Constraints(joint_constraints=[
+            JointConstraint(joint_name=name, position=0.0, tolerance_above=0.001, tolerance_below=0.001, weight=1.0)
+            for name in ARM_JOINTS[:-1]
+        ])]
+        future = planner.call_async(plan)
+        self.assertTrue(self._until(future.done, timeout=10))
+        self.assertEqual(future.result().motion_plan_response.error_code.val, MoveItErrorCodes.SUCCESS)
 
     def test_stored_home_clears_physical_chassis(self):
         client = self.node.create_client(GetStateValidity, "/check_state_validity")

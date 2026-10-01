@@ -44,7 +44,7 @@ safety_supervisor:
     arm_workspace_topic: /safety/arm_workspace_clear
     minimum_battery_voltage: 10.5
     minimum_battery_percentage: 0.15
-    # Planned forward stow candidate; physical clearance and stopping acceptance
+    # Physically set compact fold; footprint and stopping acceptance
     # remain unverified, so autonomous base acceptance remains false.
     stow_tolerance: 0.02
     stow_joint_names:
@@ -54,8 +54,8 @@ safety_supervisor:
       - arm_wrist_flex
       - arm_wrist_roll
       - arm_gripper
-    # Collision-checked forward pose; gripper zero is the calibrated contact pose.
-    stow_joint_positions: [-0.006, 1.0, -1.0, 0.0, -0.02, 0.0]
+    # Captured compact fold: wrist camera downward, fixed mapping cameras clear.
+    stow_joint_positions: [0.0, -1.8167, 1.6295, 1.2367, -0.0169, 0.2095]
 
 arm_workspace_monitor:
   ros__parameters:

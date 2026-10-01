@@ -6,7 +6,7 @@ map_id: cleanroom-development
 validated: false
 created_at: "2026-08-27T00:00:00Z"
 frame_id: map
-robot_footprint_radius: 0.32
+robot_footprint_radius: 0.33
 artifacts:
   occupancy_yaml:
     path: ../cleanroom.yaml
@@ -19,10 +19,10 @@ artifacts:
     sha256: a321972916fb74daf90883e940decf9f4859c7c246a47a420bc39f2c938df08c
   fleet_config:
     path: ../../config/fleet_config.yaml
-    sha256: 446bde605c497d19c49d469501fdd4c8730c628de9522c78a99267b8c343cd65
+    sha256: 68fd6fc03df6e836488720e25a03599abe1b2c178beb8ef6384444e0dde01c4a
   nav2_params:
     path: ../../config/nav2_params.yaml
-    sha256: d4d2fa1eb454a30a112fa2d3b816ff7b5ad1d856417c832ca8b8d19c343ae120
+    sha256: 5f37c937ab5c2aa220a78a875a5ea09a0bc5beb7ed062fc9603f93bf8fc1d4fa
 validation:
   maximum_resolution: 0.05
   maximum_reference_residual: 0.02

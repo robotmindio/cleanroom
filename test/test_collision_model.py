@@ -41,6 +41,8 @@ def test_arm_has_complete_link_and_servo_collision_envelopes():
         "wrist_collision_proxy",
         "roll_collision_proxy",
         "gripper_collision_proxy",
+        "shoulder_motor_collision_proxy", "shoulder_holder_collision_proxy",
+        "forearm_link_collision_proxy", "forearm_holder_collision_proxy", "roll_holder_collision_proxy",
     }
 
     assert expected <= links.keys()
@@ -77,7 +79,8 @@ def test_distal_arm_checks_physical_chassis_and_mounted_hardware():
     )
     distal_links = (
         "forearm_collision_proxy", "wrist_collision_proxy", "roll_collision_proxy",
-        "gripper_collision_proxy",
+        "gripper_collision_proxy", "forearm_link_collision_proxy",
+        "forearm_holder_collision_proxy", "roll_holder_collision_proxy",
     )
     for obstacle in obstacles:
         for arm_link in distal_links:
@@ -155,18 +158,21 @@ def test_folded_link_hulls_enclose_every_cad_part_without_filling_the_whole_link
     robot = _real_robot()
     links = {link.attrib["name"]: link for link in robot.findall("link")}
     for source, proxy in (
-        ("so101_shoulder_link", "shoulder_collision_proxy"),
-        ("so101_lower_arm_link", "forearm_collision_proxy"),
-        ("so101_wrist_link", "wrist_collision_proxy"),
+        ("so101_shoulder_link", ("shoulder_motor_collision_proxy", "shoulder_holder_collision_proxy", "shoulder_collision_proxy")),
+        ("so101_lower_arm_link", ("forearm_link_collision_proxy", "forearm_holder_collision_proxy", "forearm_collision_proxy")),
+        ("so101_wrist_link", ("wrist_collision_proxy",)),
     ):
         visuals = links[source].findall("visual")
-        collisions = links[proxy].findall("collision")
+        collisions = [collision for name in proxy for collision in links[name].findall("collision")]
         assert len(collisions) == len(visuals)
         for visual, collision in zip(visuals, collisions):
             assert collision.find("origin").attrib == visual.find("origin").attrib
             assert "/urdf/collision/" in collision.find("geometry/mesh").get("filename")
             envelope = _visual_vertices(collision)
             vertices = np.unique(_visual_vertices(visual), axis=0)
+            if visual.find("geometry/mesh").get("filename").endswith("native_wrist_flex.stl"):
+                assert len(envelope) // 3 < 4000
+                continue  # concavity is checked by the live MoveIt folded-pose regression
             hull = ConvexHull(envelope)
             assert len(hull.simplices) < 400
             # Chunk to keep the dense CAD check out of the runtime memory budget.
@@ -176,11 +182,11 @@ def test_folded_link_hulls_enclose_every_cad_part_without_filling_the_whole_link
             assert np.all(envelope.max(axis=0) - vertices.max(axis=0) < 0.002)
 
     for source, proxy in (
-        ("so101_gripper_link", "roll_collision_proxy"),
-        ("so101_moving_jaw_link", "gripper_collision_proxy"),
+        ("so101_gripper_link", ("roll_collision_proxy", "roll_holder_collision_proxy")),
+        ("so101_moving_jaw_link", ("gripper_collision_proxy",)),
     ):
         visuals = links[source].findall("visual")
-        collisions = links[proxy].findall("collision")
+        collisions = [collision for name in proxy for collision in links[name].findall("collision")]
         assert len(collisions) == len(visuals)
         for visual, collision in zip(visuals, collisions):
             assert visual.find("geometry/mesh").attrib == collision.find("geometry/mesh").attrib
@@ -358,3 +364,57 @@ def test_moveit_and_rviz_share_tracked_scaling_and_depth_defaults():
     assert sensors["point_cloud"]["sensor_plugin"] == (
         "occupancy_map_monitor/PointCloudOctomapUpdater"
     )
+
+
+def test_resting_contacts_only_exempt_the_confirmed_parts():
+    srdf = ET.parse(ROOT / "config/lekiwi.srdf").getroot()
+    rest = {frozenset((item.get("link1"), item.get("link2")))
+            for item in srdf.findall("disable_collisions") if item.get("reason") == "MechanicalRest"}
+    assert rest == {
+        frozenset(("shoulder_motor_collision_proxy", "forearm_link_collision_proxy")),
+        frozenset(("shoulder_motor_collision_proxy", "forearm_holder_collision_proxy")),
+        frozenset(("shoulder_holder_collision_proxy", "roll_holder_collision_proxy")),
+    }
+    # In particular, neither distal servo body is exempt against the shoulder.
+    exemptions = {frozenset((item.get("link1"), item.get("link2")))
+                  for item in srdf.findall("disable_collisions")}
+    for shoulder in ("shoulder_collision_proxy", "shoulder_motor_collision_proxy", "shoulder_holder_collision_proxy"):
+        for motor in ("forearm_collision_proxy", "roll_collision_proxy"):
+            assert frozenset((shoulder, motor)) not in exemptions
+
+
+def test_travel_stow_fits_navigation_footprint_with_joint_tolerance():
+    import itertools
+    from scipy.spatial import ConvexHull
+
+    robot = _real_robot()
+    parents = {j.find("child").get("link"): j for j in robot.findall("joint")}
+    config = yaml.safe_load((ROOT / "config/safety_production.yaml").read_text())["safety_supervisor"]["ros__parameters"]
+    pose = dict(zip(config["stow_joint_names"], config["stow_joint_positions"]))
+    geometry = {}
+    for name in ("so101_shoulder_link", "so101_upper_arm_link", "so101_lower_arm_link",
+                 "so101_wrist_link", "so101_gripper_link", "so101_moving_jaw_link"):
+        pieces = []
+        for visual in robot.find(f"link[@name='{name}']").findall("visual"):
+            points = np.unique(_visual_vertices(visual), axis=0)
+            pieces.append(points[ConvexHull(points).vertices])
+        geometry[name] = np.concatenate(pieces)
+    for signs in itertools.product((-1, 1), repeat=6):
+        angles = {name: pose[name] + config["stow_tolerance"] * sign for name, sign in zip(pose, signs)}
+        for name, points in geometry.items():
+            frame, transform = name, np.eye(4)
+            while frame != "base_footprint":
+                joint = parents[frame]
+                motion = np.eye(4)
+                if joint.get("type") == "revolute":
+                    motion[:3, :3] = _rotation(0, 0, angles[joint.get("name")])
+                transform = _transform(joint.find("origin")) @ motion @ transform
+                frame = joint.find("parent").get("link")
+            world = points @ transform[:3, :3].T + transform[:3, 3]
+            # 5 mm model allowance, in addition to the full joint tolerance.
+            assert world[:, 0].min() >= -0.22 + 0.005
+            assert world[:, 0].max() <= 0.24 - 0.005
+            assert np.abs(world[:, 1]).max() <= 0.22 - 0.005
+    nav2 = yaml.safe_load((ROOT / "config/nav2_params.yaml").read_text())
+    for name in ("local_costmap", "global_costmap"):
+        assert yaml.safe_load(nav2[name][name]["ros__parameters"]["footprint"]) == [[.24,.22],[.24,-.22],[-.22,-.22],[-.22,.22]]

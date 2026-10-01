@@ -1,6 +1,7 @@
 """The stow capture writes one pose into both safety files, exactly matching."""
 
 import importlib.util
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
@@ -25,7 +26,7 @@ def test_both_files_receive_the_same_pose_and_keep_their_comments():
     configured = dict(zip(params["stow_joint_names"], params["stow_joint_positions"]))
     accepted = yaml.safe_load(acceptance)["accepted_stow_joint_positions"]
     assert configured == accepted == stow
-    assert "Planned forward stow candidate" in production
+    assert "Physically set compact fold" in production
     assert yaml.safe_load(acceptance)["validated"] is False
     assert yaml.safe_load(acceptance)["validated_at"] is None
 
@@ -37,3 +38,23 @@ def test_a_moving_or_incomplete_arm_is_refused():
         capture.stow_from_samples([still, dict(still, arm_elbow_flex=0.6)])
     with pytest.raises(ValueError, match="missing"):
         capture.stow_from_samples([{"arm_shoulder_pan": 0.0}])
+
+
+def test_named_travel_pose_matches_safety_and_preserves_home():
+    original = (ROOT / "config/lekiwi.srdf").read_text()
+    production = yaml.safe_load((ROOT / "config/safety_production.yaml").read_text())["safety_supervisor"]["ros__parameters"]
+    stow = dict(zip(production["stow_joint_names"], production["stow_joint_positions"]))
+    changed = capture.write_named_stow(original, stow)
+    assert capture.write_named_stow(changed, stow) == changed
+    semantic = ET.fromstring(changed)
+    assert ET.tostring(semantic.find("group_state[@name='home']")) == ET.tostring(ET.fromstring(original).find("group_state[@name='home']"))
+    recorded = {joint.get("name"): float(joint.get("value"))
+                for state in semantic.findall("group_state[@name='travel_stow']") for joint in state}
+    assert recorded == stow
+    assert dict(zip(production["stow_joint_names"], production["stow_joint_positions"])) == recorded
+    stored = {joint.get("name"): float(joint.get("value"))
+              for state in ET.fromstring(original).findall("group_state[@name='travel_stow']") for joint in state}
+    assert stored == stow
+    for fault in (float("nan"), float("inf"), -2.0):
+        with pytest.raises(ValueError):
+            capture.stow_from_samples([dict(stow, arm_shoulder_lift=fault)])

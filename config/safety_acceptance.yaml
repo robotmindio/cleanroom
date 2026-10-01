@@ -24,19 +24,19 @@ validated_at: null
 # worst stopping distance and uncertainty.
 expected_base_footprint:
   - [-0.22, -0.22]
-  - [0.22, -0.22]
-  - [0.22, 0.22]
+  - [0.24, -0.22]
+  - [0.24, 0.22]
   - [-0.22, 0.22]
 expected_footprint_padding_m: 0.0
 # Must exactly match safety_production.yaml. This binds measured clearance and
 # stopping trials to the physical arm configuration used for base motion.
 accepted_stow_joint_positions:
-  arm_shoulder_pan: -0.006
-  arm_shoulder_lift: 1.0
-  arm_elbow_flex: -1.0
-  arm_wrist_flex: 0.0
-  arm_wrist_roll: -0.02
-  arm_gripper: 0.0
+  arm_shoulder_pan: 0.0
+  arm_shoulder_lift: -1.8167
+  arm_elbow_flex: 1.6295
+  arm_wrist_flex: 1.2367
+  arm_wrist_roll: -0.0169
+  arm_gripper: 0.2095
 minimum_trials_per_direction: 30
 maximum_command_stop_latency_s: null
 # Acceptance limits must be set from the reviewed safety case before testing;

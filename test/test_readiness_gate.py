@@ -320,3 +320,36 @@ def test_readiness_gate_exits_nonzero_when_ros_shuts_down_before_ready(monkeypat
 
     node._ready = True
     gate.main()  # a ready dependency is the only successful exit
+
+
+def test_one_node_mapping_seed_can_grow_without_erasing_database(tmp_path):
+    import sqlite3
+    from launch import LaunchContext
+
+    spec = importlib.util.spec_from_file_location("bringup_under_test", ROOT / "launch/bringup.launch.py")
+    bringup = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bringup)
+    database = tmp_path / "map.db"
+    context = LaunchContext()
+    context.launch_configurations.update(localization="visual_slam", slam_mode="mapping", rtabmap_database=str(database))
+
+    def configured():
+        actions = bringup._mapping_relocalization_gate(context)
+        actions[0].execute(context)
+        return context.launch_configurations["rtabmap_wait_for_loop"]
+
+    assert configured() == "true"
+    with sqlite3.connect(database) as connection:
+        connection.execute("CREATE TABLE Node(id INTEGER PRIMARY KEY)")
+        connection.execute("INSERT INTO Node VALUES(1)")
+    original = database.read_bytes()
+    assert configured() == "false"
+    assert database.read_bytes() == original
+    context.launch_configurations["slam_mode"] = "localization"
+    assert configured() == "true"
+    context.launch_configurations["slam_mode"] = "mapping"
+    with sqlite3.connect(database) as connection:
+        connection.execute("INSERT INTO Node VALUES(2)")
+    assert configured() == "true"
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("SELECT count(*) FROM Node").fetchone()[0] == 2

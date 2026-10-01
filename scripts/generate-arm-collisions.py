@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate conservative per-part collision hulls without changing vendored CAD."""
+"""Generate per-part collision meshes without changing vendored CAD."""
 
 from pathlib import Path
 import xml.etree.ElementTree as ET
@@ -24,6 +24,30 @@ def main():
         for index, visual in enumerate(robot.find(f"link[@name='{name}']").findall("visual")):
             mesh = visual.find("geometry/mesh")
             path = ROOT / mesh.get("filename").removeprefix("package://lekiwi_rmf/")
+            target = output / f"{name}-{index}.stl"
+            if path.name == "native_wrist_flex.stl":
+                # Its concavity clears the folded shoulder; a convex hull
+                # fills that gap. VTK is needed only for offline generation.
+                import vtk
+
+                reader = vtk.vtkSTLReader()
+                reader.SetFileName(str(path))
+                decimator = vtk.vtkDecimatePro()
+                decimator.SetInputConnection(reader.GetOutputPort())
+                decimator.SetTargetReduction(0.99)
+                decimator.PreserveTopologyOn()
+                decimator.SplittingOff()
+                decimator.BoundaryVertexDeletionOff()
+                decimator.SetErrorIsAbsolute(1)
+                decimator.SetAbsoluteError(0.0001)
+                writer = vtk.vtkSTLWriter()
+                writer.SetFileName(str(target))
+                writer.SetFileTypeToBinary()
+                writer.SetInputConnection(decimator.GetOutputPort())
+                if writer.Write() != 1:
+                    raise RuntimeError(f"failed to write {target}")
+                print(f"{target.relative_to(ROOT)}: concave bracket, 0.1 mm error bound")
+                continue
             data = path.read_bytes()
             count = int.from_bytes(data[80:84], "little")
             if len(data) != 84 + count * STL.itemsize:
@@ -39,7 +63,6 @@ def main():
             records = np.zeros(len(triangles), dtype=STL)
             records["vertices"] = triangles
             records["normal"] = hull.equations[:, :3]
-            target = output / f"{name}-{index}.stl"
             target.write_bytes(b"CAD occupied-cell hull, 1 mm".ljust(80, b"\0")
                                + len(records).to_bytes(4, "little") + records.tobytes())
             print(f"{target.relative_to(ROOT)}: {len(records)} triangles")

@@ -1,7 +1,10 @@
 import os
+import sqlite3
+from contextlib import closing
+from pathlib import Path
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, EmitEvent, ExecuteProcess, IncludeLaunchDescription, LogInfo, OpaqueFunction, RegisterEventHandler, SetEnvironmentVariable
+from launch.actions import DeclareLaunchArgument, EmitEvent, ExecuteProcess, IncludeLaunchDescription, LogInfo, OpaqueFunction, RegisterEventHandler, SetEnvironmentVariable, SetLaunchConfiguration
 from launch.conditions import IfCondition
 from launch.event_handlers import OnProcessExit
 from launch.events import Shutdown
@@ -64,6 +67,31 @@ def _mapping_guard_exit(event, context):
             output="screen",
         )]
     return [EmitEvent(event=Shutdown(reason=f"RTAB-Map mapping guard failed ({event.returncode})"))]
+
+
+def _mapping_relocalization_gate(context):
+    """A one-node RGB map cannot satisfy RTAB-Map's visual hypothesis test.
+
+    Before starting the mapper, allow that seed to gain another observation;
+    ordinary maps still require a verified closure before appending a session.
+    Never erase the database or invent a map-to-odometry transform.
+    """
+    wait_for_loop = "true"
+    if (LaunchConfiguration("localization").perform(context) == "visual_slam"
+            and LaunchConfiguration("slam_mode").perform(context) == "mapping"):
+        database = Path(LaunchConfiguration("rtabmap_database").perform(context)).expanduser().resolve()
+        if database.is_file():
+            try:
+                with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True, timeout=1)) as connection:
+                    count = connection.execute("SELECT count(*) FROM Node").fetchone()[0]
+            except sqlite3.Error as error:
+                raise RuntimeError(f"cannot inspect RTAB-Map database before startup: {database}: {error}") from error
+            if count == 1:
+                wait_for_loop = "false"
+    actions = [SetLaunchConfiguration("rtabmap_wait_for_loop", wait_for_loop)]
+    if wait_for_loop == "false":
+        actions.append(LogInfo(msg="RTAB-Map one-node seed: allow observations in the same database; relocalization still requires verified registration"))
+    return actions
 
 
 def generate_launch_description():
@@ -282,9 +310,9 @@ def generate_launch_description():
             "Mem/InitWMWithAllNodes": ParameterValue(PythonExpression([
                 "'", slam_mode, "' == 'localization' or ", lidar_on,
             ]), value_type=str),
-            # Start a mapping session only after it globally relocalizes to the
-            # saved graph, preventing an unlinked map on every process restart.
-            "Rtabmap/StartNewMapOnLoopClosure": "true",
+            # A one-node seed needs another observation before a visual closure
+            # is possible. Populated maps retain the normal relocalization gate.
+            "Rtabmap/StartNewMapOnLoopClosure": ParameterValue(LaunchConfiguration("rtabmap_wait_for_loop"), value_type=str),
             "RGBD/NeighborLinkRefining": "true", "RGBD/ProximityBySpace": "true",
             "Reg/Force3DoF": "true", "Grid/Sensor": "0", "Grid/RangeMax": "3.0",
             "Grid/CellSize": "0.05",
@@ -528,6 +556,7 @@ def generate_launch_description():
             # Evaluate cross-argument invariants before the first node, process,
             # or included launch description is allowed to start.
             OpaqueFunction(function=validate_context),
+            OpaqueFunction(function=_mapping_relocalization_gate),
             Node(
                 package="robot_state_publisher",
                 executable="robot_state_publisher",

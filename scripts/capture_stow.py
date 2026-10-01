@@ -1,28 +1,34 @@
 #!/usr/bin/env python3
-"""Record the held arm's stow pose into both safety configuration files.
+"""Record the held arm's stow pose into both safety files and MoveIt's SRDF.
 
 Position the arm in its reviewed, collision-free stow pose (armed and holding, or
 supported), then run this on a machine that sees the driver's /joint_states. It
 averages the six arm joints, refuses if they move, and writes the same values to
 config/safety_production.yaml (stow_joint_positions) and
 config/safety_acceptance.yaml (accepted_stow_joint_positions), which the
-supervisor requires to match. It never commands motion. Review and commit the diff.
+supervisor requires to match, plus config/lekiwi.srdf (travel_stow for arm and
+gripper). It never commands motion. Review and commit the diff.
 """
 
 import argparse
+import math
 import re
 import statistics
 import sys
 from pathlib import Path
+import xml.etree.ElementTree as ET
+
+from lekiwi_rmf.arm_trajectory import JOINT_LIMITS
 
 ROOT = Path(__file__).resolve().parents[1]
 PRODUCTION = ROOT / "config" / "safety_production.yaml"
 ACCEPTANCE = ROOT / "config" / "safety_acceptance.yaml"
+SEMANTIC = ROOT / "config" / "lekiwi.srdf"
 STOW_JOINTS = (
     "arm_shoulder_pan", "arm_shoulder_lift", "arm_elbow_flex",
     "arm_wrist_flex", "arm_wrist_roll", "arm_gripper",
 )
-# Radians. Well under the supervisor's 0.08 stow tolerance.
+# Radians. Under the supervisor's 0.02 stow tolerance.
 MAX_SPREAD = 0.01
 DECIMALS = 4
 
@@ -37,10 +43,14 @@ def stow_from_samples(samples):
         values = [sample[joint] for sample in samples if joint in sample]
         if len(values) != len(samples) or not values:
             raise ValueError(f"{joint} is missing from the joint states")
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError(f"{joint} has non-finite positions")
         spread = max(values) - min(values)
         if spread > MAX_SPREAD:
             raise ValueError(f"{joint} moved {spread:.3f} rad while recording; hold the arm still")
         stow[joint] = round(statistics.fmean(values), DECIMALS)
+        if not JOINT_LIMITS[joint][0] <= stow[joint] <= JOINT_LIMITS[joint][1]:
+            raise ValueError(f"{joint} is outside configured limits")
     return stow
 
 
@@ -74,6 +84,30 @@ def write_stow(production_text, acceptance_text, stow):
     return production, acceptance
 
 
+def write_named_stow(semantic_text, stow):
+    """Keep the captured travel posture available in both MoveIt groups."""
+    semantic = ET.fromstring(semantic_text)
+    for group, joints in (("arm", STOW_JOINTS[:-1]), ("gripper", STOW_JOINTS[-1:])):
+        states = semantic.findall(f"group_state[@name='travel_stow'][@group='{group}']")
+        if len(states) > 1:
+            raise ValueError(f"duplicate travel_stow in group {group}")
+        state = ET.Element("group_state", name="travel_stow", group=group)
+        for joint in joints:
+            ET.SubElement(state, "joint", name=joint, value=repr(stow[joint]))
+        ET.indent(state, space="  ", level=1)
+        text = ET.tostring(state, encoding="unicode")
+        if states:
+            semantic_text, count = re.subn(
+                rf'<group_state name="travel_stow" group="{group}">.*?</group_state>',
+                lambda _: text.rstrip(), semantic_text, count=1, flags=re.DOTALL,
+            )
+            if count != 1:
+                raise ValueError(f"cannot update travel_stow in group {group}")
+        else:
+            semantic_text = semantic_text.replace("</robot>", f"  {text}\n</robot>")
+    return semantic_text
+
+
 def record(samples_wanted, timeout):
     import rclpy
     from sensor_msgs.msg import JointState
@@ -105,13 +139,15 @@ def main():
         production, acceptance = write_stow(
             PRODUCTION.read_text(encoding="utf-8"), ACCEPTANCE.read_text(encoding="utf-8"), stow
         )
+        semantic = write_named_stow(SEMANTIC.read_text(encoding="utf-8"), stow)
     except ValueError as error:
         sys.exit(str(error))
     PRODUCTION.write_text(production, encoding="utf-8")
     ACCEPTANCE.write_text(acceptance, encoding="utf-8")
+    SEMANTIC.write_text(semantic, encoding="utf-8")
     for joint in STOW_JOINTS:
         print(f"{joint}: {stow[joint]}")
-    print("Wrote both stow entries; review the collision check, then commit them together.")
+    print("Wrote both safety entries and MoveIt travel_stow; review clearance and commit together.")
 
 
 if __name__ == "__main__":
