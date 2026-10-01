@@ -304,6 +304,9 @@ class _Bus:
             "Max_Temperature_Limit": dict.fromkeys(MOTORS, 70),
             "Min_Voltage_Limit": dict.fromkeys(MOTORS, 45),
             "Max_Voltage_Limit": dict.fromkeys(MOTORS, 140),
+            "P_Coefficient": dict.fromkeys(MOTORS, 16),
+            "I_Coefficient": dict.fromkeys(MOTORS, 0),
+            "D_Coefficient": dict.fromkeys(MOTORS, 32),
         }
         self.calls = []
         self.writes = {}
@@ -352,6 +355,8 @@ class _Bus:
     def write(self, register, motor, value):
         self.calls.append(f"write {register} {motor}")
         self.writes[(register, motor)] = value
+        if register in self.registers:
+            self.registers[register][motor] = value
 
     def configure_motors(self):
         self.calls.append("configure_motors")
@@ -449,7 +454,7 @@ def test_loaded_arm_joints_get_tuned_position_gain(monkeypatch):
     host = _host_module(monkeypatch)
     robot = host.SafetyLeKiwi(host.LeKiwiConfig())
     robot.bus = _Bus()
-    robot.arm_motors = ["arm_shoulder_pan", "arm_shoulder_lift", "arm_elbow_flex"]
+    robot.arm_motors = ["arm_shoulder_pan", "arm_shoulder_lift", "arm_elbow_flex", "arm_wrist_flex"]
     robot.base_motors = list(BASE)
 
     robot.configure()
@@ -457,6 +462,23 @@ def test_loaded_arm_joints_get_tuned_position_gain(monkeypatch):
     assert robot.bus.writes[("P_Coefficient", "arm_shoulder_pan")] == 16
     assert robot.bus.writes[("P_Coefficient", "arm_shoulder_lift")] == 96
     assert robot.bus.writes[("P_Coefficient", "arm_elbow_flex")] == 64
+    assert robot.bus.writes[("I_Coefficient", "arm_shoulder_lift")] == 1
+    assert robot.bus.writes[("I_Coefficient", "arm_elbow_flex")] == 1
+    assert robot.bus.writes[("I_Coefficient", "arm_wrist_flex")] == 1
+    assert robot.bus.writes[("I_Coefficient", "arm_shoulder_pan")] == 0
+
+
+def test_configure_rejects_unconfirmed_arm_gains(monkeypatch):
+    host = _host_module(monkeypatch)
+    robot = host.SafetyLeKiwi(host.LeKiwiConfig())
+    robot.bus = _Bus()
+    robot.arm_motors, robot.base_motors = list(ARM), list(BASE)
+    read = robot.bus.sync_read
+    monkeypatch.setattr(robot.bus, "sync_read", lambda register, *args, **kwargs:
+                        {} if register == "I_Coefficient" else read(register, *args, **kwargs))
+    with pytest.raises(RuntimeError, match="I_Coefficient readback differs"):
+        robot.configure()
+    assert "enable_torque" not in robot.bus.calls
 
 
 def test_shutdown_signal_waits_for_the_serial_operation_to_finish(monkeypatch):

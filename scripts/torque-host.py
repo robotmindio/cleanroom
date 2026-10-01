@@ -42,6 +42,9 @@ from lekiwi_rmf.motor_health import fault_snapshot, healthy_snapshot
 TORQUE_RETRIES = 5
 # The lift still held 0.023 rad short at P=64; tune only that loaded joint.
 ARM_P_COEFFICIENTS = {"arm_shoulder_lift": 96, "arm_elbow_flex": 64}
+# Proportional control alone leaves a load-dependent position error. Use the
+# smallest integral gain on gravity-loaded joints; keep jaw contact unchanged.
+ARM_I_COEFFICIENTS = {"arm_shoulder_lift": 1, "arm_elbow_flex": 1, "arm_wrist_flex": 1}
 # Spread grouped register reads across host cycles; one burst per snapshot can
 # starve the position loop on the shared Feetech bus.
 HEALTH_READ_PERIOD_S = 0.10
@@ -183,17 +186,26 @@ class SafetyLeKiwi(LeKiwi):
 
     def configure(self):
         # This is LeRobot 0.6.1's LeKiwi.configure() without its final
-        # enable_torque(). Keep its modes and gains identical to the supported
-        # vendor implementation.
+        # enable_torque(). Position gains are tuned for this robot's load.
         broadcast_torque_off(self.bus)
         TorqueControlServer._verify_torque(self, False)
         self.bus.sync_write("Lock", 0, num_retry=TORQUE_RETRIES)
         self.bus.configure_motors()
+        expected_gains = {"P_Coefficient": {}, "I_Coefficient": {}, "D_Coefficient": {}}
         for name in self.arm_motors:
             self.bus.write("Operating_Mode", name, OperatingMode.POSITION.value)
-            self.bus.write("P_Coefficient", name, ARM_P_COEFFICIENTS.get(name, 16))
-            self.bus.write("I_Coefficient", name, 0)
-            self.bus.write("D_Coefficient", name, 32)
+            for register, value in (
+                ("P_Coefficient", ARM_P_COEFFICIENTS.get(name, 16)),
+                ("I_Coefficient", ARM_I_COEFFICIENTS.get(name, 0)),
+                ("D_Coefficient", 32),
+            ):
+                self.bus.write(register, name, value)
+                expected_gains[register][name] = value
+        for register, expected in expected_gains.items():
+            actual = self.bus.sync_read(register, self.arm_motors, normalize=False, num_retry=TORQUE_RETRIES)
+            if actual != expected:
+                raise RuntimeError(f"{register} readback differs from configured arm gains")
+        logging.info("Arm position gains verified: %s", expected_gains)
         for name in self.base_motors:
             self.bus.write("Operating_Mode", name, OperatingMode.VELOCITY.value)
 
