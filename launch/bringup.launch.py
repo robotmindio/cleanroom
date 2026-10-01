@@ -282,6 +282,11 @@ def generate_launch_description():
             "Reg/Strategy": ParameterValue(PythonExpression([
                 "'2' if ", camera_on, " and ", lidar_on, " else ('0' if ", camera_on, " else '1')",
             ]), value_type=str),
+            # OpenGV is absent in the packaged core. Native 3D-to-3D visual
+            # registration supports both cameras using their measured depth.
+            "Vis/EstimationType": ParameterValue(PythonExpression([
+                "'0' if ", dual_rgbd, " else '1'",
+            ]), value_type=str),
             # A prior ICP-only database can persist -1 here, which disables
             # visual word extraction even after RGB is enabled at launch.
             "Kp/MaxFeatures": "500",
