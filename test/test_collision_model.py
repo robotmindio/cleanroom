@@ -49,7 +49,9 @@ def test_arm_has_complete_link_and_servo_collision_envelopes():
 
 def test_distal_arm_checks_physical_chassis_and_mounted_hardware():
     robot = _real_robot()
-    base = robot.find("link[@name='base_link']/collision/geometry/cylinder")
+    base = robot.find("link[@name='base_link']")
+    guard = base.find("collision/geometry/mesh")
+    visible_guard = base.find("visual/geometry/mesh")
     mount = robot.find("joint[@name='base_footprint_to_base_link']/origin")
     srdf = ET.parse(ROOT / "config" / "lekiwi.srdf").getroot()
     exemptions = {
@@ -58,8 +60,16 @@ def test_distal_arm_checks_physical_chassis_and_mounted_hardware():
     }
 
     assert robot.find("link[@name='arm_workspace_keepout_proxy']") is None
-    assert float(base.get("radius")) == pytest.approx(0.145)
-    assert float(base.get("length")) == pytest.approx(0.090)
+    assert guard.get("filename") == "package://lekiwi_rmf/urdf/chassis_guard.stl"
+    assert visible_guard.get("filename") == guard.get("filename")
+    assert base.find("collision/origin").get("xyz") == base.find("visual/origin").get("xyz")
+    assert np.fromstring(base.find("collision/origin").get("xyz"), sep=" ") == pytest.approx([0, 0, -0.020])
+    assert float(base.find("visual/material/color").get("rgba").split()[-1]) > 0
+    mesh = np.frombuffer((ROOT / "urdf/chassis_guard.stl").read_bytes()[84:],
+                         dtype=np.dtype([("normal", "<f4", (3,)), ("vertices", "<f4", (3, 3)), ("attr", "<u2")]))["vertices"].reshape(-1, 3)
+    assert mesh[:, 0].min() == pytest.approx(-0.145)
+    assert mesh[:, 0].max() == pytest.approx(-0.003)
+    assert np.ptp(mesh[:, 2]) == pytest.approx(0.050)
     assert np.fromstring(mount.get("xyz"), sep=" ") == pytest.approx([0.0, 0.0, 0.093])
     obstacles = (
         "base_link", "front_camera_collision_proxy", "lidar_collision_proxy",

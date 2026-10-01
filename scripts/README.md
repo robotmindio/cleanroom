@@ -26,6 +26,7 @@ units refer to them directly.
 - `install-device-services.sh` installs the device boot services (motor host, cameras, Astra, LD06, zenoh bridge).
 - `install-compute-services.sh [--remote DEVICE] [--no-start]` installs `lekiwi-stack.service`; it restarts a running stack only when its configuration changed.
 - `install-device-network.sh --user USER [--country CC]` sets the Wi-Fi country, turns off Wi-Fi power saving and grants the deploy user NetworkManager control.
+- `install-wifi-powersave.sh` disables Wi-Fi power saving on the active interface and on future NetworkManager connections; both service installers run it.
 - `install-wifi-regdom.sh [CC]` sets the Wi-Fi regulatory country (default `LEKIWI_WIFI_COUNTRY`, else `ID`) now and at every boot.
 - `install-deploy-sudoers.sh` grants the deploy user passwordless start/stop of the LeKiwi units only.
 - `setup-zenoh-tls.sh DEVICE` creates the private CA and mutual-TLS identities of the zenoh bridge on both machines.

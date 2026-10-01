@@ -617,14 +617,18 @@ def test_service_fingerprint_covers_installed_service_behavior():
         "scripts/lib/runtime-common.sh",
         "scripts/install-deploy-sudoers.sh",
         "scripts/install-device-network.sh",
+        "scripts/install-wifi-powersave.sh",
     ):
         assert source in revision
+    assert 'as_root "$PROJECT_ROOT/scripts/install-wifi-powersave.sh"' in (
+        ROOT / "scripts" / "install-compute-services.sh"
+    ).read_text(encoding="utf-8")
 
 
 def _network_checkout(tmp_path: pathlib.Path, env_file: str | None = None) -> pathlib.Path:
     """A copy of the network installers, so the developer's own .env cannot leak in."""
     checkout = tmp_path / "checkout"
-    for name in ("install-device-network.sh", "install-wifi-regdom.sh", "lib/runtime-common.sh"):
+    for name in ("install-device-network.sh", "install-wifi-regdom.sh", "install-wifi-powersave.sh", "lib/runtime-common.sh"):
         target = checkout / "scripts" / name
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / "scripts" / name, target)

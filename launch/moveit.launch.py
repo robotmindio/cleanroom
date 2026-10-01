@@ -22,6 +22,10 @@ def generate_launch_description():
         parameters = config.to_dict()
         parameters["use_sim_time"] = sim_enabled
         if not sim_enabled:
+            # The Pi owns path/goal tolerances and its execution clock pauses on
+            # lost safety permission. A wall-clock watchdog would cancel that
+            # safely suspended goal. Cancellation and motor-host leases stay live.
+            parameters.setdefault("trajectory_execution", {})["execution_duration_monitoring"] = False
             apply_gripper_calibration(
                 parameters, LaunchConfiguration("arm_calibration_file").perform(context)
             )

@@ -819,6 +819,7 @@ def generate_launch_description():
                 executable="lekiwi_driver",
                 parameters=[{
                     "remote_ip": remote_ip,
+                    "local_arm_execution": True,
                     "arm_calibration_file": arm_calibration_file,
                     "curve_client_secret_key_file": curve_client_secret,
                     "curve_server_public_key_file": curve_server_public,

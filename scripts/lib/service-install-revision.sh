@@ -9,7 +9,8 @@ service_fingerprint() {
       sources=(systemd/lekiwi-stack.service systemd/lekiwi-ros-logrotate.conf \
         systemd/lekiwi-ros-logrotate.service systemd/lekiwi-ros-logrotate.timer \
         scripts/lib/service-install-common.sh scripts/lib/runtime-common.sh \
-        scripts/lib/self-heal.sh scripts/install-deploy-sudoers.sh scripts/setup-zenoh-tls.sh)
+        scripts/lib/self-heal.sh scripts/install-deploy-sudoers.sh scripts/setup-zenoh-tls.sh \
+        scripts/install-compute-services.sh scripts/install-wifi-powersave.sh)
       ;;
     device)
       sources=(systemd/lekiwi-host.service systemd/lekiwi-astra.service \
@@ -18,8 +19,8 @@ service_fingerprint() {
         systemd/lekiwi-ros-logrotate.timer \
         scripts/ros-astra.sh scripts/ros-cameras.sh scripts/ros-lidar.sh scripts/ros-zenoh.sh \
         scripts/lib/service-install-common.sh scripts/lib/runtime-common.sh \
-        scripts/lib/self-heal.sh scripts/install-deploy-sudoers.sh scripts/install-device-network.sh \
-        scripts/install-wifi-regdom.sh)
+        scripts/lib/self-heal.sh scripts/install-deploy-sudoers.sh scripts/install-device-services.sh \
+        scripts/install-device-network.sh scripts/install-wifi-regdom.sh scripts/install-wifi-powersave.sh)
       ;;
     *) die "service fingerprint role must be compute or device" ;;
   esac

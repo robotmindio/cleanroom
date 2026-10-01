@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
 # Network settings for the machine that owns the robot's USB devices. Run as root.
 #
-#   - Wi-Fi power saving off. Ubuntu and Raspberry Pi OS enable it by default; the radio
-#     then sleeps between beacons and every packet waits up to hundreds of milliseconds,
-#     which stalls ROS discovery, the camera streams and the torque link.
+#   - Wi-Fi power saving off, through install-wifi-powersave.sh.
 #   - The Wi-Fi regulatory country, through install-wifi-regdom.sh (which explains why).
 #   - A polkit rule that lets the deployment user manage NetworkManager over SSH without a
 #     password (nmcli connection up/modify, Wi-Fi scans). It grants no shell access.
@@ -15,7 +13,7 @@
 # Usage: sudo scripts/install-device-network.sh --user USER [--country CC]
 #   --country  two-letter ISO 3166 regulatory country; default LEKIWI_WIFI_COUNTRY
 #              from the repository .env, else ID (see install-wifi-regdom.sh)
-# LEKIWI_NETWORK_ROOT=DIR writes under DIR and skips the NetworkManager reload (tests only).
+# LEKIWI_NETWORK_ROOT=DIR writes under DIR and skips live network changes (tests only).
 set -Eeuo pipefail
 
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
@@ -40,21 +38,16 @@ root=${LEKIWI_NETWORK_ROOT:-}
 
 # The radio needs its country with or without NetworkManager.
 "$(dirname -- "${BASH_SOURCE[0]}")/install-wifi-regdom.sh" "${country_args[@]}"
+"$(dirname -- "${BASH_SOURCE[0]}")/install-wifi-powersave.sh"
 
 if ! command -v nmcli >/dev/null; then
-  printf 'NetworkManager is not installed -- no power-saving or polkit settings to install\n'
+  printf 'NetworkManager is not installed -- no polkit settings to install\n'
   exit 0
 fi
 
-nm_conf=$root/etc/NetworkManager/conf.d/zz-lekiwi-wifi-powersave-off.conf
 polkit_rule=$root/etc/polkit-1/rules.d/50-lekiwi-networkmanager.rules
 
-install -d -m 0755 "${nm_conf%/*}" "${polkit_rule%/*}"
-
-# wifi.powersave: 2 = disable. The zz- prefix sorts after the distribution's
-# default-wifi-powersave-on.conf, and later files win.
-printf '%s\n' '# Managed by scripts/install-device-network.sh.' '[connection]' 'wifi.powersave = 2' |
-  install -m 0644 /dev/stdin "$nm_conf"
+install -d -m 0755 "${polkit_rule%/*}"
 
 cat <<EOF | install -m 0644 /dev/stdin "$polkit_rule"
 // Managed by scripts/install-device-network.sh.
@@ -71,7 +64,5 @@ polkit.addRule(function(action, subject) {
 EOF
 
 if [[ -z $root ]]; then
-  systemctl reload NetworkManager
-  printf 'installed %s and %s\n' "$nm_conf" "$polkit_rule"
-  printf 'Power saving is off from the next Wi-Fi connect or reboot.\n'
+  printf 'installed %s\n' "$polkit_rule"
 fi

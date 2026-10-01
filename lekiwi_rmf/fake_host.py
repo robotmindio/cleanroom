@@ -36,6 +36,7 @@ from lekiwi_rmf.odometry import (
     TELEMETRY_TORQUE_ENABLED_KEY,
 )
 from lekiwi_rmf.motor_health import healthy_snapshot
+from lekiwi_rmf.local_arm_executor import LocalArmExecutor, STATUS_KEY, LEASE_KEYS
 
 
 LEKIWI_STATE_KEYS = (
@@ -121,6 +122,7 @@ class FakeLeKiwiHost:
         self._torque_failures: dict[str, deque[str]] = {"enable": deque(), "disable": deque()}
         self._faults: deque[ObservationFault] = deque()
         self._session = uuid.uuid4().hex
+        self.arm_executor = LocalArmExecutor(time.monotonic, 0.5)
         self._sequence = 0
         self._protocol_lock = threading.Lock()
         self._last_frames: list[bytes] | None = None
@@ -188,6 +190,8 @@ class FakeLeKiwiHost:
             self._session = uuid.uuid4().hex
             self._sequence = 0
             self.torque_enabled = False
+            self.arm_executor.cancel()
+            self.arm_executor.hold = {}
             self._last_frames = None
             self._last_sample_ns = None
             return self._session
@@ -237,6 +241,7 @@ class FakeLeKiwiHost:
                 TELEMETRY_MONOTONIC_NS_KEY: sample_ns,
                 TELEMETRY_TORQUE_ENABLED_KEY: self.torque_enabled,
                 "_lekiwi_motor_health": self.motor_health,
+                STATUS_KEY: self.arm_executor.status,
             }
             self._sequence += 1
             self._last_sample_ns = sample_ns
@@ -289,9 +294,13 @@ class FakeLeKiwiHost:
             except (UnicodeDecodeError, TypeError, ValueError, json.JSONDecodeError):
                 continue
             self.actions.append(action)
-            for key, value in action.items():
-                if key in self.state:
-                    self.state[key] = value
+            if LEASE_KEYS[0] in action:
+                self.arm_executor.renew(action[LEASE_KEYS[0]], bool(action.get(LEASE_KEYS[1], 0)))
+            if not self.arm_executor.active:
+                action.update(self.arm_executor.hold)
+                for key, value in action.items():
+                    if key in self.state:
+                        self.state[key] = value
             accepted += 1
 
     def process_torque(self) -> bool:
@@ -324,7 +333,23 @@ class FakeLeKiwiHost:
             self._torque_socket.send_json({"ok": True, "torque_enabled": True})
         elif command == "disable":
             self.torque_enabled = False
+            self.arm_executor.cancel()
+            self.arm_executor.hold = {}
             self._torque_socket.send_json({"ok": True, "torque_enabled": False})
+        elif command in {"trajectory_start", "trajectory_cancel"}:
+            try:
+                if request.get("session") != self.session or not self.torque_enabled:
+                    raise ValueError("invalid trajectory session or disabled torque")
+                if command == "trajectory_start":
+                    self.arm_executor.start(request["trajectory"], self.state)
+                else:
+                    if self.arm_executor.status is None or request.get("id") != self.arm_executor.status["id"]:
+                        raise ValueError("invalid arm goal id")
+                    self.arm_executor.cancel(request["id"])
+                    self.arm_executor.hold = {key: value for key, value in self.state.items() if key.endswith(".pos")}
+                self._torque_socket.send_json({"ok": True, "trajectory": self.arm_executor.status})
+            except Exception as error:
+                self._torque_socket.send_json({"ok": False, "error": str(error)})
         elif command == "state":
             self._torque_socket.send_json({"ok": True, "torque_enabled": self.torque_enabled})
         else:
@@ -335,6 +360,11 @@ class FakeLeKiwiHost:
         """Advance all protocol endpoints once without sleeping."""
         self.process_actions()
         self.process_torque()
+        if self.torque_enabled and self.arm_executor.active:
+            action = self.arm_executor.step(self.state, time.monotonic())
+            if action is not None:
+                self.actions.append(action)
+                self.state.update(action)
         return self.publish_observation() if publish else None
 
     def start(self, period_s: float = 1 / 30) -> None:

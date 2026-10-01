@@ -243,7 +243,7 @@ class _Again(Exception):
 def _host_module(monkeypatch):
     fake_zmq = types.SimpleNamespace(
         Again=_Again, NOBLOCK=1, REP=4, PULL=7, PUSH=8, LINGER=17, CONFLATE=54, SNDHWM=23,
-        HEARTBEAT_IVL=75, HEARTBEAT_TIMEOUT=77,
+        HEARTBEAT_IVL=75, HEARTBEAT_TIMEOUT=77, MAXMSGSIZE=22,
     )
     fake_cv2 = types.SimpleNamespace(IMWRITE_JPEG_QUALITY=1, imencode=lambda *_args: (True, b"jpeg"))
     fake_draccus = types.SimpleNamespace(wrap=lambda: (lambda function: function))
@@ -295,6 +295,7 @@ class _Bus:
         self.torque = dict.fromkeys(MOTORS, 0)
         self.registers = {
             "Present_Position": dict.fromkeys(MOTORS, 12.5),
+            "Goal_Position": dict.fromkeys(MOTORS, 13.5),
             "Present_Load": dict.fromkeys(MOTORS, 100),
             "Present_Voltage": dict.fromkeys(MOTORS, 120),
             "Present_Temperature": dict.fromkeys(MOTORS, 35),
@@ -305,6 +306,7 @@ class _Bus:
             "Max_Voltage_Limit": dict.fromkeys(MOTORS, 140),
         }
         self.calls = []
+        self.writes = {}
         self.faults = {}
         self.enable_skips = ()
         self.torque_off_skips = ()
@@ -349,6 +351,7 @@ class _Bus:
 
     def write(self, register, motor, value):
         self.calls.append(f"write {register} {motor}")
+        self.writes[(register, motor)] = value
 
     def configure_motors(self):
         self.calls.append("configure_motors")
@@ -440,6 +443,28 @@ def test_configure_never_energizes_the_servos(monkeypatch):
         "write Torque_Enable", "read Torque_Enable", "write Lock", "configure_motors",
     ]
     assert "enable_torque" not in robot.bus.calls
+
+
+def test_loaded_arm_joints_get_tuned_position_gain(monkeypatch):
+    host = _host_module(monkeypatch)
+    robot = host.SafetyLeKiwi(host.LeKiwiConfig())
+    robot.bus = _Bus()
+    robot.arm_motors = ["arm_shoulder_pan", "arm_shoulder_lift", "arm_elbow_flex"]
+    robot.base_motors = list(BASE)
+
+    robot.configure()
+
+    assert robot.bus.writes[("P_Coefficient", "arm_shoulder_pan")] == 16
+    assert robot.bus.writes[("P_Coefficient", "arm_shoulder_lift")] == 96
+    assert robot.bus.writes[("P_Coefficient", "arm_elbow_flex")] == 64
+
+
+def test_shutdown_signal_waits_for_the_serial_operation_to_finish(monkeypatch):
+    host = _host_module(monkeypatch)
+
+    host._shutdown_signal(None, None)
+
+    assert host._shutdown_requested is True
 
 
 def test_enable_holds_the_measured_arm_pose_before_confirming_torque(monkeypatch, tmp_path):
@@ -624,6 +649,43 @@ def test_valid_commands_reach_the_robot_and_refresh_the_watchdog(monkeypatch, tm
     assert "stop_base" not in robot.bus.calls
 
 
+def test_real_host_local_goal_holds_through_command_silence(monkeypatch, tmp_path):
+    from test_local_arm_executor import setup_executor
+
+    host = _host_module(monkeypatch)
+    loop, clock, socket, robot = _loop(host, tmp_path)
+    loop.control.torque_enabled = True
+    _executor, _now, observation, trajectory = setup_executor()
+    robot.get_observation = lambda: dict(observation)
+    command, reply = _request(loop.control, socket, robot, {
+        "command": "trajectory_start", "session": loop.telemetry_session,
+        "trajectory": trajectory,
+    })
+    assert command == "trajectory_start" and reply["ok"]
+    for _ in range(20):
+        clock.now += 0.033
+        loop.host.zmq_cmd_socket.messages.append(_action(**{
+            "_lekiwi_arm_goal": trajectory["id"], "_lekiwi_arm_permission": 1,
+            "x.vel": 0.1, "arm_shoulder_pan.pos": 100.0,
+        }))
+        loop.step()
+        observation.update({key: value for key, value in robot.actions[-1].items() if key.endswith(".pos")})
+    elapsed = loop.arm_executor.status["elapsed"]
+    clock.now += 12.0
+    loop.step()
+    assert loop.arm_executor.status["state"] == "paused"
+    assert loop.arm_executor.status["elapsed"] == elapsed
+    assert robot.actions[-1]["x.vel"] == 0
+    assert robot.actions[-1]["arm_shoulder_pan.pos"] != 100.0
+    clock.now += 0.033
+    loop.host.zmq_cmd_socket.messages.append(_action(**{
+        "_lekiwi_arm_goal": trajectory["id"], "_lekiwi_arm_permission": 1,
+    }))
+    loop.step()
+    assert loop.arm_executor.status["state"] == "running"
+    assert loop.arm_executor.status["elapsed"] == elapsed
+
+
 def test_host_keeps_command_loop_fast_and_limits_observation_bandwidth(monkeypatch, tmp_path):
     host = _host_module(monkeypatch)
     loop, clock, _socket, robot = _loop(host, tmp_path)
@@ -643,6 +705,18 @@ def test_host_keeps_command_loop_fast_and_limits_observation_bandwidth(monkeypat
 
     assert [action["x.vel"] for action in robot.actions] == [0.1, 0.2, 0.3]
     assert len(loop.host.zmq_observation_socket.sent) == 2
+
+
+def test_host_reports_the_stage_causing_a_slow_observation(monkeypatch, tmp_path, caplog):
+    host = _host_module(monkeypatch)
+    loop, _clock, _socket, _robot = _loop(host, tmp_path)
+    timings = iter((100.0, 100.01, 100.02, 100.03, 100.34))
+    monkeypatch.setattr(host.time, "perf_counter", lambda: next(timings))
+
+    with caplog.at_level(logging.WARNING):
+        loop.step()
+
+    assert "observation=0.310s" in caplog.text
 
 
 def test_a_repeated_malformed_command_is_logged_once_per_distinct_error(monkeypatch, tmp_path, caplog):
@@ -794,6 +868,7 @@ def test_motor_health_reports_every_servo_with_its_limits(monkeypatch):
     assert levels["servo/arm_shoulder_pan"] == 0
     values = snapshot["statuses"]["servo/base_left_wheel"]["values"]
     assert values["present_voltage_v"] == "12.0" and values["maximum_temperature_c"] == "70"
+    assert values["present_position"] == "12.5" and values["goal_position"] == "13.5"
     # Bounded rate: an immediate second call reuses the last read.
     reads = len(bus.calls)
     assert collector.collect(robot, torque_enabled=False) is snapshot

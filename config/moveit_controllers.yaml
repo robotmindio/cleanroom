@@ -1,11 +1,10 @@
 moveit_controller_manager: moveit_simple_controller_manager/MoveItSimpleControllerManager
 moveit_manage_controllers: false
 trajectory_execution:
-  # Physical serial servos can finish slightly later than MoveIt's time-parameterized
-  # estimate. Keep duration monitoring enabled, with enough margin to avoid canceling
-  # otherwise healthy trajectories at their nominal endpoint.
+  # The driver allows five seconds after the planned endpoint for servo settling.
+  # MoveIt's watchdog must outlast that window, including short correction paths.
   allowed_execution_duration_scaling: 1.5
-  allowed_goal_duration_margin: 1.0
+  allowed_goal_duration_margin: 6.0
 # One entry, because the driver serves exactly one FollowJointTrajectory action that
 # accepts any subset of its six joints. Listing the gripper here lets a gripper-group
 # plan execute through the same server; arm plans simply omit it.
