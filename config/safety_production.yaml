@@ -2,6 +2,9 @@ safety_supervisor:
   ros__parameters:
     publish_frequency: 20.0
     sensor_timeout: 0.50
+    # Filtered Astra clouds arrive at <=3 Hz; observed compute gaps reach 0.71 s.
+    # Keep the scan deadline short while matching the arm monitor's 1 s cloud gate.
+    depth_timeout: 1.0
     state_timeout: 0.75
     permission_timeout: 0.5
     battery_timeout: 2.0

@@ -16,7 +16,9 @@ def test_both_files_receive_the_same_pose_and_keep_their_comments():
     stow = dict(zip(capture.STOW_JOINTS, (0.1, -1.5708, 1.4, 0.95, -0.02, 0.3)))
     production, acceptance = capture.write_stow(
         (ROOT / "config/safety_production.yaml").read_text(encoding="utf-8"),
-        (ROOT / "config/safety_acceptance.yaml").read_text(encoding="utf-8"),
+        (ROOT / "config/safety_acceptance.yaml").read_text(encoding="utf-8")
+        .replace("validated: false", "validated: true")
+        .replace("validated_at: null", 'validated_at: "2026-09-30"'),
         stow,
     )
     params = yaml.safe_load(production)["safety_supervisor"]["ros__parameters"]
@@ -25,6 +27,7 @@ def test_both_files_receive_the_same_pose_and_keep_their_comments():
     assert configured == accepted == stow
     assert "Planned forward stow candidate" in production
     assert yaml.safe_load(acceptance)["validated"] is False
+    assert yaml.safe_load(acceptance)["validated_at"] is None
 
 
 def test_a_moving_or_incomplete_arm_is_refused():
