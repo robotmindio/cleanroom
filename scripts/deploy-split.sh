@@ -298,6 +298,18 @@ trap on_exit EXIT
 log "Confirming torque-off and stopping the compute stack"
 ros_setup
 disarm
+# Older installed units broadcast SIGINT and interrupt RTAB-Map's save when
+# launch forwards it again. Close their launcher before the first unit refresh.
+if [[ $(systemctl show -P KillMode lekiwi-stack.service) != mixed ]]; then
+  stack_pid=$(systemctl show -P MainPID lekiwi-stack.service)
+  [[ $stack_pid =~ ^[1-9][0-9]*$ ]] || die "compute launcher PID is missing"
+  kill -INT "$stack_pid"
+  deadline=$((SECONDS + 45))
+  while kill -0 "$stack_pid" 2>/dev/null; do
+    (( SECONDS < deadline )) || die "compute launcher did not finish its database save"
+    sleep 0.2
+  done
+fi
 sudo -n /usr/bin/systemctl stop lekiwi-stack.service
 if [[ $pi_reboot_needed == true ]]; then
   log "Rebooting the Pi to apply its USB current setting"

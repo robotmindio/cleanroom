@@ -347,6 +347,9 @@ def test_mapper_shutdown_signals_the_launcher_without_interrupting_its_save():
     assert 'os.kill(stack.pid,signal.SIGINT)' in runner
     assert 'try:stack.wait(timeout=45)' in runner
     assert '[[ $kind == stack ]]' in stop and 'deadline=$((SECONDS + 45))' in stop
+    deploy = (ROOT / 'scripts/deploy-split.sh').read_text()
+    assert 'systemctl show -P KillMode lekiwi-stack.service' in deploy
+    assert deploy.index('kill -INT "$stack_pid"') < deploy.index('sudo -n /usr/bin/systemctl stop lekiwi-stack.service')
 
 
 def test_rviz_exports_the_selected_collision_plugin_in_its_parameter_file():
