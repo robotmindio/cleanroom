@@ -36,7 +36,9 @@ def generate_launch_description():
         ),
         Node(
             package="image_transport", executable="republish", name="astra_color_compressor",
-            parameters=[{"in_transport": "raw", "out_transport": "compressed"}],
+            parameters=[{"in_transport": "raw", "out_transport": "compressed",
+                "qos_overrides./camera/astra/color/image_raw.subscription.reliability": "best_effort",
+            }],
             remappings=[
                 ("in", "/camera/astra/color/image_raw"),
                 ("out/compressed", "/camera/astra/color/image_raw/compressed"),

@@ -36,6 +36,9 @@ def test_real_bringup_maps_both_calibrated_views_with_measured_depth():
     assert '"subscribe_rgbd": ParameterValue(dual_rgbd' in source
     assert '("rgbd_image0", "/slam/astra/rgbd_image")' in source
     assert '("rgbd_image1", "/slam/front/rgbd_image")' in source
+    assert 'executable="rgbdx_sync"' in source
+    assert '["0 if ", dual_rgbd, " else 1"]' in source
+    assert '("rgbd_images", "/slam/rgbd_images")' in source
     assert '("front", "/slam/cloud", slam_camera_info_topic, 1, camera_on)' in source
     assert '("astra", "/camera/depth/points", "/camera/astra/color/camera_info", 2, dual_rgbd)' in source
     assert '"qos_image": 2' in source

@@ -296,7 +296,7 @@ def generate_launch_description():
             "Rtabmap/DetectionRate": "2",
             "subscribe_depth": ParameterValue(PythonExpression([camera_on, " and not ", dual_rgbd]), value_type=bool),
             "subscribe_rgbd": ParameterValue(dual_rgbd, value_type=bool),
-            "rgbd_cameras": ParameterValue(PythonExpression(["2 if ", dual_rgbd, " else 1"]), value_type=int),
+            "rgbd_cameras": ParameterValue(PythonExpression(["0 if ", dual_rgbd, " else 1"]), value_type=int),
             "subscribe_scan": False,
             "subscribe_scan_cloud": ParameterValue(lidar_on, value_type=bool),
             # slam_cloud already removed the floor; project every point.
@@ -325,8 +325,7 @@ def generate_launch_description():
         remappings=[
             ("rgb/image", slam_rgb_topic), ("rgb/camera_info", slam_camera_info_topic),
             ("depth/image", "/slam/front_depth/image_raw"),
-            ("rgbd_image0", "/slam/astra/rgbd_image"),
-            ("rgbd_image1", "/slam/front/rgbd_image"),
+            ("rgbd_images", "/slam/rgbd_images"),
             ("odom", "/odom"), ("scan_cloud", "/slam/cloud"), ("map", rtabmap_map_topic),
         ],
         condition=IfCondition(visual_slam), output="screen",
@@ -985,6 +984,23 @@ def generate_launch_description():
                     ("front", "front", 1, 1), ("astra", "astra/color", 2, 2),
                 ]
             ],
+            # The packaged mapper supports RGBDImages arrays, but was built
+            # without direct multi-topic RGB-D synchronization. Use its native
+            # array synchronizer rather than rebuilding RTAB-Map.
+            Node(
+                package="rtabmap_sync", executable="rgbdx_sync", name="slam_rgbd_views",
+                parameters=[{
+                    "use_sim_time": ParameterValue(sim, value_type=bool),
+                    "rgbd_cameras": 2, "qos": 2, "approx_sync": True,
+                    "approx_sync_max_interval": 0.35,
+                    "topic_queue_size": 5, "sync_queue_size": 5,
+                }],
+                remappings=[("rgbd_image0", "/slam/astra/rgbd_image"),
+                    ("rgbd_image1", "/slam/front/rgbd_image"),
+                    ("rgbd_images", "/slam/rgbd_images")],
+                condition=IfCondition(PythonExpression([visual_slam, " and ", dual_rgbd])),
+                output="screen",
+            ),
             IncludeLaunchDescription(
             PythonLaunchDescriptionSource(PathJoinSubstitution([nav2_share, "launch", "localization_launch.py"])),
                 launch_arguments={"map": selected_map, "params_file": params_file, "use_sim_time": sim}.items(),
