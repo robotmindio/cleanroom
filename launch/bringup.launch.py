@@ -308,7 +308,7 @@ def generate_launch_description():
             "Grid/3D": "false", "Grid/NormalsSegmentation": "false", "Grid/RayTracing": "true",
             "Grid/MaxObstacleHeight": "1.0", "Grid/MaxGroundHeight": "0.05",
             "subscribe_odom_info": False, "approx_sync": True, "publish_tf": True,
-            "qos_image": 2, "qos_camera_info": 1, "qos_scan": 1, "qos_odom": 1,
+            "qos_image": 1, "qos_camera_info": 1, "qos_scan": 1, "qos_odom": 1,
             "Rtabmap/MemoryThr": ParameterValue(LaunchConfiguration("rtabmap_wm_nodes"), value_type=str),
             "Mem/IncrementalMemory": ParameterValue(slam_mapping, value_type=str),
             # ICP proximity closure only searches working memory. Reload the
@@ -951,7 +951,7 @@ def generate_launch_description():
                     "fixed_frame_id": "odom", "approx": True,
                     "decimation": 2, "fill_holes_size": 2, "fill_iterations": 1,
                     "fill_holes_error": 0.05, "wait_for_transform": 0.1,
-                    "qos": 2, "qos_camera_info": 1,
+                    "qos": 1, "qos_camera_info": 1,
                     "topic_queue_size": 5, "sync_queue_size": 5,
                 }],
                 remappings=[("cloud", "/slam/cloud"), ("camera_info", slam_camera_info_topic),
@@ -965,7 +965,7 @@ def generate_launch_description():
                     parameters=[{
                         "use_sim_time": ParameterValue(sim, value_type=bool),
                         "approx_sync": True, "approx_sync_max_interval": 0.35,
-                        "qos": 2, "qos_camera_info": info_qos,
+                        "qos": 1, "qos_camera_info": info_qos,
                         "decimation": decimation, "topic_queue_size": 5, "sync_queue_size": 5,
                     }],
                     remappings=[("rgb/image", f"/camera/{source}/image_raw"),
@@ -989,7 +989,7 @@ def generate_launch_description():
                 package="rtabmap_sync", executable="rgbdx_sync", name="slam_rgbd_views",
                 parameters=[{
                     "use_sim_time": ParameterValue(sim, value_type=bool),
-                    "rgbd_cameras": 2, "qos": 2, "approx_sync": True,
+                    "rgbd_cameras": 2, "qos": 1, "approx_sync": True,
                     "approx_sync_max_interval": 0.35,
                     "topic_queue_size": 5, "sync_queue_size": 5,
                 }],

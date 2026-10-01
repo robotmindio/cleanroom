@@ -45,7 +45,7 @@ def test_real_bringup_maps_both_calibrated_views_with_measured_depth():
     assert '"\'0\' if ", dual_rgbd, " else \'1\'"' in source
     assert '("cloud", "/slam/cloud")' in source
     assert '("astra", "astra/color", 2, 2, "/camera/astra/depth/image_raw")' in source
-    assert '"qos_image": 2' in source
+    assert '"qos_image": 1' in source
     assert '"qos_depth"' not in source
 
 
