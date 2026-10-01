@@ -321,6 +321,7 @@ def prepare_trajectory(names, points, start_positions, zero_positions=None, dire
         position_limits[name] = (lower, upper)
 
     normalized = []
+    start_delay = 0.0
     previous_time = 0.0
     previous_point = TrajectoryPoint(
         0.0, previous, dict.fromkeys(names, 0.0), dict.fromkeys(names, 0.0)
@@ -329,6 +330,7 @@ def prepare_trajectory(names, points, start_positions, zero_positions=None, dire
         if len(point) not in (3, 5):
             raise ValueError("trajectory point has an invalid shape")
         point_time, positions, velocities = point[:3]
+        point_time += start_delay
         accelerations, effort = point[3:] if len(point) == 5 else ((), ())
         positions = tuple(positions)
         action_positions(names, positions, zero_positions, directions)
@@ -369,9 +371,16 @@ def prepare_trajectory(names, points, start_positions, zero_positions=None, dire
         if duration <= 0.0:
             if any(distance > MAX_INITIAL_POSITION_ERROR for distance in distances.values()):
                 raise ValueError("trajectory requests motion with no time to execute it")
-            # A zero-time point describes initial conditions, not an instant
-            # movement. Anchor interpolation at the measured pose, avoiding a jump.
-            current = previous.copy()
+            if any(distance > 1e-9 for distance in distances.values()):
+                # Changing the first position deforms short polynomial segments.
+                # Bridge to the planned start, preserving every original segment.
+                previous_point = TrajectoryPoint(
+                    0.0, previous.copy(),
+                    dict.fromkeys(names, 0.0) if velocities else None,
+                    dict.fromkeys(names, 0.0) if accelerations else None,
+                )
+                normalized.append(previous_point)
+                start_delay = point_time = duration = 0.25
         current_point = TrajectoryPoint(
             point_time,
             current,

@@ -34,6 +34,21 @@ def test_zero_time_start_uses_local_feedback_within_moveit_start_tolerance():
         prepare_trajectory((joint,), points, {joint: 0.011})
 
 
+def test_start_feedback_offset_does_not_deform_short_moveit_segments():
+    joint = "arm_shoulder_lift"
+    points = [
+        (0.0, (0.0,), (0.0,), (0.0,), ()),
+        (0.01, (0.00001,), (0.001,), (0.0,), ()),
+        (2.0, (0.1,), (0.0,), (0.0,), ()),
+    ]
+    measured = {joint: 0.003}
+    trajectory = prepare_trajectory((joint,), points, measured)
+    assert sample_trajectory((joint,), measured, trajectory, 0.0)[0] == measured
+    assert trajectory[1].positions[joint] == 0.0
+    assert trajectory[2].time - trajectory[1].time == pytest.approx(0.01)
+    assert trajectory[-1].time == pytest.approx(2.25)
+
+
 def test_action_positions_converts_ros_radians_to_lerobot_units():
     gripper_midpoint = sum(JOINT_LIMITS["arm_gripper"]) / 2
     converted = action_positions(
