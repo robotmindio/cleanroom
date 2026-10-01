@@ -47,6 +47,8 @@ def test_real_bringup_maps_both_calibrated_views_with_measured_depth():
     assert '("astra", "astra/color", 2, 2, "/camera/astra/depth/image_raw")' in source
     assert '"qos_image": 1' in source
     assert '"qos_depth"' not in source
+    # Both calibration/image synchronizers retain metadata across 2 Hz frames.
+    assert source.count('"topic_queue_size": 5, "sync_queue_size": 30') == 2
 
 
 def test_astra_identity_is_pinned_in_tracked_hardware_configuration():

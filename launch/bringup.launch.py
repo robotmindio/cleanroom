@@ -952,7 +952,9 @@ def generate_launch_description():
                     "decimation": 2, "fill_holes_size": 2, "fill_iterations": 1,
                     "fill_holes_error": 0.05, "wait_for_transform": 0.1,
                     "qos": 1, "qos_camera_info": 1,
-                    "topic_queue_size": 5, "sync_queue_size": 5,
+                    # 25 Hz calibration must survive the slower range/image
+                    # interval; five metadata samples cover only 0.2 seconds.
+                    "topic_queue_size": 5, "sync_queue_size": 30,
                 }],
                 remappings=[("cloud", "/slam/cloud"), ("camera_info", slam_camera_info_topic),
                     ("image_raw", "/slam/front_depth/image_raw")],
@@ -966,7 +968,7 @@ def generate_launch_description():
                         "use_sim_time": ParameterValue(sim, value_type=bool),
                         "approx_sync": True, "approx_sync_max_interval": 0.35,
                         "qos": 1, "qos_camera_info": info_qos,
-                        "decimation": decimation, "topic_queue_size": 5, "sync_queue_size": 5,
+                        "decimation": decimation, "topic_queue_size": 5, "sync_queue_size": 30,
                     }],
                     remappings=[("rgb/image", f"/camera/{source}/image_raw"),
                         ("rgb/camera_info", f"/camera/{source}/camera_info"),

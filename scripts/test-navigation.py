@@ -235,8 +235,6 @@ def main():
                     future=node.map_client.call_async(GetMap.Request(global_map=True,optimized=True,graph_only=False))
                     end=time.monotonic()+3
                     while not future.done() and time.monotonic()<end:node.tick(Twist(),check=False)
-                    if not future.done() or not future.result().success:
-                        print('Nav2 did not confirm graceful lifecycle shutdown',flush=True)
                     if future.done() and future.result():
                         data=future.result().data
                         graph={'nodes':[{'id':m.id,'session':m.map_id,'features':len(m.word_kpts),
@@ -251,6 +249,8 @@ def main():
                     future=node.lifecycle_client.call_async(ManageLifecycleNodes.Request(command=ManageLifecycleNodes.Request.SHUTDOWN))
                     end=time.monotonic()+3
                     while not future.done() and time.monotonic()<end:node.tick(Twist(),check=False)
+                    if not future.done() or not future.result().success:
+                        print('Nav2 did not confirm graceful lifecycle shutdown',flush=True)
                 node.listener.unregister()
                 node.navigation.destroy()
                 node.destroy_node()
