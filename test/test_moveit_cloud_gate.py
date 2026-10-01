@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+
 import pytest
 
 from builtin_interfaces.msg import Time as TimeMsg
@@ -13,8 +14,10 @@ def test_main_closes_cleanly_after_ros_shutdown(monkeypatch, shutdown):
     node = SimpleNamespace(destroy_node=lambda: calls.append("destroy"))
     monkeypatch.setattr(moveit_cloud_gate, "MoveItCloudGate", lambda: node)
     monkeypatch.setattr(moveit_cloud_gate.rclpy, "init", lambda: calls.append("init"))
+
     def spin(_):
         raise shutdown()
+
     monkeypatch.setattr(moveit_cloud_gate.rclpy, "spin", spin)
     monkeypatch.setattr(moveit_cloud_gate.rclpy, "try_shutdown", lambda: calls.append("shutdown"))
     moveit_cloud_gate.main()
