@@ -40,3 +40,25 @@ def test_base_test_stops_inside_authorized_radius_and_rejects_bad_odometry():
     assert inside_base_test_boundary((1.19, 2.0, 0.0), (1.0, 2.0))
     assert not inside_base_test_boundary((1.0, 2.21, 0.0), (1.0, 2.0))
     assert not inside_base_test_boundary((math.nan, 2.0, 0.0), (1.0, 2.0))
+
+
+def test_navigation_probe_withdraws_lease_until_wheel_feedback_recovers(monkeypatch):
+    import runpy
+    import time
+    from pathlib import Path
+    import rclpy
+
+    Test = runpy.run_path(str(Path(__file__).parents[1] / 'scripts/test-navigation.py'))['Test']
+    leases, commands = [], []
+    node = types.SimpleNamespace(active=True, center=(0,0,0), pose=(0,0,0),
+        odom_at=time.monotonic()-1, deadline=time.monotonic()+10,
+        flags={'arm_stowed':True,'driver':'ARMED'},
+        lease=types.SimpleNamespace(publish=lambda m:leases.append(m.data)),
+        command=types.SimpleNamespace(publish=commands.append))
+    node.tick = lambda *args,**kwargs:Test.tick(node,*args,**kwargs)
+    def spin_once(node,timeout_sec):
+        if not node.active:node.odom_at=time.monotonic()
+    monkeypatch.setattr(rclpy,'spin_once',spin_once)
+    node.tick()
+    assert leases == [True,False] and node.active
+    assert len(commands)==1 and commands[0].linear.x==commands[0].angular.z==0

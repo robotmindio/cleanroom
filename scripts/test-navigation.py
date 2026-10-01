@@ -112,7 +112,15 @@ class Test(Node):
         rclpy.spin_once(self,timeout_sec=0.04)
         if check and self.center is not None:
             if time.monotonic()>self.deadline:raise RuntimeError('total test deadline expired')
-            if time.monotonic()-self.odom_at>0.5:raise RuntimeError('wheel feedback became stale')
+            if time.monotonic()-self.odom_at>0.5:
+                print('paused for fresh wheel feedback',flush=True)
+                was_active = self.active
+                self.active = False
+                end = time.monotonic()+3
+                while time.monotonic()-self.odom_at>0.5:
+                    self.tick(Twist(),check=False)
+                    if time.monotonic()>end:raise RuntimeError('wheel feedback did not recover')
+                self.active = was_active
             if math.dist(self.pose[:2],self.center[:2])>=0.18:raise RuntimeError('early 18 cm test boundary reached')
             if not self.flags.get('arm_stowed'):raise RuntimeError('arm left travel_stow')
             if self.flags.get('driver')!='ARMED':raise RuntimeError('driver stopped being armed')
