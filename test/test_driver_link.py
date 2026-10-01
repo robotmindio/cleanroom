@@ -32,7 +32,7 @@ _NODE.body = [
         "_enable_torque_and_arm", "_arm_permission_is_current", "_run_deferred_cut",
         "_permission_is_current",
         "_capability_permission_is_current", "_hold_feedback_gap", "enforce_permission_leases",
-        "on_base_permission", "on_arm_permission",
+        "on_base_permission", "on_arm_permission", "on_arm_collision",
         "record_link_loss", "update", "validate_motion_parameters",
         "_poll_telemetry", "_hold_action", "_send_pending_stop", "_apply_trajectory",
         "_send_armed_command", "auto_arm_tick", "execute_trajectory",
@@ -79,6 +79,7 @@ def make_node(**overrides):
         "_healthy_telemetry_at": None,
         "_last_fresh_monotonic": None,
         "_feedback_gap_started_at": None,
+        "arm_workspace_collision": False,
         "stop_pending": True,
         "_disarm_epoch": 0,
         "_deferred_cut": False,
@@ -1491,6 +1492,29 @@ def test_local_goal_survives_telemetry_silence_beyond_link_timeout(monkeypatch):
     assert node._hold_feedback_gap()
     assert not node.trajectory["done"].is_set()
     assert states == ["LINK_LOST"] and not disarmed
+
+
+def test_local_goal_waits_for_collision_check_after_motor_feedback_recovers(monkeypatch):
+    node = make_node(armed=True, local_arm_execution=True, disarm_on_failure=False,
+                     _last_fresh_monotonic=10.0, arm_motion_permitted=True)
+    node.trajectory = {"done": threading.Event()}
+    node.get_logger = lambda: types.SimpleNamespace(warning=lambda *_: None, error=lambda *_: None)
+    canceled, disarmed = [], []
+    node.cancel_trajectory = canceled.append
+    node.set_disarmed = disarmed.append
+    monkeypatch.setattr(driver.time, "monotonic", lambda: 10.01)
+    monkeypatch.setattr(driver, "Bool", types.SimpleNamespace, raising=False)
+
+    node.on_arm_permission(types.SimpleNamespace(data=False))
+    assert node.armed and not canceled and not disarmed
+    assert not node._arm_permission_is_current()
+    node.on_arm_permission(types.SimpleNamespace(data=True))
+    assert node._arm_permission_is_current()
+    node.on_arm_collision(types.SimpleNamespace(data=True))
+    assert canceled == ["arm safety permission withdrawn"]
+    assert disarmed == ["DISARMED"]
+    node.on_arm_permission(types.SimpleNamespace(data=True))
+    assert not node._arm_permission_is_current()
 
 
 def test_goal_timeout_names_the_joint_that_missed_tolerance(monkeypatch):

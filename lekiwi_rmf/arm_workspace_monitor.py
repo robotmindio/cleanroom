@@ -119,10 +119,14 @@ class ArmWorkspaceMonitor(Node):
         self._pending = None
         self._pending_sent_ns: int | None = None
         self._last_clear: bool | None = None
+        self._confirmed_collision = False
 
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self._permission_pub = self.create_publisher(
             Bool, str(self.get_parameter("output_topic").value), latched
+        )
+        self._collision_pub = self.create_publisher(
+            Bool, "/safety/arm_workspace_collision", latched
         )
         self._diagnostics_pub = self.create_publisher(DiagnosticArray, "/diagnostics", 10)
         self.create_subscription(
@@ -225,6 +229,9 @@ class ArmWorkspaceMonitor(Node):
             self._state.collision_free = False
             self._state.detail = "MoveIt state-validity response is missing"
             return
+        # Missing checks deny motion without proving a collision. Keep a
+        # confirmed fault until a later MoveIt check clears it.
+        self._confirmed_collision = response.valid is not True
         if response.valid is not True:
             contacts = sorted({
                 f"{contact.contact_body_1}/{contact.contact_body_2}"
@@ -263,6 +270,7 @@ class ArmWorkspaceMonitor(Node):
         permission = Bool()
         permission.data = bool(clear)
         self._permission_pub.publish(permission)
+        self._collision_pub.publish(Bool(data=self._confirmed_collision))
 
         status = DiagnosticStatus()
         status.name = "lekiwi/arm_workspace_monitor"

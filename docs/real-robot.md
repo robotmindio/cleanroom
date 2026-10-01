@@ -306,7 +306,10 @@ host on the Pi. That host interpolates targets and checks path and final-positio
 tolerances against its local servo readings. Missing fresh compute permission
 pauses its execution clock and holds a fixed measured pose; reconnecting resumes
 the retained goal without replaying elapsed time. Explicit cancellation, motor
-faults, and a host restart still invalidate the goal. MoveIt wall-clock duration
+faults, confirmed MoveIt collisions, and a host restart still invalidate the goal.
+The collision monitor publishes confirmed faults separately from missing checks;
+late joint states, perception updates or service replies pause the retained goal
+even when motor telemetry has already recovered. MoveIt wall-clock duration
 monitoring is disabled in real mode because the Pi owns the settling deadline.
 Planning, collision checks, SLAM and Nav2 continue to run on compute.
 The observation stream on port 5556 has one consumer: the driver. A second PULL

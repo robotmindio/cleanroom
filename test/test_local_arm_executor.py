@@ -89,6 +89,7 @@ def test_local_tracking_fault_uses_measured_hold():
     action = executor.step(observation, now[0])
     assert executor.status["code"] == -4
     assert executor.status["state"] == "aborted"
+    assert "error=" in executor.status["detail"] and "limit=" in executor.status["detail"]
     assert action[f"{ARM_JOINTS[0]}.pos"] == observation[f"{ARM_JOINTS[0]}.pos"]
 
 

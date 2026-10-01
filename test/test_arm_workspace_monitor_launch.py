@@ -70,9 +70,13 @@ class TestArmWorkspaceMonitorGraph(unittest.TestCase):
         )
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.clear = []
+        self.collisions = []
         self.diagnostics = []
         self.node.create_subscription(
             Bool, "/test/arm_workspace/clear", lambda message: self.clear.append(message.data), latched
+        )
+        self.node.create_subscription(
+            Bool, "/safety/arm_workspace_collision", lambda message: self.collisions.append(message.data), latched
         )
         self.node.create_subscription(
             DiagnosticArray, "/diagnostics", self.diagnostics.append, 10
@@ -117,14 +121,15 @@ class TestArmWorkspaceMonitorGraph(unittest.TestCase):
 
         self.valid = False
         start = len(self.clear)
-        self.assertTrue(self._until(lambda: False in self.clear[start:]))
+        self.assertTrue(self._until(lambda: False in self.clear[start:] and self.collisions and self.collisions[-1]))
 
         self.valid = True
-        self.assertTrue(self._until(lambda: self.clear and self.clear[-1] is True))
+        self.assertTrue(self._until(lambda: self.clear and self.clear[-1] is True and self.collisions and not self.collisions[-1]))
         start = len(self.clear)
         self.assertTrue(self._until(
             lambda: False in self.clear[start:], timeout=2.0, publish=False
         ))
+        self.assertFalse(self.collisions[-1], "silence must not become a confirmed collision")
         self.assertTrue(any(
             status.name == "lekiwi/arm_workspace_monitor"
             for message in self.diagnostics for status in message.status

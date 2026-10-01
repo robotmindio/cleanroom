@@ -151,6 +151,7 @@ class LeKiwiDriver(Node):
         self.last_fresh = now
         self._last_fresh_monotonic = None
         self._feedback_gap_started_at = None
+        self.arm_workspace_collision = False
         self.link_lost = False
         # When update() last accepted telemetry that passed the host-session and
         # torque-readback checks; the automatic arm acts only on such telemetry.
@@ -218,6 +219,10 @@ class LeKiwiDriver(Node):
             Bool, self.arm_permission_topic, self.on_arm_permission, safety_qos,
             callback_group=self.safety_callback_group,
         )
+        self.create_subscription(
+            Bool, "/safety/arm_workspace_collision", self.on_arm_collision, safety_qos,
+            callback_group=self.safety_callback_group,
+        )
         # A torque RPC blocks for up to torque_control_timeout_ms per attempt, twice.
         # Arm, disarm and the automatic arm run in their own group so they serialize
         # with each other but never stall update(), its safety/state heartbeat or
@@ -267,9 +272,9 @@ class LeKiwiDriver(Node):
             self.set_disarmed("DISARMED")
 
     def on_arm_permission(self, message):
-        permitted = bool(message.data)
         received_at_ns = time.monotonic_ns()
         with self.state_lock:
+            permitted = bool(message.data) and not self.arm_workspace_collision
             was_permitted = bool(self.arm_motion_permitted)
             was_expired = bool(self._arm_permission_expired)
             self.arm_motion_permitted = permitted
@@ -298,6 +303,12 @@ class LeKiwiDriver(Node):
                     "Arm safety permission withdrawn; canceling arm motion while base remains enabled"
                 )
 
+    def on_arm_collision(self, message):
+        with self.state_lock:
+            self.arm_workspace_collision = bool(message.data)
+        if message.data:
+            self.on_arm_permission(Bool(data=False))
+
     def _permission_is_current(self, permitted, received_at_ns, now_ns=None):
         return bool(permitted) and lease_is_fresh(
             received_at_ns, self.permission_timeout_ns, now_ns
@@ -315,24 +326,26 @@ class LeKiwiDriver(Node):
         )
 
     def _hold_feedback_gap(self):
-        """Retain an arm goal during motor-telemetry gaps.
+        """Retain an arm goal while feedback or collision checking is unavailable.
 
         No trajectory setpoint is sent without fresh feedback and permission.
-        The Pi freezes the arm if commands stop. A collision or perception fault
-        with fresh motor feedback retains the ordinary immediate cancel path.
+        The Pi freezes the arm if commands stop. A confirmed MoveIt collision
+        retains the ordinary immediate cancel path, even during a feedback gap.
         """
         now = time.monotonic()
         with self.state_lock:
             if self.disarm_on_failure or not self.armed:
                 return False
+            if self.arm_workspace_collision:
+                return False
             started = self._feedback_gap_started_at
             if started is None:
                 last = self._last_fresh_monotonic
-                if last is None or now - last < 0.3:
+                if not self.local_arm_execution and (last is None or now - last < 0.3):
                     return False
                 if not self.local_arm_execution and now - last >= self.link_timeout:
                     return False
-                started = last
+                started = now if last is None else last
                 self._feedback_gap_started_at = started
             if not self.local_arm_execution and now - started >= self.link_timeout:
                 return False

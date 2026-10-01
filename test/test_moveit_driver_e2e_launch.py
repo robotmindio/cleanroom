@@ -158,6 +158,7 @@ class TestMoveItDriverEndToEnd(unittest.TestCase):
         # Permissions are receive-time leases, so this timer models the safety
         # supervisor's continuous authorization for the whole action.
         self.permission_timer = self.node.create_timer(0.05, self._publish_permission)
+        self.permission_enabled = True
 
     def tearDown(self):
         self.node.destroy_timer(self.permission_timer)
@@ -165,7 +166,7 @@ class TestMoveItDriverEndToEnd(unittest.TestCase):
 
     def _publish_permission(self):
         permission = Bool()
-        permission.data = True
+        permission.data = self.permission_enabled
         self.arm_permission.publish(permission)
 
     def _until(self, predicate, timeout: float = 10.0) -> bool:
@@ -427,6 +428,19 @@ class TestMoveItDriverEndToEnd(unittest.TestCase):
         self.assertTrue(handle.accepted)
         result = handle.get_result_async()
         self.assertTrue(self._until(lambda: fake_host.arm_executor.active, timeout=5.0))
+        self.permission_enabled = False
+        before = len(self.joint_states)
+        self._spin_for(0.7)
+        self.assertGreater(len(self.joint_states), before + 2)
+        self.assertFalse(result.done(), "a missing collision verdict canceled the goal")
+        self.assertEqual(fake_host.arm_executor.status["state"], "paused")
+        elapsed = fake_host.arm_executor.status["elapsed"]
+        self._spin_for(0.5)
+        self.assertEqual(fake_host.arm_executor.status["elapsed"], elapsed)
+        self.permission_enabled = True
+        self.assertTrue(self._until(
+            lambda: fake_host.arm_executor.status["state"] == "running", timeout=5.0
+        ))
         fake_host.queue_observation_fault(ObservationFault.DROP, count=150)
         self._spin_for(2.0)
         self.assertFalse(result.done(), "telemetry gap aborted the retained local goal")

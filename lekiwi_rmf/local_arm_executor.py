@@ -135,7 +135,11 @@ class LocalArmExecutor:
         violation = next((name for name, limit in request["path"].items()
                           if elapsed < final.time and abs(actual[name] - positions[name]) > limit), None)
         if violation:
-            self.status.update(state="aborted", code=-4, detail=f"path tolerance exceeded for {violation}")
+            self.status.update(state="aborted", code=-4, detail=(
+                f"path tolerance exceeded for {violation}: "
+                f"error={abs(actual[violation] - positions[violation]):.4f} rad, "
+                f"limit={request['path'][violation]:.4f} rad, elapsed={elapsed:.3f} s"
+            ))
         elif elapsed >= final.time and all(
             abs(actual[name] - final.positions[name]) <= limit for name, limit in request["goal"].items()
         ):
