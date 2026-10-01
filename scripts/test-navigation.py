@@ -19,9 +19,11 @@ from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from rclpy.time import Time
 from geometry_msgs.msg import Twist
+from diagnostic_msgs.msg import DiagnosticArray
 from nav_msgs.msg import Odometry
 from nav2_msgs.action import NavigateToPose
 from rtabmap_msgs.msg import Info
+from rtabmap_msgs.srv import GetMap
 from sensor_msgs.msg import Image, LaserScan, PointCloud2
 from std_msgs.msg import Bool, String
 from tf2_ros import Buffer, TransformListener
@@ -79,6 +81,16 @@ class Test(Node):
         self.listener = TransformListener(self.buffer, self)
         self.navigation = ActionClient(self, NavigateToPose, '/navigate_to_pose')
         self.goal = None
+        self.health = {}
+        self.health_faults = []
+        self.map_client = self.create_client(GetMap, '/rtabmap/get_map_data')
+        self.create_subscription(DiagnosticArray, '/diagnostics', self.diagnostics, 10)
+
+    def diagnostics(self, m):
+        for status in m.status:
+            if status.name=='lekiwi/safety_supervisor':
+                self.health = {v.key:v.value for v in status.values}
+                if self.health.get('faults'):self.health_faults.append(self.health.copy())
 
     def odometry(self, m):
         p = m.pose.pose.position
@@ -122,7 +134,11 @@ class Test(Node):
             da = angle(target[2]-a)
             if math.hypot(dx,dy)<0.008 and abs(da)<0.03:break
             if time.monotonic()>end:raise RuntimeError('manual motion did not reach target')
-            if not self.flags.get('base_motion_permitted'):raise RuntimeError('base test permission withdrawn')
+            if not self.flags.get('base_motion_permitted'):
+                print('paused for permission',self.health,flush=True)
+                self.stop()
+                self.wait(lambda:self.flags.get('base_motion_permitted'),3)
+                continue
             command = Twist()
             norm = max(math.hypot(dx,dy),0.001)
             speed = min(0.025, norm)
@@ -212,9 +228,19 @@ def main():
                     while not future.done() and time.monotonic()<end:node.tick(Twist(),check=False)
                 node.active=False
                 node.stop()
-                report={'error':error,'origin':node.center,'final_pose':node.pose,'sensors':node.counts,
+                graph = None
+                if node.map_client.wait_for_service(timeout_sec=1):
+                    future=node.map_client.call_async(GetMap.Request(global_map=True,optimized=True,graph_only=False))
+                    end=time.monotonic()+3
+                    while not future.done() and time.monotonic()<end:node.tick(Twist(),check=False)
+                    if future.done() and future.result():
+                        data=future.result().data
+                        graph={'nodes':[{'id':m.id,'session':m.map_id,'features':len(m.word_kpts),
+                            'valid_3d_features':sum(all(math.isfinite(v) for v in (p.x,p.y,p.z)) for p in m.word_pts)} for m in data.nodes],
+                            'links':[(l.from_id,l.to_id,l.type) for l in data.graph.links]}
+                report={'error':error,'origin':node.center,'final_pose':node.pose,'sensors':node.counts,'health':node.health,
                     'max_radius_m':max((math.dist(p[:2],node.center[:2]) for p in node.trace),default=0) if node.center else None,
-                    'trace':node.trace,'slam':node.slam}
+                    'trace':node.trace,'slam':node.slam,'graph':graph,'health_faults':node.health_faults}
                 (OUTPUT/'result.json').write_text(json.dumps(report,indent=2)+'\n')
                 print('report',OUTPUT/'result.json',flush=True)
                 node.destroy_node()

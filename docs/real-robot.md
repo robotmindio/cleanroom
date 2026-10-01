@@ -45,11 +45,17 @@ them.
 
 ## Configuration
 
-Real RGB-plus-scan SLAM accepts samples only with a fresh measured travel stow
+Real RGB-D-plus-scan SLAM accepts samples only with a fresh measured travel stow
 on `/safety/arm_stowed`; its first map must describe the room, not the gripper
 covering the camera. Mapping input pauses during manipulation and resumes at
 stow. Raw range and camera safety topics continue throughout. With an empty
 database, RTAB-Map/Nav2 startup waits for this posture; the arm remains usable.
+The installed `rtabmap_util/pointcloud_to_depthimage` projects measured Astra
+points into the fixed front camera's rectified geometry. RTAB-Map receives that
+registered depth with raw front RGB (which it rectifies internally), plus the
+fused Astra/LD06 cloud. Visual registration supplies the global pose hypothesis
+and ICP refines it. RGB with an unregistered scan cloud alone does not create
+the metric visual features required for restart relocalization.
 
 Copy `.env.example` to `.env` in the repository root. Scripts read exactly three
 keys from it: `LEKIWI_ROBOT_HOST` (the robot computer's hostname or IPv4 address,

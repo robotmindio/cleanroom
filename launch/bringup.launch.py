@@ -138,10 +138,8 @@ def generate_launch_description():
     astra_here = PythonExpression([
         camera_here, " and ", real, " and '", publish_astra, "' == 'true'"
     ])
-    # Navigation must retain a working RGB-plus-scan path when the optional
-    # Astra loses USB power or its UVC interface fails. Astra depth remains
-    # available to consumers such as MoveIt when it is healthy, but it is not
-    # a bringup dependency.
+    # The fixed RGB camera supplies appearance; registered Astra depth supplies
+    # metric visual features. A scan cloud alone cannot supply PnP feature depth.
     slam_rgb_topic = "/camera/front/image_raw"
     slam_camera_info_topic = "/camera/front/camera_info"
     wrist_here = PythonExpression([camera_here, " and '", wrist_device, "' != 'none'"])
@@ -224,8 +222,8 @@ def generate_launch_description():
         package="lekiwi_rmf", executable="readiness_gate", name="wait_for_slam_sensor",
         parameters=[{
             "kind": "topic",
-            "topic": PythonExpression(["'/slam/cloud' if ", lidar_on, " else '", slam_rgb_topic, "'"]),
-            "topic_type": PythonExpression(["'cloud' if ", lidar_on, " else 'image'"]),
+            "topic": PythonExpression(["'/slam/front_depth/image_raw' if ", camera_on, " else '/slam/cloud'"]),
+            "topic_type": PythonExpression(["'image' if ", camera_on, " else 'cloud'"]),
         }],
         condition=IfCondition(visual_slam), output="screen",
     )
@@ -281,7 +279,7 @@ def generate_launch_description():
             "database_path": rtabmap_database,
             "subscribe_rgb": ParameterValue(camera_on, value_type=bool),
             "Reg/Strategy": ParameterValue(PythonExpression([
-                "'1' if ", lidar_on, " else '0'",
+                "'2' if ", camera_on, " and ", lidar_on, " else ('0' if ", camera_on, " else '1')",
             ]), value_type=str),
             # A prior ICP-only database can persist -1 here, which disables
             # visual word extraction even after RGB is enabled at launch.
@@ -295,7 +293,7 @@ def generate_launch_description():
             "RGBD/LinearUpdate": "0.04", "RGBD/ProximityMaxGraphDepth": "0",
             "RGBD/ProximityOdomGuess": "true",
             "Rtabmap/DetectionRate": "2",
-            "subscribe_depth": False,
+            "subscribe_depth": ParameterValue(camera_on, value_type=bool),
             "subscribe_rgbd": False, "subscribe_scan": False,
             "subscribe_scan_cloud": ParameterValue(lidar_on, value_type=bool),
             # slam_cloud already removed the floor; project every point.
@@ -303,6 +301,7 @@ def generate_launch_description():
             "Grid/MaxObstacleHeight": "1.0", "Grid/MaxGroundHeight": "0.05",
             "subscribe_odom_info": False, "approx_sync": True, "publish_tf": True,
             "qos_image": 1, "qos_camera_info": 1, "qos_scan": 1, "qos_odom": 1,
+            "qos_depth": 2,
             "Rtabmap/MemoryThr": ParameterValue(LaunchConfiguration("rtabmap_wm_nodes"), value_type=str),
             "Mem/IncrementalMemory": ParameterValue(slam_mapping, value_type=str),
             # ICP proximity closure only searches working memory. Reload the
@@ -323,6 +322,7 @@ def generate_launch_description():
         }],
         remappings=[
             ("rgb/image", slam_rgb_topic), ("rgb/camera_info", slam_camera_info_topic),
+            ("depth/image", "/slam/front_depth/image_raw"),
             ("odom", "/odom"), ("scan_cloud", "/slam/cloud"), ("map", rtabmap_map_topic),
         ],
         condition=IfCondition(visual_slam), output="screen",
@@ -932,6 +932,26 @@ def generate_launch_description():
                 executable="cmd_vel_mux",
                 name="cmd_vel_mux",
                 parameters=[{"permission_timeout": 0.5}],
+                output="screen",
+            ),
+            # Reuse measured Astra points; do not stream a full depth raster
+            # across the Pi link. RTAB-Map rectifies RGB itself and expects depth
+            # already registered to that rectified camera (Memory.cpp).
+            Node(
+                package="rtabmap_util", executable="pointcloud_to_depthimage",
+                name="slam_front_depth",
+                parameters=[{
+                    "use_sim_time": ParameterValue(sim, value_type=bool),
+                    "fixed_frame_id": "odom", "approx": True,
+                    "decimation": 4, "fill_holes_size": 2, "fill_iterations": 1,
+                    "fill_holes_error": 0.05, "wait_for_transform": 0.1,
+                    "qos": 2, "qos_camera_info": 1,
+                    "topic_queue_size": 5, "sync_queue_size": 5,
+                }],
+                remappings=[("cloud", "/camera/depth/points"),
+                    ("camera_info", slam_camera_info_topic),
+                    ("image_raw", "/slam/front_depth/image_raw")],
+                condition=IfCondition(PythonExpression([visual_slam, " and ", camera_on])),
                 output="screen",
             ),
             IncludeLaunchDescription(
