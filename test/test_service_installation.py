@@ -349,6 +349,13 @@ def test_mapper_shutdown_signals_the_launcher_without_interrupting_its_save():
     assert '[[ $kind == stack ]]' in stop and 'deadline=$((SECONDS + 45))' in stop
 
 
+def test_rviz_exports_the_selected_collision_plugin_in_its_parameter_file():
+    script = (ROOT / 'scripts/rviz.sh').read_text()
+    assert 'config["collision_detector"] = "lekiwi_rmf/RestFCL"' in script
+    keys = script.split('keys = (', 1)[1].split(')', 1)[0]
+    assert '"collision_detector"' in keys
+
+
 def test_build_reuses_its_checkout_cache_and_removes_a_foreign_cache(tmp_path):
     builder = (ROOT / "scripts/build-lekiwi.sh").read_text()
     section = 'cache=' + builder.split('\ncache=', 1)[1].split('\nparallel_args=', 1)[0]

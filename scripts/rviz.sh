@@ -142,6 +142,7 @@ config = moveit_config_builder("false").to_moveit_configs().to_dict()
 config["collision_detector"] = "lekiwi_rmf/RestFCL"
 apply_gripper_calibration(config, sys.argv[2])
 keys = (
+    "collision_detector",
     "robot_description", "robot_description_semantic",
     "robot_description_kinematics", "robot_description_planning",
 )
