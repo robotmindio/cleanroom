@@ -15,7 +15,7 @@ from lekiwi_rmf.arm_trajectory import (
     ARM_JOINTS, JOINT_LIMITS, action_positions, duration_seconds,
     position_tolerances,
 )
-from lekiwi_rmf.motion_guards import lease_is_fresh, twist_is_finite
+from lekiwi_rmf.motion_guards import inside_base_test_boundary, lease_is_fresh, twist_is_finite
 
 _SOURCE = (pathlib.Path(__file__).parents[1] / "lekiwi_rmf" / "driver.py").read_text()
 _TREE = ast.parse(_SOURCE)
@@ -55,6 +55,7 @@ driver.asyncio = asyncio
 driver.JOINT_LIMITS = {**JOINT_LIMITS, "joint": (-2.0, 2.0)}
 driver.lease_is_fresh = lease_is_fresh
 driver.twist_is_finite = twist_is_finite
+driver.inside_base_test_boundary = inside_base_test_boundary
 driver.duration_seconds = duration_seconds
 driver.position_tolerances = position_tolerances
 
@@ -69,6 +70,7 @@ def make_node(**overrides):
     node = driver.LeKiwiDriver.__new__(driver.LeKiwiDriver)
     state = {
         "disarm_on_failure": True,
+        "bounded_base_test": False,
         "local_arm_execution": False,
         "operator_disarmed": False,
         "auto_arm_pending": False,
@@ -1668,3 +1670,17 @@ def test_shutdown_still_raises_a_disarm_failure_while_ros_is_up(monkeypatch):
     with pytest.raises(RuntimeError, match="real failure"):
         node.destroy_node()
     assert node.calls == ["server", "robot"]
+
+
+def test_bounded_base_test_zeros_all_axes_at_boundary_without_cutting_torque():
+    node = control_loop_node(armed=True, bounded_base_test=True)
+    grant_fresh_arm_permission(node)
+    grant_fresh_base_permission(node)
+    node._base_test_center = (0.0, 0.0)
+    node.pose = (0.21, 0.0, 0.0)
+    node.command.linear.x = node.command.linear.y = 0.02
+    node.command.angular.z = 0.15
+    node._send_armed_command(_Stamp(), {'joint.pos': 10.0}, (0.0, 0.0, 0.0))
+    assert node.armed
+    assert all(node.sent[-1][axis] == 0.0 for axis in ('x.vel', 'y.vel', 'theta.vel'))
+    assert node.sent[-1]['joint.pos'] == 10.0

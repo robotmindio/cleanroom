@@ -33,3 +33,10 @@ def test_durations_must_be_finite_and_positive(value):
 def test_durations_and_stamps_convert_to_nanoseconds():
     assert positive_seconds_ns(0.25, "timeout") == 250_000_000
     assert stamp_ns(types.SimpleNamespace(sec=2, nanosec=5)) == 2_000_000_005
+
+
+def test_base_test_stops_inside_authorized_radius_and_rejects_bad_odometry():
+    from lekiwi_rmf.motion_guards import inside_base_test_boundary
+    assert inside_base_test_boundary((1.19, 2.0, 0.0), (1.0, 2.0))
+    assert not inside_base_test_boundary((1.0, 2.21, 0.0), (1.0, 2.0))
+    assert not inside_base_test_boundary((math.nan, 2.0, 0.0), (1.0, 2.0))

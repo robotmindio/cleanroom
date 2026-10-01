@@ -23,6 +23,18 @@ treated as safety functionality or used to validate the production profile.
 
 ## Reduced hardware base acceptance
 
+For an explicitly authorized, attended test inside a 30 cm radius, source
+`scripts/setup.bash` and run `python3 scripts/test-navigation.py`. The script
+temporarily replaces the production compute stack with `bounded_base_test:=true`,
+performs a finite route, and restores the service on exit. The driver caps speed
+at 0.03 m/s and 0.20 rad/s and stops at a 20 cm wheel-odometry radius; the runner
+cancels at 18 cm. This leaves stopping margin, but wheel slip still requires
+independent observation of physical position. All measured arm/base inputs and
+a test-client lease renewed within 250 ms are required. Production startup keeps
+this mode disabled and the physical acceptance record remains unvalidated.
+The folded `travel_stow` in SRDF and `safety_production.yaml` is the required
+navigation posture; starting a base goal does not automatically move the arm.
+
 `config/safety_acceptance.yaml` records an **attended autonomous base** scope:
 0.2 kg payload, dry tile, and an operator continuously next to the physical
 motor-power stop. The installed hardware record marks the bumper, IMU, and

@@ -704,12 +704,14 @@ class SafetySupervisor(Node):
         ])
         self.declare_parameter("stow_joint_positions", [0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         self.declare_parameter("require_acceptance", True)
+        self.declare_parameter("bounded_base_test", False)
         self.declare_parameter("acceptance_file", "")
         self.declare_parameter("nav2_params_file", "")
 
         # Read once: fault latching is fixed at construction, so permission
         # enforcement must not change independently at runtime.
         self._strict = bool(self.get_parameter("strict").value)
+        self._bounded_base_test = bool(self.get_parameter("bounded_base_test").value)
         sensor_timeout = positive_seconds_ns(float(self.get_parameter("sensor_timeout").value), "sensor_timeout")
         depth_timeout = positive_seconds_ns(float(self.get_parameter("depth_timeout").value), "depth_timeout")
         state_timeout = positive_seconds_ns(float(self.get_parameter("state_timeout").value), "state_timeout")
@@ -768,7 +770,10 @@ class SafetySupervisor(Node):
             driver_state_required=require_driver_state,
         )
         self._last_arm_permitted: bool | None = None
-        if bool(self.get_parameter("require_acceptance").value):
+        if self._bounded_base_test:
+            requirements["base_test"] = Requirement(250_000_000, base=True, arm=False)
+            self.create_subscription(Bool, "/safety/base_test_active", self._on_base_test, 1)
+        elif bool(self.get_parameter("require_acceptance").value):
             requirements["acceptance"] = Requirement(2**62, base=True, arm=False)
             healthy, detail = validate_acceptance_file(
                 str(self.get_parameter("acceptance_file").value),
@@ -941,6 +946,9 @@ class SafetySupervisor(Node):
     def _on_bumper(self, message: Bool) -> None:
         self._machine.update("bumper", not message.data, self._now(), "bumper active")
 
+    def _on_base_test(self, message: Bool) -> None:
+        self._machine.update("base_test", bool(message.data), self._now(), "bounded test lease withdrawn")
+
     def _on_arm_workspace(self, message: Bool) -> None:
         self._machine.update(
             "arm_workspace", bool(message.data), self._now(),
@@ -972,9 +980,14 @@ class SafetySupervisor(Node):
         return response
 
     def _publish(self) -> None:
+        measured = self._machine.decision(self._now())
         decision = permit_unless_strict(
-            self._machine.decision(self._now()), self._strict, self._machine.driver_state
+            measured, self._strict, self._machine.driver_state
         )
+        if self._bounded_base_test:
+            # Test permission requires every measured base AND arm input, even
+            # when ordinary domestic operation reports sensor faults advisory.
+            decision.base_permitted = measured.base_permitted and measured.arm_permitted
         if self._last_arm_permitted is True and not decision.arm_permitted:
             self.get_logger().warn(
                 f"Arm permission withdrawn: state={decision.state.value}; "
@@ -1003,6 +1016,7 @@ class SafetySupervisor(Node):
             KeyValue(key="arm_stowed", value=str(decision.arm_stowed).lower()),
             KeyValue(key="faults", value="; ".join(decision.faults)),
             KeyValue(key="latched_faults", value="; ".join(decision.latched_faults)),
+            KeyValue(key="bounded_base_test", value=str(self._bounded_base_test).lower()),
         ]
         diagnostics = DiagnosticArray()
         diagnostics.header.stamp = self.get_clock().now().to_msg()

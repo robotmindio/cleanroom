@@ -29,7 +29,7 @@ from lekiwi_rmf.arm_trajectory import (
     duration_seconds, position_tolerances, prepare_trajectory, sample_trajectory,
     stamp_nanoseconds, trajectory_rows,
 )
-from lekiwi_rmf.motion_guards import lease_is_fresh, twist_is_finite
+from lekiwi_rmf.motion_guards import inside_base_test_boundary, lease_is_fresh, twist_is_finite
 from lekiwi_rmf.odometry import (
     OdometrySampleClock, integrate_pose,
 )
@@ -57,6 +57,10 @@ class LeKiwiDriver(Node):
         self.yaw_scale = self.declare_parameter("yaw_velocity_scale", 1.0).value
         self.max_linear = self.declare_parameter("max_linear_speed", 0.3).value
         self.max_angular = self.declare_parameter("max_angular_speed", math.pi / 2).value
+        self.bounded_base_test = bool(self.declare_parameter("bounded_base_test", False).value)
+        if self.bounded_base_test:
+            self.max_linear = min(self.max_linear, 0.03)
+            self.max_angular = min(self.max_angular, 0.20)
         self.command_timeout = self.declare_parameter("command_timeout", 0.4).value
         self.link_timeout = self.declare_parameter("link_timeout", 1.0).value
         # Bool permissions have no source timestamp.  The receive-time lease
@@ -144,6 +148,7 @@ class LeKiwiDriver(Node):
         self.command = Twist()
         self.command_stamp = self.get_clock().now()
         self.pose = (initial_x, initial_y, initial_yaw)
+        self._base_test_center = self.pose[:2]
         now = self.get_clock().now()
         self.odom_samples = OdometrySampleClock()
         self.last_observation = None
@@ -1382,6 +1387,8 @@ class LeKiwiDriver(Node):
                 # The prepared action may carry that trajectory's setpoint.
                 action.update(measured_hold)
             if not base_permitted:
+                action["x.vel"] = action["y.vel"] = action["theta.vel"] = 0.0
+            if self.bounded_base_test and not inside_base_test_boundary(self.pose, self._base_test_center):
                 action["x.vel"] = action["y.vel"] = action["theta.vel"] = 0.0
             with self.trajectory_lock:
                 remote_goal = self.trajectory.get("host_id") if self.trajectory else None

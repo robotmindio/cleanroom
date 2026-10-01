@@ -54,6 +54,17 @@ def twist_is_finite(message: _Twist) -> bool:
     ))
 
 
+def inside_base_test_boundary(pose, center) -> bool:
+    """Stop at 20 cm, reserving 10 cm of the authorized radius for stopping.
+
+    Wheel odometry can slip; use short routes and independently check the
+    physical position. This is a commissioning bound, not certified geofencing.
+    """
+    return all(math.isfinite(v) for v in (*pose[:2], *center)) and (
+        math.hypot(pose[0] - center[0], pose[1] - center[1]) < 0.20
+    )
+
+
 def positive_seconds_ns(value: float, name: str) -> int:
     """Convert a finite, positive duration in seconds to integer nanoseconds."""
     if not math.isfinite(value) or value <= 0.0:

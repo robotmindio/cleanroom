@@ -784,3 +784,36 @@ def test_strict_enforcement_is_fixed_when_the_supervisor_starts(monkeypatch):
         if node is not None:
             node.destroy_node()
         rclpy.try_shutdown()
+
+
+def test_bounded_test_requires_lease_and_all_measured_inputs():
+    import rclpy
+    rclpy.init(args=['--ros-args', '-p', 'bounded_base_test:=true'])
+    node = SafetySupervisor()
+    try:
+        assert 'acceptance' not in node._machine.requirements
+        node._machine.driver_state = 'ARMED'
+        node._machine.arm_stowed = True
+        for key in node._machine.requirements:
+            if key != 'base_test': node._machine.update(key, True, node._now())
+        published = []
+        node._base_pub = types.SimpleNamespace(publish=published.append)
+        node._publish()
+        assert not published[-1].data
+        node._on_base_test(types.SimpleNamespace(data=True))
+        node._publish()
+        assert published[-1].data
+        node._machine.update('scan', False, node._now())
+        node._publish()
+        assert not published[-1].data
+        node._machine.update('scan', True, node._now())
+        node._machine.update('depth', False, node._now())
+        node._publish()
+        assert not published[-1].data
+        node._machine.update('depth', True, node._now())
+        node._machine.samples['base_test'].stamp_ns -= 300_000_000
+        node._publish()
+        assert not published[-1].data
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()

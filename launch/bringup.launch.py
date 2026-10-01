@@ -104,6 +104,7 @@ def generate_launch_description():
     auto_arm_on_startup = LaunchConfiguration("auto_arm_on_startup")
     arm_calibration_file = LaunchConfiguration("arm_calibration_file")
     disarm_on_failure = LaunchConfiguration("disarm_on_failure")
+    bounded_base_test = LaunchConfiguration("bounded_base_test")
     start_rmf = LaunchConfiguration("start_rmf")
     rmf_domain = LaunchConfiguration("rmf_domain")
     start_foxglove = LaunchConfiguration("start_foxglove")
@@ -381,6 +382,7 @@ def generate_launch_description():
         name="safety_supervisor",
         parameters=[safety_params_file, {
             "use_sim_time": ParameterValue(sim, value_type=bool),
+            "bounded_base_test": ParameterValue(bounded_base_test, value_type=bool),
             # Simulation keeps its qualified enforcement; real mode is strict only
             # for larger robots that opt in with disarm_on_failure.
             "strict": ParameterValue(
@@ -419,6 +421,7 @@ def generate_launch_description():
             # display. Pass headless:=false to open Gazebo's own GUI.
             DeclareLaunchArgument("headless", default_value="true", choices=["true", "false"]),
             DeclareLaunchArgument("remote_ip", default_value="127.0.0.1"),
+            DeclareLaunchArgument("bounded_base_test", default_value="false", choices=["true", "false"]),
             DeclareLaunchArgument("curve_client_secret_key_file", default_value=""),
             DeclareLaunchArgument("curve_server_public_key_file", default_value=""),
             # Fleet bridging makes the ROS graph discoverable off-host. Keep it
@@ -852,6 +855,7 @@ def generate_launch_description():
                 parameters=[{
                     "remote_ip": remote_ip,
                     "local_arm_execution": True,
+                    "bounded_base_test": ParameterValue(bounded_base_test, value_type=bool),
                     "arm_calibration_file": arm_calibration_file,
                     "curve_client_secret_key_file": curve_client_secret,
                     "curve_server_public_key_file": curve_server_public,
