@@ -35,7 +35,12 @@ set -u
 # Keep user-installed CMake/Protobuf copies from overriding the ROS packages.
 PATH=/usr/bin:/bin:$PATH
 export PATH
-rm -rf -- "$workspace/build/lekiwi_rmf"
+cache="$workspace/build/lekiwi_rmf/CMakeCache.txt"
+if [[ -f $cache && $(awk -F= '$1 == "CMAKE_HOME_DIRECTORY:INTERNAL" {print $2}' "$cache") != "$project_root" ]]; then
+  # CMake cannot reuse a build from another checkout; otherwise its normal
+  # incremental build avoids unnecessary CPU contention with robot callbacks.
+  rm -rf -- "$workspace/build/lekiwi_rmf"
+fi
 
 parallel_args=()
 if (( $(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo) < 8000 )); then

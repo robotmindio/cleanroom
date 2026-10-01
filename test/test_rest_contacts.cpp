@@ -29,5 +29,20 @@ int main(int argc, char** argv)
   result.clear();
   detector.checkSelfCollision(request, result, state, only_rest);
   if (!result.collision) throw std::runtime_error("outside-fold contact was silently allowed");
+  state.setToDefaultValues(model->getJointModelGroup("arm"), "travel_stow");
+  const double lift = state.getVariablePosition("arm_shoulder_lift");
+  const double elbow = state.getVariablePosition("arm_elbow_flex");
+  const double wrist = state.getVariablePosition("arm_wrist_flex");
+  for (int i = 1; i <= 20; ++i)
+  {
+    const double t = i / 20.0;
+    state.setVariablePosition("arm_shoulder_lift", lift + t * (-1.73 - lift));
+    state.setVariablePosition("arm_elbow_flex", elbow + t * (1.52 - elbow));
+    state.setVariablePosition("arm_wrist_flex", wrist + t * (1.12 - wrist));
+    state.update();
+    result.clear();
+    detector.checkSelfCollision(request, result, state, only_rest);
+    if (result.collision) throw std::runtime_error("measured short release path was blocked");
+  }
   std::cout << "fold accepted; outside-fold contact rejected\n";
 }
