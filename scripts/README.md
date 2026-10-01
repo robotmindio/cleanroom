@@ -26,6 +26,7 @@ units refer to them directly.
 - `install-device-services.sh` installs the device boot services (motor host, cameras, Astra, LD06, zenoh bridge).
 - `install-compute-services.sh [--remote DEVICE] [--no-start]` installs `lekiwi-stack.service`; it restarts a running stack only when its configuration changed.
 - `install-device-network.sh --user USER [--country CC]` sets the Wi-Fi country, turns off Wi-Fi power saving and grants the deploy user NetworkManager control.
+- `install-wifi-powersave.sh` disables Wi-Fi power saving on the active interface and on future NetworkManager connections; both service installers run it.
 - `install-wifi-regdom.sh [CC]` sets the Wi-Fi regulatory country (default `LEKIWI_WIFI_COUNTRY`, else `ID`) now and at every boot.
 - `install-deploy-sudoers.sh` grants the deploy user passwordless start/stop of the LeKiwi units only.
 - `setup-zenoh-tls.sh DEVICE` creates the private CA and mutual-TLS identities of the zenoh bridge on both machines.
@@ -72,7 +73,7 @@ units refer to them directly.
 
 - `free_space.py` turns the front camera into a floor-edge `LaserScan`.
 - `validate-map-bundle.py` validates an immutable map/RMF bundle.
-- `rtabmap-db-maintenance.py` bounds the RTAB-Map working database at startup.
+- `rtabmap-db-maintenance.py` prunes old RTAB-Map archives without replacing the active map.
 - `rtabmap-session-guard.py` stops a mapping session at its database quota.
 - `sim-qualification.py` collects the fail-closed simulation qualification evidence.
 - `sim-renderer-check.py` fails fast without headless OpenGL 3.3.

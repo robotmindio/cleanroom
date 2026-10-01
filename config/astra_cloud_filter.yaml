@@ -1,0 +1,6 @@
+astra_cloud_filter:
+  ros__parameters:
+    # QVGA depth at 30 Hz yields a useful sparse arm cloud without sending the
+    # raw raster. Sample every 8 pixels per axis and publish at most 3 Hz.
+    pixel_stride: 8
+    max_rate_hz: 3.0

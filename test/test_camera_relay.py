@@ -58,6 +58,12 @@ class DeviceMachine:
         self.wrist_pub = self.node.create_publisher(
             CompressedImage, "/pi/camera/wrist/image_raw/compressed", SENSOR_QOS
         )
+        self.astra_image_pub = self.node.create_publisher(
+            CompressedImage, "/camera/astra/color/image_raw/compressed", SENSOR_QOS
+        )
+        self.astra_info_pub = self.node.create_publisher(
+            CameraInfo, "/camera/astra/color/camera_info", RELIABLE_QOS
+        )
 
     def publish(self):
         self.front_image_pub.publish(self.front_jpeg)
@@ -67,6 +73,12 @@ class DeviceMachine:
         wrist.format = self.front_jpeg.format
         wrist.data = self.front_jpeg.data
         self.wrist_pub.publish(wrist)
+        astra = CompressedImage()
+        astra.header = self.front_jpeg.header
+        astra.format = self.front_jpeg.format
+        astra.data = self.front_jpeg.data
+        self.astra_image_pub.publish(astra)
+        self.astra_info_pub.publish(self.front_info)
 
 
 @pytest.fixture(scope="module")
@@ -151,6 +163,24 @@ def test_wrist_frames_are_relayed_but_its_missing_calibration_is_not_invented(gr
 
     assert ours_image, "wrist frames should be relayed like any other camera"
     assert not seen_infos, "wrist has no calibration; inventing one would be worse"
+
+
+def test_astra_preview_is_decompressed_without_republishing_its_camera_info(graph):
+    device, _, executor = graph
+    seen_images, seen_infos = [], []
+    checker = rclpy.create_node("astra_preview_checker")
+    checker.create_subscription(Image, "/camera/astra/color/image_raw", seen_images.append, SENSOR_QOS)
+    checker.create_subscription(CameraInfo, "/camera/astra/color/camera_info", seen_infos.append, RELIABLE_QOS)
+    executor.add_node(checker)
+    try:
+        pump_until(executor, device, checker, lambda: bool(seen_images and seen_infos))
+    finally:
+        executor.remove_node(checker)
+        checker.destroy_node()
+
+    assert seen_images, "compressed Astra preview was not expanded"
+    assert np.array_equal(BRIDGE.imgmsg_to_cv2(seen_images[-1], "bgr8"), FRAME)
+    assert seen_infos[-1].width == 640
 
 
 def test_frames_are_not_decoded_while_nothing_consumes_the_raw_topic(graph):

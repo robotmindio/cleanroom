@@ -11,8 +11,9 @@ from sensor_msgs.msg import BatteryState, LaserScan, PointCloud2, PointField
 from diagnostic_msgs.msg import DiagnosticStatus
 
 from lekiwi_rmf.safety_supervisor import (
-    Requirement, SafetyState, SafetyStateMachine, _valid_battery,
-    _valid_depth_points, _valid_scan_ranges, validate_acceptance_file,
+    Requirement, SafetyState, SafetyStateMachine, SafetySupervisor, _valid_battery,
+    _scan_masked_angle, _valid_depth_points, _valid_scan_ranges,
+    validate_acceptance_file,
 )
 
 
@@ -55,6 +56,7 @@ def test_production_requires_only_inputs_the_shipped_robot_publishes():
         assert parameters[name] is False, name
     ekf = yaml.safe_load((root / "config" / "ekf.yaml").read_text(encoding="utf-8"))
     assert not any(key.startswith("imu") for key in ekf["ekf_filter_node"]["ros__parameters"])
+    assert parameters["sensor_timeout"] < parameters["depth_timeout"]
 
 
 def test_production_requires_arm_workspace_gate_but_simulation_profile_does_not():
@@ -70,6 +72,24 @@ def test_production_requires_arm_workspace_gate_but_simulation_profile_does_not(
     assert production["arm_workspace_monitor"]["ros__parameters"]["group_name"] == "arm"
 
 
+def test_simulation_coverage_allows_only_the_measured_model_self_mask():
+    root = Path(__file__).parents[1]
+    simulation = yaml.safe_load(
+        (root / "config" / "safety_simulation.yaml").read_text(encoding="utf-8")
+    )["safety_supervisor"]["ros__parameters"]
+    mask = _scan_masked_angle(str(root / "config" / "lidar_self_mask_simulation.yaml"))
+    assert math.isclose(2 * math.pi - mask, math.radians(289.0), abs_tol=1e-9)
+    assert 0.0 < simulation["minimum_scan_coverage"] <= 2 * math.pi - mask
+    production = yaml.safe_load(
+        (root / "config" / "safety_production.yaml").read_text(encoding="utf-8")
+    )["safety_supervisor"]["ros__parameters"]
+    production_coverage = 2 * math.pi - _scan_masked_angle(
+        str(root / "config" / "lidar_self_mask.yaml")
+    )
+    assert production["minimum_scan_coverage"] == 4.3
+    assert production["minimum_scan_coverage"] < production_coverage
+
+
 def test_missing_required_input_denies_all_motion():
     machine = _machine()
     decision = machine.decision(SECOND)
@@ -77,6 +97,16 @@ def test_missing_required_input_denies_all_motion():
     assert not decision.base_permitted
     assert not decision.arm_permitted
     assert "scan: missing" in decision.faults
+
+
+def test_small_future_sensor_clock_skew_is_tolerated_but_large_skew_is_rejected():
+    machine = SafetyStateMachine({"scan": Requirement(500_000_000)})
+    machine.update("scan", True, SECOND + 7_000_000)
+    assert machine._requirement_fault("scan", machine.requirements["scan"], SECOND) is None
+    machine.update("scan", True, SECOND + 60_000_000)
+    assert machine._requirement_fault("scan", machine.requirements["scan"], SECOND) == "scan: stale"
+    machine.update("scan", True, SECOND - 600_000_000)
+    assert machine._requirement_fault("scan", machine.requirements["scan"], SECOND) == "scan: stale"
 
 
 def test_armed_driver_needs_stow_for_base_but_not_arm():
@@ -182,6 +212,48 @@ def test_stale_scan_removes_only_base_permission_and_latches_after_ready():
     assert decision.state == SafetyState.FAULT_LATCHED
     assert not decision.base_permitted
     assert not decision.arm_permitted
+    assert "scan: stale" in decision.latched_faults
+
+
+def test_latched_fault_reason_survives_input_recovery_and_clears_on_reset():
+    machine = _machine()
+    _healthy(machine)
+    machine.driver_state = "ARMED"
+    machine.decision(SECOND)
+    machine.update("scan", False, SECOND, "invalid range")
+    assert machine.decision(SECOND).state == SafetyState.FAULT_LATCHED
+
+    for name in machine.requirements:
+        machine.update(name, True, 2 * SECOND)
+    decision = machine.decision(2 * SECOND)
+    assert decision.state == SafetyState.FAULT_LATCHED
+    assert decision.faults == ()
+    assert decision.latched_faults == ("scan: invalid range",)
+
+    machine.driver_state = "DISARMED"
+    success, _ = machine.reset(2 * SECOND)
+    assert success
+    assert machine.decision(2 * SECOND).latched_faults == ()
+
+
+def test_simulation_without_driver_can_explicitly_reset_a_recovered_fault():
+    machine = _machine()
+    machine.driver_state_required = False
+    _healthy(machine)
+    machine.driver_state = "ARMED"
+    machine.decision(SECOND)
+    machine.update("scan", False, SECOND, "invalid range")
+    assert machine.decision(SECOND).state == SafetyState.FAULT_LATCHED
+    for name in machine.requirements:
+        machine.update(name, True, 2 * SECOND)
+
+    success, message = machine.reset(2 * SECOND)
+
+    assert success
+    assert "no hardware driver" in message
+    decision = machine.decision(2 * SECOND)
+    assert decision.state == SafetyState.ARMED
+    assert decision.base_permitted and decision.arm_permitted
 
 
 def test_estop_latches_and_cannot_reset_until_healthy_and_disarmed():
@@ -271,12 +343,16 @@ def test_physical_acceptance_requires_measured_all_direction_and_fault_results(t
             },
         }},
     }), encoding="utf-8")
-    path.write_text(yaml.safe_dump({"schema_version": 2, "validated": False}), encoding="utf-8")
+    path.write_text(yaml.safe_dump({"schema_version": 4, "validated": False}), encoding="utf-8")
     assert not validate_acceptance_file(path)[0]
 
     path.write_text(yaml.safe_dump({
-        "schema_version": 2,
+        "schema_version": 4,
         "validated": True,
+        "operating_scope": {
+            "mode": "attended_autonomous_base", "operator_at_motor_power_stop": True,
+        },
+        "installed_hardware": {"bumper": True, "imu": True, "battery_monitor": True},
         "software_revision": "abc123",
         "sensor_configuration": "scanner-v1",
         "validated_at": "2026-08-27T12:00:00Z",
@@ -307,8 +383,8 @@ def test_physical_acceptance_requires_measured_all_direction_and_fault_results(t
             "scan_disconnect": True, "depth_disconnect": True, "imu_disconnect": True,
             "battery_low_or_disconnect": True, "motor_diagnostic_fault": True,
             "bumper": True,
-            "estop_independent_of_ros": True, "host_restart_stays_disarmed": True,
-            "ros_restart_stays_disarmed": True,
+            "estop_independent_of_ros": True, "host_restart_stops_then_gated_rearm": True,
+            "ros_restart_stops_then_gated_rearm": True,
             "telemetry_loss": True, "telemetry_replay_or_duplicate": True,
             "zmq_unauthorized_client_rejected": True,
             "dds_control_plane_isolated_or_authenticated": True,
@@ -328,6 +404,35 @@ def test_physical_acceptance_requires_measured_all_direction_and_fault_results(t
     assert validate_acceptance_file(path, nav2_path, expected_stow)[0]
 
     acceptance = yaml.safe_load(path.read_text(encoding="utf-8"))
+    legacy = yaml.safe_load(path.read_text(encoding="utf-8"))
+    legacy["fault_tests"]["host_restart_stays_disarmed"] = True
+    del legacy["fault_tests"]["host_restart_stops_then_gated_rearm"]
+    path.write_text(yaml.safe_dump(legacy), encoding="utf-8")
+    assert not validate_acceptance_file(path, nav2_path, expected_stow)[0]
+    acceptance["installed_hardware"] = {
+        "bumper": False, "imu": False, "battery_monitor": False,
+    }
+    for name in ("bumper", "imu_disconnect", "battery_low_or_disconnect"):
+        acceptance["fault_tests"][name] = None
+    path.write_text(yaml.safe_dump(acceptance), encoding="utf-8")
+    assert validate_acceptance_file(
+        path, nav2_path, expected_stow, acceptance["installed_hardware"]
+    )[0]
+    assert not validate_acceptance_file(
+        path, nav2_path, expected_stow, {"bumper": True, "imu": False, "battery_monitor": False}
+    )[0]
+    acceptance["fault_tests"]["bumper"] = False
+    path.write_text(yaml.safe_dump(acceptance), encoding="utf-8")
+    assert not validate_acceptance_file(
+        path, nav2_path, expected_stow, acceptance["installed_hardware"]
+    )[0]
+    acceptance["fault_tests"]["bumper"] = None
+    acceptance["operating_scope"]["operator_at_motor_power_stop"] = False
+    path.write_text(yaml.safe_dump(acceptance), encoding="utf-8")
+    assert not validate_acceptance_file(
+        path, nav2_path, expected_stow, acceptance["installed_hardware"]
+    )[0]
+    acceptance["operating_scope"]["operator_at_motor_power_stop"] = True
     acceptance["accepted_stow_joint_positions"]["arm_elbow_flex"] = 0.1
     path.write_text(yaml.safe_dump(acceptance), encoding="utf-8")
     valid, detail = validate_acceptance_file(path, nav2_path, expected_stow)
@@ -349,8 +454,12 @@ def test_physical_acceptance_requires_measured_all_direction_and_fault_results(t
 def test_physical_acceptance_rejects_self_selected_weak_limits(tmp_path):
     path = tmp_path / "acceptance.yaml"
     template = {
-        "schema_version": 2,
+        "schema_version": 4,
         "validated": True,
+        "operating_scope": {
+            "mode": "attended_autonomous_base", "operator_at_motor_power_stop": True,
+        },
+        "installed_hardware": {"bumper": True, "imu": True, "battery_monitor": True},
         "software_revision": "abc123",
         "sensor_configuration": "scanner-v1",
         "validated_at": "2026-08-27T12:00:00Z",
@@ -373,6 +482,24 @@ def test_physical_acceptance_rejects_self_selected_weak_limits(tmp_path):
     assert "latency" in detail
 
 
+def test_live_acceptance_requirement_is_base_only():
+    rclpy = pytest.importorskip("rclpy")
+    production = Path(__file__).parents[1] / "config" / "safety_production.yaml"
+    rclpy.init(args=["--ros-args", "--params-file", str(production)])
+    node = None
+    try:
+        node = SafetySupervisor()
+        assert node._machine.requirements["acceptance"] == Requirement(
+            2**62, base=True, arm=False
+        )
+        assert node._machine.requirements["scan"].max_age_ns == 500_000_000
+        assert node._machine.requirements["depth"].max_age_ns == 1_000_000_000
+    finally:
+        if node is not None:
+            node.destroy_node()
+        rclpy.shutdown()
+
+
 def test_scan_health_rejects_blind_and_malformed_payloads():
     scan = LaserScan()
     scan.range_min = 0.1
@@ -385,6 +512,47 @@ def test_scan_health_rejects_blind_and_malformed_payloads():
     for invalid in (math.nan, -math.inf, 50.0):
         scan.ranges[0] = invalid
         assert not _valid_scan_ranges(scan, 0.05)
+
+
+def test_scan_diagnostic_reports_invalid_ranges_separately_from_coverage():
+    node = object.__new__(SafetySupervisor)
+    node._scan_masked_angle = 0.0
+    node._minimum_scan_valid_fraction = 0.05
+    node._require_full_scan = True
+    node._minimum_scan_coverage = 4.5
+    node._now = lambda: SECOND
+    updates = []
+    node._machine = types.SimpleNamespace(update=lambda *values: updates.append(values))
+
+    scan = LaserScan()
+    scan.header.stamp.sec = 1
+    scan.angle_increment = 0.01
+    scan.range_min = 0.1
+    scan.range_max = 10.0
+    scan.ranges = [1.0] * 629
+    scan.ranges[0] = math.nan
+    node._on_scan(scan)
+    assert updates[-1][1] is False
+    assert updates[-1][3] == "scan contains invalid ranges or too few valid returns"
+
+    scan.ranges[0] = 1.0
+    node._on_scan(scan)
+    assert updates[-1][1] is True
+    assert updates[-1][3].startswith("coverage=")
+
+
+def test_full_scan_coverage_excludes_tracked_self_mask(tmp_path):
+    path = tmp_path / "lidar_self_mask.yaml"
+    path.write_text(yaml.safe_dump({"scan_self_filter": {"ros__parameters": {
+        "body_start_deg": 255.0,
+        "body_end_deg": 345.0,
+        "body_max_range_m": 0.2,
+    }}}), encoding="utf-8")
+    assert 2 * math.pi - _scan_masked_angle(str(path)) < 6.0
+    assert _scan_masked_angle("") == 0.0
+    path.write_text("scan_self_filter: {}", encoding="utf-8")
+    with pytest.raises(ValueError, match="invalid scan self-mask"):
+        _scan_masked_angle(str(path))
 
 
 def _cloud(points: list[tuple[float, float, float]]) -> PointCloud2:
@@ -475,10 +643,11 @@ def test_an_estop_still_latches_when_fault_latching_is_off():
     assert machine.decision(SECOND).state == SafetyState.ESTOP
 
 
-def test_a_non_strict_supervisor_reports_faults_but_never_withholds_motion():
+def test_non_strict_mode_can_allow_non_workspace_faults():
     from lekiwi_rmf.safety_supervisor import permit_unless_strict
 
     machine = _machine()  # nothing has reported: default-deny in the state machine
+    machine.arm_stowed = True
     denied = machine.decision(SECOND)
     assert denied.state == SafetyState.BOOT
     assert not denied.base_permitted and not denied.arm_permitted and denied.faults
@@ -487,10 +656,109 @@ def test_a_non_strict_supervisor_reports_faults_but_never_withholds_motion():
     assert domestic.base_permitted and domestic.arm_permitted
     assert domestic.state == SafetyState.BOOT and domestic.faults == denied.faults
 
+    armed = permit_unless_strict(denied, strict=False, driver_state="ARMED")
+    assert armed.state == SafetyState.ARMED
+    assert armed.base_permitted and armed.arm_permitted and armed.faults == denied.faults
+
     assert permit_unless_strict(denied, strict=True) == denied
 
 
-def test_strict_enforcement_is_fixed_when_the_supervisor_starts():
+def test_non_strict_mode_keeps_acceptance_and_fresh_stow_as_base_gates():
+    from lekiwi_rmf.safety_supervisor import permit_unless_strict
+
+    machine = SafetyStateMachine({
+        "driver": Requirement(SECOND),
+        "scan": Requirement(SECOND, base=True, arm=False),
+        "acceptance": Requirement(SECOND, base=True, arm=False),
+        "joints": Requirement(SECOND),
+    })
+    machine.latch_faults = False
+    machine.driver_state = "ARMED"
+    machine.arm_stowed = True
+    machine.update("driver", True, SECOND)
+    machine.update("scan", True, SECOND)
+    machine.update("acceptance", False, SECOND, "stopping trials are incomplete")
+    machine.update("joints", True, SECOND)
+
+    decision = machine.decision(SECOND)
+    domestic = permit_unless_strict(decision, strict=False, driver_state="ARMED")
+    assert domestic.state == SafetyState.ARMED
+    assert not domestic.base_permitted
+    assert domestic.arm_permitted
+
+    machine.update("acceptance", True, SECOND)
+    machine.arm_stowed = False
+    decision = machine.decision(SECOND)
+    domestic = permit_unless_strict(decision, strict=False, driver_state="ARMED")
+    assert not domestic.base_permitted
+
+    machine.arm_stowed = True
+    machine.update("driver", True, 3 * SECOND)
+    machine.update("acceptance", True, 3 * SECOND)
+    machine.update("scan", False, 3 * SECOND, "scan unavailable")
+    domestic = permit_unless_strict(
+        machine.decision(3 * SECOND), strict=False, driver_state="ARMED"
+    )
+    assert not domestic.arm_stowed
+    assert not domestic.base_permitted
+
+
+def test_non_strict_mode_still_blocks_arm_when_moveit_reports_floor_collision():
+    from lekiwi_rmf.safety_supervisor import permit_unless_strict
+
+    machine = SafetyStateMachine({
+        "driver": Requirement(SECOND),
+        "scan": Requirement(SECOND, base=True, arm=False),
+        "arm_workspace": Requirement(SECOND, base=False, arm=True),
+    })
+    machine.driver_state = "ARMED"
+    machine.arm_stowed = True
+    machine.update("driver", True, SECOND)
+    machine.update("scan", True, SECOND)
+    machine.update("arm_workspace", False, SECOND, "MoveIt reports ground collision")
+
+    decision = machine.decision(SECOND)
+    domestic = permit_unless_strict(decision, strict=False, driver_state="ARMED")
+
+    assert domestic.base_permitted
+    assert not domestic.arm_permitted
+    assert not domestic.arm_workspace_clear
+    assert any("arm_workspace" in fault for fault in domestic.faults)
+
+
+def test_non_strict_mode_keeps_arm_disarmed_until_workspace_monitor_is_ready():
+    from lekiwi_rmf.safety_supervisor import permit_unless_strict
+
+    machine = SafetyStateMachine({
+        "driver": Requirement(SECOND),
+        "scan": Requirement(SECOND, base=True, arm=False),
+        "arm_workspace": Requirement(SECOND, base=False, arm=True),
+    })
+    machine.driver_state = "DISARMED"
+    machine.arm_stowed = True
+    machine.update("driver", True, SECOND)
+    machine.update("scan", True, SECOND)
+
+    domestic = permit_unless_strict(machine.decision(SECOND), strict=False)
+
+    assert domestic.base_permitted
+    assert not domestic.arm_permitted
+    assert not domestic.arm_workspace_clear
+
+
+def test_non_strict_permissions_never_override_an_estop():
+    from lekiwi_rmf.safety_supervisor import permit_unless_strict
+
+    machine = _machine()
+    machine.update("estop", False, SECOND)
+    estop = machine.decision(SECOND)
+
+    domestic = permit_unless_strict(estop, strict=False, driver_state="ARMED")
+    assert domestic.state == SafetyState.ESTOP
+    assert not domestic.base_permitted and not domestic.arm_permitted
+
+
+def test_strict_enforcement_is_fixed_when_the_supervisor_starts(monkeypatch):
     rclpy = pytest.importorskip("rclpy")
     from rclpy.parameter import Parameter
     from lekiwi_rmf.safety_supervisor import SafetySupervisor
@@ -506,8 +774,12 @@ def test_strict_enforcement_is_fixed_when_the_supervisor_starts():
         node.set_parameters([Parameter("strict", value=False)])
         published = []
         node._base_pub = types.SimpleNamespace(publish=published.append)
+        warnings = []
+        node._last_arm_permitted = True
+        monkeypatch.setattr(node, "get_logger", lambda: types.SimpleNamespace(warn=warnings.append))
         node._publish()
         assert published[-1].data is False  # nothing has reported: strict denies
+        assert warnings and "Arm permission withdrawn" in warnings[-1]
     finally:
         if node is not None:
             node.destroy_node()

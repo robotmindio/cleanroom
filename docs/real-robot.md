@@ -124,8 +124,9 @@ The compute installer picks the topology:
   service's compressed frames over loopback (`camera_source:=remote`) — v4l2
   allows one reader per camera, and the service already holds them;
 - with `--remote <device-address>` it reaches a host on another machine;
-  compressed frames, the Astra cloud and the device LD06's `/pi/lidar/scan`
-  arrive through the zenoh bridge, and relays in the bringup expand them into
+  rate-limited compressed camera previews, the compact Astra cloud, and the
+  device LD06's `/pi/lidar/scan` arrive through the zenoh bridge; image relays
+  in the bringup expand them into
   the same canonical topics (`/scan` has the body-masked LD06 as its sole publisher
   by default), so nothing downstream can tell the topologies apart.
 
@@ -293,6 +294,15 @@ Keep the host watchdog enabled. Ports `5555/tcp`, `5556/tcp`, and `5557/tcp`
 bind all interfaces by default (see [Network exposure](../README.md#network-security)) and
 must be reachable from the ROS computer only; do not expose them to an untrusted
 network. Check the repository health handshake on the Pi before starting ROS:
+
+In real mode, MoveIt uploads each complete arm trajectory to the existing motor
+host on the Pi. That host interpolates targets and checks path and final-position
+tolerances against its local servo readings. Missing fresh compute permission
+pauses its execution clock and holds a fixed measured pose; reconnecting resumes
+the retained goal without replaying elapsed time. Explicit cancellation, motor
+faults, and a host restart still invalidate the goal. MoveIt wall-clock duration
+monitoring is disabled in real mode because the Pi owns the settling deadline.
+Planning, collision checks, SLAM and Nav2 continue to run on compute.
 
 ```bash
 "$HOME/lekiwi_ws/.venv-lerobot/bin/python" scripts/host-health-check.py \

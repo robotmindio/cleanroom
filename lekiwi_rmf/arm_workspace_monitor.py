@@ -118,6 +118,7 @@ class ArmWorkspaceMonitor(Node):
         self._joint_snapshot: JointState | None = None
         self._pending = None
         self._pending_sent_ns: int | None = None
+        self._last_clear: bool | None = None
 
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self._permission_pub = self.create_publisher(
@@ -256,6 +257,9 @@ class ArmWorkspaceMonitor(Node):
         self._publish(clear, decision_detail)
 
     def _publish(self, clear: bool, detail: str) -> None:
+        if self._last_clear is True and not clear:
+            self.get_logger().warning(f"Arm workspace permission withdrawn: {detail}")
+        self._last_clear = clear
         permission = Bool()
         permission.data = bool(clear)
         self._permission_pub.publish(permission)

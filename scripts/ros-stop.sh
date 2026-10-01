@@ -24,8 +24,8 @@ pid_matches() { # pid_matches <pid> <stack|host|rviz|astra|cameras|lidar|zenoh>
   esac
 }
 
-stop_recorded() { # stop_recorded <file> <kind>
-  local file=$1 kind=$2 pid pgid deadline grouped=0
+stop_recorded() { # stop_recorded <file> <kind> [owning-unit]
+  local file=$1 kind=$2 unit=${3:-} pid pgid deadline grouped=0 ownership_status
   [ -r "$file" ] || return 1
   pid=$(<"$file")
   if [[ ! $pid =~ ^[1-9][0-9]*$ ]] || ! kill -0 "$pid" 2>/dev/null; then
@@ -35,6 +35,18 @@ stop_recorded() { # stop_recorded <file> <kind>
   if ! pid_matches "$pid" "$kind"; then
     echo "$0: refusing to signal unrecognised PID $pid from $file" >&2
     return 1
+  fi
+  if [[ -n $unit ]]; then
+    if unit_owns_pid "$pid" "$unit"; then
+      echo "$unit owns recorded $kind (PID $pid) -- left running; stop it with: sudo systemctl stop $unit"
+      return 1
+    else
+      ownership_status=$?
+      if (( ownership_status == 2 )); then
+        echo "$0: cannot verify whether $unit owns recorded $kind (PID $pid); left it running" >&2
+        return 1
+      fi
+    fi
   fi
   pgid=$(ps -o pgid= -p "$pid" | tr -d '[:space:]')
   if [[ $pgid == "$pid" ]]; then grouped=1; fi
@@ -68,18 +80,28 @@ stop_recorded() { # stop_recorded <file> <kind>
   return 0
 }
 
-# A systemd unit owns its cgroup and restart policy; do not fight it with raw
-# signals. The explicit command below keeps the ownership boundary visible.
+# Leave a process alone only when an active unit actually owns its cgroup.
 unit_active() { # unit_active <unit>
   command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "$1"
+}
+
+unit_owns_pid() { # 0: unit owns pid, 1: it does not, 2: ownership cannot be checked
+  local pid=$1 unit=$2 unit_cgroup pid_cgroups cgroup
+  unit_active "$unit" || return 1
+  unit_cgroup=$(systemctl show --property=ControlGroup --value "$unit" 2>/dev/null) || return 2
+  [[ -n $unit_cgroup && -r /proc/$pid/cgroup ]] || return 2
+  pid_cgroups=$(awk -F: '{print $3}' "/proc/$pid/cgroup") || return 2
+  [[ -n $pid_cgroups ]] || return 2
+  while IFS= read -r cgroup; do
+    [[ $cgroup == "$unit_cgroup" || $cgroup == "$unit_cgroup/"* ]] && return 0
+  done <<<"$pid_cgroups"
+  return 1
 }
 
 stopped=0
 stop_kind() { # stop_kind <kind> [owning-unit]
   local kind=$1 unit=${2:-}
-  if [[ -n $unit ]] && unit_active "$unit"; then
-    echo "$unit is active -- left running; stop it with: sudo systemctl stop $unit"
-  elif stop_recorded "$runtime_dir/$kind.pid" "$kind"; then
+  if stop_recorded "$runtime_dir/$kind.pid" "$kind" "$unit"; then
     stopped=1
   fi
 }

@@ -12,6 +12,7 @@ import sys
 import time
 
 import rclpy
+from action_msgs.msg import GoalStatus
 from builtin_interfaces.msg import Duration
 from control_msgs.action import FollowJointTrajectory
 from rclpy.action import ActionClient
@@ -52,6 +53,35 @@ class ArmJogger(rclpy.node.Node):
             if joint in self.positions and time.monotonic() - self.received_at < 1.0:
                 return self.positions[joint]
         raise RuntimeError("no fresh joint state from the real robot")
+
+
+def wait_for_result(node, handle, result_future, timeout):
+    rclpy.spin_until_future_complete(node, result_future, timeout_sec=timeout)
+    if result_future.done():
+        return result_future.result()
+
+    cancel_future = handle.cancel_goal_async()
+    rclpy.spin_until_future_complete(node, cancel_future, timeout_sec=3.0)
+    if not cancel_future.done():
+        raise RuntimeError("jog timed out; controller did not confirm a cancellation request")
+    response = cancel_future.result()
+    if not response.goals_canceling:
+        rclpy.spin_until_future_complete(node, result_future, timeout_sec=2.0)
+        if result_future.done():
+            return result_future.result()
+        raise RuntimeError("jog timed out; controller neither canceled nor completed the goal")
+
+    rclpy.spin_until_future_complete(node, result_future, timeout_sec=2.0)
+    if not result_future.done():
+        raise RuntimeError("jog timed out; cancellation was acknowledged but no final result arrived")
+    raise RuntimeError("jog timed out; controller acknowledged cancellation")
+
+
+def result_is_successful(result):
+    return (
+        result.status == GoalStatus.STATUS_SUCCEEDED
+        and result.result.error_code == FollowJointTrajectory.Result.SUCCESSFUL
+    )
 
 
 def parse_args():
@@ -104,10 +134,14 @@ def main():
         if handle is None or not handle.accepted:
             raise RuntimeError("controller rejected jog (the arm may be disarmed)")
         result_future = handle.get_result_async()
-        rclpy.spin_until_future_complete(node, result_future, timeout_sec=args.duration + 7.0)
-        result = result_future.result()
-        if result is None or result.result.error_code != FollowJointTrajectory.Result.SUCCESSFUL:
-            detail = "no result" if result is None else result.result.error_string
+        try:
+            result = wait_for_result(node, handle, result_future, args.duration + 7.0)
+        except RuntimeError as error:
+            raise RuntimeError(f"jog failed: {error}") from error
+        if not result_is_successful(result):
+            detail = result.result.error_string or (
+                f"action status {result.status}, error code {result.result.error_code}"
+            )
             raise RuntimeError(f"jog failed: {detail}")
         print("Jog completed.")
         return 0

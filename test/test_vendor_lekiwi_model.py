@@ -47,6 +47,23 @@ def test_transform_replaces_existing_limits_without_duplicate_elements(tmp_path)
     )
 
 
+def test_transform_applies_local_shoulder_limit_override(tmp_path):
+    source = tmp_path / "model.xacro"
+    source.write_text(
+        '''<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <joint name="arm_shoulder_lift" type="revolute">
+    <limit lower="-1.74533" upper="1.74533"/>
+  </joint>
+</robot>'''
+    )
+
+    root, _ = VENDOR.transform(source)
+
+    limits = root.find("joint/limit")
+    assert float(limits.get("lower")) == VENDOR.JOINT_LIMITS["arm_shoulder_lift"][0]
+    assert float(limits.get("upper")) == VENDOR.JOINT_LIMITS["arm_shoulder_lift"][1]
+
+
 def test_transform_rejects_a_source_that_xacro_cannot_expand(tmp_path):
     source = tmp_path / "model.xacro"
     source.write_text(

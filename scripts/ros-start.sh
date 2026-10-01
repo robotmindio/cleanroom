@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Bring up the full ROS stack against the real robot.
 # Usage: scripts/ros-start.sh [extra launch args...]
-#   scripts/ros-start.sh                                    # local mapping/navigation only
+#   scripts/ros-start.sh                                    # build/update the active map
 #   scripts/ros-start.sh slam_mode:=localization            # drive a map you already built
 #   scripts/ros-start.sh start_rmf:=false                   # Nav2 only
 # Override per machine: LEKIWI_FRONT, LEKIWI_WS. The Astra serial is pinned
@@ -38,8 +38,8 @@ set +u
 source scripts/setup.bash
 set -u
 
-# systemd starts this script directly, not scripts/up.sh. Apply the same
-# bounded default-database policy in both startup paths.
+# systemd starts this script directly, not scripts/up.sh. Prune old archives
+# without replacing the active map database.
 scripts/rtabmap-db-maintenance.py "$@"
 
 # /dev/videoN shifts on every USB re-enumeration and on a laptop video0 is the built-in

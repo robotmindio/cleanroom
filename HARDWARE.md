@@ -296,8 +296,8 @@ whenever USB re-enumerates.
 
 For the normal two-computer setup, use the device launcher instead. It starts
 the camera-less motor host, ROS camera publisher, LD06 publisher, Astra
-publisher and zenoh sensor bridge — v4l2_camera reads the cameras here, and only
-compressed frames cross the network to the workstation:
+publisher and zenoh sensor bridge — v4l2_camera reads the cameras here, and
+rate-limited compressed previews and sensor clouds cross to the workstation:
 
 ```bash
 scripts/pi-up.sh

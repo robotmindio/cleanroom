@@ -16,6 +16,9 @@ def test_astra_pro_publishes_registered_rgbd_in_the_robot_camera_frame():
     assert parameters["depth_registration"] is True
     assert parameters["color_depth_synchronization"] is True
     assert parameters["enable_point_cloud"] is True
+    assert (parameters["depth_width"], parameters["depth_height"], parameters["depth_fps"]) == (
+        320, 240, 30
+    )
     assert parameters["publish_tf"] is False
     assert parameters["color_optical_frame_id"] == "astra_camera_optical_frame"
     assert parameters["depth_optical_frame_id"] == "astra_camera_optical_frame"
@@ -53,6 +56,15 @@ def test_astra_has_its_own_tracked_robot_frame():
     assert camera.find("collision/origin").attrib == camera.find("visual/origin").attrib
     assert '<parent link="astra_pro_compact_mount"/><child link="astra_camera_link"/>' in description
     assert 'property name="astra_mount_xyz" value="0 0 0.0155"' in description
+
+
+def test_local_and_remote_astra_cloud_filters_share_the_bandwidth_profile():
+    filter_config = ROOT / "config" / "astra_cloud_filter.yaml"
+    values = yaml.safe_load(filter_config.read_text())["astra_cloud_filter"]["ros__parameters"]
+    assert values == {"pixel_stride": 8, "max_rate_hz": 3.0}
+    for launch in (ROOT / "launch" / "bringup.launch.py", ROOT / "launch" / "pi_astra.launch.py"):
+        assert "astra_cloud_filter.yaml" in launch.read_text()
+    assert 1.0 / values["max_rate_hz"] < 0.5  # production depth freshness timeout
 
 
 def test_so101_visuals_use_one_yellow_material():
@@ -120,7 +132,8 @@ def test_sensor_calibration_has_one_xacro_source_for_all_model_consumers():
     assert 'property name="wrist_camera_xyz"' in description
     assert 'property name="lidar_offset_xyz"' in description
     assert "lidar_offset_x:=" not in bringup
-    assert 'xacro "$package_share/urdf/lekiwi.urdf.xacro" sim:=false' in rviz
+    assert "moveit_config_builder(\"false\")" in rviz
+    assert "apply_gripper_calibration(config" in rviz
     assert 'file_path="urdf/lekiwi.urdf.xacro"' in moveit
 
 
@@ -151,6 +164,7 @@ def test_cyclonedds_sends_rgbd_clouds_in_loopback_sized_datagrams():
 
     # DDS never crosses machines (multicast TTL 0), so datagrams can be loopback sized.
     assert "<MulticastTimeToLive>0</MulticastTimeToLive>" in cyclonedds
+    assert '<NetworkInterface name="lo"/>' in cyclonedds
     assert "<MaxMessageSize>65500B</MaxMessageSize>" in cyclonedds
     assert "<FragmentSize>65000B</FragmentSize>" in cyclonedds
     assert '<SocketReceiveBufferSize min="default" max="8MiB"/>' in cyclonedds

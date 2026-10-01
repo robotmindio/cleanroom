@@ -47,6 +47,86 @@ def test_arm_has_complete_link_and_servo_collision_envelopes():
     assert all(links[name].find("collision") is not None for name in expected)
 
 
+def test_distal_arm_checks_physical_chassis_and_mounted_hardware():
+    robot = _real_robot()
+    base = robot.find("link[@name='base_link']")
+    guard = base.find("collision/geometry/mesh")
+    visible_guard = base.find("visual/geometry/mesh")
+    mount = robot.find("joint[@name='base_footprint_to_base_link']/origin")
+    srdf = ET.parse(ROOT / "config" / "lekiwi.srdf").getroot()
+    exemptions = {
+        frozenset((item.get("link1"), item.get("link2")))
+        for item in srdf.findall("disable_collisions")
+    }
+
+    assert robot.find("link[@name='arm_workspace_keepout_proxy']") is None
+    assert guard.get("filename") == "package://lekiwi_rmf/urdf/chassis_guard.stl"
+    assert visible_guard.get("filename") == guard.get("filename")
+    assert base.find("collision/origin").get("xyz") == base.find("visual/origin").get("xyz")
+    assert np.fromstring(base.find("collision/origin").get("xyz"), sep=" ") == pytest.approx([0, 0, -0.020])
+    assert float(base.find("visual/material/color").get("rgba").split()[-1]) > 0
+    mesh = np.frombuffer((ROOT / "urdf/chassis_guard.stl").read_bytes()[84:],
+                         dtype=np.dtype([("normal", "<f4", (3,)), ("vertices", "<f4", (3, 3)), ("attr", "<u2")]))["vertices"].reshape(-1, 3)
+    assert mesh[:, 0].min() == pytest.approx(-0.145)
+    assert mesh[:, 0].max() == pytest.approx(-0.003)
+    assert np.ptp(mesh[:, 2]) == pytest.approx(0.050)
+    assert np.fromstring(mount.get("xyz"), sep=" ") == pytest.approx([0.0, 0.0, 0.093])
+    obstacles = (
+        "base_link", "front_camera_collision_proxy", "lidar_collision_proxy",
+        "rpi5_stack_collision_proxy", "astra_camera_link",
+    )
+    distal_links = (
+        "forearm_collision_proxy", "wrist_collision_proxy", "roll_collision_proxy",
+        "gripper_collision_proxy",
+    )
+    for obstacle in obstacles:
+        for arm_link in distal_links:
+            assert frozenset((obstacle, arm_link)) not in exemptions
+
+
+def test_real_arm_collision_model_includes_ground_keepout():
+    real = _real_robot()
+    sim = _sim_robot()
+    floor = real.find("link[@name='arm_ground_keepout_proxy']/collision")
+    box = floor.find("geometry/box")
+    box_origin = floor.find("origin")
+    mount = real.find("joint[@name='arm_ground_keepout_mount']")
+    exemptions = {
+        frozenset((item.get("link1"), item.get("link2")))
+        for item in ET.parse(ROOT / "config" / "lekiwi.srdf").getroot().findall("disable_collisions")
+    }
+
+    assert np.fromstring(box.get("size"), sep=" ") == pytest.approx([2.0, 2.0, 2.0])
+    assert box_origin is not None
+    box_centre = np.fromstring(box_origin.get("xyz"), sep=" ")
+    box_size = np.fromstring(box.get("size"), sep=" ")
+    assert box_centre == pytest.approx([0.0, 0.0, -1.0])
+    assert box_centre[2] + box_size[2] / 2 == pytest.approx(0.0)
+    assert mount.find("parent").get("link") == "base_footprint"
+    assert mount.find("child").get("link") == "arm_ground_keepout_proxy"
+    assert sim.find("link[@name='arm_ground_keepout_proxy']/collision") is None
+    for link in (
+        "shoulder_collision_proxy", "upper_arm_collision_proxy", "forearm_collision_proxy",
+        "wrist_collision_proxy", "roll_collision_proxy", "gripper_collision_proxy",
+    ):
+        assert frozenset(("arm_ground_keepout_proxy", link)) not in exemptions
+
+
+def test_pedestal_and_upper_arm_proxies_match_their_vendored_cad_meshes():
+    robot = _real_robot()
+    links = {link.attrib["name"]: link for link in robot.findall("link")}
+    for source, proxy in (
+        ("so101_base_link", "arm_pedestal_collision_proxy"),
+        ("so101_upper_arm_link", "upper_arm_collision_proxy"),
+    ):
+        visuals = links[source].findall("visual")
+        collisions = links[proxy].findall("collision")
+        assert len(collisions) == len(visuals), proxy
+        for visual, collision in zip(visuals, collisions):
+            assert visual.find("geometry/mesh").attrib == collision.find("geometry/mesh").attrib
+            assert visual.find("origin").attrib == collision.find("origin").attrib
+
+
 def test_rpi5_stack_box_encloses_plate_carrier_and_table_with_clearance():
     robot = _real_robot()
     joints = {joint.find("child").get("link"): joint for joint in robot.findall("joint")}
@@ -70,16 +150,24 @@ def test_long_arm_sections_use_capsules_not_joint_center_spheres():
     links = {link.attrib["name"]: link for link in robot.findall("link")}
     for name in (
         "shoulder_collision_proxy",
-        "upper_arm_collision_proxy",
         "forearm_collision_proxy",
-        "roll_collision_proxy",
-        "gripper_collision_proxy",
     ):
         geometries = [
             collision.find("geometry") for collision in links[name].findall("collision")
         ]
         assert any(geometry.find("cylinder") is not None for geometry in geometries)
         assert sum(geometry.find("sphere") is not None for geometry in geometries) == 2
+
+    for source, proxy in (
+        ("so101_gripper_link", "roll_collision_proxy"),
+        ("so101_moving_jaw_link", "gripper_collision_proxy"),
+    ):
+        visuals = links[source].findall("visual")
+        collisions = links[proxy].findall("collision")
+        assert len(collisions) == len(visuals)
+        for visual, collision in zip(visuals, collisions):
+            assert visual.find("geometry/mesh").attrib == collision.find("geometry/mesh").attrib
+            assert visual.find("origin").attrib == collision.find("origin").attrib
 
 
 def test_srdf_collision_exemptions_reference_real_links_only():
@@ -257,7 +345,7 @@ def test_moveit_and_rviz_share_tracked_scaling_and_depth_defaults():
     assert planning_display["Acceleration_Scaling_Factor"] == pytest.approx(
         limits["default_acceleration_scaling_factor"]
     )
-    assert sensors["point_cloud"]["point_cloud_topic"] == "/camera/depth/points"
+    assert sensors["point_cloud"]["point_cloud_topic"] == "/moveit/depth/points_ready"
     assert sensors["point_cloud"]["sensor_plugin"] == (
         "occupancy_map_monitor/PointCloudOctomapUpdater"
     )

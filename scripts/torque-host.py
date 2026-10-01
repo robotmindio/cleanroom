@@ -29,6 +29,7 @@ from lekiwi_rmf.torque_control import (
     torque_readback_matches, validate_action_payload, validated_bind_address,
 )
 from lekiwi_rmf.arm_trajectory import ARM_JOINTS
+from lekiwi_rmf.local_arm_executor import LocalArmExecutor, STATUS_KEY, LEASE_KEYS
 from lekiwi_rmf.zmq_security import CurveServerSecurity, configure_link_liveness
 from lekiwi_rmf.odometry import (
     TELEMETRY_MONOTONIC_NS_KEY, TELEMETRY_PROTOCOL_KEY,
@@ -39,7 +40,26 @@ from lekiwi_rmf.motor_health import fault_snapshot, healthy_snapshot
 
 
 TORQUE_RETRIES = 5
-HEALTH_PERIOD_S = 0.10
+# The lift still held 0.023 rad short at P=64; tune only that loaded joint.
+ARM_P_COEFFICIENTS = {"arm_shoulder_lift": 96, "arm_elbow_flex": 64}
+# Spread grouped register reads across host cycles; one burst per snapshot can
+# starve the position loop on the shared Feetech bus.
+HEALTH_READ_PERIOD_S = 0.10
+# State and the full per-servo diagnostic snapshot share the narrow Pi uplink.
+# Ten hertz keeps feedback fresh while leaving command and watchdog handling at 30 Hz.
+OBSERVATION_PERIOD_S = 0.10
+HEALTH_READS = (
+    ("Present_Position", True),
+    # Read back the register the servo actually received so tracking failures
+    # can be separated from command transport or calibration errors.
+    ("Goal_Position", True),
+    ("Present_Load", False),
+    ("Present_Voltage", False),
+    ("Present_Temperature", False),
+    ("Present_Current", False),
+    ("Status", False),
+    ("Torque_Enable", False),
+)
 ACTION_KEYS = tuple(f"{joint}.pos" for joint in ARM_JOINTS) + (
     "x.vel", "y.vel", "theta.vel",
 )
@@ -171,7 +191,7 @@ class SafetyLeKiwi(LeKiwi):
         self.bus.configure_motors()
         for name in self.arm_motors:
             self.bus.write("Operating_Mode", name, OperatingMode.POSITION.value)
-            self.bus.write("P_Coefficient", name, 16)
+            self.bus.write("P_Coefficient", name, ARM_P_COEFFICIENTS.get(name, 16))
             self.bus.write("I_Coefficient", name, 0)
             self.bus.write("D_Coefficient", name, 32)
         for name in self.base_motors:
@@ -187,6 +207,7 @@ class TorqueControlServer:
             raise ValueError("safety.port_zmq must be between 1 and 65535")
         self.socket = context.socket(zmq.REP)
         self.socket.setsockopt(zmq.LINGER, 0)
+        self.socket.setsockopt(zmq.MAXMSGSIZE, 2 * 1024 * 1024)
         security.configure_socket(self.socket)
         self.socket.bind(f"tcp://{validated_bind_address(config.bind_address)}:{config.port_zmq}")
         self.latch = latch
@@ -263,6 +284,28 @@ class TorqueControlServer:
                 self._enable(robot)
             elif command == "disable":
                 self._disable(robot)
+                if hasattr(self, "arm_executor"):
+                    self.arm_executor.cancel()
+                    self.arm_executor.hold = {}
+            elif command == "trajectory_start":
+                if not self.torque_enabled or request.get("session") != self.host_session:
+                    raise ValueError("trajectory requires enabled torque and the current host session")
+                # Validation can take more than one loop tick. Stop the base and
+                # latch the measured arm before spending that time on the request.
+                self._hold_present_arm_position(robot)
+                observation = robot.get_observation()
+                status = self.arm_executor.start(request["trajectory"], observation)
+                self.socket.send_json({"ok": True, "trajectory": status})
+                return command
+            elif command == "trajectory_cancel":
+                if request.get("session") != self.host_session:
+                    raise ValueError("trajectory cancellation belongs to another host session")
+                if self.arm_executor.status is None or request.get("id") != self.arm_executor.status["id"]:
+                    raise ValueError("trajectory cancellation belongs to another arm goal")
+                self.arm_executor.cancel(request.get("id"))
+                self._hold_present_arm_position(robot)
+                measured = robot.get_observation()
+                self.arm_executor.hold = {f"{name}.pos": measured[f"{name}.pos"] for name in ARM_JOINTS}
             elif command != "state":
                 raise ValueError("command must be enable, disable, or state")
             self.socket.send_json({"ok": True, "torque_enabled": self.torque_enabled})
@@ -297,6 +340,8 @@ class MotorHealthCollector:
         self._snapshot = fault_snapshot(self.motors, "health read has not completed")
         self._last_error = None
         self._limits = None
+        self._read_index = 0
+        self._readbacks = {}
 
     def _read_limits(self, robot: SafetyLeKiwi) -> None:
         """Read the servo-programmed protective limits once after connection."""
@@ -316,29 +361,36 @@ class MotorHealthCollector:
         envelope remain advisory until bench-qualified.
         """
         now = time.monotonic()
-        if now - self._last_read < HEALTH_PERIOD_S:
+        if now - self._last_read < HEALTH_READ_PERIOD_S:
             return self._snapshot
         self._last_read = now
         try:
             if self._limits is None:
                 self._read_limits(robot)
-            torque = robot.bus.sync_read(
-                "Torque_Enable", list(self.motors), normalize=False, num_retry=TORQUE_RETRIES,
+            register, normalize = HEALTH_READS[self._read_index]
+            values = robot.bus.sync_read(
+                register, list(self.motors), normalize=normalize,
+                num_retry=TORQUE_RETRIES,
             )
-            positions = robot.bus.sync_read(
-                "Present_Position", list(self.motors), num_retry=TORQUE_RETRIES,
-            )
+            if not isinstance(values, dict) or set(values) != set(self.motors):
+                raise RuntimeError(f"incomplete {register} readback")
+            self._readbacks[register] = values
+            self._read_index += 1
+            if self._read_index < len(HEALTH_READS):
+                return self._snapshot
+
+            all_readbacks = self._readbacks
+            self._readbacks = {}
+            self._read_index = 0
+            torque = all_readbacks["Torque_Enable"]
+            positions = all_readbacks["Present_Position"]
+            goals = all_readbacks["Goal_Position"]
             feedback = {
-                "Present_Load": robot.bus.sync_read("Present_Load", list(self.motors), normalize=False, num_retry=TORQUE_RETRIES),
-                "Present_Voltage": robot.bus.sync_read("Present_Voltage", list(self.motors), normalize=False, num_retry=TORQUE_RETRIES),
-                "Present_Temperature": robot.bus.sync_read("Present_Temperature", list(self.motors), normalize=False, num_retry=TORQUE_RETRIES),
-                "Status": robot.bus.sync_read("Status", list(self.motors), normalize=False, num_retry=TORQUE_RETRIES),
-                "Present_Current": robot.bus.sync_read("Present_Current", list(self.motors), normalize=False, num_retry=TORQUE_RETRIES),
+                key: all_readbacks[key] for key in (
+                    "Present_Load", "Present_Voltage", "Present_Temperature",
+                    "Present_Current", "Status",
+                )
             }
-            all_readbacks = {"Torque_Enable": torque, "Present_Position": positions, **feedback}
-            for register, values in all_readbacks.items():
-                if not isinstance(values, dict) or set(values) != set(self.motors):
-                    raise RuntimeError(f"incomplete {register} readback")
             details = {}
             warnings = {}
             for motor in self.motors:
@@ -355,8 +407,9 @@ class MotorHealthCollector:
                     )
                     return self._snapshot
                 position = float(positions[motor])
-                if not math.isfinite(position):
-                    raise RuntimeError(f"non-finite present position from {motor}")
+                goal = float(goals[motor])
+                if not math.isfinite(position) or not math.isfinite(goal):
+                    raise RuntimeError(f"non-finite position readback from {motor}")
                 load = float(feedback["Present_Load"][motor])
                 voltage_raw = int(feedback["Present_Voltage"][motor])
                 temperature = int(feedback["Present_Temperature"][motor])
@@ -381,6 +434,7 @@ class MotorHealthCollector:
                     warnings[motor] = "temperature is at or beyond the configured servo limit"
                 details[motor] = {
                     "present_position": position,
+                    "goal_position": goal,
                     "torque_enabled": bool(reported_torque),
                     "present_load_raw": int(load),
                     "present_load_duty_cycle": load / 1000.0,
@@ -400,6 +454,8 @@ class MotorHealthCollector:
                 logging.info("Motor-health read recovered")
                 self._last_error = None
         except Exception as error:
+            self._readbacks = {}
+            self._read_index = 0
             detail = f"motor-health read failed: {error}"
             if detail != self._last_error:
                 logging.warning("%s", detail)
@@ -426,22 +482,64 @@ class HostLoop:
         self.watchdog_active = False
         self.next_watchdog_attempt = 0.0
         self.telemetry_session = uuid.uuid4().hex
+        self.arm_executor = LocalArmExecutor(clock, host.watchdog_timeout_ms / 1000)
+        control.arm_executor = self.arm_executor
+        control.host_session = self.telemetry_session
+        self.local_observation = None
+        self.local_feedback_at = None
         self.telemetry_sequence = 0
+        self.next_observation_at = None
         self._last_command_error = None
+        self._last_step_started = None
+        self._last_slow_log = 0.0
 
     def step(self) -> None:
+        started = time.perf_counter()
         self.receive_command()
+        command_done = time.perf_counter()
         self.handle_control_request()
+        control_done = time.perf_counter()
         self.enforce_watchdog()
-        self.publish_observation()
+        watchdog_done = time.perf_counter()
+        now = self.clock()
+        if self.next_observation_at is None or now >= self.next_observation_at:
+            self.publish_observation()
+            self.next_observation_at = now + OBSERVATION_PERIOD_S
+        if self.control.torque_enabled and self.arm_executor.active:
+            action = self.arm_executor.step(self.local_observation, self.local_feedback_at)
+            if action is not None:
+                self.robot.send_action(action)
+        finished = time.perf_counter()
+        gap = 0.0 if self._last_step_started is None else started - self._last_step_started
+        self._last_step_started = started
+        if (gap > 0.2 or finished - started > 0.15) and started - self._last_slow_log > 1.0:
+            logging.warning(
+                "Motor-host loop delay: gap=%.3fs command=%.3fs control=%.3fs "
+                "watchdog=%.3fs observation=%.3fs",
+                gap, command_done - started, control_done - command_done,
+                watchdog_done - control_done, finished - watchdog_done,
+            )
+            self._last_slow_log = started
 
     def receive_command(self) -> None:
         try:
             message = self.host.zmq_cmd_socket.recv_string(zmq.NOBLOCK)
-            action = validate_action_payload(message, ACTION_KEYS)
+            action = validate_action_payload(message, ACTION_KEYS, LEASE_KEYS)
             if not self.control.torque_enabled:
                 raise RuntimeError("servo torque is disabled")
-            self.robot.send_action(action)
+            goal_id = action.pop(LEASE_KEYS[0], None)
+            permission = action.pop(LEASE_KEYS[1], None)
+            if (goal_id is None) != (permission is None) or (
+                goal_id is not None and (not goal_id.is_integer() or not 0 < goal_id < 2**48 or permission not in (0, 1))
+            ):
+                raise ValueError("invalid arm trajectory lease")
+            if goal_id is not None:
+                self.arm_executor.renew(int(goal_id), bool(permission))
+            # While a local goal owns the arm, legacy streamed setpoints cannot
+            # overwrite it. The retained final target also survives reply latency.
+            if not self.arm_executor.active:
+                action.update(self.arm_executor.hold)
+                self.robot.send_action(action)
         except zmq.Again:
             # Between commands is the normal state; silence past the watchdog
             # timeout is handled by enforce_watchdog().
@@ -480,6 +578,11 @@ class HostLoop:
         if not self.control.torque_enabled:
             self.watchdog_active = True
             return
+        if self.arm_executor.status is not None:
+            self.arm_executor.renew(self.arm_executor.status["id"], False)
+        if self.disarm_on_failure:
+            self.arm_executor.cancel()
+            self.arm_executor.hold = {}
         self.next_watchdog_attempt = now + 0.25
         try:
             outcome = react_to_command_silence(
@@ -501,6 +604,8 @@ class HostLoop:
 
     def publish_observation(self) -> None:
         observation = self.robot.get_observation()
+        self.local_observation = dict(observation)
+        self.local_feedback_at = self.clock()
         sample_monotonic_ns = time.monotonic_ns()
         motor_health = self.health.collect(self.robot, self.control.torque_enabled)
         camera_keys = list(self.robot.cameras.keys())
@@ -519,6 +624,7 @@ class HostLoop:
             TELEMETRY_MONOTONIC_NS_KEY: sample_monotonic_ns,
             TELEMETRY_TORQUE_ENABLED_KEY: self.control.torque_enabled,
             "_lekiwi_motor_health": motor_health,
+            STATUS_KEY: self.arm_executor.status,
         }
         try:
             self.host.zmq_observation_socket.send_multipart(
@@ -529,25 +635,33 @@ class HostLoop:
         self.telemetry_sequence += 1
 
 
+_shutdown_requested = False
+
+
 def _shutdown_signal(_signum, _frame):
-    # Translate systemd's SIGTERM so the finally block cuts and verifies torque.
-    raise KeyboardInterrupt
+    # Finish an in-flight serial transaction before the torque-off readback.
+    # Raising inside Feetech's port handler leaves its port-in-use flag set.
+    global _shutdown_requested
+    _shutdown_requested = True
 
 
 def connect_when_servos_powered(robot: SafetyLeKiwi) -> None:
     """Wait on one servo without restarting this LeRobot process every few seconds."""
     robot.bus.connect(handshake=False)
     try:
-        while robot.bus.ping("arm_shoulder_pan") is None:
+        while not _shutdown_requested and robot.bus.ping("arm_shoulder_pan") is None:
             logging.info("Waiting for servo power")
             time.sleep(1)
     finally:
         robot.bus.disconnect(disable_torque=False)
-    robot.connect()
+    if not _shutdown_requested:
+        robot.connect()
 
 
 @draccus.wrap()
 def main(cfg: TorqueHostConfig):
+    global _shutdown_requested
+    _shutdown_requested = False
     latch = TorqueLatch(cfg.safety.state_file)
     robot = SafetyLeKiwi(cfg.robot)
     host = None
@@ -557,19 +671,24 @@ def main(cfg: TorqueHostConfig):
     try:
         logging.info("Waiting for servo power")
         connect_when_servos_powered(robot)
+        if _shutdown_requested:
+            raise KeyboardInterrupt
         # configure() leaves torque off, but a write returning successfully
         # is not proof. Reissue it and require every servo's register readback
         # before opening any network control endpoint.
         broadcast_torque_off(robot.bus)
         TorqueControlServer._verify_torque(robot, False)
         latch.save(False)
+        if _shutdown_requested:
+            raise KeyboardInterrupt
         host = BoundLeKiwiHost(cfg.host, cfg.safety.bind_address, cfg.curve)
         control = TorqueControlServer(host.zmq_context, cfg.safety, latch, host.security)
         loop = HostLoop(robot, host, control, MotorHealthCollector(robot), cfg.safety.disarm_on_failure)
-        while True:
+        while not _shutdown_requested:
             loop_start = time.monotonic()
             loop.step()
             time.sleep(max(1 / host.max_loop_freq_hz - (time.monotonic() - loop_start), 0))
+        logging.info("Stopping LeKiwi torque host")
     except KeyboardInterrupt:
         logging.info("Stopping LeKiwi torque host")
     finally:

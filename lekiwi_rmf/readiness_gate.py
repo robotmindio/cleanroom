@@ -22,7 +22,8 @@ from rclpy.action import ActionClient
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
-from sensor_msgs.msg import Image, LaserScan, PointCloud2
+from rtabmap_msgs.srv import PublishMap
+from sensor_msgs.msg import Image, JointState, LaserScan, PointCloud2
 
 
 TOPIC_TYPES = {
@@ -66,7 +67,10 @@ class ReadinessGate(Node):
         self.declare_parameter("topic_type", "")
         self.declare_parameter("action", "")
         self.declare_parameter("lifecycle_node", "/bt_navigator")
+        self.declare_parameter("joint_names", [""])
+        self.declare_parameter("minimum_joint_samples", 20)
         self._ready = False
+        self._map_publish_requested = False
         kind = str(self.get_parameter("kind").value)
 
         if kind == "topic":
@@ -76,6 +80,26 @@ class ReadinessGate(Node):
                 raise ValueError("topic readiness requires topic and a supported topic_type")
             self.create_subscription(TOPIC_TYPES[topic_type], topic, self._on_message, topic_qos(topic_type))
             self.get_logger().info(f"waiting for {topic_type} message on {topic}")
+            if topic_type == "map":
+                self._map_publish_client = self.create_client(PublishMap, "/rtabmap/publish_map")
+                self._map_publish_timer = self.create_timer(0.5, self._request_map_publication)
+        elif kind == "joint_states":
+            topic = str(self.get_parameter("topic").value)
+            self._required_joint_names = tuple(self.get_parameter("joint_names").value)
+            self._minimum_joint_samples = int(self.get_parameter("minimum_joint_samples").value)
+            if (
+                not topic or not self._required_joint_names
+                or any(not name for name in self._required_joint_names)
+                or len(set(self._required_joint_names)) != len(self._required_joint_names)
+                or self._minimum_joint_samples < 1
+            ):
+                raise ValueError("joint-state readiness requires a topic, unique joint names, and positive sample count")
+            self._joint_samples = 0
+            self._last_joint_stamp = 0
+            self.create_subscription(JointState, topic, self._on_joint_states, 10)
+            self.get_logger().info(
+                f"waiting for {self._minimum_joint_samples} complete joint-state samples on {topic}"
+            )
         elif kind in ("navigate_to_pose_action", "follow_joint_trajectory_action"):
             action = str(self.get_parameter("action").value)
             if not action:
@@ -129,6 +153,43 @@ class ReadinessGate(Node):
             self._ready = bool(message.child_frame_id) and all(
                 math.isfinite(value) for value in values
             )
+
+    def _request_map_publication(self) -> None:
+        if self._ready or self._map_publish_requested or not self._map_publish_client.service_is_ready():
+            return
+        request = PublishMap.Request()
+        request.global_map = True
+        request.optimized = True
+        request.graph_only = False
+        self._map_publish_requested = True
+        future = self._map_publish_client.call_async(request)
+        future.add_done_callback(self._map_publication_finished)
+
+    def _map_publication_finished(self, future) -> None:
+        try:
+            future.result()
+        except Exception as error:
+            self._map_publish_requested = False
+            self.get_logger().warning(f"RTAB-Map map publication request failed: {error}")
+        else:
+            self.get_logger().info("requested RTAB-Map to publish its saved map; waiting for /map")
+
+    def _on_joint_states(self, message: JointState) -> None:
+        positions = dict(zip(message.name, message.position))
+        stamp = message.header.stamp.sec * 1_000_000_000 + message.header.stamp.nanosec
+        valid = (
+            len(message.name) == len(message.position)
+            and len(positions) == len(message.name)
+            and stamp > self._last_joint_stamp
+            and all(name in positions and math.isfinite(positions[name]) for name in self._required_joint_names)
+        )
+        if valid:
+            self._joint_samples += 1
+            self._last_joint_stamp = stamp
+        else:
+            self._joint_samples = 0
+            self._last_joint_stamp = 0
+        self._ready = self._joint_samples >= self._minimum_joint_samples
 
     def _check_action(self) -> None:
         if not self._action_client.wait_for_server(timeout_sec=0.0):

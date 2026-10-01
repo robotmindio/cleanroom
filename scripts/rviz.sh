@@ -123,31 +123,31 @@ cp config/lekiwi.rviz "$run_config"
 # Without them the Planning panel cannot construct its robot model and emits a misleading
 # robot_description_semantic error even though move_group itself is healthy.
 package_share="$(ros2 pkg prefix lekiwi_rmf)/share/lekiwi_rmf"
-robot_description="$(xacro "$package_share/urdf/lekiwi.urdf.xacro" sim:=false)"
-robot_description_semantic="$(< "$package_share/config/lekiwi.srdf")"
 
 # The Planning panel gets its robot model, planned-path markers, and IK solver all through
-# ROS parameters. A plain -p cannot carry these: the nested kinematics map defeats it, and
-# the expanded URDF/SRDF are multi-line XML whose spaces and apostrophes (e.g. the
-# gripper's comment) an override rule cannot tolerate. So everything goes through a
-# generated params file instead, with the XML as YAML literal blocks.
+# ROS parameters. Generate the same calibrated model MoveGroup uses; otherwise the panel
+# would keep the stale SRDF close position even though the driver rejects it.
 run_params="${LEKIWI_LOGS:-$HOME/.ros/lekiwi}/rviz-moveit-params.yaml"
 velocity_scale="$(awk '$1 == "default_velocity_scaling_factor:" { print $2; exit }' "$package_share/config/joint_limits.yaml")"
 acceleration_scale="$(awk '$1 == "default_acceleration_scaling_factor:" { print $2; exit }' "$package_share/config/joint_limits.yaml")"
-{
-  printf '/**:\n  ros__parameters:\n'
-  printf '    robot_description: |-\n'
-  printf '%s\n' "$robot_description" | sed 's/^/      /'
-  printf '    robot_description_semantic: |-\n'
-  printf '%s\n' "$robot_description_semantic" | sed 's/^/      /'
-  printf '    robot_description_kinematics:\n'
-  sed 's/^/      /' "$package_share/config/kinematics.yaml"
-  # The Motion Planning panel is its own ROS node.  It reads these defaults from
-  # its *own* parameters (not move_group's), otherwise it silently falls back to
-  # 0.1 for both controls even when joint_limits.yaml says otherwise.
-  printf '    robot_description_planning:\n'
-  sed 's/^/      /' "$package_share/config/joint_limits.yaml"
-} > "$run_params"
+python3 - "$run_params" "$HOME/.ros/lekiwi_arm_calibration.json" <<'PY'
+import sys
+from pathlib import Path
+
+import yaml
+
+from lekiwi_rmf.moveit_config import apply_gripper_calibration, moveit_config_builder
+
+config = moveit_config_builder("false").to_moveit_configs().to_dict()
+apply_gripper_calibration(config, sys.argv[2])
+keys = (
+    "robot_description", "robot_description_semantic",
+    "robot_description_kinematics", "robot_description_planning",
+)
+Path(sys.argv[1]).write_text(yaml.safe_dump({
+    "/**": {"ros__parameters": {key: config[key] for key in keys}},
+}, sort_keys=False), encoding="utf-8")
+PY
 
 # Do not let the startup lock leak into RViz itself.
 exec 9>&-

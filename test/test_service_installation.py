@@ -179,7 +179,7 @@ def test_unit_validation_ignores_unrelated_systemd_units():
     assert 'systemd-analyze verify --recursive-errors=no "$UNIT_DIR/$unit"' in helper
 
 
-def test_startup_disarm_is_tracked_in_the_launch_default():
+def test_strict_startup_arm_requires_explicit_opt_in():
     launch = (ROOT / "launch" / "bringup.launch.py").read_text()
     assert '"auto_arm_on_startup", default_value="false"' in launch
 
@@ -241,7 +241,7 @@ download_verified https://example.invalid/a.deb "$2" "$3"
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git is required")
-def test_pinned_checkout_reverses_only_its_patch_and_keeps_other_local_edits(tmp_path):
+def test_pinned_checkout_reverses_known_patches_and_keeps_other_local_edits(tmp_path):
     script = r'''
 set -Eeuo pipefail
 die() { printf '%s\n' "$*" >&2; exit 1; }
@@ -251,25 +251,39 @@ cd "$2"
 git init -q upstream
 printf 'one\n' > upstream/a.txt
 printf 'two\n' > upstream/b.txt
+printf 'three\n' > upstream/c.txt
 git -C upstream add .
 git -C upstream commit -qm base
 printf 'patched\n' > upstream/a.txt
-git -C upstream diff > fix.patch
+git -C upstream diff > first.patch
 git -C upstream checkout -q a.txt
+printf 'patched too\n' > upstream/b.txt
+git -C upstream diff > second.patch
+git -C upstream checkout -q b.txt
 revision=$(git -C upstream rev-parse HEAD)
 
-checkout_pinned "$PWD/upstream" "$PWD/dest" "$revision" "$PWD/fix.patch" >/dev/null 2>&1
-apply_pinned_patch dest "$PWD/fix.patch" "the test patch"
+checkout_pinned "$PWD/upstream" "$PWD/dest" "$revision" "$PWD/first.patch" "$PWD/second.patch" >/dev/null 2>&1
+apply_pinned_patch dest "$PWD/first.patch" "the first test patch"
+apply_pinned_patch dest "$PWD/first.patch" "the first test patch"
+apply_pinned_patch dest "$PWD/second.patch" "the second test patch"
 # A rerun over the patched tree, with an unrelated local edit beside it.
-printf 'mine\n' > dest/b.txt
-checkout_pinned "$PWD/upstream" "$PWD/dest" "$revision" "$PWD/fix.patch" >/dev/null 2>&1
-apply_pinned_patch dest "$PWD/fix.patch" "the test patch"
+printf 'mine\n' > dest/c.txt
+checkout_pinned "$PWD/upstream" "$PWD/dest" "$revision" "$PWD/first.patch" "$PWD/second.patch" >/dev/null 2>&1
+apply_pinned_patch dest "$PWD/first.patch" "the first test patch"
+apply_pinned_patch dest "$PWD/second.patch" "the second test patch"
 [[ $(cat dest/a.txt) == patched ]]
-[[ $(cat dest/b.txt) == mine ]]
+[[ $(cat dest/b.txt) == 'patched too' ]]
+[[ $(cat dest/c.txt) == mine ]]
 
 # Without the known patch, local changes are refused rather than discarded.
 if (checkout_pinned "$PWD/upstream" "$PWD/dest" "$revision" >/dev/null 2>&1); then exit 1; fi
-[[ $(cat dest/b.txt) == mine ]]
+[[ $(cat dest/c.txt) == mine ]]
+
+# An unrelated edit alone is not mistaken for an already-applied known patch.
+checkout_pinned "$PWD/upstream" "$PWD/other" "$revision" >/dev/null 2>&1
+printf 'mine\n' > other/c.txt
+if (checkout_pinned "$PWD/upstream" "$PWD/other" "$revision" "$PWD/first.patch" "$PWD/second.patch" >/dev/null 2>&1); then exit 1; fi
+[[ $(cat other/c.txt) == mine ]]
 '''
     subprocess.run(["bash", "-c", script, "pinned-checkout", str(ROOT), str(tmp_path)], check=True)
 
@@ -298,6 +312,28 @@ def test_split_compute_installs_and_starts_moveit_by_default():
     assert "systemctl restart" not in compute
     assert "systemctl restart" not in reinstall
     assert "start_moveit:=true" in workstation
+
+
+def test_full_stack_boots_in_mapping_mode_so_loop_closure_can_run():
+    launch = (ROOT / "launch" / "bringup.launch.py").read_text(encoding="utf-8")
+
+    assert '"slam_mode",\n                default_value="mapping"' in launch
+    rgb = launch.split('"subscribe_rgb":', 1)[1].split('"Reg/Strategy"', 1)[0]
+    assert "ParameterValue(camera_on, value_type=bool)" in rgb
+    assert "lidar_on" not in rgb
+    strategy = launch.split('"Reg/Strategy":', 1)[1].split('"Icp/VoxelSize"', 1)[0]
+    assert "'1' if " in strategy and "lidar_on" in strategy and "'2'" not in strategy
+    init_memory = launch.split('"Mem/InitWMWithAllNodes":', 1)[1].split('"Rtabmap/StartNewMapOnLoopClosure"', 1)[0]
+    assert "slam_mode" in init_memory and "localization" in init_memory and "lidar_on" in init_memory
+    assert "value_type=str" in init_memory
+    assert "value_type=bool" not in init_memory
+    assert '"Kp/MaxFeatures": "500"' in launch
+    assert '"RGBD/LinearUpdate": "0.04"' in launch
+    assert '"RGBD/ProximityMaxGraphDepth": "0"' in launch
+    assert '"RGBD/ProximityOdomGuess": "true"' in launch
+    assert '"Rtabmap/ImagesAlreadyRectified": "false"' in launch
+    assert '"Rtabmap/StartNewMapOnLoopClosure": "true"' in launch
+    assert '"Mem/NotLinkedNodesKept": "false"' in launch
 
 
 def test_service_installers_support_an_unauthenticated_split_zmq_transport():
@@ -453,12 +489,25 @@ def test_sensor_services_keep_retrying_after_intermittent_usb_resets():
 
 
 def test_pi_and_manual_split_startup_include_the_ld06():
+    installer = (ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
     pi_installer = (ROOT / "scripts" / "install-pi.sh").read_text(encoding="utf-8")
     pi_up = (ROOT / "scripts" / "pi-up.sh").read_text(encoding="utf-8")
     workstation_up = (ROOT / "scripts" / "workstation-up.sh").read_text(encoding="utf-8")
     lidar = (ROOT / "scripts" / "ros-lidar.sh").read_text(encoding="utf-8")
 
     assert "Installing the pinned LD06 ROS driver" in pi_installer
+    assert "0002-latest-scan-qos.patch" in installer
+    assert "0003-initialize-ld06-baudrate.patch" in installer
+    assert "0002-latest-scan-qos.patch" in pi_installer
+    assert "0003-initialize-ld06-baudrate.patch" in pi_installer
+    assert 'apply_pinned_patch "$ldlidar_source" "$ldlidar_qos_patch"' in installer
+    assert 'apply_pinned_patch "$ldlidar_source" "$ldlidar_baud_patch"' in installer
+    assert 'apply_pinned_patch "$lidar_source" "$lidar_qos_patch"' in pi_installer
+    assert 'apply_pinned_patch "$lidar_source" "$lidar_baud_patch"' in pi_installer
+    build = (ROOT / "scripts" / "build-lekiwi.sh").read_text(encoding="utf-8")
+    assert 'apply_pinned_patch "$lidar_source" "$lidar_qos_patch"' in build
+    assert 'apply_pinned_patch "$lidar_source" "$lidar_baud_patch"' in build
+    assert 'packages+=(ldlidar_stl_ros2)' in build
     assert "ldlidar_stl_ros2_node" in pi_installer
     assert "start_recorded lidar scripts/ros-lidar.sh" in pi_up
     assert "start_recorded astra scripts/ros-astra.sh" in pi_up
@@ -568,14 +617,18 @@ def test_service_fingerprint_covers_installed_service_behavior():
         "scripts/lib/runtime-common.sh",
         "scripts/install-deploy-sudoers.sh",
         "scripts/install-device-network.sh",
+        "scripts/install-wifi-powersave.sh",
     ):
         assert source in revision
+    assert 'as_root "$PROJECT_ROOT/scripts/install-wifi-powersave.sh"' in (
+        ROOT / "scripts" / "install-compute-services.sh"
+    ).read_text(encoding="utf-8")
 
 
 def _network_checkout(tmp_path: pathlib.Path, env_file: str | None = None) -> pathlib.Path:
     """A copy of the network installers, so the developer's own .env cannot leak in."""
     checkout = tmp_path / "checkout"
-    for name in ("install-device-network.sh", "install-wifi-regdom.sh", "lib/runtime-common.sh"):
+    for name in ("install-device-network.sh", "install-wifi-regdom.sh", "install-wifi-powersave.sh", "lib/runtime-common.sh"):
         target = checkout / "scripts" / name
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / "scripts" / name, target)
@@ -846,30 +899,82 @@ def test_long_running_startup_children_do_not_inherit_the_start_lock():
         assert "flock -n 9" in script
 
 
-def test_ros_stop_leaves_units_owned_by_systemd_alone(tmp_path):
+def test_ros_stop_leaves_unit_owned_stack_alone(tmp_path):
     runtime = tmp_path / "runtime"
     runtime.mkdir()
     fake_systemctl = tmp_path / "bin" / "systemctl"
-    _executable(fake_systemctl, 'exit 0\n')  # every unit reports active
-    sentinel = subprocess.Popen(["sleep", "60"], start_new_session=True)
+    unit_cgroup = next(
+        line.split("::", 1)[1]
+        for line in pathlib.Path(f"/proc/{os.getpid()}/cgroup").read_text().splitlines()
+        if line.startswith("0::")
+    )
+    _executable(
+        fake_systemctl,
+        'case "$1" in is-active) exit 0 ;; show) printf "%s\\n" "$FAKE_UNIT_CGROUP" ;; esac\n',
+    )
+    sentinel = subprocess.Popen(
+        ["bash", "-c", 'exec -a "ros2 launch lekiwi_rmf bringup.launch.py" sleep 60'],
+        start_new_session=True,
+    )
     try:
-        kinds = ("stack", "host", "astra", "cameras", "lidar", "zenoh")
-        for kind in kinds:
-            (runtime / f"{kind}.pid").write_text(f"{sentinel.pid}\n", encoding="utf-8")
+        (runtime / "stack.pid").write_text(f"{sentinel.pid}\n", encoding="utf-8")
         result = subprocess.run(
             ["bash", str(ROOT / "scripts" / "ros-stop.sh")],
             env={**os.environ, "LEKIWI_RUNTIME_DIR": str(runtime),
+                 "FAKE_UNIT_CGROUP": unit_cgroup,
                  "PATH": f"{fake_systemctl.parent}:{os.environ['PATH']}"},
             capture_output=True, text=True, timeout=30,
         )
         assert result.returncode == 0, result.stderr
-        for unit in ("stack", "host", "astra", "cameras", "lidar", "zenoh"):
-            assert f"lekiwi-{unit}.service is active -- left running" in result.stdout
+        assert "lekiwi-stack.service owns recorded stack" in result.stdout
         assert sentinel.poll() is None
-        assert all((runtime / f"{kind}.pid").exists() for kind in kinds)
+        assert (runtime / "stack.pid").exists()
     finally:
         sentinel.kill()
         sentinel.wait()
+
+
+def test_ros_stop_stops_recorded_sim_when_stack_unit_is_active(tmp_path):
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    fake_systemctl = tmp_path / "bin" / "systemctl"
+    _executable(
+        fake_systemctl,
+        'case "$1" in is-active) exit 0 ;; show) printf "%s\\n" "$FAKE_UNIT_CGROUP" ;; esac\n',
+    )
+    sentinel = subprocess.Popen(
+        ["bash", "-c", 'exec -a "ros2 launch lekiwi_rmf bringup.launch.py" sleep 60'],
+        start_new_session=True,
+    )
+    (runtime / "stack.pid").write_text(f"{sentinel.pid}\n", encoding="utf-8")
+    sentinel_cgroup = next(
+        line.split("::", 1)[1]
+        for line in pathlib.Path(f"/proc/{sentinel.pid}/cgroup").read_text().splitlines()
+        if line.startswith("0::")
+    )
+    stop = subprocess.Popen(
+        ["bash", str(ROOT / "scripts" / "ros-stop.sh")],
+        env={**os.environ, "LEKIWI_RUNTIME_DIR": str(runtime),
+             "FAKE_UNIT_CGROUP": f"{sentinel_cgroup}/unrelated.service",
+             "PATH": f"{fake_systemctl.parent}:{os.environ['PATH']}"},
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        deadline = time.monotonic() + 5
+        while sentinel.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert sentinel.poll() is not None
+        stdout, stderr = stop.communicate(timeout=5)
+        assert stop.returncode == 0, stderr
+        assert "stopping recorded stack" in stdout
+        assert not (runtime / "stack.pid").exists()
+    finally:
+        if sentinel.poll() is None:
+            sentinel.kill()
+            sentinel.wait()
+        if stop.poll() is None:
+            stop.kill()
+            stop.wait()
 
 
 def test_sync_calibration_uses_the_configured_robot_and_gives_up(tmp_path):

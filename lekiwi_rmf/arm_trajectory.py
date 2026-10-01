@@ -64,6 +64,8 @@ def _configured_limits():
 JOINT_LIMITS, JOINT_VELOCITY_LIMITS, JOINT_ACCELERATION_LIMITS = _configured_limits()
 GRIPPER_LOWER, GRIPPER_UPPER = JOINT_LIMITS["arm_gripper"]
 GRIPPER_RANGE = GRIPPER_UPPER - GRIPPER_LOWER
+# ponytail: only recover small torque-off sag; larger overrun needs physical inspection.
+MAX_BOUNDARY_RECOVERY_OVERRUN = 0.15
 
 
 @dataclass(frozen=True)
@@ -137,12 +139,19 @@ def action_positions(names, positions, zero_positions=None, directions=None):
         name: zero_positions[name] + directions[name] * position
         for name, position in zip(names, positions)
     }
-    return {
-        name: (position - GRIPPER_LOWER) / GRIPPER_RANGE * 100
-        if name == "arm_gripper"
-        else math.degrees(position)
-        for name, position in raw_positions.items()
-    }
+    actions = {}
+    for name, position in raw_positions.items():
+        if name == "arm_gripper":
+            position = (position - GRIPPER_LOWER) / GRIPPER_RANGE * 100
+            # Calibration decimals can put an exact endpoint a few ulps outside
+            # the normalized range. Clamp only that floating-point noise.
+            if not -1e-9 <= position <= 100.0 + 1e-9:
+                raise ValueError("calibrated gripper position is outside the servo's 0-100 range")
+            position = min(100.0, max(0.0, position))
+        else:
+            position = math.degrees(position)
+        actions[name] = position
+    return actions
 
 
 def _power_to_bernstein(coefficients):
@@ -226,9 +235,9 @@ def _evaluate(coefficients, value):
     return result
 
 
-def _check_segment_limits(name, coefficients, duration):
+def _check_segment_limits(name, coefficients, duration, position_limits=None):
     """Conservatively bound an entire polynomial using its Bernstein hull."""
-    lower, upper = JOINT_LIMITS[name]
+    lower, upper = position_limits or JOINT_LIMITS[name]
     if not _polynomial_within(coefficients, lower, upper):
         raise ValueError(f"trajectory interpolation exceeds {name} position limits")
 
@@ -273,7 +282,7 @@ def trajectory_rows(trajectory):
     ]
 
 
-def prepare_trajectory(names, points, start_positions):
+def prepare_trajectory(names, points, start_positions, zero_positions=None, directions=None):
     """Validate and normalize raw FollowJointTrajectory points.
 
     ``points`` contains ``(time_from_start, positions, velocities)`` tuples, optionally
@@ -282,6 +291,8 @@ def prepare_trajectory(names, points, start_positions):
     velocities also stay within the limits used for time feasibility.
     """
     names = tuple(names)
+    zero_positions = zero_positions or dict.fromkeys(ARM_JOINTS, 0.0)
+    directions = directions or dict.fromkeys(ARM_JOINTS, 1.0)
     if not points:
         raise ValueError("trajectory must contain a point")
     if not names or len(set(names)) != len(names) or set(names) - set(ARM_JOINTS):
@@ -293,6 +304,18 @@ def prepare_trajectory(names, points, start_positions):
         raise ValueError("current arm positions are incomplete or non-finite") from error
     if not all(math.isfinite(value) for value in previous.values()):
         raise ValueError("current arm positions are incomplete or non-finite")
+    position_limits = {}
+    for name in names:
+        lower, upper = JOINT_LIMITS[name]
+        if name == "arm_gripper":
+            # Gripper telemetry is normalized over the URDF range before its
+            # calibration offset is applied, so its reachable ROS range shifts.
+            endpoints = (
+                directions[name] * (lower - zero_positions[name]),
+                directions[name] * (upper - zero_positions[name]),
+            )
+            lower, upper = min(endpoints), max(endpoints)
+        position_limits[name] = (lower, upper)
 
     normalized = []
     previous_time = 0.0
@@ -305,7 +328,7 @@ def prepare_trajectory(names, points, start_positions):
         point_time, positions, velocities = point[:3]
         accelerations, effort = point[3:] if len(point) == 5 else ((), ())
         positions = tuple(positions)
-        action_positions(names, positions)
+        action_positions(names, positions, zero_positions, directions)
         if not math.isfinite(point_time) or point_time < 0.0:
             raise ValueError("trajectory times must be finite and non-negative")
         if point_index and point_time <= previous_time:
@@ -359,7 +382,35 @@ def prepare_trajectory(names, points, start_positions):
                     None if current_point.accelerations is None else current_point.accelerations[name],
                     duration,
                 )
-                _check_segment_limits(name, coefficients, duration)
+                segment_limits = position_limits[name]
+                if point_index == 0:
+                    lower, upper = segment_limits
+                    start = previous[name]
+                    if start < lower:
+                        if lower - start > MAX_BOUNDARY_RECOVERY_OVERRUN:
+                            raise ValueError(
+                                f"{name} starts too far outside limits for recovery"
+                            )
+                        segment_limits = (start, upper)
+                        if not _polynomial_within(
+                            _derivative(coefficients), 0.0, math.inf
+                        ):
+                            raise ValueError(
+                                f"{name} recovery must move monotonically into its limits"
+                            )
+                    elif start > upper:
+                        if start - upper > MAX_BOUNDARY_RECOVERY_OVERRUN:
+                            raise ValueError(
+                                f"{name} starts too far outside limits for recovery"
+                            )
+                        segment_limits = (lower, start)
+                        if not _polynomial_within(
+                            _derivative(coefficients), -math.inf, 0.0
+                        ):
+                            raise ValueError(
+                                f"{name} recovery must move monotonically into its limits"
+                            )
+                _check_segment_limits(name, coefficients, duration, segment_limits)
         normalized.append(current_point)
         previous_time, previous, previous_point = point_time, current, current_point
     if len({point.velocities is None for point in normalized}) > 1:

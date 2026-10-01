@@ -20,16 +20,24 @@ download_verified() { # download_verified <url> <sha256> <destination>
   }
 }
 
-checkout_pinned() { # checkout_pinned <url> <destination> <revision> [known-patch]
-  local url=$1 destination=$2 revision=$3 expected_patch=${4:-}
+checkout_pinned() { # checkout_pinned <url> <destination> <revision> [known-patch ...]
+  local url=$1 destination=$2 revision=$3 patch_index recognized_patch=false
+  shift 3
+  local -a expected_patches=("$@")
   if [[ ! -d $destination/.git ]]; then
     git clone --filter=blob:none "$url" "$destination"
   elif [[ -n $(git -C "$destination" status --porcelain) ]]; then
-    # Permit only a prior application of the tracked build patch. Applying
-    # its reverse preserves unrelated local work, which the checkout rejects.
-    if [[ -n $expected_patch ]] && git -C "$destination" apply --reverse --check "$expected_patch" 2>/dev/null; then
-      git -C "$destination" apply --reverse "$expected_patch"
-    else
+    # Undo recognized patches in reverse application order before updating the
+    # pinned checkout. Leave other local edits for git checkout to preserve.
+    for ((patch_index=${#expected_patches[@]} - 1; patch_index >= 0; patch_index--)); do
+      if git -C "$destination" apply --reverse --check "${expected_patches[patch_index]}" 2>/dev/null; then
+        git -C "$destination" apply --reverse "${expected_patches[patch_index]}"
+        recognized_patch=true
+      elif ! git -C "$destination" apply --check "${expected_patches[patch_index]}" 2>/dev/null; then
+        die "$destination has local changes; preserve them before rerunning"
+      fi
+    done
+    if [[ $recognized_patch != true ]]; then
       die "$destination has local changes; preserve them before rerunning"
     fi
   fi
@@ -39,6 +47,9 @@ checkout_pinned() { # checkout_pinned <url> <destination> <revision> [known-patc
 
 apply_pinned_patch() { # apply_pinned_patch <destination> <patch> <description>
   local destination=$1 patch=$2 description=$3
+  if git -C "$destination" apply --reverse --check "$patch" 2>/dev/null; then
+    return 0
+  fi
   if git -C "$destination" apply --check "$patch" 2>/dev/null; then
     git -C "$destination" apply "$patch"
   else

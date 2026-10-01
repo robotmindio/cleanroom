@@ -33,6 +33,7 @@ from std_msgs.msg import Bool, String
 from std_srvs.srv import Trigger
 
 from lekiwi_rmf.motion_guards import positive_seconds_ns, stamp_ns
+from lekiwi_rmf.scan_self_filter import parse_sectors
 
 
 class SafetyState(str, Enum):
@@ -64,6 +65,9 @@ class SafetyDecision:
     base_permitted: bool
     arm_permitted: bool
     faults: tuple[str, ...] = ()
+    latched_faults: tuple[str, ...] = ()
+    arm_workspace_clear: bool = True
+    arm_stowed: bool = False
 
 
 @dataclass
@@ -83,6 +87,16 @@ class SafetyStateMachine:
     latch_faults: bool = True
     base_ever_ready: bool = False
     arm_ever_ready: bool = False
+    latched_faults: list[str] = field(default_factory=list)
+    driver_state_required: bool = True
+    # The Pi's scan clock was measured 7 ms ahead of compute; bound the grace.
+    future_stamp_tolerance_ns: int = 50_000_000
+
+    def _latch(self, faults: tuple[str, ...]) -> None:
+        self.fault_latched = True
+        self.latched_faults.extend(
+            fault for fault in faults if fault not in self.latched_faults
+        )
 
     def update(self, name: str, healthy: bool, stamp_ns: int, detail: str = "") -> None:
         if name not in self.requirements:
@@ -96,90 +110,133 @@ class SafetyStateMachine:
                 (requirement.base and self.base_ever_ready)
                 or (requirement.arm and self.arm_ever_ready)
             ):
-                self.fault_latched = True
+                self._latch((f"{name}: {detail or 'unhealthy'}",))
 
     def _faults(self, now_ns: int, for_base: bool, for_arm: bool) -> tuple[str, ...]:
         faults: list[str] = []
         for name, requirement in self.requirements.items():
             if not ((for_base and requirement.base) or (for_arm and requirement.arm)):
                 continue
-            sample = self.samples.get(name)
-            if sample is None:
-                faults.append(f"{name}: missing")
-                continue
-            age = now_ns - sample.stamp_ns
-            if age < 0 or age > requirement.max_age_ns:
-                faults.append(f"{name}: stale")
-            elif not sample.healthy:
-                faults.append(f"{name}: {sample.detail or 'unhealthy'}")
+            fault = self._requirement_fault(name, requirement, now_ns)
+            if fault is not None:
+                faults.append(fault)
         return tuple(faults)
+
+    def _requirement_fault(self, name: str, requirement: Requirement, now_ns: int) -> str | None:
+        sample = self.samples.get(name)
+        if sample is None:
+            return f"{name}: missing"
+        age = now_ns - sample.stamp_ns
+        if age < -self.future_stamp_tolerance_ns or age > requirement.max_age_ns:
+            return f"{name}: stale"
+        if not sample.healthy:
+            return f"{name}: {sample.detail or 'unhealthy'}"
+        return None
 
     def decision(self, now_ns: int) -> SafetyDecision:
         base_faults = self._faults(now_ns, True, False)
         arm_faults = self._faults(now_ns, False, True)
+        workspace_requirement = self.requirements.get("arm_workspace")
+        arm_workspace_clear = (
+            workspace_requirement is None
+            or self._requirement_fault("arm_workspace", workspace_requirement, now_ns) is None
+        )
+        joints_requirement = self.requirements.get("joints")
+        arm_stowed = self.arm_stowed and (
+            joints_requirement is None
+            or self._requirement_fault("joints", joints_requirement, now_ns) is None
+        )
         all_faults = tuple(dict.fromkeys((*base_faults, *arm_faults)))
         if self.driver_state == "LINK_LOST":
             all_faults = (*all_faults, "driver: link lost")
             base_faults = (*base_faults, "driver: link lost")
             arm_faults = (*arm_faults, "driver: link lost")
             if self.latch_faults and (self.base_ever_ready or self.arm_ever_ready):
-                self.fault_latched = True
+                self._latch(("driver: link lost",))
         elif self.latch_faults and (
             (base_faults and self.base_ever_ready)
             or (arm_faults and self.arm_ever_ready)
         ):
             # A dependency becoming stale after its scope was ready is a
             # global runtime fault, not a return to partial startup state.
-            self.fault_latched = True
+            faults = (
+                (base_faults if self.base_ever_ready else ())
+                + (arm_faults if self.arm_ever_ready else ())
+            )
+            self._latch(faults)
 
         if self.estop_latched:
-            return SafetyDecision(SafetyState.ESTOP, False, False, all_faults)
+            return SafetyDecision(
+                SafetyState.ESTOP, False, False, all_faults, tuple(self.latched_faults),
+                arm_workspace_clear, arm_stowed,
+            )
         if self.fault_latched:
-            return SafetyDecision(SafetyState.FAULT_LATCHED, False, False, all_faults)
+            return SafetyDecision(
+                SafetyState.FAULT_LATCHED, False, False, all_faults, tuple(self.latched_faults),
+                arm_workspace_clear, arm_stowed,
+            )
 
         base_ready = not base_faults
         arm_ready = not arm_faults
         if not base_ready and not arm_ready:
-            return SafetyDecision(SafetyState.BOOT, False, False, all_faults)
+            return SafetyDecision(
+                SafetyState.BOOT, False, False, all_faults,
+                arm_workspace_clear=arm_workspace_clear, arm_stowed=arm_stowed,
+            )
 
         self.base_ever_ready = self.base_ever_ready or base_ready
         self.arm_ever_ready = self.arm_ever_ready or arm_ready
         armed = self.driver_state == "ARMED"
-        base_permitted = armed and base_ready and self.arm_stowed
+        base_permitted = armed and base_ready and arm_stowed
         arm_permitted = armed and arm_ready
         if armed:
             return SafetyDecision(
-                SafetyState.ARMED, base_permitted, arm_permitted, all_faults
+                SafetyState.ARMED, base_permitted, arm_permitted, all_faults,
+                arm_workspace_clear=arm_workspace_clear, arm_stowed=arm_stowed,
             )
         # In READY these are short-lived capability-readiness leases, not
         # evidence of motion or torque. The disarmed driver still rejects all
-        # commands, but its explicit arm transaction may use either healthy
-        # capability to bootstrap the shared physical torque bus.
+        # commands, but the explicit arm transaction requires the arm-specific
+        # lease because enabling torque can move a loaded arm.
         return SafetyDecision(
             SafetyState.READY,
-            base_ready and self.arm_stowed,
+            base_ready and arm_stowed,
             arm_ready,
             all_faults,
+            arm_workspace_clear=arm_workspace_clear, arm_stowed=arm_stowed,
         )
 
     def reset(self, now_ns: int) -> tuple[bool, str]:
-        if self.driver_state == "ARMED":
+        if self.driver_state_required and self.driver_state == "ARMED":
             return False, "disarm the driver before resetting safety faults"
         faults = self._faults(now_ns, True, True)
         if faults:
             return False, "; ".join(faults)
         self.fault_latched = False
         self.estop_latched = False
+        self.latched_faults.clear()
         self.base_ever_ready = True
         self.arm_ever_ready = True
-        return True, "safety fault reset; robot remains disarmed"
+        if self.driver_state_required:
+            return True, "safety fault reset; robot remains disarmed"
+        return True, "safety fault reset; no hardware driver state is configured"
 
 
-def permit_unless_strict(decision: SafetyDecision, strict: bool) -> SafetyDecision:
-    """Report the findings, but let a non-strict (domestic) robot move regardless."""
-    if strict:
+def permit_unless_strict(
+    decision: SafetyDecision, strict: bool, driver_state: str = ""
+) -> SafetyDecision:
+    """Allow non-strict operation while keeping acceptance and stow gates hard."""
+    if strict or decision.state in {SafetyState.ESTOP, SafetyState.FAULT_LATCHED}:
         return decision
-    return replace(decision, base_permitted=True, arm_permitted=True)
+    state = SafetyState.ARMED if driver_state == "ARMED" else decision.state
+    acceptance_failed = any(
+        fault.partition(":")[0] == "acceptance" for fault in decision.faults
+    )
+    return replace(
+        decision, state=state,
+        arm_permitted=decision.arm_workspace_clear,
+        base_permitted=decision.arm_stowed and not acceptance_failed,
+    )
 
 
 def _valid_scan_ranges(message: LaserScan, minimum_valid_fraction: float) -> bool:
@@ -195,6 +252,24 @@ def _valid_scan_ranges(message: LaserScan, minimum_valid_fraction: float) -> boo
             return False
         finite_returns += 1
     return finite_returns / len(message.ranges) >= minimum_valid_fraction
+
+
+def _scan_masked_angle(path: str) -> float:
+    """Angular coverage hidden by the tracked robot-body scan filter."""
+    if not path:
+        return 0.0
+    try:
+        params = yaml.safe_load(Path(path).read_text(encoding="utf-8"))[
+            "scan_self_filter"
+        ]["ros__parameters"]
+        sectors = parse_sectors(*(params[name] for name in (
+            "body_start_deg", "body_end_deg", "body_max_range_m"
+        )))
+    except (OSError, yaml.YAMLError, KeyError, TypeError, ValueError) as error:
+        raise ValueError(f"invalid scan self-mask {path}: {error}") from error
+    return math.radians(sum(
+        (end - start) % 360.0 for start, end, reach in sectors if reach > 0.0
+    ))
 
 
 def _point_field_format(field: PointField) -> tuple[str, int] | None:
@@ -463,16 +538,29 @@ def _nav2_stop_zone_clearance(nav2_path: str | Path, acceptance: dict) -> tuple[
 def validate_acceptance_file(
     path: str | Path, nav2_params_file: str | Path = "",
     expected_stow: dict[str, float] | None = None,
+    installed_hardware: dict[str, bool] | None = None,
 ) -> tuple[bool, str]:
     """Validate the measured physical stopping/fault acceptance record."""
     try:
         data = yaml.safe_load(Path(path).expanduser().read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError) as error:
         return False, f"cannot read safety acceptance: {error}"
-    if not isinstance(data, dict) or data.get("schema_version") != 2:
+    if not isinstance(data, dict) or data.get("schema_version") != 4:
         return False, "unsupported safety acceptance schema"
     if data.get("validated") is not True:
         return False, "physical safety acceptance is not validated"
+    scope = data.get("operating_scope")
+    if not isinstance(scope, dict) or scope.get("mode") != "attended_autonomous_base" or (
+        scope.get("operator_at_motor_power_stop") is not True
+    ):
+        return False, "acceptance requires an attended operator at the physical motor-power stop"
+    hardware = data.get("installed_hardware")
+    if not isinstance(hardware, dict) or set(hardware) != {"bumper", "imu", "battery_monitor"} or (
+        not all(type(value) is bool for value in hardware.values())
+    ):
+        return False, "accepted installed hardware must identify bumper, IMU, and battery monitor"
+    if installed_hardware is not None and hardware != installed_hardware:
+        return False, "accepted installed hardware differs from the production safety profile"
     minimum_trials = data.get("minimum_trials_per_direction")
     if isinstance(minimum_trials, bool) or not isinstance(minimum_trials, int) or minimum_trials < 30:
         return False, "at least 30 trials per direction are required"
@@ -516,22 +604,27 @@ def validate_acceptance_file(
             return False, f"{direction} stopping distance plus uncertainty exceeds its acceptance limit"
     fault_tests = data.get("fault_tests")
     required_fault_tests = {
-        "scan_disconnect", "depth_disconnect", "imu_disconnect",
-        "battery_low_or_disconnect", "motor_diagnostic_fault", "bumper",
+        "scan_disconnect", "depth_disconnect", "motor_diagnostic_fault",
         "estop_independent_of_ros", "telemetry_loss",
-        "telemetry_replay_or_duplicate", "host_restart_stays_disarmed",
-        "ros_restart_stays_disarmed", "zmq_unauthorized_client_rejected",
+        "telemetry_replay_or_duplicate", "host_restart_stops_then_gated_rearm",
+        "ros_restart_stops_then_gated_rearm", "zmq_unauthorized_client_rejected",
         "dds_control_plane_isolated_or_authenticated",
         "rosbridge_disabled_or_authenticated",
         "collision_monitor_obstacle_stop",
         "arm_workspace_intrusion_stop",
     }
-    if (
-        not isinstance(fault_tests, dict)
-        or not required_fault_tests.issubset(fault_tests)
-        or not all(fault_tests[name] is True for name in required_fault_tests)
+    if not isinstance(fault_tests, dict) or not all(
+        fault_tests.get(name) is True for name in required_fault_tests
     ):
         return False, "required fault-response tests have not all passed"
+    for hardware_name, test_name in (
+        ("imu", "imu_disconnect"),
+        ("battery_monitor", "battery_low_or_disconnect"),
+        ("bumper", "bumper"),
+    ):
+        expected = True if hardware[hardware_name] else None
+        if test_name not in fault_tests or fault_tests[test_name] is not expected:
+            return False, f"{test_name} result does not match installed hardware"
     payload = data.get("payload_kg")
     if (
         not _finite_number(payload) or payload < 0
@@ -571,6 +664,7 @@ class SafetySupervisor(Node):
         super().__init__("safety_supervisor")
         self.declare_parameter("publish_frequency", 20.0)
         self.declare_parameter("sensor_timeout", 0.75)
+        self.declare_parameter("depth_timeout", 0.75)
         self.declare_parameter("state_timeout", 1.0)
         # Consumers use this receive-time lease because Bool has no source
         # timestamp. Keep it shorter than the supervisor's input deadline so
@@ -585,6 +679,7 @@ class SafetySupervisor(Node):
         self.declare_parameter("require_driver_state", True)
         self.declare_parameter("require_full_scan", True)
         self.declare_parameter("minimum_scan_coverage", 6.0)
+        self.declare_parameter("scan_self_mask_file", "")
         self.declare_parameter("minimum_scan_valid_fraction", 0.05)
         self.declare_parameter("require_depth", True)
         self.declare_parameter("minimum_depth_valid_points", 16)
@@ -616,6 +711,7 @@ class SafetySupervisor(Node):
         # enforcement must not change independently at runtime.
         self._strict = bool(self.get_parameter("strict").value)
         sensor_timeout = positive_seconds_ns(float(self.get_parameter("sensor_timeout").value), "sensor_timeout")
+        depth_timeout = positive_seconds_ns(float(self.get_parameter("depth_timeout").value), "depth_timeout")
         state_timeout = positive_seconds_ns(float(self.get_parameter("state_timeout").value), "state_timeout")
         permission_timeout = positive_seconds_ns(
             float(self.get_parameter("permission_timeout").value), "permission_timeout"
@@ -630,7 +726,7 @@ class SafetySupervisor(Node):
         if self.get_parameter("require_scan").value:
             requirements["scan"] = Requirement(sensor_timeout, base=True, arm=False)
         if self.get_parameter("require_depth").value:
-            requirements["depth"] = Requirement(sensor_timeout, base=False, arm=True)
+            requirements["depth"] = Requirement(depth_timeout, base=False, arm=True)
         if self.get_parameter("require_bumper").value:
             requirements["bumper"] = Requirement(state_timeout)
         if self.get_parameter("require_estop").value:
@@ -669,16 +765,26 @@ class SafetySupervisor(Node):
             driver_state="DISARMED" if require_driver_state else "ARMED",
             arm_stowed=not require_joint_states,
             latch_faults=self._strict,
+            driver_state_required=require_driver_state,
         )
+        self._last_arm_permitted: bool | None = None
         if bool(self.get_parameter("require_acceptance").value):
-            requirements["acceptance"] = Requirement(2**62)
+            requirements["acceptance"] = Requirement(2**62, base=True, arm=False)
             healthy, detail = validate_acceptance_file(
                 str(self.get_parameter("acceptance_file").value),
                 str(self.get_parameter("nav2_params_file").value),
                 self._stow,
+                {
+                    "bumper": bool(self.get_parameter("require_bumper").value),
+                    "imu": bool(self.get_parameter("require_imu").value),
+                    "battery_monitor": bool(self.get_parameter("require_battery").value),
+                },
             )
             self._machine.update("acceptance", healthy, 0, detail)
         self._minimum_scan_coverage = float(self.get_parameter("minimum_scan_coverage").value)
+        self._scan_masked_angle = _scan_masked_angle(
+            str(self.get_parameter("scan_self_mask_file").value)
+        )
         self._require_full_scan = bool(self.get_parameter("require_full_scan").value)
         self._minimum_scan_valid_fraction = float(
             self.get_parameter("minimum_scan_valid_fraction").value
@@ -752,19 +858,36 @@ class SafetySupervisor(Node):
         self._machine.update("driver", healthy, self._now(), message.data or "empty state")
 
     def _on_scan(self, message: LaserScan) -> None:
-        coverage = abs(float(message.angle_increment)) * max(0, len(message.ranges) - 1)
-        healthy = (
-            bool(message.ranges)
-            and math.isfinite(message.angle_increment)
-            and message.angle_increment != 0.0
-            and math.isfinite(message.range_min)
-            and math.isfinite(message.range_max)
-            and 0.0 <= message.range_min < message.range_max
-            and _valid_scan_ranges(message, self._minimum_scan_valid_fraction)
-            and (not self._require_full_scan or coverage >= self._minimum_scan_coverage)
-            and stamp_ns(message.header.stamp) > 0
+        coverage = max(
+            0.0,
+            abs(float(message.angle_increment)) * max(0, len(message.ranges) - 1)
+            - self._scan_masked_angle,
         )
-        self._machine.update("scan", healthy, stamp_ns(message.header.stamp) or self._now(), f"coverage={coverage:.2f} rad")
+        stamp = stamp_ns(message.header.stamp)
+        failure = None
+        if not message.ranges:
+            failure = "scan has no ranges"
+        elif not math.isfinite(message.angle_increment) or message.angle_increment == 0.0:
+            failure = "scan angle increment is invalid"
+        elif (
+            not math.isfinite(message.range_min)
+            or not math.isfinite(message.range_max)
+            or not 0.0 <= message.range_min < message.range_max
+        ):
+            failure = "scan range bounds are invalid"
+        elif not _valid_scan_ranges(message, self._minimum_scan_valid_fraction):
+            failure = "scan contains invalid ranges or too few valid returns"
+        elif self._require_full_scan and coverage < self._minimum_scan_coverage:
+            failure = (
+                f"coverage={coverage:.2f} rad is below the "
+                f"{self._minimum_scan_coverage:.2f} rad minimum"
+            )
+        elif stamp <= 0:
+            failure = "scan timestamp is missing"
+        self._machine.update(
+            "scan", failure is None, stamp or self._now(),
+            failure or f"coverage={coverage:.2f} rad",
+        )
 
     def _on_depth(self, message: PointCloud2) -> None:
         healthy = (
@@ -848,7 +971,15 @@ class SafetySupervisor(Node):
         return response
 
     def _publish(self) -> None:
-        decision = permit_unless_strict(self._machine.decision(self._now()), self._strict)
+        decision = permit_unless_strict(
+            self._machine.decision(self._now()), self._strict, self._machine.driver_state
+        )
+        if self._last_arm_permitted is True and not decision.arm_permitted:
+            self.get_logger().warn(
+                f"Arm permission withdrawn: state={decision.state.value}; "
+                f"faults={'; '.join(decision.faults) or 'none'}"
+            )
+        self._last_arm_permitted = decision.arm_permitted
         state = String()
         state.data = decision.state.value
         base = Bool()
@@ -868,6 +999,7 @@ class SafetySupervisor(Node):
             KeyValue(key="base_motion_permitted", value=str(decision.base_permitted).lower()),
             KeyValue(key="arm_motion_permitted", value=str(decision.arm_permitted).lower()),
             KeyValue(key="faults", value="; ".join(decision.faults)),
+            KeyValue(key="latched_faults", value="; ".join(decision.latched_faults)),
         ]
         diagnostics = DiagnosticArray()
         diagnostics.header.stamp = self.get_clock().now().to_msg()

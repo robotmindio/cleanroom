@@ -41,13 +41,6 @@ done
 [[ $heartbeat_interval =~ ^[1-9][0-9]*$ && $heartbeat_timeout =~ ^[1-9][0-9]*$ && $startup_grace =~ ^[0-9]+$ ]] || usage
 
 child=""; stopping=0
-stop_tree() { # stop_tree <signal> <pid>
-  local signal=$1 pid=$2 descendant
-  for descendant in $(pgrep -P "$pid" 2>/dev/null || true); do
-    stop_tree "$signal" "$descendant"
-  done
-  kill "-$signal" "$pid" 2>/dev/null || true
-}
 stop() {
   stopping=1
   [[ -z $child ]] || stop_child "shutdown"
@@ -58,14 +51,16 @@ stop_child() { # stop_child <reason>; bounded TERM -> KILL for a wedged camera
   local reason=$1 deadline
   [[ -n $child ]] || return 0
   echo "$node_name: stopping camera ($reason)" >&2
-  stop_tree TERM "$child"
+  # ros2 run can exit before its native camera child. Signal the isolated
+  # process group so reparented descendants cannot keep the V4L2 device open.
+  kill -TERM -- "-$child" 2>/dev/null || true
   deadline=$((SECONDS + 5))
-  while kill -0 "$child" 2>/dev/null && (( SECONDS < deadline )); do
+  while kill -0 -- "-$child" 2>/dev/null && (( SECONDS < deadline )); do
     sleep 1
   done
-  if kill -0 "$child" 2>/dev/null; then
-    echo "$node_name: camera ignored TERM; sending KILL" >&2
-    stop_tree KILL "$child"
+  if kill -0 -- "-$child" 2>/dev/null; then
+    echo "$node_name: camera process group ignored TERM; sending KILL" >&2
+    kill -KILL -- "-$child" 2>/dev/null || true
   fi
   wait "$child" 2>/dev/null || true
   child=""
@@ -188,7 +183,7 @@ while (( ! stopping )); do
   # A leading dot aborts v4l2_camera during argument parsing, leaving the
   # supervisor to retry forever without publishing a front-camera frame.
   [[ -z $jpeg_quality ]] || camera_args+=(-p "image_raw.compressed.jpeg_quality:=$jpeg_quality")
-  "${camera_args[@]}" &
+  setsid --wait "${camera_args[@]}" &
   child=$!
   disconnected=0
   started=$SECONDS

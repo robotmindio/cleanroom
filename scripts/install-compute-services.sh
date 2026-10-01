@@ -79,6 +79,10 @@ source "$PROJECT_ROOT/scripts/lib/service-install-revision.sh"
 resolve_service_user "$SERVICE_USER_ARG"
 resolve_service_paths "$WORKSPACE_ARG" "" true false
 
+# Keep CURVE enabled on routine service refreshes once keys are installed.
+[[ -n $CURVE_DIR_ARG || ! -d $LEKIWI_SERVICE_HOME/.config/lekiwi/curve ]] || \
+  CURVE_DIR_ARG=$LEKIWI_SERVICE_HOME/.config/lekiwi/curve
+
 host_unit="$UNIT_DIR/lekiwi-host.service"
 cameras_unit="$UNIT_DIR/lekiwi-cameras.service"
 lidar_unit="$UNIT_DIR/lekiwi-lidar.service"
@@ -167,6 +171,9 @@ verify_systemd_units lekiwi-ros-logrotate.service lekiwi-ros-logrotate.timer
 stack_env=/etc/default/lekiwi-stack
 printf -v stack_config '# Written by scripts/install-compute-services.sh.\nLEKIWI_STACK_ARGS=%s\n' "$STACK_ARGS"
 install_unit_config "$stack_env" lekiwi-stack.service "$stack_config"
+
+log "Disabling Wi-Fi power saving on the telemetry receiver"
+as_root "$PROJECT_ROOT/scripts/install-wifi-powersave.sh"
 
 log "Reloading systemd and enabling lekiwi-stack.service"
 as_root systemctl daemon-reload

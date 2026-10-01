@@ -52,6 +52,33 @@ def test_action_positions_rejects_invalid_joint_lists():
         action_positions(("arm_wrist_roll",), (math.nan,))
 
 
+def test_gripper_calibration_rejects_goals_outside_reachable_servo_range():
+    zeros = dict.fromkeys(JOINT_LIMITS, 0.0)
+    directions = dict.fromkeys(JOINT_LIMITS, 1.0)
+    zeros["arm_gripper"] = -0.13763789773507207
+    lower = JOINT_LIMITS["arm_gripper"][0]
+    reachable_closed = lower - zeros["arm_gripper"]
+
+    assert action_positions(
+        ("arm_gripper",), (reachable_closed,), zeros, directions
+    )["arm_gripper"] == pytest.approx(0.0)
+    configured_closed = -0.036895102265
+    assert action_positions(
+        ("arm_gripper",), (configured_closed,), zeros, directions
+    )["arm_gripper"] == pytest.approx(0.0)
+    prepare_trajectory(
+        ("arm_gripper",), [(1.0, (configured_closed,), ())],
+        {"arm_gripper": 0.0}, zeros, directions,
+    )
+    with pytest.raises(ValueError, match="outside the servo's 0-100 range"):
+        action_positions(("arm_gripper",), (lower,), zeros, directions)
+    with pytest.raises(ValueError, match="outside the servo's 0-100 range"):
+        prepare_trajectory(
+            ("arm_gripper",), [(1.0, (lower,), ())], {"arm_gripper": 0.0},
+            zeros, directions,
+        )
+
+
 def test_trajectory_timing_and_reported_velocities_are_bounded():
     start = {"arm_shoulder_pan": 0.0}
     prepare_trajectory(
@@ -126,6 +153,41 @@ def test_trajectory_rejects_acceleration_and_interpolated_limit_violations():
             names,
             [(1.0, (0.1,), (0.1,)), (2.0, (0.2,), ())],
             {"arm_shoulder_pan": 0.0},
+        )
+
+
+@pytest.mark.parametrize("side", ["low", "high"])
+def test_slightly_out_of_bounds_start_can_only_recover_monotonically(side):
+    lower, upper = JOINT_LIMITS["arm_shoulder_lift"]
+    start = lower - 0.07 if side == "low" else upper + 0.07
+    target = lower + 0.04 if side == "low" else upper - 0.04
+    names = ("arm_shoulder_lift",)
+    start_positions = {names[0]: start}
+    trajectory = prepare_trajectory(
+        names, [(1.0, (target,), ())], start_positions
+    )
+    positions = [
+        sample_trajectory(names, start_positions, trajectory, step / 4)[0][names[0]]
+        for step in range(5)
+    ]
+    assert positions[-1] == pytest.approx(target)
+    assert positions == sorted(positions, reverse=(side == "high"))
+
+    with pytest.raises(ValueError, match="too far outside limits"):
+        prepare_trajectory(
+            names,
+            [(1.0, (target,), ())],
+            {names[0]: start + (-0.1 if side == "low" else 0.1)},
+        )
+
+
+def test_boundary_recovery_rejects_a_nonmonotonic_interpolation():
+    upper = JOINT_LIMITS["arm_shoulder_lift"][1]
+    with pytest.raises(ValueError, match="monotonically"):
+        prepare_trajectory(
+            ("arm_shoulder_lift",),
+            [(1.0, (upper - 0.04,), (0.0,), (3.0,), ())],
+            {"arm_shoulder_lift": upper + 0.07},
         )
 
 

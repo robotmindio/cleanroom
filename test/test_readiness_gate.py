@@ -9,7 +9,7 @@ import pytest
 from rclpy.qos import DurabilityPolicy, ReliabilityPolicy
 from lifecycle_msgs.msg import State
 from nav_msgs.msg import OccupancyGrid, Odometry
-from sensor_msgs.msg import Image, LaserScan, PointCloud2
+from sensor_msgs.msg import Image, JointState, LaserScan, PointCloud2
 
 from lekiwi_rmf.readiness_gate import ReadinessGate, TOPIC_TYPES, topic_qos
 
@@ -19,6 +19,7 @@ ROOT = pathlib.Path(__file__).parents[1]
 
 def test_readiness_gate_supports_the_bringup_dependencies():
     assert set(TOPIC_TYPES) == {"image", "odom", "map", "scan", "cloud"}
+    assert '<exec_depend>rtabmap_msgs</exec_depend>' in (ROOT / "package.xml").read_text()
 
 
 def test_topic_gate_requires_semantically_usable_messages():
@@ -64,6 +65,32 @@ def test_topic_gate_requires_semantically_usable_messages():
     assert gate._ready
 
 
+def test_joint_state_gate_waits_for_fresh_complete_samples():
+    gate = ReadinessGate.__new__(ReadinessGate)
+    gate._required_joint_names = ("arm_shoulder_lift", "arm_gripper")
+    gate._minimum_joint_samples = 2
+    gate._joint_samples = 0
+    gate._last_joint_stamp = 0
+    gate._ready = False
+    message = JointState()
+    message.name = list(gate._required_joint_names)
+    message.position = [0.2, 0.0]
+
+    message.header.stamp.sec = 1
+    gate._on_joint_states(message)
+    assert not gate._ready
+    message.header.stamp.nanosec = 1
+    gate._on_joint_states(message)
+    assert gate._ready
+
+    message.name = ["arm_shoulder_lift"]
+    message.position = [0.2]
+    message.header.stamp.nanosec = 2
+    gate._on_joint_states(message)
+    assert not gate._ready
+    assert gate._joint_samples == 0
+
+
 def test_scan_readiness_matches_best_effort_laser_drivers():
     assert topic_qos("scan").reliability == ReliabilityPolicy.BEST_EFFORT
 
@@ -71,6 +98,56 @@ def test_scan_readiness_matches_best_effort_laser_drivers():
 def test_map_readiness_receives_rtabmaps_latched_grid():
     assert topic_qos("map").durability == DurabilityPolicy.TRANSIENT_LOCAL
     assert topic_qos("image").durability == DurabilityPolicy.VOLATILE
+
+
+def test_map_gate_requests_the_saved_rtabmap_grid_once():
+    class Future:
+        def add_done_callback(self, callback):
+            self.callback = callback
+
+    class Client:
+        def __init__(self):
+            self.requests = []
+
+        def service_is_ready(self):
+            return True
+
+        def call_async(self, request):
+            self.requests.append(request)
+            return Future()
+
+    gate = ReadinessGate.__new__(ReadinessGate)
+    gate._ready = False
+    gate._map_publish_requested = False
+    gate._map_publish_client = Client()
+
+    gate._request_map_publication()
+    gate._request_map_publication()
+
+    assert len(gate._map_publish_client.requests) == 1
+    request = gate._map_publish_client.requests[0]
+    assert (request.global_map, request.optimized, request.graph_only) == (True, True, False)
+
+
+def test_rtabmap_restarts_after_a_runtime_exit():
+    source = (ROOT / "launch" / "bringup.launch.py").read_text()
+    node = source.split("rtabmap_node = Node(", 1)[1].split("mapping_guard = ExecuteProcess(", 1)[0]
+    assert "respawn=True, respawn_delay=2.0" in node
+
+
+def test_map_gate_retries_when_the_publish_service_call_fails():
+    warnings = []
+    gate = ReadinessGate.__new__(ReadinessGate)
+    gate._map_publish_requested = True
+    gate.get_logger = lambda: types.SimpleNamespace(warning=warnings.append)
+
+    def fail():
+        raise RuntimeError("service unavailable")
+
+    gate._map_publication_finished(types.SimpleNamespace(result=fail))
+
+    assert not gate._map_publish_requested
+    assert "service unavailable" in warnings[0]
 
 
 def test_nav_action_is_not_ready_until_lifecycle_node_is_active():
@@ -120,6 +197,14 @@ def test_failed_gate_does_not_start_its_dependents():
     assert "dependents remain stopped" in failure[0].msg[0].text
 
 
+def test_safety_supervisor_is_not_blocked_by_map_relocalization():
+    source = (ROOT / "launch" / "bringup.launch.py").read_text()
+    joint_gate = source[source.index("target_action=joint_state_ready_gate"):]
+    map_gate = source[source.index("target_action=map_ready_gate"):]
+    assert "safety_supervisor_node" in joint_gate.split("RegisterEventHandler", 1)[0]
+    assert "safety_supervisor_node" not in map_gate.split("RegisterEventHandler", 1)[0]
+
+
 def test_shutdown_gate_does_not_start_dependents():
     spec = importlib.util.spec_from_file_location("bringup_under_test", ROOT / "launch" / "bringup.launch.py")
     bringup = importlib.util.module_from_spec(spec)
@@ -140,8 +225,8 @@ def test_simulation_base_controller_consumes_only_the_guarded_velocity_topic():
     assert '"/cmd_vel_safe"' in controller
     assert '"/cmd_vel"' not in controller
     assert "/sim/sim_base_left_wheel/cmd_vel" in source
-    # Every real LD06 path reaches /scan only through the body-masking filter.
-    assert source.count('executable="scan_self_filter"') == 1
+    # Real LD06 and simulated Gazebo scans both pass through body masking.
+    assert source.count('executable="scan_self_filter"') == 2
     assert "'/pi/lidar/scan' if " in source
     assert '"topic_name": "/lidar/scan_raw"' in source
     assert '"topic_name": "/scan"' not in source

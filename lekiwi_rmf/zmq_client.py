@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import json
 import math
+import time
 
 from lekiwi_rmf.odometry import TelemetrySequenceTracker, accept_validated_telemetry
 from lekiwi_rmf.motor_health import MOTOR_HEALTH_KEY, parse_motor_health
+from lekiwi_rmf.local_arm_executor import STATUS_KEY, LEASE_KEYS, validate_status
 from lekiwi_rmf.zmq_security import (
     CurveClientCredentials,
     configure_link_liveness,
@@ -55,6 +57,7 @@ class LeKiwiZmqClient:
         self.observation_session_changed = False
         self.observation_torque_enabled = None
         self.observation_motor_health = None
+        self.arm_trajectory_status = None
         self.telemetry_sequences = TelemetrySequenceTracker()
 
     def connect(self):
@@ -85,11 +88,30 @@ class LeKiwiZmqClient:
                 f"tcp://{self.remote_ip}:{self.observation_port}"
             )
             poller = zmq.Poller()
+            poller.register(self.zmq_cmd_socket, zmq.POLLOUT)
             poller.register(self.zmq_observation_socket, zmq.POLLIN)
-            if dict(poller.poll(self.connect_timeout_s * 1000)).get(
-                self.zmq_observation_socket
-            ) != zmq.POLLIN:
-                raise ConnectionError("timeout waiting for LeKiwi host observation")
+            command_ready = observation_ready = False
+            deadline = time.monotonic() + self.connect_timeout_s
+            while not (command_ready and observation_ready):
+                timeout_ms = max(0, int((deadline - time.monotonic()) * 1000))
+                events = dict(poller.poll(timeout_ms))
+                if events.get(self.zmq_cmd_socket, 0) & zmq.POLLOUT:
+                    poller.unregister(self.zmq_cmd_socket)
+                    command_ready = True
+                if events.get(self.zmq_observation_socket, 0) & zmq.POLLIN:
+                    poller.unregister(self.zmq_observation_socket)
+                    observation_ready = True
+                if not events:
+                    break
+            if not (command_ready and observation_ready):
+                missing = []
+                if not command_ready:
+                    missing.append("command connection")
+                if not observation_ready:
+                    missing.append("host observation")
+                raise ConnectionError(
+                    "timeout waiting for LeKiwi " + " and ".join(missing)
+                )
         except Exception:
             self._close_sockets()
             raise
@@ -154,6 +176,7 @@ class LeKiwiZmqClient:
                 self.telemetry_sequences, payload, self.state_keys
             )
             motor_health = parse_motor_health(payload.get(MOTOR_HEALTH_KEY))
+            arm_status = validate_status(payload.get(STATUS_KEY))
             state = {key: float(payload[key]) for key in self.state_keys}
         except (TypeError, ValueError, OverflowError):
             return self.last_remote_state
@@ -163,10 +186,11 @@ class LeKiwiZmqClient:
         self.observation_session_changed = accepted.session_changed
         self.observation_torque_enabled = accepted.torque_enabled
         self.observation_motor_health = motor_health
+        self.arm_trajectory_status = arm_status
         self.last_remote_state = state
         return state
 
-    def send_action(self, action):
+    def send_action(self, action, *, arm_goal_id=None, arm_permitted=False):
         if not self.connected:
             raise RuntimeError("LeKiwi client is not connected")
         if not isinstance(action, dict) or set(action) != set(self.state_keys):
@@ -179,6 +203,11 @@ class LeKiwiZmqClient:
             if not math.isfinite(number):
                 raise ValueError(f"action {key!r} is not finite")
             encoded[str(key)] = number
+        if arm_goal_id is not None:
+            if type(arm_goal_id) is not int or not 0 < arm_goal_id < 2**48 or type(arm_permitted) is not bool:
+                raise ValueError("invalid arm trajectory lease")
+            encoded[LEASE_KEYS[0]] = arm_goal_id
+            encoded[LEASE_KEYS[1]] = int(arm_permitted)
         try:
             self.zmq_cmd_socket.send_string(
                 json.dumps(encoded, allow_nan=False), flags=self._zmq.NOBLOCK

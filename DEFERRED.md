@@ -5,8 +5,10 @@ checkout without physical hardware, site measurements, deployment credentials,
 an external service, or a qualified GPU host. None of the items below may be
 marked complete from unit tests or loopback simulation alone.
 
-The repository remains deliberately default-deny while these blockers exist.
-In particular, `config/safety_acceptance.yaml` must remain `validated: false`.
+The physical acceptance record remains `validated: false` while these blockers
+exist. The default nonstrict runtime reports that fault but still permits
+motion; strict mode denies motion. Do not treat nonstrict motion permission as
+physical safety acceptance.
 Each section names its completion condition and its tracking issue.
 
 ## Physical safety hardware and acceptance
@@ -18,6 +20,13 @@ Done when `config/safety_acceptance.yaml` holds a reviewed record with
 fault test, and the production profile requires every physical input it names.
 Tracked in [#6](https://github.com/robotmindio/cleanroom/issues/6).
 
+The current reduced scope is attended autonomous base motion with no payload on
+dry tile. It records bumper, IMU, and battery monitoring as absent, so their
+fault tests are inapplicable; all other listed tests remain required. Keep the
+operator at the physical motor-power stop throughout any accepted run. The
+full-hardware items below remain necessary before claiming those functions or
+expanding to unattended operation.
+
 - Install bumper/contact sensing, publish its real state on
   `safety/bumper_active`, and set `require_bumper: true` in
   `config/safety_production.yaml`.
@@ -26,11 +35,17 @@ Tracked in [#6](https://github.com/robotmindio/cleanroom/issues/6).
   profile's 6-radian scan requirement. The camera floor-scan fallback is not a
   360-degree scanner and cannot satisfy that requirement or reliably detect
   side, rear, low-contrast and overhanging obstacles.
-- Once the RPi 5 table is fitted, run `scripts/lidar-self-mask.py` on the
-  stationary robot with nothing else within 30 cm and copy its proposal into
-  `config/lidar_self_mask.yaml`. The CAD puts the table legs across the LD06
-  scan plane at roughly 90-145 laser-frame degrees and 0.08-0.21 m, which needs
-  a second sector (the filter accepts a list).
+- Resolve the LD06's physical self-occlusion before base trials. The current
+  90-degree body mask leaves less than the required 6 radians of effective
+  coverage, and stationary scans still show 7-20 cm returns around 180-225
+  laser-frame degrees. Reposition the lidar or nearby hardware, then rerun
+  `scripts/lidar-self-mask.py` in a clear area and review the proposal; do not
+  blanket-mask additional sectors and claim full scan coverage. A CAD-only
+  starting point is a laser centre near `base_footprint` x=-0.18 m, y=0.005 m,
+  z=0.35 m (current: x=-0.135 m, y=0.005 m, z=0.182 m). At the measured arm
+  stow and its 0.04-rad tolerance, the arm spans roughly 12 degrees there;
+  the new bracket, cable, vibration, and real scan still need checking before
+  selecting a mount or changing the tracked self-mask.
 - Measure the Astra Pro's optical-centre correction and prove that its
   `/camera/depth/points` cloud covers the arm workspace; the driver publishes
   the cloud, but coverage is not established.
@@ -48,8 +63,8 @@ Tracked in [#6](https://github.com/robotmindio/cleanroom/issues/6).
   30 trials in each of forward, reverse, left, right, clockwise rotation and
   counter-clockwise rotation on every accepted surface/payload combination.
   Record worst distances, timing and measurement uncertainty.
-- Fault-inject every item required by `config/safety_acceptance.yaml`: scan,
-  depth, IMU, battery, diagnostics, bumper, telemetry loss
+- Fault-inject every applicable item required by `config/safety_acceptance.yaml`: scan,
+  depth, diagnostics, telemetry loss
   and replay, host and ROS restart, unauthorized ZMQ, DDS and rosbridge policy,
   Nav2 obstacle stop, and arm-workspace intrusion stop.
 - Confirm the enabled Nav2 StopZone contains the accepted footprint plus the
@@ -69,10 +84,10 @@ matrix review is recorded, and the physical MoveIt trials and arm-workspace
 intrusion stop are in the acceptance record. Tracked in
 [#7](https://github.com/robotmindio/cleanroom/issues/7).
 
-- Measure the real joint-zero calibration and a mechanically safe, collision-
-  checked stow pose. With the arm held there, `scripts/capture_stow.py`
-  replaces the placeholder zero stow in both `config/safety_production.yaml`
-  and the accepted stow mapping, which must match exactly.
+- The real joint-zero calibration is measured. A manually positioned upright
+  stow candidate is captured in both tracked safety files and is collision-free
+  in MoveIt. Measure its physical arm and cable envelope against the base
+  footprint before accepting it; the CAD check alone does not prove clearance.
 - Find and record a physically collision-free calibration pose, then review
   the production CAD/SRDF collision matrix against the assembled robot. The
   loopback MoveIt test uses that production matrix, but simulated clearance is

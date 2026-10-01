@@ -21,6 +21,41 @@ physical sensor or safety component before they can provide a meaningful safety
 measurement. Dummy publishers may be useful for testing, but must never be
 treated as safety functionality or used to validate the production profile.
 
+## Reduced hardware base acceptance
+
+`config/safety_acceptance.yaml` records an **attended autonomous base** scope:
+0.2 kg payload, dry tile, and an operator continuously next to the physical
+motor-power stop. The installed hardware record marks the bumper, IMU, and
+battery monitor absent. Their fault tests are `null` (not applicable), and the
+validator checks that this record agrees with the production profile's
+`require_bumper`, `require_imu`, and `require_battery` settings. All other fault
+tests and six-direction stopping trials remain mandatory. The operating
+condition is a site procedure; software cannot verify that the operator is
+present. The record stays `validated: false` until the physical evidence is
+reviewed. It grants no unattended scope or payload beyond the recorded 0.2 kg.
+
+The configured hold mode automatically re-arms after a fault or restart only
+when telemetry and arm permission recover. The acceptance tests for host and
+ROS restarts must show immediate command stop, then re-arm only after those
+inputs are healthy. A new captured arm stow invalidates the old acceptance.
+
+Before base trials, physically verify a compact arm stow, record its measured
+joints with `scripts/capture_stow.py`, and check that the full arm and cable
+envelope fits the accepted footprint. Predeclare stopping limits, measure at
+least 30 trials per direction on dry tile at 0.2 kg, and update the tracked Nav2
+StopZone to cover the worst distance plus measurement uncertainty. A software
+pass alone cannot establish obstacle coverage or stopping performance.
+
+The current LD06 produces a 360-degree scan. Its measured body mask covers
+100 degrees, leaving 260 degrees (4.54 rad) of effective coverage. The
+production supervisor requires 4.3 rad (about 246 degrees), leaving roughly
+14 degrees for scan-span variation. This is a reduced, attended operating
+scope: masked directions provide no obstacle sensing, and an operator must
+remain at the physical motor-power stop. Remeasure the mask after the arm is
+stowed and before acceptance trials because nearby hardware can change the
+self-returns. Full surrounding coverage requires moving the lidar or adding a
+second sensor.
+
 ## Current motor-health behavior
 
 The motor host is the only serial-bus owner. At 10 Hz it reads each STS3215's

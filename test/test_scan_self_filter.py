@@ -42,17 +42,80 @@ def test_zero_range_disables_the_filter():
     assert list(blank_body_returns(scan, 0.0, 359.0, 0.0).ranges) == list(scan.ranges)
 
 
+def test_finite_out_of_range_samples_are_discarded_without_hiding_valid_returns():
+    from lekiwi_rmf.safety_supervisor import _valid_scan_ranges
+
+    scan = _scan([0.0, 12.993, 0.5, math.inf])
+    out = blank_body_returns(scan, 0.0, 90.0, 0.0)
+    assert list(out.ranges) == [math.inf, math.inf, 0.5, math.inf]
+    assert _valid_scan_ranges(out, 0.05)
+    assert not _valid_scan_ranges(blank_body_returns(_scan([0.0] * 12), 0.0, 90.0, 0.0), 0.05)
+
+
 def test_the_scan_still_passes_the_supervisors_validity_check():
     from lekiwi_rmf.safety_supervisor import _valid_scan_ranges
 
     assert _valid_scan_ranges(blank_body_returns(_scan([0.1, 2.0] * 6), 0.0, 90.0, 0.2), 0.05)
 
 
+def test_nan_no_returns_are_normalized_for_the_canonical_scan():
+    from lekiwi_rmf.safety_supervisor import _valid_scan_ranges
+
+    scan = _scan([math.nan, 2.0, math.nan, -math.inf])
+    out = blank_body_returns(scan, 0.0, 90.0, 0.0)
+    assert list(out.ranges) == [math.inf, 2.0, math.inf, -math.inf]
+    assert math.isnan(scan.ranges[0])
+    assert not _valid_scan_ranges(out, 0.05)
+    out.ranges[3] = math.inf
+    assert _valid_scan_ranges(out, 0.05)
+
+
+def test_negative_infinity_is_removed_only_inside_a_measured_body_sector():
+    from lekiwi_rmf.scan_self_filter import blank_body_sectors
+
+    scan = _scan([math.inf] * 360, angle_min=math.radians(-180), increment=math.radians(1))
+    scan.ranges[38] = -math.inf   # -141.9 deg, inside the simulated body mask
+    scan.ranges[20] = -math.inf   # -160 deg, outside it
+    out = blank_body_sectors(scan, [(208.0, 221.0, 0.218)])
+    assert math.isinf(out.ranges[38]) and out.ranges[38] > 0.0
+    assert out.ranges[20] == -math.inf
+
+
+def test_simulation_mask_matches_the_measured_cad_returns_and_scan_gate():
+    from lekiwi_rmf.safety_supervisor import _scan_masked_angle
+
+    path = ROOT / "config" / "lidar_self_mask_simulation.yaml"
+    node = yaml.safe_load(path.read_text())["scan_self_filter"]["ros__parameters"]
+    assert node["body_start_deg"] == [87.0, 119.0, 139.0, 163.0, 208.0]
+    coverage = 2 * math.pi - _scan_masked_angle(str(path))
+    safety = yaml.safe_load((ROOT / "config" / "safety_simulation.yaml").read_text())
+    minimum = safety["safety_supervisor"]["ros__parameters"]["minimum_scan_coverage"]
+    assert coverage > minimum
+    assert math.isclose(coverage, math.radians(289.0), abs_tol=1e-9)
+
+
 def test_the_tracked_mask_covers_the_measured_body_returns_and_nothing_far():
     node = yaml.safe_load((ROOT / "config" / "lidar_self_mask.yaml").read_text())["scan_self_filter"]["ros__parameters"]
-    # Measured on the stationary robot: 259-306 deg at up to 0.18 m, edge returns to 340 deg.
-    assert node["body_start_deg"] <= 259.0 and node["body_end_deg"] >= 340.0
-    assert 0.18 < node["body_max_range_m"] <= 0.25
+    assert node["body_start_deg"] == [214.0, 254.0, 299.0, 301.0]
+    assert node["body_end_deg"] == [233.0, 284.0, 301.0, 350.0]
+    assert node["body_max_range_m"] == [0.24, 0.216, 0.165, 0.192]
+
+
+def test_live_self_return_inside_the_base_footprint_is_masked():
+    from lekiwi_rmf.scan_self_filter import blank_body_sectors
+
+    params = yaml.safe_load((ROOT / "config" / "lidar_self_mask.yaml").read_text())[
+        "scan_self_filter"]["ros__parameters"]
+    sectors = zip(params["body_start_deg"], params["body_end_deg"], params["body_max_range_m"])
+    sectors = list(sectors)
+    for angle_deg, distance in ((219.6, 0.225), (214.6, 0.16), (300.5, 0.162)):
+        angle = math.radians(angle_deg)
+        # Nominal yaw -180 degrees plus the measured -90-degree correction.
+        base_x = -0.135 - distance * math.sin(angle)
+        base_y = 0.005 + distance * math.cos(angle)
+        assert abs(base_x) < 0.22 and abs(base_y) < 0.22
+        scan = _scan([distance], angle_min=angle)
+        assert math.isinf(blank_body_sectors(scan, sectors).ranges[0])
 
 
 @pytest.mark.parametrize("value", ["-0.1", "1.5", ".nan"])

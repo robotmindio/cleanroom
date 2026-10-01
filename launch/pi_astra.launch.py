@@ -31,6 +31,16 @@ def generate_launch_description():
         ),
         Node(
             package="lekiwi_rmf", executable="astra_cloud_filter", name="astra_cloud_filter",
+            parameters=[str(package / "config" / "astra_cloud_filter.yaml")],
+            output="screen", respawn=True, respawn_delay=5.0,
+        ),
+        Node(
+            package="image_transport", executable="republish", name="astra_color_compressor",
+            parameters=[{"in_transport": "raw", "out_transport": "compressed"}],
+            remappings=[
+                ("in", "/camera/astra/color/image_raw"),
+                ("out", "/camera/astra/color/image_raw"),
+            ],
             output="screen", respawn=True, respawn_delay=5.0,
         ),
     ])

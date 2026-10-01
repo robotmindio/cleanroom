@@ -35,11 +35,22 @@ def blank_body_returns(
 def blank_body_sectors(scan: LaserScan, sectors) -> LaserScan:
     """blank_body_returns for several (start_deg, end_deg, max_range) sectors."""
     ranges = np.array(scan.ranges, dtype=float)
+    # The LD06 uses NaN for no return; publish the ROS no-return value so
+    # downstream consumers can distinguish it from a malformed range.
+    ranges[np.isnan(ranges)] = math.inf
+    # The LD06 also emits occasional zero and >range_max returns. Discard only
+    # those finite out-of-range samples, as required by LaserScan semantics.
+    ranges[np.isfinite(ranges) & ((ranges < scan.range_min) | (ranges > scan.range_max))] = math.inf
     angles = np.degrees(scan.angle_min + np.arange(len(ranges)) * scan.angle_increment)
     finite = np.isfinite(ranges)
     for start_deg, end_deg, max_range in sectors:
+        if max_range == 0.0:
+            continue
         in_sector = (angles - start_deg) % 360.0 <= (end_deg - start_deg) % 360.0
-        ranges[in_sector & finite & (ranges < max_range)] = math.inf
+        body_returns = in_sector & (
+            (finite & (ranges < max_range)) | np.isneginf(ranges)
+        )
+        ranges[body_returns] = math.inf
     filtered = LaserScan()
     filtered.header = scan.header
     for field in (

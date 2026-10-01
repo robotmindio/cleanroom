@@ -749,7 +749,7 @@
         <parent link="so101_shoulder_link" />
         <child link="so101_upper_arm_link" />
         <axis xyz="0 0 1" />
-        <limit lower="-1.74533" upper="1.74533" effort="4" velocity="2" />
+        <limit lower="-1.74533" upper="1.82" effort="4" velocity="2" />
     </joint>
     <joint name="arm_shoulder_pan" type="${arm_joint}">
         <origin xyz="0.0388353 -8.97657e-09 0.0624" rpy="3.14159 4.18253e-17 -3.14159" />

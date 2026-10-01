@@ -181,8 +181,13 @@ checkout_pinned https://github.com/open-rmf/rmf_demos.git "$WORKSPACE/src/rmf_de
 log "Fetching the pinned LDROBOT LD06 driver"
 ldlidar_source="$WORKSPACE/src/ldlidar_stl_ros2"
 ldlidar_patch="$PROJECT_ROOT/thirdparty/ldlidar_stl_ros2/0001-linux-build-fixes.patch"
-checkout_pinned "$LDLIDAR_STL_REPOSITORY" "$ldlidar_source" "$LDLIDAR_STL_REV" "$ldlidar_patch"
+ldlidar_qos_patch="$PROJECT_ROOT/thirdparty/ldlidar_stl_ros2/0002-latest-scan-qos.patch"
+ldlidar_baud_patch="$PROJECT_ROOT/thirdparty/ldlidar_stl_ros2/0003-initialize-ld06-baudrate.patch"
+checkout_pinned "$LDLIDAR_STL_REPOSITORY" "$ldlidar_source" "$LDLIDAR_STL_REV" \
+  "$ldlidar_patch" "$ldlidar_qos_patch" "$ldlidar_baud_patch"
 apply_pinned_patch "$ldlidar_source" "$ldlidar_patch" "the LDROBOT Linux build fixes"
+apply_pinned_patch "$ldlidar_source" "$ldlidar_qos_patch" "the LD06 latest-scan QoS fix"
+apply_pinned_patch "$ldlidar_source" "$ldlidar_baud_patch" "the LD06 baud-rate default fix"
 
 extra_source_paths=()
 extra_packages=()

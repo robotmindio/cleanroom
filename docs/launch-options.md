@@ -132,12 +132,32 @@ The supervisor publishes `safety/supervisor_state`,
 mode, domestic robot) it reports missing or unhealthy inputs in `/diagnostics` but
 does not withhold motion. With `LEKIWI_DISARM_ON_FAILURE=true`, and always in
 simulation, missing or unhealthy inputs deny motion and runtime faults latch until
-`/safety/reset_fault` is called while the driver is disarmed and all inputs are
-healthy. An e-stop always latches in that mode. `/safety/disarm` stops ROS commands
+`/safety/reset_fault` is called while the hardware driver is disarmed and all
+required inputs are healthy. Simulation has no hardware driver; it accepts the
+same explicit reset only after its required inputs recover. An e-stop always
+latches in that mode. `/safety/disarm` stops ROS commands
 and waits for the motor host to confirm that it cut torque on all nine servos.
 Arming, manual or automatic, holds each arm joint at its measured position and
 sends zero wheel velocity. The physical E-stop remains mandatory for any
 electrical, mechanical, or process failure.
+
+The real robot's MoveIt model has a floor keepout 20 mm above the wheel-contact
+plane. The old broad wrist-roll capsule falsely overlapped it in the observed
+resting pose. The wrist-roll collision now uses the vendored CAD meshes, so that
+pose passes MoveIt's state-validity check while lower poses still hit the floor
+keepout. Verify the live check before commanding the arm.
+
+If another fallen pose actually hits the keepout, use assisted recovery. Confirm
+servo torque is off; if it is on, call `/safety/disarm` and confirm the host cut
+torque. An operator must lift and support the arm forward of the base until the
+live `/safety/arm_workspace_clear` topic reports `true`. Keep supporting it while
+the driver arms and holds the measured position. After an explicit disarm, call
+`/safety/arm`; otherwise the default startup policy arms automatically. Confirm
+`/safety/driver_state` is `ARMED` before releasing support. Then plan and
+execute the reviewed forward stow in MoveIt from that valid start, checking the
+displayed path and surroundings before execution. Base permission remains
+denied until the physical stopping trials and other required checks in
+`config/safety_acceptance.yaml` are recorded and validated.
 
 ## Production safety prerequisites
 
@@ -202,8 +222,10 @@ still be camera-sensitive and should not be used as the ROS motor service.
 The front/wrist V4L2 cameras are also the supported remote-camera topology:
 frames are read by `v4l2_camera` on the machine where they are plugged in, then
 relayed as below. The Astra is read by `ros-astra.sh` (`lekiwi-astra.service`)
-on whichever machine holds its USB connection; on a split robot the device zenoh
-bridge carries its cloud and a 2 Hz colour preview to the workstation.
+on whichever machine holds its USB connection; on a split robot the bridge
+carries a decimated depth cloud, LD06 scan, front preview at up to 3 Hz, wrist
+preview at up to 2 Hz, and a JPEG Astra colour preview at up to 0.25 Hz. Raw
+Astra colour frames stay on the device.
 
 With a Pi on the robot, `ros-cameras.sh` reads each USB camera there and publishes a
 compressed `/pi/camera/...` stream. The device zenoh bridge carries it to the

@@ -430,7 +430,7 @@ work is tracked in [DEFERRED.md](DEFERRED.md#network-security-and-credentials).
 | `5555/tcp` | `lekiwi-host` | ZMQ motor commands | none; optional CURVE |
 | `5556/tcp` | `lekiwi-host` | ZMQ observations and joint state | none; optional CURVE |
 | `5557/tcp` | `lekiwi-host` | Torque arm, disarm and state | none; optional CURVE |
-| `7447/tcp` | `lekiwi-zenoh` | Zenoh, export-only: `/pi/lidar/scan`, `/pi/camera/*`, `/camera/depth/points`, and the Astra colour `image_raw` and `camera_info` | mutual TLS |
+| `7447/tcp` | `lekiwi-zenoh` | Zenoh, export-only: `/pi/lidar/scan`, rate-limited compressed `/pi/camera/*`, compact `/camera/depth/points`, and the compressed Astra colour preview with `camera_info` | mutual TLS |
 | `9090/tcp` | `rosbridge` (off by default) | JSON over WebSocket to one ROS graph | none; loopback or tailnet bind |
 
 - The ZMQ listeners bind every interface by default and accept any client

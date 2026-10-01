@@ -145,14 +145,15 @@ memory recognises places sooner.
 
 ## RTAB-Map database or old crash archives consume disk
 
-Before every repository-managed real-hardware launch, the default
-`~/.ros/lekiwi_rtabmap.db` is rotated once it exceeds 512 MiB. Its SQLite sidecars move with
-it, so a fresh database cannot replay an old WAL. Automatic `stale-*` and `corrupt-*` archives
-are retained for at most 14 days, three sessions, and 1.5 GiB combined (including sidecars).
-An explicit `rtabmap_database:=...` is never rotated or deleted; use it for a map that must be
-kept. The same policy runs from both `scripts/up.sh` and the systemd `scripts/ros-start.sh` path.
-If the stack is already running, `scripts/rtabmap-db-maintenance.py --prune-only` safely applies
-only the automatic-archive retention policy; it never opens or moves the active database.
+The active `~/.ros/lekiwi_rtabmap.db` is never rotated or deleted during startup. Mapping
+switches to localization when the configured database-size or session-duration quota is reached;
+the saved map stays available, and later launches reopen the same database. Increase the tracked
+`rtabmap_mapping_max_bytes` or `rtabmap_mapping_max_seconds` launch defaults if the robot needs a
+longer mapping session and the device has enough storage. Old automatic `stale-*` and `corrupt-*`
+archives are retained for at most 14 days, three sessions, and 1.5 GiB combined (including SQLite
+sidecars). The same archive cleanup runs from repository-managed startup paths. If the stack is
+already running, `scripts/rtabmap-db-maintenance.py --prune-only` applies only that archive
+retention policy; it never opens or moves the active database.
 
 ## ROS logs consume disk
 

@@ -55,11 +55,7 @@ def _after_success(stage, actions):
 
 
 def _mapping_guard_exit(event, context):
-    """Freeze the map at its quota instead of stopping the robot.
-
-    Shutting the stack down would let startup maintenance rotate the full
-    database away, so an always-mapping robot would lose its map at every quota.
-    """
+    """Freeze map growth at its quota while keeping the robot and map available."""
     if context.is_shutdown or event.returncode in (0, 130, -2, -15):
         return []
     if event.returncode == 75:
@@ -78,6 +74,7 @@ def generate_launch_description():
     curve_client_secret = LaunchConfiguration("curve_client_secret_key_file")
     curve_server_public = LaunchConfiguration("curve_server_public_key_file")
     auto_arm_on_startup = LaunchConfiguration("auto_arm_on_startup")
+    arm_calibration_file = LaunchConfiguration("arm_calibration_file")
     disarm_on_failure = LaunchConfiguration("disarm_on_failure")
     start_rmf = LaunchConfiguration("start_rmf")
     rmf_domain = LaunchConfiguration("rmf_domain")
@@ -107,7 +104,6 @@ def generate_launch_description():
     real = PythonExpression(["'", mode, "' == 'real'"])
     amcl = PythonExpression(["'", localization, "' == 'amcl'"])
     visual_slam = PythonExpression(["'", localization, "' == 'visual_slam'"])
-    slam_localization = PythonExpression(["'", slam_mode, "' == 'localization'"])
     camera_on = PythonExpression(["'", publish_camera, "' == 'true'"])
     camera_here = PythonExpression([camera_on, " and '", camera_source, "' == 'local'"])
     astra_here = PythonExpression([
@@ -188,6 +184,7 @@ def generate_launch_description():
     slam_cloud = Node(
         package="lekiwi_rmf", executable="slam_cloud", name="slam_cloud",
         parameters=[{"use_sim_time": ParameterValue(sim, value_type=bool)}],
+        additional_env={"OPENBLAS_NUM_THREADS": "1"},
         condition=IfCondition(PythonExpression([visual_slam, " and ", lidar_on])),
         output="screen",
     )
@@ -222,47 +219,82 @@ def generate_launch_description():
         condition=IfCondition(start_moveit),
         output="screen",
     )
+    joint_state_ready_gate = Node(
+        package="lekiwi_rmf", executable="readiness_gate", name="wait_for_stable_joint_states",
+        parameters=[{
+            "kind": "joint_states",
+            "topic": "/joint_states",
+            "joint_names": [
+                "arm_shoulder_pan", "arm_shoulder_lift", "arm_elbow_flex",
+                "arm_wrist_flex", "arm_wrist_roll", "arm_gripper",
+            ],
+            "minimum_joint_samples": 20,
+        }],
+        output="screen",
+    )
     moveit_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(PathJoinSubstitution([package, "launch", "moveit.launch.py"])),
         launch_arguments={"sim": PythonExpression([
             "'true' if '", mode, "' == 'sim' else 'false'",
-        ])}.items(),
+        ]), "arm_calibration_file": arm_calibration_file}.items(),
     )
     rtabmap_node = Node(
         package="rtabmap_slam", executable="rtabmap", name="rtabmap",
         parameters=[{
             "use_sim_time": ParameterValue(sim, value_type=bool),
             "frame_id": "base_footprint", "map_frame_id": "map", "odom_frame_id": "odom",
-            # With a laser, map from the merged lidar/Astra cloud (ICP), which
-            # keeps flowing while either sensor is alive. RGB over this Wi-Fi
-            # is too slow for visual SLAM and would stall it on every camera
-            # dropout. Without a laser, fall back to RGB so there is still
-            # something to map with.
+            # Keep appearance-based retrieval enabled alongside LiDAR ICP.
+            # A restarted odometry session cannot use proximity ICP until it
+            # has globally relocalized, so the camera must find that first link.
             "database_path": rtabmap_database,
-            "subscribe_rgb": ParameterValue(PythonExpression(["not ", lidar_on]), value_type=bool),
-            "Reg/Strategy": ParameterValue(PythonExpression(["'1' if ", lidar_on, " else '0'"]), value_type=str),
+            "subscribe_rgb": ParameterValue(camera_on, value_type=bool),
+            "Reg/Strategy": ParameterValue(PythonExpression([
+                "'1' if ", lidar_on, " else '0'",
+            ]), value_type=str),
+            # A prior ICP-only database can persist -1 here, which disables
+            # visual word extraction even after RGB is enabled at launch.
+            "Kp/MaxFeatures": "500",
             "Icp/VoxelSize": "0.05", "Icp/MaxCorrespondenceDistance": "0.1",
             "Icp/PointToPlane": "false", "RGBD/ProximityPathMaxNeighbors": "10",
+            # The front topic is image_raw and its CameraInfo has nonzero lens
+            # distortion; RTAB-Map must rectify it before geometric verification.
+            "Rtabmap/ImagesAlreadyRectified": "false",
+            "Mem/NotLinkedNodesKept": "false",
+            "RGBD/LinearUpdate": "0.04", "RGBD/ProximityMaxGraphDepth": "0",
+            "RGBD/ProximityOdomGuess": "true",
+            "Rtabmap/DetectionRate": "2",
             "subscribe_depth": False,
             "subscribe_rgbd": False, "subscribe_scan": False,
             "subscribe_scan_cloud": ParameterValue(lidar_on, value_type=bool),
             # slam_cloud already removed the floor; project every point.
             "Grid/3D": "false", "Grid/NormalsSegmentation": "false", "Grid/RayTracing": "true",
-            "Grid/MaxObstacleHeight": "1.0",
+            "Grid/MaxObstacleHeight": "1.0", "Grid/MaxGroundHeight": "0.05",
             "subscribe_odom_info": False, "approx_sync": True, "publish_tf": True,
             "qos_image": 1, "qos_camera_info": 1, "qos_scan": 1, "qos_odom": 1,
             "Rtabmap/MemoryThr": ParameterValue(LaunchConfiguration("rtabmap_wm_nodes"), value_type=str),
             "Mem/IncrementalMemory": ParameterValue(slam_mapping, value_type=str),
-            "Mem/InitWMWithAllNodes": ParameterValue(slam_localization, value_type=str),
+            # ICP proximity closure only searches working memory. Reload the
+            # saved scans for lidar mapping so a restart can relocalize against
+            # the existing graph.
+            "Mem/InitWMWithAllNodes": ParameterValue(PythonExpression([
+                "'", slam_mode, "' == 'localization' or ", lidar_on,
+            ]), value_type=str),
+            # Start a mapping session only after it globally relocalizes to the
+            # saved graph, preventing an unlinked map on every process restart.
+            "Rtabmap/StartNewMapOnLoopClosure": "true",
             "RGBD/NeighborLinkRefining": "true", "RGBD/ProximityBySpace": "true",
             "Reg/Force3DoF": "true", "Grid/Sensor": "0", "Grid/RangeMax": "3.0",
-            "Grid/CellSize": "0.05", "sync_queue_size": 20, "topic_queue_size": 20,
+            "Grid/CellSize": "0.05",
+            # Five-message sync queues keep temporary link jitter from turning
+            # the map into a several-second replay of stale sensor data.
+            "sync_queue_size": 5, "topic_queue_size": 5,
         }],
         remappings=[
             ("rgb/image", slam_rgb_topic), ("rgb/camera_info", slam_camera_info_topic),
             ("odom", "/odom"), ("scan_cloud", "/slam/cloud"), ("map", rtabmap_map_topic),
         ],
         condition=IfCondition(visual_slam), output="screen",
+        respawn=True, respawn_delay=2.0,
     )
     mapping_guard = ExecuteProcess(
         cmd=[
@@ -309,6 +341,44 @@ def generate_launch_description():
         Node(package="rmf_task_ros2", executable="rmf_task_dispatcher", parameters=[{"bidding_time_window": 2.0}], additional_env={"ROS_DOMAIN_ID": rmf_domain}, output="screen"),
         rmf_owner_guard,
     ]
+    # Start safety once feedback is genuinely flowing. It does not depend on a
+    # map: RTAB-Map may wait for relocalization after an odometry reset, while
+    # Nav2 must remain gated until a usable map exists.
+    safety_supervisor_node = Node(
+        package="lekiwi_rmf",
+        executable="safety_supervisor",
+        name="safety_supervisor",
+        parameters=[safety_params_file, {
+            "use_sim_time": ParameterValue(sim, value_type=bool),
+            # Simulation keeps its qualified enforcement; real mode is strict only
+            # for larger robots that opt in with disarm_on_failure.
+            "strict": ParameterValue(
+                PythonExpression([sim, " or '", disarm_on_failure, "' == 'true'"]),
+                value_type=bool,
+            ),
+            "acceptance_file": safety_acceptance_file,
+            "scan_self_mask_file": ParameterValue(
+                PathJoinSubstitution([
+                    package,
+                    "config",
+                    PythonExpression([
+                        "'lidar_self_mask_simulation.yaml' if ",
+                        sim,
+                        " else 'lidar_self_mask.yaml'",
+                    ]),
+                ]),
+                value_type=str,
+            ),
+            # A validated physical record is accepted only when its measured stopping
+            # distance still fits this exact tracked Nav2 footprint and StopZone.
+            "nav2_params_file": params_file,
+        }],
+        # This node is the one continuously-enforced source of motion permission; a
+        # crash must not leave the driver believing its last lease is current.
+        respawn=True,
+        respawn_delay=2.0,
+        output="screen",
+    )
 
     return LaunchDescription(
         [
@@ -335,6 +405,12 @@ def generate_launch_description():
             # co-run with RTAB-Map on the 4 GB robot computer. Enable it only
             # for an arm task, preferably from the workstation.
             DeclareLaunchArgument("start_moveit", default_value="false"),
+            DeclareLaunchArgument(
+                "arm_calibration_file",
+                default_value=PathJoinSubstitution([
+                    EnvironmentVariable("HOME"), ".ros", "lekiwi_arm_calibration.json",
+                ]),
+            ),
             DeclareLaunchArgument("rosbridge_address", default_value="127.0.0.1"),
             DeclareLaunchArgument("rosbridge_port", default_value="9090"),
             DeclareLaunchArgument("rosbridge_domain", default_value="0"),
@@ -536,6 +612,20 @@ def generate_launch_description():
                 name="sim_lidar_bridge",
                 arguments=["/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan"],
                 parameters=[{"override_frame_id": "laser"}],
+                remappings=[("/scan", "/sim/scan_raw")],
+                condition=IfCondition(sim),
+                output="screen",
+            ),
+            Node(
+                package="lekiwi_rmf",
+                executable="scan_self_filter",
+                name="scan_self_filter",
+                parameters=[
+                    PathJoinSubstitution([
+                        package, "config", "lidar_self_mask_simulation.yaml",
+                    ]),
+                    {"input_topic": "/sim/scan_raw"},
+                ],
                 condition=IfCondition(sim),
                 output="screen",
             ),
@@ -598,6 +688,7 @@ def generate_launch_description():
             ),
             Node(
                 package="lekiwi_rmf", executable="astra_cloud_filter", name="astra_cloud_filter",
+                parameters=[PathJoinSubstitution([package, "config", "astra_cloud_filter.yaml"])],
                 condition=IfCondition(astra_here), output="screen",
             ),
             # A V4L2 front camera is read straight off the device rather than relayed through the
@@ -728,6 +819,8 @@ def generate_launch_description():
                 executable="lekiwi_driver",
                 parameters=[{
                     "remote_ip": remote_ip,
+                    "local_arm_execution": True,
+                    "arm_calibration_file": arm_calibration_file,
                     "curve_client_secret_key_file": curve_client_secret,
                     "curve_server_public_key_file": curve_server_public,
                     # Wheel odometry always starts in its local frame. AMCL or
@@ -775,39 +868,6 @@ def generate_launch_description():
                 respawn_delay=2.0,
                 output="screen",
             ),
-            # Unlike the one-shot readiness gates, this authority evaluates every
-            # required input continuously. It withholds base and arm permission
-            # for a missing, stale, or unhealthy input only in strict mode:
-            # always in simulation, and on the real robot only with
-            # disarm_on_failure:=true. By default (real, non-strict) it reports
-            # its findings on /diagnostics but permits motion.
-            Node(
-                package="lekiwi_rmf",
-                executable="safety_supervisor",
-                name="safety_supervisor",
-                parameters=[safety_params_file, {
-                    # Simulation keeps its qualified enforcement; real mode is strict only
-                    # for larger robots that opt in with disarm_on_failure.
-                    "strict": ParameterValue(
-                        PythonExpression([sim, " or '", disarm_on_failure, "' == 'true'"]),
-                        value_type=bool,
-                    ),
-                    "acceptance_file": safety_acceptance_file,
-                    # A validated physical record is accepted only when its
-                    # measured stopping distance still fits this exact tracked
-                    # Nav2 footprint and collision-monitor StopZone.
-                    "nav2_params_file": params_file,
-                }],
-                # This node is the one continuously-enforced source of motion
-                # permission; a crash here must not leave the driver believing
-                # its last-received permission is still current for good. It
-                # already fails safe (driver.py's permission leases expire
-                # and auto-disarm without fresh Bool messages), so restarting
-                # it is strictly a recovery, never a new risk.
-                respawn=True,
-                respawn_delay=2.0,
-                output="screen",
-            ),
             Node(
                 package="lekiwi_rmf",
                 executable="arm_workspace_monitor",
@@ -816,6 +876,14 @@ def generate_launch_description():
                     safety_params_file,
                     {"use_sim_time": ParameterValue(sim, value_type=bool)},
                 ],
+                condition=IfCondition(start_moveit),
+                output="screen",
+            ),
+            Node(
+                package="lekiwi_rmf",
+                executable="moveit_cloud_gate",
+                name="moveit_cloud_gate",
+                parameters=[{"use_sim_time": ParameterValue(sim, value_type=bool)}],
                 condition=IfCondition(start_moveit),
                 output="screen",
             ),
@@ -856,6 +924,11 @@ def generate_launch_description():
             # components race slow sensors and telemetry reconnects.
             slam_cloud,
             slam_sensor_gate,
+            joint_state_ready_gate,
+            RegisterEventHandler(OnProcessExit(
+                target_action=joint_state_ready_gate,
+                on_exit=_after_success("joint states", [safety_supervisor_node]),
+            )),
             RegisterEventHandler(OnProcessExit(
                 target_action=slam_sensor_gate,
                 on_exit=_after_success("SLAM sensor", [rtabmap_node, mapping_guard]),
@@ -871,7 +944,9 @@ def generate_launch_description():
             )),
             RegisterEventHandler(OnProcessExit(
                 target_action=map_ready_gate,
-                on_exit=_after_success("map", [initial_pose, navigation_launch, nav_ready_gate]),
+                on_exit=_after_success("map", [
+                    initial_pose, navigation_launch, nav_ready_gate,
+                ]),
             )),
             RegisterEventHandler(OnProcessExit(
                 target_action=nav_ready_gate,

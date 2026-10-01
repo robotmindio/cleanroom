@@ -26,17 +26,21 @@ pytest.importorskip("zmq")
 
 import rclpy
 from action_msgs.msg import GoalStatus
+from builtin_interfaces.msg import Duration
+from control_msgs.action import FollowJointTrajectory
 from moveit_configs_utils import MoveItConfigsBuilder
 from moveit_msgs.action import MoveGroup
 from moveit_msgs.msg import Constraints, JointConstraint, MoveItErrorCodes
+from moveit_msgs.srv import GetPositionFK, GetPositionIK, GetStateValidity
 from rclpy.action import ActionClient
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool
 from std_srvs.srv import Trigger
+from trajectory_msgs.msg import JointTrajectoryPoint
 
 from lekiwi_rmf.arm_trajectory import ARM_JOINTS
-from lekiwi_rmf.fake_host import FakeLeKiwiHost
+from lekiwi_rmf.fake_host import FakeLeKiwiHost, ObservationFault
 
 
 def _identity_calibration() -> tuple[str, tempfile.TemporaryDirectory]:
@@ -54,7 +58,16 @@ def _identity_calibration() -> tuple[str, tempfile.TemporaryDirectory]:
 @pytest.mark.rostest
 def generate_test_description():
     fake_host = FakeLeKiwiHost()
-    # SO-101 new_calib zero is the reference L pose, not the legacy folded pose.
+    # Start outside the production keep-out so planning can test a valid transition.
+    fake_host.set_state(
+        **{
+            "arm_shoulder_pan.pos": math.degrees(-0.006),
+            "arm_shoulder_lift.pos": math.degrees(1.0),
+            "arm_elbow_flex.pos": math.degrees(-1.0),
+            "arm_wrist_flex.pos": math.degrees(0.0),
+            "arm_wrist_roll.pos": math.degrees(-0.02),
+        }
+    )
     fake_host.start(period_s=0.02)
     calibration, calibration_directory = _identity_calibration()
 
@@ -63,7 +76,10 @@ def generate_test_description():
     # lacks moveit_ros_perception; the production launch retains sensors_3d.
     moveit_config = (
         MoveItConfigsBuilder("lekiwi", package_name="lekiwi_rmf")
-        .robot_description(file_path="urdf/lekiwi.urdf.xacro", mappings={"sim": "false"})
+        .robot_description(
+            file_path=str(Path(__file__).parents[1] / "urdf" / "lekiwi.urdf.xacro"),
+            mappings={"sim": "false"},
+        )
         .robot_description_semantic(file_path="config/lekiwi.srdf")
         .robot_description_kinematics(file_path="config/kinematics.yaml")
         .joint_limits(file_path="config/joint_limits.yaml")
@@ -72,6 +88,7 @@ def generate_test_description():
         .to_moveit_configs()
     )
     moveit_parameters = moveit_config.to_dict()
+    moveit_parameters.setdefault("trajectory_execution", {})["execution_duration_monitoring"] = False
     move_group = launch_ros.actions.Node(
         package="moveit_ros_move_group",
         executable="move_group",
@@ -86,6 +103,7 @@ def generate_test_description():
         output="screen",
         parameters=[{
             "remote_ip": "127.0.0.1",
+            "local_arm_execution": True,
             "remote_command_port": fake_host.command_endpoint_port,
             "remote_observation_port": fake_host.observation_endpoint_port,
             "torque_control_port": fake_host.torque_endpoint_port,
@@ -133,6 +151,10 @@ class TestMoveItDriverEndToEnd(unittest.TestCase):
         self.node.create_subscription(JointState, "/joint_states", self.joint_states.append, 10)
         self.arm_client = self.node.create_client(Trigger, "/safety/arm")
         self.move_group = ActionClient(self.node, MoveGroup, "/move_action")
+        self.trajectory_client = ActionClient(
+            self.node, FollowJointTrajectory,
+            "/arm_controller/follow_joint_trajectory",
+        )
         # Permissions are receive-time leases, so this timer models the safety
         # supervisor's continuous authorization for the whole action.
         self.permission_timer = self.node.create_timer(0.05, self._publish_permission)
@@ -159,6 +181,67 @@ class TestMoveItDriverEndToEnd(unittest.TestCase):
         while time.monotonic() < deadline:
             rclpy.spin_once(self.node, timeout_sec=0.05)
 
+    def test_moveit_state_validity_distinguishes_floor_contact(self):
+        client = self.node.create_client(GetStateValidity, "/check_state_validity")
+        self.assertTrue(self._until(client.service_is_ready, timeout=15.0))
+
+        below_floor_contacts = []
+        for shoulder_lift in (-1.74533, 1.82):
+            request = GetStateValidity.Request()
+            request.group_name = "arm"
+            request.robot_state.is_diff = True
+            request.robot_state.joint_state.name = list(ARM_JOINTS)
+            request.robot_state.joint_state.position = [
+                0.0, shoulder_lift, 0.0, 0.0, 0.0, 0.0,
+            ]
+            future = client.call_async(request)
+            self.assertTrue(self._until(future.done, timeout=10.0))
+            below_floor_contacts.extend(future.result().contacts)
+        self.assertTrue(any(
+            "arm_ground_keepout_proxy" in (c.contact_body_1, c.contact_body_2)
+            for c in below_floor_contacts
+        ), "MoveIt did not report a below-floor arm collision")
+
+        request = GetStateValidity.Request()
+        request.group_name = "arm"
+        request.robot_state.is_diff = True
+        request.robot_state.joint_state.name = list(ARM_JOINTS)
+        # The broad roll capsule falsely hit the keepout here; exact CAD
+        # geometry admits this reachable resting pose without removing the floor.
+        request.robot_state.joint_state.position = [
+            -0.01995, 1.81054, -1.05871, -0.19486, -0.01995, -0.00264,
+        ]
+        future = client.call_async(request)
+        self.assertTrue(self._until(future.done, timeout=10.0))
+        response = future.result()
+        self.assertTrue(response.valid, response.contacts)
+
+    def test_stored_home_clears_physical_chassis(self):
+        client = self.node.create_client(GetStateValidity, "/check_state_validity")
+        self.assertTrue(self._until(client.service_is_ready, timeout=15.0))
+        request = GetStateValidity.Request()
+        request.group_name = "arm"
+        request.robot_state.is_diff = True
+        request.robot_state.joint_state.name = list(ARM_JOINTS)
+        request.robot_state.joint_state.position = [0.0] * len(ARM_JOINTS)
+        future = client.call_async(request)
+        self.assertTrue(self._until(future.done, timeout=10.0))
+        self.assertTrue(future.result().valid, future.result().contacts)
+
+    def test_open_gripper_can_reach_floor_object(self):
+        client = self.node.create_client(GetStateValidity, "/check_state_validity")
+        self.assertTrue(self._until(client.service_is_ready, timeout=15.0))
+        request = GetStateValidity.Request()
+        request.group_name = "arm"
+        request.robot_state.is_diff = True
+        request.robot_state.joint_state.name = list(ARM_JOINTS)
+        request.robot_state.joint_state.position = [
+            -0.01995, 1.81054, -1.05871, -0.10, -0.01995, 1.74533,
+        ]
+        future = client.call_async(request)
+        self.assertTrue(self._until(future.done, timeout=10.0))
+        self.assertTrue(future.result().valid, future.result().contacts)
+
     def _arm(self):
         self.assertTrue(self.arm_client.wait_for_service(timeout_sec=10.0))
         # Publish while discovery settles; the timer keeps this lease fresh
@@ -175,6 +258,34 @@ class TestMoveItDriverEndToEnd(unittest.TestCase):
             timeout=15.0,
         ))
         self.assertTrue(self._until(self.move_group.server_is_ready, timeout=15.0))
+
+        fk_client = self.node.create_client(GetPositionFK, "/compute_fk")
+        ik_client = self.node.create_client(GetPositionIK, "/compute_ik")
+        self.assertTrue(self._until(fk_client.service_is_ready, timeout=10.0))
+        self.assertTrue(self._until(ik_client.service_is_ready, timeout=10.0))
+        fk = GetPositionFK.Request()
+        fk.fk_link_names = ["tool0"]
+        fk.robot_state.joint_state.name = [
+            "arm_shoulder_pan", "arm_shoulder_lift", "arm_elbow_flex",
+            "arm_wrist_flex", "arm_wrist_roll",
+        ]
+        fk.robot_state.joint_state.position = [-0.006, 1.0, -1.0, 0.0, -0.02]
+        fk_future = fk_client.call_async(fk)
+        self.assertTrue(self._until(fk_future.done, timeout=10.0))
+        fk_result = fk_future.result()
+        self.assertEqual(fk_result.error_code.val, MoveItErrorCodes.SUCCESS)
+
+        ik = GetPositionIK.Request()
+        ik.ik_request.group_name = "arm"
+        ik.ik_request.ik_link_name = "tool0"
+        ik.ik_request.pose_stamped = fk_result.pose_stamped[0]
+        ik.ik_request.robot_state = fk.robot_state
+        ik.ik_request.avoid_collisions = True
+        ik.ik_request.timeout.sec = 1
+        ik_future = ik_client.call_async(ik)
+        self.assertTrue(self._until(ik_future.done, timeout=10.0))
+        self.assertEqual(ik_future.result().error_code.val, MoveItErrorCodes.SUCCESS)
+
         # Use the production collision matrix without test-only exemptions.
         # Drain the fake transport's pre-arm torque-off telemetry, then arm on
         # a fresh sample.  This models the explicit operator re-arm required
@@ -194,10 +305,10 @@ class TestMoveItDriverEndToEnd(unittest.TestCase):
         request.max_acceleration_scaling_factor = 0.15
         target_positions = {
             "arm_shoulder_pan": 0.12,
-            "arm_shoulder_lift": 0.0,
-            "arm_elbow_flex": 0.0,
+            "arm_shoulder_lift": 1.0,
+            "arm_elbow_flex": -1.0,
             "arm_wrist_flex": 0.0,
-            "arm_wrist_roll": 0.0,
+            "arm_wrist_roll": -0.02,
         }
         request.goal_constraints = [Constraints(joint_constraints=[
             JointConstraint(
@@ -239,6 +350,77 @@ class TestMoveItDriverEndToEnd(unittest.TestCase):
             timeout=10.0,
         ))
         success.set()
+
+    def test_canceling_a_trajectory_keeps_feedback_live(self, fake_host):
+        self.assertTrue(self._until(
+            lambda: bool(self.joint_states), timeout=15.0
+        ))
+        self.assertTrue(self._until(
+            self.trajectory_client.server_is_ready, timeout=15.0
+        ))
+        self._arm()
+        # Drain torque-off telemetry queued before the arm RPC, as in the
+        # MoveGroup test, then start this cancellation test from a confirmed arm.
+        self._spin_for(0.30)
+        self._arm()
+        joint = "arm_shoulder_pan"
+        latest = self.joint_states[-1]
+        start = latest.position[latest.name.index(joint)]
+        goal = FollowJointTrajectory.Goal()
+        goal.trajectory.joint_names = [joint]
+        goal.trajectory.points = [JointTrajectoryPoint(
+            positions=[start + 0.1],
+            time_from_start=Duration(sec=3),
+        )]
+
+        before = len(self.joint_states)
+        goal_future = self.trajectory_client.send_goal_async(goal)
+        self.assertTrue(self._until(goal_future.done, timeout=5.0))
+        handle = goal_future.result()
+        self.assertTrue(handle.accepted)
+        result_future = handle.get_result_async()
+        self._spin_for(0.25)
+        self.assertGreater(len(self.joint_states), before + 2)
+        self.assertFalse(result_future.done(), result_future.result())
+
+        cancel_future = handle.cancel_goal_async()
+        self.assertTrue(self._until(cancel_future.done, timeout=5.0))
+        self.assertTrue(cancel_future.result().goals_canceling)
+        self.assertTrue(self._until(result_future.done, timeout=5.0))
+        self.assertEqual(result_future.result().status, GoalStatus.STATUS_CANCELED)
+        self.assertTrue(self._until(
+            lambda: len(self.joint_states) > before + 5, timeout=3.0
+        ))
+
+    def test_local_goal_recovers_after_three_seconds_without_telemetry(self, fake_host):
+        self.assertTrue(self._until(lambda: bool(self.joint_states), timeout=15.0))
+        self.assertTrue(self._until(self.trajectory_client.server_is_ready, timeout=15.0))
+        self._arm()
+        self._spin_for(0.30)
+        self._arm()
+        joint = "arm_shoulder_pan"
+        latest = self.joint_states[-1]
+        start = latest.position[latest.name.index(joint)]
+        goal = FollowJointTrajectory.Goal()
+        goal.trajectory.joint_names = [joint]
+        goal.trajectory.points = [JointTrajectoryPoint(
+            positions=[start + 0.08], time_from_start=Duration(sec=4),
+        )]
+        future = self.trajectory_client.send_goal_async(goal)
+        self.assertTrue(self._until(future.done, timeout=5.0))
+        handle = future.result()
+        self.assertTrue(handle.accepted)
+        result = handle.get_result_async()
+        self.assertTrue(self._until(lambda: fake_host.arm_executor.active, timeout=5.0))
+        fake_host.queue_observation_fault(ObservationFault.DROP, count=150)
+        self._spin_for(2.0)
+        self.assertFalse(result.done(), "telemetry gap aborted the retained local goal")
+        self.assertEqual(fake_host.arm_executor.status["state"], "paused")
+        elapsed = fake_host.arm_executor.status["elapsed"]
+        self._spin_for(0.5)
+        self.assertEqual(fake_host.arm_executor.status["elapsed"], elapsed)
+        self.assertTrue(self._until(result.done, timeout=12.0))
+        self.assertEqual(result.result().status, GoalStatus.STATUS_SUCCEEDED)
 
 
 @launch_testing.post_shutdown_test()
