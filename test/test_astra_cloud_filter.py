@@ -87,3 +87,29 @@ def test_a_field_that_overruns_the_point_is_rejected():
     cloud.data = bytes(12)
 
     assert compact_cloud(cloud, 1) is None
+
+
+def test_rgb_encoding_is_eager_rate_limited_and_keeps_capture_stamp(monkeypatch):
+    import cv2
+    import rclpy
+    from rclpy.serialization import serialize_message
+    from sensor_msgs.msg import Image
+    from types import SimpleNamespace
+    from lekiwi_rmf.astra_cloud_filter import AstraCloudFilter
+
+    rclpy.init()
+    node = AstraCloudFilter()
+    try:
+        frames = []
+        node._rgb_publisher = SimpleNamespace(publish=frames.append)
+        clock = iter([10.0, 11.0, 14.1])
+        monkeypatch.setattr("lekiwi_rmf.astra_cloud_filter.time.monotonic", lambda: next(clock))
+        image = Image(width=2, height=2, encoding="bgr8", step=6, data=bytes(12))
+        image.header.stamp.sec = 7
+        for _ in range(3): node._on_rgb(serialize_message(image))
+        assert len(frames) == 2
+        assert all(f.header.stamp.sec == 7 and f.format == "jpeg" for f in frames)
+        assert cv2.imdecode(np.frombuffer(frames[0].data, np.uint8), cv2.IMREAD_COLOR).shape == (2, 2, 3)
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()

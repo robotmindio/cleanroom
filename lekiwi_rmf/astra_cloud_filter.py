@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Publish a compact, valid Astra cloud without sending its raw raster over Wi-Fi."""
+"""Publish compact Astra points and rate-limited RGB for the device bridge."""
 
 from __future__ import annotations
 
@@ -7,12 +7,14 @@ import math
 import time
 
 import numpy as np
+import cv2
+from cv_bridge import CvBridge
 import rclpy
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from rclpy.serialization import deserialize_message
-from sensor_msgs.msg import PointCloud2, PointField
+from sensor_msgs.msg import CompressedImage, Image, PointCloud2, PointField
 
 
 def compact_cloud(message: PointCloud2, stride: int) -> PointCloud2 | None:
@@ -60,10 +62,14 @@ class AstraCloudFilter(Node):
         super().__init__("astra_cloud_filter")
         self.declare_parameter("pixel_stride", 4)
         self.declare_parameter("max_rate_hz", 5.0)
+        self.declare_parameter("rgb_max_rate_hz", 0.25)
         self._stride = int(self.get_parameter("pixel_stride").value)
         rate = float(self.get_parameter("max_rate_hz").value)
+        rgb_rate = float(self.get_parameter("rgb_max_rate_hz").value)
         if self._stride < 1 or not math.isfinite(rate) or rate <= 0.0:
             raise ValueError("pixel_stride must be positive and max_rate_hz must be finite and positive")
+        if not math.isfinite(rgb_rate) or rgb_rate <= 0:
+            raise ValueError("rgb_max_rate_hz must be finite and positive")
         self._period = 1.0 / rate
         self._last_publish = 0.0
         self._publisher = self.create_publisher(PointCloud2, "/camera/depth/points", qos_profile_sensor_data)
@@ -73,6 +79,30 @@ class AstraCloudFilter(Node):
             PointCloud2, "/camera/depth/points_raw", self._on_cloud, qos_profile_sensor_data,
             raw=True,
         )
+        self._bridge = CvBridge()
+        self._rgb_period = 1.0 / rgb_rate
+        self._last_rgb_publish = 0.0
+        self._rgb_publisher = self.create_publisher(
+            CompressedImage, "/camera/astra/color/image_raw/compressed", 1)
+        # image_transport's lazy republisher does not remain subscribed for the
+        # bridge's native DDS reader. Subscribe eagerly, encode only sent frames.
+        self.create_subscription(Image, "/camera/astra/color/image_raw", self._on_rgb,
+                                 qos_profile_sensor_data, raw=True)
+
+    def _on_rgb(self, serialized: bytes) -> None:
+        now = time.monotonic()
+        if now - self._last_rgb_publish < self._rgb_period:
+            return
+        try:
+            image = deserialize_message(serialized, Image)
+            ok, jpeg = cv2.imencode(".jpg", self._bridge.imgmsg_to_cv2(image, "bgr8"))
+            if not ok:
+                raise RuntimeError("JPEG encoding failed")
+        except Exception as error:
+            self.get_logger().warning(f"discarding invalid Astra RGB frame: {error}", throttle_duration_sec=5)
+            return
+        self._last_rgb_publish = now
+        self._rgb_publisher.publish(CompressedImage(header=image.header, format="jpeg", data=jpeg.tobytes()))
 
     def _on_cloud(self, serialized: bytes) -> None:
         now = time.monotonic()
