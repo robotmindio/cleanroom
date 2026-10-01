@@ -44,6 +44,8 @@ def generate_launch_description():
             parameters=[parameters],
             respawn=True,
             respawn_delay=2.0,
+            sigterm_timeout="15",
+            sigkill_timeout="5",
         )]
 
     return LaunchDescription([

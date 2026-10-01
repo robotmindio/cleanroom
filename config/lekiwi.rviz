@@ -48,7 +48,7 @@ Visualization Manager:
     Plane Cell Count: 10
     Reference Frame: <Fixed Frame>
     Value: true
-  - Class: moveit_rviz_plugin/MotionPlanning
+  - Class: lekiwi_rmf/MotionPlanning
     Enabled: true
     Name: MotionPlanning
     Planned Path:

@@ -349,7 +349,7 @@ def test_moveit_and_rviz_share_tracked_scaling_and_depth_defaults():
     planning_display = next(
         display
         for display in rviz["Visualization Manager"]["Displays"]
-        if display.get("Class") == "moveit_rviz_plugin/MotionPlanning"
+        if display.get("Class") == "lekiwi_rmf/MotionPlanning"
     )
     sensors = yaml.safe_load((ROOT / "config" / "moveit_sensors.yaml").read_text())
 

@@ -354,6 +354,9 @@ def test_rviz_exports_the_selected_collision_plugin_in_its_parameter_file():
     assert 'config["collision_detector"] = "lekiwi_rmf/RestFCL"' in script
     keys = script.split('keys = (', 1)[1].split(')', 1)[0]
     assert '"collision_detector"' in keys
+    display = (ROOT / 'src/rest_motion_planning_display.cpp').read_text()
+    assert display.index('declare_parameter<std::string>') < display.index('MotionPlanningDisplay::onInitialize();')
+    assert 'Class: lekiwi_rmf/MotionPlanning' in (ROOT / 'config/lekiwi.rviz').read_text()
 
 
 def test_build_reuses_its_checkout_cache_and_removes_a_foreign_cache(tmp_path):

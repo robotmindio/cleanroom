@@ -1,0 +1,5 @@
+<library path="lekiwi_rest_motion_planning">
+  <class name="lekiwi_rmf/MotionPlanning" type="lekiwi_rmf::RestMotionPlanningDisplay" base_class_type="rviz_common::Display">
+    <description>MoveIt planning with posture-dependent resting contacts.</description>
+  </class>
+</library>
