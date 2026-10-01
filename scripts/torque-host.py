@@ -40,8 +40,9 @@ from lekiwi_rmf.motor_health import fault_snapshot, healthy_snapshot
 
 
 TORQUE_RETRIES = 5
-# The lift still held 0.023 rad short at P=64; tune only that loaded joint.
-ARM_P_COEFFICIENTS = {"arm_shoulder_lift": 96, "arm_elbow_flex": 64}
+# P=96 made the unsupported folded lift oscillate 0.0245 rad at a constant
+# goal. Integral correction below handles static load error; soften its P loop.
+ARM_P_COEFFICIENTS = {"arm_shoulder_lift": 32, "arm_elbow_flex": 64}
 # Proportional control alone leaves a load-dependent position error. Use the
 # smallest integral gain on gravity-loaded joints; keep jaw contact unchanged.
 ARM_I_COEFFICIENTS = {"arm_shoulder_lift": 1, "arm_elbow_flex": 1, "arm_wrist_flex": 1}
