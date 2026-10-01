@@ -339,6 +339,20 @@ def test_full_stack_boots_in_mapping_mode_so_loop_closure_can_run():
     assert '"Mem/NotLinkedNodesKept": "false"' in launch
 
 
+def test_build_reuses_its_checkout_cache_and_removes_a_foreign_cache(tmp_path):
+    builder = (ROOT / "scripts/build-lekiwi.sh").read_text()
+    section = 'cache=' + builder.split('\ncache=', 1)[1].split('\nparallel_args=', 1)[0]
+    workspace = tmp_path / 'workspace'
+    build = workspace / 'build/lekiwi_rmf'
+    build.mkdir(parents=True)
+    cache = build / 'CMakeCache.txt'
+    cache.write_text('CMAKE_HOME_DIRECTORY:INTERNAL=/source/current\n')
+    env = {**os.environ, 'workspace': str(workspace), 'project_root': '/source/current'}
+    subprocess.run(['bash', '-ec', section], env=env, check=True)
+    assert cache.exists()
+    env['project_root'] = '/source/other'
+    subprocess.run(['bash', '-ec', section], env=env, check=True)
+    assert not build.exists()
 def test_service_installers_support_an_unauthenticated_split_zmq_transport():
     device = (ROOT / "scripts" / "install-device-services.sh").read_text(encoding="utf-8")
     compute = (ROOT / "scripts" / "install-compute-services.sh").read_text(encoding="utf-8")
