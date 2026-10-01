@@ -127,12 +127,6 @@
 
   <!-- Collision proxies stay attached to their CAD links. Prefer exact
        vendored meshes where enclosing primitives create false collisions. -->
-  <xacro:macro name="collision_sphere_proxy" params="name parent xyz radius">
-    <link name="${name}"><collision><geometry><sphere radius="${radius}"/></geometry></collision></link>
-    <joint name="${name}_mount" type="fixed">
-      <parent link="${parent}"/><child link="${name}"/><origin xyz="${xyz}" rpy="0 0 0"/>
-    </joint>
-  </xacro:macro>
   <xacro:macro name="collision_capsule_proxy" params="name parent xyz rpy radius cylinder_length">
     <link name="${name}">
       <collision><geometry><cylinder radius="${radius}" length="${cylinder_length}"/></geometry></collision>
@@ -155,7 +149,14 @@
   <joint name="arm_pedestal_collision_proxy_mount" type="fixed">
     <parent link="so101_base_link"/><child link="arm_pedestal_collision_proxy"/><origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
-  <xacro:collision_sphere_proxy name="front_camera_collision_proxy" parent="Camera-Model-v3" xyz="-0.0158 0.0114 -0.0114" radius="0.0332"/>
+  <!-- The enclosing camera sphere reached into the wrist at a valid resting
+       pose. Use the physical camera mesh while retaining collision checking. -->
+  <link name="front_camera_collision_proxy">
+    <collision><origin xyz="0 0 0" rpy="0 0 0"/><geometry><mesh filename="package://lekiwi_rmf/urdf/meshes/Camera-Model-v3.stl" scale="0.001 0.001 0.001"/></geometry></collision>
+  </link>
+  <joint name="front_camera_collision_proxy_mount" type="fixed">
+    <parent link="Camera-Model-v3"/><child link="front_camera_collision_proxy"/><origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
 
   <!-- SO-101 aggregate links already contain their servo housings. These
        CAD-bounds-derived envelopes therefore cover each complete moving link. -->

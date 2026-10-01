@@ -228,6 +228,21 @@ class TestMoveItDriverEndToEnd(unittest.TestCase):
         self.assertTrue(self._until(future.done, timeout=10.0))
         self.assertTrue(future.result().valid, future.result().contacts)
 
+    def test_measured_resting_pose_clears_front_camera(self):
+        client = self.node.create_client(GetStateValidity, "/check_state_validity")
+        self.assertTrue(self._until(client.service_is_ready, timeout=15.0))
+        request = GetStateValidity.Request()
+        request.group_name = "arm"
+        request.robot_state.is_diff = True
+        request.robot_state.joint_state.name = list(ARM_JOINTS)
+        # Measured after torque-off; the old camera sphere rejected this pose.
+        request.robot_state.joint_state.position = [
+            -0.004603, 0.971247, 0.494062, 0.738025, -0.015344, -0.002635,
+        ]
+        future = client.call_async(request)
+        self.assertTrue(self._until(future.done, timeout=10.0))
+        self.assertTrue(future.result().valid, future.result().contacts)
+
     def test_open_gripper_can_reach_floor_object(self):
         client = self.node.create_client(GetStateValidity, "/check_state_validity")
         self.assertTrue(self._until(client.service_is_ready, timeout=15.0))

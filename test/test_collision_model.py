@@ -112,12 +112,13 @@ def test_real_arm_collision_model_includes_ground_keepout():
         assert frozenset(("arm_ground_keepout_proxy", link)) not in exemptions
 
 
-def test_pedestal_and_upper_arm_proxies_match_their_vendored_cad_meshes():
+def test_pedestal_upper_arm_and_camera_proxies_match_their_vendored_cad_meshes():
     robot = _real_robot()
     links = {link.attrib["name"]: link for link in robot.findall("link")}
     for source, proxy in (
         ("so101_base_link", "arm_pedestal_collision_proxy"),
         ("so101_upper_arm_link", "upper_arm_collision_proxy"),
+        ("Camera-Model-v3", "front_camera_collision_proxy"),
     ):
         visuals = links[source].findall("visual")
         collisions = links[proxy].findall("collision")
@@ -125,6 +126,9 @@ def test_pedestal_and_upper_arm_proxies_match_their_vendored_cad_meshes():
         for visual, collision in zip(visuals, collisions):
             assert visual.find("geometry/mesh").attrib == collision.find("geometry/mesh").attrib
             assert visual.find("origin").attrib == collision.find("origin").attrib
+        mount = robot.find(f"joint[@name='{proxy}_mount']")
+        assert mount.find("parent").get("link") == source
+        assert np.fromstring(mount.find("origin").get("xyz"), sep=" ") == pytest.approx([0, 0, 0])
 
 
 def test_rpi5_stack_box_encloses_plate_carrier_and_table_with_clearance():
