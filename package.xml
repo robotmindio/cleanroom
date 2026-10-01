@@ -26,6 +26,7 @@
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>ldlidar_stl_ros2</exec_depend>
   <exec_depend>nav2_bringup</exec_depend>
+  <exec_depend>nav2_common</exec_depend>
   <exec_depend>nav2_lifecycle_manager</exec_depend>
   <exec_depend>nav2_map_server</exec_depend>
   <exec_depend>nav_msgs</exec_depend>

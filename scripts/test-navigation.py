@@ -249,7 +249,7 @@ def main():
                 print('report',OUTPUT/'result.json',flush=True)
                 if node.lifecycle_client.wait_for_service(timeout_sec=1):
                     future=node.lifecycle_client.call_async(ManageLifecycleNodes.Request(command=ManageLifecycleNodes.Request.SHUTDOWN))
-                    end=time.monotonic()+3
+                    end=time.monotonic()+8
                     while not future.done() and time.monotonic()<end:node.tick(Twist(),check=False)
                     if not future.done() or not future.result().success:
                         print('Nav2 did not confirm graceful lifecycle shutdown',flush=True)

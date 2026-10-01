@@ -9,10 +9,11 @@ from launch.conditions import IfCondition
 from launch.event_handlers import OnProcessExit
 from launch.events import Shutdown
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import Command, EnvironmentVariable, LaunchConfiguration, PathJoinSubstitution, PythonExpression
+from launch.substitutions import Command, EnvironmentVariable, IfElseSubstitution, LaunchConfiguration, PathJoinSubstitution, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackagePrefix, FindPackageShare
+from nav2_common.launch import RewrittenYaml
 
 from lekiwi_rmf.launch_validation import validate_context
 
@@ -35,6 +36,22 @@ def _lidar_serial_present():
 def _lidar_default_port():
     """Select the stable serial name that actually exists at launch time."""
     return next((path for path in LD06_SERIAL_PORTS if os.path.exists(path)), LD06_SERIAL_PORTS[0])
+
+
+def _navigation_params(source_file, bounded_test):
+    # Match the driver's attended-test limits so MPPI predicts actual movement.
+    prefix = "controller_server.ros__parameters."
+    test_params = RewrittenYaml(source_file=source_file, param_rewrites={
+        prefix + "FollowPath.vx_max": "0.03",
+        prefix + "FollowPath.vx_min": "-0.03",
+        prefix + "FollowPath.vy_max": "0.03",
+        prefix + "FollowPath.wz_max": "0.20",
+        prefix + "FollowPath.vx_std": "0.012",
+        prefix + "FollowPath.vy_std": "0.012",
+        prefix + "FollowPath.wz_std": "0.04",
+        prefix + "progress_checker.required_movement_radius": "0.02",
+    }, convert_types=True)
+    return IfElseSubstitution(bounded_test, if_value=test_params, else_value=source_file)
 
 
 def _after_success(stage, actions):
@@ -187,7 +204,9 @@ def generate_launch_description():
     nav2_share = FindPackageShare("nav2_bringup")
     # Never inherit the upstream TurtleBot/DiffDrive tuning.  This is installed
     # with the package so a launch from an overlay and a source checkout agree.
-    params_file = PathJoinSubstitution([package, "config", "nav2_params.yaml"])
+    params_file = _navigation_params(
+        PathJoinSubstitution([package, "config", "nav2_params.yaml"]), bounded_base_test,
+    )
     ekf_params_file = PathJoinSubstitution([package, "config", "ekf.yaml"])
     safety_params_file = PathJoinSubstitution([
         package,

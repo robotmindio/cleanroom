@@ -5,6 +5,34 @@ import pytest
 from lekiwi_rmf.launch_validation import astra_serial_from_hardware_config, validate_launch_arguments
 
 
+def test_nav2_bounded_profile_matches_the_driver_and_preserves_production():
+    import runpy
+    from pathlib import Path
+    import yaml
+    from launch import LaunchContext
+    from launch.substitutions import LaunchConfiguration
+
+    root = Path(__file__).parents[1]
+    profile = runpy.run_path(str(root / 'launch/bringup.launch.py'))['_navigation_params']
+    source = root / 'config/nav2_params.yaml'
+    context = LaunchContext()
+    context.launch_configurations['bounded_base_test'] = 'false'
+    substitution = profile(str(source), LaunchConfiguration('bounded_base_test'))
+    assert substitution.perform(context) == str(source)
+    context.launch_configurations['bounded_base_test'] = 'true'
+    rewritten = Path(substitution.perform(context))
+    assert rewritten != source
+    try:
+        parameters = yaml.safe_load(rewritten.read_text())['controller_server']['ros__parameters']
+        controller = parameters['FollowPath']
+        assert (controller['vx_max'], controller['vx_min'], controller['vy_max'], controller['wz_max']) == (0.03, -0.03, 0.03, 0.20)
+        assert (controller['vx_std'], controller['vy_std'], controller['wz_std']) == (0.012, 0.012, 0.04)
+        assert parameters['progress_checker']['required_movement_radius'] == 0.02
+        assert parameters['goal_checker']['xy_goal_tolerance'] == 0.03
+    finally:
+        rewritten.unlink()
+
+
 def valid_arguments(**overrides):
     arguments = {
         "mode": "real",
