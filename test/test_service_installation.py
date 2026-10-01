@@ -325,6 +325,7 @@ def test_full_stack_boots_in_mapping_mode_so_loop_closure_can_run():
     assert "'2' if " in strategy and "lidar_on" in strategy
     assert '"RGBD/NeighborLinkRefining": "false"' in launch
     assert '"RGBD/LoopCovLimited": "true"' in launch
+    assert '"odom_sensor_sync": True' in launch
     init_memory = launch.split('"Mem/InitWMWithAllNodes":', 1)[1].split('"Rtabmap/StartNewMapOnLoopClosure"', 1)[0]
     assert "slam_mode" in init_memory and "localization" in init_memory and "lidar_on" in init_memory
     assert "value_type=str" in init_memory

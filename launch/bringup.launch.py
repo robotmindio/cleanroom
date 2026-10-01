@@ -16,6 +16,7 @@ from launch_ros.substitutions import FindPackagePrefix, FindPackageShare
 from nav2_common.launch import RewrittenYaml
 
 from lekiwi_rmf.launch_validation import validate_context
+from lekiwi_rmf.odometry import BASE_XY_SCALE, BASE_YAW_SCALE
 
 
 LD06_SERIAL_PORTS = (
@@ -327,6 +328,9 @@ def generate_launch_description():
             "Grid/3D": "false", "Grid/NormalsSegmentation": "false", "Grid/RayTracing": "true",
             "Grid/MaxObstacleHeight": "1.0", "Grid/MaxGroundHeight": "0.05",
             "subscribe_odom_info": False, "approx_sync": True, "publish_tf": True,
+            # The two cameras and fused scan have different capture stamps.
+            # Native TF motion compensation places each in the reference pose.
+            "odom_sensor_sync": True,
             "qos_image": 1, "qos_camera_info": 1, "qos_scan": 1, "qos_odom": 1,
             "Rtabmap/MemoryThr": ParameterValue(LaunchConfiguration("rtabmap_wm_nodes"), value_type=str),
             "Mem/IncrementalMemory": ParameterValue(slam_mapping, value_type=str),
@@ -523,8 +527,8 @@ def generate_launch_description():
             # LeRobot's kinematics assume base_radius=0.125 m. Measure your own robot --
             # wheel-centre to wheel-centre, divided by sqrt(3), gives the real radius --
             # and set yaw_velocity_scale to 0.125 / that. Wheels 24 cm apart give 0.90.
-            DeclareLaunchArgument("xy_velocity_scale", default_value="1.0"),
-            DeclareLaunchArgument("yaw_velocity_scale", default_value="0.90"),
+            DeclareLaunchArgument("xy_velocity_scale", default_value=str(BASE_XY_SCALE)),
+            DeclareLaunchArgument("yaw_velocity_scale", default_value=str(BASE_YAW_SCALE)),
             DeclareLaunchArgument(
                 "camera_info_url",
                 default_value=["file://", EnvironmentVariable("HOME"), "/.ros/camera_info/lekiwi_front.yaml"],
