@@ -290,9 +290,9 @@ class TorqueControlServer:
             elif command == "trajectory_start":
                 if not self.torque_enabled or request.get("session") != self.host_session:
                     raise ValueError("trajectory requires enabled torque and the current host session")
-                # Validation can take more than one loop tick. Stop the base and
-                # latch the measured arm before spending that time on the request.
-                self._hold_present_arm_position(robot)
+                # Stop wheels before validation, without an extra arm read/write
+                # transaction that delays the host's regular feedback publication.
+                robot.stop_base()
                 observation = robot.get_observation()
                 status = self.arm_executor.start(request["trajectory"], observation)
                 self.socket.send_json({"ok": True, "trajectory": status})

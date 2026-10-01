@@ -66,6 +66,9 @@ GRIPPER_LOWER, GRIPPER_UPPER = JOINT_LIMITS["arm_gripper"]
 GRIPPER_RANGE = GRIPPER_UPPER - GRIPPER_LOWER
 # ponytail: only recover small torque-off sag; larger overrun needs physical inspection.
 MAX_BOUNDARY_RECOVERY_OVERRUN = 0.15
+# Match MoveIt's start-state allowance; encoder samples need not be identical
+# between planning, action acceptance, and the Pi's local execution start.
+MAX_INITIAL_POSITION_ERROR = 0.01
 
 
 @dataclass(frozen=True)
@@ -364,8 +367,11 @@ def prepare_trajectory(names, points, start_positions, zero_positions=None, dire
         duration = point_time - previous_time
         distances = {name: abs(current[name] - previous[name]) for name in names}
         if duration <= 0.0:
-            if any(distance > 1e-9 for distance in distances.values()):
+            if any(distance > MAX_INITIAL_POSITION_ERROR for distance in distances.values()):
                 raise ValueError("trajectory requests motion with no time to execute it")
+            # A zero-time point describes initial conditions, not an instant
+            # movement. Anchor interpolation at the measured pose, avoiding a jump.
+            current = previous.copy()
         current_point = TrajectoryPoint(
             point_time,
             current,
@@ -383,7 +389,7 @@ def prepare_trajectory(names, points, start_positions, zero_positions=None, dire
                     duration,
                 )
                 segment_limits = position_limits[name]
-                if point_index == 0:
+                if previous_time == 0.0:
                     lower, upper = segment_limits
                     start = previous[name]
                     if start < lower:

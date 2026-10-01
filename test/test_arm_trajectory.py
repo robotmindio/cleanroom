@@ -22,6 +22,18 @@ from lekiwi_rmf.arm_trajectory import (
 ROOT = pathlib.Path(__file__).parents[1]
 
 
+def test_zero_time_start_uses_local_feedback_within_moveit_start_tolerance():
+    joint = "arm_shoulder_pan"
+    points = [(0.0, (0.0,), ()), (2.0, (0.1,), ())]
+    measured = {joint: 0.003}
+    trajectory = prepare_trajectory((joint,), points, measured)
+    assert trajectory[0].positions[joint] == measured[joint]
+    assert sample_trajectory((joint,), measured, trajectory, 0.0)[0] == measured
+    assert trajectory[-1].positions[joint] == 0.1
+    with pytest.raises(ValueError, match="no time"):
+        prepare_trajectory((joint,), points, {joint: 0.011})
+
+
 def test_action_positions_converts_ros_radians_to_lerobot_units():
     gripper_midpoint = sum(JOINT_LIMITS["arm_gripper"]) / 2
     converted = action_positions(
