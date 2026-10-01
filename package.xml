@@ -51,6 +51,7 @@
   <exec_depend>rosbridge_server</exec_depend>
   <exec_depend>rosapi</exec_depend>
   <exec_depend>rtabmap_slam</exec_depend>
+  <exec_depend>rtabmap_sync</exec_depend>
   <exec_depend>rtabmap_util</exec_depend>
   <exec_depend>rtabmap_msgs</exec_depend>
   <exec_depend>rviz2</exec_depend>

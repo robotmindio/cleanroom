@@ -138,8 +138,9 @@ def generate_launch_description():
     astra_here = PythonExpression([
         camera_here, " and ", real, " and '", publish_astra, "' == 'true'"
     ])
-    # The fixed RGB camera supplies appearance; registered Astra depth supplies
-    # metric visual features. A scan cloud alone cannot supply PnP feature depth.
+    # The cameras face different directions: never assign Astra depth to front
+    # RGB. Native RGB-D synchronization preserves each camera's measured view.
+    dual_rgbd = PythonExpression([camera_on, " and ", real, " and '", publish_astra, "' == 'true'"])
     slam_rgb_topic = "/camera/front/image_raw"
     slam_camera_info_topic = "/camera/front/camera_info"
     wrist_here = PythonExpression([camera_here, " and '", wrist_device, "' != 'none'"])
@@ -277,7 +278,7 @@ def generate_launch_description():
             # A restarted odometry session cannot use proximity ICP until it
             # has globally relocalized, so the camera must find that first link.
             "database_path": rtabmap_database,
-            "subscribe_rgb": ParameterValue(camera_on, value_type=bool),
+            "subscribe_rgb": ParameterValue(PythonExpression([camera_on, " and not ", dual_rgbd]), value_type=bool),
             "Reg/Strategy": ParameterValue(PythonExpression([
                 "'2' if ", camera_on, " and ", lidar_on, " else ('0' if ", camera_on, " else '1')",
             ]), value_type=str),
@@ -293,15 +294,16 @@ def generate_launch_description():
             "RGBD/LinearUpdate": "0.04", "RGBD/ProximityMaxGraphDepth": "0",
             "RGBD/ProximityOdomGuess": "true",
             "Rtabmap/DetectionRate": "2",
-            "subscribe_depth": ParameterValue(camera_on, value_type=bool),
-            "subscribe_rgbd": False, "subscribe_scan": False,
+            "subscribe_depth": ParameterValue(PythonExpression([camera_on, " and not ", dual_rgbd]), value_type=bool),
+            "subscribe_rgbd": ParameterValue(dual_rgbd, value_type=bool),
+            "rgbd_cameras": ParameterValue(PythonExpression(["2 if ", dual_rgbd, " else 1"]), value_type=int),
+            "subscribe_scan": False,
             "subscribe_scan_cloud": ParameterValue(lidar_on, value_type=bool),
             # slam_cloud already removed the floor; project every point.
             "Grid/3D": "false", "Grid/NormalsSegmentation": "false", "Grid/RayTracing": "true",
             "Grid/MaxObstacleHeight": "1.0", "Grid/MaxGroundHeight": "0.05",
             "subscribe_odom_info": False, "approx_sync": True, "publish_tf": True,
-            "qos_image": 1, "qos_camera_info": 1, "qos_scan": 1, "qos_odom": 1,
-            "qos_depth": 2,
+            "qos_image": 2, "qos_camera_info": 1, "qos_scan": 1, "qos_odom": 1,
             "Rtabmap/MemoryThr": ParameterValue(LaunchConfiguration("rtabmap_wm_nodes"), value_type=str),
             "Mem/IncrementalMemory": ParameterValue(slam_mapping, value_type=str),
             # ICP proximity closure only searches working memory. Reload the
@@ -323,6 +325,8 @@ def generate_launch_description():
         remappings=[
             ("rgb/image", slam_rgb_topic), ("rgb/camera_info", slam_camera_info_topic),
             ("depth/image", "/slam/front_depth/image_raw"),
+            ("rgbd_image0", "/slam/astra/rgbd_image"),
+            ("rgbd_image1", "/slam/front/rgbd_image"),
             ("odom", "/odom"), ("scan_cloud", "/slam/cloud"), ("map", rtabmap_map_topic),
         ],
         condition=IfCondition(visual_slam), output="screen",
@@ -934,26 +938,53 @@ def generate_launch_description():
                 parameters=[{"permission_timeout": 0.5}],
                 output="screen",
             ),
-            # Reuse measured Astra points; do not stream a full depth raster
-            # across the Pi link. RTAB-Map rectifies RGB itself and expects depth
-            # already registered to that rectified camera (Memory.cpp).
-            Node(
-                package="rtabmap_util", executable="pointcloud_to_depthimage",
-                name="slam_front_depth",
-                parameters=[{
-                    "use_sim_time": ParameterValue(sim, value_type=bool),
-                    "fixed_frame_id": "odom", "approx": True,
-                    "decimation": 4, "fill_holes_size": 2, "fill_iterations": 1,
-                    "fill_holes_error": 0.05, "wait_for_transform": 0.1,
-                    "qos": 2, "qos_camera_info": 1,
-                    "topic_queue_size": 5, "sync_queue_size": 5,
-                }],
-                remappings=[("cloud", "/camera/depth/points"),
-                    ("camera_info", slam_camera_info_topic),
-                    ("image_raw", "/slam/front_depth/image_raw")],
-                condition=IfCondition(PythonExpression([visual_slam, " and ", camera_on])),
-                output="screen",
-            ),
+            # Reuse measured range points; full depth rasters stay on the Pi.
+            # Front RGB gets visible LiDAR/Astra returns, Astra RGB gets its own
+            # registered depth. Both views retain their physical extrinsics.
+            *[
+                Node(
+                    package="rtabmap_util", executable="pointcloud_to_depthimage",
+                    name=f"slam_{camera}_depth",
+                    parameters=[{
+                        "use_sim_time": ParameterValue(sim, value_type=bool),
+                        "fixed_frame_id": "odom", "approx": True,
+                        "decimation": 4, "fill_holes_size": 2, "fill_iterations": 1,
+                        "fill_holes_error": 0.05, "wait_for_transform": 0.1,
+                        "qos": 2, "qos_camera_info": info_qos,
+                        "topic_queue_size": 5, "sync_queue_size": 5,
+                    }],
+                    remappings=[("cloud", cloud), ("camera_info", info),
+                        ("image_raw", f"/slam/{camera}_depth/image_raw")],
+                    condition=IfCondition(PythonExpression([visual_slam, " and ", enabled])),
+                    output="screen",
+                )
+                for camera, cloud, info, info_qos, enabled in [
+                    ("front", "/slam/cloud", slam_camera_info_topic, 1, camera_on),
+                    ("astra", "/camera/depth/points", "/camera/astra/color/camera_info", 2, dual_rgbd),
+                ]
+            ],
+            *[
+                Node(
+                    package="rtabmap_sync", executable="rgbd_sync", name=f"slam_{camera}_rgbd",
+                    parameters=[{
+                        "use_sim_time": ParameterValue(sim, value_type=bool),
+                        "approx_sync": True, "approx_sync_max_interval": 0.35,
+                        "qos": 2, "qos_camera_info": info_qos,
+                        "decimation": decimation, "topic_queue_size": 5, "sync_queue_size": 5,
+                    }],
+                    remappings=[("rgb/image", f"/camera/{source}/image_raw"),
+                        ("rgb/camera_info", f"/camera/{source}/camera_info"),
+                        ("depth/image", f"/slam/{camera}_depth/image_raw"),
+                        ("rgbd_image", f"/slam/{camera}/rgbd_image")],
+                    condition=IfCondition(PythonExpression([visual_slam, " and ", dual_rgbd])),
+                    output="screen",
+                )
+                # RTAB-Map concatenates equal-sized camera rasters. Astra VGA
+                # becomes QVGA, matching the front RGB and its 80x60 depth.
+                for camera, source, info_qos, decimation in [
+                    ("front", "front", 1, 1), ("astra", "astra/color", 2, 2),
+                ]
+            ],
             IncludeLaunchDescription(
             PythonLaunchDescriptionSource(PathJoinSubstitution([nav2_share, "launch", "localization_launch.py"])),
                 launch_arguments={"map": selected_map, "params_file": params_file, "use_sim_time": sim}.items(),

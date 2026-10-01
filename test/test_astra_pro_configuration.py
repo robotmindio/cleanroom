@@ -24,7 +24,7 @@ def test_astra_pro_publishes_registered_rgbd_in_the_robot_camera_frame():
     assert parameters["depth_optical_frame_id"] == "astra_camera_optical_frame"
 
 
-def test_real_bringup_keeps_navigation_on_the_front_camera_when_astra_fails():
+def test_real_bringup_maps_both_calibrated_views_with_measured_depth():
     source = (ROOT / "launch" / "bringup.launch.py").read_text()
 
     assert 'package="astra_camera", executable="astra_camera_node"' in source
@@ -33,7 +33,13 @@ def test_real_bringup_keeps_navigation_on_the_front_camera_when_astra_fails():
     assert '"--namespace", "/camera/front"' in source
     assert '"--namespace", "/camera/wrist"' in source
     assert 'slam_rgb_topic = "/camera/front/image_raw"' in source
-    assert '"subscribe_depth": False' in source
+    assert '"subscribe_rgbd": ParameterValue(dual_rgbd' in source
+    assert '("rgbd_image0", "/slam/astra/rgbd_image")' in source
+    assert '("rgbd_image1", "/slam/front/rgbd_image")' in source
+    assert '("front", "/slam/cloud", slam_camera_info_topic, 1, camera_on)' in source
+    assert '("astra", "/camera/depth/points", "/camera/astra/color/camera_info", 2, dual_rgbd)' in source
+    assert '"qos_image": 2' in source
+    assert '"qos_depth"' not in source
 
 
 def test_astra_identity_is_pinned_in_tracked_hardware_configuration():

@@ -39,7 +39,7 @@ def generate_launch_description():
             parameters=[{"in_transport": "raw", "out_transport": "compressed"}],
             remappings=[
                 ("in", "/camera/astra/color/image_raw"),
-                ("out", "/camera/astra/color/image_raw"),
+                ("out/compressed", "/camera/astra/color/image_raw/compressed"),
             ],
             output="screen", respawn=True, respawn_delay=5.0,
         ),

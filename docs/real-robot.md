@@ -50,10 +50,12 @@ on `/safety/arm_stowed`; its first map must describe the room, not the gripper
 covering the camera. Mapping input pauses during manipulation and resumes at
 stow. Raw range and camera safety topics continue throughout. With an empty
 database, RTAB-Map/Nav2 startup waits for this posture; the arm remains usable.
-The installed `rtabmap_util/pointcloud_to_depthimage` projects measured Astra
-points into the fixed front camera's rectified geometry. RTAB-Map receives that
-registered depth with raw front RGB (which it rectifies internally), plus the
-fused Astra/LD06 cloud. Visual registration supplies the global pose hypothesis
+The cameras face different directions. Installed `pointcloud_to_depthimage` and
+`rgbd_sync` nodes provide two calibrated views: Astra RGB with its own measured
+depth, and front RGB with visible returns projected from the fused Astra/LD06
+cloud. Raw RGB is rectified inside RTAB-Map. Full depth rasters stay on the Pi;
+only compact points and compressed RGB cross the link. RTAB-Map receives both
+views and the fused range cloud. Visual registration supplies the global pose hypothesis
 and ICP refines it. RGB with an unregistered scan cloud alone does not create
 the metric visual features required for restart relocalization.
 
@@ -388,7 +390,7 @@ its required health inputs and physical acceptance record are installed. Do not
 weaken the supervisor just to map; use a reviewed mapping configuration and retain
 the hardwired E-stop.
 
-Drive slowly around the complete route and return to previously visited areas so RTAB-Map can close loops. RTAB-Map maps from the merged LD06 scan and Astra cloud alone, using ICP scan matching and proximity loop closure, so a single sensor dropout does not stop mapping and lighting does not matter. Long featureless corridors and repetitive cleanroom walls are the weak case for ICP.
+Drive slowly around the complete route and return to previously visited areas so RTAB-Map can close loops. RTAB-Map combines the two camera views with the merged LD06 scan and Astra cloud. Global relocalization needs visible features with measured depth; ICP refines the resulting pose. A camera outage pauses visual mapping, while the raw range safety topics remain independent. Long featureless corridors and repetitive walls remain weak cases for registration.
 
 Stop with `scripts/ros-stop.sh`; RTAB-Map persists the database at the configured path.
 

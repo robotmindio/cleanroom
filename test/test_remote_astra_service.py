@@ -15,6 +15,7 @@ def test_remote_astra_service_publishes_the_canonical_cloud_without_other_hardwa
     assert '"config" / "astra_cloud_filter.yaml"' in launch
     assert 'package="image_transport", executable="republish"' in launch
     assert '"out_transport": "compressed"' in launch
+    assert '("out/compressed", "/camera/astra/color/image_raw/compressed")' in launch
     assert "astra_serial_from_hardware_config" in launch
     assert "ExecStart=@PROJECT_ROOT@/scripts/ros-astra.sh" in service
     assert "Restart=always" in service
