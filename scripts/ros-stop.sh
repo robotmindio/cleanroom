@@ -51,8 +51,11 @@ stop_recorded() { # stop_recorded <file> <kind> [owning-unit]
   pgid=$(ps -o pgid= -p "$pid" | tr -d '[:space:]')
   if [[ $pgid == "$pid" ]]; then grouped=1; fi
   echo "stopping recorded $kind (PID $pid)"
-  if (( grouped )); then kill -INT -- "-$pid" 2>/dev/null || true; else kill -INT "$pid" 2>/dev/null || true; fi
+  if [[ $kind == stack ]]; then
+    kill -INT "$pid" 2>/dev/null || true
+  elif (( grouped )); then kill -INT -- "-$pid" 2>/dev/null || true; else kill -INT "$pid" 2>/dev/null || true; fi
   deadline=$((SECONDS + 15))
+  [[ $kind != stack ]] || deadline=$((SECONDS + 45))
   while (( SECONDS < deadline )); do
     if (( grouped )); then kill -0 -- "-$pid" 2>/dev/null || break; else kill -0 "$pid" 2>/dev/null || break; fi
     sleep 1

@@ -27,8 +27,7 @@ Description=LeKiwi ROS 2 stack (bringup.launch.py)
 Documentation=file://@PROJECT_ROOT@/README.md
 After=network-online.target
 Wants=network-online.target
-# The self-heal watcher deliberately SIGKILLs the stack on every IPv4 change,
-# and a Wi-Fi switch or DHCP renewal storm can repeat that; RestartSec paces it.
+# Missing devices at startup must not exhaust the automatic retry budget.
 # A start limit would leave the robot without its stack until a human intervenes.
 StartLimitIntervalSec=0
 
@@ -68,7 +67,11 @@ Restart=on-failure
 RestartSec=15s
 # Nav2's lifecycle teardown alone takes ~15 s (see scripts/ros-stop.sh).
 TimeoutStopSec=45s
-KillMode=control-group
+# Signal the ROS launcher once; it closes its children and saves RTAB-Map's
+# dictionary. Broadcasting and then forwarding delivers a second signal while
+# the mapper is saving. Kill the remaining cgroup only after the stop deadline.
+KillSignal=SIGINT
+KillMode=mixed
 
 [Install]
 WantedBy=multi-user.target

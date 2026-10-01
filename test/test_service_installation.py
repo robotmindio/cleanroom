@@ -339,6 +339,16 @@ def test_full_stack_boots_in_mapping_mode_so_loop_closure_can_run():
     assert '"Mem/NotLinkedNodesKept": "false"' in launch
 
 
+def test_mapper_shutdown_signals_the_launcher_without_interrupting_its_save():
+    stack = (ROOT / 'systemd/lekiwi-stack.service').read_text()
+    runner = (ROOT / 'scripts/test-navigation.py').read_text()
+    stop = (ROOT / 'scripts/ros-stop.sh').read_text()
+    assert 'KillMode=mixed' in stack and 'KillSignal=SIGINT' in stack
+    assert 'os.kill(stack.pid,signal.SIGINT)' in runner
+    assert 'try:stack.wait(timeout=45)' in runner
+    assert '[[ $kind == stack ]]' in stop and 'deadline=$((SECONDS + 45))' in stop
+
+
 def test_build_reuses_its_checkout_cache_and_removes_a_foreign_cache(tmp_path):
     builder = (ROOT / "scripts/build-lekiwi.sh").read_text()
     section = 'cache=' + builder.split('\ncache=', 1)[1].split('\nparallel_args=', 1)[0]
@@ -896,7 +906,7 @@ def test_rotation_config_compresses_rotated_launch_logs_at_once():
     assert "[[ -x /usr/sbin/logrotate ]]" in helper
 
 
-def test_stack_survives_repeated_self_heal_kills_and_host_gets_time_to_pass_its_gate():
+def test_stack_retries_startup_and_host_gets_time_to_pass_its_gate():
     stack = (ROOT / "systemd" / "lekiwi-stack.service").read_text(encoding="utf-8")
     host = (ROOT / "systemd" / "lekiwi-host.service").read_text(encoding="utf-8")
 

@@ -29,7 +29,7 @@ ProtectKernelLogs=true
 LockPersonality=true
 RestrictSUIDSGID=true
 UMask=0077
-# The self-heal watcher kills the bridge on a network change; always restart.
+# Recover if the bridge exits; transient network changes reconnect in place.
 Restart=always
 RestartSec=10s
 TimeoutStopSec=20s

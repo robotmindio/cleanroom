@@ -267,8 +267,8 @@ def main():
                 rclpy.try_shutdown()
     finally:
         if stack is not None:
-            os.killpg(stack.pid,signal.SIGINT)
-            try:stack.wait(timeout=8)
+            os.kill(stack.pid,signal.SIGINT)
+            try:stack.wait(timeout=45)
             except subprocess.TimeoutExpired:
                 os.killpg(stack.pid,signal.SIGTERM)
                 try:stack.wait(timeout=5)
