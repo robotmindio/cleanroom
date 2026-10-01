@@ -10,7 +10,7 @@ import json
 import math
 import time
 
-from lekiwi_rmf.odometry import TelemetrySequenceTracker, accept_validated_telemetry
+from lekiwi_rmf.odometry import TelemetrySequenceTracker, accept_validated_telemetry, parse_host_odometry
 from lekiwi_rmf.motor_health import MOTOR_HEALTH_KEY, parse_motor_health
 from lekiwi_rmf.local_arm_executor import STATUS_KEY, LEASE_KEYS, validate_status
 from lekiwi_rmf.zmq_security import (
@@ -57,6 +57,7 @@ class LeKiwiZmqClient:
         self.observation_session_changed = False
         self.observation_torque_enabled = None
         self.observation_motor_health = None
+        self.observation_odometry = None
         self.arm_trajectory_status = None
         self.telemetry_sequences = TelemetrySequenceTracker()
 
@@ -172,11 +173,12 @@ class LeKiwiZmqClient:
             self.missing_state_keys = tuple(
                 key for key in self.state_keys if key not in payload
             )
+            motor_health = parse_motor_health(payload.get(MOTOR_HEALTH_KEY))
+            arm_status = validate_status(payload.get(STATUS_KEY))
+            odometry = parse_host_odometry(payload)
             accepted = accept_validated_telemetry(
                 self.telemetry_sequences, payload, self.state_keys
             )
-            motor_health = parse_motor_health(payload.get(MOTOR_HEALTH_KEY))
-            arm_status = validate_status(payload.get(STATUS_KEY))
             state = {key: float(payload[key]) for key in self.state_keys}
         except (TypeError, ValueError, OverflowError):
             return self.last_remote_state
@@ -186,6 +188,7 @@ class LeKiwiZmqClient:
         self.observation_session_changed = accepted.session_changed
         self.observation_torque_enabled = accepted.torque_enabled
         self.observation_motor_health = motor_health
+        self.observation_odometry = odometry
         self.arm_trajectory_status = arm_status
         self.last_remote_state = state
         return state

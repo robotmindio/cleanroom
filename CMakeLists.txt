@@ -4,6 +4,14 @@ project(lekiwi_rmf)
 find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_python REQUIRED)
 find_package(gz-sim8 REQUIRED)
+find_package(moveit_core REQUIRED)
+find_package(pluginlib REQUIRED)
+
+add_library(lekiwi_rest_collision SHARED src/rest_collision_plugin.cpp)
+target_compile_features(lekiwi_rest_collision PUBLIC cxx_std_17)
+ament_target_dependencies(lekiwi_rest_collision moveit_core pluginlib)
+pluginlib_export_plugin_description_file(moveit_core config/rest_collision_plugin.xml)
+install(TARGETS lekiwi_rest_collision LIBRARY DESTINATION lib)
 
 add_library(lekiwi_sim_native_failsafe SHARED src/sim_native_failsafe.cpp)
 target_compile_features(lekiwi_sim_native_failsafe PUBLIC cxx_std_17)
@@ -54,9 +62,16 @@ install(DIRECTORY config launch maps urdf worlds DESTINATION share/${PROJECT_NAM
   PATTERN "*.pyo" EXCLUDE)
 
 if(BUILD_TESTING)
+  add_executable(test_rest_contacts test/test_rest_contacts.cpp)
+  target_compile_features(test_rest_contacts PUBLIC cxx_std_17)
+  ament_target_dependencies(test_rest_contacts moveit_core)
   find_package(ament_cmake_pytest REQUIRED)
   find_package(launch_testing_ament_cmake REQUIRED)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  execute_process(COMMAND xacro ${CMAKE_CURRENT_SOURCE_DIR}/urdf/lekiwi.urdf.xacro sim:=false
+    OUTPUT_FILE ${CMAKE_CURRENT_BINARY_DIR}/rest-test.urdf COMMAND_ERROR_IS_FATAL ANY)
+  add_test(NAME test_rest_contacts COMMAND test_rest_contacts
+    ${CMAKE_CURRENT_BINARY_DIR}/rest-test.urdf ${CMAKE_CURRENT_SOURCE_DIR}/config/lekiwi.srdf)
   execute_process(
     COMMAND "${CMAKE_COMMAND}" -E env PYTHONNOUSERSITE=1
       "${Python3_EXECUTABLE}" -c

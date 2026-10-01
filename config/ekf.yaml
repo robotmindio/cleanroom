@@ -18,12 +18,12 @@ ekf_filter_node:
     world_frame: odom
 
     odom0: /wheel/odometry
-    # Wheel odometry supplies planar body velocity. Pose is deliberately not
-    # fused back into the EKF because it is derived from the same velocities.
-    odom0_config: [false, false, false,
-                   false, false, false,
-                   true,  true,  false,
+    # Pi-integrated pose retains every local sample across dropped packets.
+    # Fuse pose only: its derivative is correlated and must not be counted twice.
+    odom0_config: [true,  true,  false,
                    false, false, true,
+                   false, false, false,
+                   false, false, false,
                    false, false, false]
     odom0_queue_size: 5
     odom0_differential: false

@@ -93,3 +93,22 @@ def test_odometry_does_not_bridge_restart_link_loss_or_large_gap():
     assert clock.accept(("host", "b", 2), 5_500_000_000, 610_000_000) is None
     assert "exceeds" in clock.discontinuity
     assert clock.accept(("host", "b", 3), 5_600_000_000, 710_000_000) == pytest.approx(0.1)
+
+
+def test_host_odometry_keeps_motion_across_lost_packets_and_reanchors_restart(tmp_path):
+    from lekiwi_rmf.odometry import HostOdometry, HostPoseTracker, load_base_scales, parse_host_odometry, HOST_ODOMETRY_KEY
+
+    calibration = tmp_path / "calibration.conf"
+    calibration.write_text("camera_pitch=0.02\nxy_velocity_scale=2\nyaw_velocity_scale=0.9\n")
+    assert load_base_scales(calibration) == (2.0, 0.9)
+    host, tracker = HostOdometry(1, 1), HostPoseTracker()
+    sample = host.update((0.1, 0, 0), 1_000_000_000, 1_000_000_000)
+    assert parse_host_odometry({HOST_ODOMETRY_KEY: sample}) == sample
+    pose = tracker.update("a", sample["pose"], (1, 2, math.pi / 2))
+    for i in range(1, 11):  # Only the last packet reaches compute.
+        sample = host.update((0.1, 0, 0), 1_000_000_000 + i * 100_000_000, 1_000_000_000)
+    pose = tracker.update("a", sample["pose"], pose)
+    assert pose == pytest.approx((1, 2.1, math.pi / 2))
+    assert tracker.update("b", (0, 0, 0), pose) == pytest.approx(pose)
+    with pytest.raises(ValueError):
+        parse_host_odometry({HOST_ODOMETRY_KEY: {**sample, "pose": [float("nan"), 0, 0]}})

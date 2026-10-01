@@ -1,0 +1,5 @@
+<library path="lekiwi_rest_collision">
+  <class name="lekiwi_rmf/RestFCL" type="lekiwi_rmf::RestCollisionPlugin" base_class_type="collision_detection::CollisionPlugin">
+    <description>FCL with posture-dependent mechanical resting contacts.</description>
+  </class>
+</library>

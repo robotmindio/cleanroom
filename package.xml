@@ -11,6 +11,8 @@
   <!-- Gazebo Sim 8's exported CMake package is named gz-sim8, while the
        ROS/Jazzy rosdep key is the vendor package below. -->
   <build_depend>gz_sim_vendor</build_depend>
+  <depend>moveit_core</depend>
+  <depend>pluginlib</depend>
 
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>ament_index_python</exec_depend>

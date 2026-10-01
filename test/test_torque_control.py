@@ -377,7 +377,7 @@ class _Robot:
         self.actions.append(action)
 
     def get_observation(self):
-        return {"arm_gripper.pos": 1.0}
+        return {"arm_gripper.pos": 1.0, "x.vel": 0.0, "y.vel": 0.0, "theta.vel": 0.0}
 
 
 class _RepSocket:
@@ -678,7 +678,7 @@ def test_real_host_local_goal_holds_through_command_silence(monkeypatch, tmp_pat
     loop, clock, socket, robot = _loop(host, tmp_path)
     loop.control.torque_enabled = True
     _executor, _now, observation, trajectory = setup_executor()
-    robot.get_observation = lambda: dict(observation)
+    robot.get_observation = lambda: {"x.vel": 0.0, "y.vel": 0.0, "theta.vel": 0.0, **observation}
     command, reply = _request(loop.control, socket, robot, {
         "command": "trajectory_start", "session": loop.telemetry_session,
         "trajectory": trajectory,

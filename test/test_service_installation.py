@@ -319,10 +319,12 @@ def test_full_stack_boots_in_mapping_mode_so_loop_closure_can_run():
 
     assert '"slam_mode",\n                default_value="mapping"' in launch
     rgb = launch.split('"subscribe_rgb":', 1)[1].split('"Reg/Strategy"', 1)[0]
-    assert "ParameterValue(camera_on, value_type=bool)" in rgb
+    assert 'camera_on, " and not ", dual_rgbd' in rgb
     assert "lidar_on" not in rgb
     strategy = launch.split('"Reg/Strategy":', 1)[1].split('"Icp/VoxelSize"', 1)[0]
-    assert "'1' if " in strategy and "lidar_on" in strategy and "'2'" not in strategy
+    assert "'2' if " in strategy and "lidar_on" in strategy
+    assert '"RGBD/NeighborLinkRefining": "false"' in launch
+    assert '"RGBD/LoopCovLimited": "true"' in launch
     init_memory = launch.split('"Mem/InitWMWithAllNodes":', 1)[1].split('"Rtabmap/StartNewMapOnLoopClosure"', 1)[0]
     assert "slam_mode" in init_memory and "localization" in init_memory and "lidar_on" in init_memory
     assert "value_type=str" in init_memory

@@ -241,6 +241,14 @@ The known JYU2C wrist camera is auto-detected unless `LEKIWI_WRIST=none`. It pub
 
 LeRobot's kinematics assume a wheel 12.5 cm from the centre of rotation. Measure your robot — wheel centre to wheel centre, divided by √3 — and set `yaw_velocity_scale` to `0.125 / that`. Wheels 24 cm apart give 0.90, the default here. The factor corrects both what the base reports and what it executes, so a rotation Nav2 asks for is the rotation it gets.
 
+The motor host integrates measured base velocities on the Pi before publishing
+telemetry. Compute aligns this accumulated pose to its local odometry frame and
+uses the capture timestamp; dropped packets do not discard displacement. The
+EKF consumes pose without counting the correlated velocity a second time.
+Save wheel scales in `~/.ros/lekiwi_launch_calibration.conf` on the Pi and use
+`scripts/sync-calibration.sh` for compute. Mismatched scales deny commands with a
+diagnostic; a compute-only launch override cannot recalibrate the Pi's odometry.
+
 Check translation against a printed checkerboard, which needs no measuring tools beyond the board itself:
 
 ```bash

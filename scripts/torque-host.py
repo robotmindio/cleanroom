@@ -32,6 +32,7 @@ from lekiwi_rmf.arm_trajectory import ARM_JOINTS
 from lekiwi_rmf.local_arm_executor import LocalArmExecutor, STATUS_KEY, LEASE_KEYS
 from lekiwi_rmf.zmq_security import CurveServerSecurity, configure_link_liveness
 from lekiwi_rmf.odometry import (
+    HOST_ODOMETRY_KEY, HostOdometry, load_base_scales,
     TELEMETRY_MONOTONIC_NS_KEY, TELEMETRY_PROTOCOL_KEY,
     TELEMETRY_PROTOCOL_VERSION, TELEMETRY_SEQUENCE_KEY, TELEMETRY_SESSION_KEY,
     TELEMETRY_TORQUE_ENABLED_KEY,
@@ -506,6 +507,8 @@ class HostLoop:
         self.local_observation = None
         self.local_feedback_at = None
         self.telemetry_sequence = 0
+        self.odometry = HostOdometry(*load_base_scales(os.environ.get(
+            "LEKIWI_LAUNCH_CALIBRATION", "~/.ros/lekiwi_launch_calibration.conf")))
         self.next_observation_at = None
         self._last_command_error = None
         self._last_step_started = None
@@ -625,6 +628,10 @@ class HostLoop:
         self.local_observation = dict(observation)
         self.local_feedback_at = self.clock()
         sample_monotonic_ns = time.monotonic_ns()
+        odometry = self.odometry.update((
+            float(observation["x.vel"]), float(observation["y.vel"]),
+            math.radians(float(observation["theta.vel"])),
+        ), sample_monotonic_ns, time.time_ns())
         motor_health = self.health.collect(self.robot, self.control.torque_enabled)
         camera_keys = list(self.robot.cameras.keys())
         jpeg_frames = []
@@ -642,6 +649,7 @@ class HostLoop:
             TELEMETRY_MONOTONIC_NS_KEY: sample_monotonic_ns,
             TELEMETRY_TORQUE_ENABLED_KEY: self.control.torque_enabled,
             "_lekiwi_motor_health": motor_health,
+            HOST_ODOMETRY_KEY: odometry,
             STATUS_KEY: self.arm_executor.status,
         }
         try:

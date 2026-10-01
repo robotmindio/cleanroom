@@ -31,7 +31,7 @@ from lekiwi_rmf.arm_trajectory import (
 )
 from lekiwi_rmf.motion_guards import inside_base_test_boundary, lease_is_fresh, twist_is_finite
 from lekiwi_rmf.odometry import (
-    OdometrySampleClock, integrate_pose,
+    BASE_XY_SCALE, BASE_YAW_SCALE, HostPoseTracker, OdometrySampleClock, integrate_pose,
 )
 from lekiwi_rmf.torque_control import TorqueControlClient
 from lekiwi_rmf.zmq_client import LeKiwiZmqClient
@@ -53,8 +53,8 @@ class LeKiwiDriver(Node):
         torque_control_timeout_ms = self.declare_parameter("torque_control_timeout_ms", 4000).value
         curve_client_secret = self.declare_parameter("curve_client_secret_key_file", "").value
         curve_server_public = self.declare_parameter("curve_server_public_key_file", "").value
-        self.xy_scale = self.declare_parameter("xy_velocity_scale", 1.0).value
-        self.yaw_scale = self.declare_parameter("yaw_velocity_scale", 1.0).value
+        self.xy_scale = self.declare_parameter("xy_velocity_scale", BASE_XY_SCALE).value
+        self.yaw_scale = self.declare_parameter("yaw_velocity_scale", BASE_YAW_SCALE).value
         self.max_linear = self.declare_parameter("max_linear_speed", 0.3).value
         self.max_angular = self.declare_parameter("max_angular_speed", math.pi / 2).value
         self.bounded_base_test = bool(self.declare_parameter("bounded_base_test", False).value)
@@ -151,6 +151,8 @@ class LeKiwiDriver(Node):
         self._base_test_center = self.pose[:2]
         now = self.get_clock().now()
         self.odom_samples = OdometrySampleClock()
+        self.host_pose = HostPoseTracker()
+        self.observation_stamp = None
         self.last_observation = None
         self.last_observation_token = None
         self.last_fresh = now
@@ -1162,6 +1164,19 @@ class LeKiwiDriver(Node):
                 )
             return None
 
+        odometry = getattr(self.robot, "observation_odometry", None)
+        self.observation_stamp = None
+        if odometry is not None:
+            if any(not math.isclose(a, b, rel_tol=1e-6) for a, b in zip(
+                    odometry["scales"], (self.xy_scale, self.yaw_scale))):
+                self.record_link_loss("Pi and compute wheel calibration differ; sync calibration before motion")
+                return None
+            stamp_ns = odometry["stamp_ns"]
+            age = (self.get_clock().now().nanoseconds - stamp_ns) / 1e9
+            if age > self.link_timeout or age < -0.1:
+                self.record_link_loss(f"Host odometry capture timestamp is stale or unsynchronized ({age:.3f}s)")
+                return None
+            self.observation_stamp = rclpy.time.Time(nanoseconds=stamp_ns).to_msg()
         self.last_fresh = now
         with self.state_lock:
             self._last_fresh_monotonic = time.monotonic()
@@ -1194,6 +1209,9 @@ class LeKiwiDriver(Node):
             float(observation["y.vel"]) * self.xy_scale,
             math.radians(float(observation["theta.vel"])) * self.yaw_scale,
         )
+        if odometry is not None:
+            self.pose = self.host_pose.update(self.last_observation_token[1], odometry["pose"], self.pose)
+            return observation, velocity
         sample_dt = self.odom_samples.accept(
             self.last_observation_token,
             now.nanoseconds,
@@ -1414,6 +1432,7 @@ class LeKiwiDriver(Node):
         self.publish_safety()
 
     def publish_state(self, stamp, observation, velocity):
+        stamp = getattr(self, "observation_stamp", None) or stamp
         x, y, yaw = self.pose
         qz, qw = math.sin(yaw / 2), math.cos(yaw / 2)
 

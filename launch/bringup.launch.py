@@ -339,7 +339,10 @@ def generate_launch_description():
             # A one-node seed needs another observation before a visual closure
             # is possible. Populated maps retain the normal relocalization gate.
             "Rtabmap/StartNewMapOnLoopClosure": ParameterValue(LaunchConfiguration("rtabmap_wait_for_loop"), value_type=str),
-            "RGBD/NeighborLinkRefining": "true", "RGBD/ProximityBySpace": "true",
+            # Sub-voxel motions cannot justify replacing wheel uncertainty with
+            # a millimetre-tight ICP neighbor constraint. Keep native odometry.
+            "RGBD/NeighborLinkRefining": "false", "RGBD/ProximityBySpace": "true",
+            "RGBD/LoopCovLimited": "true",
             "Reg/Force3DoF": "true", "Grid/Sensor": "0", "Grid/RangeMax": "3.0",
             "Grid/CellSize": "0.05",
             # Five-message sync queues keep temporary link jitter from turning

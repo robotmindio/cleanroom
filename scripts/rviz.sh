@@ -139,6 +139,7 @@ import yaml
 from lekiwi_rmf.moveit_config import apply_gripper_calibration, moveit_config_builder
 
 config = moveit_config_builder("false").to_moveit_configs().to_dict()
+config["collision_detector"] = "lekiwi_rmf/RestFCL"
 apply_gripper_calibration(config, sys.argv[2])
 keys = (
     "robot_description", "robot_description_semantic",

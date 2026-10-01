@@ -94,7 +94,8 @@
 
   <!-- Operator-confirmed resting interfaces in the compact folded posture.
        Distal motor bodies still check the shoulder; jaw and surrounding hardware
-       retain collision checks. These permissions apply to the listed part pairs. -->
+       retain collision checks. RestFCL restricts these part permissions to the
+       folded travel_stow neighborhood and its short release motion. -->
   <disable_collisions link1="shoulder_motor_collision_proxy" link2="forearm_link_collision_proxy" reason="MechanicalRest"/>
   <disable_collisions link1="shoulder_motor_collision_proxy" link2="forearm_holder_collision_proxy" reason="MechanicalRest"/>
   <disable_collisions link1="shoulder_holder_collision_proxy" link2="roll_holder_collision_proxy" reason="MechanicalRest"/>

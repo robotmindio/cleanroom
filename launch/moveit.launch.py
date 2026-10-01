@@ -20,6 +20,7 @@ def generate_launch_description():
             .to_moveit_configs()
         )
         parameters = config.to_dict()
+        parameters["collision_detector"] = "lekiwi_rmf/RestFCL"
         parameters["use_sim_time"] = sim_enabled
         if not sim_enabled:
             # The Pi owns path/goal tolerances and its execution clock pauses on

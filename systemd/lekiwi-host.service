@@ -30,6 +30,8 @@ StartLimitBurst=8
 
 [Service]
 Type=simple
+# Serial feedback and the local watchdog take priority over camera processing.
+Nice=-5
 User=@SERVICE_USER@
 Environment=HOME=@SERVICE_HOME@
 Environment=LEKIWI_WS=@WORKSPACE@

@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from math import cos, isfinite, sin
+from pathlib import Path
 
 
 TELEMETRY_PROTOCOL_VERSION = 2
@@ -10,6 +11,9 @@ TELEMETRY_SESSION_KEY = "_lekiwi_session"
 TELEMETRY_SEQUENCE_KEY = "_lekiwi_sequence"
 TELEMETRY_MONOTONIC_NS_KEY = "_lekiwi_sample_monotonic_ns"
 TELEMETRY_TORQUE_ENABLED_KEY = "_lekiwi_torque_enabled"
+HOST_ODOMETRY_KEY = "_lekiwi_odometry"
+BASE_XY_SCALE = 1.0
+BASE_YAW_SCALE = 0.90
 TELEMETRY_KEYS = (
     TELEMETRY_PROTOCOL_KEY,
     TELEMETRY_SESSION_KEY,
@@ -165,3 +169,83 @@ def integrate_pose(pose, velocity, dt):
         y + (vx * sin(yaw) + vy * cos(yaw)) * dt,
         yaw + wz * dt,
     )
+
+
+def load_base_scales(path):
+    """Use the same saved wheel calibration as ros-start.sh."""
+    scales = {"xy_velocity_scale": BASE_XY_SCALE, "yaw_velocity_scale": BASE_YAW_SCALE}
+    path = Path(path).expanduser()
+    if path.exists():
+        for line in path.read_text().splitlines():
+            key, separator, value = line.partition("=")
+            if separator and key in scales:
+                scales[key] = float(value)
+    if not all(isfinite(value) and value > 0 for value in scales.values()):
+        raise ValueError(f"invalid wheel calibration in {path}")
+    return tuple(scales.values())
+
+
+def parse_host_odometry(payload):
+    if HOST_ODOMETRY_KEY not in payload:
+        return None  # Older/simulated hosts still use timestamped velocities.
+    value = payload[HOST_ODOMETRY_KEY]
+    if not isinstance(value, dict):
+        raise ValueError("invalid host odometry")
+    pose, scales, stamp = value.get("pose"), value.get("scales"), value.get("stamp_ns")
+    if (not isinstance(pose, list) or len(pose) != 3
+            or not isinstance(scales, list) or len(scales) != 2
+            or any(type(v) not in (int, float) or not isfinite(v) for v in pose + scales)
+            or any(v <= 0 for v in scales)
+            or type(stamp) is not int or stamp <= 0):
+        raise ValueError("invalid host odometry pose, calibration, or timestamp")
+    return value
+
+
+class HostOdometry:
+    """Integrate measured velocity before transport can drop observations."""
+
+    def __init__(self, xy_scale=BASE_XY_SCALE, yaw_scale=BASE_YAW_SCALE):
+        self.scales = (xy_scale, yaw_scale)
+        self.pose = (0.0, 0.0, 0.0)
+        self.sample_ns = None
+        self.velocity = None
+
+    def update(self, velocity, sample_ns, stamp_ns):
+        if (len(velocity) != 3 or not all(isfinite(v) for v in velocity)
+                or type(sample_ns) is not int or sample_ns <= 0
+                or type(stamp_ns) is not int or stamp_ns <= 0):
+            raise ValueError("invalid local odometry sample")
+        vx, vy, wz = velocity
+        velocity = (vx * self.scales[0], vy * self.scales[0], wz * self.scales[1])
+        if self.sample_ns is not None:
+            dt = (sample_ns - self.sample_ns) / 1e9
+            if dt <= 0:
+                raise ValueError("host odometry clock did not advance")
+            # Trapezoidal velocity and midpoint heading avoid the endpoint
+            # bias during acceleration, braking, and simultaneous rotation.
+            average = tuple((a + b) / 2 for a, b in zip(self.velocity, velocity))
+            x, y, yaw = self.pose
+            px, py, _ = integrate_pose((x, y, yaw + average[2] * dt / 2), average, dt)
+            self.pose = (px, py, yaw + average[2] * dt)
+        self.sample_ns, self.velocity = sample_ns, velocity
+        return {"pose": list(self.pose), "scales": list(self.scales), "stamp_ns": stamp_ns}
+
+
+class HostPoseTracker:
+    """Align each host session to the driver's continuous local odom frame."""
+
+    def __init__(self):
+        self.session = None
+        self.origin = None
+
+    def update(self, session, host_pose, local_pose):
+        hx, hy, ha = host_pose
+        if session != self.session:
+            x, y, yaw = local_pose
+            rotation = yaw - ha
+            self.origin = (x - hx * cos(rotation) + hy * sin(rotation),
+                           y - hx * sin(rotation) - hy * cos(rotation), rotation)
+            self.session = session
+        x, y, rotation = self.origin
+        return (x + hx * cos(rotation) - hy * sin(rotation),
+                y + hx * sin(rotation) + hy * cos(rotation), rotation + ha)

@@ -34,6 +34,8 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=simple
+# Keep robot callbacks responsive when desktop/build workloads compete for CPU.
+Nice=-5
 User=@SERVICE_USER@
 Environment=HOME=@SERVICE_HOME@
 Environment=LEKIWI_WS=@WORKSPACE@
