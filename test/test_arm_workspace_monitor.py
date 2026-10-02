@@ -1,10 +1,13 @@
 """Pure checks for the execution-time MoveIt collision gate."""
 
 import math
+import types
 
 from sensor_msgs.msg import JointState
 
-from lekiwi_rmf.arm_workspace_monitor import ArmWorkspaceState, complete_joint_snapshot
+from lekiwi_rmf.arm_workspace_monitor import (
+    ArmWorkspaceMonitor, ArmWorkspaceState, complete_joint_snapshot,
+)
 
 
 SECOND = 1_000_000_000
@@ -61,6 +64,30 @@ def test_gate_rejects_future_receive_timestamps():
     clear, detail = state.decision(SECOND, SECOND, SECOND, SECOND)
     assert not clear
     assert "joint state stale" == detail
+
+
+def test_joint_capture_clock_skew_is_bounded_and_transport_age_is_preserved():
+    now = [SECOND]
+    node = types.SimpleNamespace(_joint_names=('joint_a','joint_b'),
+        _joint_timeout_ns=450_000_000, _state=ArmWorkspaceState(),
+        _monotonic_ns=lambda:10*SECOND,
+        get_clock=lambda:types.SimpleNamespace(now=lambda:types.SimpleNamespace(nanoseconds=now[0])))
+    message = _joints()
+    for ahead in (7_000_000,50_000_000):
+        message.header.stamp.nanosec = ahead
+        ArmWorkspaceMonitor._on_joint_state(node,message)
+        assert node._joint_snapshot is not None
+        assert node._state.joint_received_ns==10*SECOND
+    message.header.stamp.nanosec = 50_000_001
+    ArmWorkspaceMonitor._on_joint_state(node,message)
+    assert node._joint_snapshot is None and node._state.joint_received_ns is None
+    message.header.stamp.nanosec = 0
+    now[0] = SECOND+100_000_000
+    ArmWorkspaceMonitor._on_joint_state(node,message)
+    assert node._state.joint_received_ns==10*SECOND-100_000_000
+    now[0] = SECOND+450_000_001
+    ArmWorkspaceMonitor._on_joint_state(node,message)
+    assert node._joint_snapshot is None
 
 
 def test_gate_blocks_until_the_perception_cloud_arrives_and_when_it_goes_stale():

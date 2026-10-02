@@ -32,7 +32,9 @@ from sensor_msgs.msg import BatteryState, Imu, JointState, LaserScan, PointCloud
 from std_msgs.msg import Bool, String
 from std_srvs.srv import Trigger
 
-from lekiwi_rmf.motion_guards import load_base_speed_limits, positive_seconds_ns, stamp_ns
+from lekiwi_rmf.motion_guards import (
+    FUTURE_STAMP_TOLERANCE_NS, load_base_speed_limits, positive_seconds_ns, stamp_ns,
+)
 from lekiwi_rmf.scan_self_filter import parse_sectors
 
 
@@ -90,7 +92,7 @@ class SafetyStateMachine:
     latched_faults: list[str] = field(default_factory=list)
     driver_state_required: bool = True
     # The Pi's scan clock was measured 7 ms ahead of compute; bound the grace.
-    future_stamp_tolerance_ns: int = 50_000_000
+    future_stamp_tolerance_ns: int = FUTURE_STAMP_TOLERANCE_NS
 
     def _latch(self, faults: tuple[str, ...]) -> None:
         self.fault_latched = True

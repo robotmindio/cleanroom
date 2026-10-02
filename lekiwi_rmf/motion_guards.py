@@ -13,6 +13,10 @@ from typing import Optional, Protocol
 
 import yaml
 
+# Pi capture timestamps were measured a few milliseconds ahead of compute.
+# This bounds source-clock skew; monotonic receive-time leases remain strict.
+FUTURE_STAMP_TOLERANCE_NS = 50_000_000
+
 
 def load_base_speed_limits(path: str | Path) -> tuple[float, float]:
     """Use the tracked MPPI limits for both acceptance and manual commands."""

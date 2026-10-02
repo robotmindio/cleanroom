@@ -35,8 +35,14 @@ The webcam confirms good lighting and the compact empty-gripper fold.
 
 Deployed 47fdbef: acceptance now binds to tracked MPPI speed limits, the manual
 driver uses those limits, and required base health is enforced in hold mode.
-Depth now protects both base and arm. All 158 affected Python checks passed.
+Depth now protects both base and arm. All 163 affected Python checks passed.
 Normal hold mode keeps torque and recovers permission without new fault latching.
+
+Final idle verification identified frequent false "joint state missing" events:
+the arm workspace monitor rejected every future capture stamp, while Pi samples
+occasionally arrive a few milliseconds ahead of compute. It now shares the
+supervisor's bounded 50 ms source-clock tolerance and subtracts transport age
+from its monotonic joint lease; stale data is not given a fresh full lease.
 
 Live fault checks passed for lidar, depth and telemetry loss (4.9 cm maximum
 wheel-odometry radius). Compute-driver SIGSTOP exercised the Pi command watchdog,

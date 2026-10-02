@@ -17,7 +17,7 @@ from sensor_msgs.msg import JointState, PointCloud2
 from std_msgs.msg import Bool
 
 from lekiwi_rmf.arm_trajectory import ARM_JOINTS
-from lekiwi_rmf.motion_guards import positive_seconds_ns, stamp_ns
+from lekiwi_rmf.motion_guards import FUTURE_STAMP_TOLERANCE_NS, positive_seconds_ns, stamp_ns
 
 
 @dataclass
@@ -155,7 +155,7 @@ class ArmWorkspaceMonitor(Node):
         source_age_ns = self.get_clock().now().nanoseconds - source_ns
         if (
             snapshot is None
-            or source_age_ns < 0
+            or source_age_ns < -FUTURE_STAMP_TOLERANCE_NS
             or source_age_ns > self._joint_timeout_ns
         ):
             self._joint_snapshot = None
@@ -166,7 +166,7 @@ class ArmWorkspaceMonitor(Node):
             )
             return
         self._joint_snapshot = snapshot
-        self._state.joint_received_ns = self._monotonic_ns()
+        self._state.joint_received_ns = self._monotonic_ns() - max(0, source_age_ns)
 
     def _on_perception(self, _serialized_cloud: bytes) -> None:
         self._state.perception_received_ns = self._monotonic_ns()
