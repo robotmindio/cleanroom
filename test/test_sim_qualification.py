@@ -105,6 +105,7 @@ def test_runner_rejects_evidence_inside_the_source_checkout(monkeypatch):
 def test_expected_ctests_match_every_test_the_package_registers():
     cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
     registered = set(re.findall(r"add_lekiwi_pytest\((\w+)", cmake))
+    registered |= set(re.findall(r"add_test\(NAME\s+(\w+)", cmake))
     registered |= {f"test_{name}" for name in re.findall(r"add_launch_test\(test/(\S+)", cmake)}
     assert registered == set(_load().EXPECTED_CTESTS)
     unit_tests = {path.stem for path in (ROOT / "test").glob("test_*.py") if not path.stem.endswith("_launch")}

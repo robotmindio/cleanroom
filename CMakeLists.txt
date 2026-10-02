@@ -120,7 +120,7 @@ if(BUILD_TESTING)
     ament_add_pytest_test(${name} test/${name}.py ENV "${test_environment}")
   endfunction()
   # Never let a test discover a running robot or a parallel test. These are
-  # distinct valid DDS domains (180-223), intentionally away from the live
+  # distinct valid DDS domains (180-224), intentionally away from the live
   # default (0) and below Cyclone DDS's highest usable domain (232). Tests
   # without one never open a DDS participant.
   add_lekiwi_pytest(test_odometry 180)
@@ -135,6 +135,7 @@ if(BUILD_TESTING)
   add_lekiwi_pytest(test_arm_trajectory 184)
   add_lekiwi_pytest(test_local_arm_executor)
   add_lekiwi_pytest(test_arm_calibration)
+  add_lekiwi_pytest(test_arm_jog 224)
   add_lekiwi_pytest(test_capture_stow)
   add_lekiwi_pytest(test_collision_model 185)
   add_lekiwi_pytest(test_vendor_lekiwi_model)

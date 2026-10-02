@@ -60,8 +60,14 @@ still undergo normal destruction. Three isolated MoveIt SIGINT trials exited
 zero, and the native action regression passes. Nav2 now uses a tracked ten-second
 lifecycle RPC deadline, shares discovery/response timing, honors success=false,
 and receives its parameter file. Delayed, timed-out, refused and disappearing
-service cases all pass; 98 affected Python checks pass. Deployment and production
-restart verification are next.
+service cases all pass; 98 affected Python checks pass. First deployment and
+production verification passed: all ten Nav2 nodes active, ten-second runtime
+RPC timeout, fresh 2D/depth/lidar/SLAM streams, MoveIt-valid folded arm with no
+encoder-resolved movement, and native library mappings from the selected
+workspace. Native CTest and loopback MoveIt-to-driver execution also passed.
+The full qualification inventory now includes C++ tests, local arm execution
+and arm-jog cancellation. CI exposed an optional colcon flag missing from the
+minimal image; the builder now detects it without adding a dependency.
 
 Next: independent floor scale and confirmation of surface/payload and test speed
 scope, then 30 stopping trials per direction and remaining fault tests (motor

@@ -25,7 +25,8 @@ ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_CTESTS = (
     "test_odometry", "test_motor_health", "test_odom_scale", "test_free_space",
     "test_camera_relay", "test_astra_pro_configuration", "test_astra_cloud_filter",
-    "test_remote_astra_service", "test_arm_trajectory", "test_arm_calibration",
+    "test_remote_astra_service", "test_arm_trajectory", "test_local_arm_executor", "test_arm_calibration",
+    "test_arm_jog",
     "test_capture_stow",
     "test_collision_model", "test_vendor_lekiwi_model", "test_driver_link",
     "test_cmd_vel_mux", "test_teleop", "test_readiness_gate", "test_sim_host_tools",
@@ -35,7 +36,7 @@ EXPECTED_CTESTS = (
     "test_launch_validation", "test_rtabmap_session_guard", "test_fake_host",
     "test_zmq_security", "test_simulation_model", "test_service_installation",
     "test_rmf_owner_guard", "test_moveit_shutdown_probe",
-    "test_native_lifecycle", "test_native_waitable",
+    "test_native_lifecycle", "test_native_waitable", "test_rest_contacts",
     "test_sim_qualification", "test_slam_cloud", "test_motion_guards",
     "test_scan_self_filter", "test_camera_supervisor", "test_moveit_cloud_gate",
     "test_moveit_gripper_calibration",

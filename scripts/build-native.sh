@@ -33,12 +33,16 @@ set -u
 # One compiler at a time keeps the running robot stack responsive during deploy.
 export MAKEFLAGS=-j1
 export PATH=/usr/bin:/bin:$PATH
+override_args=()
+if [[ $(colcon build --help) == *--allow-overriding* ]]; then
+  override_args=(--allow-overriding class_loader rclcpp nav2_util nav2_lifecycle_manager nav2_bringup)
+fi
 colcon --log-base "$workspace/log" build \
   --base-paths "$workspace/src/class_loader" "$workspace/src/rclcpp/rclcpp" \
     "$workspace/src/navigation2/nav2_util" "$workspace/src/navigation2/nav2_lifecycle_manager" \
     "$workspace/src/navigation2/nav2_bringup" \
   --packages-select class_loader rclcpp nav2_util nav2_lifecycle_manager nav2_bringup \
-  --executor sequential --allow-overriding class_loader rclcpp nav2_util nav2_lifecycle_manager nav2_bringup \
+  --executor sequential "${override_args[@]}" \
   --build-base "$workspace/build" --install-base "$workspace/install" \
   --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
     -DCMAKE_IGNORE_PREFIX_PATH="$HOME/.local" -DPython3_EXECUTABLE=/usr/bin/python3

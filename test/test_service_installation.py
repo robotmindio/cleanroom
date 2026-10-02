@@ -18,6 +18,19 @@ import pytest
 ROOT = pathlib.Path(__file__).parents[1]
 
 
+@pytest.mark.parametrize("help_text,expected", [("colcon build", False), ("--allow-overriding", True)])
+def test_native_builder_accepts_colcon_without_optional_override_extension(help_text, expected):
+    builder = (ROOT / "scripts/build-native.sh").read_text()
+    options = builder.split("override_args=()\n", 1)[1].split("\ncolcon --log-base", 1)[0]
+    result = subprocess.run(
+        ["bash", "-c", 'set -Eeuo pipefail; colcon() { printf "%s\\n" "$0"; }; '
+         'override_args=(); ' + options + '\ndeclare -p override_args', help_text],
+        # The function receives build/--help; supply the synthetic help as $0.
+        check=True, capture_output=True, text=True,
+    )
+    assert ("--allow-overriding" in result.stdout) is expected
+
+
 def test_pi5_usb_current_config_is_idempotent(tmp_path):
     script = (ROOT / "scripts" / "enable-pi5-usb-current.sh").read_text(encoding="utf-8")
     update = script.split("<<'PY'\n", 1)[1].split("\nPY", 1)[0]
