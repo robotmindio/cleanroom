@@ -507,7 +507,7 @@ def test_live_acceptance_requirement_is_base_only():
             2**62, base=True, arm=False
         )
         assert node._machine.requirements["scan"].max_age_ns == 500_000_000
-        assert node._machine.requirements["depth"].max_age_ns == 1_000_000_000
+        assert node._machine.requirements["depth"] == Requirement(1_000_000_000)
     finally:
         if node is not None:
             node.destroy_node()

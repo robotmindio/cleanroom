@@ -736,7 +736,7 @@ class SafetySupervisor(Node):
         if self.get_parameter("require_scan").value:
             requirements["scan"] = Requirement(sensor_timeout, base=True, arm=False)
         if self.get_parameter("require_depth").value:
-            requirements["depth"] = Requirement(depth_timeout, base=False, arm=True)
+            requirements["depth"] = Requirement(depth_timeout)
         if self.get_parameter("require_bumper").value:
             requirements["bumper"] = Requirement(state_timeout)
         if self.get_parameter("require_estop").value:

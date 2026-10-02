@@ -73,8 +73,12 @@ def test_physical_fault_probe_restores_service_when_injection_fails():
     calls = []
     node = types.SimpleNamespace(flags={'base_motion_permitted':True,'arm_stowed':True},
         speed=0.0, odom_at=time.monotonic(), pose=(0,0,0),
+        checks={},linear_speed=0.0,safe_speed=0.01,
         stop=lambda:calls.append('stop'), wait=lambda condition,timeout:condition())
-    node.tick = lambda command:setattr(node,'speed',0.01)
+    def tick(command):
+        node.linear_speed = 0.01
+        node.pose = (0.005,0,0)
+    node.tick = tick
     def broken(command):
         raise RuntimeError('injection failed')
     with pytest.raises(RuntimeError,match='injection failed'):

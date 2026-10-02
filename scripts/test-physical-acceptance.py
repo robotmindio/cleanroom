@@ -13,6 +13,7 @@ import subprocess
 import time
 
 from geometry_msgs.msg import Twist
+from lifecycle_msgs.srv import GetState
 
 navigation = runpy.run_path(str(Path(__file__).with_name('test-navigation.py')))
 
@@ -23,6 +24,12 @@ class FaultTest(navigation['Test']):
         self.deadline = time.monotonic()+360
         self.speed = math.inf
         self.checks = {}
+        self.phase = None
+        self.safe_speed = None
+        self.linear_speed = math.inf
+        self.monitor_state = self.create_client(GetState,'/collision_monitor/get_state')
+        self.create_subscription(Twist,'/cmd_vel_safe',lambda m:setattr(self,'safe_speed',
+            math.hypot(m.linear.x,m.linear.y)+abs(m.angular.z)),10)
         arguments = navigation['installed_stack_arguments']()
         self.device = next(a.partition(':=')[2] for a in arguments if a.startswith('remote_ip:='))
         self.ssh = ['ssh','-o','BatchMode=yes','-o','ConnectTimeout=5',
@@ -31,7 +38,16 @@ class FaultTest(navigation['Test']):
     def odometry(self, message):
         super().odometry(message)
         velocity = message.twist.twist
-        self.speed = math.hypot(velocity.linear.x,velocity.linear.y)+abs(velocity.angular.z)
+        self.linear_speed = math.hypot(velocity.linear.x,velocity.linear.y)
+        self.speed = self.linear_speed+abs(velocity.angular.z)
+        if self.phase:
+            stamp = message.header.stamp
+            self.checks[self.phase]['samples'].append({
+                'time':time.monotonic(),'wheel_speed':self.speed,'safe_command':self.safe_speed,
+                'linear_speed':self.linear_speed,'angular_speed':velocity.angular.z,
+                'capture_age_s':(self.get_clock().now().nanoseconds-stamp.sec*10**9-stamp.nanosec)/10**9,
+                'base_permitted':self.flags.get('base_motion_permitted'),
+                'faults':self.health.get('faults')})
 
     def tick(self, twist=None, check=True):
         # Faults intentionally remove feedback/permission. Keep the finite
@@ -65,12 +81,16 @@ class FaultTest(navigation['Test']):
     def fault(self, name, begin, restore, expected):
         self.wait(lambda:self.flags.get('base_motion_permitted') and self.flags.get('arm_stowed'),30)
         command = Twist()
-        command.linear.x = 0.02
-        end = time.monotonic()+2
-        while self.speed<=0.001 or time.monotonic()-self.odom_at>0.3:
+        command.linear.x = 0.03
+        start = self.pose
+        end = time.monotonic()+5
+        while (self.linear_speed<0.005 or not self.safe_speed or
+               math.dist(self.pose[:2],start[:2])<0.003 or time.monotonic()-self.odom_at>0.3):
             if time.monotonic()>end:raise RuntimeError('base did not start for '+name)
             self.tick(command)
         origin = self.pose
+        self.phase = name
+        self.checks[name] = {'passed':False,'samples':[]}
         print('injecting',name,'moving speed',self.speed,flush=True)
         try:
             begin(command)
@@ -80,15 +100,23 @@ class FaultTest(navigation['Test']):
                 if time.monotonic()>end:raise RuntimeError(name+' did not withdraw permission: '+str(self.health))
                 self.tick(command)
             denial = self.health.copy()
+            self.checks[name]['denial'] = denial
             if 'base_test:' in denial.get('faults',''):
                 raise RuntimeError('test-client lease expired; fault result would be confounded')
+            denied_at = time.monotonic()
+            end = denied_at+3
+            while name!='telemetry_loss' and sum(
+                s['wheel_speed']<=0.001 and s['capture_age_s']<0.3
+                for s in self.checks[name]['samples'] if s['time']>=denied_at
+            )<3:
+                if time.monotonic()>end:raise RuntimeError(name+' lacks fresh stopped wheel samples')
+                self.tick(command)
             end = time.monotonic()+1
             while time.monotonic()<end:self.tick(command)
             # Sensor fault tests retain fresh wheel feedback. For telemetry loss
             # check the first recovered reading before sending another command.
-            if name!='telemetry_loss' and (
-                self.speed>0.001 or time.monotonic()-self.odom_at>0.4
-            ):raise RuntimeError(name+' did not produce fresh stopped wheel readings')
+            if name!='telemetry_loss' and self.safe_speed!=0:
+                raise RuntimeError(name+' left a nonzero guarded command')
             for frame in range(2):
                 image = navigation['ROOT']/f'.benchmarks/physical-acceptance/{name}-{frame}.jpg'
                 self.action(['timeout','12','gst-launch-1.0','-q','pipewiresrc',
@@ -103,15 +131,24 @@ class FaultTest(navigation['Test']):
         self.wait(lambda:time.monotonic()-self.odom_at<0.3 and self.speed<=0.001,10)
         self.wait(lambda:self.flags.get('base_motion_permitted') and
                   self.flags.get('arm_stowed') and self.flags.get('driver')=='ARMED',45)
-        self.checks[name] = {'passed':True,'denial':denial,'recovered_driver':self.flags['driver'],
+        self.checks[name].update({'passed':True,'denial':denial,'recovered_driver':self.flags['driver'],
                              'stopped_wheel_speed':self.speed,
-                             'observed_displacement_m':math.dist(origin[:2],self.pose[:2])}
-        print('passed',name,self.checks[name],flush=True)
+                             'observed_displacement_m':math.dist(origin[:2],self.pose[:2])})
+        self.phase = None
+        print('passed',name,'stopped speed',self.speed,flush=True)
         self.move(self.center)
 
     def run(self):
         self.wait(lambda:self.pose is not None and self.flags.get('arm_stowed') and
                   self.flags.get('driver')=='ARMED',70)
+        self.wait(lambda:self.monitor_state.service_is_ready(),20)
+        end = time.monotonic()+30
+        while True:
+            future = self.monitor_state.call_async(GetState.Request())
+            self.wait(future.done,5)
+            if future.result().current_state.id==3:break
+            if time.monotonic()>end:raise RuntimeError('collision monitor did not activate')
+            self.tick(Twist())
         self.center = self.pose
         self.active = True
         for name,unit,reason in [('scan_disconnect','lekiwi-lidar.service','scan:'),
