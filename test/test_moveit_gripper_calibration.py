@@ -10,7 +10,8 @@ def test_moveit_execution_budget_allows_real_servo_timing_margin():
     execution = moveit_config_builder("false").to_moveit_configs().trajectory_execution
     assert execution["trajectory_execution"] == {
         "allowed_execution_duration_scaling": 1.5,
-        "allowed_goal_duration_margin": 1.0,
+        # Include the driver's five-second settling window and transport margin.
+        "allowed_goal_duration_margin": 6.0,
     }
 
 

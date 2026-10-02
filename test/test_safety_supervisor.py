@@ -830,7 +830,8 @@ def test_bounded_test_requires_lease_and_all_measured_inputs():
         node._machine.driver_state = 'ARMED'
         node._machine.arm_stowed = True
         for key in node._machine.requirements:
-            if key != 'base_test': node._machine.update(key, True, node._now())
+            if key != 'base_test':
+                node._machine.update(key, True, node._now())
         published = []
         node._base_pub = types.SimpleNamespace(publish=published.append)
         node._publish()

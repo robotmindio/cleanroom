@@ -124,7 +124,8 @@ def test_navigation_probe_withdraws_lease_until_wheel_feedback_recovers(monkeypa
         command=types.SimpleNamespace(publish=commands.append))
     node.tick = lambda *args,**kwargs:Test.tick(node,*args,**kwargs)
     def spin_once(node,timeout_sec):
-        if not node.active:node.odom_at=time.monotonic()
+        if not node.active:
+            node.odom_at=time.monotonic()
     monkeypatch.setattr(rclpy,'spin_once',spin_once)
     node.tick()
     assert leases == [True,False] and node.active

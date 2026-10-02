@@ -110,7 +110,8 @@ def test_rgb_encoding_is_eager_rate_limited_and_keeps_capture_stamp(monkeypatch)
         monkeypatch.setattr("lekiwi_rmf.astra_cloud_filter.time.monotonic", lambda: next(clock))
         image = Image(width=2, height=2, encoding="bgr8", step=6, data=bytes(12))
         image.header.stamp.sec = 7
-        for _ in range(3): node._on_image(serialize_message(image), "color", ".jpg", "jpeg", publisher)
+        for _ in range(3):
+            node._on_image(serialize_message(image), "color", ".jpg", "jpeg", publisher)
         assert len(frames) == 2
         assert all(f.header.stamp.sec == 7 and f.format == "jpeg" for f in frames)
         assert cv2.imdecode(np.frombuffer(frames[0].data, np.uint8), cv2.IMREAD_COLOR).shape == (2, 2, 3)

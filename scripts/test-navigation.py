@@ -38,7 +38,8 @@ def installed_stack_arguments(path=Path('/etc/default/lekiwi-stack')):
         if line.startswith('LEKIWI_STACK_ARGS='):
             args = shlex.split(line.partition('=')[2])
             # systemd EnvironmentFile permits an unquoted value with spaces.
-            if len(args)==1:args = shlex.split(args[0])
+            if len(args)==1:
+                args = shlex.split(args[0])
             if not args or any(':=' not in arg for arg in args):
                 raise ValueError('invalid installed LEKIWI_STACK_ARGS')
             return args
@@ -92,7 +93,8 @@ class Test(Node):
         for status in m.status:
             if status.name=='lekiwi/safety_supervisor':
                 self.health = {v.key:v.value for v in status.values}
-                if self.health.get('faults'):self.health_faults.append(self.health.copy())
+                if self.health.get('faults'):
+                    self.health_faults.append(self.health.copy())
 
     def odometry(self, m):
         p = m.pose.pose.position
@@ -108,10 +110,12 @@ class Test(Node):
 
     def tick(self, twist=None, check=True):
         self.lease.publish(Bool(data=self.active))
-        if twist is not None:self.command.publish(twist)
+        if twist is not None:
+            self.command.publish(twist)
         rclpy.spin_once(self,timeout_sec=0.04)
         if check and self.center is not None:
-            if time.monotonic()>self.deadline:raise RuntimeError('total test deadline expired')
+            if time.monotonic()>self.deadline:
+                raise RuntimeError('total test deadline expired')
             if time.monotonic()-self.odom_at>0.5:
                 print('paused for fresh wheel feedback',flush=True)
                 was_active = self.active
@@ -119,21 +123,27 @@ class Test(Node):
                 end = time.monotonic()+3
                 while time.monotonic()-self.odom_at>0.5:
                     self.tick(Twist(),check=False)
-                    if time.monotonic()>end:raise RuntimeError('wheel feedback did not recover')
+                    if time.monotonic()>end:
+                        raise RuntimeError('wheel feedback did not recover')
                 self.active = was_active
-            if math.dist(self.pose[:2],self.center[:2])>=0.18:raise RuntimeError('early 18 cm test boundary reached')
-            if not self.flags.get('arm_stowed'):raise RuntimeError('arm left travel_stow')
-            if self.flags.get('driver')!='ARMED':raise RuntimeError('driver stopped being armed')
+            if math.dist(self.pose[:2],self.center[:2])>=0.18:
+                raise RuntimeError('early 18 cm test boundary reached')
+            if not self.flags.get('arm_stowed'):
+                raise RuntimeError('arm left travel_stow')
+            if self.flags.get('driver')!='ARMED':
+                raise RuntimeError('driver stopped being armed')
 
     def wait(self, condition, seconds):
         end = time.monotonic()+seconds
         while not condition():
-            if time.monotonic()>end:raise RuntimeError('timed out waiting for '+str(condition))
+            if time.monotonic()>end:
+                raise RuntimeError('timed out waiting for '+str(condition))
             self.tick()
 
     def stop(self):
         end = time.monotonic()+0.6
-        while time.monotonic()<end:self.tick(Twist(),check=False)
+        while time.monotonic()<end:
+            self.tick(Twist(),check=False)
 
     def move(self, target):
         print('manual target',target,flush=True)
@@ -144,8 +154,10 @@ class Test(Node):
             x,y,a = self.pose
             dx,dy = target[0]-x,target[1]-y
             da = angle(target[2]-a)
-            if math.hypot(dx,dy)<0.008 and abs(da)<0.03:break
-            if time.monotonic()>end:raise RuntimeError('manual motion did not reach target')
+            if math.hypot(dx,dy)<0.008 and abs(da)<0.03:
+                break
+            if time.monotonic()>end:
+                raise RuntimeError('manual motion did not reach target')
             if not self.flags.get('base_motion_permitted'):
                 print('paused for permission',self.health,flush=True)
                 self.stop()
@@ -172,12 +184,14 @@ class Test(Node):
         future = self.navigation.send_goal_async(goal)
         self.wait(future.done,5)
         self.goal = future.result()
-        if not self.goal.accepted:raise RuntimeError('Nav2 rejected goal')
+        if not self.goal.accepted:
+            raise RuntimeError('Nav2 rejected goal')
         result = self.goal.get_result_async()
         self.wait(result.done,40)
         status = result.result().status
         print('Nav2 result',status,'pose',self.pose,flush=True)
-        if status!=4:raise RuntimeError('Nav2 failed: '+str(result.result().result))
+        if status!=4:
+            raise RuntimeError('Nav2 failed: '+str(result.result().result))
         self.goal = None
         self.stop()
 
@@ -189,8 +203,10 @@ class Test(Node):
         self.wait(lambda:self.flags.get('base_motion_permitted'),10)
         # Verify denial on a dead test client before sending any nonzero command.
         end = time.monotonic()+0.8
-        while time.monotonic()<end:rclpy.spin_once(self,timeout_sec=0.05)
-        if self.flags.get('base_motion_permitted'):raise RuntimeError('test lease did not expire')
+        while time.monotonic()<end:
+            rclpy.spin_once(self,timeout_sec=0.05)
+        if self.flags.get('base_motion_permitted'):
+            raise RuntimeError('test lease did not expire')
         self.wait(lambda:self.flags.get('base_motion_permitted'),5)
         print('lease expiry verified; center',self.center,flush=True)
         x,y,a = self.center
@@ -207,11 +223,13 @@ class Test(Node):
         mx,my,ma = tf.translation.x,tf.translation.y,yaw(tf.rotation)
         before = self.pose
         self.navigate((mx+0.16*math.cos(ma),my+0.16*math.sin(ma),ma))
-        if math.dist(before[:2],self.pose[:2])<0.035:raise RuntimeError('Nav2 reported success without meaningful motion')
+        if math.dist(before[:2],self.pose[:2])<0.035:
+            raise RuntimeError('Nav2 reported success without meaningful motion')
         self.navigate((mx,my,ma))
         self.move(self.center)
         end = time.monotonic()+5
-        while time.monotonic()<end:self.tick(Twist())
+        while time.monotonic()<end:
+            self.tick(Twist())
 
 
 def main(test_class=Test, output=OUTPUT):
@@ -229,7 +247,8 @@ def main(test_class=Test, output=OUTPUT):
                 env={**os.environ,'LEKIWI_RUNTIME_DIR':str(output/'runtime')}, start_new_session=True)
             rclpy.init()
             node = test_class()
-            try:node.run()
+            try:
+                node.run()
             except (Exception,KeyboardInterrupt) as e:
                 error = str(e) or type(e).__name__
                 raise
@@ -237,19 +256,21 @@ def main(test_class=Test, output=OUTPUT):
                 if node.goal is not None:
                     future=node.goal.cancel_goal_async()
                     end=time.monotonic()+2
-                    while not future.done() and time.monotonic()<end:node.tick(Twist(),check=False)
+                    while not future.done() and time.monotonic()<end:
+                        node.tick(Twist(),check=False)
                 node.active=False
                 node.stop()
                 graph = None
                 if node.map_client.wait_for_service(timeout_sec=1):
                     future=node.map_client.call_async(GetMap.Request(global_map=True,optimized=True,graph_only=False))
                     end=time.monotonic()+3
-                    while not future.done() and time.monotonic()<end:node.tick(Twist(),check=False)
+                    while not future.done() and time.monotonic()<end:
+                        node.tick(Twist(),check=False)
                     if future.done() and future.result():
                         data=future.result().data
                         graph={'nodes':[{'id':m.id,'session':m.map_id,'features':len(m.word_kpts),
                             'valid_3d_features':sum(all(math.isfinite(v) for v in (p.x,p.y,p.z)) for p in m.word_pts)} for m in data.nodes],
-                            'links':[(l.from_id,l.to_id,l.type) for l in data.graph.links]}
+                            'links':[(link.from_id,link.to_id,link.type) for link in data.graph.links]}
                 report={'error':error,'origin':node.center,'final_pose':node.pose,'sensors':node.counts,'health':node.health,
                     'max_radius_m':max((math.dist(p[:2],node.center[:2]) for p in node.trace),default=0) if node.center else None,
                     'trace':node.trace,'slam':node.slam,'graph':graph,'health_faults':node.health_faults,
@@ -259,7 +280,8 @@ def main(test_class=Test, output=OUTPUT):
                 if node.lifecycle_client.wait_for_service(timeout_sec=1):
                     future=node.lifecycle_client.call_async(ManageLifecycleNodes.Request(command=ManageLifecycleNodes.Request.SHUTDOWN))
                     end=time.monotonic()+8
-                    while not future.done() and time.monotonic()<end:node.tick(Twist(),check=False)
+                    while not future.done() and time.monotonic()<end:
+                        node.tick(Twist(),check=False)
                     if not future.done() or not future.result().success:
                         print('Nav2 did not confirm graceful lifecycle shutdown',flush=True)
                 node.listener.unregister()
@@ -269,14 +291,18 @@ def main(test_class=Test, output=OUTPUT):
     finally:
         if stack is not None:
             os.kill(stack.pid,signal.SIGINT)
-            try:stack.wait(timeout=45)
+            try:
+                stack.wait(timeout=45)
             except subprocess.TimeoutExpired:
                 os.killpg(stack.pid,signal.SIGTERM)
-                try:stack.wait(timeout=5)
+                try:
+                    stack.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     os.killpg(stack.pid,signal.SIGKILL)
                     stack.wait(timeout=3)
-        if was_active:subprocess.run(['sudo','-n','/usr/bin/systemctl','start','lekiwi-stack.service'],check=True)
+        if was_active:
+            subprocess.run(['sudo','-n','/usr/bin/systemctl','start','lekiwi-stack.service'],check=True)
 
 
-if __name__=='__main__':main()
+if __name__=='__main__':
+    main()

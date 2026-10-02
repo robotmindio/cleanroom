@@ -56,22 +56,26 @@ class FaultTest(navigation['Test']):
         # deadline and radius checks without aborting on the expected dropout.
         super().tick(twist,check=False)
         if check:
-            if time.monotonic()>self.deadline:raise RuntimeError('fault-test deadline expired')
+            if time.monotonic()>self.deadline:
+                raise RuntimeError('fault-test deadline expired')
             if self.center and math.dist(self.pose[:2],self.center[:2])>=0.12:
                 raise RuntimeError('fault test reached its early 12 cm boundary')
 
     def action(self, argv, twist=None, data=None):
         with subprocess.Popen(argv,stdin=subprocess.PIPE,stdout=subprocess.PIPE,
                               stderr=subprocess.STDOUT,text=True) as process:
-            if data:process.stdin.write(data)
+            if data:
+                process.stdin.write(data)
             process.stdin.close()
             end = time.monotonic()+20
             try:
                 while process.poll() is None:
-                    if time.monotonic()>end:raise RuntimeError('fault action timed out: '+shlex.join(argv))
+                    if time.monotonic()>end:
+                        raise RuntimeError('fault action timed out: '+shlex.join(argv))
                     self.tick(twist,check=twist is not None and twist.linear.x!=0)
                 output = process.stdout.read()
-                if process.returncode:raise RuntimeError('fault action failed: '+output)
+                if process.returncode:
+                    raise RuntimeError('fault action failed: '+output)
             finally:
                 if process.poll() is None:
                     process.kill()
@@ -90,7 +94,8 @@ class FaultTest(navigation['Test']):
         end = time.monotonic()+5
         while (self.linear_speed<0.005 or not self.safe_speed or
                math.dist(self.pose[:2],start[:2])<0.003 or time.monotonic()-self.odom_at>0.3):
-            if time.monotonic()>end:raise RuntimeError('base did not start for '+name)
+            if time.monotonic()>end:
+                raise RuntimeError('base did not start for '+name)
             self.tick(command)
         origin = self.pose
         self.phase = name
@@ -101,7 +106,8 @@ class FaultTest(navigation['Test']):
             end = time.monotonic()+5
             while not (expected in self.health.get('faults','') and
                        not self.flags.get('base_motion_permitted')):
-                if time.monotonic()>end:raise RuntimeError(name+' did not withdraw permission: '+str(self.health))
+                if time.monotonic()>end:
+                    raise RuntimeError(name+' did not withdraw permission: '+str(self.health))
                 self.tick(command)
             denial = self.health.copy()
             self.checks[name]['denial'] = denial
@@ -113,10 +119,12 @@ class FaultTest(navigation['Test']):
                 s['wheel_speed']<=0.001 and s['capture_age_s']<0.3
                 for s in self.checks[name]['samples'] if s['time']>=denied_at
             )<3:
-                if time.monotonic()>end:raise RuntimeError(name+' lacks fresh stopped wheel samples')
+                if time.monotonic()>end:
+                    raise RuntimeError(name+' lacks fresh stopped wheel samples')
                 self.tick(command)
             end = time.monotonic()+1
-            while time.monotonic()<end:self.tick(command)
+            while time.monotonic()<end:
+                self.tick(command)
             # Sensor fault tests retain fresh wheel feedback. For telemetry loss
             # check the first recovered reading before sending another command.
             if not no_feedback and self.safe_speed!=0:
@@ -128,7 +136,8 @@ class FaultTest(navigation['Test']):
                     'image/jpeg,width=1280,height=720,framerate=30/1','!',
                     'filesink',f'location={image}'],command)
                 end = time.monotonic()+0.7
-                while time.monotonic()<end:self.tick(command)
+                while time.monotonic()<end:
+                    self.tick(command)
         finally:
             self.stop()
             restore()
@@ -150,12 +159,15 @@ class FaultTest(navigation['Test']):
         while True:
             future = self.monitor_state.call_async(GetState.Request())
             self.wait(future.done,5)
-            if future.result().current_state.id==3:break
-            if time.monotonic()>end:raise RuntimeError('collision monitor did not activate')
+            if future.result().current_state.id==3:
+                break
+            if time.monotonic()>end:
+                raise RuntimeError('collision monitor did not activate')
             # spin_once returns immediately for ready callbacks. Rate-limit
             # lifecycle queries so this probe cannot flood startup services.
             next_query = time.monotonic()+0.5
-            while time.monotonic()<next_query:self.tick(Twist())
+            while time.monotonic()<next_query:
+                self.tick(Twist())
         self.center = self.pose
         self.active = True
         if self.restart_tests:
@@ -163,7 +175,8 @@ class FaultTest(navigation['Test']):
             # stop the motors while compute cannot send its own stop command.
             pids = subprocess.check_output(['pgrep','-f',
                 '/lib/lekiwi_rmf/lekiwi_driver '],text=True).split()
-            if len(pids)!=1:raise RuntimeError('expected exactly one robot driver process')
+            if len(pids)!=1:
+                raise RuntimeError('expected exactly one robot driver process')
             self.fault('compute_command_loss',
                 lambda c:self.action(['kill','-STOP',pids[0]],c),
                 lambda:self.action(['kill','-CONT',pids[0]],Twist()),'driver:')

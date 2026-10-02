@@ -358,7 +358,7 @@ def test_mapper_shutdown_signals_the_launcher_without_interrupting_its_save():
     stop = (ROOT / 'scripts/ros-stop.sh').read_text()
     assert 'KillMode=mixed' in stack and 'KillSignal=SIGINT' in stack
     assert 'os.kill(stack.pid,signal.SIGINT)' in runner
-    assert 'try:stack.wait(timeout=45)' in runner
+    assert re.search(r'try:\s+stack\.wait\(timeout=45\)', runner)
     assert '[[ $kind == stack ]]' in stop and 'deadline=$((SECONDS + 45))' in stop
     deploy = (ROOT / 'scripts/deploy-split.sh').read_text()
     assert 'systemctl show -P KillMode lekiwi-stack.service' in deploy

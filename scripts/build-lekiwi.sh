@@ -15,7 +15,7 @@ base_paths=("$project_root")
 packages=(lekiwi_rmf)
 lidar_source=$workspace/src/ldlidar_stl_ros2
 if [[ -d $lidar_source/.git ]]; then
-  # shellcheck source=thirdparty-common.sh
+  # shellcheck source=scripts/thirdparty-common.sh
   source "$project_root/scripts/thirdparty-common.sh"
   lidar_qos_patch=$project_root/thirdparty/ldlidar_stl_ros2/0002-latest-scan-qos.patch
   lidar_baud_patch=$project_root/thirdparty/ldlidar_stl_ros2/0003-initialize-ld06-baudrate.patch
