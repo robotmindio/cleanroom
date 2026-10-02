@@ -1,0 +1,47 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index a6afc4c..7b1481f 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -44,7 +44,8 @@ target_include_directories(${PROJECT_NAME} PUBLIC
+ if(ament_cmake_FOUND)
+   target_link_libraries(${PROJECT_NAME} PUBLIC
+     console_bridge::console_bridge
+-    rcpputils::rcpputils)
++    rcpputils::rcpputils
++    PRIVATE ${CMAKE_DL_LIBS})
+   ament_export_targets(${PROJECT_NAME})
+ else()
+   target_include_directories(${PROJECT_NAME}
+diff --git a/src/class_loader_core.cpp b/src/class_loader_core.cpp
+index 632f8c2..6bc2a84 100644
+--- a/src/class_loader_core.cpp
++++ b/src/class_loader_core.cpp
+@@ -35,6 +35,9 @@
+ #include <memory>
+ #include <string>
+ #include <vector>
++#ifdef __linux__
++#include <dlfcn.h>
++#endif
+ 
+ namespace class_loader
+ {
+@@ -428,6 +431,18 @@ void loadLibrary(const std::string & library_path, ClassLoader * loader)
+     setCurrentlyLoadingLibraryName(library_path);
+     try {
+       library_handle = std::make_shared<rcpputils::SharedLibrary>(library_path.c_str());
++#ifdef __linux__
++      // ROS executors can retain weak control blocks whose destructors live in
++      // this plugin after its last managed instance has been destroyed.
++      // ponytail: code stays mapped until exit; restart to load rebuilt plugins.
++      void * retained = dlopen(library_path.c_str(), RTLD_LAZY | RTLD_NOLOAD | RTLD_NODELETE);
++      if (retained == nullptr) {
++        throw std::runtime_error(std::string("Cannot retain plugin code: ") + dlerror());
++      }
++      if (dlclose(retained) != 0) {
++        throw std::runtime_error(std::string("Cannot release plugin handle: ") + dlerror());
++      }
++#endif
+     } catch (const std::runtime_error & e) {
+       setCurrentlyLoadingLibraryName("");
+       setCurrentlyActiveClassLoader(nullptr);

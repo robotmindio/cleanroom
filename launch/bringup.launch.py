@@ -1045,7 +1045,7 @@ def generate_launch_description():
                 package="nav2_lifecycle_manager",
                 executable="lifecycle_manager",
                 name="lifecycle_manager_map_server",
-                parameters=[{"autostart": True, "node_names": ["map_server"], "use_sim_time": ParameterValue(sim, value_type=bool)}],
+                parameters=[{"autostart": True, "node_names": ["map_server"], "service_timeout": 10, "use_sim_time": ParameterValue(sim, value_type=bool)}],
                 condition=IfCondition(canned_map),
                 output="screen",
             ),

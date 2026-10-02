@@ -52,16 +52,21 @@ low-speed fault checks, not measured physical braking trials. Reports:
 `.benchmarks/physical-acceptance/result.json` and
 `.benchmarks/physical-acceptance-restarts/result.json`.
 
-One additional startup failed because Nav2's collision_monitor/get_state call
-exceeded its native two-second response timeout; the next startup succeeded.
-The probe's unthrottled readiness-query loop is now limited to 2 Hz. This does
-not establish that native startup is fully qualified. MoveIt also reproduced
-its known native CallbackGroup destructor SIGSEGV on shutdown (see DEFERRED.md).
+The remaining native failures have reproducible fixes. rclcpp's action removal
+kept an expired weak registration, and class_loader unloaded the code needed
+by weak control blocks still held by ROS executors. Pinned patches remove the
+expired registration and retain plugin code until process exit; plugin objects
+still undergo normal destruction. Three isolated MoveIt SIGINT trials exited
+zero, and the native action regression passes. Nav2 now uses a tracked ten-second
+lifecycle RPC deadline, shares discovery/response timing, honors success=false,
+and receives its parameter file. Delayed, timed-out, refused and disappearing
+service cases all pass; 98 affected Python checks pass. Deployment and production
+restart verification are next.
 
 Next: independent floor scale and confirmation of surface/payload and test speed
 scope, then 30 stopping trials per direction and remaining fault tests (motor
 diagnostics, replay, ROS restart, obstacle stop, arm workspace intrusion).
 The authorized 30 cm commissioning tests are capped at 0.03 m/s and 0.20 rad/s;
 production is faster. Never approve production speed or physical stopping
-distance from slow wheel-odometry trials. Native MoveIt shutdown still fails
-qualification and Nav2 startup needs further validation. Keep validated:false.
+distance from slow wheel-odometry trials. Keep validated:false until physical
+acceptance and independent map calibration have evidence.

@@ -191,19 +191,15 @@ revision is retained. Tracked in
   tracked qualification runner checks the complete required test-name set and
   fails when those tests were omitted; an acceptance image must install the
   dependency and run them.
-- Resolve the ROS Jazzy MoveIt 2.12.4 `move_group` SIGSEGV after SIGINT. The
-  tracked `scripts/moveit-shutdown-probe.py` has isolated it from the driver,
-  pyzmq, joint feedback and trajectory execution: after reaching readiness,
-  `MoveItCpp` destruction reaches `TrajectoryExecutionManager`, `rclcpp::Node`
-  and `CallbackGroup` destruction before exiting `-11`. This matches open
-  upstream MoveIt issues
-  [#3680](https://github.com/moveit/moveit2/issues/3680) and
-  [#3721](https://github.com/moveit/moveit2/issues/3721). The strict
-  qualification runner invokes the probe and requires revision- and selected-
-  install-bound JSON with `clean_shutdown: true` and
-  `move_group_exit_code: 0`; the current package therefore fails closed. Do
-  not replace orderly teardown with SIGKILL or signal masking. A deployment
-  image remains unacceptable until a fixed package passes this probe.
+- Keep qualifying ROS Jazzy MoveIt shutdown with
+  `scripts/moveit-shutdown-probe.py` after native package changes. The reproduced
+  2.12.4 SIGSEGV came from weak action control blocks surviving plugin unload:
+  first in `CallbackGroup`, then in the executor's wait set. Pinned rclcpp and
+  class_loader fixes now remove expired action registrations and retain plugin
+  code through normal object teardown. Three isolated SIGINT trials exited
+  zero. The builder, pins and process-lifetime mapping limit are documented in
+  `thirdparty/README.md`. The strict qualification runner still requires clean,
+  revision- and selected-install-bound JSON. No signals or exit codes are masked.
 - Run the GitHub Actions workflow on the final revision and retain its result.
   Local checks are not evidence that the hosted CI image and rosdep resolution
   are healthy.

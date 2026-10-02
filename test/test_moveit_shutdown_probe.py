@@ -87,4 +87,4 @@ def test_package_prefix_is_recorded_from_the_active_ament_index(monkeypatch):
         lambda package: f"/selected/install/{package}",
     )
 
-    assert probe._lekiwi_package_prefix() == "/selected/install/lekiwi_rmf"
+    assert probe._package_prefix() == "/selected/install/lekiwi_rmf"

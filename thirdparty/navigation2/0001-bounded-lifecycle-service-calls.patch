@@ -1,0 +1,132 @@
+diff --git a/nav2_bringup/launch/navigation_launch.py b/nav2_bringup/launch/navigation_launch.py
+index 33c0547..fbb18c3 100644
+--- a/nav2_bringup/launch/navigation_launch.py
++++ b/nav2_bringup/launch/navigation_launch.py
+@@ -242,7 +242,7 @@ def generate_launch_description():
+                 name='lifecycle_manager_navigation',
+                 output='screen',
+                 arguments=['--ros-args', '--log-level', log_level],
+-                parameters=[{'autostart': autostart}, {'node_names': lifecycle_nodes}],
++                parameters=[configured_params, {'autostart': autostart}, {'node_names': lifecycle_nodes}],
+             ),
+         ],
+     )
+diff --git a/nav2_lifecycle_manager/src/lifecycle_manager.cpp b/nav2_lifecycle_manager/src/lifecycle_manager.cpp
+index e37f53c..82ebbd5 100644
+--- a/nav2_lifecycle_manager/src/lifecycle_manager.cpp
++++ b/nav2_lifecycle_manager/src/lifecycle_manager.cpp
+@@ -44,6 +44,13 @@ LifecycleManager::LifecycleManager(const rclcpp::NodeOptions & options)
+   declare_parameter("bond_timeout", 4.0);
+   declare_parameter("bond_respawn_max_duration", 10.0);
+   declare_parameter("attempt_respawn_reconnection", true);
++  rcl_interfaces::msg::ParameterDescriptor timeout_descriptor;
++  timeout_descriptor.read_only = true;
++  declare_parameter("service_timeout", 2, timeout_descriptor);
++  const auto service_timeout = get_parameter("service_timeout").as_int();
++  if (service_timeout <= 0) {
++    throw std::invalid_argument("service_timeout must be positive seconds");
++  }
+ 
+   registerRclPreshutdownCallback();
+ 
+@@ -244,9 +251,10 @@ bool
+ LifecycleManager::changeStateForNode(const std::string & node_name, std::uint8_t transition)
+ {
+   message(transition_label_map_[transition] + node_name);
++  const auto timeout = std::chrono::seconds(get_parameter("service_timeout").as_int());
+ 
+-  if (!node_map_[node_name]->change_state(transition) ||
+-    !(node_map_[node_name]->get_state() == transition_state_map_[transition]))
++  if (!node_map_[node_name]->change_state(transition, timeout) ||
++    !(node_map_[node_name]->get_state(timeout) == transition_state_map_[transition]))
+   {
+     RCLCPP_ERROR(get_logger(), "Failed to change state for node: %s", node_name.c_str());
+     return false;
+@@ -538,7 +546,8 @@ LifecycleManager::checkBondRespawnConnection()
+     }
+ 
+     try {
+-      node_map_[node_name]->get_state();  // Only won't throw if the server exists
++      node_map_[node_name]->get_state(
++        std::chrono::seconds(get_parameter("service_timeout").as_int()));
+       live_servers++;
+     } catch (...) {
+       break;
+diff --git a/nav2_util/include/nav2_util/service_client.hpp b/nav2_util/include/nav2_util/service_client.hpp
+index 73eb07b..c8436ca 100644
+--- a/nav2_util/include/nav2_util/service_client.hpp
++++ b/nav2_util/include/nav2_util/service_client.hpp
+@@ -63,27 +63,30 @@ public:
+     typename RequestType::SharedPtr & request,
+     const std::chrono::nanoseconds timeout = std::chrono::nanoseconds(-1))
+   {
+-    while (!client_->wait_for_service(std::chrono::seconds(1))) {
+-      if (!rclcpp::ok()) {
+-        throw std::runtime_error(
+-                service_name_ + " service client: interrupted while waiting for service");
+-      }
+-      RCLCPP_INFO(
+-        node_->get_logger(), "%s service client: waiting for service to appear...",
+-        service_name_.c_str());
++    const auto started = std::chrono::steady_clock::now();
++    if (!client_->wait_for_service(timeout)) {
++      throw std::runtime_error(service_name_ + " service client: service unavailable or interrupted");
+     }
+ 
+     RCLCPP_DEBUG(
+       node_->get_logger(), "%s service client: send async request",
+       service_name_.c_str());
++    auto remaining = timeout;
++    if (timeout.count() >= 0) {
++      remaining -= std::chrono::steady_clock::now() - started;
++      if (remaining.count() <= 0) {
++        throw std::runtime_error(service_name_ + " service client: discovery deadline exceeded");
++      }
++    }
+     auto future_result = client_->async_send_request(request);
+ 
+-    if (callback_group_executor_.spin_until_future_complete(future_result, timeout) !=
+-      rclcpp::FutureReturnCode::SUCCESS)
+-    {
++    const auto result = callback_group_executor_.spin_until_future_complete(future_result, remaining);
++    if (result != rclcpp::FutureReturnCode::SUCCESS) {
+       // Pending request must be manually cleaned up if execution is interrupted or timed out
+       client_->remove_pending_request(future_result);
+-      throw std::runtime_error(service_name_ + " service client: async_send_request failed");
++      throw std::runtime_error(service_name_ + " service client: " +
++              (result == rclcpp::FutureReturnCode::TIMEOUT ? "response deadline exceeded" :
++              "response wait interrupted"));
+     }
+ 
+     return future_result.get();
+diff --git a/nav2_util/src/lifecycle_service_client.cpp b/nav2_util/src/lifecycle_service_client.cpp
+index 70656d9..3077e3b 100644
+--- a/nav2_util/src/lifecycle_service_client.cpp
++++ b/nav2_util/src/lifecycle_service_client.cpp
+@@ -64,14 +64,10 @@ bool LifecycleServiceClient::change_state(
+   const uint8_t transition,
+   const seconds timeout)
+ {
+-  if (!change_state_.wait_for_service(timeout)) {
+-    throw std::runtime_error("change_state service is not available!");
+-  }
+-
+   auto request = std::make_shared<lifecycle_msgs::srv::ChangeState::Request>();
+   request->transition.id = transition;
+   auto response = change_state_.invoke(request, timeout);
+-  return response.get();
++  return response->success;
+ }
+ 
+ bool LifecycleServiceClient::change_state(
+@@ -90,10 +86,6 @@ bool LifecycleServiceClient::change_state(
+ uint8_t LifecycleServiceClient::get_state(
+   const seconds timeout)
+ {
+-  if (!get_state_.wait_for_service(timeout)) {
+-    throw std::runtime_error("get_state service is not available!");
+-  }
+-
+   auto request = std::make_shared<lifecycle_msgs::srv::GetState::Request>();
+   auto result = get_state_.invoke(request, timeout);
+   return result->current_state.id;

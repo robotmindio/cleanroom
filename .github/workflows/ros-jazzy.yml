@@ -52,8 +52,9 @@ jobs:
         run: |
           . /opt/ros/jazzy/setup.sh
           colcon build --symlink-install --event-handlers console_cohesion+
+          LEKIWI_WS="$GITHUB_WORKSPACE" scripts/build-native.sh
           . install/setup.sh
-          colcon test --event-handlers console_cohesion+
+          colcon test --packages-select lekiwi_rmf --event-handlers console_cohesion+
           colcon test-result --verbose
       - name: Static repository validation
         run: |
@@ -93,6 +94,7 @@ jobs:
           ROS_DOMAIN_ID: 221
         run: |
           . /opt/ros/jazzy/setup.sh
+          . install/setup.sh
           set -euo pipefail
           mapfile -t unit_tests < <(
             find test -maxdepth 1 -type f -name 'test_*.py' ! -name '*_launch.py' -print | sort

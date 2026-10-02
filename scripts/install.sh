@@ -304,6 +304,8 @@ colcon --log-base "$WORKSPACE/log" build \
     "-DCMAKE_IGNORE_PREFIX_PATH=$HOME/.local" \
     -DProtobuf_PROTOC_EXECUTABLE=/usr/bin/protoc
 
+LEKIWI_WS="$WORKSPACE" "$PROJECT_ROOT/scripts/build-native.sh"
+
 # colcon prints "Finished" per package it reached, and an interrupted run can
 # still leave a plausible-looking install tree with share/ metadata but no
 # compiled node (an oomd kill mid-build did exactly that once). Trust binaries,

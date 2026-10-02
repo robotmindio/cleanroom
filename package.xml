@@ -78,6 +78,9 @@
   <exec_depend>v4l-utils</exec_depend>
 
   <test_depend>ament_cmake_pytest</test_depend>
+  <test_depend>rclcpp</test_depend>
+  <test_depend>rclcpp_action</test_depend>
+  <test_depend>control_msgs</test_depend>
   <test_depend>ament_flake8</test_depend>
   <test_depend>launch_testing_ament_cmake</test_depend>
 

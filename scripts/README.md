@@ -33,6 +33,7 @@ units refer to them directly.
 - `deploy-split.sh [DEVICE]` deploys one pushed revision to the compute machine and its device host.
 - `reinstall-compute.sh` reinstalls the compute service from `.env` (`LEKIWI_ROBOT_HOST`) with MoveIt enabled.
 - `build-lekiwi.sh` rebuilds this package in the workspace used by the managed services.
+- `build-native.sh` builds pinned class_loader 2.7.1, rclcpp 28.1.22 and Nav2 1.3.13 reliability patches into that workspace. Installation and split deployment run it automatically on compute; `/opt/ros` remains the dependency underlay.
 - `rebuild-all.sh` verifies and vendors the LeKiwi model, renders it, rebuilds and runs the CTest suite.
 - `thirdparty-common.sh` (sourced) holds the pinned third-party sources and download helpers.
 

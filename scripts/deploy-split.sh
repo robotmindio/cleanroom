@@ -271,6 +271,10 @@ if [[ $refresh_compute == false && $refresh_device == false && \
       $(cat "$marker" 2>/dev/null || true) == "$target" && \
       $("${ssh_command[@]}" "cat '$remote_marker' 2>/dev/null || true") == "$target" && \
       $(workspace_revision "$workspace") == "$target" && \
+      $(cat "$workspace/install/.lekiwi-native-revision" 2>/dev/null || true) == "$target" && \
+      -s $workspace/install/rclcpp/lib/librclcpp.so && \
+      -s $workspace/install/class_loader/lib/libclass_loader.so && \
+      -x $workspace/install/nav2_lifecycle_manager/lib/nav2_lifecycle_manager/lifecycle_manager && \
       $(remote_workspace_revision) == "$target" ]] && \
     /usr/bin/systemctl is-active --quiet lekiwi-stack.service && \
     remote_unit_active_all "${device_units[@]}"; then
@@ -286,6 +290,7 @@ remote_unit_active lekiwi-host.service || die "lekiwi-host.service must be runni
 log "Building revision ${target:0:12} on the device"
 "${ssh_command[@]}" nice -n 10 env LEKIWI_WS="$remote_workspace" "$remote_repo/scripts/build-lekiwi.sh"
 log "Building revision ${target:0:12} on compute"
+nice -n 10 env LEKIWI_WS="$workspace" "$project_root/scripts/build-native.sh"
 nice -n 10 env LEKIWI_WS="$workspace" "$project_root/scripts/build-lekiwi.sh"
 
 on_exit() {

@@ -53,11 +53,11 @@ def _package_versions() -> dict[str, str | None]:
     }
 
 
-def _lekiwi_package_prefix() -> str | None:
+def _package_prefix(package: str = "lekiwi_rmf") -> str | None:
     try:
         from ament_index_python.packages import get_package_prefix
 
-        return get_package_prefix("lekiwi_rmf")
+        return get_package_prefix(package)
     except (ImportError, LookupError):
         return None
 
@@ -142,6 +142,8 @@ def main() -> int:
             output="log",
             parameters=[parameters],
             respawn=False,
+            sigterm_timeout="15",
+            sigkill_timeout="5",
         )
 
         def on_output(event):
@@ -208,7 +210,11 @@ def main() -> int:
         "timed_out": bool(state["timed_out"]),
         "launch_error": launch_error,
         "package_versions": _package_versions(),
-        "lekiwi_rmf_package_prefix": _lekiwi_package_prefix(),
+        "lekiwi_rmf_package_prefix": _package_prefix(),
+        "native_package_prefixes": {
+            package: _package_prefix(package)
+            for package in ("class_loader", "rclcpp", "nav2_util", "nav2_lifecycle_manager", "nav2_bringup")
+        },
         "platform": {
             "machine": platform.machine(),
             "release": platform.release(),

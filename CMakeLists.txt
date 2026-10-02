@@ -71,6 +71,13 @@ install(DIRECTORY config launch maps urdf worlds DESTINATION share/${PROJECT_NAM
   PATTERN "*.pyo" EXCLUDE)
 
 if(BUILD_TESTING)
+  find_package(rclcpp REQUIRED)
+  find_package(rclcpp_action REQUIRED)
+  find_package(control_msgs REQUIRED)
+  add_executable(test_native_waitable test/test_native_waitable.cpp)
+  ament_target_dependencies(test_native_waitable rclcpp rclcpp_action control_msgs)
+  add_test(NAME test_native_waitable COMMAND test_native_waitable)
+  set_tests_properties(test_native_waitable PROPERTIES ENVIRONMENT "ROS_DOMAIN_ID=223")
   add_executable(test_rest_contacts test/test_rest_contacts.cpp)
   target_compile_features(test_rest_contacts PUBLIC cxx_std_17)
   ament_target_dependencies(test_rest_contacts moveit_core)
@@ -113,7 +120,7 @@ if(BUILD_TESTING)
     ament_add_pytest_test(${name} test/${name}.py ENV "${test_environment}")
   endfunction()
   # Never let a test discover a running robot or a parallel test. These are
-  # distinct valid DDS domains (180-220), intentionally away from the live
+  # distinct valid DDS domains (180-223), intentionally away from the live
   # default (0) and below Cyclone DDS's highest usable domain (232). Tests
   # without one never open a DDS participant.
   add_lekiwi_pytest(test_odometry 180)
@@ -148,6 +155,7 @@ if(BUILD_TESTING)
   add_lekiwi_pytest(test_rtabmap_session_guard 197)
   add_lekiwi_pytest(test_rmf_owner_guard 211)
   add_lekiwi_pytest(test_moveit_shutdown_probe 213)
+  add_lekiwi_pytest(test_native_lifecycle 222)
   add_lekiwi_pytest(test_sim_qualification 214)
   if(test_python_has_zmq EQUAL 0)
     add_lekiwi_pytest(test_fake_host 198)

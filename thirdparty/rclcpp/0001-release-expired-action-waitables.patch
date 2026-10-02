@@ -1,0 +1,26 @@
+diff --git a/rclcpp/src/rclcpp/callback_group.cpp b/rclcpp/src/rclcpp/callback_group.cpp
+index 73cd458..b989596 100644
+--- a/rclcpp/src/rclcpp/callback_group.cpp
++++ b/rclcpp/src/rclcpp/callback_group.cpp
+@@ -218,11 +218,14 @@ void
+ CallbackGroup::remove_waitable(const rclcpp::Waitable::SharedPtr waitable_ptr) noexcept
+ {
+   std::lock_guard<std::mutex> lock(mutex_);
+-  for (auto iter = waitable_ptrs_.begin(); iter != waitable_ptrs_.end(); ++iter) {
+-    const auto shared_ptr = iter->lock();
+-    if (shared_ptr.get() == waitable_ptr.get()) {
+-      waitable_ptrs_.erase(iter);
+-      break;
+-    }
+-  }
++  // Action deleters run after their strong count reaches zero. Their weak
++  // registration can no longer be locked, but must be released while the
++  // plugin containing its control-block destructor is still loaded.
++  waitable_ptrs_.erase(
++    std::remove_if(
++      waitable_ptrs_.begin(), waitable_ptrs_.end(),
++      [&waitable_ptr](const rclcpp::Waitable::WeakPtr & weak_ptr) {
++        return weak_ptr.expired() || weak_ptr.lock().get() == waitable_ptr.get();
++      }),
++    waitable_ptrs_.end());
+ }

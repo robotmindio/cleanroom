@@ -35,6 +35,7 @@ EXPECTED_CTESTS = (
     "test_launch_validation", "test_rtabmap_session_guard", "test_fake_host",
     "test_zmq_security", "test_simulation_model", "test_service_installation",
     "test_rmf_owner_guard", "test_moveit_shutdown_probe",
+    "test_native_lifecycle", "test_native_waitable",
     "test_sim_qualification", "test_slam_cloud", "test_motion_guards",
     "test_scan_self_filter", "test_camera_supervisor", "test_moveit_cloud_gate",
     "test_moveit_gripper_calibration",
