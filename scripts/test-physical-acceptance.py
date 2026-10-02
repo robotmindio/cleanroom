@@ -5,6 +5,7 @@ Source setup.bash first. Requires the authorized clear 30 cm area and folded arm
 Uses the existing bounded stack runner and restores interrupted services on exit.
 Wheel readings prove the fault response, not an independent stopping distance.
 """
+import argparse
 import math
 from pathlib import Path
 import runpy
@@ -19,11 +20,12 @@ navigation = runpy.run_path(str(Path(__file__).with_name('test-navigation.py')))
 
 
 class FaultTest(navigation['Test']):
-    def __init__(self):
+    def __init__(self, restart_tests=False):
         super().__init__()
         self.deadline = time.monotonic()+360
         self.speed = math.inf
         self.checks = {}
+        self.restart_tests = restart_tests
         self.phase = None
         self.safe_speed = None
         self.linear_speed = math.inf
@@ -82,6 +84,8 @@ class FaultTest(navigation['Test']):
         self.wait(lambda:self.flags.get('base_motion_permitted') and self.flags.get('arm_stowed'),30)
         command = Twist()
         command.linear.x = 0.03
+        no_feedback = name in ('telemetry_loss','compute_command_loss',
+                              'host_restart_stops_then_gated_rearm')
         start = self.pose
         end = time.monotonic()+5
         while (self.linear_speed<0.005 or not self.safe_speed or
@@ -105,7 +109,7 @@ class FaultTest(navigation['Test']):
                 raise RuntimeError('test-client lease expired; fault result would be confounded')
             denied_at = time.monotonic()
             end = denied_at+3
-            while name!='telemetry_loss' and sum(
+            while not no_feedback and sum(
                 s['wheel_speed']<=0.001 and s['capture_age_s']<0.3
                 for s in self.checks[name]['samples'] if s['time']>=denied_at
             )<3:
@@ -115,7 +119,7 @@ class FaultTest(navigation['Test']):
             while time.monotonic()<end:self.tick(command)
             # Sensor fault tests retain fresh wheel feedback. For telemetry loss
             # check the first recovered reading before sending another command.
-            if name!='telemetry_loss' and self.safe_speed!=0:
+            if not no_feedback and self.safe_speed!=0:
                 raise RuntimeError(name+' left a nonzero guarded command')
             for frame in range(2):
                 image = navigation['ROOT']/f'.benchmarks/physical-acceptance/{name}-{frame}.jpg'
@@ -148,9 +152,29 @@ class FaultTest(navigation['Test']):
             self.wait(future.done,5)
             if future.result().current_state.id==3:break
             if time.monotonic()>end:raise RuntimeError('collision monitor did not activate')
-            self.tick(Twist())
+            # spin_once returns immediately for ready callbacks. Rate-limit
+            # lifecycle queries so this probe cannot flood startup services.
+            next_query = time.monotonic()+0.5
+            while time.monotonic()<next_query:self.tick(Twist())
         self.center = self.pose
         self.active = True
+        if self.restart_tests:
+            # Pause only our driver: the Pi's independent command watchdog must
+            # stop the motors while compute cannot send its own stop command.
+            pids = subprocess.check_output(['pgrep','-f',
+                '/lib/lekiwi_rmf/lekiwi_driver '],text=True).split()
+            if len(pids)!=1:raise RuntimeError('expected exactly one robot driver process')
+            self.fault('compute_command_loss',
+                lambda c:self.action(['kill','-STOP',pids[0]],c),
+                lambda:self.action(['kill','-CONT',pids[0]],Twist()),'driver:')
+            # The arm is still compact and supported in travel_stow before the
+            # host restart releases torque. Observe loss before waiting for boot.
+            self.fault('host_restart_stops_then_gated_rearm',
+                lambda c:self.remote(['sudo','-n','systemctl','--no-block','restart',
+                                     'lekiwi-host.service'],c),
+                lambda:self.remote(['sudo','-n','systemctl','start','lekiwi-host.service'],Twist()),
+                'driver:')
+            return
         for name,unit,reason in [('scan_disconnect','lekiwi-lidar.service','scan:'),
                                  ('depth_disconnect','lekiwi-astra.service','depth:')]:
             self.fault(name,
@@ -176,4 +200,10 @@ class FaultTest(navigation['Test']):
 
 
 if __name__=='__main__':
-    navigation['main'](FaultTest,navigation['ROOT']/'.benchmarks/physical-acceptance')
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--restart-tests',action='store_true',
+                        help='test compute-driver suspension and the Pi motor-host restart')
+    args = parser.parse_args()
+    suffix = '-restarts' if args.restart_tests else ''
+    navigation['main'](lambda:FaultTest(args.restart_tests),
+                       navigation['ROOT']/('.benchmarks/physical-acceptance'+suffix))

@@ -86,6 +86,29 @@ def test_physical_fault_probe_restores_service_when_injection_fails():
     assert calls==['stop','restore']
 
 
+def test_physical_probe_limits_lifecycle_polling_to_two_queries_per_second(monkeypatch):
+    import runpy
+    from pathlib import Path
+    FaultTest = runpy.run_path(str(Path(__file__).parents[1] /
+                                  'scripts/test-physical-acceptance.py'))['FaultTest']
+    now, queries = [0.0], []
+    def request(_):
+        queries.append(now[0])
+        state = 3 if len(queries)==3 else 1
+        return types.SimpleNamespace(done=lambda:True,
+            result=lambda:types.SimpleNamespace(current_state=types.SimpleNamespace(id=state)))
+    node = types.SimpleNamespace(pose=(0,0,0),restart_tests=True,
+        flags={'arm_stowed':True,'driver':'ARMED'},
+        monitor_state=types.SimpleNamespace(service_is_ready=lambda:True,call_async=request),
+        wait=lambda condition,timeout:condition(),
+        tick=lambda command:now.__setitem__(0,now[0]+0.05),fault=lambda *args:None)
+    monkeypatch.setitem(FaultTest.run.__globals__,'time',types.SimpleNamespace(monotonic=lambda:now[0]))
+    monkeypatch.setitem(FaultTest.run.__globals__,'subprocess',
+                        types.SimpleNamespace(check_output=lambda *args,**kwargs:'123'))
+    FaultTest.run(node)
+    assert len(queries)==3 and all(b-a>=0.49 for a,b in zip(queries,queries[1:]))
+
+
 def test_navigation_probe_withdraws_lease_until_wheel_feedback_recovers(monkeypatch):
     import runpy
     import time

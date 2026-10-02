@@ -71,7 +71,7 @@ units refer to them directly.
 
 ## Maps, simulation and qualification
 
-- `test-physical-acceptance.py` runs finite live lidar, depth and telemetry-loss checks within the attended 30 cm envelope, restores services, and records fault evidence without approving physical braking distances.
+- `test-physical-acceptance.py` runs finite live lidar, depth and telemetry-loss checks within the attended 30 cm envelope; `--restart-tests` tests compute-driver suspension and the Pi motor-host restart. It restores services and records fault evidence without approving physical braking distances.
 - `free_space.py` turns the front camera into a floor-edge `LaserScan`.
 - `validate-map-bundle.py` validates an immutable map/RMF bundle.
 - `rtabmap-db-maintenance.py` prunes old RTAB-Map archives without replacing the active map.

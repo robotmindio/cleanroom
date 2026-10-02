@@ -508,6 +508,20 @@ def test_live_acceptance_requirement_is_base_only():
         )
         assert node._machine.requirements["scan"].max_age_ns == 500_000_000
         assert node._machine.requirements["depth"] == Requirement(1_000_000_000)
+        node._machine.driver_state = "ARMED"
+        node._machine.arm_stowed = True
+        for name in node._machine.requirements:
+            node._machine.update(name, True, node._now())
+        published = []
+        node._base_pub = types.SimpleNamespace(publish=published.append)
+        node._publish()
+        assert published[-1].data
+        node._machine.update("depth", False, node._now(), "disconnected")
+        node._publish()
+        assert not published[-1].data and not node._machine.fault_latched
+        node._machine.update("depth", True, node._now())
+        node._publish()
+        assert published[-1].data
     finally:
         if node is not None:
             node.destroy_node()

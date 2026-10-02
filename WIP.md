@@ -33,11 +33,29 @@ The full deployment of 32a8969 succeeded autonomously after sudo authentication;
 the compute unit now uses KillMode=mixed and Nice=-5, and deployment markers agree.
 The webcam confirms good lighting and the compact empty-gripper fold.
 
-Next: deploy the acceptance speed binding and required-base-input enforcement,
-then run the finite physical fault runner. Normal hold mode keeps torque and
-recovers permission; no new disarm or fault latching behavior is introduced.
+Deployed 47fdbef: acceptance now binds to tracked MPPI speed limits, the manual
+driver uses those limits, and required base health is enforced in hold mode.
+Depth now protects both base and arm. All 158 affected Python checks passed.
+Normal hold mode keeps torque and recovers permission without new fault latching.
 
-Pending: independent floor scale and confirmation of surface/payload and test
-speed scope for physical braking acceptance. The authorized 30 cm commissioning
-tests are capped at 0.03 m/s and 0.20 rad/s; production is faster. Never approve
-production speed or physical stopping distance from slow wheel-odometry trials.
+Live fault checks passed for lidar, depth and telemetry loss (4.9 cm maximum
+wheel-odometry radius). Compute-driver SIGSTOP exercised the Pi command watchdog,
+and motor-host restart stopped commands then recovered with fresh permission
+(2.7 cm radius in that run). Webcam pairs were retained for each stop. These are
+low-speed fault checks, not measured physical braking trials. Reports:
+`.benchmarks/physical-acceptance/result.json` and
+`.benchmarks/physical-acceptance-restarts/result.json`.
+
+One additional startup failed because Nav2's collision_monitor/get_state call
+exceeded its native two-second response timeout; the next startup succeeded.
+The probe's unthrottled readiness-query loop is now limited to 2 Hz. This does
+not establish that native startup is fully qualified. MoveIt also reproduced
+its known native CallbackGroup destructor SIGSEGV on shutdown (see DEFERRED.md).
+
+Next: independent floor scale and confirmation of surface/payload and test speed
+scope, then 30 stopping trials per direction and remaining fault tests (motor
+diagnostics, replay, ROS restart, obstacle stop, arm workspace intrusion).
+The authorized 30 cm commissioning tests are capped at 0.03 m/s and 0.20 rad/s;
+production is faster. Never approve production speed or physical stopping
+distance from slow wheel-odometry trials. Native MoveIt shutdown still fails
+qualification and Nav2 startup needs further validation. Keep validated:false.

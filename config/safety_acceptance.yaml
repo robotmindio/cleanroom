@@ -55,8 +55,10 @@ directions:
   rotation_cw: {trials: 0, worst_stopping_distance_m: null}
   rotation_ccw: {trials: 0, worst_stopping_distance_m: null}
 fault_tests:
-  scan_disconnect: false
-  depth_disconnect: false
+  # Live bounded tests on 2026-10-02: command cap 0.03 m/s, compact fold;
+  # stopping distances and production-speed acceptance remain unvalidated.
+  scan_disconnect: true
+  depth_disconnect: true
   imu_disconnect: null # Not applicable: no IMU is fitted.
   battery_low_or_disconnect: null # Not applicable: no battery monitor is fitted.
   motor_diagnostic_fault: false
@@ -64,11 +66,11 @@ fault_tests:
   # The labelled physical motor-power stop has been tested to remove actuator
   # energy without ROS.
   estop_independent_of_ros: true
-  telemetry_loss: false
+  telemetry_loss: true
   telemetry_replay_or_duplicate: false
   # A restart must stop commands; re-arm is allowed only with fresh telemetry
   # and current arm permission in the configured automatic re-arm mode.
-  host_restart_stops_then_gated_rearm: false
+  host_restart_stops_then_gated_rearm: true
   ros_restart_stops_then_gated_rearm: false
   # A client without a key received neither telemetry nor a health reply;
   # authorized driver credentials received telemetry on 2026-09-26.
