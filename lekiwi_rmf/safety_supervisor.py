@@ -32,7 +32,7 @@ from sensor_msgs.msg import BatteryState, Imu, JointState, LaserScan, PointCloud
 from std_msgs.msg import Bool, String
 from std_srvs.srv import Trigger
 
-from lekiwi_rmf.motion_guards import positive_seconds_ns, stamp_ns
+from lekiwi_rmf.motion_guards import load_base_speed_limits, positive_seconds_ns, stamp_ns
 from lekiwi_rmf.scan_self_filter import parse_sectors
 
 
@@ -225,17 +225,13 @@ class SafetyStateMachine:
 def permit_unless_strict(
     decision: SafetyDecision, strict: bool, driver_state: str = ""
 ) -> SafetyDecision:
-    """Allow non-strict operation while keeping acceptance and stow gates hard."""
+    """Keep base health gates active while preserving non-strict arm hold policy."""
     if strict or decision.state in {SafetyState.ESTOP, SafetyState.FAULT_LATCHED}:
         return decision
     state = SafetyState.ARMED if driver_state == "ARMED" else decision.state
-    acceptance_failed = any(
-        fault.partition(":")[0] == "acceptance" for fault in decision.faults
-    )
     return replace(
         decision, state=state,
         arm_permitted=decision.arm_workspace_clear,
-        base_permitted=decision.arm_stowed and not acceptance_failed,
     )
 
 
@@ -473,6 +469,18 @@ def _finite_number(value: object) -> bool:
 
 def _nav2_stop_zone_clearance(nav2_path: str | Path, acceptance: dict) -> tuple[bool, str]:
     """Bind acceptance to Nav2's footprint and measured StopZone clearance."""
+    try:
+        limits = load_base_speed_limits(nav2_path)
+    except ValueError as error:
+        return False, str(error)
+    for name, required in zip(
+        ("maximum_tested_linear_speed_m_s", "maximum_tested_angular_speed_rad_s"), limits
+    ):
+        measured = acceptance.get(name)
+        if not _finite_number(measured) or measured <= 0:
+            return False, f"acceptance lacks a positive {name}"
+        if measured + 1e-9 < required:
+            return False, f"{name} {measured} is below configured speed {required}"
     try:
         nav2 = yaml.safe_load(Path(nav2_path).expanduser().read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError) as error:
@@ -985,8 +993,7 @@ class SafetySupervisor(Node):
             measured, self._strict, self._machine.driver_state
         )
         if self._bounded_base_test:
-            # Test permission requires every measured base AND arm input, even
-            # when ordinary domestic operation reports sensor faults advisory.
+            # The attended test also requires every measured arm input.
             decision.base_permitted = measured.base_permitted and measured.arm_permitted
         if self._last_arm_permitted is True and not decision.arm_permitted:
             self.get_logger().warn(

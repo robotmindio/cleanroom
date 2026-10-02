@@ -888,6 +888,7 @@ def generate_launch_description():
                 executable="lekiwi_driver",
                 parameters=[{
                     "remote_ip": remote_ip,
+                    "nav2_params_file": params_file,
                     "local_arm_execution": True,
                     "bounded_base_test": ParameterValue(bounded_base_test, value_type=bool),
                     "arm_calibration_file": arm_calibration_file,

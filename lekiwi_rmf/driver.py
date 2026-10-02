@@ -29,7 +29,9 @@ from lekiwi_rmf.arm_trajectory import (
     duration_seconds, position_tolerances, prepare_trajectory, sample_trajectory,
     stamp_nanoseconds, trajectory_rows,
 )
-from lekiwi_rmf.motion_guards import inside_base_test_boundary, lease_is_fresh, twist_is_finite
+from lekiwi_rmf.motion_guards import (
+    inside_base_test_boundary, lease_is_fresh, load_base_speed_limits, twist_is_finite,
+)
 from lekiwi_rmf.odometry import (
     BASE_XY_SCALE, BASE_YAW_SCALE, HostPoseTracker, OdometrySampleClock, integrate_pose,
 )
@@ -55,8 +57,14 @@ class LeKiwiDriver(Node):
         curve_server_public = self.declare_parameter("curve_server_public_key_file", "").value
         self.xy_scale = self.declare_parameter("xy_velocity_scale", BASE_XY_SCALE).value
         self.yaw_scale = self.declare_parameter("yaw_velocity_scale", BASE_YAW_SCALE).value
-        self.max_linear = self.declare_parameter("max_linear_speed", 0.3).value
-        self.max_angular = self.declare_parameter("max_angular_speed", math.pi / 2).value
+        nav2_file = self.declare_parameter("nav2_params_file", "").value
+        speed_limits = load_base_speed_limits(nav2_file) if nav2_file else (0.3, math.pi / 2)
+        self.max_linear = min(
+            self.declare_parameter("max_linear_speed", speed_limits[0]).value, speed_limits[0]
+        )
+        self.max_angular = min(
+            self.declare_parameter("max_angular_speed", speed_limits[1]).value, speed_limits[1]
+        )
         self.bounded_base_test = bool(self.declare_parameter("bounded_base_test", False).value)
         if self.bounded_base_test:
             self.max_linear = min(self.max_linear, 0.03)

@@ -214,8 +214,8 @@ class Test(Node):
         while time.monotonic()<end:self.tick(Twist())
 
 
-def main():
-    OUTPUT.mkdir(parents=True,exist_ok=True)
+def main(test_class=Test, output=OUTPUT):
+    output.mkdir(parents=True,exist_ok=True)
     stack = None
     node = None
     error = None
@@ -223,12 +223,12 @@ def main():
     was_active = subprocess.run(['systemctl','is-active','--quiet','lekiwi-stack.service']).returncode==0
     subprocess.run(['sudo','-n','/usr/bin/systemctl','stop','lekiwi-stack.service'],check=True)
     try:
-        with (OUTPUT/'stack.log').open('w') as log:
+        with (output/'stack.log').open('w') as log:
             stack = subprocess.Popen([str(ROOT/'scripts/ros-start.sh'), *arguments,
                 'bounded_base_test:=true'], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
-                env={**os.environ,'LEKIWI_RUNTIME_DIR':str(OUTPUT/'runtime')}, start_new_session=True)
+                env={**os.environ,'LEKIWI_RUNTIME_DIR':str(output/'runtime')}, start_new_session=True)
             rclpy.init()
-            node = Test()
+            node = test_class()
             try:node.run()
             except (Exception,KeyboardInterrupt) as e:
                 error = str(e) or type(e).__name__
@@ -252,9 +252,10 @@ def main():
                             'links':[(l.from_id,l.to_id,l.type) for l in data.graph.links]}
                 report={'error':error,'origin':node.center,'final_pose':node.pose,'sensors':node.counts,'health':node.health,
                     'max_radius_m':max((math.dist(p[:2],node.center[:2]) for p in node.trace),default=0) if node.center else None,
-                    'trace':node.trace,'slam':node.slam,'graph':graph,'health_faults':node.health_faults}
-                (OUTPUT/'result.json').write_text(json.dumps(report,indent=2)+'\n')
-                print('report',OUTPUT/'result.json',flush=True)
+                    'trace':node.trace,'slam':node.slam,'graph':graph,'health_faults':node.health_faults,
+                    'fault_checks':getattr(node,'checks',None)}
+                (output/'result.json').write_text(json.dumps(report,indent=2)+'\n')
+                print('report',output/'result.json',flush=True)
                 if node.lifecycle_client.wait_for_service(timeout_sec=1):
                     future=node.lifecycle_client.call_async(ManageLifecycleNodes.Request(command=ManageLifecycleNodes.Request.SHUTDOWN))
                     end=time.monotonic()+8

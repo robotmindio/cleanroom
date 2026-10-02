@@ -326,6 +326,9 @@ def test_physical_acceptance_requires_measured_all_direction_and_fault_results(t
     path = tmp_path / "acceptance.yaml"
     nav2_path = tmp_path / "nav2.yaml"
     nav2_path.write_text(yaml.safe_dump({
+        "controller_server": {"ros__parameters": {"FollowPath": {
+            "vx_max": 0.3, "vx_min": -0.3, "vy_max": 0.3, "wz_max": 1.57,
+        }}},
         "local_costmap": {"local_costmap": {"ros__parameters": {
             "footprint": "[[-0.22, -0.22], [0.22, -0.22], [0.22, 0.22], [-0.22, 0.22]]",
             "footprint_padding": 0.0,
@@ -371,6 +374,8 @@ def test_physical_acceptance_requires_measured_all_direction_and_fault_results(t
             "arm_gripper": 0.0,
         },
         "minimum_trials_per_direction": 30,
+        "maximum_tested_linear_speed_m_s": 0.3,
+        "maximum_tested_angular_speed_rad_s": 1.57,
         "maximum_command_stop_latency_s": 0.08,
         "maximum_allowed_command_stop_latency_s": 0.10,
         "maximum_allowed_stopping_distance_m": 0.22,
@@ -404,6 +409,15 @@ def test_physical_acceptance_requires_measured_all_direction_and_fault_results(t
     assert validate_acceptance_file(path, nav2_path, expected_stow)[0]
 
     acceptance = yaml.safe_load(path.read_text(encoding="utf-8"))
+    for key in ("maximum_tested_linear_speed_m_s", "maximum_tested_angular_speed_rad_s"):
+        original = acceptance[key]
+        for unqualified in (None, True, float("nan"), 0.03):
+            acceptance[key] = unqualified
+            path.write_text(yaml.safe_dump(acceptance), encoding="utf-8")
+            valid, detail = validate_acceptance_file(path, nav2_path, expected_stow)
+            assert not valid and key in detail
+        acceptance[key] = original
+    path.write_text(yaml.safe_dump(acceptance), encoding="utf-8")
     legacy = yaml.safe_load(path.read_text(encoding="utf-8"))
     legacy["fault_tests"]["host_restart_stays_disarmed"] = True
     del legacy["fault_tests"]["host_restart_stops_then_gated_rearm"]
@@ -643,7 +657,7 @@ def test_an_estop_still_latches_when_fault_latching_is_off():
     assert machine.decision(SECOND).state == SafetyState.ESTOP
 
 
-def test_non_strict_mode_can_allow_non_workspace_faults():
+def test_non_strict_mode_preserves_arm_hold_but_denies_unhealthy_base():
     from lekiwi_rmf.safety_supervisor import permit_unless_strict
 
     machine = _machine()  # nothing has reported: default-deny in the state machine
@@ -653,12 +667,12 @@ def test_non_strict_mode_can_allow_non_workspace_faults():
     assert not denied.base_permitted and not denied.arm_permitted and denied.faults
 
     domestic = permit_unless_strict(denied, strict=False)
-    assert domestic.base_permitted and domestic.arm_permitted
+    assert not domestic.base_permitted and domestic.arm_permitted
     assert domestic.state == SafetyState.BOOT and domestic.faults == denied.faults
 
     armed = permit_unless_strict(denied, strict=False, driver_state="ARMED")
     assert armed.state == SafetyState.ARMED
-    assert armed.base_permitted and armed.arm_permitted and armed.faults == denied.faults
+    assert not armed.base_permitted and armed.arm_permitted and armed.faults == denied.faults
 
     assert permit_unless_strict(denied, strict=True) == denied
 
@@ -693,6 +707,13 @@ def test_non_strict_mode_keeps_acceptance_and_fresh_stow_as_base_gates():
     assert not domestic.base_permitted
 
     machine.arm_stowed = True
+    machine.update("scan", False, SECOND, "scan unavailable")
+    domestic = permit_unless_strict(machine.decision(SECOND), strict=False, driver_state="ARMED")
+    assert domestic.arm_stowed and not domestic.base_permitted
+    assert not machine.fault_latched
+    machine.update("scan", True, SECOND)
+    domestic = permit_unless_strict(machine.decision(SECOND), strict=False, driver_state="ARMED")
+    assert domestic.base_permitted
     machine.update("driver", True, 3 * SECOND)
     machine.update("acceptance", True, 3 * SECOND)
     machine.update("scan", False, 3 * SECOND, "scan unavailable")

@@ -5,7 +5,29 @@ import types
 
 import pytest
 
-from lekiwi_rmf.motion_guards import lease_is_fresh, positive_seconds_ns, stamp_ns, twist_is_finite
+from lekiwi_rmf.motion_guards import (
+    lease_is_fresh, load_base_speed_limits, positive_seconds_ns, stamp_ns, twist_is_finite,
+)
+
+
+def test_base_speed_limits_reject_bad_configuration_and_include_reverse(tmp_path):
+    import yaml
+    path = tmp_path / "nav2.yaml"
+    controller = {"vx_max": 0.2, "vx_min": -0.3, "vy_max": 0.1, "wz_max": 0.5}
+    def write():
+        path.write_text(yaml.safe_dump({"controller_server": {
+            "ros__parameters": {"FollowPath": controller},
+        }}))
+    write()
+    assert load_base_speed_limits(path) == (0.3, 0.5)
+    for bad in (True, "0.3", 0, -0.1, float("inf"), float("nan")):
+        controller["vx_max"] = bad
+        write()
+        with pytest.raises(ValueError, match="invalid Nav2 speed limits"):
+            load_base_speed_limits(path)
+    path.write_text("[]")
+    with pytest.raises(ValueError, match="invalid Nav2 speed limits"):
+        load_base_speed_limits(path)
 
 
 def test_lease_is_fresh_only_within_its_timeout_and_never_from_the_future():
@@ -40,6 +62,24 @@ def test_base_test_stops_inside_authorized_radius_and_rejects_bad_odometry():
     assert inside_base_test_boundary((1.19, 2.0, 0.0), (1.0, 2.0))
     assert not inside_base_test_boundary((1.0, 2.21, 0.0), (1.0, 2.0))
     assert not inside_base_test_boundary((math.nan, 2.0, 0.0), (1.0, 2.0))
+
+
+def test_physical_fault_probe_restores_service_when_injection_fails():
+    import runpy
+    import time
+    from pathlib import Path
+    FaultTest = runpy.run_path(str(Path(__file__).parents[1] /
+                                  'scripts/test-physical-acceptance.py'))['FaultTest']
+    calls = []
+    node = types.SimpleNamespace(flags={'base_motion_permitted':True,'arm_stowed':True},
+        speed=0.0, odom_at=time.monotonic(), pose=(0,0,0),
+        stop=lambda:calls.append('stop'), wait=lambda condition,timeout:condition())
+    node.tick = lambda command:setattr(node,'speed',0.01)
+    def broken(command):
+        raise RuntimeError('injection failed')
+    with pytest.raises(RuntimeError,match='injection failed'):
+        FaultTest.fault(node,'scan_disconnect',broken,lambda:calls.append('restore'),'scan:')
+    assert calls==['stop','restore']
 
 
 def test_navigation_probe_withdraws_lease_until_wheel_feedback_recovers(monkeypatch):

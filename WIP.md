@@ -29,12 +29,15 @@ with the longer grace period, and the mapper retained 20,109 dictionary entries
 with no missing references. The cloud gate's real isolated ROS process also
 exited zero after SIGINT. A finite hold showed zero encoder-resolved movement.
 
-Next: after `sudo -v` on compute, run `scripts/deploy-split.sh` to install the
-pending `KillMode=mixed` / Nice=-5 compute unit. Current global sudo timestamps
-allow that authentication to be shared; restart permission alone does not allow
-rewriting units. Deployment markers remain old until the full script succeeds.
+The full deployment of 32a8969 succeeded autonomously after sudo authentication;
+the compute unit now uses KillMode=mixed and Nice=-5, and deployment markers agree.
+The webcam confirms good lighting and the compact empty-gripper fold.
 
-Pending: compute administrator authentication for changed service configuration;
-independent floor scale and confirmation of surface/payload for physical braking
-acceptance; room lighting for further visual qualification. Never set acceptance
-validated from wheel odometry alone.
+Next: deploy the acceptance speed binding and required-base-input enforcement,
+then run the finite physical fault runner. Normal hold mode keeps torque and
+recovers permission; no new disarm or fault latching behavior is introduced.
+
+Pending: independent floor scale and confirmation of surface/payload and test
+speed scope for physical braking acceptance. The authorized 30 cm commissioning
+tests are capped at 0.03 m/s and 0.20 rad/s; production is faster. Never approve
+production speed or physical stopping distance from slow wheel-odometry trials.

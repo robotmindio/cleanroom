@@ -2,10 +2,11 @@
 
 This document records which requested safety functions can be provided by the
 current robot hardware and which require an additional physical signal source.
-The repository safety supervisor consumes the topics below. In strict mode
-(`LEKIWI_DISARM_ON_FAILURE=true`, and always in simulation) it default-denies
-motion when a required input is absent, stale, or unhealthy; by default it only
-reports them. A ROS topic alone is not evidence of a real safety function.
+The repository safety supervisor denies base motion when a required input is
+absent, stale, or unhealthy. Normal hold mode restores permission when inputs
+recover, while strict mode (`LEKIWI_DISARM_ON_FAILURE=true`, and always in
+simulation) also latches faults. A ROS topic alone is not evidence of a real
+safety function.
 
 | Function | Software support exists? | What is required for a real implementation |
 | --- | --- | --- |
@@ -50,6 +51,9 @@ The configured hold mode automatically re-arms after a fault or restart only
 when telemetry and arm permission recover. The acceptance tests for host and
 ROS restarts must show immediate command stop, then re-arm only after those
 inputs are healthy. A new captured arm stow invalidates the old acceptance.
+Tested linear and angular speeds must cover the tracked MPPI limits. The manual
+driver uses those same limits, so slow commissioning trials cannot approve a
+faster production or manual command.
 
 Before base trials, physically verify a compact arm stow, record its measured
 joints with `scripts/capture_stow.py`, and check that the full arm and cable
@@ -94,8 +98,8 @@ The diagnostics use these units:
 | Load | raw value and signed duty-cycle estimate (`raw / 1000`), not physical torque |
 | Temperature | internal servo temperature in °C |
 
-The following conditions are `ERROR` and therefore revoke safety permission in
-strict mode (by default they are reported and motion is not withheld):
+The following conditions are `ERROR` and revoke base permission in both modes;
+strict mode additionally latches the fault:
 
 - communication failure, incomplete readback, or invalid value;
 - torque readback that differs from the host's safety latch; or

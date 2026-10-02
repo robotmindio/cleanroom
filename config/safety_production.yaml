@@ -21,9 +21,9 @@ safety_supervisor:
     minimum_depth_valid_fraction: 0.01
     minimum_depth_range: 0.05
     maximum_depth_range: 10.0
-    # Missing, stale, or unhealthy sensor inputs deny motion in strict mode.
-    # Acceptance and a fresh measured arm stow remain hard base-motion gates
-    # in both modes; MoveIt collision status always gates arm motion.
+    # Required base inputs, acceptance and fresh stow gate base motion in both
+    # modes. Hold mode recovers permission when inputs recover, without disarming.
+    # MoveIt collision status always gates arm motion.
     #
     # The shipped robot has no bumper, IMU, or battery monitor, and its e-stop
     # cuts motor power outside the electronics, so nothing publishes

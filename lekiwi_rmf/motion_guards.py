@@ -8,7 +8,27 @@ from __future__ import annotations
 
 import math
 import time
+from pathlib import Path
 from typing import Optional, Protocol
+
+import yaml
+
+
+def load_base_speed_limits(path: str | Path) -> tuple[float, float]:
+    """Use the tracked MPPI limits for both acceptance and manual commands."""
+    try:
+        data = yaml.safe_load(Path(path).expanduser().read_text(encoding="utf-8"))
+        controller = data["controller_server"]["ros__parameters"]["FollowPath"]
+        values = [controller[key] for key in ("vx_max", "vx_min", "vy_max", "wz_max")]
+        if not all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                   and math.isfinite(v) for v in values):
+            raise ValueError("speed limits must be finite numbers")
+        vx, reverse, vy, angular = values
+        if vx <= 0 or reverse >= 0 or vy <= 0 or angular <= 0:
+            raise ValueError("expected positive maxima and a negative vx_min")
+        return float(max(vx, -reverse, vy)), float(angular)
+    except (OSError, yaml.YAMLError, KeyError, TypeError, ValueError) as error:
+        raise ValueError(f"invalid Nav2 speed limits in {path}: {error}") from error
 
 
 class _Vector(Protocol):
