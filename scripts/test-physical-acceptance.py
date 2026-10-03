@@ -107,7 +107,8 @@ class FaultTest(navigation['Test']):
                 raise RuntimeError('fault speed test blocked by collision monitor: '+str(action))
             if time.monotonic()>end:
                 self.stop()
-                raise RuntimeError(f'{name} did not reach {self.test_speed} m/s; '
+                units = 'rad/s' if self.angular_test else 'm/s'
+                raise RuntimeError(f'{name} did not reach {self.test_speed} {units}; '
                                    f'wheel={self.measured_speed}, guarded={self.safe_speed}')
             self.tick(command)
         origin = self.pose

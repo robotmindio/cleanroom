@@ -323,7 +323,8 @@ def test_shared_runner_restores_production_if_the_test_stack_has_already_exited(
     assert calls[-1][-2:]==['start','lekiwi-stack.service']
 
 
-def test_physical_fault_probe_restores_service_when_injection_fails():
+@pytest.mark.parametrize('angular_test',[False,True])
+def test_physical_fault_probe_restores_service_when_injection_fails(angular_test):
     import runpy
     import time
     from pathlib import Path
@@ -332,13 +333,15 @@ def test_physical_fault_probe_restores_service_when_injection_fails():
     calls = []
     node = types.SimpleNamespace(flags={'base_motion_permitted':True,'arm_stowed':True},
         speed=0.0, odom_at=time.monotonic(), pose=(0,0,0),
-        checks={},measured_speed=0.0,safe_speed=0.01,test_speed=.05,monitor_action=None,angular_test=False,
+        checks={},measured_speed=0.0,safe_speed=0.01,test_speed=.05,monitor_action=None,angular_test=angular_test,
         stop=lambda:calls.append('stop'), wait=lambda condition,timeout:condition())
     def tick(command):
+        assert command.angular.z==(.05 if angular_test else 0)
+        assert command.linear.x==(0 if angular_test else .05)
         calls.append('tick')
         node.measured_speed = .025 if calls.count('tick')==1 else .05
         node.safe_speed = .05
-        node.pose = (0.005,0,0)
+        node.pose = (0.005,0,.02 if angular_test else 0)
     node.tick = tick
     def broken(command):
         raise RuntimeError('injection failed')
