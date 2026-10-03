@@ -43,3 +43,20 @@ def test_cloud_waits_for_matching_arm_transform_and_expires():
     transforms.available = True
     assert ready(cloud, 1, 2, transforms)
     assert not ready(cloud, 1, MAX_WAIT_NS + 2, transforms)
+
+
+def test_new_cloud_cannot_replace_the_frame_waiting_for_its_joint_transform(monkeypatch):
+    monkeypatch.setattr(moveit_cloud_gate.time, "monotonic_ns", lambda: 1)
+    published = []
+    transforms = SimpleNamespace(can_transform=lambda *_: True)
+    node = SimpleNamespace(_pending=None, _transforms=transforms,
+                           _publisher=SimpleNamespace(publish=published.append))
+    first = SimpleNamespace(header=SimpleNamespace(frame_id="depth", stamp=TimeMsg(sec=1)))
+    newer = SimpleNamespace(header=SimpleNamespace(frame_id="depth", stamp=TimeMsg(sec=2)))
+    moveit_cloud_gate.MoveItCloudGate._on_cloud(node, first)
+    moveit_cloud_gate.MoveItCloudGate._on_cloud(node, newer)
+    assert node._pending == (first, 1)
+    moveit_cloud_gate.MoveItCloudGate._flush(node)
+    assert published == [first] and node._pending is None
+    moveit_cloud_gate.MoveItCloudGate._on_cloud(node, newer)
+    assert node._pending == (newer, 1)

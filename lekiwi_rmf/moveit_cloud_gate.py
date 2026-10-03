@@ -40,7 +40,11 @@ class MoveItCloudGate(Node):
         self.create_timer(0.01, self._flush)
 
     def _on_cloud(self, cloud):
-        self._pending = (cloud, time.monotonic_ns())
+        # A newer cloud can also be ahead of the latest joint TF. Replacing
+        # the waiting cloud on every arrival can starve the gate indefinitely.
+        # Keep one bounded pending frame until its TF arrives or it expires.
+        if self._pending is None:
+            self._pending = (cloud, time.monotonic_ns())
 
     def _flush(self):
         if self._pending is None:
