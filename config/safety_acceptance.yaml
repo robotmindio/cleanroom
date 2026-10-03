@@ -55,8 +55,9 @@ directions:
   rotation_cw: {trials: 0, worst_stopping_distance_m: null}
   rotation_ccw: {trials: 0, worst_stopping_distance_m: null}
 fault_tests:
-  # Live bounded tests on 2026-10-02: command cap 0.03 m/s, compact fold;
-  # stopping distances and production-speed acceptance remain unvalidated.
+  # Optical bounded checks on 2026-10-03/04: 0.04 m/s and 0.08 rad/s,
+  # compact fold. See docs/physical-verification-20261003.md. The declared
+  # measurement error is not independently calibrated; acceptance stays false.
   scan_disconnect: true
   depth_disconnect: true
   imu_disconnect: null # Not applicable: no IMU is fitted.
@@ -71,7 +72,9 @@ fault_tests:
   # A restart must stop commands; re-arm is allowed only with fresh telemetry
   # and current arm permission in the configured automatic re-arm mode.
   host_restart_stops_then_gated_rearm: true
-  ros_restart_stops_then_gated_rearm: false
+  # Full test ROS tree (31 processes) killed at 0.04 m/s; independent camera
+  # stopping bound plus declared error < 5 cm, then fresh gated production re-arm.
+  ros_restart_stops_then_gated_rearm: true
   # A client without a key received neither telemetry nor a health reply;
   # authorized driver credentials received telemetry on 2026-09-26.
   zmq_unauthorized_client_rejected: true
