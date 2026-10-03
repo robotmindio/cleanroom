@@ -40,6 +40,13 @@ root=${LEKIWI_NETWORK_ROOT:-}
 "$(dirname -- "${BASH_SOURCE[0]}")/install-wifi-regdom.sh" "${country_args[@]}"
 "$(dirname -- "${BASH_SOURCE[0]}")/install-wifi-powersave.sh"
 
+dds_buffers=$root/etc/sysctl.d/60-lekiwi-dds-socket-buffers.conf
+install -d -m 0755 "${dds_buffers%/*}"
+install -m 0644 "$(dirname -- "${BASH_SOURCE[0]}")/../config/dds_socket_buffers.conf" "$dds_buffers"
+if [[ -z $root ]]; then
+  sysctl --load "$dds_buffers"
+fi
+
 if ! command -v nmcli >/dev/null; then
   printf 'NetworkManager is not installed -- no polkit settings to install\n'
   exit 0

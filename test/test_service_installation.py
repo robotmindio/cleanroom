@@ -716,6 +716,8 @@ def _network_checkout(tmp_path: pathlib.Path, env_file: str | None = None) -> pa
         target = checkout / "scripts" / name
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / "scripts" / name, target)
+    (checkout/'config').mkdir()
+    shutil.copy2(ROOT/'config/dds_socket_buffers.conf',checkout/'config/dds_socket_buffers.conf')
     if env_file is not None:
         (checkout / ".env").write_text(env_file, encoding="utf-8")
     return checkout
@@ -811,6 +813,8 @@ def test_device_network_installer_disables_power_saving_and_scopes_polkit(tmp_pa
 
     powersave = (tmp_path / "root/etc/NetworkManager/conf.d/zz-lekiwi-wifi-powersave-off.conf").read_text()
     assert "[connection]" in powersave and "wifi.powersave = 2" in powersave
+    buffers=tmp_path/'root/etc/sysctl.d/60-lekiwi-dds-socket-buffers.conf'
+    assert buffers.read_text()==(ROOT/'config/dds_socket_buffers.conf').read_text()
 
     rule = (tmp_path / "root/etc/polkit-1/rules.d/50-lekiwi-networkmanager.rules").read_text()
     assert f'subject.user == "{user}"' in rule
