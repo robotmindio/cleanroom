@@ -10,8 +10,9 @@ angular_steps_rad_s: [0.10]
 trials_per_direction: 30
 trial_displacement_m: 0.030
 trial_rotation_rad: 0.12
-# The fixed camera's marker border has about 7 cm of remaining view margin.
-maximum_optical_displacement_m: 0.06
+# Recentered three-marker view accommodates the pulse and stopping excursion.
+# This is a measurement boundary; the StopZone's 5 cm budget below is unchanged.
+maximum_optical_displacement_m: 0.08
 # Protect the authorized chassis-center radius even if the camera's reference
 # lies up to 20 cm away from that center and the base rotates during a trial.
 marker_center_offset_bound_m: 0.20
