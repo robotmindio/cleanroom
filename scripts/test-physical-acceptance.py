@@ -95,8 +95,13 @@ class FaultTest(navigation['Test']):
         end = time.monotonic()+5
         while (self.linear_speed<self.test_speed*.9 or self.safe_speed is None or self.safe_speed<self.test_speed*.9 or
                math.dist(self.pose[:2],start[:2])<0.003 or time.monotonic()-self.odom_at>0.3):
+            if self.monitor_action and self.monitor_action[1]!=navigation['CollisionMonitorState'].DO_NOTHING:
+                self.stop()
+                raise RuntimeError('fault speed test blocked by collision monitor: '+str(self.monitor_action))
             if time.monotonic()>end:
-                raise RuntimeError('base did not start for '+name)
+                self.stop()
+                raise RuntimeError(f'{name} did not reach {self.test_speed} m/s; '
+                                   f'wheel={self.linear_speed}, guarded={self.safe_speed}')
             self.tick(command)
         origin = self.pose
         self.phase = name
