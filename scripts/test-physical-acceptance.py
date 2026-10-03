@@ -14,17 +14,20 @@ import subprocess
 import time
 
 from geometry_msgs.msg import Twist
+from lekiwi_rmf.motion_guards import load_base_speed_limits
 
 navigation = runpy.run_path(str(Path(__file__).with_name('test-navigation.py')))
 
 
 class FaultTest(navigation['Test']):
-    def __init__(self, restart_tests=False):
+    def __init__(self, restart_tests=False, output=None):
         super().__init__()
         self.deadline = time.monotonic()+360
         self.speed = math.inf
         self.checks = {}
         self.restart_tests = restart_tests
+        self.output = output
+        self.test_speed = load_base_speed_limits(navigation['ROOT']/'config/nav2_params.yaml')[0]
         self.phase = None
         self.safe_speed = None
         self.linear_speed = math.inf
@@ -85,19 +88,20 @@ class FaultTest(navigation['Test']):
     def fault(self, name, begin, restore, expected):
         self.wait(lambda:self.flags.get('base_motion_permitted') and self.flags.get('arm_stowed'),30)
         command = Twist()
-        command.linear.x = 0.03
+        command.linear.x = self.test_speed
         no_feedback = name in ('telemetry_loss','compute_command_loss',
                               'host_restart_stops_then_gated_rearm')
         start = self.pose
         end = time.monotonic()+5
-        while (self.linear_speed<0.005 or not self.safe_speed or
+        while (self.linear_speed<self.test_speed*.9 or self.safe_speed is None or self.safe_speed<self.test_speed*.9 or
                math.dist(self.pose[:2],start[:2])<0.003 or time.monotonic()-self.odom_at>0.3):
             if time.monotonic()>end:
                 raise RuntimeError('base did not start for '+name)
             self.tick(command)
         origin = self.pose
         self.phase = name
-        self.checks[name] = {'passed':False,'samples':[]}
+        self.checks[name] = {'passed':False,'samples':[],
+                             'requested_speed_m_s':self.test_speed,'injection_speed_m_s':self.linear_speed}
         print('injecting',name,'moving speed',self.speed,flush=True)
         try:
             begin(command)
@@ -128,10 +132,10 @@ class FaultTest(navigation['Test']):
             if not no_feedback and self.safe_speed!=0:
                 raise RuntimeError(name+' left a nonzero guarded command')
             for frame in range(2):
-                image = navigation['ROOT']/f'.benchmarks/physical-acceptance/{name}-{frame}.jpg'
+                image = self.output/f'{name}-{frame}.jpg'
                 self.action(['timeout','12','gst-launch-1.0','-q','pipewiresrc',
                     'target-object=v4l2_input.pci-0000_04_00.3-usb-0_2.1.2_1.0','num-buffers=1','!',
-                    'image/jpeg,width=1280,height=720,framerate=30/1','!',
+                    'image/jpeg,width=1280,height=960,framerate=30/1','!',
                     'filesink',f'location={image}'],command)
                 end = time.monotonic()+0.7
                 while time.monotonic()<end:
@@ -200,6 +204,5 @@ if __name__=='__main__':
     parser.add_argument('--restart-tests',action='store_true',
                         help='test compute-driver suspension and the Pi motor-host restart')
     args = parser.parse_args()
-    suffix = '-restarts' if args.restart_tests else ''
-    navigation['main'](lambda:FaultTest(args.restart_tests),
-                       navigation['ROOT']/('.benchmarks/physical-acceptance'+suffix))
+    output = navigation['ROOT']/'.benchmarks/physical-faults'/time.strftime('%Y%m%d-%H%M%S')
+    navigation['main'](lambda:FaultTest(args.restart_tests,output),output)

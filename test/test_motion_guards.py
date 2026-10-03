@@ -315,17 +315,20 @@ def test_physical_fault_probe_restores_service_when_injection_fails():
     calls = []
     node = types.SimpleNamespace(flags={'base_motion_permitted':True,'arm_stowed':True},
         speed=0.0, odom_at=time.monotonic(), pose=(0,0,0),
-        checks={},linear_speed=0.0,safe_speed=0.01,
+        checks={},linear_speed=0.0,safe_speed=0.01,test_speed=.05,
         stop=lambda:calls.append('stop'), wait=lambda condition,timeout:condition())
     def tick(command):
-        node.linear_speed = 0.01
+        calls.append('tick')
+        node.linear_speed = .025 if calls.count('tick')==1 else .05
+        node.safe_speed = .05
         node.pose = (0.005,0,0)
     node.tick = tick
     def broken(command):
         raise RuntimeError('injection failed')
     with pytest.raises(RuntimeError,match='injection failed'):
         FaultTest.fault(node,'scan_disconnect',broken,lambda:calls.append('restore'),'scan:')
-    assert calls==['stop','restore']
+    assert calls==['tick','tick','stop','restore']
+    assert node.checks['scan_disconnect']['injection_speed_m_s']==.05
 
 
 def test_shared_motion_probe_waits_for_active_monitor_without_nonzero_commands(monkeypatch):
