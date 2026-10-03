@@ -18,6 +18,37 @@ import pytest
 ROOT = pathlib.Path(__file__).parents[1]
 
 
+@pytest.mark.parametrize('activation_failure',[False,True])
+def test_wifi_switch_arms_rollback_before_activation_and_retains_original(tmp_path,activation_failure):
+    fakes=tmp_path/'bin'
+    log=tmp_path/'calls'
+    _executable(fakes/'nmcli',r'''
+printf 'nmcli %s\n' "$*" >> "$LEKIWI_TEST_LOG"
+if [[ $1 == -g && $2 == GENERAL.CON-UUID ]]; then echo original; exit; fi
+if [[ $1 == -g ]]; then
+  [[ -f $LEKIWI_TEST_CLONED ]] || exit 10
+  echo target; exit
+fi
+if [[ $1 == connection && $2 == clone ]]; then touch "$LEKIWI_TEST_CLONED"; fi
+if [[ $1 == --wait ]]; then exit "$LEKIWI_TEST_FAIL"; fi
+''')
+    _executable(fakes/'sudo','shift\nexec "$@"\n')
+    for name in ('systemd-run','systemctl'):
+        _executable(fakes/name,'printf "%s %s\\n" "${0##*/}" "$*" >> "$LEKIWI_TEST_LOG"\n')
+    result=subprocess.run(['bash',str(ROOT/'scripts/switch-device-wifi.sh'),'house 5GHz'],
+        env={**os.environ,'PATH':f'{fakes}:{os.environ["PATH"]}',
+             'LEKIWI_TEST_LOG':str(log),'LEKIWI_TEST_CLONED':str(tmp_path/'cloned'),
+             'LEKIWI_TEST_FAIL':str(int(activation_failure))},capture_output=True,text=True)
+    calls=log.read_text().splitlines()
+    timer=next(i for i,s in enumerate(calls) if s.startswith('systemd-run'))
+    activation=next(i for i,s in enumerate(calls) if s.startswith('nmcli --wait'))
+    assert timer<activation and calls[timer].endswith('/usr/bin/nmcli connection up uuid original')
+    assert not any('modify uuid original' in s or 'delete' in s or 'psk' in s for s in calls)
+    assert any('band a' in s and 'autoconnect-priority 10' in s for s in calls)
+    assert ('systemctl stop lekiwi-wifi-rollback.timer' in calls) is not activation_failure
+    assert (result.returncode!=0) is activation_failure
+
+
 @pytest.mark.parametrize("help_text,expected", [("colcon build", False), ("--allow-overriding", True)])
 def test_native_builder_accepts_colcon_without_optional_override_extension(help_text, expected):
     builder = (ROOT / "scripts/build-native.sh").read_text()
