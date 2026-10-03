@@ -1,6 +1,6 @@
 # Nav2 parameters for the physical LeKiwi.  This intentionally does not inherit
 # nav2_bringup's TurtleBot defaults: LeKiwi is holonomic and the driver clamps
-# planar speed magnitude to 0.30 m/s and yaw to pi/2 rad/s.
+# planar speed magnitude and yaw to the shared MPPI limits below.
 
 amcl:
   ros__parameters:
@@ -63,7 +63,7 @@ controller_server:
       vx_max: 0.04
       vx_min: -0.04
       vy_max: 0.04
-      wz_max: 0.10
+      wz_max: 0.08
       ax_max: 0.60
       ax_min: -0.60
       ay_max: 0.60
@@ -210,8 +210,8 @@ behavior_server:
     robot_base_frame: base_footprint
     transform_tolerance: 0.2
     cycle_frequency: 10.0
-    max_rotational_vel: 0.10
-    min_rotational_vel: 0.05
+    max_rotational_vel: 0.08
+    min_rotational_vel: 0.04
     behavior_plugins: [spin, backup, drive_on_heading, assisted_teleop, wait]
     spin:
       plugin: nav2_behaviors::Spin
@@ -239,8 +239,8 @@ velocity_smoother:
     smoothing_frequency: 20.0
     feedback: OPEN_LOOP
     scale_velocities: true
-    max_velocity: [0.04, 0.04, 0.10]
-    min_velocity: [-0.04, -0.04, -0.10]
+    max_velocity: [0.04, 0.04, 0.08]
+    min_velocity: [-0.04, -0.04, -0.08]
     max_accel: [0.60, 0.60, 1.57]
     max_decel: [-0.60, -0.60, -1.57]
     odom_topic: /odom

@@ -25,7 +25,8 @@ units refer to them directly.
 - `install-pi.sh` installs the Pi host and enables the Pi 5 USB current setting by default; this requires a 5 V / 5 A supply.
 - `install-device-services.sh` installs the device boot services (motor host, cameras, Astra, LD06, zenoh bridge).
 - `install-compute-services.sh [--remote DEVICE] [--no-start]` installs `lekiwi-stack.service`; it restarts a running stack only when its configuration changed.
-- `install-device-network.sh --user USER [--country CC]` sets the Wi-Fi country, turns off Wi-Fi power saving and grants the deploy user NetworkManager control.
+- `install-device-network.sh --user USER [--country CC]` sets the Wi-Fi country, turns off Wi-Fi power saving, persists 8 MiB DDS socket-buffer limits and grants the deploy user NetworkManager control.
+- `switch-device-wifi.sh SSID` clones the active saved connection for 5 GHz with a native timed rollback; it retains the original profile and does not expose credentials.
 - `install-wifi-powersave.sh` disables Wi-Fi power saving on the active interface and on future NetworkManager connections; both service installers run it.
 - `install-wifi-regdom.sh [CC]` sets the Wi-Fi regulatory country (default `LEKIWI_WIFI_COUNTRY`, else `ID`) now and at every boot.
 - `install-deploy-sudoers.sh` grants the deploy user passwordless start/stop of the LeKiwi units only.

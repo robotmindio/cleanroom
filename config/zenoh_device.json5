@@ -27,7 +27,7 @@
         action_servers: [],
         action_clients: [],
       },
-      // Astra preprocessing already limits points to 3 Hz and images to 2 Hz.
+      // Astra preprocessing already limits points to 10 Hz and images to 2 Hz.
       // Do not throttle those again: arrival jitter near an identical period
       // would drop an extra frame. Limit the remaining native high-rate feeds.
       pub_max_frequencies: [
