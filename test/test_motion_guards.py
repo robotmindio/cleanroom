@@ -44,6 +44,19 @@ def test_stopping_clearance_uses_farthest_point_excursion_without_summing_jitter
     assert excursion([[0,0,0],[.01,0,.2],[0,0,0]],.53) == pytest.approx(.01+1.06*math.sin(.1))
 
 
+def test_optical_speed_uses_capture_intervals_and_rejects_replayed_timestamps():
+    import runpy
+    from pathlib import Path
+    speeds = runpy.run_path(str(Path(__file__).parents[1]/'scripts/test-braking.py'))['observed_speeds']
+    frames = [{'pts_ns':100_000_000,'time':1.,'pose':[0,0,0]},
+              {'pts_ns':200_000_000,'time':2.,'pose':[.01,0,.02]}]
+    assert speeds(frames,False) == pytest.approx([.1])
+    assert speeds(frames,True) == pytest.approx([.2])
+    frames[1]['pts_ns'] = frames[0]['pts_ns']
+    with pytest.raises(RuntimeError,match='capture timestamps'):
+        speeds(frames,False)
+
+
 def test_missing_measurement_camera_does_not_interrupt_production(monkeypatch,tmp_path):
     import runpy
     import sys
@@ -72,7 +85,7 @@ def test_braking_exploration_stops_a_speed_step_at_its_first_failed_direction(tm
     trials = []
     def trial(direction,speed):
         trials.append((direction,speed))
-        return {'within_budget':direction=='forward'}
+        return {'within_budget':direction=='forward','feedback_interrupted':False}
     def finished(*args):
         raise RuntimeError('exploration finished')
     node = types.SimpleNamespace(camera=types.SimpleNamespace(calibration=[0,0,0,0],last_pose=[0,0,0]),
@@ -224,7 +237,8 @@ def test_shared_motion_probe_waits_for_active_monitor_without_nonzero_commands(m
     assert all(c.linear.x==c.linear.y==c.angular.z==0 for c in commands)
 
 
-def test_navigation_probe_withdraws_lease_until_wheel_feedback_recovers(monkeypatch):
+@pytest.mark.parametrize('unverified',['wheel','arm'])
+def test_navigation_probe_withdraws_lease_until_feedback_recovers(monkeypatch,unverified):
     import runpy
     import time
     from pathlib import Path
@@ -233,15 +247,19 @@ def test_navigation_probe_withdraws_lease_until_wheel_feedback_recovers(monkeypa
     Test = runpy.run_path(str(Path(__file__).parents[1] / 'scripts/test-navigation.py'))['Test']
     leases, commands = [], []
     node = types.SimpleNamespace(active=True, center=(0,0,0), pose=(0,0,0),
-        odom_at=time.monotonic()-1, deadline=time.monotonic()+10,
-        flags={'arm_stowed':True,'driver':'ARMED'},
+        odom_at=time.monotonic()-(1 if unverified=='wheel' else 0), deadline=time.monotonic()+10,
+        flags={'arm_stowed':unverified!='arm','driver':'ARMED'},health={},
+        motion_pauses=0,paused_seconds=0.0,
         lease=types.SimpleNamespace(publish=lambda m:leases.append(m.data)),
         command=types.SimpleNamespace(publish=commands.append))
     node.tick = lambda *args,**kwargs:Test.tick(node,*args,**kwargs)
+    node.pause_until = lambda *args:Test.pause_until(node,*args)
     def spin_once(node,timeout_sec):
         if not node.active:
             node.odom_at=time.monotonic()
+            node.flags['arm_stowed']=True
     monkeypatch.setattr(rclpy,'spin_once',spin_once)
     node.tick()
     assert leases == [True,False] and node.active
     assert len(commands)==1 and commands[0].linear.x==commands[0].angular.z==0
+    assert node.motion_pauses==1

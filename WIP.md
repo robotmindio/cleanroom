@@ -8,6 +8,8 @@ Completed: smaller 56 x 54 cm stop zone, 70 x 68 cm slowdown zone, matching 0.10
 
 Verified: 57 CTests and 94 affected tests; tracked zones active on both machines; arm remains folded, stationary and valid. The new position cleared the old StopZone returns.
 
-Next: reconnect the external measurement camera (USB enumeration error -71), investigate network interruption (up to 0.85 s RTT and packet loss), then repeat scripts/test-braking.py and bounded navigation. The live navigation retest stopped after 2.1 cm for simultaneous stale feedback. Production is restored; no test monitor remains.
+Latest: camera reconnected. Shared readiness now waits for active CollisionMonitor. At 0.10 m/s reverse stopping plus the declared allowance exceeded 50 mm; translation is capped at 0.05 m/s. Decimation 2 detects all three visible markers. Dry concrete, zero added payload and marker tilt following the modeled Astra mount are confirmed.
+
+Next: run the complete finite braking sequence using capture-time speed intervals and bounded zero-command recovery for feedback gaps. Interrupted/unattained trials are retained but excluded from repetition counts. Then test navigation/SLAM and remaining fault cases, restore production and stop the test runners.
 
 Pending: thirty qualifying trials per direction, full-speed coverage, floor-plane calibration, actual payload/surface confirmation, remaining fault tests and verified SLAM registration. Physical acceptance remains false. Check CI for the new dependency fix.

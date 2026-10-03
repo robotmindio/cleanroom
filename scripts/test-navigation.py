@@ -90,6 +90,8 @@ class Test(Node):
         self.health_faults = []
         self.monitor_action = None
         self.blocked_at = None
+        self.motion_pauses = 0
+        self.paused_seconds = 0.0
         self.create_subscription(CollisionMonitorState, '/collision_monitor_state',
             lambda m:setattr(self,'monitor_action',(m.polygon_name,m.action_type)), 10)
         self.map_client = self.create_client(GetMap, '/rtabmap/get_map_data')
@@ -137,22 +139,13 @@ class Test(Node):
         if check and self.center is not None:
             if time.monotonic()>self.deadline:
                 raise RuntimeError('total test deadline expired')
-            if time.monotonic()-self.odom_at>0.5:
-                print('paused for fresh wheel feedback',flush=True)
-                was_active = self.active
-                self.active = False
-                end = time.monotonic()+3
-                while time.monotonic()-self.odom_at>0.5:
-                    self.tick(Twist(),check=False)
-                    if time.monotonic()>end:
-                        raise RuntimeError('wheel feedback did not recover')
-                self.active = was_active
+            def unverified():
+                return (time.monotonic()-self.odom_at>0.5 or
+                        not self.flags.get('arm_stowed') or self.flags.get('driver')!='ARMED')
+            if unverified():
+                self.pause_until(lambda:not unverified(),'verified motion feedback')
             if math.dist(self.pose[:2],self.center[:2])>=0.18:
                 raise RuntimeError('early 18 cm test boundary reached')
-            if not self.flags.get('arm_stowed'):
-                raise RuntimeError('arm stow is unverified: '+str(self.health))
-            if self.flags.get('driver')!='ARMED':
-                raise RuntimeError('driver stopped being armed')
 
     def wait(self, condition, seconds):
         end = time.monotonic()+seconds
@@ -165,6 +158,19 @@ class Test(Node):
         end = time.monotonic()+0.6
         while time.monotonic()<end:
             self.tick(Twist(),check=False)
+
+    def pause_until(self,condition,reason):
+        print('paused for',reason,self.health,flush=True)
+        was_active = self.active
+        self.active = False
+        self.motion_pauses += 1
+        start = time.monotonic()
+        while not condition():
+            self.tick(Twist(),check=False)
+            if time.monotonic()-start>3:
+                raise RuntimeError(reason+' did not recover: '+str(self.health))
+        self.paused_seconds += time.monotonic()-start
+        self.active = was_active
 
     def wait_ready(self):
         self.wait(lambda:self.pose is not None and self.flags.get('arm_stowed')
