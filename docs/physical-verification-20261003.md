@@ -2,8 +2,67 @@
 
 **Result: characterization completed partially; smaller indoor zones deployed;
 physical acceptance remains false.**
-The fixed measurement camera was retained. The three chassis AprilTag 36h11
-markers (53, 69, 59) have a supplied black-edge side length of 35 mm.
+The three chassis AprilTag 36h11 markers (53, 69, 59) have a supplied face size
+of 35 mm. Whether that dimension measures the detected black edge or includes
+the white margin still requires confirmation.
+
+## Latest verification, 19:50
+
+Revision `6f6ce96` was deployed directly to compute and Pi. Production limits
+are **0.05 m/s translation and 0.10 rad/s rotation**; the 5 cm StopZone clearance
+is unchanged. Physical acceptance remains false.
+
+Run `20261003-193625` uses projective rectification of the marker plane and a
+fixed optical return position. Earlier affine measurements are historical
+characterization; they are not substituted into the corrected series.
+
+| Direction | Eligible stops, including exploration | Worst swept bound | Stop-time upper bound |
+| --- | ---: | ---: | ---: |
+| Forward, 0.05 m/s | 31 | 24.52 mm | 0.416 s |
+| Reverse, 0.05 m/s | 31 | 24.02 mm | 0.422 s |
+| Left, 0.05 m/s | 14 | 20.54 mm | 0.317 s |
+| Right, 0.05 m/s | 1 | 17.97 mm | 0.263 s |
+| Clockwise, 0.10 rad/s | 1 | 18.34 mm | 0.185 s |
+| Counterclockwise, 0.10 rad/s | 1 | 24.13 mm | 0.260 s |
+
+Forward and reverse each completed thirty repetitions after exploration.
+Add the declared **10 mm uncertainty** to the swept bounds. A clockwise
+0.20 rad/s trial measured 43.7 mm plus that allowance, exceeding the 50 mm
+budget; the shared production rotation limit was therefore reduced to 0.10.
+
+Three measurement causes were corrected: decimation missed a visible tag, so
+full-resolution detection now follows a region with full-frame recovery;
+wheel-only returns accumulated about 2 cm despite a stationary camera, so
+returns now close on the fixed optical pose; the affine model rejected valid
+rotation frames, so the tilted plane is projectively rectified. Synthetic
+perspective regression and raw-frame replay check that geometry. None of these
+establishes independently surveyed floor/lens/timing calibration.
+
+The run stopped on a speed check that included stationary command startup.
+That check now uses terminal capture intervals, matching its unchanged 90%
+speed-coverage requirement. Linear pulses are 30 mm; guards are unchanged.
+Twenty-six motion-guard regressions and **57/57 CTests** passed (37.54 seconds).
+
+At 19:49 and 19:50 the external camera showed only floor and a support leg,
+with the robot and all markers outside the image. Further physical trials
+cannot establish a reference. They remain pending until the view is restored;
+no camera-less movement was attempted. Production was restored, all runners
+exited, and the existing SLAM database was preserved.
+
+The finite restored-runtime probe confirmed the folded arm ARMED, stationary
+across 74 joint samples and MoveIt-valid; all ten Nav2 lifecycle nodes were
+active. Controller parameters returned 0.10 rad/s and 0.05 m/s. The final
+standing base-permission fault was unvalidated physical acceptance. The same
+probe also captured brief scan/workspace freshness faults; restoration does
+not imply those intermittent interruptions are fixed.
+
+Remaining: finish lateral/rotation repetitions, confirm marker dimensions and
+independent measurement error bounds, complete applicable fault cases, and
+demonstrate meaningful Nav2 movement and SLAM growth/closure. Shared scan/depth/
+joint interruptions still occur; healthy average RTT and Pi load do not identify
+their cause. No safety deadlines were relaxed to hide them.
+
+## Earlier evidence
 
 ## Recorded stopping trials
 
