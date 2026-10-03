@@ -23,6 +23,7 @@ from geometry_msgs.msg import Twist
 from diagnostic_msgs.msg import DiagnosticArray
 from nav_msgs.msg import Odometry
 from nav2_msgs.action import NavigateToPose
+from nav2_msgs.msg import CollisionMonitorState
 from nav2_msgs.srv import ManageLifecycleNodes
 from rtabmap_msgs.msg import Info
 from rtabmap_msgs.srv import GetMap
@@ -86,6 +87,10 @@ class Test(Node):
         self.goal = None
         self.health = {}
         self.health_faults = []
+        self.monitor_action = None
+        self.blocked_at = None
+        self.create_subscription(CollisionMonitorState, '/collision_monitor_state',
+            lambda m:setattr(self,'monitor_action',(m.polygon_name,m.action_type)), 10)
         self.map_client = self.create_client(GetMap, '/rtabmap/get_map_data')
         self.lifecycle_client = self.create_client(ManageLifecycleNodes, '/lifecycle_manager_navigation/manage_nodes')
         self.create_subscription(DiagnosticArray, '/diagnostics', self.diagnostics, 10)
@@ -118,6 +123,15 @@ class Test(Node):
         # high-rate sensor topics cannot leave our pose/permissions queued.
         for _ in range(20):
             rclpy.spin_once(self,timeout_sec=0)
+        requested = twist is not None and any((twist.linear.x,twist.linear.y,twist.angular.z))
+        if check and requested and self.monitor_action == ('StopZone',CollisionMonitorState.STOP):
+            if self.blocked_at is None:
+                self.blocked_at = time.monotonic()
+            elif time.monotonic()-self.blocked_at > 3:
+                self.command.publish(Twist())
+                raise RuntimeError('physical obstacle in collision-monitor StopZone blocks motion')
+        else:
+            self.blocked_at = None
         if check and self.center is not None:
             if time.monotonic()>self.deadline:
                 raise RuntimeError('total test deadline expired')
@@ -162,7 +176,7 @@ class Test(Node):
             if math.hypot(dx,dy)<0.008 and abs(da)<0.03:
                 break
             if time.monotonic()>end:
-                raise RuntimeError('manual motion did not reach target')
+                raise RuntimeError(f'manual motion did not reach target; collision monitor={self.monitor_action}')
             if not self.flags.get('base_motion_permitted'):
                 print('paused for permission',self.health,flush=True)
                 self.stop()
@@ -279,6 +293,7 @@ def main(test_class=Test, output=OUTPUT, launch_arguments=()):
                             'valid_3d_features':sum(all(math.isfinite(v) for v in (p.x,p.y,p.z)) for p in m.word_pts)} for m in data.nodes],
                             'links':[(link.from_id,link.to_id,link.type) for link in data.graph.links]}
                 report={'error':error,'origin':node.center,'final_pose':node.pose,'sensors':node.counts,'health':node.health,
+                    'collision_monitor_action':node.monitor_action,
                     'max_radius_m':max((math.dist(p[:2],node.center[:2]) for p in node.trace),default=0) if node.center else None,
                     'trace':node.trace,'slam':node.slam,'graph':graph,'health_faults':node.health_faults,
                     'fault_checks':getattr(node,'checks',None)}

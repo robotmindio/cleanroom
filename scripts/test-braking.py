@@ -75,13 +75,15 @@ class Camera:
         self.video = (output/'camera.mjpg').open('wb')
         self.records = (output/'camera.jsonl').open('w')
         self.config = config
+        self.output = output
         self.calibration = None
         self.last_pose = None
         self.last_time = 0.0
         self.closed = False
         self.count = 0
         self.detector = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_APRILTAG_36h11)
-        self.parameters = cv2.aruco.DetectorParameters_create()
+        self.parameters = (cv2.aruco.DetectorParameters_create() if hasattr(cv2.aruco,'DetectorParameters_create')
+                           else cv2.aruco.DetectorParameters())
         self.parameters.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_APRILTAG
         self.parameters.aprilTagQuadDecimate = 3.0
         if self.pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
@@ -119,6 +121,11 @@ class Camera:
         markers = {} if ids is None else {int(key):c.reshape(4, 2) for key, c in zip(ids.flatten(), corners)}
         if self.calibration is None and all(key in markers for key in self.config['marker_ids']):
             self.calibration = metric_reference(markers, self.config['marker_ids'], self.config['marker_side_m'])
+            matrix,origin,reference,error = self.calibration
+            (self.output/'calibration.json').write_text(json.dumps({
+                'matrix':matrix.tolist(),'origin_px':origin.tolist(),
+                'reference':{key:value.tolist() for key,value in reference.items()},
+                'marker_edge_residual_m':error,'opencv':cv2.__version__},indent=2)+'\n')
         pose = None if self.calibration is None else metric_pose(markers, *self.calibration[:3])
         if pose is not None:
             self.last_pose = pose[0]
@@ -164,7 +171,8 @@ class BrakingTest(navigation['Test']):
             self.optical_samples.append(sample)
         if twist is not None:
             self.feedback.write(json.dumps({'time':time.monotonic(), 'command':[twist.linear.x,twist.linear.y,twist.angular.z],
-                'safe_command':self.latest_safe, 'wheel_pose':self.pose, 'health':self.health})+'\n')
+                'safe_command':self.latest_safe, 'wheel_pose':self.pose, 'health':self.health,
+                'collision_monitor_action':self.monitor_action})+'\n')
         if check and self.active:
             if time.monotonic()-self.camera.last_time > self.config['maximum_frame_age_s']:
                 self.command.publish(Twist())
@@ -204,7 +212,7 @@ class BrakingTest(navigation['Test']):
             if distance >= self.config['trial_rotation_rad' if angular else 'trial_displacement_m']:
                 break
             if time.monotonic() > timeout:
-                raise RuntimeError('base did not complete the optical motion pulse')
+                raise RuntimeError(f'optical motion pulse incomplete; collision monitor={self.monitor_action}')
         moving = self.optical_samples[beginning:]
         if len(moving) < 3:
             raise RuntimeError('too few optical frames to measure the attained speed')

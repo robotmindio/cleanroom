@@ -1,9 +1,9 @@
 # Physical braking verification
 
-Completed: finite camera runner, tracked 35 mm marker specification, attended speed limits bounded by production caps; existing sensor and stow gates retained.
+Completed: finite camera runner, 35 mm marker specification, production-bounded test limits, camera/callback/interrupt fixes, and CI ownership/dependency fixes.
 
-Verified: 121 affected tests; stationary optical tracking and production runtime preflight. Arm is compact and stationary; Nav2 nodes active; MoveIt current pose valid.
+Verified: 57/57 CTests; 122 affected tests; 85 measured stopping trials, fresh sensors, stationary folded arm, active Nav2 and valid MoveIt pose. Details: docs/physical-verification-20261003.md.
 
-Next: deploy, explore speeds inside the authorized 30 cm radius, run repeated stopping and fault checks, record attained speeds and limitations, restore production.
+Next: clear persistent rear-right StopZone returns without moving the measurement camera; rerun scripts/test-braking.py and complete remaining fault/navigation tests. Production is restored; no test monitor remains.
 
-Pending: physical acceptance stays false until applicable measured evidence and calibration support it. Marker-plane measurements do not independently establish floor-plane calibration. External CI for the preceding revision failed and has not been diagnosed.
+Pending: thirty qualifying trials per direction, full-speed coverage, floor-plane calibration, actual payload/surface confirmation, remaining fault tests and verified SLAM registration. Physical acceptance remains false. Check CI for the new dependency fix.

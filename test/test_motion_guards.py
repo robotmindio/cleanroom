@@ -35,6 +35,25 @@ def test_optical_measurement_recovers_known_rigid_motion_and_rejects_deformation
     assert functions['metric_pose'](moved,matrix,origin,reference) is None
 
 
+def test_runner_drains_callbacks_and_reports_a_physical_stop(monkeypatch):
+    import runpy
+    import time
+    from pathlib import Path
+    from geometry_msgs.msg import Twist
+    functions = runpy.run_path(str(Path(__file__).parents[1]/'scripts/test-navigation.py'))
+    calls, commands = [], []
+    monkeypatch.setattr(functions['rclpy'],'spin_once',lambda *a,**k:calls.append(k))
+    node = types.SimpleNamespace(active=True,lease=types.SimpleNamespace(publish=lambda m:None),
+                                 command=types.SimpleNamespace(publish=commands.append),
+                                 monitor_action=('StopZone',1),blocked_at=time.monotonic()-4)
+    command = Twist()
+    command.linear.x = .03
+    with pytest.raises(RuntimeError,match='physical obstacle'):
+        functions['Test'].tick(node,command)
+    assert len(calls) == 21
+    assert commands[-1].linear.x == commands[-1].angular.z == 0
+
+
 def test_base_speed_limits_reject_bad_configuration_and_include_reverse(tmp_path):
     import yaml
     path = tmp_path / "nav2.yaml"
