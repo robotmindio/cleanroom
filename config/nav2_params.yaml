@@ -60,9 +60,9 @@ controller_server:
       # Indoor limits paired with the 5 cm stopping clearance below.
       # Depth transport and its 0.5 s freshness gate are paired with these
       # limits; physical stopping acceptance remains pending.
-      vx_max: 0.05
-      vx_min: -0.05
-      vy_max: 0.05
+      vx_max: 0.04
+      vx_min: -0.04
+      vy_max: 0.04
       wz_max: 0.10
       ax_max: 0.60
       ax_min: -0.60
@@ -239,8 +239,8 @@ velocity_smoother:
     smoothing_frequency: 20.0
     feedback: OPEN_LOOP
     scale_velocities: true
-    max_velocity: [0.05, 0.05, 0.10]
-    min_velocity: [-0.05, -0.05, -0.10]
+    max_velocity: [0.04, 0.04, 0.10]
+    min_velocity: [-0.04, -0.04, -0.10]
     max_accel: [0.60, 0.60, 1.57]
     max_decel: [-0.60, -0.60, -1.57]
     odom_topic: /odom
