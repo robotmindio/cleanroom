@@ -65,6 +65,26 @@ def test_missing_measurement_camera_does_not_interrupt_production(monkeypatch,tm
     assert not calls
 
 
+def test_braking_exploration_stops_a_speed_step_at_its_first_failed_direction(tmp_path):
+    import runpy
+    from pathlib import Path
+    BrakingTest = runpy.run_path(str(Path(__file__).parents[1]/'scripts/test-braking.py'))['BrakingTest']
+    trials = []
+    def trial(direction,speed):
+        trials.append((direction,speed))
+        return {'within_budget':direction=='forward'}
+    def finished(*args):
+        raise RuntimeError('exploration finished')
+    node = types.SimpleNamespace(camera=types.SimpleNamespace(calibration=[0,0,0,0],last_pose=[0,0,0]),
+        pose=(0,0,0),flags={'base_motion_permitted':True},checks={},output=tmp_path,
+        config={'linear_steps_m_s':[.03,.05],'angular_steps_rad_s':[],'trials_per_direction':0},
+        wait=lambda *args:None,wait_ready=lambda:None,settle=lambda:None,stop=lambda:None,
+        trial=trial,move=lambda *args:None,buffer=types.SimpleNamespace(lookup_transform=finished))
+    with pytest.raises(RuntimeError,match='exploration finished'):
+        BrakingTest.run(node)
+    assert trials == [('forward',.03),('reverse',.03)]
+
+
 def test_indoor_stop_zone_and_speed_profile_match_the_acceptance_budget():
     from pathlib import Path
     import yaml
