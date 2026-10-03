@@ -77,7 +77,7 @@ if(BUILD_TESTING)
   add_executable(test_native_waitable test/test_native_waitable.cpp)
   ament_target_dependencies(test_native_waitable rclcpp rclcpp_action control_msgs)
   add_test(NAME test_native_waitable COMMAND test_native_waitable)
-  set_tests_properties(test_native_waitable PROPERTIES ENVIRONMENT "ROS_DOMAIN_ID=223")
+  set_tests_properties(test_native_waitable PROPERTIES ENVIRONMENT "ROS_DOMAIN_ID=83")
   add_executable(test_rest_contacts test/test_rest_contacts.cpp)
   target_compile_features(test_rest_contacts PUBLIC cxx_std_17)
   ament_target_dependencies(test_rest_contacts moveit_core)
@@ -120,51 +120,52 @@ if(BUILD_TESTING)
     ament_add_pytest_test(${name} test/${name}.py ENV "${test_environment}")
   endfunction()
   # Never let a test discover a running robot or a parallel test. These are
-  # distinct valid DDS domains (180-224), intentionally away from the live
-  # default (0) and below Cyclone DDS's highest usable domain (232). Tests
+  # distinct DDS domains (40-84), away from the live default (0) and
+  # Linux ephemeral UDP ports (32768-60999). Higher domains collided with a
+  # live node's ephemeral socket during discovery. Tests
   # without one never open a DDS participant.
-  add_lekiwi_pytest(test_odometry 180)
-  add_lekiwi_pytest(test_motor_health 216)
-  add_lekiwi_pytest(test_odom_scale 181)
-  add_lekiwi_pytest(test_free_space 182)
-  add_lekiwi_pytest(test_camera_relay 183)
-  add_lekiwi_pytest(test_astra_pro_configuration 215)
-  add_lekiwi_pytest(test_astra_cloud_filter 218)
-  add_lekiwi_pytest(test_slam_cloud 219)
-  add_lekiwi_pytest(test_remote_astra_service 217)
-  add_lekiwi_pytest(test_arm_trajectory 184)
+  add_lekiwi_pytest(test_odometry 40)
+  add_lekiwi_pytest(test_motor_health 76)
+  add_lekiwi_pytest(test_odom_scale 41)
+  add_lekiwi_pytest(test_free_space 42)
+  add_lekiwi_pytest(test_camera_relay 43)
+  add_lekiwi_pytest(test_astra_pro_configuration 75)
+  add_lekiwi_pytest(test_astra_cloud_filter 78)
+  add_lekiwi_pytest(test_slam_cloud 79)
+  add_lekiwi_pytest(test_remote_astra_service 77)
+  add_lekiwi_pytest(test_arm_trajectory 44)
   add_lekiwi_pytest(test_local_arm_executor)
   add_lekiwi_pytest(test_arm_calibration)
-  add_lekiwi_pytest(test_arm_jog 224)
+  add_lekiwi_pytest(test_arm_jog 84)
   add_lekiwi_pytest(test_capture_stow)
-  add_lekiwi_pytest(test_collision_model 185)
+  add_lekiwi_pytest(test_collision_model 45)
   add_lekiwi_pytest(test_vendor_lekiwi_model)
-  add_lekiwi_pytest(test_driver_link 186)
-  add_lekiwi_pytest(test_cmd_vel_mux 187)
+  add_lekiwi_pytest(test_driver_link 46)
+  add_lekiwi_pytest(test_cmd_vel_mux 47)
   add_lekiwi_pytest(test_motion_guards)
-  add_lekiwi_pytest(test_teleop 188)
-  add_lekiwi_pytest(test_readiness_gate 189)
-  add_lekiwi_pytest(test_sim_host_tools 190)
-  add_lekiwi_pytest(test_rtabmap_db_maintenance 191)
-  add_lekiwi_pytest(test_torque_control 192)
+  add_lekiwi_pytest(test_teleop 48)
+  add_lekiwi_pytest(test_readiness_gate 49)
+  add_lekiwi_pytest(test_sim_host_tools 50)
+  add_lekiwi_pytest(test_rtabmap_db_maintenance 51)
+  add_lekiwi_pytest(test_torque_control 52)
   add_lekiwi_pytest(test_gripper_calibrate)
-  add_lekiwi_pytest(test_lidar_detection 193)
-  add_lekiwi_pytest(test_safety_supervisor 194)
-  add_lekiwi_pytest(test_arm_workspace_monitor 209)
-  add_lekiwi_pytest(test_map_bundle 195)
-  add_lekiwi_pytest(test_launch_validation 196)
-  add_lekiwi_pytest(test_rtabmap_session_guard 197)
-  add_lekiwi_pytest(test_rmf_owner_guard 211)
-  add_lekiwi_pytest(test_moveit_shutdown_probe 213)
-  add_lekiwi_pytest(test_native_lifecycle 222)
-  add_lekiwi_pytest(test_sim_qualification 214)
+  add_lekiwi_pytest(test_lidar_detection 53)
+  add_lekiwi_pytest(test_safety_supervisor 54)
+  add_lekiwi_pytest(test_arm_workspace_monitor 69)
+  add_lekiwi_pytest(test_map_bundle 55)
+  add_lekiwi_pytest(test_launch_validation 56)
+  add_lekiwi_pytest(test_rtabmap_session_guard 57)
+  add_lekiwi_pytest(test_rmf_owner_guard 71)
+  add_lekiwi_pytest(test_moveit_shutdown_probe 73)
+  add_lekiwi_pytest(test_native_lifecycle 82)
+  add_lekiwi_pytest(test_sim_qualification 74)
   if(test_python_has_zmq EQUAL 0)
-    add_lekiwi_pytest(test_fake_host 198)
+    add_lekiwi_pytest(test_fake_host 58)
   endif()
-  add_lekiwi_pytest(test_zmq_security 201)
-  add_lekiwi_pytest(test_simulation_model 203)
-  add_lekiwi_pytest(test_service_installation 200)
-  add_lekiwi_pytest(test_scan_self_filter 220)
+  add_lekiwi_pytest(test_zmq_security 61)
+  add_lekiwi_pytest(test_simulation_model 63)
+  add_lekiwi_pytest(test_service_installation 60)
+  add_lekiwi_pytest(test_scan_self_filter 80)
   add_lekiwi_pytest(test_camera_supervisor)
   add_lekiwi_pytest(test_moveit_cloud_gate)
   add_lekiwi_pytest(test_moveit_gripper_calibration)
@@ -173,27 +174,27 @@ if(BUILD_TESTING)
   add_lekiwi_pytest(test_foxglove_configuration)
   add_launch_test(test/test_cmd_vel_mux_launch.py
     TIMEOUT 30
-    ENV "${test_launch_environment};ROS_DOMAIN_ID=199")
+    ENV "${test_launch_environment};ROS_DOMAIN_ID=59")
   # A module-level pytest skip is not represented correctly by launch_testing:
   # without pyzmq it reports a misleading missing-result error before launch.
   # CI installs python3-zmq; minimal ROS hosts may intentionally omit it.
   if(test_python_has_zmq EQUAL 0)
     add_launch_test(test/test_driver_fake_host_launch.py
       TIMEOUT 45
-      ENV "${test_launch_environment};ROS_DOMAIN_ID=202")
+      ENV "${test_launch_environment};ROS_DOMAIN_ID=62")
   else()
     message(WARNING
       "pyzmq is unavailable to ${Python3_EXECUTABLE}; not registering ZMQ launch tests")
   endif()
   add_launch_test(test/test_simulation_physics_launch.py
     TIMEOUT 60
-    ENV "${test_launch_environment};ROS_DOMAIN_ID=204")
+    ENV "${test_launch_environment};ROS_DOMAIN_ID=64")
   add_launch_test(test/test_sim_native_failsafe_launch.py
     TIMEOUT 45
-    ENV "${test_launch_environment};ROS_DOMAIN_ID=206")
+    ENV "${test_launch_environment};ROS_DOMAIN_ID=66")
   add_launch_test(test/test_sim_sensor_frames_launch.py
     TIMEOUT 35
-    ENV "${test_launch_environment};ROS_DOMAIN_ID=207")
+    ENV "${test_launch_environment};ROS_DOMAIN_ID=67")
   # Both tests own a Gazebo server and make assertions against simulated-time
   # progress. Running the two servers concurrently on a small host can starve
   # physics updates and produce false motion/failsafe failures even though DDS
@@ -205,19 +206,19 @@ if(BUILD_TESTING)
     PROPERTIES RESOURCE_LOCK lekiwi_gazebo_server)
   add_launch_test(test/test_safety_supervisor_launch.py
     TIMEOUT 30
-    ENV "${test_launch_environment};ROS_DOMAIN_ID=205")
+    ENV "${test_launch_environment};ROS_DOMAIN_ID=65")
   add_launch_test(test/test_arm_workspace_monitor_launch.py
     TIMEOUT 30
-    ENV "${test_launch_environment};ROS_DOMAIN_ID=210")
+    ENV "${test_launch_environment};ROS_DOMAIN_ID=70")
   add_launch_test(test/test_rmf_owner_guard_launch.py
     TIMEOUT 20
-    ENV "${test_launch_environment};ROS_DOMAIN_ID=212")
+    ENV "${test_launch_environment};ROS_DOMAIN_ID=72")
   if(test_python_has_zmq EQUAL 0)
     # This is intentionally its own DDS graph: it launches MoveIt and the real
     # driver against the loopback-only fake motor host.
     add_launch_test(test/test_moveit_driver_e2e_launch.py
       TIMEOUT 90
-      ENV "${test_launch_environment};ROS_DOMAIN_ID=208")
+      ENV "${test_launch_environment};ROS_DOMAIN_ID=68")
   endif()
 endif()
 

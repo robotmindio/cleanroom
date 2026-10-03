@@ -6,8 +6,10 @@ Verified: dry concrete, 0 kg payload, modeled 8 degree marker tilt; 31 algorithm
 
 Current blocker: measurement image/tape/floor shifted abruptly at 18:12:48, leaving markers outside the image. An operator question is pending to restore and secure the fixed camera. No further motion until the reference is usable.
 
-Completed root fix: fresh SLAM startup previously required a loop closure after its first node. Empty and one-node databases may now grow, while populated maps retain relocalization gating. Production database preserved.
+Fixed startup configuration: empty and one-node SLAM databases now start without the new-session closure gate; populated maps retain relocalization gating. Deployed stationary probe confirms false and a seed with 271 nonzero 3D features. Growth and loop closure remain unverified; one stationary seed is expected below the 40 mm keyframe threshold. Production database preserved.
 
-Next: deploy the seed/preflight fixes, verify isolated fresh-map startup, then resume only left/right/clockwise/counterclockwise repetitions once the rig is stable. Finish navigation and outstanding fault tests, restore production and close all runners.
+Latest software root: domain 206 discovery UDP 58901 collided with Foxglove's ephemeral socket. Test domains changed to 40–84; full rerun pending after deployment.
+
+Next: resume only left/right/clockwise/counterclockwise repetitions once the rig is stable. Finish navigation and outstanding fault tests, restore production and close all runners.
 
 Pending: independent floor/lens/timing calibration, four directions' repetitions, outstanding applicable fault cases, verified loop closure/navigation, and intermittent shared network stalls. Physical acceptance remains false. Details: docs/physical-verification-20261003.md.

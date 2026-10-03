@@ -159,14 +159,36 @@ gaps; intermittent network impairment remains unresolved.
 
 An independent fresh test database preserved the production database. Both camera
 models and genuine nonzero 3D features were present in saved RGBD nodes. The fresh
-mapper saved one seed, then reported subsequent observations as map ID -1 while
-waiting for a closure. The launch gate enabled `StartNewMapOnLoopClosure` even for
-a nonexistent/empty database. It now permits empty and one-node mapping seeds to
-grow; maps with two or more nodes still require verified relocalization. No
-production database was erased and no closure was fabricated.
+mapper saved one seed. Stationary displacement was below the configured 40 mm
+keyframe threshold, so one saved node does not demonstrate a mapping failure.
+`Loop/Map_id/=-1` identifies the absence of a closure target; it is not the current
+node's session ID. The saved seed's actual session ID was zero.
+
+The launch gate enabled `StartNewMapOnLoopClosure` even for a nonexistent/empty
+database. Empty and one-node mapping databases now start with that option false;
+the deployed probe confirmed the value and retained 271 genuine nonzero 3D
+features. Maps with two or more nodes still require verified relocalization.
+Map growth and closure still require a movement test. No production database was
+erased and no closure was fabricated.
 
 The finite restored-runtime probe found the folded arm stationary, ARMED and
 MoveIt-valid, all ten Nav2 lifecycle nodes active, both cameras and lidar fresh,
 and unvalidated physical acceptance as the only standing base-permission fault.
 New regression checks: **96 passed** across motion guards, readiness and service
-installation. The corrected seed gate still needs its deployed runtime probe.
+installation. Revision `b4e4077` deployed successfully to compute and Pi; the
+stationary seed probe completed and restored production.
+
+## Test discovery port collision
+
+The final full software run passed 56/57 CTests. The native failsafe launch test
+failed before any simulated robot ran: domain 206 needed UDP 58901, already held
+by the live Foxglove DDS participant's ephemeral socket. The collision was still
+present on a second isolated attempt. The shared CMake test domains are now
+40–84, distinct from production domain zero and below Linux's ephemeral port
+range (32768–60999). A regression checks uniqueness and the fixed DDS port
+bounds. This changes test isolation, not production robot behavior. Full rerun
+pending after this revision's deployment.
+
+A final ten-second stationary camera inspection still could not establish a
+marker reference; it left production running. Remaining physical maneuvers need
+the camera restored and secured with all three markers visible.

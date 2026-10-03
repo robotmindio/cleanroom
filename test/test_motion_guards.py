@@ -10,6 +10,16 @@ from lekiwi_rmf.motion_guards import (
 )
 
 
+def test_test_domains_are_distinct_and_avoid_live_graph_and_ephemeral_ports():
+    import re
+    from pathlib import Path
+    source = (Path(__file__).parents[1]/'CMakeLists.txt').read_text()
+    domains = [int(a or b) for a,b in re.findall(
+        r'ROS_DOMAIN_ID=(\d+)|add_lekiwi_pytest\([^ )]+ (\d+)\)',source)]
+    assert domains and len(domains)==len(set(domains))
+    assert all(0<domain<=84 and 7400+250*domain+11+2*119<32768 for domain in domains)
+
+
 def test_attended_speed_trials_cannot_exceed_production_limits():
     assert bounded_test_speed_limits(.3, 1.57, (.3, 1.57)) == (.3, 1.57)
     for values in [(True,.2), (math.nan,.2), (.03,0), (.31,.2), (.03,1.58)]:
