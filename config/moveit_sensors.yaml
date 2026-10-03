@@ -10,5 +10,7 @@ point_cloud:
   point_subsample: 1
   padding_offset: 0.03
   padding_scale: 1.0
-  max_update_rate: 5.0
+  # Compact clouds are already capped at 10 Hz on the Pi. A second throttle
+  # discarded jittered ready frames and produced 0.6 s processed-cloud gaps.
+  max_update_rate: 0.0
   filtered_cloud_topic: /moveit/filtered_cloud

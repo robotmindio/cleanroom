@@ -361,6 +361,7 @@ def test_moveit_and_rviz_share_tracked_scaling_and_depth_defaults():
         limits["default_acceleration_scaling_factor"]
     )
     assert sensors["point_cloud"]["point_cloud_topic"] == "/moveit/depth/points_ready"
+    assert sensors["point_cloud"]["max_update_rate"] == 0.0
     assert sensors["point_cloud"]["sensor_plugin"] == (
         "occupancy_map_monitor/PointCloudOctomapUpdater"
     )
