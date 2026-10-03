@@ -14,7 +14,6 @@ import subprocess
 import time
 
 from geometry_msgs.msg import Twist
-from lifecycle_msgs.srv import GetState
 
 navigation = runpy.run_path(str(Path(__file__).with_name('test-navigation.py')))
 
@@ -29,7 +28,6 @@ class FaultTest(navigation['Test']):
         self.phase = None
         self.safe_speed = None
         self.linear_speed = math.inf
-        self.monitor_state = self.create_client(GetState,'/collision_monitor/get_state')
         self.create_subscription(Twist,'/cmd_vel_safe',lambda m:setattr(self,'safe_speed',
             math.hypot(m.linear.x,m.linear.y)+abs(m.angular.z)),10)
         arguments = navigation['installed_stack_arguments']()
@@ -152,22 +150,7 @@ class FaultTest(navigation['Test']):
         self.move(self.center)
 
     def run(self):
-        self.wait(lambda:self.pose is not None and self.flags.get('arm_stowed') and
-                  self.flags.get('driver')=='ARMED',70)
-        self.wait(lambda:self.monitor_state.service_is_ready(),20)
-        end = time.monotonic()+30
-        while True:
-            future = self.monitor_state.call_async(GetState.Request())
-            self.wait(future.done,5)
-            if future.result().current_state.id==3:
-                break
-            if time.monotonic()>end:
-                raise RuntimeError('collision monitor did not activate')
-            # spin_once returns immediately for ready callbacks. Rate-limit
-            # lifecycle queries so this probe cannot flood startup services.
-            next_query = time.monotonic()+0.5
-            while time.monotonic()<next_query:
-                self.tick(Twist())
+        self.wait_ready()
         self.center = self.pose
         self.active = True
         if self.restart_tests:

@@ -272,7 +272,7 @@ class BrakingTest(navigation['Test']):
     def run(self):
         try:
             self.wait(lambda:self.camera.calibration is not None and self.camera.last_pose is not None, 10)
-            self.wait(lambda:self.pose is not None and self.flags.get('arm_stowed') and self.flags.get('driver')=='ARMED', 70)
+            self.wait_ready()
             self.center = self.pose
             self.active = True
             self.wait(lambda:self.flags.get('base_motion_permitted'), 15)

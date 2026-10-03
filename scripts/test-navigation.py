@@ -21,6 +21,7 @@ from rclpy.signals import SignalHandlerOptions
 from rclpy.time import Time
 from geometry_msgs.msg import Twist
 from diagnostic_msgs.msg import DiagnosticArray
+from lifecycle_msgs.srv import GetState
 from nav_msgs.msg import Odometry
 from nav2_msgs.action import NavigateToPose
 from nav2_msgs.msg import CollisionMonitorState
@@ -93,6 +94,7 @@ class Test(Node):
             lambda m:setattr(self,'monitor_action',(m.polygon_name,m.action_type)), 10)
         self.map_client = self.create_client(GetMap, '/rtabmap/get_map_data')
         self.lifecycle_client = self.create_client(ManageLifecycleNodes, '/lifecycle_manager_navigation/manage_nodes')
+        self.monitor_state = self.create_client(GetState,'/collision_monitor/get_state')
         self.create_subscription(DiagnosticArray, '/diagnostics', self.diagnostics, 10)
 
     def diagnostics(self, m):
@@ -164,6 +166,22 @@ class Test(Node):
         while time.monotonic()<end:
             self.tick(Twist(),check=False)
 
+    def wait_ready(self):
+        self.wait(lambda:self.pose is not None and self.flags.get('arm_stowed')
+            and self.flags.get('driver')=='ARMED',70)
+        self.wait(lambda:self.monitor_state.service_is_ready(),20)
+        end = time.monotonic()+30
+        while True:
+            future = self.monitor_state.call_async(GetState.Request())
+            self.wait(future.done,5)
+            if future.result().current_state.id==3:
+                return
+            if time.monotonic()>end:
+                raise RuntimeError('collision monitor did not activate')
+            next_query = time.monotonic()+0.5
+            while time.monotonic()<next_query:
+                self.tick(Twist())
+
     def move(self, target, linear_limit=0.025, angular_limit=0.15):
         print('manual target',target,flush=True)
         # Collision monitoring legitimately scales manual commands to 35% near
@@ -215,8 +233,7 @@ class Test(Node):
         self.stop()
 
     def run(self):
-        self.wait(lambda:self.pose is not None and self.flags.get('arm_stowed')
-            and self.flags.get('driver')=='ARMED',70)
+        self.wait_ready()
         self.center = self.pose
         self.active = True
         self.wait(lambda:self.flags.get('base_motion_permitted'),10)
