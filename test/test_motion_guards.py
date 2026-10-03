@@ -35,6 +35,31 @@ def test_optical_measurement_recovers_known_rigid_motion_and_rejects_deformation
     assert functions['metric_pose'](moved,matrix,origin,reference) is None
 
 
+def test_stopping_clearance_uses_farthest_point_excursion_without_summing_jitter():
+    import runpy
+    from pathlib import Path
+    functions = runpy.run_path(str(Path(__file__).parents[1]/'scripts/test-braking.py'))
+    excursion = functions['maximum_swept_excursion']
+    assert excursion([[0,0,0],*[p for _ in range(100) for p in [[.001,0,0],[0,0,0]]]],.53) == .001
+    assert excursion([[0,0,0],[.01,0,.2],[0,0,0]],.53) == pytest.approx(.01+1.06*math.sin(.1))
+
+
+def test_indoor_stop_zone_and_speed_profile_match_the_acceptance_budget():
+    from pathlib import Path
+    import yaml
+    from lekiwi_rmf.safety_supervisor import _polygon, _polygon_boundary_distance, _point_in_polygon
+    root = Path(__file__).parents[1]
+    nav2 = yaml.safe_load((root/'config/nav2_params.yaml').read_text())
+    profile = yaml.safe_load((root/'config/physical_test.yaml').read_text())
+    footprint = _polygon(nav2['local_costmap']['local_costmap']['ros__parameters']['footprint'],'footprint')
+    stop = _polygon(nav2['collision_monitor']['ros__parameters']['StopZone']['points'],'stop')
+    assert all(_point_in_polygon(point,stop) for point in footprint)
+    assert _polygon_boundary_distance(footprint,stop) == pytest.approx(profile['maximum_stopping_distance_m'])
+    assert load_base_speed_limits(root/'config/nav2_params.yaml') == (
+        profile['maximum_linear_speed_m_s'],profile['maximum_angular_speed_rad_s'])
+    assert nav2['velocity_smoother']['ros__parameters']['max_velocity'] == [.1,.1,.2]
+
+
 def test_runner_drains_callbacks_and_reports_a_physical_stop(monkeypatch):
     import runpy
     import time

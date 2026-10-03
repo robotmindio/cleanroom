@@ -56,6 +56,18 @@ def metric_pose(markers, matrix, origin, reference):
             math.atan2(rotation[1, 0], rotation[0, 0])], error, common
 
 
+def maximum_swept_excursion(poses, radius):
+    """Bound any body's point displacement from the pre-stop pose.
+
+    The farthest excursion consumes obstacle clearance. Summing frame-to-frame
+    travel instead accumulates stationary detector jitter as braking distance.
+    """
+    start = poses[0]
+    return max(math.dist(start[:2], pose[:2]) +
+               2*radius*abs(math.sin(navigation['angle'](pose[2]-start[2])/2))
+               for pose in poses)
+
+
 class Camera:
     def __init__(self, config, output):
         import gi
@@ -234,7 +246,8 @@ class BrakingTest(navigation['Test']):
         rotation = sum(abs(navigation['angle'](b['pose'][2]-a['pose'][2])) for a,b in zip(post,post[1:]))
         # ponytail: conservative swept-point bound; surveyed marker-to-center
         # extrinsics can replace the 20 cm offset allowance after calibration.
-        swept = path+(.33+self.config['marker_center_offset_bound_m'])*rotation
+        swept = maximum_swept_excursion([s['pose'] for s in post],
+                                       .33+self.config['marker_center_offset_bound_m'])
         final = post[-1]['pose']
         outside = [i for i,s in enumerate(post) if math.dist(s['pose'][:2], final[:2]) > .002
                    or abs(navigation['angle'](s['pose'][2]-final[2])) > .01]

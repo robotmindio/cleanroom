@@ -57,18 +57,19 @@ controller_server:
       batch_size: 1000
       iteration_count: 1
       motion_model: Omni
-      vx_max: 0.30
-      vx_min: -0.30
-      vy_max: 0.30
-      wz_max: 1.57
+      # Indoor limits paired with the 5 cm stopping clearance below.
+      vx_max: 0.10
+      vx_min: -0.10
+      vy_max: 0.10
+      wz_max: 0.20
       ax_max: 0.60
       ax_min: -0.60
       ay_max: 0.60
       ay_min: -0.60
       az_max: 1.57
-      vx_std: 0.12
-      vy_std: 0.12
-      wz_std: 0.35
+      vx_std: 0.04
+      vy_std: 0.04
+      wz_std: 0.08
       prune_distance: 1.5
       transform_tolerance: 0.2
       visualize: false
@@ -234,8 +235,8 @@ velocity_smoother:
     smoothing_frequency: 20.0
     feedback: OPEN_LOOP
     scale_velocities: true
-    max_velocity: [0.30, 0.30, 1.57]
-    min_velocity: [-0.30, -0.30, -1.57]
+    max_velocity: [0.10, 0.10, 0.20]
+    min_velocity: [-0.10, -0.10, -0.20]
     max_accel: [0.60, 0.60, 1.57]
     max_decel: [-0.60, -0.60, -1.57]
     odom_topic: /odom
@@ -261,11 +262,10 @@ collision_monitor:
     polygons: [StopZone, SlowdownZone]
     StopZone:
       type: polygon
-      # Initial test envelope: 0.24 m front / 0.22 m rear + 0.075 m
-      # ideal braking distance at 0.30 m/s and 0.60 m/s^2. This value must be
-      # increased to include measured sensor/control latency and uncertainty
-      # before physical acceptance; it must never be tuned only in RViz.
-      points: "[[0.32, 0.30], [0.32, -0.30], [-0.30, -0.30], [-0.30, 0.30]]"
+      # Folded footprint plus 5 cm on every side: 0.56 x 0.54 m.
+      # Acceptance must cover measured stopping travel plus uncertainty at
+      # the indoor speed limits; this smaller envelope is not yet accepted.
+      points: "[[0.29, 0.27], [0.29, -0.27], [-0.27, -0.27], [-0.27, 0.27]]"
       action_type: stop
       min_points: 1
       visualize: true
@@ -273,7 +273,8 @@ collision_monitor:
       enabled: true
     SlowdownZone:
       type: polygon
-      points: "[[0.45, 0.45], [0.45, -0.45], [-0.45, -0.45], [-0.45, 0.45]]"
+      # 12 cm from the folded footprint: 0.70 x 0.68 m.
+      points: "[[0.36, 0.34], [0.36, -0.34], [-0.34, -0.34], [-0.34, 0.34]]"
       action_type: slowdown
       slowdown_ratio: 0.35
       min_points: 1
