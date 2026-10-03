@@ -186,8 +186,9 @@ by the live Foxglove DDS participant's ephemeral socket. The collision was still
 present on a second isolated attempt. The shared CMake test domains are now
 40–84, distinct from production domain zero and below Linux's ephemeral port
 range (32768–60999). A regression checks uniqueness and the fixed DDS port
-bounds. This changes test isolation, not production robot behavior. Full rerun
-pending after this revision's deployment.
+bounds. This changes test isolation, not production robot behavior. The deployed domain change made the native failsafe test pass. The next full
+run found only an obsolete qualification assertion requiring the old domain
+range; that assertion now checks the actual UDP port bound. Final rerun pending.
 
 A final ten-second stationary camera inspection still could not establish a
 marker reference; it left production running. Remaining physical maneuvers need

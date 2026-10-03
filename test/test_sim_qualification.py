@@ -112,9 +112,10 @@ def test_expected_ctests_match_every_test_the_package_registers():
     assert unit_tests <= registered
 
 
-def test_every_ctest_ros_domain_is_unique():
+def test_every_ctest_ros_domain_is_unique_and_avoids_ephemeral_ports():
     cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
     domains = re.findall(r"add_lekiwi_pytest\(\w+ (\d+)\)", cmake)
     domains += re.findall(r"ROS_DOMAIN_ID=(\d+)", cmake)
     assert len(domains) == len(set(domains))
-    assert all(180 <= int(domain) <= 232 for domain in domains)
+    assert all(40 <= int(domain) <= 84 and
+               7400+250*int(domain)+11+2*119<32768 for domain in domains)
