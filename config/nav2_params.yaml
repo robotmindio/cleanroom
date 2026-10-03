@@ -58,9 +58,11 @@ controller_server:
       iteration_count: 1
       motion_model: Omni
       # Indoor limits paired with the 5 cm stopping clearance below.
-      vx_max: 0.05
-      vx_min: -0.05
-      vy_max: 0.05
+      # Depth loss at 0.05 m/s consumed 48.7 mm plus 10 mm uncertainty.
+      # Preserve 5 cm clearance by limiting translation to 0.03 m/s.
+      vx_max: 0.03
+      vx_min: -0.03
+      vy_max: 0.03
       wz_max: 0.10
       ax_max: 0.60
       ax_min: -0.60
@@ -235,8 +237,8 @@ velocity_smoother:
     smoothing_frequency: 20.0
     feedback: OPEN_LOOP
     scale_velocities: true
-    max_velocity: [0.05, 0.05, 0.10]
-    min_velocity: [-0.05, -0.05, -0.10]
+    max_velocity: [0.03, 0.03, 0.10]
+    min_velocity: [-0.03, -0.03, -0.10]
     max_accel: [0.60, 0.60, 1.57]
     max_decel: [-0.60, -0.60, -1.57]
     odom_topic: /odom

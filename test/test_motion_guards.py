@@ -332,11 +332,11 @@ def test_physical_fault_probe_restores_service_when_injection_fails():
     calls = []
     node = types.SimpleNamespace(flags={'base_motion_permitted':True,'arm_stowed':True},
         speed=0.0, odom_at=time.monotonic(), pose=(0,0,0),
-        checks={},linear_speed=0.0,safe_speed=0.01,test_speed=.05,monitor_action=None,
+        checks={},measured_speed=0.0,safe_speed=0.01,test_speed=.05,monitor_action=None,angular_test=False,
         stop=lambda:calls.append('stop'), wait=lambda condition,timeout:condition())
     def tick(command):
         calls.append('tick')
-        node.linear_speed = .025 if calls.count('tick')==1 else .05
+        node.measured_speed = .025 if calls.count('tick')==1 else .05
         node.safe_speed = .05
         node.pose = (0.005,0,0)
     node.tick = tick
@@ -345,7 +345,7 @@ def test_physical_fault_probe_restores_service_when_injection_fails():
     with pytest.raises(RuntimeError,match='injection failed'):
         FaultTest.fault(node,'scan_disconnect',broken,lambda:calls.append('restore'),'scan:')
     assert calls==['tick','tick','stop','restore']
-    assert node.checks['scan_disconnect']['injection_speed_m_s']==.05
+    assert node.checks['scan_disconnect']['injection_speed']==.05
 
 
 def test_fault_probe_stops_before_injection_if_collision_monitor_reduces_speed():
@@ -355,7 +355,7 @@ def test_fault_probe_stops_before_injection_if_collision_monitor_reduces_speed()
     FaultTest=runpy.run_path(str(Path(__file__).parents[1]/'scripts/test-physical-acceptance.py'))['FaultTest']
     calls=[]
     node=types.SimpleNamespace(flags={'base_motion_permitted':True,'arm_stowed':True},
-        linear_speed=.0175,safe_speed=.0175,test_speed=.05,pose=(0,0,0),
+        measured_speed=.0175,safe_speed=.0175,test_speed=.05,pose=(0,0,0),angular_test=False,
         odom_at=time.monotonic(),monitor_action=('SlowdownZone',2),
         stop=lambda:calls.append('stop'),wait=lambda condition,timeout:condition())
     with pytest.raises(RuntimeError,match='blocked by collision monitor'):

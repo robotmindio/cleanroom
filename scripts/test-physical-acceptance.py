@@ -20,17 +20,18 @@ navigation = runpy.run_path(str(Path(__file__).with_name('test-navigation.py')))
 
 
 class FaultTest(navigation['Test']):
-    def __init__(self, restart_tests=False, output=None):
+    def __init__(self, restart_tests=False, output=None, angular_test=False):
         super().__init__()
         self.deadline = time.monotonic()+360
         self.speed = math.inf
         self.checks = {}
         self.restart_tests = restart_tests
         self.output = output
-        self.test_speed = load_base_speed_limits(navigation['ROOT']/'config/nav2_params.yaml')[0]
+        self.angular_test = angular_test
+        self.test_speed = load_base_speed_limits(navigation['ROOT']/'config/nav2_params.yaml')[int(angular_test)]
         self.phase = None
         self.safe_speed = None
-        self.linear_speed = math.inf
+        self.measured_speed = math.inf
         self.create_subscription(Twist,'/cmd_vel_safe',lambda m:setattr(self,'safe_speed',
             math.hypot(m.linear.x,m.linear.y)+abs(m.angular.z)),10)
         arguments = navigation['installed_stack_arguments']()
@@ -41,13 +42,14 @@ class FaultTest(navigation['Test']):
     def odometry(self, message):
         super().odometry(message)
         velocity = message.twist.twist
-        self.linear_speed = math.hypot(velocity.linear.x,velocity.linear.y)
-        self.speed = self.linear_speed+abs(velocity.angular.z)
+        linear_speed = math.hypot(velocity.linear.x,velocity.linear.y)
+        self.measured_speed = abs(velocity.angular.z) if self.angular_test else linear_speed
+        self.speed = linear_speed+abs(velocity.angular.z)
         if self.phase:
             stamp = message.header.stamp
             self.checks[self.phase]['samples'].append({
                 'time':time.monotonic(),'wheel_speed':self.speed,'safe_command':self.safe_speed,
-                'linear_speed':self.linear_speed,'angular_speed':velocity.angular.z,
+                'linear_speed':linear_speed,'angular_speed':velocity.angular.z,
                 'capture_age_s':(self.get_clock().now().nanoseconds-stamp.sec*10**9-stamp.nanosec)/10**9,
                 'base_permitted':self.flags.get('base_motion_permitted'),
                 'faults':self.health.get('faults')})
@@ -73,7 +75,7 @@ class FaultTest(navigation['Test']):
                 while process.poll() is None:
                     if time.monotonic()>end:
                         raise RuntimeError('fault action timed out: '+shlex.join(argv))
-                    self.tick(twist,check=twist is not None and twist.linear.x!=0)
+                    self.tick(twist,check=twist is not None and any((twist.linear.x,twist.linear.y,twist.angular.z)))
                 output = process.stdout.read()
                 if process.returncode:
                     raise RuntimeError('fault action failed: '+output)
@@ -88,25 +90,31 @@ class FaultTest(navigation['Test']):
     def fault(self, name, begin, restore, expected):
         self.wait(lambda:self.flags.get('base_motion_permitted') and self.flags.get('arm_stowed'),30)
         command = Twist()
-        command.linear.x = self.test_speed
+        if self.angular_test:
+            command.angular.z = self.test_speed
+        else:
+            command.linear.x = self.test_speed
         no_feedback = name in ('telemetry_loss','compute_command_loss',
                               'host_restart_stops_then_gated_rearm')
         start = self.pose
         end = time.monotonic()+5
-        while (self.linear_speed<self.test_speed*.9 or self.safe_speed is None or self.safe_speed<self.test_speed*.9 or
-               math.dist(self.pose[:2],start[:2])<0.003 or time.monotonic()-self.odom_at>0.3):
+        while (self.measured_speed<self.test_speed*.9 or self.safe_speed is None or self.safe_speed<self.test_speed*.9 or
+               (abs(navigation['angle'](self.pose[2]-start[2]))<0.015 if self.angular_test else
+                math.dist(self.pose[:2],start[:2])<0.003) or time.monotonic()-self.odom_at>0.3):
             if self.monitor_action and self.monitor_action[1]!=navigation['CollisionMonitorState'].DO_NOTHING:
+                action = self.monitor_action
                 self.stop()
-                raise RuntimeError('fault speed test blocked by collision monitor: '+str(self.monitor_action))
+                raise RuntimeError('fault speed test blocked by collision monitor: '+str(action))
             if time.monotonic()>end:
                 self.stop()
                 raise RuntimeError(f'{name} did not reach {self.test_speed} m/s; '
-                                   f'wheel={self.linear_speed}, guarded={self.safe_speed}')
+                                   f'wheel={self.measured_speed}, guarded={self.safe_speed}')
             self.tick(command)
         origin = self.pose
         self.phase = name
         self.checks[name] = {'passed':False,'samples':[],
-                             'requested_speed_m_s':self.test_speed,'injection_speed_m_s':self.linear_speed}
+                             'angular_test':self.angular_test,
+                             'requested_speed':self.test_speed,'injection_speed':self.measured_speed}
         print('injecting',name,'moving speed',self.speed,flush=True)
         try:
             begin(command)
@@ -208,6 +216,7 @@ if __name__=='__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--restart-tests',action='store_true',
                         help='test compute-driver suspension and the Pi motor-host restart')
+    parser.add_argument('--angular',action='store_true',help='inject faults during rotation instead of translation')
     args = parser.parse_args()
     output = navigation['ROOT']/'.benchmarks/physical-faults'/time.strftime('%Y%m%d-%H%M%S')
-    navigation['main'](lambda:FaultTest(args.restart_tests,output),output)
+    navigation['main'](lambda:FaultTest(args.restart_tests,output,args.angular),output)
