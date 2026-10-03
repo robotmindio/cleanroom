@@ -25,7 +25,7 @@ def test_optical_measurement_recovers_known_rigid_motion_and_rejects_deformation
     square = np.array([[0,0],[35,0],[35,35],[0,35]],dtype=float)
     markers = {53:square,69:square+[0,50],59:square-[0,50]}
     matrix,origin,reference,error = functions['metric_reference'](markers,[53,69,59],.035)
-    assert error < 1e-10
+    assert error < 1e-8  # OpenCV's homography inputs use float32.
     rotation = np.array([[math.cos(.2),-math.sin(.2)],[math.sin(.2),math.cos(.2)]])
     moved = {key:(corners-origin)@rotation.T+origin+[10,5] for key,corners in markers.items()}
     pose,_,_ = functions['metric_pose'](moved,matrix,origin,reference)
