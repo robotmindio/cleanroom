@@ -1,8 +1,9 @@
 astra_cloud_filter:
   ros__parameters:
     # QVGA depth at 30 Hz yields a useful sparse arm cloud without sending the
-    # raw raster. Sample every 8 pixels per axis and publish at most 3 Hz.
+    # raw raster. Sample every 8 pixels per axis. A 10 Hz compact cloud keeps
+    # safety observations timely without increasing the RGB/depth image rate.
     pixel_stride: 8
-    max_rate_hz: 3.0
+    max_rate_hz: 10.0
     # Visual registration needs dense measured depth, paired with RGB.
     image_max_rate_hz: 2.0
