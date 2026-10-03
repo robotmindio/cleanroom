@@ -58,17 +58,17 @@ controller_server:
       iteration_count: 1
       motion_model: Omni
       # Indoor limits paired with the 5 cm stopping clearance below.
-      vx_max: 0.10
-      vx_min: -0.10
-      vy_max: 0.10
+      vx_max: 0.05
+      vx_min: -0.05
+      vy_max: 0.05
       wz_max: 0.20
       ax_max: 0.60
       ax_min: -0.60
       ay_max: 0.60
       ay_min: -0.60
       az_max: 1.57
-      vx_std: 0.04
-      vy_std: 0.04
+      vx_std: 0.02
+      vy_std: 0.02
       wz_std: 0.08
       prune_distance: 1.5
       transform_tolerance: 0.2
@@ -235,8 +235,8 @@ velocity_smoother:
     smoothing_frequency: 20.0
     feedback: OPEN_LOOP
     scale_velocities: true
-    max_velocity: [0.10, 0.10, 0.20]
-    min_velocity: [-0.10, -0.10, -0.20]
+    max_velocity: [0.05, 0.05, 0.20]
+    min_velocity: [-0.05, -0.05, -0.20]
     max_accel: [0.60, 0.60, 1.57]
     max_decel: [-0.60, -0.60, -1.57]
     odom_topic: /odom

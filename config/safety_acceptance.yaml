@@ -16,8 +16,8 @@ installed_hardware:
 validated: false
 software_revision: null
 sensor_configuration: null
-payload_kg: 0.2
-surface: dry tile
+payload_kg: 0.0
+surface: dry concrete
 validated_at: null
 # Must exactly match both tracked Nav2 costmap footprints. The supervisor also
 # checks that the collision StopZone encloses this polygon plus the measured

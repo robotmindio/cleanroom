@@ -93,11 +93,12 @@ class Camera:
         self.last_time = 0.0
         self.closed = False
         self.count = 0
+        cv2.setNumThreads(2)
         self.detector = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_APRILTAG_36h11)
         self.parameters = (cv2.aruco.DetectorParameters_create() if hasattr(cv2.aruco,'DetectorParameters_create')
                            else cv2.aruco.DetectorParameters())
         self.parameters.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_APRILTAG
-        self.parameters.aprilTagQuadDecimate = 3.0
+        self.parameters.aprilTagQuadDecimate = 2.0
         if self.pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
             message = self.pipeline.get_bus().pop_filtered(Gst.MessageType.ERROR)
             details = message.parse_error() if message is not None else 'no GStreamer error detail'
@@ -283,8 +284,13 @@ class BrakingTest(navigation['Test']):
                                       (['rotation_cw','rotation_ccw'],self.config['angular_steps_rad_s'])]:
                 accepted = None
                 for speed in steps:
-                    results = [self.trial(direction,speed) for direction in directions]
-                    if not all(result['within_budget'] for result in results):
+                    results = []
+                    for direction in directions:
+                        result = self.trial(direction,speed)
+                        results.append(result)
+                        if not result['within_budget']:
+                            break
+                    if len(results)!=len(directions) or not all(result['within_budget'] for result in results):
                         break
                     accepted = speed
                 if accepted is not None:

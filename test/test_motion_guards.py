@@ -78,7 +78,9 @@ def test_indoor_stop_zone_and_speed_profile_match_the_acceptance_budget():
     assert _polygon_boundary_distance(footprint,stop) == pytest.approx(profile['maximum_stopping_distance_m'])
     assert load_base_speed_limits(root/'config/nav2_params.yaml') == (
         profile['maximum_linear_speed_m_s'],profile['maximum_angular_speed_rad_s'])
-    assert nav2['velocity_smoother']['ros__parameters']['max_velocity'] == [.1,.1,.2]
+    assert nav2['velocity_smoother']['ros__parameters']['max_velocity'] == [
+        profile['maximum_linear_speed_m_s'],profile['maximum_linear_speed_m_s'],
+        profile['maximum_angular_speed_rad_s']]
 
 
 def test_runner_drains_callbacks_and_reports_a_physical_stop(monkeypatch):
