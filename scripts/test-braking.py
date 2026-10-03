@@ -99,8 +99,10 @@ class Camera:
         self.parameters.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_APRILTAG
         self.parameters.aprilTagQuadDecimate = 3.0
         if self.pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
+            message = self.pipeline.get_bus().pop_filtered(Gst.MessageType.ERROR)
+            details = message.parse_error() if message is not None else 'no GStreamer error detail'
             self.close()
-            raise RuntimeError('measurement camera pipeline failed to start')
+            raise RuntimeError(f'measurement camera pipeline failed to start: {details}')
 
     def sample(self):
         if self.closed:
@@ -157,12 +159,12 @@ class Camera:
 
 
 class BrakingTest(navigation['Test']):
-    def __init__(self, config, output):
+    def __init__(self, config, output, camera):
         super().__init__()
         self.config = config
         self.output = output
         self.deadline = time.monotonic()+config['maximum_runtime_s']
-        self.camera = Camera(config, output)
+        self.camera = camera
         self.optical_samples = []
         self.feedback = (output/'feedback.jsonl').open('w')
         self.checks = {'trials':[], 'navigation':[], 'measurement_scope':'marker-plane characterization',
@@ -322,9 +324,10 @@ def main():
     output = ROOT/'.benchmarks/physical-braking'/time.strftime('%Y%m%d-%H%M%S')
     output.mkdir(parents=True)
     (output/'profile.yaml').write_text(yaml.safe_dump(config))
-    if args.inspect:
-        camera = Camera(config,output)
-        try:
+    # Check the external measurement device before interrupting production.
+    camera = Camera(config,output)
+    try:
+        if args.inspect:
             end = time.monotonic()+10
             while time.monotonic()<end:
                 camera.sample()
@@ -333,14 +336,14 @@ def main():
                 raise RuntimeError('cannot establish the optical reference')
             print(json.dumps({'camera_frames':camera.count,'marker_edge_residual_m':camera.calibration[3],
                               'last_pose':camera.last_pose,'output':str(output)}))
-        finally:
-            camera.close()
-    else:
-        if args.explore_only:
-            config['trials_per_direction'] = 0
-        navigation['main'](lambda:BrakingTest(config,output),output,
-                           (f"base_test_linear_limit:={config['maximum_linear_speed_m_s']}",
-                            f"base_test_angular_limit:={config['maximum_angular_speed_rad_s']}"))
+        else:
+            if args.explore_only:
+                config['trials_per_direction'] = 0
+            navigation['main'](lambda:BrakingTest(config,output,camera),output,
+                               (f"base_test_linear_limit:={config['maximum_linear_speed_m_s']}",
+                                f"base_test_angular_limit:={config['maximum_angular_speed_rad_s']}"))
+    finally:
+        camera.close()
 
 
 if __name__ == '__main__':

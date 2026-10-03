@@ -44,6 +44,27 @@ def test_stopping_clearance_uses_farthest_point_excursion_without_summing_jitter
     assert excursion([[0,0,0],[.01,0,.2],[0,0,0]],.53) == pytest.approx(.01+1.06*math.sin(.1))
 
 
+def test_missing_measurement_camera_does_not_interrupt_production(monkeypatch,tmp_path):
+    import runpy
+    import sys
+    from pathlib import Path
+    root = Path(__file__).parents[1]
+    functions = runpy.run_path(str(root/'scripts/test-braking.py'))
+    globals_ = functions['main'].__globals__
+    (tmp_path/'config').mkdir()
+    (tmp_path/'config/physical_test.yaml').write_text((root/'config/physical_test.yaml').read_text())
+    monkeypatch.setitem(globals_,'ROOT',tmp_path)
+    monkeypatch.setattr(sys,'argv',['test-braking.py'])
+    def missing_camera(*args):
+        raise RuntimeError('measurement camera missing')
+    monkeypatch.setitem(globals_,'Camera',missing_camera)
+    calls = []
+    monkeypatch.setitem(globals_['navigation'],'main',lambda *args:calls.append(args))
+    with pytest.raises(RuntimeError,match='measurement camera missing'):
+        functions['main']()
+    assert not calls
+
+
 def test_indoor_stop_zone_and_speed_profile_match_the_acceptance_budget():
     from pathlib import Path
     import yaml
