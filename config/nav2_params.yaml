@@ -58,20 +58,20 @@ controller_server:
       iteration_count: 1
       motion_model: Omni
       # Indoor limits paired with the 5 cm stopping clearance below.
-      # Depth loss at 0.05 m/s consumed 48.7 mm plus 10 mm uncertainty.
-      # Preserve 5 cm clearance by limiting translation to 0.03 m/s.
-      vx_max: 0.03
-      vx_min: -0.03
-      vy_max: 0.03
-      wz_max: 0.10
+      # Loss of depth consumed 48.7 mm at 0.05 m/s and 73.5 mm at 0.10 rad/s,
+      # before the declared 10 mm uncertainty. Keep margin inside 5 cm.
+      vx_max: 0.025
+      vx_min: -0.025
+      vy_max: 0.025
+      wz_max: 0.04
       ax_max: 0.60
       ax_min: -0.60
       ay_max: 0.60
       ay_min: -0.60
       az_max: 1.57
-      vx_std: 0.02
-      vy_std: 0.02
-      wz_std: 0.08
+      vx_std: 0.012
+      vy_std: 0.012
+      wz_std: 0.04
       prune_distance: 1.5
       transform_tolerance: 0.2
       visualize: false
@@ -210,6 +210,8 @@ behavior_server:
     robot_base_frame: base_footprint
     transform_tolerance: 0.2
     cycle_frequency: 10.0
+    max_rotational_vel: 0.04
+    min_rotational_vel: 0.02
     behavior_plugins: [spin, backup, drive_on_heading, assisted_teleop, wait]
     spin:
       plugin: nav2_behaviors::Spin
@@ -237,8 +239,8 @@ velocity_smoother:
     smoothing_frequency: 20.0
     feedback: OPEN_LOOP
     scale_velocities: true
-    max_velocity: [0.03, 0.03, 0.10]
-    min_velocity: [-0.03, -0.03, -0.10]
+    max_velocity: [0.025, 0.025, 0.04]
+    min_velocity: [-0.025, -0.025, -0.04]
     max_accel: [0.60, 0.60, 1.57]
     max_decel: [-0.60, -0.60, -1.57]
     odom_topic: /odom

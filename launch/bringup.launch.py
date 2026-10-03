@@ -2,6 +2,8 @@ import os
 import sqlite3
 from contextlib import closing
 from pathlib import Path
+from ament_index_python.packages import get_package_share_directory
+from lekiwi_rmf.motion_guards import load_base_speed_limits
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, EmitEvent, ExecuteProcess, IncludeLaunchDescription, LogInfo, OpaqueFunction, RegisterEventHandler, SetEnvironmentVariable, SetLaunchConfiguration
@@ -115,6 +117,8 @@ def _mapping_relocalization_gate(context):
 
 def generate_launch_description():
     package = FindPackageShare("lekiwi_rmf")
+    test_linear, test_angular = load_base_speed_limits(
+        Path(get_package_share_directory("lekiwi_rmf")) / "config/nav2_params.yaml")
     camera_supervisor = PathJoinSubstitution([package, "scripts", "camera-supervisor.sh"])
     mode = LaunchConfiguration("mode")
     remote_ip = LaunchConfiguration("remote_ip")
@@ -458,8 +462,8 @@ def generate_launch_description():
             DeclareLaunchArgument("headless", default_value="true", choices=["true", "false"]),
             DeclareLaunchArgument("remote_ip", default_value="127.0.0.1"),
             DeclareLaunchArgument("bounded_base_test", default_value="false", choices=["true", "false"]),
-            DeclareLaunchArgument("base_test_linear_limit", default_value="0.03"),
-            DeclareLaunchArgument("base_test_angular_limit", default_value="0.20"),
+            DeclareLaunchArgument("base_test_linear_limit", default_value=str(test_linear)),
+            DeclareLaunchArgument("base_test_angular_limit", default_value=str(test_angular)),
             DeclareLaunchArgument("curve_client_secret_key_file", default_value=""),
             DeclareLaunchArgument("curve_server_public_key_file", default_value=""),
             # Fleet bridging makes the ROS graph discoverable off-host. Keep it

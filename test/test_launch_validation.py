@@ -5,6 +5,23 @@ import pytest
 from lekiwi_rmf.launch_validation import astra_serial_from_hardware_config, validate_launch_arguments
 
 
+def test_bounded_launch_defaults_follow_current_production_speed_limits(monkeypatch):
+    import runpy
+    from pathlib import Path
+    from launch import LaunchContext
+    from launch.actions import DeclareLaunchArgument
+    from launch.utilities import perform_substitutions
+    from lekiwi_rmf.motion_guards import load_base_speed_limits
+    root=Path(__file__).parents[1]
+    generate=runpy.run_path(str(root/'launch/bringup.launch.py'))['generate_launch_description']
+    monkeypatch.setitem(generate.__globals__,'get_package_share_directory',lambda name:str(root))
+    description=generate()
+    arguments={a.name:a.default_value for a in description.entities if isinstance(a,DeclareLaunchArgument)}
+    limits=tuple(float(perform_substitutions(LaunchContext(),arguments[name])) for name in
+                 ('base_test_linear_limit','base_test_angular_limit'))
+    assert limits==load_base_speed_limits(root/'config/nav2_params.yaml')
+
+
 def test_nav2_bounded_profile_matches_the_driver_and_preserves_production():
     import runpy
     from pathlib import Path

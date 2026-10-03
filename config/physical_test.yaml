@@ -3,10 +3,10 @@ camera: v4l2_input.pci-0000_04_00.3-usb-0_2.1.2_1.0
 image_size: [1280, 960]
 marker_ids: [53, 69, 59]
 marker_side_m: 0.035
-maximum_linear_speed_m_s: 0.03
-maximum_angular_speed_rad_s: 0.10
-linear_steps_m_s: [0.03]
-angular_steps_rad_s: [0.10]
+maximum_linear_speed_m_s: 0.025
+maximum_angular_speed_rad_s: 0.04
+linear_steps_m_s: [0.025]
+angular_steps_rad_s: [0.04]
 trials_per_direction: 30
 trial_displacement_m: 0.030
 trial_rotation_rad: 0.12
