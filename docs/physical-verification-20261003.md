@@ -177,3 +177,26 @@ under `.benchmarks/physical-braking/`, `.benchmarks/physical-optical-faults/`,
 deployment logs and paired buffer/network timing probes. Earlier completed
 full ROS crash verification killed and checked 31 owned ROS processes while an
 independent camera measured the stop; it did not kill the Pi or camera observer.
+
+## Final software and restored-runtime check
+
+Runtime revision **c6afe474f597** was deployed to compute and Pi without operator
+intervention. A complete CTest rerun passed **57/57 checks in 36.56 seconds**,
+including all nine launch tests. The preceding run's sole failure was an obsolete
+assertion requiring the former 3 Hz depth profile; it now checks the deployed
+10 Hz profile. Targeted configuration/supervisor checks passed 53/53.
+
+The final eight-second production probe received 81 complete joint samples with
+zero position span on every arm joint. The driver was **ARMED**, compact stow
+and arm permission true, MoveIt state validity true, and all ten Nav2 lifecycle
+nodes active. The only remaining base-permission denial was **physical acceptance
+not validated**; bounded commissioning mode was false. Live parameter queries
+confirmed 0.04 m/s, 0.08 rad/s, 0.5 s perception freshness, and no second MoveIt
+cloud throttle. The final photo confirms the compact fold and all three tags.
+
+Artifacts: `.benchmarks/physical-rig/final-ctest-confirm.log`,
+`final-production-runtime.log` and `final-production-camera.jpg`. Interrupted Pi
+services are active, temporary fault firewall rules and rollback timers absent.
+Finite test clients have exited; production is restored and no test monitor stays
+running. Subsequent commits update this report only; the recorded runtime
+revision identifies the tested deployment.

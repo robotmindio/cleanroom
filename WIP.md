@@ -6,4 +6,6 @@ Root fixes deployed: folded lidar mask geometry, shared test speed defaults/clea
 
 Tracked limits: 0.04 m/s and 0.08 rad/s, 5 cm StopZone clearance, depth/perception deadlines 0.5 s. Higher 0.05 m/s depth-loss and 0.10 rad/s lidar-loss rotation exceeded the budget including the declared 10 mm uncertainty. Characterization is provisional; validated remains false and qualifying fields unset.
 
+Final verification: deployed c6afe474f597, 57/57 CTests passed in 36.56 s. Production restored with arm ARMED, stationary across 81 joint samples, MoveIt-valid and all ten Nav2 nodes active. No test clients remain; acceptance is the only base-permission blocker.
+
 Next: independently bound floor/lens/timing measurement error, then complete motor-diagnostic, telemetry replay/duplicate, external obstacle and arm-workspace intrusion fault evidence before reviewing formal acceptance. Global appearance-only relocalization and whole-house accuracy are not established by this small route. Evidence: docs/physical-verification-20261003.md.
