@@ -39,14 +39,14 @@ def _lidar_default_port():
     return next((path for path in LD06_SERIAL_PORTS if os.path.exists(path)), LD06_SERIAL_PORTS[0])
 
 
-def _navigation_params(source_file, bounded_test):
+def _navigation_params(source_file, bounded_test, linear_limit="0.03", angular_limit="0.20"):
     # Match the driver's attended-test limits so MPPI predicts actual movement.
     prefix = "controller_server.ros__parameters."
     test_params = RewrittenYaml(source_file=source_file, param_rewrites={
-        prefix + "FollowPath.vx_max": "0.03",
-        prefix + "FollowPath.vx_min": "-0.03",
-        prefix + "FollowPath.vy_max": "0.03",
-        prefix + "FollowPath.wz_max": "0.20",
+        prefix + "FollowPath.vx_max": linear_limit,
+        prefix + "FollowPath.vx_min": ["-", linear_limit],
+        prefix + "FollowPath.vy_max": linear_limit,
+        prefix + "FollowPath.wz_max": angular_limit,
         prefix + "FollowPath.vx_std": "0.012",
         prefix + "FollowPath.vy_std": "0.012",
         prefix + "FollowPath.wz_std": "0.04",
@@ -207,6 +207,7 @@ def generate_launch_description():
     # with the package so a launch from an overlay and a source checkout agree.
     params_file = _navigation_params(
         PathJoinSubstitution([package, "config", "nav2_params.yaml"]), bounded_base_test,
+        LaunchConfiguration("base_test_linear_limit"), LaunchConfiguration("base_test_angular_limit"),
     )
     ekf_params_file = PathJoinSubstitution([package, "config", "ekf.yaml"])
     safety_params_file = PathJoinSubstitution([
@@ -456,6 +457,8 @@ def generate_launch_description():
             DeclareLaunchArgument("headless", default_value="true", choices=["true", "false"]),
             DeclareLaunchArgument("remote_ip", default_value="127.0.0.1"),
             DeclareLaunchArgument("bounded_base_test", default_value="false", choices=["true", "false"]),
+            DeclareLaunchArgument("base_test_linear_limit", default_value="0.03"),
+            DeclareLaunchArgument("base_test_angular_limit", default_value="0.20"),
             DeclareLaunchArgument("curve_client_secret_key_file", default_value=""),
             DeclareLaunchArgument("curve_server_public_key_file", default_value=""),
             # Fleet bridging makes the ROS graph discoverable off-host. Keep it
@@ -888,9 +891,11 @@ def generate_launch_description():
                 executable="lekiwi_driver",
                 parameters=[{
                     "remote_ip": remote_ip,
-                    "nav2_params_file": params_file,
+                    "nav2_params_file": PathJoinSubstitution([package, "config", "nav2_params.yaml"]),
                     "local_arm_execution": True,
                     "bounded_base_test": ParameterValue(bounded_base_test, value_type=bool),
+                    "base_test_linear_limit": ParameterValue(LaunchConfiguration("base_test_linear_limit"), value_type=float),
+                    "base_test_angular_limit": ParameterValue(LaunchConfiguration("base_test_angular_limit"), value_type=float),
                     "arm_calibration_file": arm_calibration_file,
                     "curve_client_secret_key_file": curve_client_secret,
                     "curve_server_public_key_file": curve_server_public,

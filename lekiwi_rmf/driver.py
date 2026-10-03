@@ -30,7 +30,7 @@ from lekiwi_rmf.arm_trajectory import (
     stamp_nanoseconds, trajectory_rows,
 )
 from lekiwi_rmf.motion_guards import (
-    inside_base_test_boundary, lease_is_fresh, load_base_speed_limits, twist_is_finite,
+    bounded_test_speed_limits, inside_base_test_boundary, lease_is_fresh, load_base_speed_limits, twist_is_finite,
 )
 from lekiwi_rmf.odometry import (
     BASE_XY_SCALE, BASE_YAW_SCALE, HostPoseTracker, OdometrySampleClock, integrate_pose,
@@ -67,8 +67,13 @@ class LeKiwiDriver(Node):
         )
         self.bounded_base_test = bool(self.declare_parameter("bounded_base_test", False).value)
         if self.bounded_base_test:
-            self.max_linear = min(self.max_linear, 0.03)
-            self.max_angular = min(self.max_angular, 0.20)
+            linear, angular = bounded_test_speed_limits(
+                self.declare_parameter("base_test_linear_limit", 0.03).value,
+                self.declare_parameter("base_test_angular_limit", 0.20).value,
+                speed_limits,
+            )
+            self.max_linear = min(self.max_linear, linear)
+            self.max_angular = min(self.max_angular, angular)
         self.command_timeout = self.declare_parameter("command_timeout", 0.4).value
         self.link_timeout = self.declare_parameter("link_timeout", 1.0).value
         # Bool permissions have no source timestamp.  The receive-time lease

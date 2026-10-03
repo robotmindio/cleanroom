@@ -6,8 +6,33 @@ import types
 import pytest
 
 from lekiwi_rmf.motion_guards import (
-    lease_is_fresh, load_base_speed_limits, positive_seconds_ns, stamp_ns, twist_is_finite,
+    bounded_test_speed_limits, lease_is_fresh, load_base_speed_limits, positive_seconds_ns, stamp_ns, twist_is_finite,
 )
+
+
+def test_attended_speed_trials_cannot_exceed_production_limits():
+    assert bounded_test_speed_limits(.3, 1.57, (.3, 1.57)) == (.3, 1.57)
+    for values in [(True,.2), (math.nan,.2), (.03,0), (.31,.2), (.03,1.58)]:
+        with pytest.raises(ValueError):
+            bounded_test_speed_limits(*values, (.3,1.57))
+
+
+def test_optical_measurement_recovers_known_rigid_motion_and_rejects_deformation():
+    import runpy
+    from pathlib import Path
+    import numpy as np
+    functions = runpy.run_path(str(Path(__file__).parents[1]/'scripts/test-braking.py'))
+    square = np.array([[0,0],[35,0],[35,35],[0,35]],dtype=float)
+    markers = {53:square,69:square+[0,50],59:square-[0,50]}
+    matrix,origin,reference,error = functions['metric_reference'](markers,[53,69,59],.035)
+    assert error < 1e-10
+    rotation = np.array([[math.cos(.2),-math.sin(.2)],[math.sin(.2),math.cos(.2)]])
+    moved = {key:(corners-origin)@rotation.T+origin+[10,5] for key,corners in markers.items()}
+    pose,_,_ = functions['metric_pose'](moved,matrix,origin,reference)
+    assert pose == pytest.approx([.01,.005,.2])
+    assert functions['metric_pose']({53:markers[53]},matrix,origin,reference) is None
+    moved[59] += [20,0]
+    assert functions['metric_pose'](moved,matrix,origin,reference) is None
 
 
 def test_base_speed_limits_reject_bad_configuration_and_include_reverse(tmp_path):

@@ -232,7 +232,7 @@ class Test(Node):
             self.tick(Twist())
 
 
-def main(test_class=Test, output=OUTPUT):
+def main(test_class=Test, output=OUTPUT, launch_arguments=()):
     output.mkdir(parents=True,exist_ok=True)
     stack = None
     node = None
@@ -243,7 +243,7 @@ def main(test_class=Test, output=OUTPUT):
     try:
         with (output/'stack.log').open('w') as log:
             stack = subprocess.Popen([str(ROOT/'scripts/ros-start.sh'), *arguments,
-                'bounded_base_test:=true'], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
+                'bounded_base_test:=true', *launch_arguments], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
                 env={**os.environ,'LEKIWI_RUNTIME_DIR':str(output/'runtime')}, start_new_session=True)
             rclpy.init()
             node = test_class()

@@ -35,6 +35,17 @@ def load_base_speed_limits(path: str | Path) -> tuple[float, float]:
         raise ValueError(f"invalid Nav2 speed limits in {path}: {error}") from error
 
 
+def bounded_test_speed_limits(linear, angular, production):
+    """Allow attended speed trials only within the configured production caps."""
+    requested = (linear, angular)
+    if any(isinstance(v, bool) or not isinstance(v, (int, float))
+           or not math.isfinite(v) or v <= 0 for v in (*requested, *production)):
+        raise ValueError("base test speed limits must be finite and positive")
+    if any(value > maximum for value, maximum in zip(requested, production)):
+        raise ValueError("base test speed limits exceed configured production limits")
+    return requested
+
+
 class _Vector(Protocol):
     x: float
     y: float
