@@ -188,8 +188,25 @@ present on a second isolated attempt. The shared CMake test domains are now
 range (32768–60999). A regression checks uniqueness and the fixed DDS port
 bounds. This changes test isolation, not production robot behavior. The deployed domain change made the native failsafe test pass. The next full
 run found only an obsolete qualification assertion requiring the old domain
-range; that assertion now checks the actual UDP port bound. Final rerun pending.
+range; that assertion now checks the actual UDP port bound. The final full rerun
+passed **57/57 CTests** in 36.27 seconds, including all nine launch tests. The
+combined qualification/motion regressions passed 29 checks.
 
 A final ten-second stationary camera inspection still could not establish a
 marker reference; it left production running. Remaining physical maneuvers need
 the camera restored and secured with all three markers visible.
+
+## Final restored state and remaining work
+
+Runtime revision `d5e1d3b` is deployed. Subsequent source changes only update
+qualification tests and this report. The finite runtime probe confirmed all ten
+Nav2 lifecycle nodes active, the stationary folded arm ARMED and MoveIt-valid,
+and physical acceptance as the sole standing base-permission fault. All test
+runners and simulated Gazebo servers exited; production remains active.
+
+The next physical step is restoring and securing the measurement view so all
+three markers remain visible. Resume only left/right/CW/CCW stopping repetitions
+with the tracked direction selector; retain earlier forward/reverse evidence.
+Independent floor/lens/timing error bounds, the remaining applicable fault tests,
+meaningful Nav2 movement and SLAM closure are still required. The production
+acceptance record remains false and its qualifying counts remain unchanged.

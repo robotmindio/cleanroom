@@ -8,7 +8,7 @@ Current blocker: measurement image/tape/floor shifted abruptly at 18:12:48, leav
 
 Fixed startup configuration: empty and one-node SLAM databases now start without the new-session closure gate; populated maps retain relocalization gating. Deployed stationary probe confirms false and a seed with 271 nonzero 3D features. Growth and loop closure remain unverified; one stationary seed is expected below the 40 mm keyframe threshold. Production database preserved.
 
-Latest software root: domain 206 discovery UDP 58901 collided with Foxglove's ephemeral socket. Test domains changed to 40–84; full rerun pending after deployment.
+Latest software root: domain 206 discovery UDP 58901 collided with Foxglove's ephemeral socket. Test domains changed to 40–84. Runtime fixes deployed as d5e1d3b; final 57/57 CTests and 29 qualification/motion checks pass. All test runners exited; production restored.
 
 Next: resume only left/right/clockwise/counterclockwise repetitions once the rig is stable. Finish navigation and outstanding fault tests, restore production and close all runners.
 
