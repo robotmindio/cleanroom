@@ -98,7 +98,7 @@ def test_the_tracked_mask_covers_the_measured_body_returns_and_nothing_far():
     node = yaml.safe_load((ROOT / "config" / "lidar_self_mask.yaml").read_text())["scan_self_filter"]["ros__parameters"]
     assert node["body_start_deg"] == [214.0, 254.0, 299.0, 301.0]
     assert node["body_end_deg"] == [233.0, 284.0, 301.0, 350.0]
-    assert node["body_max_range_m"] == [0.24, 0.216, 0.165, 0.192]
+    assert node["body_max_range_m"] == [0.24, 0.228, 0.205, 0.205]
 
 
 def test_live_self_return_inside_the_base_footprint_is_masked():
@@ -108,7 +108,8 @@ def test_live_self_return_inside_the_base_footprint_is_masked():
         "scan_self_filter"]["ros__parameters"]
     sectors = zip(params["body_start_deg"], params["body_end_deg"], params["body_max_range_m"])
     sectors = list(sectors)
-    for angle_deg, distance in ((219.6, 0.225), (214.6, 0.16), (300.5, 0.162)):
+    for angle_deg, distance in ((219.6, 0.225), (214.6, 0.16), (300.5, 0.162),
+                                (300.5, 0.188), (302.1, 0.194), (278.1, 0.217)):
         angle = math.radians(angle_deg)
         # Nominal yaw -180 degrees plus the measured -90-degree correction.
         base_x = -0.135 - distance * math.sin(angle)
@@ -116,6 +117,18 @@ def test_live_self_return_inside_the_base_footprint_is_masked():
         assert abs(base_x) < 0.22 and abs(base_y) < 0.22
         scan = _scan([distance], angle_min=angle)
         assert math.isinf(blank_body_sectors(scan, sectors).ranges[0])
+        # Obstacles beyond the body and beams outside its measured sectors
+        # must retain their original range.
+        far = _scan([0.30],angle_min=angle)
+        assert blank_body_sectors(far,sectors).ranges[0] == pytest.approx(.30)
+    for angle_deg in range(299,351):
+        angle = math.radians(angle_deg)
+        assert -.22 < -.135-.205*math.sin(angle) < .24
+        assert -.22 < .005+.205*math.cos(angle) < .22
+    for angle_deg in range(254,285):
+        angle = math.radians(angle_deg)
+        assert -.22 < -.135-.228*math.sin(angle) < .24
+        assert -.22 < .005+.228*math.cos(angle) < .22
 
 
 @pytest.mark.parametrize("value", ["-0.1", "1.5", ".nan"])
