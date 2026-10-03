@@ -60,6 +60,26 @@ def test_marker_roi_preserves_full_image_coordinates_and_recovers_after_a_shift(
     assert all(np.allclose(recovered[key],original[key]+[500,300],atol=1) for key in original)
 
 
+def test_marker_plane_rectification_recovers_motion_under_perspective():
+    import cv2
+    import runpy
+    from pathlib import Path
+    import numpy as np
+    functions = runpy.run_path(str(Path(__file__).parents[1]/'scripts/test-braking.py'))
+    square = np.array([[-.0175,-.0175],[.0175,-.0175],[.0175,.0175],[-.0175,.0175]])
+    plane = {53:square,69:square+[.07,0],59:square+[-.07,0]}
+    camera = np.array([[1800.,400,640],[120,1900,400],[1.5,3,1]])
+    def project(corners):
+        return cv2.perspectiveTransform(corners.reshape(-1,1,2),camera).reshape(-1,2)
+    markers = {key:project(c) for key,c in plane.items()}
+    matrix,origin,reference,error = functions['metric_reference'](markers,[53,69,59],.035)
+    assert error<1e-6
+    rotation = np.array([[math.cos(.12),-math.sin(.12)],[math.sin(.12),math.cos(.12)]])
+    moved = {key:project(c@rotation.T+[.02,-.015]) for key,c in plane.items()}
+    pose,_,_ = functions['metric_pose'](moved,matrix,origin,reference)
+    assert pose==pytest.approx([.02,-.015,.12],abs=1e-6)
+
+
 def test_stopping_clearance_uses_farthest_point_excursion_without_summing_jitter():
     import runpy
     from pathlib import Path

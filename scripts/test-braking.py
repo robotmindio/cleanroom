@@ -23,18 +23,22 @@ DIRECTIONS = {'forward':(1,0,0), 'reverse':(-1,0,0), 'left':(0,1,0), 'right':(0,
               'rotation_cw':(0,0,-1), 'rotation_ccw':(0,0,1)}
 
 
+def plane_points(corners,matrix,origin):
+    return cv2.perspectiveTransform((np.asarray(corners,dtype=float)-origin).reshape(-1,1,2),
+                                    matrix).reshape(-1,2)
+
+
 def metric_reference(markers, identifiers, side):
     if not math.isfinite(side) or side <= 0 or len(identifiers) < 2:
         raise ValueError('invalid marker dimensions or reference identifiers')
     corners = [np.asarray(markers[key], dtype=float) for key in identifiers]
-    u = np.mean([(c[1]-c[0]+c[2]-c[3])/2 for c in corners], axis=0)
-    v = np.mean([(c[3]-c[0]+c[2]-c[1])/2 for c in corners], axis=0)
-    matrix = side*np.linalg.inv(np.column_stack((u, v)))
     origin = corners[0].mean(axis=0)
-    reference = {key: (np.asarray(markers[key])-origin)@matrix.T for key in identifiers}
+    square = np.float32([[-side/2,-side/2],[side/2,-side/2],[side/2,side/2],[-side/2,side/2]])
+    matrix = cv2.getPerspectiveTransform(np.float32(corners[0]-origin),square)
+    reference = {key:plane_points(markers[key],matrix,origin) for key in identifiers}
     error = max(abs(np.linalg.norm(c-np.roll(c, -1, axis=0), axis=1)-side).max()
                 for c in reference.values())
-    if error > side*.15:
+    if not math.isfinite(error) or error > side*.15:
         raise ValueError(f'marker scale is inconsistent: {error:.4f} m edge residual')
     return matrix, origin, reference, float(error)
 
@@ -44,7 +48,7 @@ def metric_pose(markers, matrix, origin, reference):
     if len(common) < 2:
         return None
     before = np.concatenate([reference[key] for key in common])
-    after = np.concatenate([(np.asarray(markers[key])-origin)@matrix.T for key in common])
+    after = np.concatenate([plane_points(markers[key],matrix,origin) for key in common])
     a, b = before.mean(axis=0), after.mean(axis=0)
     u, _, vt = np.linalg.svd((before-a).T@(after-b))
     rotation = vt.T@u.T
@@ -196,7 +200,7 @@ class Camera:
             self.last_time = received
         self.count += 1
         record = {'time':received, 'pts_ns':int(buffer.pts), 'pose':None if pose is None else pose[0],
-                  'fit_error_m':None if pose is None else pose[1], 'ids':list(markers)}
+                  'fit_error_m':None if pose is None else pose[1], 'ids':list(markers),'bytes':len(raw)}
         self.records.write(json.dumps(record)+'\n')
         return record
 
