@@ -306,6 +306,23 @@ def test_shared_runner_uses_current_production_caps_and_restores_on_launch_failu
     assert calls[-1][-2:]==['start','lekiwi-stack.service']
 
 
+def test_shared_runner_restores_production_if_the_test_stack_has_already_exited(tmp_path,monkeypatch):
+    import runpy
+    from pathlib import Path
+    main=runpy.run_path(str(Path(__file__).parents[1]/'scripts/test-navigation.py'))['main']
+    calls=[]
+    monkeypatch.setitem(main.__globals__,'installed_stack_arguments',lambda:['remote_ip:=127.0.0.1'])
+    monkeypatch.setitem(main.__globals__,'subprocess',types.SimpleNamespace(STDOUT=-2,
+        run=lambda argv,**kwargs:(calls.append(argv) or types.SimpleNamespace(returncode=0)),
+        Popen=lambda *args,**kwargs:types.SimpleNamespace(poll=lambda:0)))
+    monkeypatch.setitem(main.__globals__,'rclpy',types.SimpleNamespace(init=lambda **kwargs:None))
+    def broken():
+        raise RuntimeError('test construction failed')
+    with pytest.raises(RuntimeError,match='test construction failed'):
+        main(broken,tmp_path)
+    assert calls[-1][-2:]==['start','lekiwi-stack.service']
+
+
 def test_physical_fault_probe_restores_service_when_injection_fails():
     import runpy
     import time

@@ -339,19 +339,21 @@ def main(test_class=Test, output=OUTPUT, launch_arguments=()):
                 node.destroy_node()
                 rclpy.try_shutdown()
     finally:
-        if stack is not None:
-            os.kill(stack.pid,signal.SIGINT)
-            try:
-                stack.wait(timeout=45)
-            except subprocess.TimeoutExpired:
-                os.killpg(stack.pid,signal.SIGTERM)
+        try:
+            if stack is not None and stack.poll() is None:
+                os.kill(stack.pid,signal.SIGINT)
                 try:
-                    stack.wait(timeout=5)
+                    stack.wait(timeout=45)
                 except subprocess.TimeoutExpired:
-                    os.killpg(stack.pid,signal.SIGKILL)
-                    stack.wait(timeout=3)
-        if was_active:
-            subprocess.run(['sudo','-n','/usr/bin/systemctl','start','lekiwi-stack.service'],check=True)
+                    os.killpg(stack.pid,signal.SIGTERM)
+                    try:
+                        stack.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        os.killpg(stack.pid,signal.SIGKILL)
+                        stack.wait(timeout=3)
+        finally:
+            if was_active:
+                subprocess.run(['sudo','-n','/usr/bin/systemctl','start','lekiwi-stack.service'],check=True)
 
 
 if __name__=='__main__':
