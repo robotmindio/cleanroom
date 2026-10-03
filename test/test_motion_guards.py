@@ -35,6 +35,31 @@ def test_optical_measurement_recovers_known_rigid_motion_and_rejects_deformation
     assert functions['metric_pose'](moved,matrix,origin,reference) is None
 
 
+def test_marker_roi_preserves_full_image_coordinates_and_recovers_after_a_shift():
+    import cv2
+    import runpy
+    from pathlib import Path
+    import numpy as np
+    Camera = runpy.run_path(str(Path(__file__).parents[1]/'scripts/test-braking.py'))['Camera']
+    camera = Camera.__new__(Camera)
+    camera.config = {'marker_ids':[53,69,59]}
+    camera.roi = None
+    camera.detector = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_APRILTAG_36h11)
+    camera.parameters = cv2.aruco.DetectorParameters_create()
+    image = np.full((600,1000),255,dtype=np.uint8)
+    for index,key in enumerate(camera.config['marker_ids']):
+        image[100:180,100+100*index:180+100*index] = cv2.aruco.drawMarker(camera.detector,key,80)
+    original = camera.detect(image)
+    assert set(original)=={53,69,59} and camera.roi is not None
+    cropped = camera.detect(image)
+    assert all(np.allclose(original[key],cropped[key],atol=1) for key in original)
+    shifted = np.full_like(image,255)
+    shifted[300:500,500:900] = image[0:200,0:400]
+    recovered = camera.detect(shifted)
+    assert set(recovered)==set(original)
+    assert all(np.allclose(recovered[key],original[key]+[500,300],atol=1) for key in original)
+
+
 def test_stopping_clearance_uses_farthest_point_excursion_without_summing_jitter():
     import runpy
     from pathlib import Path

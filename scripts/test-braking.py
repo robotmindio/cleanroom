@@ -108,17 +108,40 @@ class Camera:
         self.last_time = 0.0
         self.closed = False
         self.count = 0
+        self.roi = None
         cv2.setNumThreads(2)
         self.detector = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_APRILTAG_36h11)
         self.parameters = (cv2.aruco.DetectorParameters_create() if hasattr(cv2.aruco,'DetectorParameters_create')
                            else cv2.aruco.DetectorParameters())
         self.parameters.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_APRILTAG
-        self.parameters.aprilTagQuadDecimate = 2.0
+        self.parameters.aprilTagQuadDecimate = 1.0
         if self.pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
             message = self.pipeline.get_bus().pop_filtered(Gst.MessageType.ERROR)
             details = message.parse_error() if message is not None else 'no GStreamer error detail'
             self.close()
             raise RuntimeError(f'measurement camera pipeline failed to start: {details}')
+
+    def detect(self, image):
+        wanted = set(self.config['marker_ids'])
+        for region in ([self.roi,None] if self.roi is not None else [None]):
+            x,y,w,h = region or (0,0,image.shape[1],image.shape[0])
+            corners,ids,_ = cv2.aruco.detectMarkers(image[y:y+h,x:x+w],self.detector,
+                                                   parameters=self.parameters)
+            markers = {} if ids is None else {
+                int(key):c.reshape(4,2)+[x,y] for key,c in zip(ids.flatten(),corners)}
+            if len(wanted.intersection(markers))>=2:
+                break
+        if wanted <= set(markers):
+            points = np.concatenate([markers[key] for key in wanted])
+            # One marker width of context follows the bounded slow motion.
+            # Lost tracking falls back to the full frame without resetting scale.
+            pad = max(np.linalg.norm(c-np.roll(c,-1,axis=0),axis=1).max()
+                      for key,c in markers.items() if key in wanted)
+            lo = np.maximum(np.floor(points.min(axis=0)-pad),0).astype(int)
+            hi = np.minimum(np.ceil(points.max(axis=0)+pad),
+                            [image.shape[1],image.shape[0]]).astype(int)
+            self.roi = (*lo,*(hi-lo))
+        return markers
 
     def sample(self):
         if self.closed:
@@ -147,8 +170,7 @@ class Camera:
                       'ids':[], 'error':'invalid JPEG', 'bytes':len(raw)}
             self.records.write(json.dumps(record)+'\n')
             return record
-        corners, ids, _ = cv2.aruco.detectMarkers(image, self.detector, parameters=self.parameters)
-        markers = {} if ids is None else {int(key):c.reshape(4, 2) for key, c in zip(ids.flatten(), corners)}
+        markers = self.detect(image)
         if self.calibration is None and all(key in markers for key in self.config['marker_ids']):
             self.calibration = metric_reference(markers, self.config['marker_ids'], self.config['marker_side_m'])
             matrix,origin,reference,error = self.calibration
