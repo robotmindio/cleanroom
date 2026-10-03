@@ -10,6 +10,8 @@ Fixed startup configuration: empty and one-node SLAM databases now start without
 
 Latest software root: domain 206 discovery UDP 58901 collided with Foxglove's ephemeral socket. Test domains changed to 40–84. Runtime fixes deployed as d5e1d3b; final 57/57 CTests and 29 qualification/motion checks pass. All test runners exited; production restored.
 
-Next: resume only left/right/clockwise/counterclockwise repetitions once the rig is stable. Finish navigation and outstanding fault tests, restore production and close all runners.
+Latest run 20261003-193625 uses projective marker-plane rectification and optical returns: 31 eligible forward and reverse stops at 0.05 m/s, 14 left, one right and one rotation each at 0.10 rad/s. A 0.20 rad/s clockwise stop consumed 43.7 mm plus 10 mm uncertainty, exceeding the 50 mm budget; production rotation cap is reduced to 0.10 rad/s. Stationary startup waits no longer dilute the terminal attained-speed check. Pulses extend to 30 mm without relaxing the optical guard or 90% speed threshold.
+
+Next: deploy and finish left/right/clockwise/counterclockwise repetitions. Finish navigation and outstanding fault tests, restore production and close all runners.
 
 Pending: independent floor/lens/timing calibration, four directions' repetitions, outstanding applicable fault cases, verified loop closure/navigation, and intermittent shared network stalls. Physical acceptance remains false. Details: docs/physical-verification-20261003.md.

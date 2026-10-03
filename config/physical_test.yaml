@@ -4,11 +4,11 @@ image_size: [1280, 960]
 marker_ids: [53, 69, 59]
 marker_side_m: 0.035
 maximum_linear_speed_m_s: 0.05
-maximum_angular_speed_rad_s: 0.20
+maximum_angular_speed_rad_s: 0.10
 linear_steps_m_s: [0.03, 0.05]
-angular_steps_rad_s: [0.10, 0.20]
+angular_steps_rad_s: [0.10]
 trials_per_direction: 30
-trial_displacement_m: 0.020
+trial_displacement_m: 0.030
 trial_rotation_rad: 0.12
 # The fixed camera's marker border has about 7 cm of remaining view margin.
 maximum_optical_displacement_m: 0.06

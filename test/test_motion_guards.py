@@ -102,6 +102,32 @@ def test_optical_speed_uses_capture_intervals_and_rejects_replayed_timestamps():
         speeds(frames,False)
 
 
+def test_braking_observes_terminal_speed_despite_stationary_startup(tmp_path,monkeypatch):
+    import runpy
+    import time
+    from pathlib import Path
+    BrakingTest = runpy.run_path(str(Path(__file__).parents[1]/'scripts/test-braking.py'))['BrakingTest']
+    stamp = time.monotonic()
+    frames = [{'time':stamp+i*.04,'pts_ns':int((i+1)*4e7),'pose':[i*.002,0,0]} for i in range(10)]
+    def tick(command):
+        node.optical_samples.extend(frames)
+        node.camera.last_pose = [.03,0,0]
+    node = types.SimpleNamespace(center=(0,0,0),camera=types.SimpleNamespace(last_pose=[0,0,0]),
+        flags={'base_motion_permitted':True},motion_pauses=0,paused_seconds=0,health_faults=[],
+        move=lambda target:None,wait=lambda *args:None,tick=tick,optical_samples=[],
+        command=types.SimpleNamespace(publish=lambda command:None),settle=lambda:frames,
+        config={'trial_displacement_m':.03,'measurement_uncertainty_m':.01,
+                'marker_center_offset_bound_m':.20,'maximum_stopping_distance_m':.05,'maximum_stop_time_s':1.5},
+        checks={'trials':[]},output=tmp_path)
+    monkeypatch.setitem(BrakingTest.trial.__globals__,'observed_speeds',lambda *args:[0]*20+[.05]*3)
+    result = BrakingTest.trial(node,'forward',.05)
+    assert result['median_observed_speed']==0 and result['requested_speed_covered']
+    monkeypatch.setitem(BrakingTest.trial.__globals__,'observed_speeds',lambda *args:[0]*23)
+    node.camera.last_pose = [0,0,0]
+    with pytest.raises(RuntimeError,match='not independently observed'):
+        BrakingTest.trial(node,'forward',.05)
+
+
 def test_optical_return_handles_reflected_axes_and_caps_both_commands():
     import runpy
     from pathlib import Path

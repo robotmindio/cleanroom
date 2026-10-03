@@ -329,7 +329,9 @@ class BrakingTest(navigation['Test']):
                 distance = abs(navigation['angle'](b['pose'][2]-a['pose'][2])) if angular else math.dist(b['pose'][:2], a['pose'][:2])
                 receive_rates.append(distance/dt)
         rates = observed_speeds(moving,angular)
-        if not rates or float(np.median(rates)) < (.015 if angular else .001):
+        # Initial command/feedback waits are stationary. Verify the terminal
+        # capture intervals used below for speed coverage, not startup delay.
+        if not rates or float(np.median(rates[-3:])) < (.015 if angular else .001):
             raise RuntimeError('requested motion was not independently observed')
         # The preceding image arrived before t0; its exposure is earlier still.
         # Including that entire remaining path conservatively includes camera delay.
