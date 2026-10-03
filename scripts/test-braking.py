@@ -83,6 +83,18 @@ def observed_speeds(samples,angular):
     return rates
 
 
+def optical_return_twist(pose, target, body_to_marker):
+    handedness = math.copysign(1,np.linalg.det(body_to_marker))
+    heading = handedness*navigation['angle'](pose[2]-target[2])
+    dx,dy = np.linalg.solve(body_to_marker,np.subtract(target[:2],pose[:2]))
+    vx,vy = 2*(math.cos(heading)*dx+math.sin(heading)*dy), 2*(-math.sin(heading)*dx+math.cos(heading)*dy)
+    scale = min(1,.05/max(math.hypot(vx,vy),1e-9))
+    command = Twist()
+    command.linear.x,command.linear.y = vx*scale,vy*scale
+    command.angular.z = max(-.20,min(.20,-2*heading))
+    return command
+
+
 class Camera:
     def __init__(self, config, output):
         import gi
@@ -208,13 +220,50 @@ class BrakingTest(navigation['Test']):
         self.checks = {'trials':[], 'navigation':[], 'measurement_scope':'marker-plane characterization',
                        'floor_plane_alignment_verified':False, 'physical_acceptance_granted':False}
         self.latest_safe = None
+        self.return_transform = None
+        self.optical_center = None
         self.create_subscription(Twist, '/cmd_vel_safe', self.safe_command, 10)
 
     def safe_command(self, message):
         self.latest_safe = [message.linear.x, message.linear.y, message.angular.z]
 
     def move(self, target):
-        super().move(target, linear_limit=.10, angular_limit=.40)
+        if self.return_transform is None or target!=self.center:
+            return super().move(target, linear_limit=.10, angular_limit=.40)
+        end = time.monotonic()+30
+        while (math.dist(self.camera.last_pose[:2],self.optical_center[:2])>.002 or
+               abs(navigation['angle'](self.camera.last_pose[2]-self.optical_center[2]))>.015):
+            if time.monotonic()>end:
+                raise RuntimeError('optical return to the fixed test center timed out')
+            if not self.flags.get('base_motion_permitted'):
+                self.stop()
+                self.wait(lambda:self.flags.get('base_motion_permitted'),3)
+                continue
+            self.tick(optical_return_twist(self.camera.last_pose,self.optical_center,self.return_transform))
+        self.stop()
+
+    def calibrate_return(self):
+        self.optical_center = self.camera.last_pose.copy()
+        x,y,a = self.center
+        rotation = np.array([[math.cos(a),-math.sin(a)],[math.sin(a),math.cos(a)]])
+        wheel,markers = [],[]
+        for offset in [(0.02,0),(0,0.02)]:
+            before_wheel,before_marker = np.array(self.pose[:2]),np.array(self.camera.last_pose[:2])
+            dx,dy = rotation@offset
+            super().move((x+dx,y+dy,a))
+            wheel.append(rotation.T@(np.array(self.pose[:2])-before_wheel))
+            markers.append(np.array(self.camera.last_pose[:2])-before_marker)
+            super().move(self.center)
+        measured = np.column_stack(wheel)
+        if np.linalg.cond(measured)>10:
+            raise RuntimeError('return calibration did not observe two independent base directions')
+        self.return_transform = np.column_stack(markers)@np.linalg.inv(measured)
+        values = np.linalg.svd(self.return_transform,compute_uv=False)
+        if not np.all(np.isfinite(values)) or values.min()<.25 or values.max()>3:
+            raise RuntimeError('return calibration has inconsistent optical motion')
+        self.checks['return_calibration'] = {'body_to_marker':self.return_transform.tolist(),
+                                            'center':self.optical_center}
+        self.move(self.center)
 
     def tick(self, twist=None, check=True):
         super().tick(twist, check)
@@ -322,6 +371,7 @@ class BrakingTest(navigation['Test']):
             self.active = True
             self.wait(lambda:self.flags.get('base_motion_permitted'), 15)
             self.settle()
+            self.calibrate_return()
             self.checks['marker_edge_residual_m'] = self.camera.calibration[3]
             candidates = []
             for directions, steps in [(['forward','reverse','left','right'],self.config['linear_steps_m_s']),

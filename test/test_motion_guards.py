@@ -82,6 +82,19 @@ def test_optical_speed_uses_capture_intervals_and_rejects_replayed_timestamps():
         speeds(frames,False)
 
 
+def test_optical_return_handles_reflected_axes_and_caps_both_commands():
+    import runpy
+    from pathlib import Path
+    import numpy as np
+    command = runpy.run_path(str(Path(__file__).parents[1]/'scripts/test-braking.py'))['optical_return_twist']
+    straight = command([.01,0,0],[0,0,0],np.eye(2))
+    assert straight.linear.x == pytest.approx(-.02)
+    reflected = command([0,1,.5],[0,0,0],np.diag([1,-1]))
+    assert math.hypot(reflected.linear.x,reflected.linear.y)==pytest.approx(.05)
+    assert reflected.linear.y>0 and reflected.angular.z==.20
+    assert command([0,0,0],[0,0,0],np.eye(2)).linear.x==0
+
+
 @pytest.mark.parametrize('visible',[False,True])
 def test_missing_measurement_camera_does_not_interrupt_production(monkeypatch,tmp_path,visible):
     import runpy
@@ -123,7 +136,7 @@ def test_braking_exploration_stops_a_speed_step_at_its_first_failed_direction(tm
     node = types.SimpleNamespace(camera=types.SimpleNamespace(calibration=[0,0,0,0],last_pose=[0,0,0]),
         pose=(0,0,0),flags={'base_motion_permitted':True},checks={},output=tmp_path,
         config={'linear_steps_m_s':[.03,.05],'angular_steps_rad_s':[],'trials_per_direction':0},
-        wait=lambda *args:None,wait_ready=lambda:None,settle=lambda:None,stop=lambda:None,
+        wait=lambda *args:None,wait_ready=lambda:None,settle=lambda:None,calibrate_return=lambda:None,stop=lambda:None,
         trial=trial,move=lambda *args:None,buffer=types.SimpleNamespace(lookup_transform=finished))
     with pytest.raises(RuntimeError,match='exploration finished'):
         BrakingTest.run(node)
