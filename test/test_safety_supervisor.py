@@ -56,7 +56,11 @@ def test_production_requires_only_inputs_the_shipped_robot_publishes():
         assert parameters[name] is False, name
     ekf = yaml.safe_load((root / "config" / "ekf.yaml").read_text(encoding="utf-8"))
     assert not any(key.startswith("imu") for key in ekf["ekf_filter_node"]["ros__parameters"])
-    assert parameters["sensor_timeout"] < parameters["depth_timeout"]
+    assert parameters["sensor_timeout"] == parameters["depth_timeout"] == 0.50
+    arm = yaml.safe_load(
+        (root / "config" / "safety_production.yaml").read_text(encoding="utf-8")
+    )["arm_workspace_monitor"]["ros__parameters"]
+    assert arm["perception_timeout"] == parameters["depth_timeout"]
 
 
 def test_production_requires_arm_workspace_gate_but_simulation_profile_does_not():
