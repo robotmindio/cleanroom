@@ -57,7 +57,8 @@ def test_optical_speed_uses_capture_intervals_and_rejects_replayed_timestamps():
         speeds(frames,False)
 
 
-def test_missing_measurement_camera_does_not_interrupt_production(monkeypatch,tmp_path):
+@pytest.mark.parametrize('visible',[False,True])
+def test_missing_measurement_camera_does_not_interrupt_production(monkeypatch,tmp_path,visible):
     import runpy
     import sys
     from pathlib import Path
@@ -70,10 +71,16 @@ def test_missing_measurement_camera_does_not_interrupt_production(monkeypatch,tm
     monkeypatch.setattr(sys,'argv',['test-braking.py'])
     def missing_camera(*args):
         raise RuntimeError('measurement camera missing')
-    monkeypatch.setitem(globals_,'Camera',missing_camera)
+    if visible:
+        camera = types.SimpleNamespace(calibration=None,sample=lambda:None,close=lambda:None)
+        monkeypatch.setitem(globals_,'Camera',lambda *args:camera)
+        clock = iter([0,11])
+        monkeypatch.setattr(globals_['time'],'monotonic',lambda:next(clock))
+    else:
+        monkeypatch.setitem(globals_,'Camera',missing_camera)
     calls = []
     monkeypatch.setitem(globals_['navigation'],'main',lambda *args:calls.append(args))
-    with pytest.raises(RuntimeError,match='measurement camera missing'):
+    with pytest.raises(RuntimeError,match='measurement camera'):
         functions['main']()
     assert not calls
 
@@ -96,6 +103,11 @@ def test_braking_exploration_stops_a_speed_step_at_its_first_failed_direction(tm
     with pytest.raises(RuntimeError,match='exploration finished'):
         BrakingTest.run(node)
     assert trials == [('forward',.03),('reverse',.03)]
+    trials.clear()
+    node.config['directions'] = ['left']
+    with pytest.raises(RuntimeError,match='exploration finished'):
+        BrakingTest.run(node)
+    assert trials == [('left',.03)]
 
 
 def test_indoor_stop_zone_and_speed_profile_match_the_acceptance_budget():

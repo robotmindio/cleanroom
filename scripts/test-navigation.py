@@ -313,9 +313,11 @@ def main(test_class=Test, output=OUTPUT, launch_arguments=()):
                     if future.done() and future.result():
                         data=future.result().data
                         graph={'nodes':[{'id':m.id,'session':m.map_id,'features':len(m.word_kpts),
-                            'valid_3d_features':sum(all(math.isfinite(v) for v in (p.x,p.y,p.z)) for p in m.word_pts)} for m in data.nodes],
+                            'valid_3d_features':sum(all(math.isfinite(v) for v in (p.x,p.y,p.z)) and
+                                math.hypot(p.x,p.y,p.z)>.01 for p in m.word_pts)} for m in data.nodes],
                             'links':[(link.from_id,link.to_id,link.type) for link in data.graph.links]}
                 report={'error':error,'origin':node.center,'final_pose':node.pose,'sensors':node.counts,'health':node.health,
+                    'source_revision':subprocess.check_output(['git','-C',str(ROOT),'rev-parse','HEAD'],text=True).strip(),
                     'collision_monitor_action':node.monitor_action,
                     'max_radius_m':max((math.dist(p[:2],node.center[:2]) for p in node.trace),default=0) if node.center else None,
                     'trace':node.trace,'slam':node.slam,'graph':graph,'health_faults':node.health_faults,

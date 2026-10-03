@@ -339,9 +339,11 @@ def test_one_node_mapping_seed_can_grow_without_erasing_database(tmp_path):
         actions[0].execute(context)
         return context.launch_configurations["rtabmap_wait_for_loop"]
 
-    assert configured() == "true"
+    assert configured() == "false"
     with sqlite3.connect(database) as connection:
         connection.execute("CREATE TABLE Node(id INTEGER PRIMARY KEY)")
+    assert configured() == "false"
+    with sqlite3.connect(database) as connection:
         connection.execute("INSERT INTO Node VALUES(1)")
     original = database.read_bytes()
     assert configured() == "false"

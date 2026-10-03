@@ -118,3 +118,55 @@ measurement geometry and full-speed coverage, and complete remaining applicable
 fault tests before populating qualifying measurements in
 `config/safety_acceptance.yaml`. Its validation and trial counters were left
 unchanged; the map database was preserved.
+
+## Reconnected rig and measured indoor limit
+
+The operator confirmed **dry concrete, 0 kg added payload**, and marker faces
+following the Astra's modeled 8 degree mounting tilt. The markers are therefore
+not parallel to the floor; independent floor/lens calibration remains pending.
+
+The shared motion-test readiness now waits for CollisionMonitor's active state
+before any nonzero command. Capture PTS intervals measure speed; receive times
+remain conservative stopping-time bounds. Feedback gaps send zero and withdraw
+the temporary commissioning lease during a bounded recovery. Interrupted trials
+and trials without attained speed remain recorded but do not count as repetitions.
+
+Exploration at 0.10 m/s measured a 41.1 mm reverse swept bound. With the declared
+10 mm allowance it exceeded the 50 mm clearance. Translation is now capped at
+**0.05 m/s**, with rotation still capped at **0.20 rad/s**. Marker detection uses
+quad decimation 2; decimation 3 lost the third marker near the image edge.
+
+Run `20261003-180606` recorded 100 attempts. At 0.05 m/s, forward and reverse each
+had 31 algorithm-eligible stops (one exploratory stop plus thirty repetitions).
+Their largest swept bounds were respectively **23.70 mm** and **21.96 mm**;
+receive-time stopping bounds were **0.347 s** and **0.302 s**. These are still
+marker-plane characterization, not independently calibrated physical acceptance.
+Other directions did not complete thirty repetitions.
+
+At 18:12:48 the measurement image shifted abruptly, including the tape and floor.
+The optical position guard sent zero; production was restored. The final frame
+leaves almost all chassis markers outside the image. This invalidates the camera's
+fixed reference for subsequent measurements. The camera/support cause needs an
+operator check. Tests can now select only unfinished directions, and loss of a
+visible marker reference fails before production is interrupted.
+
+A contemporaneous 30-packet comparison recorded no loss: direct LAN averaged
+2.90 ms and peaked at 7.40 ms; the tailnet path averaged 4.73 ms and peaked at
+7.47 ms. This does not implicate the tailnet as the cause of earlier shared sensor
+gaps; intermittent network impairment remains unresolved.
+
+## Isolated stationary SLAM diagnosis
+
+An independent fresh test database preserved the production database. Both camera
+models and genuine nonzero 3D features were present in saved RGBD nodes. The fresh
+mapper saved one seed, then reported subsequent observations as map ID -1 while
+waiting for a closure. The launch gate enabled `StartNewMapOnLoopClosure` even for
+a nonexistent/empty database. It now permits empty and one-node mapping seeds to
+grow; maps with two or more nodes still require verified relocalization. No
+production database was erased and no closure was fabricated.
+
+The finite restored-runtime probe found the folded arm stationary, ARMED and
+MoveIt-valid, all ten Nav2 lifecycle nodes active, both cameras and lidar fresh,
+and unvalidated physical acceptance as the only standing base-permission fault.
+New regression checks: **96 passed** across motion guards, readiness and service
+installation. The corrected seed gate still needs its deployed runtime probe.

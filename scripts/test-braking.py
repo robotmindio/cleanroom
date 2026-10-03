@@ -19,6 +19,8 @@ from geometry_msgs.msg import Twist
 
 navigation = runpy.run_path(str(Path(__file__).with_name('test-navigation.py')))
 ROOT = navigation['ROOT']
+DIRECTIONS = {'forward':(1,0,0), 'reverse':(-1,0,0), 'left':(0,1,0), 'right':(0,-1,0),
+              'rotation_cw':(0,0,-1), 'rotation_ccw':(0,0,1)}
 
 
 def metric_reference(markers, identifiers, side):
@@ -227,9 +229,7 @@ class BrakingTest(navigation['Test']):
         self.wait(lambda:self.flags.get('base_motion_permitted'), 10)
         before = self.camera.last_pose.copy()
         command = Twist()
-        axes = {'forward':(1,0,0), 'reverse':(-1,0,0), 'left':(0,1,0), 'right':(0,-1,0),
-                'rotation_cw':(0,0,-1), 'rotation_ccw':(0,0,1)}
-        command.linear.x, command.linear.y, command.angular.z = (speed*v for v in axes[direction])
+        command.linear.x, command.linear.y, command.angular.z = (speed*v for v in DIRECTIONS[direction])
         beginning = len(self.optical_samples)
         pauses = self.motion_pauses
         paused_seconds = self.paused_seconds
@@ -304,6 +304,9 @@ class BrakingTest(navigation['Test']):
             candidates = []
             for directions, steps in [(['forward','reverse','left','right'],self.config['linear_steps_m_s']),
                                       (['rotation_cw','rotation_ccw'],self.config['angular_steps_rad_s'])]:
+                directions = [d for d in directions if d in self.config.get('directions',DIRECTIONS)]
+                if not directions:
+                    continue
                 accepted = None
                 for speed in steps:
                     results = []
@@ -358,8 +361,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--inspect', action='store_true', help='measure ten seconds of stationary camera data without touching ROS services')
     parser.add_argument('--explore-only', action='store_true', help='explore speed steps without the final thirty repetitions')
+    parser.add_argument('--directions', nargs='+', choices=list(DIRECTIONS), default=list(DIRECTIONS),
+                        help='test only these directions; earlier evidence remains in its original run')
     args = parser.parse_args()
     config = yaml.safe_load((ROOT/'config/physical_test.yaml').read_text())
+    config['directions'] = args.directions
     output = ROOT/'.benchmarks/physical-braking'/time.strftime('%Y%m%d-%H%M%S')
     output.mkdir(parents=True)
     (output/'profile.yaml').write_text(yaml.safe_dump(config))
@@ -376,6 +382,11 @@ def main():
             print(json.dumps({'camera_frames':camera.count,'marker_edge_residual_m':camera.calibration[3],
                               'last_pose':camera.last_pose,'output':str(output)}))
         else:
+            end = time.monotonic()+10
+            while camera.calibration is None or time.monotonic()-camera.last_time > config['maximum_frame_age_s']:
+                camera.sample()
+                if time.monotonic()>end:
+                    raise RuntimeError('measurement camera cannot establish a fresh marker reference; production untouched')
             if args.explore_only:
                 config['trials_per_direction'] = 0
             navigation['main'](lambda:BrakingTest(config,output,camera),output,

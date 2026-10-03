@@ -88,7 +88,7 @@ def _mapping_guard_exit(event, context):
 
 
 def _mapping_relocalization_gate(context):
-    """A one-node RGB map cannot satisfy RTAB-Map's visual hypothesis test.
+    """An empty or one-node RGB map cannot satisfy visual hypothesis testing.
 
     Before starting the mapper, allow that seed to gain another observation;
     ordinary maps still require a verified closure before appending a session.
@@ -98,17 +98,18 @@ def _mapping_relocalization_gate(context):
     if (LaunchConfiguration("localization").perform(context) == "visual_slam"
             and LaunchConfiguration("slam_mode").perform(context) == "mapping"):
         database = Path(LaunchConfiguration("rtabmap_database").perform(context)).expanduser().resolve()
+        count = 0
         if database.is_file():
             try:
                 with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True, timeout=1)) as connection:
                     count = connection.execute("SELECT count(*) FROM Node").fetchone()[0]
             except sqlite3.Error as error:
                 raise RuntimeError(f"cannot inspect RTAB-Map database before startup: {database}: {error}") from error
-            if count == 1:
-                wait_for_loop = "false"
+        if count <= 1:
+            wait_for_loop = "false"
     actions = [SetLaunchConfiguration("rtabmap_wait_for_loop", wait_for_loop)]
     if wait_for_loop == "false":
-        actions.append(LogInfo(msg="RTAB-Map one-node seed: allow observations in the same database; relocalization still requires verified registration"))
+        actions.append(LogInfo(msg="RTAB-Map empty/one-node seed: allow observations in the same database; relocalization still requires verified registration"))
     return actions
 
 
