@@ -31,6 +31,7 @@ from rtabmap_msgs.srv import GetMap
 from sensor_msgs.msg import Image, LaserScan, PointCloud2
 from std_msgs.msg import Bool, String
 from tf2_ros import Buffer, TransformListener
+from lekiwi_rmf.motion_guards import load_base_speed_limits
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / '.benchmarks/navigation-test'
@@ -280,12 +281,14 @@ def main(test_class=Test, output=OUTPUT, launch_arguments=()):
     node = None
     error = None
     arguments = installed_stack_arguments()
+    linear,angular = load_base_speed_limits(ROOT/'config/nav2_params.yaml')
     was_active = subprocess.run(['systemctl','is-active','--quiet','lekiwi-stack.service']).returncode==0
     subprocess.run(['sudo','-n','/usr/bin/systemctl','stop','lekiwi-stack.service'],check=True)
     try:
         with (output/'stack.log').open('w') as log:
             stack = subprocess.Popen([str(ROOT/'scripts/ros-start.sh'), *arguments,
-                'bounded_base_test:=true', *launch_arguments], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
+                'bounded_base_test:=true',f'base_test_linear_limit:={linear}',
+                f'base_test_angular_limit:={angular}',*launch_arguments], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
                 env={**os.environ,'LEKIWI_RUNTIME_DIR':str(output/'runtime')}, start_new_session=True)
             # Keep ROS alive through Python's interrupt cleanup so it can send
             # zero commands, withdraw the test lease and shut down Nav2 first.

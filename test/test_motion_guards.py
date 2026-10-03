@@ -285,6 +285,27 @@ def test_base_test_stops_inside_authorized_radius_and_rejects_bad_odometry():
     assert not inside_base_test_boundary((math.nan, 2.0, 0.0), (1.0, 2.0))
 
 
+def test_shared_runner_uses_current_production_caps_and_restores_on_launch_failure(tmp_path,monkeypatch):
+    import runpy
+    from pathlib import Path
+    main = runpy.run_path(str(Path(__file__).parents[1]/'scripts/test-navigation.py'))['main']
+    calls=[]
+    def run(argv,**kwargs):
+        calls.append(argv)
+        return types.SimpleNamespace(returncode=0)
+    def launch(argv,**kwargs):
+        calls.append(argv)
+        raise RuntimeError('launch prepared')
+    monkeypatch.setitem(main.__globals__,'subprocess',types.SimpleNamespace(run=run,Popen=launch,STDOUT=-2))
+    monkeypatch.setitem(main.__globals__,'installed_stack_arguments',lambda:['remote_ip:=127.0.0.1'])
+    with pytest.raises(RuntimeError,match='launch prepared'):
+        main(output=tmp_path)
+    linear,angular=load_base_speed_limits(Path(__file__).parents[1]/'config/nav2_params.yaml')
+    assert f'base_test_linear_limit:={linear}' in calls[2]
+    assert f'base_test_angular_limit:={angular}' in calls[2]
+    assert calls[-1][-2:]==['start','lekiwi-stack.service']
+
+
 def test_physical_fault_probe_restores_service_when_injection_fails():
     import runpy
     import time
