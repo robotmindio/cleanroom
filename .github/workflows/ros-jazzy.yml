@@ -51,6 +51,8 @@ jobs:
           ROS_DOMAIN_ID: 221
         run: |
           . /opt/ros/jazzy/setup.sh
+          # The container runs as root while checkout files belong to the runner.
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           colcon build --symlink-install --event-handlers console_cohesion+
           LEKIWI_WS="$GITHUB_WORKSPACE" scripts/build-native.sh
           . install/setup.sh

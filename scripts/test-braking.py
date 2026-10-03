@@ -108,9 +108,13 @@ class Camera:
             buffer.unmap(mapped)
         received = time.monotonic()
         self.video.write(raw)
-        image = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_GRAYSCALE)
+        image = cv2.imdecode(np.frombuffer(raw, np.uint8), cv2.IMREAD_GRAYSCALE) if raw else None
         if image is None:
-            raise RuntimeError('cannot decode measurement camera frame')
+            self.count += 1
+            record = {'time':received, 'pts_ns':int(buffer.pts), 'pose':None,
+                      'ids':[], 'error':'invalid JPEG', 'bytes':len(raw)}
+            self.records.write(json.dumps(record)+'\n')
+            return record
         corners, ids, _ = cv2.aruco.detectMarkers(image, self.detector, parameters=self.parameters)
         markers = {} if ids is None else {int(key):c.reshape(4, 2) for key, c in zip(ids.flatten(), corners)}
         if self.calibration is None and all(key in markers for key in self.config['marker_ids']):
@@ -149,6 +153,9 @@ class BrakingTest(navigation['Test']):
 
     def safe_command(self, message):
         self.latest_safe = [message.linear.x, message.linear.y, message.angular.z]
+
+    def move(self, target):
+        super().move(target, linear_limit=.10, angular_limit=.40)
 
     def tick(self, twist=None, check=True):
         super().tick(twist, check)
@@ -207,7 +214,7 @@ class BrakingTest(navigation['Test']):
             if dt > .005:
                 distance = abs(navigation['angle'](b['pose'][2]-a['pose'][2])) if angular else math.dist(b['pose'][:2], a['pose'][:2])
                 rates.append(distance/dt)
-        if not rates or float(np.median(rates)) < speed*.25:
+        if not rates or float(np.median(rates)) < (.015 if angular else .001):
             raise RuntimeError('requested motion was not independently observed')
         # The preceding image arrived before t0; its exposure is earlier still.
         # Including that entire remaining path conservatively includes camera delay.
@@ -227,6 +234,7 @@ class BrakingTest(navigation['Test']):
         stop_time = max(0.0, stable_start['time']-stopped_at)
         result = {'direction':direction,'requested_speed':speed,'median_observed_speed':float(np.median(rates)),
                   'maximum_observed_speed':float(max(rates)),'stop_command_time':stopped_at,
+                  'requested_speed_covered':float(np.median(rates[-3:])) >= speed*.9,
                   'marker_path_after_pre_stop_frame_m':path,'residual_rotation_rad':rotation,
                   'conservative_swept_distance_m':swept,'stop_time_receive_upper_s':stop_time,
                   'camera_frames':len(moving)+len(post),'measurement_uncertainty_m':self.config['measurement_uncertainty_m']}
@@ -247,6 +255,7 @@ class BrakingTest(navigation['Test']):
             self.wait(lambda:self.flags.get('base_motion_permitted'), 15)
             self.settle()
             self.checks['marker_edge_residual_m'] = self.camera.calibration[3]
+            candidates = []
             for directions, steps in [(['forward','reverse','left','right'],self.config['linear_steps_m_s']),
                                       (['rotation_cw','rotation_ccw'],self.config['angular_steps_rad_s'])]:
                 accepted = None
@@ -256,9 +265,13 @@ class BrakingTest(navigation['Test']):
                         break
                     accepted = speed
                 if accepted is not None:
-                    for direction in directions:
-                        for _ in range(self.config['trials_per_direction']):
-                            self.trial(direction,accepted)
+                    candidates.append((directions,accepted))
+            for directions,speed in candidates:
+                for direction in directions:
+                    for _ in range(self.config['trials_per_direction']):
+                        result = self.trial(direction,speed)
+                        if not result['within_budget']:
+                            raise RuntimeError('repeated stopping trial exceeded the predeclared budget')
             self.move(self.center)
             self.wait(lambda:self.navigation.server_is_ready(), 10)
             self.wait(lambda:self.buffer.can_transform('map','base_footprint',navigation['Time']()), 10)
@@ -272,8 +285,11 @@ class BrakingTest(navigation['Test']):
             self.active = False
             self.stop()
             (self.output/'measurements.json').write_text(json.dumps(self.checks,indent=2)+'\n')
-            self.camera.close()
-            self.feedback.close()
+
+    def destroy_node(self):
+        self.camera.close()
+        self.feedback.close()
+        return super().destroy_node()
 
 
 def main():

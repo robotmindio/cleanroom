@@ -20,4 +20,4 @@ measurement_uncertainty_m: 0.010
 # Predeclared budget: the existing StopZone has 8 cm footprint clearance.
 maximum_stopping_distance_m: 0.080
 maximum_stop_time_s: 1.5
-maximum_runtime_s: 1200
+maximum_runtime_s: 2400

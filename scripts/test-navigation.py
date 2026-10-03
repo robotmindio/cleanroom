@@ -17,6 +17,7 @@ import rclpy
 from rclpy.action import ActionClient
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
+from rclpy.signals import SignalHandlerOptions
 from rclpy.time import Time
 from geometry_msgs.msg import Twist
 from diagnostic_msgs.msg import DiagnosticArray
@@ -113,6 +114,10 @@ class Test(Node):
         if twist is not None:
             self.command.publish(twist)
         rclpy.spin_once(self,timeout_sec=0.04)
+        # Camera processing can take a frame period. Drain ready callbacks so
+        # high-rate sensor topics cannot leave our pose/permissions queued.
+        for _ in range(20):
+            rclpy.spin_once(self,timeout_sec=0)
         if check and self.center is not None:
             if time.monotonic()>self.deadline:
                 raise RuntimeError('total test deadline expired')
@@ -145,7 +150,7 @@ class Test(Node):
         while time.monotonic()<end:
             self.tick(Twist(),check=False)
 
-    def move(self, target):
+    def move(self, target, linear_limit=0.025, angular_limit=0.15):
         print('manual target',target,flush=True)
         # Collision monitoring legitimately scales manual commands to 35% near
         # obstacles; a 0.6 rad reversal plus proportional settling exceeds 12 s.
@@ -165,10 +170,10 @@ class Test(Node):
                 continue
             command = Twist()
             norm = max(math.hypot(dx,dy),0.001)
-            speed = min(0.025, norm)
+            speed = min(linear_limit, 2*norm)
             command.linear.x = (math.cos(a)*dx+math.sin(a)*dy)/norm*speed
             command.linear.y = (-math.sin(a)*dx+math.cos(a)*dy)/norm*speed
-            command.angular.z = max(-0.15,min(0.15,da)) if abs(da)>=0.03 else 0.0
+            command.angular.z = max(-angular_limit,min(angular_limit,2*da)) if abs(da)>=0.03 else 0.0
             self.tick(command)
         self.stop()
         print('manual reached',self.pose,flush=True)
@@ -245,7 +250,9 @@ def main(test_class=Test, output=OUTPUT, launch_arguments=()):
             stack = subprocess.Popen([str(ROOT/'scripts/ros-start.sh'), *arguments,
                 'bounded_base_test:=true', *launch_arguments], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
                 env={**os.environ,'LEKIWI_RUNTIME_DIR':str(output/'runtime')}, start_new_session=True)
-            rclpy.init()
+            # Keep ROS alive through Python's interrupt cleanup so it can send
+            # zero commands, withdraw the test lease and shut down Nav2 first.
+            rclpy.init(signal_handler_options=SignalHandlerOptions.NO)
             node = test_class()
             try:
                 node.run()
