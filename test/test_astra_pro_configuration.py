@@ -76,7 +76,8 @@ def test_astra_has_its_own_tracked_robot_frame():
 def test_local_and_remote_astra_cloud_filters_share_the_bandwidth_profile():
     filter_config = ROOT / "config" / "astra_cloud_filter.yaml"
     values = yaml.safe_load(filter_config.read_text())["astra_cloud_filter"]["ros__parameters"]
-    assert values == {"pixel_stride": 8, "max_rate_hz": 10.0, "image_max_rate_hz": 2.0}
+    assert values == {"pixel_stride": 8, "max_rate_hz": 10.0, "image_max_rate_hz": 2.0,
+                      "jpeg_quality": 70}
     for launch in (ROOT / "launch" / "bringup.launch.py", ROOT / "launch" / "pi_astra.launch.py"):
         assert "astra_cloud_filter.yaml" in launch.read_text()
     assert 1.0 / values["max_rate_hz"] < 0.5  # production depth freshness timeout
