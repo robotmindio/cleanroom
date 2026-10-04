@@ -532,7 +532,8 @@ def test_stop_time_uses_terminal_median_with_wrapped_heading():
     frames = [{'time':i*.1,'pose':[.01 if i<5 else .02,0,math.pi-.004]} for i in range(20)]
     frames[-3]['pose'][2] = math.pi-.010
     frames[-1]['pose'][2] = -math.pi+.004
-    assert stop(frames,0) == pytest.approx(.5)
+    assert stop(frames,0) == pytest.approx(.6)
+    frames[-2]['pose'][0] = .024
     frames[-1]['pose'][0] = .024
     assert stop(frames,0) == pytest.approx(1.9)
     with pytest.raises(ValueError,match='eight'):

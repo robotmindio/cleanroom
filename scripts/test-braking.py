@@ -152,15 +152,20 @@ def maximum_swept_excursion(poses, radius):
 
 
 def stop_time_upper(samples, stopped_at):
-    """Use a terminal median so a noisy last frame cannot redefine rest."""
+    """Reject isolated tag noise; trailing medians delay detection conservatively."""
     if len(samples) < 8:
         raise ValueError('at least eight optical stop samples are required')
     terminal = np.array([s['pose'] for s in samples[-8:]])
     terminal[:,2] = np.unwrap(terminal[:,2])
     final = np.median(terminal,axis=0)
-    outside = [i for i,s in enumerate(samples)
-               if math.dist(s['pose'][:2],final[:2]) > .002
-               or abs(navigation['angle'](s['pose'][2]-final[2])) > .01]
+    observed = np.array([s['pose'] for s in samples])
+    observed[:,2] = np.unwrap(observed[:,2])
+    # The timestamp remains the newest frame, so this adds observation delay.
+    filtered = [np.median(observed[max(0,i-2):i+1],axis=0)
+                for i in range(len(samples))]
+    outside = [i for i,pose in enumerate(filtered)
+               if math.dist(pose[:2],final[:2]) > .002
+               or abs(navigation['angle'](pose[2]-final[2])) > .01]
     stable = samples[min(max(outside)+1 if outside else 1,len(samples)-1)]
     return max(0.,stable['time']-stopped_at)
 
