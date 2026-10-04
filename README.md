@@ -358,11 +358,10 @@ Symptoms and fixes are collected in [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 ## Safety and current limits
 
 - Real mode evaluates its safety inputs continuously; a one-shot readiness
-  message is not a motion permit. With `LEKIWI_DISARM_ON_FAILURE=true` (strict
-  mode) the supervisor is default-deny: missing or stale required inputs deny
-  motion, and a runtime fault latches until the driver is disarmed and
-  `/safety/reset_fault` is explicitly called. By default it reports them in
-  `/diagnostics` without withholding motion.
+  message is not a motion permit. Missing, stale or unhealthy required inputs
+  deny the affected capability. Normal hold mode recovers when inputs recover.
+  With `LEKIWI_DISARM_ON_FAILURE=true` (strict mode), a runtime fault also
+  latches until the driver is disarmed and `/safety/reset_fault` is called.
 - Keep a hardwired physical E-stop reachable and supervise every hardware run.
   The ROS E-stop topic and software torque cut are status/control interfaces,
   not substitutes for removing actuator energy independently of ROS.
@@ -370,12 +369,14 @@ Symptoms and fixes are collected in [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
   `/joint_states`, `/hardware/diagnostics`, and `safety/driver_state`. It does
   not require `/imu/data`, `/battery_state`, `safety/bumper_active`, or
   `safety/estop_active`, because the shipped robot has no source for them. The supplied
-  `config/safety_acceptance.yaml` is deliberately unvalidated; physical
-  stopping and fault trials must populate it before production arming.
-- The acceptance record is schema version 2. It remains invalid until it has
+  `config/safety_acceptance.yaml` records the completed 2026-10-04 physical
+  acceptance: attended operation on dry concrete, no added payload, folded
+  `travel_stow`, 0.03 m/s and 0.06 rad/s. See
+  [the verification report](docs/physical-verification-20261003.md).
+- The acceptance record is schema version 4. It remains invalid until it has
   reviewed limits, at least 30 trials in every translation/rotation direction,
   worst-case distances plus uncertainty, stop latency, traceable
-  software/sensor/payload/surface details, and every fault test marked true.
+  software/sensor/payload/surface details, and every applicable fault test marked true.
   This includes independent E-stop behavior, unauthorized ZMQ rejection, and
   DDS/rosbridge isolation or authentication. At startup, the supervisor also
   requires the accepted footprint and padding to match both tracked Nav2

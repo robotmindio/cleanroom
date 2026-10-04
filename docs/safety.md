@@ -32,7 +32,7 @@ from the tracked production MPPI limits and stops at a 20 cm wheel-odometry radi
 cancels at 18 cm. This leaves stopping margin, but wheel slip still requires
 independent observation of physical position. All measured arm/base inputs and
 a test-client lease renewed within 250 ms are required. Production startup keeps
-this mode disabled and the physical acceptance record remains unvalidated.
+this mode disabled; its validated acceptance record governs base permission.
 The folded `travel_stow` in SRDF and `safety_production.yaml` is the required
 navigation posture; starting a base goal does not automatically move the arm.
 
@@ -44,8 +44,11 @@ validator checks that this record agrees with the production profile's
 `require_bumper`, `require_imu`, and `require_battery` settings. All other fault
 tests and six-direction stopping trials remain mandatory. The operating
 condition is a site procedure; software cannot verify that the operator is
-present. The record stays `validated: false` until the physical evidence is
-reviewed. It grants no unattended scope or additional payload.
+present. The 2026-10-04 physical evidence is reviewed and the record is
+`validated: true`, at 0.03 m/s and 0.06 rad/s with 20 mm measurement uncertainty
+inside the unchanged 50 mm stopping budget. See
+[the verification report](physical-verification-20261003.md). It grants no
+unattended scope or additional payload.
 
 The configured hold mode automatically re-arms after a fault or restart only
 when telemetry and arm permission recover. The acceptance tests for host and

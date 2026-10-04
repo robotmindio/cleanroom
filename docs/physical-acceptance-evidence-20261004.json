@@ -1,0 +1,612 @@
+{
+  "validated_at": "2026-10-04T05:13:19.034759+00:00",
+  "tested_source_revision": "dfa699e199ac12ee50bb6594f33423d9971d86fb",
+  "runtime_before_final_deployment": "704b83a",
+  "scope": "attended autonomous base; dry concrete; no added payload; unchanged folded travel_stow",
+  "measurement_reference": {
+    "floor_tag_id": 33,
+    "black_square_side_m": 0.044,
+    "body_black_square_side_m": 0.035,
+    "declared_uncertainty_m": 0.02,
+    "maximum_qualified_window_uncertainty_m": 0.013668876063852625,
+    "method": "floor projective rectification with raised-marker correction; 256 one-pixel floor-corner perturbations; 16 floor-registration subsets; stationary pairwise swept jitter; 1 mm dimensional reserve; original and reconstructed sweep/timing maxima"
+  },
+  "speed_limits": {
+    "linear_m_s": 0.03,
+    "angular_rad_s": 0.06
+  },
+  "stopping_budget_m": 0.05,
+  "counts": {
+    "reverse": 30,
+    "forward": 31,
+    "left": 31,
+    "right": 32,
+    "rotation_ccw": 32,
+    "rotation_cw": 30
+  },
+  "worst_swept_m": {
+    "reverse": 0.023218947800299736,
+    "forward": 0.027711597840157885,
+    "left": 0.026631578823167395,
+    "right": 0.02407113235570237,
+    "rotation_ccw": 0.02759546325758897,
+    "rotation_cw": 0.02759546325758897
+  },
+  "maximum_moving_stop_time_s": 0.7892667921259999,
+  "nominal_runs": [
+    {
+      "path": ".benchmarks/physical-braking/20261004-130608",
+      "counts": {
+        "reverse": 4
+      },
+      "excluded_windows": []
+    },
+    {
+      "path": ".benchmarks/physical-braking/20261004-115451",
+      "counts": {
+        "reverse": 18
+      },
+      "excluded_windows": [
+        "reverse:1",
+        "reverse:2",
+        "reverse:3",
+        "reverse:5",
+        "reverse:18",
+        "reverse:20"
+      ]
+    },
+    {
+      "path": ".benchmarks/physical-braking/20261004-120324",
+      "counts": {
+        "reverse": 2
+      },
+      "excluded_windows": []
+    },
+    {
+      "path": ".benchmarks/physical-braking/20261004-124547",
+      "counts": {
+        "reverse": 5
+      },
+      "excluded_windows": []
+    },
+    {
+      "path": ".benchmarks/physical-braking/20261004-111213",
+      "counts": {
+        "forward": 16,
+        "reverse": 1
+      },
+      "excluded_windows": []
+    },
+    {
+      "path": ".benchmarks/physical-braking/20261004-114403",
+      "counts": {
+        "forward": 15
+      },
+      "excluded_windows": []
+    },
+    {
+      "path": ".benchmarks/physical-braking/20261003-211714",
+      "counts": {
+        "left": 31,
+        "right": 32,
+        "rotation_ccw": 17,
+        "rotation_cw": 30
+      },
+      "excluded_windows": []
+    },
+    {
+      "path": ".benchmarks/physical-braking/20261003-214655",
+      "counts": {
+        "rotation_ccw": 15
+      },
+      "excluded_windows": []
+    }
+  ],
+  "moving_faults": [
+    {
+      "name": "scan_disconnect",
+      "axis": "linear",
+      "path": ".benchmarks/physical-optical-faults/20261004-125745",
+      "speed": 0.03,
+      "swept_upper_m": 0.027457413758019543,
+      "stop_time_upper_s": 0.7892667921259999,
+      "uncertainty_upper_m": 0.013285929646868998,
+      "measurement_time_basis": "final_live_sensor_capture"
+    },
+    {
+      "name": "depth_disconnect",
+      "axis": "linear",
+      "path": ".benchmarks/physical-optical-faults/20261004-125745",
+      "speed": 0.03,
+      "swept_upper_m": 0.027711597840157885,
+      "stop_time_upper_s": 0.7413059889804572,
+      "uncertainty_upper_m": 0.010209768154891871,
+      "measurement_time_basis": "final_live_sensor_capture"
+    },
+    {
+      "name": "telemetry_loss",
+      "axis": "linear",
+      "path": ".benchmarks/physical-optical-faults/20261004-125745",
+      "speed": 0.03,
+      "swept_upper_m": 0.025813481369169385,
+      "stop_time_upper_s": 0.6123275440186262,
+      "uncertainty_upper_m": 0.010940391616485308,
+      "measurement_time_basis": "final_live_sensor_capture"
+    },
+    {
+      "name": "compute_command_loss",
+      "axis": "linear",
+      "path": ".benchmarks/physical-optical-faults/20261004-125745",
+      "speed": 0.03,
+      "swept_upper_m": 0.022636180191353508,
+      "stop_time_upper_s": 0.6504139420576394,
+      "uncertainty_upper_m": 0.008630087636335864,
+      "measurement_time_basis": "fault_request_upper_bound"
+    },
+    {
+      "name": "host_restart_stops_then_gated_rearm",
+      "axis": "linear",
+      "path": ".benchmarks/physical-optical-faults/20261004-130905",
+      "speed": 0.03,
+      "swept_upper_m": 0.008518273589534877,
+      "stop_time_upper_s": 0.17728180391713977,
+      "uncertainty_upper_m": 0.007816911562668965,
+      "measurement_time_basis": "final_live_sensor_capture"
+    },
+    {
+      "name": "motor_diagnostic_fault",
+      "axis": "linear",
+      "path": ".benchmarks/physical-optical-faults/20261004-130337",
+      "speed": 0.03,
+      "swept_upper_m": 0.012115455399389486,
+      "stop_time_upper_s": 0.3363328529521823,
+      "uncertainty_upper_m": 0.008226033156709054,
+      "measurement_time_basis": "final_live_sensor_capture"
+    },
+    {
+      "name": "telemetry_replay_or_duplicate",
+      "axis": "linear",
+      "path": ".benchmarks/physical-optical-faults/20261004-130337",
+      "speed": 0.03,
+      "swept_upper_m": 0.022803795665301652,
+      "stop_time_upper_s": 0.6809348037932068,
+      "uncertainty_upper_m": 0.013314992638782015,
+      "measurement_time_basis": "final_live_sensor_capture"
+    },
+    {
+      "name": "scan_disconnect",
+      "axis": "angular",
+      "path": ".benchmarks/physical-optical-faults/20261004-130831",
+      "speed": 0.06,
+      "swept_upper_m": 0.02604580996144869,
+      "stop_time_upper_s": 0.5237956028431654,
+      "uncertainty_upper_m": 0.011488473955735354,
+      "measurement_time_basis": "final_live_sensor_capture"
+    },
+    {
+      "name": "depth_disconnect",
+      "axis": "angular",
+      "path": ".benchmarks/physical-optical-faults/20261004-130131",
+      "speed": 0.06,
+      "swept_upper_m": 0.025854368488457305,
+      "stop_time_upper_s": 0.5791434049606323,
+      "uncertainty_upper_m": 0.012249593290737923,
+      "measurement_time_basis": "final_live_sensor_capture"
+    },
+    {
+      "name": "telemetry_loss",
+      "axis": "angular",
+      "path": ".benchmarks/physical-optical-faults/20261004-130131",
+      "speed": 0.06,
+      "swept_upper_m": 0.026126465415906693,
+      "stop_time_upper_s": 0.6032553368713707,
+      "uncertainty_upper_m": 0.013621730510866355,
+      "measurement_time_basis": "final_live_sensor_capture"
+    },
+    {
+      "name": "compute_command_loss",
+      "axis": "angular",
+      "path": ".benchmarks/physical-optical-faults/20261004-130131",
+      "speed": 0.06,
+      "swept_upper_m": 0.02464144620923975,
+      "stop_time_upper_s": 0.4566957410424948,
+      "uncertainty_upper_m": 0.013668876063852625,
+      "measurement_time_basis": "final_live_sensor_capture"
+    },
+    {
+      "name": "host_restart_stops_then_gated_rearm",
+      "axis": "angular",
+      "path": ".benchmarks/physical-optical-faults/20261004-130131",
+      "speed": 0.06,
+      "swept_upper_m": 0.007824329980252013,
+      "stop_time_upper_s": 0.010733244940638542,
+      "uncertainty_upper_m": 0.009572572508064765,
+      "measurement_time_basis": "final_live_sensor_capture"
+    },
+    {
+      "name": "motor_diagnostic_fault",
+      "axis": "angular",
+      "path": ".benchmarks/physical-optical-faults/20261004-130438",
+      "speed": 0.06,
+      "swept_upper_m": 0.01579226935434945,
+      "stop_time_upper_s": 0.2979346220381558,
+      "uncertainty_upper_m": 0.012058916362424746,
+      "measurement_time_basis": "final_live_sensor_capture"
+    },
+    {
+      "name": "telemetry_replay_or_duplicate",
+      "axis": "angular",
+      "path": ".benchmarks/physical-optical-faults/20261004-130438",
+      "speed": 0.06,
+      "swept_upper_m": 0.02759546325758897,
+      "stop_time_upper_s": 0.5788766879122704,
+      "uncertainty_upper_m": 0.013069080454429428,
+      "measurement_time_basis": "final_live_sensor_capture"
+    },
+    {
+      "name": "whole_ros_command_loss",
+      "axis": "linear",
+      "path": ".benchmarks/physical-ros-restart/20261004-130536",
+      "speed": 0.03,
+      "swept_upper_m": 0.021972786568371018,
+      "stop_time_upper_s": 0.7394835450686514,
+      "uncertainty_upper_m": 0.007579097478405389,
+      "verified_ros_processes_killed": 31,
+      "measurement_time_basis": "verified_local_process_kill"
+    }
+  ],
+  "artifacts": {
+    ".benchmarks/physical-braking/20261003-211714": {
+      "camera.mjpg": {
+        "bytes": 1984394256,
+        "sha256": "967024a17d6f6bf33788562f237683be8af63c761206940f85ea314bdc2dd309"
+      },
+      "camera.jsonl": {
+        "bytes": 5757414,
+        "sha256": "5670cd3898b44a644cb4f2be9da7d012f30a270ce98da5c056cd79ed4cb9a1dd"
+      },
+      "calibration.json": {
+        "bytes": 1431,
+        "sha256": "1c8d974b0f695aa0f84b2edb0e44af2cd4d153d9d1445733072e4a6d3265c117"
+      },
+      "measurements.json": {
+        "bytes": 163034,
+        "sha256": "ae66078a1e6df78e2c9b3f1a4b728323f22c0adff289df92620044f8d4ce8f62"
+      },
+      "ground-qualification.json": {
+        "bytes": 68840,
+        "sha256": "f5e9ffd3e10e397f95af2aaef9cb3ad89faa65075d9a8c7c2cd416ae56633b1e"
+      }
+    },
+    ".benchmarks/physical-braking/20261003-214655": {
+      "camera.mjpg": {
+        "bytes": 377749592,
+        "sha256": "edd66e69f4f9c89d263d102937e7023ad6a42cc180102851738f97ebbc005007"
+      },
+      "camera.jsonl": {
+        "bytes": 1093820,
+        "sha256": "eac298ba7ba086aa2c1f2f9a7dd917f05619f5473e97f785331d0ac055315281"
+      },
+      "calibration.json": {
+        "bytes": 1433,
+        "sha256": "5867d0c8d296b0ac7ffe9f71663c3cf3076bf58af1c79292b0dba82d2b159554"
+      },
+      "measurements.json": {
+        "bytes": 24711,
+        "sha256": "73c513803052fdcbb74dc389ec17d4fc16c74b5ea96ac9cddf3bb4c8ea3e64cc"
+      },
+      "ground-qualification.json": {
+        "bytes": 15579,
+        "sha256": "0f227992bfcccb614ba223f8deb2c608851a0b3ad1bd87cb4bade6666c8d235a"
+      }
+    },
+    ".benchmarks/physical-braking/20261004-111213": {
+      "camera.mjpg": {
+        "bytes": 200644056,
+        "sha256": "af6b0065b1baace9ca7af2398efd268b2bb611d86d81776eea265d770db7be69"
+      },
+      "camera.jsonl": {
+        "bytes": 788535,
+        "sha256": "ebf53e83686d5579d89fda9dd44bdae49247c3cee962227fcbac483d4b7c523c"
+      },
+      "calibration.json": {
+        "bytes": 3542,
+        "sha256": "a361c4cf1b8cace5dfc3cde4a436fe5966d9d5e6aede30efda732e9aa234d816"
+      },
+      "measurements.json": {
+        "bytes": 14525,
+        "sha256": "fefd6c46e257c26daeedc22a55891561f3bd07f937ca00aa29ec5c214036d389"
+      },
+      "ground-qualification.json": {
+        "bytes": 16661,
+        "sha256": "befffdefa413f1203f51dad1c544257cca3faf2decf4b81dda81764283594a85"
+      }
+    },
+    ".benchmarks/physical-braking/20261004-114403": {
+      "camera.mjpg": {
+        "bytes": 173080600,
+        "sha256": "489f2d39d2daf1d8360ccf995ca5446af0588ed9f7dacaf4e9da09656704dab6"
+      },
+      "camera.jsonl": {
+        "bytes": 692033,
+        "sha256": "f05b06ba56abf4900de16fa0027961a011ae91c0563158dda8ef784327f21078"
+      },
+      "calibration.json": {
+        "bytes": 4010,
+        "sha256": "a7efd612c5f70760990f7f4ee9b7ceed99c3fb76577dea57d3d31640f2afb9c5"
+      },
+      "measurements.json": {
+        "bytes": 12953,
+        "sha256": "d98e69f132149d6dc16531b1d7927c938b9fe2e4b8c4b8e5d3d53a6cafe8e30b"
+      },
+      "ground-qualification.json": {
+        "bytes": 15534,
+        "sha256": "42084d54d43bf3beeefe379eb3ca267d5a142ca7a97da75e55ac698697e0029b"
+      }
+    },
+    ".benchmarks/physical-braking/20261004-115451": {
+      "camera.mjpg": {
+        "bytes": 278130360,
+        "sha256": "14565c47a7587ecb56d150ee683d9e0edcff0f86a3f69ef189a664ebd5ca2816"
+      },
+      "camera.jsonl": {
+        "bytes": 1046534,
+        "sha256": "2a5b46222b2e3ab40e74536438194c93cf7ce54f5239a55e0d413e62c4abef99"
+      },
+      "calibration.json": {
+        "bytes": 4011,
+        "sha256": "926748108b5b96761c910242654af3fd871ad638faafd75f542f409013a99538"
+      },
+      "measurements.json": {
+        "bytes": 20732,
+        "sha256": "93c26bd1f84b810179ce865f7f65df531b77ede80e3b208237e8d4e52c1f2736"
+      },
+      "ground-qualification.json": {
+        "bytes": 17327,
+        "sha256": "5a50f07d04371aae0def91260aa6b7aaf33f14bc9fae189e4956795014fb1f37"
+      }
+    },
+    ".benchmarks/physical-braking/20261004-120324": {
+      "camera.mjpg": {
+        "bytes": 61215376,
+        "sha256": "2eafc83e742f98419eb5b35cd807ade93a2fd06eed198f2e139b0a7d61087fcd"
+      },
+      "camera.jsonl": {
+        "bytes": 507126,
+        "sha256": "064f0b6cd5e2efcb988df9db2554a519428cb6b16ae3bc987458773d6a676e31"
+      },
+      "calibration.json": {
+        "bytes": 3996,
+        "sha256": "854aab9de3d83563e2270ba994ef0b50559dd10c06bf8ab6bec046a3c60e4dff"
+      },
+      "measurements.json": {
+        "bytes": 2108,
+        "sha256": "f49c5ac756729006cfe3d5a6d6b8d33db7a19b689ed0d31991243067b0656137"
+      },
+      "ground-qualification.json": {
+        "bytes": 8268,
+        "sha256": "76054966fbad980e39a06bbcc8181efe7636593675ded8e69804adf4c0cb3428"
+      }
+    },
+    ".benchmarks/physical-braking/20261004-124547": {
+      "camera.mjpg": {
+        "bytes": 92193368,
+        "sha256": "d7d62d8d9cb5c00663b42e4e74c0a8cc23388a454a8c67f9de0e75e834a53249"
+      },
+      "camera.jsonl": {
+        "bytes": 847015,
+        "sha256": "e75a1a255d30bae9bf71cdb150d3527a04bc53dae37f4995ec57695a06381dac"
+      },
+      "calibration.json": {
+        "bytes": 3643,
+        "sha256": "93c3f0fb71d4115f5ed123db62c68dd3d203c1a78f8939f4ea72e7cd3d36de8a"
+      },
+      "measurements.json": {
+        "bytes": 5200,
+        "sha256": "15e5844436e45e9cfbc1577d055e9d8dac50bbd45e49cb2a87981b440060225b"
+      },
+      "ground-qualification.json": {
+        "bytes": 9976,
+        "sha256": "496baf6e49b82685f47b6cc2e3ebf5773a8dc7687d0a8b1904cf5fa082e6d4bd"
+      }
+    },
+    ".benchmarks/physical-braking/20261004-130608": {
+      "camera.mjpg": {
+        "bytes": 205914352,
+        "sha256": "c8ed5c07d7cb1d59cb864b481636093b961e5282a30619cf81e60defec35a229"
+      },
+      "camera.jsonl": {
+        "bytes": 1889051,
+        "sha256": "d2ad7fc874597a4e6ec314e470c0015056b1b805502f8d0dc20e04b2f6510faa"
+      },
+      "calibration.json": {
+        "bytes": 3652,
+        "sha256": "83e73b66c6406444e62a726d18e21336a2c7a304a9b95b1e2c59ac27301bc2ca"
+      },
+      "measurements.json": {
+        "bytes": 13738,
+        "sha256": "52952380485ffeb1745000820368c827461288f4d71d3ba30bf0724cba4abcfa"
+      },
+      "ground-qualification.json": {
+        "bytes": 9432,
+        "sha256": "54f42e290b8d7760cf6df5ccee5ea37c4beec044f55cdc1f421cf8b5b1569757"
+      }
+    },
+    ".benchmarks/physical-optical-faults/20261004-125745": {
+      "camera.mjpg": {
+        "bytes": 110387584,
+        "sha256": "57895b839863f8fc52bd039ff9514b628bfd7de13a0de1288880afdee525cfeb"
+      },
+      "camera.jsonl": {
+        "bytes": 1007922,
+        "sha256": "20b210a7ee1b852766c4b008cccb84d36773a5a10c85899d10defdec4d3043e0"
+      },
+      "calibration.json": {
+        "bytes": 3646,
+        "sha256": "cf2a09311aa00f07f53006cd6614fb00bb154e47a982093f1d58df87dc8f2ea4"
+      },
+      "measurements.json": {
+        "bytes": 76411,
+        "sha256": "12a3ca47b67a55864ce60bd5655f28237790ecb1df27375f3b7a9a819e4a7541"
+      },
+      "ground-qualification.json": {
+        "bytes": 9878,
+        "sha256": "90a58c613f9e80e254afd31178b17e05e5526590d5f6437b5f5f7833f4ec8e8f"
+      }
+    },
+    ".benchmarks/physical-optical-faults/20261004-130131": {
+      "camera.mjpg": {
+        "bytes": 111407280,
+        "sha256": "89a68323b19ec240e908d172fa0c8dfe01937eba99e9752a682ebbabfa3bbd88"
+      },
+      "camera.jsonl": {
+        "bytes": 1011138,
+        "sha256": "4290aa744ea09c6b69e8b9096b65908c5740f8de0b3391e783e18a6827521a53"
+      },
+      "calibration.json": {
+        "bytes": 3643,
+        "sha256": "2d4eb94175c7bf50d0e6a7a72fe2bf2a0b6bb17e4ac3ac51435c3bd112beea05"
+      },
+      "measurements.json": {
+        "bytes": 73807,
+        "sha256": "137aa404927072c2dc888524af5599a41885c79c0eaba9c4fe3b71e161a4e7e5"
+      },
+      "ground-qualification.json": {
+        "bytes": 9847,
+        "sha256": "2819c1bafc445c117b5638033ea0a6fa25093d5f3886de10612776bb382ab7eb"
+      }
+    },
+    ".benchmarks/physical-optical-faults/20261004-130337": {
+      "camera.mjpg": {
+        "bytes": 94146680,
+        "sha256": "4e0ac9ff70225da018148b72b6553717f90c7978366d1c8e8657707505fcddb6"
+      },
+      "camera.jsonl": {
+        "bytes": 851488,
+        "sha256": "df1287f6cacf8e0819403d7813862fbc6e436244270d244a926018e41090125f"
+      },
+      "calibration.json": {
+        "bytes": 3640,
+        "sha256": "1a8efc9c5fab6f774c60afc5cdc89336d6f8de8c00930a05d38ab148d58dcacd"
+      },
+      "measurements.json": {
+        "bytes": 80583,
+        "sha256": "ff932c54c52bcef4c2713ff9c21ecd6a26e538b1151b702d00847cf936d529b6"
+      },
+      "ground-qualification.json": {
+        "bytes": 8232,
+        "sha256": "f39ab47b41646076e7f8213b3fee874abbf385473ce753709fa0213f3ac21986"
+      }
+    },
+    ".benchmarks/physical-optical-faults/20261004-130438": {
+      "camera.mjpg": {
+        "bytes": 89647712,
+        "sha256": "1c928e23052126a12e10cd9035c496a04abd27aca91be56d1c7d19879cc20bf3"
+      },
+      "camera.jsonl": {
+        "bytes": 824297,
+        "sha256": "0f9d9fa737fbc0992f0a4fff80486a24faf409881b2ff67923d3af1e67aa270c"
+      },
+      "calibration.json": {
+        "bytes": 3629,
+        "sha256": "af1afec31f073ce1b882417b484c7dba0a4bbd81a31d9ee8caec1e3b45a372a6"
+      },
+      "measurements.json": {
+        "bytes": 80632,
+        "sha256": "a1ae8ab2aca33c8bb5ee9a0a9d108609577de822eb100e039e3645c5c462750b"
+      },
+      "ground-qualification.json": {
+        "bytes": 8245,
+        "sha256": "5382c254e11ba4249919b74583c1990d1810839d344790de3588cac49450dfff"
+      }
+    },
+    ".benchmarks/physical-optical-faults/20261004-130831": {
+      "camera.mjpg": {
+        "bytes": 44254688,
+        "sha256": "17ff8e2aa2afc6fcc8d47bf8efc8684a987a3027f79c9851c76966b717b53158"
+      },
+      "camera.jsonl": {
+        "bytes": 401934,
+        "sha256": "706e0951376af261d2e0bf668d3bcdadb0b6b9dc23e4a67b7ef6b05e881d8ceb"
+      },
+      "calibration.json": {
+        "bytes": 3634,
+        "sha256": "1d401f6254446097b1891f8e16069650c9ecc21ebb8a620b442fe53e5dfdb481"
+      },
+      "measurements.json": {
+        "bytes": 21238,
+        "sha256": "337d2af8f9da1be92c5f286a6055d06a10b3f6b3813aea9628fe17eba1f4731a"
+      },
+      "ground-qualification.json": {
+        "bytes": 7736,
+        "sha256": "9db3af9783d7299eef8d057f48304821e68079a9a08e7113d9da82f648e871bd"
+      }
+    },
+    ".benchmarks/physical-optical-faults/20261004-130905": {
+      "camera.mjpg": {
+        "bytes": 41699904,
+        "sha256": "3caf92f0ec7649f71b57953dc58bb262ac650ba7fbd24c51a508e1673eebb220"
+      },
+      "camera.jsonl": {
+        "bytes": 380360,
+        "sha256": "338b3bdff0ffe0b14a84f8ca0d41321ed0f4b5cbfb762edfe2f81b4ea3b83faf"
+      },
+      "calibration.json": {
+        "bytes": 3644,
+        "sha256": "2dcea868778c164966b5c927594dcd20101d4f2d68955ce578f40ed46db8c44f"
+      },
+      "measurements.json": {
+        "bytes": 10535,
+        "sha256": "d300144a6a4c5c1bd817b2c49e4b74aed64845e242617dcea9bf336c943c07bd"
+      },
+      "ground-qualification.json": {
+        "bytes": 7752,
+        "sha256": "9f6f7ffb4914cafaf5cd3e241872bf84b175bbf19b05dcc5b218bff4846de5d8"
+      }
+    },
+    ".benchmarks/physical-ros-restart/20261004-130536": {
+      "camera.mjpg": {
+        "bytes": 39477264,
+        "sha256": "4aa8378159fd68b89f2aa9dbee7cb73c3734d80c459e29a44711b027d96b7b45"
+      },
+      "camera.jsonl": {
+        "bytes": 360580,
+        "sha256": "391aae95dcd304883364e1da91880011d12a887a2fbb3b32fbc6dca7f9115e39"
+      },
+      "calibration.json": {
+        "bytes": 3632,
+        "sha256": "ad4cede8955c071a8b27e2150e5d0a6899c45e6891eae31a2970a8169d7a260e"
+      },
+      "measurements.json": {
+        "bytes": 620,
+        "sha256": "92b6cb74b89158330f6d5e8e7be7965c749da253416ddca27e2a91cf2d8b879b"
+      },
+      "ground-qualification.json": {
+        "bytes": 7713,
+        "sha256": "7c64535bc72678cc83797a2f967da66acfcdb6488f853a98a7a46ad96d385a8e"
+      }
+    }
+  },
+  "reference_artifacts": {
+    ".benchmarks/physical-ground-reference/20261004-100828/floor-calibration.json": {
+      "bytes": 2242,
+      "sha256": "2a3f2e93819b2469b11880f090a731c7aa1e187cf04268190f8bde1b24afe3cf"
+    },
+    ".benchmarks/physical-ground-reference/20261004-100828/camera.jsonl": {
+      "bytes": 21803,
+      "sha256": "4c8fcd996ccca6a84b028de1c4af692fea8a750564aab79bf7b4e4b19ff5244e"
+    },
+    "config/nav2_params.yaml": {
+      "bytes": 11076,
+      "sha256": "1a27927bda70abac056eb07bac77e1bec6d28c316c1b050dd4f9777a525a9b4b"
+    },
+    "config/physical_test.yaml": {
+      "bytes": 1443,
+      "sha256": "4144bae753247e990e4ad88198410eb8636aae493c38ef1c9802dbeeb570e300"
+    },
+    "config/safety_production.yaml": {
+      "bytes": 2976,
+      "sha256": "be7ecd03a08c697a3d04a5a12295aee3adf82f053909e6f13d12a29f71819b39"
+    }
+  }
+}

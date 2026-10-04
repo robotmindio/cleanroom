@@ -59,7 +59,7 @@ controller_server:
       motion_model: Omni
       # Indoor limits paired with the 5 cm stopping clearance below.
       # Depth transport and its 0.5 s freshness gate are paired with these
-      # limits; physical stopping acceptance remains pending.
+      # limits and the completed attended physical acceptance.
       vx_max: 0.03
       vx_min: -0.03
       vy_max: 0.03

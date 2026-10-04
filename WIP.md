@@ -1,7 +1,7 @@
-# Physical acceptance in progress
+# Accepted physical profile: delivery pending
 
-44 mm floor AprilTag calibration is recorded. Nominal ground-qualified counts: forward 31, reverse 26, left 31, right 32, clockwise 30, counterclockwise 32. Six reverse windows with missing raw baselines were excluded. Worst nominal sweep is 26.632 mm. Declared measurement uncertainty is 20 mm; total clearance remains 50 mm.
+Completed: 186 qualified nominal stops across all six directions and 15 moving fault stops. All accepted windows meet the 20 mm error and unchanged 50 mm total stopping budget. Final caps 0.03 m/s / 0.06 rad/s, dry concrete, 0 kg added payload, unchanged folded travel_stow, attended operator at independent power stop. The tracked acceptance validator returns true. Evidence hashes and per-case bounds are in docs/physical-acceptance-evidence-20261004.json.
 
-Live lidar loss at 0.04 m/s exceeded the travel budget (38.088 mm + 20 mm). Limits are now 0.03 m/s and 0.06 rad/s pending repetitions. Single-frame terminal yaw noise falsely extended stop time; terminal pose now uses eight observations, with regression coverage. Runtime still deployed at 704b83a until final deployment.
+Higher 0.04 m/s failed lidar-loss distance after proper floor calibration. Unqualified windows and historical failures are retained. Normal/rotation fault tests restore production; complete ROS crash killed and verified 31 owned processes. No production map or named pose was changed.
 
-Next: finish five additional reverse stops, repeat linear/angular fault stops and whole-ROS crash, qualify raw camera evidence, grant acceptance only if all budgets pass, deploy and run a finite production check. Preserve named poses and production map. No persistent test clients.
+Next: native deployment, full CTest, finite production permission/MoveIt/Nav2 verification, then remove this file. Runtime before final deployment is 704b83a. No persistent test clients or motion publishers.

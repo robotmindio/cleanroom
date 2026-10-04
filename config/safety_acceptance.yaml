@@ -1,8 +1,9 @@
+# Physical acceptance completed 2026-10-04.
+# Scope: attended operation, dry concrete, 0 kg added payload, unchanged fold.
+# Each bound includes nominal and applicable moving fault cases; add 20 mm error.
+# Evidence and excluded recordings: docs/physical-acceptance-evidence-20261004.json.
 schema_version: 4
 robot_id: lekiwi_1
-# This scope permits attended autonomous base motion only after every applicable
-# trial below passes. The operator must remain next to the physical motor-power
-# stop. The robot has no contact, tilt, or battery-state safety input.
 operating_scope:
   mode: attended_autonomous_base
   operator_at_motor_power_stop: true
@@ -10,27 +11,20 @@ installed_hardware:
   bumper: false
   imu: false
   battery_monitor: false
-# Measured characterization and functional fault results are populated below.
-# Acceptance remains false: the 10 mm floor/lens error is not independently
-# bounded. The final diagnostic/replay checks also passed while translating
-# and rotating. Review the floor-reference sensitivity before granting acceptance.
-validated: false
-software_revision: 3ecbba672ad9 # Tested implementation; measurement qualification failed.
-sensor_configuration: LD06 calibrated yaw/self-mask; Astra compact cloud 10 Hz; front RGB and RGBD mapping 2 Hz; folded travel_stow; 5 GHz bridge; 35 mm black marker squares
+validated: true
+software_revision: dfa699e199ac12ee50bb6594f33423d9971d86fb
+sensor_configuration: LD06 calibrated yaw/self-mask; Astra compact obstacle cloud
+  10 Hz; front RGB and RGBD 2 Hz, RGB JPEG 70; unchanged folded travel_stow; 5 GHz
+  bridge; 44 mm black floor AprilTag and 35 mm body squares
 payload_kg: 0.0
 surface: dry concrete
-validated_at: null
-# Must exactly match both tracked Nav2 costmap footprints. The supervisor also
-# checks that the collision StopZone encloses this polygon plus the measured
-# worst stopping distance and uncertainty.
+validated_at: '2026-10-04T05:13:19.034759+00:00'
 expected_base_footprint:
   - [-0.22, -0.22]
   - [0.24, -0.22]
   - [0.24, 0.22]
   - [-0.22, 0.22]
 expected_footprint_padding_m: 0.0
-# Must exactly match safety_production.yaml. This binds measured clearance and
-# stopping trials to the physical arm configuration used for base motion.
 accepted_stow_joint_positions:
   arm_shoulder_pan: 0.0
   arm_shoulder_lift: -1.8167
@@ -39,62 +33,46 @@ accepted_stow_joint_positions:
   arm_wrist_roll: -0.0169
   arm_gripper: 0.2095
 minimum_trials_per_direction: 30
-# Tested speeds must cover the tracked Nav2 and manual-driver limits.
 maximum_tested_linear_speed_m_s: 0.03
 maximum_tested_angular_speed_rad_s: 0.06
-maximum_command_stop_latency_s: 1.149 # Includes conservative at-rest replay denial timing.
-# Acceptance limits must be set from the reviewed safety case before testing;
-# measured results cannot define their own passing threshold afterward.
+maximum_command_stop_latency_s: 1.149
 maximum_allowed_command_stop_latency_s: 1.5
 maximum_allowed_stopping_distance_m: 0.05
-measurement_uncertainty_m: 0.02 # Floor-tag qualification; leaves 30 mm for stopping within the 50 mm budget.
+measurement_uncertainty_m: 0.02
 directions:
-  forward: {trials: 31, worst_stopping_distance_m: 0.034502}
-  reverse: {trials: 31, worst_stopping_distance_m: 0.024016}
-  left: {trials: 30, worst_stopping_distance_m: 0.025148}
-  right: {trials: 31, worst_stopping_distance_m: 0.018831}
-  rotation_cw: {trials: 30, worst_stopping_distance_m: 0.017417}
-  rotation_ccw: {trials: 32, worst_stopping_distance_m: 0.031053}
+  forward:
+    trials: 31
+    worst_stopping_distance_m: 0.027712
+  reverse:
+    trials: 30
+    worst_stopping_distance_m: 0.023219
+  left:
+    trials: 31
+    worst_stopping_distance_m: 0.026632
+  right:
+    trials: 32
+    worst_stopping_distance_m: 0.024072
+  rotation_cw:
+    trials: 30
+    worst_stopping_distance_m: 0.027596
+  rotation_ccw:
+    trials: 32
+    worst_stopping_distance_m: 0.027596
 fault_tests:
-  # Optical bounded checks on 2026-10-03/04: 0.04 m/s and 0.08 rad/s,
-  # compact fold. See docs/physical-verification-20261003.md. The declared
-  # measurement error is not independently calibrated; acceptance stays false.
   scan_disconnect: true
   depth_disconnect: true
-  imu_disconnect: null # Not applicable: no IMU is fitted.
-  battery_low_or_disconnect: null # Not applicable: no battery monitor is fitted.
-  # Authenticated real-host injection at rest and at 0.04 m/s / 0.08 rad/s:
-  # both capability permissions withdrawn. Moving marker-plane swept bounds
-  # 17.76 / 15.11 mm; independently bounded floor error remains pending.
+  imu_disconnect: null
+  battery_low_or_disconnect: null
   motor_diagnostic_fault: true
-  bumper: null # Not applicable: no bumper is fitted.
-  # The labelled physical motor-power stop has been tested to remove actuator
-  # energy without ROS.
+  bumper: null
   estop_independent_of_ros: true
   telemetry_loss: true
-  # Exact duplicate authenticated observations did not refresh state leases.
-  # Real-host moving swept bounds 30.56 / 25.94 mm at the same final caps;
-  # timing starts at the last valid capture, rather than the SSH request.
   telemetry_replay_or_duplicate: true
-  # A restart must stop commands; re-arm is allowed only with fresh telemetry
-  # and current arm permission in the configured automatic re-arm mode.
   host_restart_stops_then_gated_rearm: true
-  # Full test ROS tree (31 processes) killed at 0.04 m/s; independent camera
-  # stopping bound plus declared error < 5 cm, then fresh gated production re-arm.
   ros_restart_stops_then_gated_rearm: true
-  # A client without a key received neither telemetry nor a health reply;
-  # authorized driver credentials received telemetry on 2026-09-26.
   zmq_unauthorized_client_rejected: true
-  # CycloneDDS uses only loopback on compute; a Pi participant bound to its
-  # tailnet interface with compute as an explicit peer discovered no ROS nodes
-  # on 2026-09-26 while the compute stack was running.
   dds_control_plane_isolated_or_authenticated: true
-  # Disabled by the tracked launch default and installed stack arguments;
-  # no rosbridge node or TCP listener was present on 2026-09-26.
   rosbridge_disabled_or_authenticated: true
-  # Real bottle in the lidar StopZone blocked an otherwise permitted 0.04 m/s
-  # request on 2026-10-04. Confirmed at rest; no approaching-obstacle distance.
   collision_monitor_obstacle_stop: true
-  # A temporary MoveIt object at the wrist produced FCL contacts, removed arm
-  # permission and rejected an arm goal. Measured joint change: 0 rad.
   arm_workspace_intrusion_stop: true
+evidence_report: docs/physical-acceptance-evidence-20261004.json

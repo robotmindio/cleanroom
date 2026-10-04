@@ -183,12 +183,13 @@ until hardware publishes them:
 | Motor health | `/hardware/diagnostics` | Servo/bus faults |
 | Arm collision gate | `/safety/arm_workspace_clear` | Live MoveIt scene/state validity |
 
-The repository ships `config/safety_acceptance.yaml` with `validated: false`.
-It is an acceptance template, not proof of safety. A qualified hardware
-procedure must record all-direction stopping trials, fault responses, software
-revision, sensor configuration, and the measured stow pose before setting it
-true. No physical stopping, E-stop, depth, or full production sensor acceptance
-is implied by a passing software test.
+The repository records completed 2026-10-04 physical acceptance in
+`config/safety_acceptance.yaml`: attended operation, dry concrete, 0 kg added
+payload, unchanged folded stow, 0.03 m/s and 0.06 rad/s. Its 50 mm stopping
+budget includes 20 mm measurement uncertainty. See
+[the measured evidence](physical-verification-20261003.md). A change to the
+accepted conditions requires new physical evidence; software tests alone do
+not establish physical stopping or obstacle coverage.
 
 ## Where the camera comes from
 

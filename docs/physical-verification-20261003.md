@@ -1,288 +1,156 @@
 # Physical verification — 2026-10-03/04
 
-**Stopping characterization completed in all six directions. Physical acceptance
-remains false.** The operator confirmed 35 mm measures each detected black
-marker square, excluding its white margin. Surface: dry concrete; added payload:
-0 kg; arm: unchanged compact `travel_stow`. All maneuvers use the authorized
-30 cm radius, independent camera tracking and finite test clients.
+**Physical acceptance completed: `validated: true`.** Scope: attended autonomous
+base operation on dry concrete, 0 kg added payload, unchanged compact
+`travel_stow`, and an operator at the independent motor-power stop.
+Production limits are **0.03 m/s and 0.06 rad/s**. The StopZone remains 56 × 54 cm,
+with 50 mm clearance outside the accepted 46 × 44 cm footprint.
 
-## Root causes corrected
+## Measurement and exclusions
 
-- **Depth loss on the Pi:** kernel UDP buffers were capped at 212992 bytes,
-  smaller than a complete raw cloud despite DDS requesting 8 MiB. The kernel
-  recorded 794 receive-buffer drops in ten seconds. The device installer now
-  persists 8 MiB maxima from `config/dds_socket_buffers.conf` before starting
-  publishers. Compact obstacle clouds target 10 Hz; mapping images stay 2 Hz.
-- **Shared receive gaps:** Pi was on 2.4 GHz while compute used 5 GHz. A tracked
-  NetworkManager helper clones the saved connection, sets 5 GHz and installs a
-  timed rollback before activation. The original connection remains available.
-  Exact RF interference sources were not isolated.
-- **Lidar self-returns:** ranges in the existing folded-body sectors exceeded
-  the old mask. The same angular union is now split at 315 degrees to give the
-  earlier sector sufficient range while staying within the measured footprint.
-  Regression tests retain far returns and check the sector geometry. Rare
-  transient StopZone detections have also occurred; their cause is not proven.
-- **MoveIt perception gaps:** a second 5 Hz throttle discarded already bounded
-  upstream frames. Removing it exposed a separate gate starvation: every new
-  cloud replaced the pending frame before its joint TF became available. The
-  gate now retains one frame until its transform arrives or the existing
-  0.5-second wait expires. In successive 20-second probes, raw depth stayed
-  below 0.16 s gaps; processed output went from 0.60 s gaps, then 1.00 s at
-  the gate, to **0.211 s** after both fixes. The final probe had zero workspace
-  denials. Rate zero disables the second throttle in
-  [MoveIt 2.12.4's updater](https://github.com/moveit/moveit2/blob/2.12.4/moveit_ros/perception/pointcloud_octomap_updater/src/pointcloud_octomap_updater.cpp#L182).
-- **Test validity:** shared launch defaults now read production speed limits;
-  startup stops when CollisionMonitor reduces the requested test speed. Sensor
-  loss timing uses the final live capture rather than the earlier SSH stop
-  request. Cleanup restores production even if the entire test ROS tree died.
-- **Measurement:** full-resolution marker tracking, projective rectification of
-  the tilted plane, fixed optical returns and terminal capture intervals replace
-  decimated detection, affine geometry, drifting wheel-only returns and speed
-  checks diluted by stationary startup. These fixes do not independently
-  calibrate floor alignment, lens distortion or exposure timing.
+The operator measured the floor AprilTag's black square as **44 × 44 mm** and
+the three body squares as 35 × 35 mm, excluding white margins. The fixed USB
+camera records 1280 × 960 native MJPEG and capture/receive timestamps. Tracking
+uses floor projective rectification, raised-marker magnification correction,
+and multiple marker headings. The current primary marker is 69; marker 59
+remains readable when the third square is obscured.
 
-Simultaneous 60-second source/receiver probes after the network and buffer fixes:
+The declared **20 mm measurement error** leaves **30 mm for measured stopping**
+inside the original 50 mm budget. Each accepted window is checked against 256
+independent one-pixel floor-corner perturbations, sixteen floor-registration
+subsets, observed stationary pairwise swept jitter, and a 1 mm dimensional
+reserve. The largest accepted window's calculated error is **13.669 mm**.
+This is a conservative model for this fixed rig, not a surveyed camera calibration.
+The visible 7 mm ruler is an independent dimensional cross-check; its blurred
+inch labels were not used as exact calibration measurements.
 
-| Measurement | Pi | Compute |
-| --- | ---: | ---: |
-| UDP receive-buffer drops | 0 | 0 |
-| Largest depth receive gap | 0.152 s | 0.173 s |
-| Largest depth capture age | 0.022 s | 0.077 s |
-| CPU busy | 32.8% | 13.2% |
+Swept distance bounds use translation plus rotation of a point up to 0.53 m
+from the tracked marker, retaining raw frame excursions. Stop timing uses the
+median of eight terminal observations and trailing three-frame medians; each
+median keeps its newest receive timestamp, adding observation delay. This
+removes isolated tag noise from the time estimate without filtering the raw
+swept-distance bound. Sensor, telemetry and remote restart fault timing starts
+from the last valid hardware capture; SSH request travel is recorded separately.
+Whole-ROS timing starts at the verified local process kill.
 
-Compute joint gaps were at most 0.150 s; filtered lidar gaps at most 0.219 s.
-All 1200 supervisor samples reported only unvalidated physical acceptance.
-This finite sample establishes improvement, not uninterrupted future operation.
-Depth and arm-perception deadlines are now 0.5 s, with joint freshness at 0.45 s.
+Historical runs remain on disk. The old forward/reverse view could not be
+registered reliably to the floor and was replaced. Six reverse windows lacked
+an observed raw starting marker and were excluded; new stops complete the
+required count. A rotation/lidar window had a calculated 20.069 mm error and
+was replaced by a new window bounded at 11.488 mm. No failed recording was
+rounded into a pass. Only the individually qualified windows listed in the
+[evidence manifest](physical-acceptance-evidence-20261004.json) contribute.
 
-## Nominal braking
+## Nominal braking and accepted bounds
 
-Corrected evidence: `20261003-193625`, `20261003-211714` and
-`20261003-214655` under `.benchmarks/physical-braking/`.
-Each direction completed thirty algorithm-eligible repetitions; counts below
-include eligible exploration. Translation was 0.05 m/s and rotation 0.10 rad/s.
+All **186 nominal stops** meet speed coverage, stopping distance, latency,
+frame-gap and error requirements. Earlier nominal tests at 0.05 m/s / 0.10 rad/s
+and later 0.04 m/s cover the lower final caps. At least thirty independently
+qualified nominal stops remain in each direction. The bounds below also include
+applicable moving faults and conservatively retain the larger original or
+floor-reconstructed result. Angular fault maxima cover both rotation directions.
 
-| Direction | Eligible stops | Worst swept bound | Stop-time upper bound |
+| Direction | Qualified nominal stops | Accepted swept bound, mm | Bound + 20 mm error, mm |
 | --- | ---: | ---: | ---: |
-| Forward | 31 | 24.52 mm | 0.416 s |
-| Reverse | 31 | 24.02 mm | 0.422 s |
-| Left | 30 | 25.15 mm | 0.812 s |
-| Right | 31 | 18.83 mm | 0.311 s |
-| Clockwise | 30 | 17.42 mm | 0.204 s |
-| Counterclockwise | 32 | 17.76 mm | 0.192 s |
+| forward | 31 | 27.712 | 47.712 |
+| reverse | 30 | 23.219 | 43.219 |
+| left | 31 | 26.632 | 46.632 |
+| right | 32 | 24.072 | 44.072 |
+| rotation_cw | 30 | 27.596 | 47.596 |
+| rotation_ccw | 32 | 27.596 | 47.596 |
 
-Add the declared **10 mm uncertainty** to each bound. It is not independently
-surveyed. Earlier affine/higher-speed exploration remains historical evidence,
-not substituted into this corrected series. Clockwise 0.20 rad/s nominal braking
-exceeded the 50 mm clearance including uncertainty.
+The worst bound including error is **47.712 mm**, inside the 50 mm clearance.
+The maximum qualified moving fault stop-time bound is **0.789 s**. The record
+retains **1.149 s** as its maximum command-stop latency because the earlier
+at-rest authenticated replay-denial check had that conservative upper bound;
+the predeclared limit remains 1.5 s.
 
-## Fault-stop boundary
+## Moving fault stops
 
-After transport correction, depth loss at 0.05 m/s measured 40.026 mm plus
-10 mm uncertainty, exceeding the predeclared 50 mm budget. Lidar loss during
-0.10 rad/s rotation measured 40.335 mm plus 10 mm, also exceeding it. Failed
-runs remain recorded. Limits are **0.04 m/s and 0.08 rad/s**; the StopZone remains
-56 x 54 cm, the folded footprint plus 5 cm on each side. MPPI, velocity smoothing,
-manual driver, spin behavior, bounded launch and test profile share those caps.
+Each of seven faults passed while translating and rotating at the final caps.
+A separate whole-ROS crash also passed: **15 moving fault stops** in total.
+Permissions were withdrawn, the base stopped, and current healthy telemetry
+and arm permission were required for recovery. The host's watchdog remained
+active throughout authenticated diagnostic/replay injections.
 
-At 0.04 m/s all five finite linear fault checks passed optically and functionally:
+| Fault | Motion | Swept bound, mm | Stop-time upper bound, s |
+| --- | --- | ---: | ---: |
+| scan_disconnect | linear | 27.457 | 0.789 |
+| depth_disconnect | linear | 27.712 | 0.741 |
+| telemetry_loss | linear | 25.813 | 0.612 |
+| compute_command_loss | linear | 22.636 | 0.650 |
+| host_restart_stops_then_gated_rearm | linear | 8.518 | 0.177 |
+| motor_diagnostic_fault | linear | 12.115 | 0.336 |
+| telemetry_replay_or_duplicate | linear | 22.804 | 0.681 |
+| scan_disconnect | angular | 26.046 | 0.524 |
+| depth_disconnect | angular | 25.854 | 0.579 |
+| telemetry_loss | angular | 26.126 | 0.603 |
+| compute_command_loss | angular | 24.641 | 0.457 |
+| host_restart_stops_then_gated_rearm | angular | 7.824 | 0.011 |
+| motor_diagnostic_fault | angular | 15.792 | 0.298 |
+| telemetry_replay_or_duplicate | angular | 27.595 | 0.579 |
+| whole_ros_command_loss | linear | 21.973 | 0.739 |
 
-| Fault | Swept bound | Stop-time upper bound |
-| --- | ---: | ---: |
-| Lidar service loss | 30.48 mm | 0.615 s |
-| Depth service loss | 32.60 mm | 0.683 s |
-| Telemetry loss | 29.00 mm | 0.662 s |
-| Compute driver suspension | 33.89 mm | 0.672 s |
-| Motor-host restart | 26.73 mm | 0.532 s |
+Add the same 20 mm error to every swept bound. Full-ROS injection killed and
+verified **31 owned processes**; the independent camera and Pi remained alive.
+The production service was restored after every finite test. Native rollback
+timers cover interrupted Pi injections and test firewall rules.
 
-Add 10 mm to these distances. Evidence:
-`.benchmarks/physical-optical-faults/20261003-235925/`.
-Services and permissions recovered; the compact arm was retained. One short
-workspace-permission interruption during recovery cleared within the runner's
-bounded pause. No lost telemetry was presented as a changed arm pose.
+The higher-speed boundary is retained as failed evidence: 0.05 m/s sensor-loss
+and 0.10 rad/s rotation cases exceeded the original budget; the final 44 mm
+floor-reference lidar-loss test at 0.04 m/s measured **38.088 + 20 mm**, also
+exceeding it. These observations justify the lower final caps without enlarging
+the obstacle zone or the stopping-distance limit.
 
-At 0.08 rad/s the same five rotation fault checks passed:
+## Other applicable gates
 
-| Fault | Swept bound | Stop-time upper bound |
-| --- | ---: | ---: |
-| Lidar service loss | 20.01 mm | 0.318 s |
-| Depth service loss | 28.37 mm | 0.527 s |
-| Telemetry loss | 25.23 mm | 0.491 s |
-| Compute driver suspension | 25.97 mm | 0.504 s |
-| Motor-host restart | 18.86 mm | 0.333 s |
+- The independent physical motor-power stop removes actuator energy without ROS.
+- A real bottle in the lidar StopZone blocked an otherwise authorized command;
+  removing it cleared the block. This was stationary blocking, not a moving
+  approach-distance test.
+- A temporary wrist planning-scene obstacle produced FCL contacts, withdrew arm
+  permission and rejected an arm goal with zero joint change. It was removed.
+- Authenticated diagnostic ERROR and exact duplicate observations withdraw both
+  capability permissions; old observations do not renew freshness leases.
+- Unauthorized ZMQ clients are rejected; the DDS control plane is confined to
+  loopback/bridge topology; rosbridge is disabled by tracked defaults.
+- No bumper, IMU or battery-state monitor is fitted. Their tests are explicitly
+  not applicable. Acceptance grants no unattended scope or added payload.
 
-Add the same declared 10 mm. Evidence:
-`.benchmarks/physical-optical-faults/20261004-000448/`.
+## Root fixes and navigation evidence
 
-After both MoveIt perception fixes, the affected sensor-loss cases were repeated
-at the final caps. All passed:
+Pi DDS receive-buffer maxima are persisted at 8 MiB; obstacle clouds target
+10 Hz and mapping images 2 Hz. Paired sixty-second probes after buffer and
+5 GHz transport fixes recorded zero UDP drops, depth gaps 0.152 s on Pi and
+0.173 s on compute, and CPU busy 32.8% / 13.2%. A later Wi-Fi disconnect/reconnect
+restored direct tailnet transport and DNS; its precise wireless cause was not
+proved. RGB JPEG quality is explicitly 70 and depth remains lossless.
 
-| Fault | Translation swept bound / time | Rotation swept bound / time |
-| --- | ---: | ---: |
-| Lidar loss | 33.89 mm / 0.725 s | 31.05 mm / 0.608 s |
-| Depth loss | 34.50 mm / 0.734 s | 29.57 mm / 0.602 s |
+MoveIt's redundant cloud throttle was removed, and its TF gate now keeps one
+pending frame until transformed or expired. Final twenty-second output gaps
+were at most 0.211 s. Normal hold mode now retains health gates instead of
+unconditionally overriding permission; healthy inputs restore permission.
+Deployments can transfer the already verified pushed Git revision over native
+SSH when the Pi cannot fetch its origin. No named pose or CAD arm was changed.
 
-Again add the declared 10 mm. Final sensor evidence:
-`.benchmarks/physical-optical-faults/20261004-002413/` and `20261004-002549/`.
-The repeat protects against earlier incidental workspace stops confounding the
-sensor-fault bounds. Driver/host watchdog cases retain their recorded evidence.
+The fresh-map route completed twelve meaningful Nav2 goals with 50.5–58.4 mm
+observed forward travel. It saved eleven nodes with genuine 3D visual features
+and a spatial proximity closure, 143 → 1, with 35 visual inliers. Four subsequent
+goals passed with zero workspace withdrawals; later bounded repetitions also
+completed their Nav2 goals. The depth, 2D camera and lidar feeds remain configured.
+Global appearance-only closure and whole-house accuracy were not established by
+a route restricted to 30 cm. The production SLAM database was preserved.
 
-## Whole ROS crash and navigation
+## Reproducible evidence and delivery
 
-At the final 0.04 m/s translation limit, the test killed and verified **31 owned
-ROS processes**. The independent camera observer and Pi remained alive. Swept
-stopping bound: **29.84 mm + 10 mm**, time upper bound **0.615 s**. Production
-then re-armed with fresh telemetry and arm permission; the finite restored probe
-confirmed 81 joint samples, unchanged folded pose, MoveIt validity and all ten
-Nav2 lifecycle nodes active. Evidence:
-`.benchmarks/physical-ros-restart/20261004-000626/`.
-The functional ROS-restart flag is recorded; overall acceptance stays false.
+The [manifest](physical-acceptance-evidence-20261004.json) lists selected windows,
+counts, fault bounds, reference metadata, file sizes and SHA-256 hashes. Original
+MJPEG, camera timestamps, ROS feedback and measurements remain in `.benchmarks/`.
+The repeatable registration, qualification and closure programs are in
+`.benchmarks/physical-rig/`. The tracked acceptance file binds these results to
+footprint, stow, hardware, payload, surface, revision and speed limits. A changed
+captured stow invalidates it.
 
-The separate fresh-map run `20261004-000738` completed **12 Nav2 goals**, six
-forward-and-return cycles with 8 cm requested goals and fixed optical returns.
-Each forward goal produced **50.5–58.4 mm independently observed translation**,
-consistent with Nav2's 30 mm goal tolerance. The largest wheel radius was
-51.5 mm from that test center. All goals succeeded. The map saved **11 nodes**,
-with 212–273 genuine nonzero 3D features per node, and accepted a **spatial
-proximity closure from node 143 to node 1 with 35 visual inliers**. Global
-appearance-only closure was not observed; a spatial closure is the actual result.
-The saved graph contains that additional closure link. Both RGBD camera feeds
-and the combined depth/lidar scan remained configured. The production database
-was not overwritten by the test database.
-
-That first route also exposed the short MoveIt perception interruptions fixed
-above; it is not evidence that those interruptions never happened. A subsequent
-four-goal route after both fixes completed successfully with **zero workspace
-permission withdrawals**. Its two independently observed forward movements were
-55.15 and 55.21 mm, maximum wheel radius 55.0 mm, and its fresh graph saved four
-nodes. Evidence: `.benchmarks/physical-navigation/20261004-002217/`.
-
-## Qualification outcome
-
-The provisional marker-plane evidence does not establish an independently
-bounded floor/lens measurement error. The acceptance record now contains the
-185 eligible nominal stops and conservatively rounded distances, including
-the larger measured moving fault bounds. It remains `validated: false`.
-The final diagnostic and duplicate-telemetry cases have now passed while
-translating and rotating; see the final checks below. The ruler is visible and
-its confirmed width is 7 mm. A floor-reference sensitivity check could not
-bound the declared 10 mm error, so physical acceptance is rejected pending
-measurement calibration. The fixtures are no longer missing.
-Meaningful Nav2 movement, fresh-map growth and spatial closure were observed;
-this small route does not establish whole-house accuracy or global relocalization. The production SLAM database is
-retained; fresh test databases are separate artifacts.
-
-## Evidence
-
-Raw MJPEG, frame times, ROS feedback, measurement JSON and failure results are
-under `.benchmarks/physical-braking/`, `.benchmarks/physical-optical-faults/`,
-`.benchmarks/physical-ros-restart/`, `.benchmarks/physical-navigation/` and
-`.benchmarks/physical-rig/`. The latter contains nominal aggregate statistics,
-deployment logs and paired buffer/network timing probes. Earlier completed
-full ROS crash verification killed and checked 31 owned ROS processes while an
-independent camera measured the stop; it did not kill the Pi or camera observer.
-
-## Final software and restored-runtime check
-
-Runtime revision **c6afe474f597** was deployed to compute and Pi without operator
-intervention. A complete CTest rerun passed **57/57 checks in 36.56 seconds**,
-including all nine launch tests. The preceding run's sole failure was an obsolete
-assertion requiring the former 3 Hz depth profile; it now checks the deployed
-10 Hz profile. Targeted configuration/supervisor checks passed 53/53.
-
-The final eight-second production probe received 81 complete joint samples with
-zero position span on every arm joint. The driver was **ARMED**, compact stow
-and arm permission true, MoveIt state validity true, and all ten Nav2 lifecycle
-nodes active. The only remaining base-permission denial was **physical acceptance
-not validated**; bounded commissioning mode was false. Live parameter queries
-confirmed 0.04 m/s, 0.08 rad/s, 0.5 s perception freshness, and no second MoveIt
-cloud throttle. The final photo confirms the compact fold and all three tags.
-
-Artifacts: `.benchmarks/physical-rig/final-ctest-confirm.log`,
-`final-production-runtime.log` and `final-production-camera.jpg`. Interrupted Pi
-services are active, temporary fault firewall rules and rollback timers absent.
-Finite test clients have exited; production is restored and no test monitor stays
-running. Subsequent commits update this report only; the recorded runtime
-revision identifies the tested deployment.
-
-## Additional live gates — 2026-10-04
-
-| Case | Actual input and response |
-| --- | --- |
-| External obstacle | Operator's bottle appears in Astra RGB and depth and the lidar StopZone. An otherwise permitted 0.04 m/s request was forced to zero; wheel translation stayed below 0.7 mm. This was a stationary blocking check. |
-| Arm workspace | A temporary MoveIt collision object at the wrist produced FCL contacts, withdrew permission and rejected an arm goal. All six measured joints remained unchanged. This tests injected planning-scene geometry, not camera detection of that object. The object was removed. |
-| Motor diagnostics | ERROR injected only into authenticated outgoing observations withdrew base permission but initially left arm permission true. The normal-mode override was the cause. Removing that override makes both capabilities obey their health gates; the driver's existing feedback-gap hold remains intact. |
-| Duplicate telemetry | Exact copies of the last successful authenticated observation did not renew state leases. Driver/joint freshness expired and permission was withdrawn; normal fresh observations restored permission. |
-
-The last two cases used the real servo host and driver **at rest**, preserving
-servo registers and the local watchdog. Injection expired after four seconds;
-a finite native test unit and independent rollback restored the production
-host. Final repeat on revision `7c3ef989cdab`: motor-error permission response
-upper bound 0.432 s, replay response upper bound 1.149 s, maximum joint change
-0 rad in both cases; camera swept excursions below 0.4 mm. These response times
-include the fault request and transport; they are not moving stopping times.
-All applicable functional fault flags are now recorded as passed. The full
-CTest suite after the correction passed **57/57 in 154.53 s**, including nine
-launch checks. Targeted supervisor/driver/torque checks passed 151/151.
-
-Evidence: `.benchmarks/acceptance-gates/20261004-083003/`,
-`20261004-083219/`, `.benchmarks/physical-telemetry-gates/20261004-084631/`
-and `.benchmarks/physical-rig/arm-health-fixed-ctest.log`.
-
-## Final moving faults and measurement review — 2026-10-04
-
-Revision `3ecbba672ad9` was deployed to compute and Pi. Both additional real-host
-faults passed while translating at 0.04 m/s and rotating at 0.08 rad/s:
-
-| Fault | Translation swept bound / time | Rotation swept bound / time |
-| --- | ---: | ---: |
-| Motor diagnostic ERROR | 17.76 mm / 0.308 s | 15.11 mm / 0.190 s |
-| Exact duplicate observation | 30.56 mm / 0.690 s | 25.94 mm / 0.539 s |
-
-Each distance still requires the declared 10 mm error allowance. The finite
-test wrapper changes outgoing authenticated observations, retains real servo
-reads and the production watchdog, expires injection after eight seconds and
-restores the native host on exit. Timing uses the last healthy diagnostic or
-joint capture recorded during injection, before recovery. An earlier attempt
-counted SSH latency as fault stopping travel: duplicate telemetry gave
-43.15 mm plus 10 mm and failed. That failed artifact is retained; the final
-capture-based repetitions above supply the causal fault measurements.
-
-Evidence: `.benchmarks/physical-optical-faults/20261004-093343/` and
-`20261004-093534/`; earlier request-based attempt `20261004-092926/`.
-The shared camera reference now takes the median of ten complete observations,
-checks all three known marker squares and selects the anchor with the smallest
-edge residual while preserving the first marker's physical origin. Measurement
-tracking tolerates a 0.5 s frame age within the early optical boundary; this
-does not change production joint or perception freshness limits. Its final
-stationary marker edge residual was about 0.62 mm. Small edge residuals in the
-raised marker plane do not themselves prove floor-plane accuracy.
-
-### Floor-reference result
-
-The external image `fixed-ruler.jpg` contains the operator-confirmed 7 mm-wide
-ruler with inch graduations. Seven intervals span approximately 293 pixels;
-the short dimension spans only 16 pixels. The image is blurred, so resolving
-its boundaries substantially better than one native pixel is unsupported.
-A deterministic sensitivity check varies each of four rectangle corners by
-one pixel, considers 256 projective floor transformations and accounts for
-the raised marker plane rather than treating it as the floor. The same
-35 mm marker-plane displacement then produces floor estimates from
-**18.27 to 46.70 mm**; a 0.06 rad marker rotation produces yaw estimates from
-**0.0298 to 0.0784 rad**. These are model-sensitivity ranges, not measured
-robot travel or a calibrated transformation.
-
-The result does not support a 10 mm error bound. The earlier forward/reverse
-camera view also lacks a reliable floor-image registration to this reference;
-the other two nominal views have 174–199 background registration inliers,
-but registration alone cannot resolve the narrow reference's uncertainty.
-Thus `validated: false` remains correct even though all applicable functional
-fault flags passed. A resolved planar reference with two known dimensions,
-such as the existing 8x6, 25 mm checkerboard, can be placed on the floor with
-the camera fixed. The unresolved issue is measurement qualification, not a
-remaining motor, MoveIt, transport or navigation fault from these checks.
-
-Sensitivity artifact: `.benchmarks/physical-rig/floor-reference-sensitivity.json`.
-Raw images and the repeatable analysis are under `.benchmarks/physical-rig/`.
-The final software rerun passed **57/57 CTests in 163.52 s**, including nine
-launch checks; measurement/torque regressions passed **72/72**.
+Software checks and the final native deployment/runtime result are recorded
+below after delivery. No persistent measurement or test-motion client is left
+running.
