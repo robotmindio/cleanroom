@@ -20,7 +20,7 @@ navigation = runpy.run_path(str(Path(__file__).with_name('test-navigation.py')))
 
 
 class FaultTest(navigation['Test']):
-    def __init__(self, restart_tests=False, output=None, angular_test=False):
+    def __init__(self, restart_tests=False, output=None, angular_test=False, telemetry_tests=False):
         super().__init__()
         self.deadline = time.monotonic()+360
         self.speed = math.inf
@@ -28,6 +28,7 @@ class FaultTest(navigation['Test']):
         self.restart_tests = restart_tests
         self.output = output
         self.angular_test = angular_test
+        self.telemetry_tests = telemetry_tests
         self.test_speed = load_base_speed_limits(navigation['ROOT']/'config/nav2_params.yaml')[int(angular_test)]
         self.phase = None
         self.safe_speed = None
@@ -94,7 +95,7 @@ class FaultTest(navigation['Test']):
             command.angular.z = self.test_speed
         else:
             command.linear.x = self.test_speed
-        no_feedback = name in ('telemetry_loss','compute_command_loss',
+        no_feedback = name in ('telemetry_loss','telemetry_replay_or_duplicate','compute_command_loss',
                               'host_restart_stops_then_gated_rearm')
         start = self.pose
         end = time.monotonic()+5
@@ -171,6 +172,9 @@ class FaultTest(navigation['Test']):
         self.wait_ready()
         self.center = self.pose
         self.active = True
+        if self.telemetry_tests:
+            self.run_telemetry_faults()
+            return
         if self.restart_tests:
             # Pause only our driver: the Pi's independent command watchdog must
             # stop the motors while compute cannot send its own stop command.
@@ -212,12 +216,50 @@ class FaultTest(navigation['Test']):
         self.fault('telemetry_loss',block,unblock,'driver:')
         self.stop()
 
+    def run_telemetry_faults(self):
+        # Clone the native service's environment without printing credentials.
+        # A finite test unit and independent rollback restore the normal host.
+        setup = '''import subprocess
+def run(*a): return subprocess.check_output(a,text=True).strip()
+env=run('systemctl','show','--value','-p','Environment','lekiwi-host.service')
+directory=run('systemctl','show','--value','-p','WorkingDirectory','lekiwi-host.service')
+user=run('systemctl','show','--value','-p','User','lekiwi-host.service')
+run('systemd-run','--quiet','--collect','--unit=lekiwi-qualification-restore','--on-active=120s',
+    '/bin/sh','-c','systemctl stop lekiwi-qualification-host.service; systemctl start lekiwi-host.service')
+run('systemctl','stop','lekiwi-host.service')
+run('systemd-run','--quiet','--collect','--unit=lekiwi-qualification-host',
+    '--property=RuntimeMaxSec=100','--property=User='+user,
+    '--property=WorkingDirectory='+directory,'--property=Environment='+env,
+    directory+'/scripts/robot-host.sh','--telemetry-fault-test')
+'''
+        try:
+            self.remote(['sudo','-n','/usr/bin/python3','-'],Twist(),setup)
+            self.wait(lambda:self.flags.get('base_motion_permitted') and
+                      self.flags.get('driver')=='ARMED',45)
+            for name,signum,reason in [('motor_diagnostic_fault','USR1','motor_health:'),
+                    ('telemetry_replay_or_duplicate','USR2','driver:')]:
+                def inject(command,signum=signum):
+                    self.remote(['/bin/bash','-c',
+                        'mapfile -t pids < <(pgrep -f "[p]ython scripts/test-host-telemetry.py"); '
+                        '[[ ${#pids[@]} == 1 ]] && kill -'+signum+' "${pids[0]}"'],command)
+                self.fault(name,inject,lambda:None,reason)
+        finally:
+            try:
+                self.remote(['sudo','-n','systemctl','stop','lekiwi-qualification-host.service'],Twist())
+            finally:
+                try:
+                    self.remote(['sudo','-n','systemctl','start','lekiwi-host.service'],Twist())
+                finally:
+                    self.remote(['sudo','-n','systemctl','stop','lekiwi-qualification-restore.timer'],Twist())
+
 
 if __name__=='__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--restart-tests',action='store_true',
                         help='test compute-driver suspension and the Pi motor-host restart')
     parser.add_argument('--angular',action='store_true',help='inject faults during rotation instead of translation')
+    parser.add_argument('--telemetry-fault-tests',action='store_true',
+                        help='use the finite qualification host for motor diagnostics and duplicate telemetry')
     args = parser.parse_args()
     output = navigation['ROOT']/'.benchmarks/physical-faults'/time.strftime('%Y%m%d-%H%M%S')
-    navigation['main'](lambda:FaultTest(args.restart_tests,output,args.angular),output)
+    navigation['main'](lambda:FaultTest(args.restart_tests,output,args.angular,args.telemetry_fault_tests),output)

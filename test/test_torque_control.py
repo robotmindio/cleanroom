@@ -7,8 +7,39 @@ import logging
 import pathlib
 import sys
 import types
+import runpy
 
 import pytest
+
+
+def test_qualification_socket_changes_only_wire_data_and_expires():
+    cls = runpy.run_path(str(pathlib.Path(__file__).parents[1] /
+                            'scripts/test-host-telemetry.py'))['FaultSocket']
+    sent, now = [], [0.0]
+    socket = cls(types.SimpleNamespace(send_multipart=lambda f, **k: sent.append(f)),
+                 lambda: now[0])
+    frames = [json.dumps({'sequence': 1, '_lekiwi_motor_health': {
+        'statuses': {'motor_bus': {'level': 0, 'message': 'healthy'}}}}).encode(), b'jpeg']
+    with pytest.raises(RuntimeError, match='before'):
+        socket.inject('duplicate')
+    socket.send_multipart(frames)
+    socket.inject('duplicate')
+    new = [frames[0].replace(b'1', b'2', 1), b'new jpeg']
+    socket.send_multipart(new)
+    assert sent[-1] == frames
+    now[0] = 4.0
+    socket.send_multipart(new)
+    assert sent[-1] == new
+    socket.inject('diagnostic')
+    socket.send_multipart(new)
+    assert json.loads(sent[-1][0])['_lekiwi_motor_health']['statuses']['motor_bus']['level'] == 2
+    assert json.loads(new[0])['_lekiwi_motor_health']['statuses']['motor_bus']['level'] == 0
+    assert sent[-1][1] == b'new jpeg'
+    now[0] = 8.0
+    socket.send_multipart(new)
+    assert sent[-1] == new
+    with pytest.raises(ValueError, match='unsupported'):
+        socket.inject('unknown')
 
 from lekiwi_rmf.torque_control import (
     TorqueControlClient, TorqueControlError, enable_with_rollback,

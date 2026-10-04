@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Motor calibration and ZMQ robot host for a LeKiwi, with this machine's camera paths.
-# Usage: scripts/robot-host.sh [calibrate|--no-cameras]
+# Usage: scripts/robot-host.sh [calibrate|--no-cameras|--telemetry-fault-test]
 # Override per machine: LEKIWI_PORT, LEKIWI_FRONT, LEKIWI_WRIST, LEKIWI_ID
 set -Eeuo pipefail
 
@@ -32,6 +32,7 @@ ID="${LEKIWI_ID:-lekiwi_1}"
 READ_RETRIES="${LEKIWI_READ_RETRIES:-5}"
 RESTART_DELAY="${LEKIWI_HOST_RESTART_DELAY:-3}"
 BIND_ADDRESS="${LEKIWI_BIND_ADDRESS:-0.0.0.0}"
+HOST_PROGRAM=scripts/torque-host.py
 CURVE_SERVER_SECRET="${LEKIWI_CURVE_SERVER_SECRET:-}"
 CURVE_AUTHORIZED_CLIENTS="${LEKIWI_CURVE_AUTHORIZED_CLIENTS:-}"
 if [[ -n $CURVE_SERVER_SECRET || -n $CURVE_AUTHORIZED_CLIENTS ]]; then
@@ -107,7 +108,7 @@ run_host_once() {
     echo "Calibrate at the robot first: scripts/calibrate.sh motor" >&2
     exit 78
   }
-  printf '\n' | "$BIN/python" scripts/torque-host.py \
+  printf '\n' | "$BIN/python" "$HOST_PROGRAM" \
     --robot.id="$ID" --robot.port="$PORT" --robot.cameras="$1" \
     --robot.num_read_retries="$READ_RETRIES" \
     --safety.bind_address="$BIND_ADDRESS" \
@@ -153,7 +154,8 @@ case "${1:-}" in
     exec "$BIN/lerobot-calibrate" --robot.type=lekiwi --robot.id="$ID" \
       --robot.port="$PORT" --robot.cameras='{}'
     ;;
-  --no-cameras)
+  --no-cameras|--telemetry-fault-test)
+    [[ $1 != --telemetry-fault-test ]] || HOST_PROGRAM=scripts/test-host-telemetry.py
     require PORT
     require_port_access
     run_host '{}'
@@ -176,7 +178,7 @@ case "${1:-}" in
     run_host "$CAMERAS"
     ;;
   *)
-    echo "usage: $0 [calibrate|--no-cameras]" >&2
+    echo "usage: $0 [calibrate|--no-cameras|--telemetry-fault-test]" >&2
     exit 2
     ;;
 esac
