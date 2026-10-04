@@ -44,6 +44,12 @@ def metric_reference(markers, identifiers, side):
     matrix,origin,reference,error = min(candidates,key=lambda c:c[3])
     if not math.isfinite(error) or error > side*.15:
         raise ValueError(f'marker scale is inconsistent: {error:.4f} m edge residual')
+    # Keep the physical origin at the first marker when another anchor fits better.
+    shift = reference[identifiers[0]].mean(axis=0)
+    rebase = np.eye(3)
+    rebase[:2, 2] = -shift
+    matrix = rebase @ matrix
+    reference = {key:value-shift for key,value in reference.items()}
     return matrix, origin, reference, float(error)
 
 

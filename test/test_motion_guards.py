@@ -68,8 +68,9 @@ def test_metric_reference_uses_other_tags_to_check_the_anchor():
     square = np.array([[0,0],[35,0],[35,35],[0,35]],dtype=float)
     markers = {53:square.copy(),69:square+[50,0],59:square+[100,0]}
     markers[53][0] += [3,2]
-    _,origin,_,error = reference(markers,[53,69,59],.035)
+    _,origin,points,error = reference(markers,[53,69,59],.035)
     assert not np.allclose(origin,markers[53].mean(axis=0))
+    assert points[53].mean(axis=0) == pytest.approx([0,0],abs=1e-10)
     assert error < .004
 
 
