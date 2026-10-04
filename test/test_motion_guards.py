@@ -60,6 +60,36 @@ def test_marker_roi_preserves_full_image_coordinates_and_recovers_after_a_shift(
     assert all(np.allclose(recovered[key],original[key]+[500,300],atol=1) for key in original)
 
 
+def test_floor_camera_keeps_real_observations_when_marker_plane_fit_fails(monkeypatch, tmp_path):
+    import cv2
+    import io
+    import runpy
+    from pathlib import Path
+    import numpy as np
+    Camera = runpy.run_path(str(Path(__file__).parents[1]/'scripts/test-braking.py'))['Camera']
+    camera = Camera.__new__(Camera)
+    raw = cv2.imencode('.png',np.zeros((20,20),np.uint8))[1].tobytes()
+    buffer = types.SimpleNamespace(pts=1,map=lambda _: (True,types.SimpleNamespace(data=raw)),unmap=lambda _:None)
+    camera.sink = types.SimpleNamespace(emit=lambda *args:types.SimpleNamespace(get_buffer=lambda:buffer))
+    camera.Gst = types.SimpleNamespace(MSECOND=1,MapFlags=types.SimpleNamespace(READ=0))
+    camera.closed = False
+    camera.video, camera.records = io.BytesIO(), io.StringIO()
+    camera.config = {'marker_ids':[53,69,59]}
+    camera.calibration = (None,None,{53:None,69:None},0)
+    camera.floor_calibration = {}
+    camera.count = 0
+    camera.last_pose, camera.last_time = None, 0
+    markers = {key:np.zeros((4,2)) for key in [53,69]}
+    camera.detect = lambda _:markers
+    monkeypatch.setitem(Camera.sample.__globals__,'metric_pose',lambda *args:None)
+    monkeypatch.setitem(Camera.sample.__globals__,'floor_pose',lambda *args:[.01,.02,.1])
+    row = camera.sample()
+    assert row['pose'] == [.01,.02,.1] and row['marker_pose'] is None
+    assert camera.last_pose == row['pose'] and set(row['markers']) == {53,69}
+    camera.detect = lambda _:{53:markers[53]}
+    assert camera.sample()['pose'] is None
+
+
 def test_metric_reference_uses_other_tags_to_check_the_anchor():
     import runpy
     from pathlib import Path

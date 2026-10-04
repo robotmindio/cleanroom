@@ -271,15 +271,21 @@ class Camera:
                 'marker_edge_residual_m':error,'floor_reference':self.floor_calibration,'opencv':cv2.__version__},indent=2)+'\n')
         pose = None if self.calibration is None else metric_pose(markers, *self.calibration[:3])
         marker_pose = pose
-        if pose is not None and self.floor_calibration is not None:
+        if self.floor_calibration is not None:
             ground = floor_pose(markers,self.floor_calibration)
-            pose = None if ground is None else (ground,pose[1],pose[2])
+            common = sorted(set(markers).intersection(self.config['marker_ids']))
+            # A tilted marker plane does not undergo a rigid 2D transform when
+            # the base moves horizontally. Its old fit is diagnostic only;
+            # floor tracking uses the actual observed squares independently.
+            pose = None if ground is None or len(common)<2 else (
+                ground,None if marker_pose is None else marker_pose[1],common)
         if pose is not None:
             self.last_pose = pose[0]
             self.last_time = received
         self.count += 1
         record = {'time':received, 'pts_ns':int(buffer.pts), 'pose':None if pose is None else pose[0],
                   'marker_pose':None if marker_pose is None else marker_pose[0],
+                  'markers':{key:value.tolist() for key,value in markers.items() if key in self.config['marker_ids']},
                   'fit_error_m':None if pose is None else pose[1], 'ids':list(markers),'bytes':len(raw)}
         self.records.write(json.dumps(record)+'\n')
         return record
