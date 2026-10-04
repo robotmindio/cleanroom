@@ -383,8 +383,9 @@ Symptoms and fixes are collected in [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
   costmaps and proves the enabled StopZone leaves at least the measured worst
   stopping distance plus uncertainty around that footprint.
 - The driver arms only after receiving fresh healthy telemetry and supervisor
-  permission. By default it re-arms itself after a host session change or link
-  loss, with servo torque on throughout; in strict mode it disarms, cuts torque,
+  permission. By default it re-arms after a host session change or link loss
+  once those inputs recover. Feedback-gap holding preserves arm torque; host
+  shutdown cuts torque before its fresh gated restart. In strict mode it disarms, cuts torque,
   and `/safety/arm` is an explicit operator action after inspection. An
   operator's `/safety/disarm` cuts torque through the motor host, aborts arm
   motion, and holds until `/safety/arm`.

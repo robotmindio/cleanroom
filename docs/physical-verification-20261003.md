@@ -151,6 +151,32 @@ The repeatable registration, qualification and closure programs are in
 footprint, stow, hardware, payload, surface, revision and speed limits. A changed
 captured stow invalidates it.
 
-Software checks and the final native deployment/runtime result are recorded
-below after delivery. No persistent measurement or test-motion client is left
-running.
+## Final native deployment and verification
+
+Runtime revision **a0f2896d448a** was deployed to compute and Pi by the repository
+script. Production reports **ARMED**, arm and base permission true, compact stow
+true, and no current or latched fault. Bounded commissioning mode is **false**.
+An eight-second final probe received 81 complete joint samples with zero span
+on all six arm joints, fresh lidar/depth/RGB/SLAM streams, valid MoveIt state,
+and all ten Nav2 lifecycle nodes active. The final webcam confirms the fold.
+
+Two goals on the unmodified production stack/database succeeded. Independent
+forward travel was **56.576 mm**; maximum wheel radius was **52.036 mm**; no
+permission withdrawals occurred. Native driver and MPPI parameter reads both
+confirm 0.03 m/s and 0.06 rad/s. The return ended near the original test center.
+
+**57/57 CTests passed in 70.65 seconds**, including all nine launch tests;
+139 targeted checks and fourteen camera configuration checks passed. The first
+full rerun found an obsolete expected dictionary missing the configured JPEG 70
+field; its assertion was corrected and the full suite rerun successfully.
+Subsequent commits change tests/documentation only; the revision above identifies
+the deployed runtime.
+
+All five Pi production services are active. The transient qualification host
+and rollback timers are inactive, the test firewall table is absent, and all
+measurement/motion clients have exited. No test monitor remains running.
+
+Final artifacts: `.benchmarks/physical-rig/accepted-profile-deployment.log`,
+`accepted-profile-final-ctest.log`, `accepted-final-runtime.log`,
+`accepted-final-posture.jpg`, and
+`.benchmarks/accepted-native-navigation/20261004-132202/result.json`.

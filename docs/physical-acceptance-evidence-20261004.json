@@ -607,6 +607,147 @@
     "config/safety_production.yaml": {
       "bytes": 2976,
       "sha256": "be7ecd03a08c697a3d04a5a12295aee3adf82f053909e6f13d12a29f71819b39"
+    },
+    ".benchmarks/accepted-native-navigation/20261004-132202/result.json": {
+      "bytes": 843,
+      "sha256": "bae92b0203e3511996d5433aa57bdb1244dc75b32631d44aa10649ec79f753e7"
+    },
+    ".benchmarks/physical-rig/accepted-final-runtime.log": {
+      "bytes": 1294,
+      "sha256": "f2f71be735761888ff5cd3784057afecddcac724753736f2bf676611ff07941c"
+    },
+    ".benchmarks/physical-rig/accepted-profile-final-ctest.log": {
+      "bytes": 7304,
+      "sha256": "8c69322785041a06370f8d43778248cf9b47bfe2b5a60a924932ce3b4d7d99d9"
+    },
+    ".benchmarks/physical-rig/accepted-profile-deployment.log": {
+      "bytes": 2410,
+      "sha256": "6bf12a830fcb11e2af41123dd6b211c8ca2de91f8a8def174742bbafc99dde2f"
+    },
+    ".benchmarks/physical-rig/accepted-final-posture.jpg": {
+      "bytes": 136936,
+      "sha256": "d0025e7269b50c3f572bc114cb7017724f2efcfefb640a88a0d55b27ed8a55e5"
+    }
+  },
+  "delivery": {
+    "deployed_revision": "a0f2896d448abb9be37e55344a2a90884cd3eafe",
+    "software_checks": {
+      "ctest_passed": 57,
+      "ctest_failed": 0,
+      "ctest_launch_tests": 9,
+      "ctest_seconds": 70.65,
+      "targeted_checks_passed": 139,
+      "camera_profile_checks_passed": 14
+    },
+    "native_navigation": {
+      "/lekiwi_driver/get_parameters": {
+        "max_linear_speed": 0.03,
+        "max_angular_speed": 0.06
+      },
+      "/controller_server/get_parameters": {
+        "FollowPath.vx_max": 0.03,
+        "FollowPath.vy_max": 0.03,
+        "FollowPath.wz_max": 0.06
+      },
+      "passed": true,
+      "production_flags": {
+        "arm_stowed": true,
+        "base_motion_permitted": true,
+        "arm_motion_permitted": true,
+        "driver": "ARMED"
+      },
+      "health": {
+        "base_motion_permitted": "true",
+        "arm_motion_permitted": "true",
+        "arm_stowed": "true",
+        "faults": "",
+        "latched_faults": "",
+        "bounded_base_test": "false"
+      },
+      "forward_optical_distance_m": 0.05657563975436387,
+      "final_optical_pose": [
+        0.0024109514353445553,
+        -0.0012879177842993303,
+        -0.0010840719884450678
+      ],
+      "max_wheel_radius_m": 0.05203603567026616,
+      "permission_withdrawals": []
+    },
+    "finite_final_runtime": {
+      "flags": {
+        "arm_stowed": true,
+        "arm_motion_permitted": true,
+        "base_motion_permitted": true,
+        "driver_state": "ARMED"
+      },
+      "health": {
+        "base_motion_permitted": "true",
+        "arm_motion_permitted": "true",
+        "arm_stowed": "true",
+        "faults": "",
+        "latched_faults": "",
+        "bounded_base_test": "false"
+      },
+      "sensor_counts": {
+        "/camera/front/image_raw": 17,
+        "/camera/depth/points": 75,
+        "/scan": 40,
+        "/info": 11
+      },
+      "joint_samples": 81,
+      "joint_spans_rad": {
+        "arm_shoulder_pan": 0.0,
+        "arm_shoulder_lift": 0.0,
+        "arm_elbow_flex": 0.0,
+        "arm_wrist_flex": 0.0,
+        "arm_wrist_roll": 0.0,
+        "arm_gripper": 0.0
+      },
+      "lifecycle_states": {
+        "controller_server": 3,
+        "smoother_server": 3,
+        "planner_server": 3,
+        "route_server": 3,
+        "behavior_server": 3,
+        "velocity_smoother": 3,
+        "collision_monitor": 3,
+        "bt_navigator": 3,
+        "waypoint_follower": 3,
+        "docking_server": 3
+      },
+      "moveit_current_pose_valid": true,
+      "deployed_revision": "a0f2896d448abb9be37e55344a2a90884cd3eafe"
+    },
+    "cleanup": "all five Pi production services active; transient qualification host and rollback timers inactive; no fault firewall table; measurement and motion clients exited"
+  },
+  "verification_programs": {
+    "scripts/test-braking.py": {
+      "bytes": 33801,
+      "sha256": "dcbaf54733c2570c2d2c81a7fb4c872f9a5beb2ef801e6a99896799dbd98bd1e"
+    },
+    ".benchmarks/physical-rig/register-floor-recordings.py": {
+      "bytes": 3405,
+      "sha256": "583aa080878c509693e0d433d0c6831a02b3783d02e1b0b859cffb2b71b97f96"
+    },
+    ".benchmarks/physical-rig/qualify-floor-recordings.py": {
+      "bytes": 11437,
+      "sha256": "1aeaadc7b2e868510270dee611b61762ef85bf015c1ca0f3a5419ef445dbffcb"
+    },
+    ".benchmarks/physical-rig/ground-camera.py": {
+      "bytes": 2672,
+      "sha256": "4f755b38d721689447b0574c314ed813728fa3b54ca211d82127d9031913e567"
+    },
+    ".benchmarks/physical-rig/optical-gate-faults.py": {
+      "bytes": 5598,
+      "sha256": "eb223bdf5460555f26c6495164cddd61a111f7b23f46c854fe13f96b43126faf"
+    },
+    ".benchmarks/physical-rig/whole-ros-restart.py": {
+      "bytes": 3981,
+      "sha256": "6ff7764813bb1d3c39b191c62105c6889685799f7241183cbdd0fd07c68f14ae"
+    },
+    ".benchmarks/physical-rig/close-acceptance.py": {
+      "bytes": 7023,
+      "sha256": "137debce4d24ce406a3c67465a66ca079ee3df0319dcf62c0a5f1359ab2c16de"
     }
   }
 }
