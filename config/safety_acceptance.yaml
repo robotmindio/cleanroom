@@ -12,10 +12,10 @@ installed_hardware:
   battery_monitor: false
 # Measured characterization and functional fault results are populated below.
 # Acceptance remains false: the 10 mm floor/lens error is not independently
-# bounded and the final diagnostic/replay checks have only been run at rest.
-# Set true only after those physical checks complete within the declared budget.
+# bounded. The final diagnostic/replay checks also passed while translating
+# and rotating. Review the floor-reference sensitivity before granting acceptance.
 validated: false
-software_revision: 7c3ef989cdab # Tested implementation; acceptance remains pending.
+software_revision: 3ecbba672ad9 # Tested implementation; measurement qualification failed.
 sensor_configuration: LD06 calibrated yaw/self-mask; Astra compact cloud 10 Hz; front RGB and RGBD mapping 2 Hz; folded travel_stow; 5 GHz bridge; 35 mm black marker squares
 payload_kg: 0.0
 surface: dry concrete
@@ -63,8 +63,9 @@ fault_tests:
   depth_disconnect: true
   imu_disconnect: null # Not applicable: no IMU is fitted.
   battery_low_or_disconnect: null # Not applicable: no battery monitor is fitted.
-  # Authenticated real-host injection at rest: both capability permissions
-  # withdrawn; joint positions unchanged. No moving diagnostic-stop distance.
+  # Authenticated real-host injection at rest and at 0.04 m/s / 0.08 rad/s:
+  # both capability permissions withdrawn. Moving marker-plane swept bounds
+  # 17.76 / 15.11 mm; independently bounded floor error remains pending.
   motor_diagnostic_fault: true
   bumper: null # Not applicable: no bumper is fitted.
   # The labelled physical motor-power stop has been tested to remove actuator
@@ -72,7 +73,8 @@ fault_tests:
   estop_independent_of_ros: true
   telemetry_loss: true
   # Exact duplicate authenticated observations did not refresh state leases.
-  # Real-host test at rest; no moving replay-stop distance.
+  # Real-host moving swept bounds 30.56 / 25.94 mm at the same final caps;
+  # timing starts at the last valid capture, rather than the SSH request.
   telemetry_replay_or_duplicate: true
   # A restart must stop commands; re-arm is allowed only with fresh telemetry
   # and current arm permission in the configured automatic re-arm mode.

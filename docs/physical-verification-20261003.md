@@ -157,16 +157,17 @@ permission withdrawals**. Its two independently observed forward movements were
 55.15 and 55.21 mm, maximum wheel radius 55.0 mm, and its fresh graph saved four
 nodes. Evidence: `.benchmarks/physical-navigation/20261004-002217/`.
 
-## Remaining qualification
+## Qualification outcome
 
 The provisional marker-plane evidence does not establish an independently
 bounded floor/lens measurement error. The acceptance record now contains the
 185 eligible nominal stops and conservatively rounded distances, including
 the larger measured moving fault bounds. It remains `validated: false`.
-The declared 10 mm measurement error is still unverified: the floor ruler's
-graduations are absent from the external camera image. Moving diagnostic and
-duplicate-telemetry stopping distances also remain unmeasured; the bottle must
-be removed before those two cases can attain the test speed.
+The final diagnostic and duplicate-telemetry cases have now passed while
+translating and rotating; see the final checks below. The ruler is visible and
+its confirmed width is 7 mm. A floor-reference sensitivity check could not
+bound the declared 10 mm error, so physical acceptance is rejected pending
+measurement calibration. The fixtures are no longer missing.
 Meaningful Nav2 movement, fresh-map growth and spatial closure were observed;
 this small route does not establish whole-house accuracy or global relocalization. The production SLAM database is
 retained; fresh test databases are separate artifacts.
@@ -227,3 +228,61 @@ launch checks. Targeted supervisor/driver/torque checks passed 151/151.
 Evidence: `.benchmarks/acceptance-gates/20261004-083003/`,
 `20261004-083219/`, `.benchmarks/physical-telemetry-gates/20261004-084631/`
 and `.benchmarks/physical-rig/arm-health-fixed-ctest.log`.
+
+## Final moving faults and measurement review — 2026-10-04
+
+Revision `3ecbba672ad9` was deployed to compute and Pi. Both additional real-host
+faults passed while translating at 0.04 m/s and rotating at 0.08 rad/s:
+
+| Fault | Translation swept bound / time | Rotation swept bound / time |
+| --- | ---: | ---: |
+| Motor diagnostic ERROR | 17.76 mm / 0.308 s | 15.11 mm / 0.190 s |
+| Exact duplicate observation | 30.56 mm / 0.690 s | 25.94 mm / 0.539 s |
+
+Each distance still requires the declared 10 mm error allowance. The finite
+test wrapper changes outgoing authenticated observations, retains real servo
+reads and the production watchdog, expires injection after eight seconds and
+restores the native host on exit. Timing uses the last healthy diagnostic or
+joint capture recorded during injection, before recovery. An earlier attempt
+counted SSH latency as fault stopping travel: duplicate telemetry gave
+43.15 mm plus 10 mm and failed. That failed artifact is retained; the final
+capture-based repetitions above supply the causal fault measurements.
+
+Evidence: `.benchmarks/physical-optical-faults/20261004-093343/` and
+`20261004-093534/`; earlier request-based attempt `20261004-092926/`.
+The shared camera reference now takes the median of ten complete observations,
+checks all three known marker squares and selects the anchor with the smallest
+edge residual while preserving the first marker's physical origin. Measurement
+tracking tolerates a 0.5 s frame age within the early optical boundary; this
+does not change production joint or perception freshness limits. Its final
+stationary marker edge residual was about 0.62 mm. Small edge residuals in the
+raised marker plane do not themselves prove floor-plane accuracy.
+
+### Floor-reference result
+
+The external image `fixed-ruler.jpg` contains the operator-confirmed 7 mm-wide
+ruler with inch graduations. Seven intervals span approximately 293 pixels;
+the short dimension spans only 16 pixels. The image is blurred, so resolving
+its boundaries substantially better than one native pixel is unsupported.
+A deterministic sensitivity check varies each of four rectangle corners by
+one pixel, considers 256 projective floor transformations and accounts for
+the raised marker plane rather than treating it as the floor. The same
+35 mm marker-plane displacement then produces floor estimates from
+**18.27 to 46.70 mm**; a 0.06 rad marker rotation produces yaw estimates from
+**0.0298 to 0.0784 rad**. These are model-sensitivity ranges, not measured
+robot travel or a calibrated transformation.
+
+The result does not support a 10 mm error bound. The earlier forward/reverse
+camera view also lacks a reliable floor-image registration to this reference;
+the other two nominal views have 174–199 background registration inliers,
+but registration alone cannot resolve the narrow reference's uncertainty.
+Thus `validated: false` remains correct even though all applicable functional
+fault flags passed. A resolved planar reference with two known dimensions,
+such as the existing 8x6, 25 mm checkerboard, can be placed on the floor with
+the camera fixed. The unresolved issue is measurement qualification, not a
+remaining motor, MoveIt, transport or navigation fault from these checks.
+
+Sensitivity artifact: `.benchmarks/physical-rig/floor-reference-sensitivity.json`.
+Raw images and the repeatable analysis are under `.benchmarks/physical-rig/`.
+The final software rerun passed **57/57 CTests in 163.52 s**, including nine
+launch checks; measurement/torque regressions passed **72/72**.
