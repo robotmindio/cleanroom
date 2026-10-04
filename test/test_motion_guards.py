@@ -76,7 +76,7 @@ def test_floor_camera_keeps_real_observations_when_marker_plane_fit_fails(monkey
     camera.video, camera.records = io.BytesIO(), io.StringIO()
     camera.config = {'marker_ids':[53,69,59]}
     camera.calibration = (None,None,{53:None,69:None},0)
-    camera.floor_calibration = {}
+    camera.floor_calibration = {'body_id':53}
     camera.count = 0
     camera.last_pose, camera.last_time = None, 0
     markers = {key:np.zeros((4,2)) for key in [53,69]}
@@ -155,6 +155,12 @@ def test_floor_tracking_recovers_ground_motion_of_a_raised_tilted_marker(tilt):
         points = points.copy(); points[:,:2] = points[:,:2]@rotation.T+[.02,-.015]
         moved_boards[key] = project(points)
     assert functions['floor_pose'](moved_boards,reference) == pytest.approx([*expected,yaw],abs=2e-6)
+    visible = {k:v for k,v in moved_boards.items() if k!=53}
+    assert functions['floor_pose'](visible,reference) == pytest.approx([*expected,yaw],abs=2e-6)
+    assert functions['floor_pose']({69:visible[69]},reference) is None
+    visible[59] = visible[59].copy()
+    visible[59][0] += [100,50]
+    assert functions['floor_pose'](visible,reference) is None
     assert functions['floor_pose']({},reference) is None
 
 

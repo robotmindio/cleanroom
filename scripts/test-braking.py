@@ -95,17 +95,36 @@ def floor_reference(markers, floor_id, floor_side, body_id, body_side):
     points = plane_points([[0,0],*(-body_side/2*axis,body_side/2*axis)],ground,np.zeros(2))
     direction = points[2]-points[1]
     return {'matrix':matrix.tolist(), 'body_id':body_id, 'body_side_m':body_side,
+            'corners_px':np.asarray(markers[body_id]).tolist(),
             'axis':axis.tolist(), 'magnification':magnification, 'origin':points[0].tolist(),
             'heading':math.atan2(direction[1],direction[0])}
 
 
+def reference_marker_corners(markers, reference):
+    """Locate the reference square from two visible squares on its rigid plane."""
+    key = reference['body_id']
+    if key in markers:
+        return markers[key]
+    common = [r for r in [reference,*reference.get('others',[])]
+              if r['body_id'] in markers and 'corners_px' in r]
+    if len(common)<2 or 'corners_px' not in reference:
+        return None
+    before = np.float64(np.concatenate([r['corners_px'] for r in common]))
+    after = np.float64(np.concatenate([markers[r['body_id']] for r in common]))
+    transform,_ = cv2.findHomography(before,after,0)
+    if transform is None or max(np.linalg.norm(plane_points(before,transform,np.zeros(2))-after,axis=1))>3:
+        return None
+    return plane_points(reference['corners_px'],transform,np.zeros(2))
+
+
 def floor_pose(markers, reference):
     key = reference['body_id']
-    if key not in markers:
+    corners = reference_marker_corners(markers,reference)
+    if corners is None:
         return None
     side,axis = reference['body_side_m'],np.array(reference['axis'])
     square = np.float32([[-side/2,-side/2],[side/2,-side/2],[side/2,side/2],[-side/2,side/2]])
-    body = cv2.getPerspectiveTransform(square,np.float32(markers[key]))
+    body = cv2.getPerspectiveTransform(square,np.float32(corners))
     points = plane_points([[0,0],*(-side/2*axis,side/2*axis)],np.array(reference['matrix'])@body,np.zeros(2))
     translation = (points[0]-reference['origin'])/reference['magnification']
     direction = points[2]-points[1]
@@ -208,6 +227,18 @@ class Camera:
                                                    parameters=self.parameters)
             markers = {} if ids is None else {
                 int(key):c.reshape(4,2)+[x,y] for key,c in zip(ids.flatten(),corners)}
+            if len(wanted.intersection(markers))<2:
+                # Some small tilted squares decode at only one sampling scale.
+                # Combine observations from the same image before dropping it.
+                self.parameters.aprilTagQuadDecimate = 1.0
+                try:
+                    extra,keys,_ = cv2.aruco.detectMarkers(image[y:y+h,x:x+w],self.detector,
+                                                          parameters=self.parameters)
+                    if keys is not None:
+                        for key,c in zip(keys.flatten(),extra):
+                            markers.setdefault(int(key),c.reshape(4,2)+[x,y])
+                finally:
+                    self.parameters.aprilTagQuadDecimate = 1.5
             if len(wanted.intersection(markers))>=2:
                 break
         if wanted <= set(markers):
@@ -286,6 +317,7 @@ class Camera:
         record = {'time':received, 'pts_ns':int(buffer.pts), 'pose':None if pose is None else pose[0],
                   'marker_pose':None if marker_pose is None else marker_pose[0],
                   'markers':{key:value.tolist() for key,value in markers.items() if key in self.config['marker_ids']},
+                  'reference_marker_observed':None if self.floor_calibration is None else self.floor_calibration['body_id'] in markers,
                   'fit_error_m':None if pose is None else pose[1], 'ids':list(markers),'bytes':len(raw)}
         self.records.write(json.dumps(record)+'\n')
         return record
@@ -383,6 +415,11 @@ class BrakingTest(navigation['Test']):
         while time.monotonic()-start < 1.0:
             self.tick(Twist())
         samples = [s for s in self.optical_samples if s['time'] >= start]
+        # Sparse valid camera captures may need a longer stationary observation,
+        # while the configured stopping-time limit remains unchanged.
+        while len(samples)<8 and time.monotonic()-start<3:
+            self.tick(Twist())
+            samples = [s for s in self.optical_samples if s['time'] >= start]
         if len(samples) < 8:
             raise RuntimeError('insufficient camera samples to verify stopping')
         return samples
