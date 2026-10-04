@@ -227,14 +227,15 @@ class SafetyStateMachine:
 def permit_unless_strict(
     decision: SafetyDecision, strict: bool, driver_state: str = ""
 ) -> SafetyDecision:
-    """Keep base health gates active while preserving non-strict arm hold policy."""
+    """Keep capability health gates active in the recoverable normal mode.
+
+    Holding an existing arm goal through feedback gaps belongs to the driver;
+    it must not grant new arm movement through motor-health errors here.
+    """
     if strict or decision.state in {SafetyState.ESTOP, SafetyState.FAULT_LATCHED}:
         return decision
     state = SafetyState.ARMED if driver_state == "ARMED" else decision.state
-    return replace(
-        decision, state=state,
-        arm_permitted=decision.arm_workspace_clear,
-    )
+    return replace(decision, state=state)
 
 
 def _valid_scan_ranges(message: LaserScan, minimum_valid_fraction: float) -> bool:

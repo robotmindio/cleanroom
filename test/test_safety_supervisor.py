@@ -675,7 +675,7 @@ def test_an_estop_still_latches_when_fault_latching_is_off():
     assert machine.decision(SECOND).state == SafetyState.ESTOP
 
 
-def test_non_strict_mode_preserves_arm_hold_but_denies_unhealthy_base():
+def test_non_strict_mode_preserves_health_gates_for_both_capabilities():
     from lekiwi_rmf.safety_supervisor import permit_unless_strict
 
     machine = _machine()  # nothing has reported: default-deny in the state machine
@@ -685,14 +685,30 @@ def test_non_strict_mode_preserves_arm_hold_but_denies_unhealthy_base():
     assert not denied.base_permitted and not denied.arm_permitted and denied.faults
 
     domestic = permit_unless_strict(denied, strict=False)
-    assert not domestic.base_permitted and domestic.arm_permitted
+    assert not domestic.base_permitted and not domestic.arm_permitted
     assert domestic.state == SafetyState.BOOT and domestic.faults == denied.faults
 
     armed = permit_unless_strict(denied, strict=False, driver_state="ARMED")
     assert armed.state == SafetyState.ARMED
-    assert not armed.base_permitted and armed.arm_permitted and armed.faults == denied.faults
+    assert not armed.base_permitted and not armed.arm_permitted and armed.faults == denied.faults
 
     assert permit_unless_strict(denied, strict=True) == denied
+
+
+def test_normal_mode_motor_error_blocks_arm_without_latching_recovery():
+    from lekiwi_rmf.safety_supervisor import permit_unless_strict
+    machine = SafetyStateMachine({'motor_health':Requirement(SECOND)},
+                                driver_state='ARMED',arm_stowed=True,latch_faults=False)
+    machine.update('motor_health',True,SECOND)
+    assert permit_unless_strict(machine.decision(SECOND),False,'ARMED').arm_permitted
+    machine.update('motor_health',False,SECOND,'servo error')
+    denied = permit_unless_strict(machine.decision(SECOND),False,'ARMED')
+    assert denied.arm_workspace_clear
+    assert not denied.arm_permitted and not denied.base_permitted
+    machine.update('motor_health',True,SECOND)
+    recovered = permit_unless_strict(machine.decision(SECOND),False,'ARMED')
+    assert recovered.arm_permitted and recovered.base_permitted
+    assert not recovered.latched_faults
 
 
 def test_non_strict_mode_keeps_acceptance_and_fresh_stow_as_base_gates():
