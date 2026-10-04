@@ -112,13 +112,19 @@ def test_floor_tracking_recovers_ground_motion_of_a_raised_tilted_marker(tilt):
     floor = np.column_stack((unit*.044,np.zeros(4)))
     center = np.array([.12,.02,.15])
     body = center+unit@np.array([[math.cos(tilt),0,math.sin(tilt)],[0,1,0]])*.035
-    reference = functions['floor_reference']({33:project(floor),53:project(body)},33,.044,53,.035)
+    boards = {53:body,69:body+[0,.07,0],59:body-[0,.07,0]}
+    reference = functions['floor_reference']({33:project(floor),**{k:project(p) for k,p in boards.items()}},33,.044,[53,69,59],.035)
     yaw = .12
     rotation = np.array([[math.cos(yaw),-math.sin(yaw)],[math.sin(yaw),math.cos(yaw)]])
     moved = body.copy(); moved[:,:2] = body[:,:2]@rotation.T+[.02,-.015]
     pose = functions['floor_pose']({53:project(moved)},reference)
     expected = center[:2]@rotation.T+[.02,-.015]-center[:2]
     assert pose == pytest.approx([*expected,yaw],abs=2e-6)
+    moved_boards = {}
+    for key,points in boards.items():
+        points = points.copy(); points[:,:2] = points[:,:2]@rotation.T+[.02,-.015]
+        moved_boards[key] = project(points)
+    assert functions['floor_pose'](moved_boards,reference) == pytest.approx([*expected,yaw],abs=2e-6)
     assert functions['floor_pose']({},reference) is None
 
 

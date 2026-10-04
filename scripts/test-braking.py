@@ -74,6 +74,10 @@ def metric_pose(markers, matrix, origin, reference):
 
 def floor_reference(markers, floor_id, floor_side, body_id, body_side):
     """Rectify the floor and account for the tracked square's raised plane."""
+    if isinstance(body_id,(list,tuple)):
+        references = [floor_reference(markers,floor_id,floor_side,key,body_side) for key in body_id]
+        references[0]['others'] = references[1:]
+        return references[0]
     if any(not math.isfinite(s) or s <= 0 for s in (floor_side, body_side)):
         raise ValueError('invalid floor or body marker dimensions')
     unit = np.float32([[-.5,-.5],[.5,-.5],[.5,.5],[-.5,.5]])
@@ -106,6 +110,12 @@ def floor_pose(markers, reference):
     translation = (points[0]-reference['origin'])/reference['magnification']
     direction = points[2]-points[1]
     heading = navigation['angle'](math.atan2(direction[1],direction[0])-reference['heading'])
+    headings = [heading]
+    for other in reference.get('others',[]):
+        pose = floor_pose(markers,other)
+        if pose is not None:
+            headings.append(heading+navigation['angle'](pose[2]-heading))
+    heading = float(np.median(headings))
     return [float(translation[0]),float(translation[1]),heading]
 
 
@@ -253,7 +263,7 @@ class Camera:
             self.calibration = metric_reference(stable, self.config['marker_ids'], self.config['marker_side_m'])
             if self.config.get('floor_marker_id') is not None:
                 self.floor_calibration = floor_reference(stable,self.config['floor_marker_id'],
-                    self.config['floor_marker_side_m'],self.config['marker_ids'][0],self.config['marker_side_m'])
+                    self.config['floor_marker_side_m'],self.config['marker_ids'],self.config['marker_side_m'])
             matrix,origin,reference,error = self.calibration
             (self.output/'calibration.json').write_text(json.dumps({
                 'matrix':matrix.tolist(),'origin_px':origin.tolist(),
