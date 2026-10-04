@@ -239,6 +239,13 @@ class Camera:
                             markers.setdefault(int(key),c.reshape(4,2)+[x,y])
                 finally:
                     self.parameters.aprilTagQuadDecimate = 1.5
+            if len(wanted.intersection(markers))<2:
+                enlarged = cv2.resize(image[y:y+h,x:x+w],None,fx=1.5,fy=1.5)
+                extra,keys,_ = cv2.aruco.detectMarkers(enlarged,self.detector,
+                                                      parameters=self.parameters)
+                if keys is not None:
+                    for key,c in zip(keys.flatten(),extra):
+                        markers.setdefault(int(key),(c.reshape(4,2)+.5)/1.5-.5+[x,y])
             if len(wanted.intersection(markers))>=2:
                 break
         if wanted <= set(markers):

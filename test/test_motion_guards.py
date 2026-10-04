@@ -60,6 +60,27 @@ def test_marker_roi_preserves_full_image_coordinates_and_recovers_after_a_shift(
     assert all(np.allclose(recovered[key],original[key]+[500,300],atol=1) for key in original)
 
 
+def test_marker_resampling_keeps_original_pixel_coordinates(monkeypatch):
+    import cv2
+    import runpy
+    from pathlib import Path
+    import numpy as np
+    Camera = runpy.run_path(str(Path(__file__).parents[1]/'scripts/test-braking.py'))['Camera']
+    camera = Camera.__new__(Camera)
+    camera.config, camera.roi = {'marker_ids':[69,59]}, None
+    camera.detector = None
+    camera.parameters = types.SimpleNamespace(aprilTagQuadDecimate=1.5)
+    square = np.float32([[100,100],[180,100],[180,180],[100,180]])
+    def detect(image,*args,**kwargs):
+        if image.shape==(200,400):return [],None,[]
+        assert image.shape==(300,600)
+        return [((square+.5)*1.5-.5).reshape(1,4,2),((square+[100,0]+.5)*1.5-.5).reshape(1,4,2)],np.array([[69],[59]]),[]
+    monkeypatch.setattr(cv2.aruco,'detectMarkers',detect)
+    markers = camera.detect(np.zeros((200,400),np.uint8))
+    assert markers[69] == pytest.approx(square)
+    assert markers[59] == pytest.approx(square+[100,0])
+
+
 def test_floor_camera_keeps_real_observations_when_marker_plane_fit_fails(monkeypatch, tmp_path):
     import cv2
     import io
