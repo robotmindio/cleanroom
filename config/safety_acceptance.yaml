@@ -40,8 +40,8 @@ accepted_stow_joint_positions:
   arm_gripper: 0.2095
 minimum_trials_per_direction: 30
 # Tested speeds must cover the tracked Nav2 and manual-driver limits.
-maximum_tested_linear_speed_m_s: 0.04
-maximum_tested_angular_speed_rad_s: 0.08
+maximum_tested_linear_speed_m_s: 0.03
+maximum_tested_angular_speed_rad_s: 0.06
 maximum_command_stop_latency_s: 1.149 # Includes conservative at-rest replay denial timing.
 # Acceptance limits must be set from the reviewed safety case before testing;
 # measured results cannot define their own passing threshold afterward.

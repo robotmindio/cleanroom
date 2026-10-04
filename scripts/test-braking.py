@@ -150,6 +150,21 @@ def maximum_swept_excursion(poses, radius):
                for pose in poses)
 
 
+
+def stop_time_upper(samples, stopped_at):
+    """Use a terminal median so a noisy last frame cannot redefine rest."""
+    if len(samples) < 8:
+        raise ValueError('at least eight optical stop samples are required')
+    terminal = np.array([s['pose'] for s in samples[-8:]])
+    terminal[:,2] = np.unwrap(terminal[:,2])
+    final = np.median(terminal,axis=0)
+    outside = [i for i,s in enumerate(samples)
+               if math.dist(s['pose'][:2],final[:2]) > .002
+               or abs(navigation['angle'](s['pose'][2]-final[2])) > .01]
+    stable = samples[min(max(outside)+1 if outside else 1,len(samples)-1)]
+    return max(0.,stable['time']-stopped_at)
+
+
 def observed_speeds(samples,angular):
     rates = []
     for a,b in zip(samples,samples[1:]):
@@ -477,11 +492,7 @@ class BrakingTest(navigation['Test']):
         # extrinsics can replace the 20 cm offset allowance after calibration.
         swept = maximum_swept_excursion([s['pose'] for s in post],
                                        .33+self.config['marker_center_offset_bound_m'])
-        final = post[-1]['pose']
-        outside = [i for i,s in enumerate(post) if math.dist(s['pose'][:2], final[:2]) > .002
-                   or abs(navigation['angle'](s['pose'][2]-final[2])) > .01]
-        stable_start = post[min((max(outside)+1 if outside else 1),len(post)-1)]
-        stop_time = max(0.0, stable_start['time']-stopped_at)
+        stop_time = stop_time_upper(post,stopped_at)
         result = {'direction':direction,'requested_speed':speed,'median_observed_speed':float(np.median(rates)),
                   'speed_time_source':'camera_capture_pts',
                   'receive_clock_median_speed':float(np.median(receive_rates)) if receive_rates else None,

@@ -60,10 +60,10 @@ controller_server:
       # Indoor limits paired with the 5 cm stopping clearance below.
       # Depth transport and its 0.5 s freshness gate are paired with these
       # limits; physical stopping acceptance remains pending.
-      vx_max: 0.04
-      vx_min: -0.04
-      vy_max: 0.04
-      wz_max: 0.08
+      vx_max: 0.03
+      vx_min: -0.03
+      vy_max: 0.03
+      wz_max: 0.06
       ax_max: 0.60
       ax_min: -0.60
       ay_max: 0.60
@@ -210,8 +210,8 @@ behavior_server:
     robot_base_frame: base_footprint
     transform_tolerance: 0.2
     cycle_frequency: 10.0
-    max_rotational_vel: 0.08
-    min_rotational_vel: 0.04
+    max_rotational_vel: 0.06
+    min_rotational_vel: 0.03
     behavior_plugins: [spin, backup, drive_on_heading, assisted_teleop, wait]
     spin:
       plugin: nav2_behaviors::Spin
@@ -239,8 +239,8 @@ velocity_smoother:
     smoothing_frequency: 20.0
     feedback: OPEN_LOOP
     scale_velocities: true
-    max_velocity: [0.04, 0.04, 0.08]
-    min_velocity: [-0.04, -0.04, -0.08]
+    max_velocity: [0.03, 0.03, 0.06]
+    min_velocity: [-0.03, -0.03, -0.06]
     max_accel: [0.60, 0.60, 1.57]
     max_decel: [-0.60, -0.60, -1.57]
     odom_topic: /odom

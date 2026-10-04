@@ -7,10 +7,10 @@ marker_side_m: 0.035
 # Operator measured the black floor-marker square, excluding its white margin.
 floor_marker_id: 33
 floor_marker_side_m: 0.044
-maximum_linear_speed_m_s: 0.04
-maximum_angular_speed_rad_s: 0.08
-linear_steps_m_s: [0.04]
-angular_steps_rad_s: [0.08]
+maximum_linear_speed_m_s: 0.03
+maximum_angular_speed_rad_s: 0.06
+linear_steps_m_s: [0.03]
+angular_steps_rad_s: [0.06]
 trials_per_direction: 30
 trial_displacement_m: 0.030
 trial_rotation_rad: 0.12

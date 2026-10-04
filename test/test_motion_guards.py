@@ -523,3 +523,17 @@ def test_navigation_probe_withdraws_lease_until_feedback_recovers(monkeypatch,un
     assert leases == [True,False] and node.active
     assert len(commands)==1 and commands[0].linear.x==commands[0].angular.z==0
     assert node.motion_pauses==1
+
+
+def test_stop_time_uses_terminal_median_with_wrapped_heading():
+    import runpy
+    from pathlib import Path
+    stop = runpy.run_path(str(Path(__file__).parents[1]/'scripts/test-braking.py'))['stop_time_upper']
+    frames = [{'time':i*.1,'pose':[.01 if i<5 else .02,0,math.pi-.004]} for i in range(20)]
+    frames[-3]['pose'][2] = math.pi-.010
+    frames[-1]['pose'][2] = -math.pi+.004
+    assert stop(frames,0) == pytest.approx(.5)
+    frames[-1]['pose'][0] = .024
+    assert stop(frames,0) == pytest.approx(1.9)
+    with pytest.raises(ValueError,match='eight'):
+        stop(frames[:7],0)
