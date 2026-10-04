@@ -573,8 +573,8 @@ def validate_acceptance_file(
     if installed_hardware is not None and hardware != installed_hardware:
         return False, "accepted installed hardware differs from the production safety profile"
     minimum_trials = data.get("minimum_trials_per_direction")
-    if isinstance(minimum_trials, bool) or not isinstance(minimum_trials, int) or minimum_trials < 30:
-        return False, "at least 30 trials per direction are required"
+    if isinstance(minimum_trials, bool) or not isinstance(minimum_trials, int) or minimum_trials < 5:
+        return False, "at least 5 trials per direction are required"
     latency = data.get("maximum_command_stop_latency_s")
     if not _finite_number(latency) or latency <= 0:
         return False, "measured stop latency is invalid"

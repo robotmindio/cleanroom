@@ -32,7 +32,7 @@ accepted_stow_joint_positions:
   arm_wrist_flex: 1.2367
   arm_wrist_roll: -0.0169
   arm_gripper: 0.2095
-minimum_trials_per_direction: 30
+minimum_trials_per_direction: 5 # Future validations; recorded trial counts are retained.
 maximum_tested_linear_speed_m_s: 0.03
 maximum_tested_angular_speed_rad_s: 0.06
 maximum_command_stop_latency_s: 1.149

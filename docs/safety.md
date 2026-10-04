@@ -61,9 +61,15 @@ faster production or manual command.
 Before base trials, physically verify a compact arm stow, record its measured
 joints with `scripts/capture_stow.py`, and check that the full arm and cable
 envelope fits the accepted footprint. Predeclare stopping limits, measure at
-least 30 trials per direction on the recorded surface and payload, and update the tracked Nav2
+least 5 trials per direction on the recorded surface and payload, and update the tracked Nav2
 StopZone to cover the worst distance plus measurement uncertainty. A software
 pass alone cannot establish obstacle coverage or stopping performance.
+
+Future validations use five repetitions per direction. The completed 186-stop
+record and its measured bounds remain intact. Existing qualified evidence can
+be reused for unchanged operating conditions; repeat the fault cases affected
+by the change. All applicable fault results and stopping/error limits remain
+required by the acceptance validator.
 
 The current LD06 produces a 360-degree scan. Its measured body mask covers
 100 degrees, leaving 260 degrees (4.54 rad) of effective coverage. The

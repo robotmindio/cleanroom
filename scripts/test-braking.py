@@ -586,7 +586,7 @@ class BrakingTest(navigation['Test']):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--inspect', action='store_true', help='measure ten seconds of stationary camera data without touching ROS services')
-    parser.add_argument('--explore-only', action='store_true', help='explore speed steps without the final thirty repetitions')
+    parser.add_argument('--explore-only', action='store_true', help='explore speed steps without the configured final repetitions')
     parser.add_argument('--directions', nargs='+', choices=list(DIRECTIONS), default=list(DIRECTIONS),
                         help='test only these directions; earlier evidence remains in its original run')
     args = parser.parse_args()

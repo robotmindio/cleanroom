@@ -374,7 +374,7 @@ Symptoms and fixes are collected in [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
   `travel_stow`, 0.03 m/s and 0.06 rad/s. See
   [the verification report](docs/physical-verification-20261003.md).
 - The acceptance record is schema version 4. It remains invalid until it has
-  reviewed limits, at least 30 trials in every translation/rotation direction,
+  reviewed limits, at least 5 trials in every translation/rotation direction,
   worst-case distances plus uncertainty, stop latency, traceable
   software/sensor/payload/surface details, and every applicable fault test marked true.
   This includes independent E-stop behavior, unauthorized ZMQ rejection, and
