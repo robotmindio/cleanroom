@@ -656,6 +656,34 @@ def test_deploy_order_fails_closed_around_the_device_restart():
     assert "reset --hard" not in deploy
 
 
+def test_deploy_bundle_transfers_exact_revision_without_device_origin(tmp_path):
+    source, device = tmp_path/'source', tmp_path/'device'
+    def git(repository, *args):
+        return subprocess.run(['git', '-C', str(repository), *args], check=True,
+                              capture_output=True, text=True).stdout.strip()
+    source.mkdir()
+    git(source, 'init')
+    git(source, 'config', 'user.name', 'Test')
+    git(source, 'config', 'user.email', 'test@example.invalid')
+    (source/'value').write_text('before')
+    git(source, 'add', 'value')
+    git(source, 'commit', '-m', 'before')
+    subprocess.run(['git', 'clone', str(source), str(device)], check=True, capture_output=True)
+    (source/'value').write_text('after')
+    git(source, 'commit', '-am', 'after')
+    target = git(source, 'rev-parse', 'HEAD')
+    deploy = (ROOT/'scripts/deploy-split.sh').read_text()
+    function = 'transfer_device_revision() (' + deploy.split('transfer_device_revision() (', 1)[1].split('\nros_setup()', 1)[0]
+    subprocess.run(['bash', '-c', '''set -Eeuo pipefail
+project_root=$1; remote_repo=$2; target=$3
+die() { echo "$*" >&2; exit 1; }
+ssh_command=(bash -c 'if [[ $# == 1 ]]; then eval "$1"; else "$@"; fi' --)
+''' + function + '\ntransfer_device_revision\ngit -C "$remote_repo" merge --ff-only "$target"\ntransfer_device_revision',
+        '--', str(source), str(device), target], check=True, capture_output=True, text=True)
+    assert git(device, 'rev-parse', 'HEAD') == target
+    assert (device/'value').read_text() == 'after'
+
+
 def test_deploy_sudoers_are_limited_by_machine_role():
     script = ROOT / "scripts" / "install-deploy-sudoers.sh"
     compute = subprocess.run(

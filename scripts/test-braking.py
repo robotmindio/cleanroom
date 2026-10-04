@@ -200,7 +200,7 @@ class Camera:
 
     def detect(self, image):
         wanted = set(self.config['marker_ids'])
-        if self.config.get('floor_marker_id') is not None:
+        if self.config.get('floor_marker_id') is not None and getattr(self,'calibration',None) is None:
             wanted.add(self.config['floor_marker_id'])
         for region in ([self.roi,None] if self.roi is not None else [None]):
             x,y,w,h = region or (0,0,image.shape[1],image.shape[0])

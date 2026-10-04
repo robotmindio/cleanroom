@@ -60,6 +60,25 @@ require_clean() { # require_clean <repository> [description]
   local repository=$1 description=${2:-$1}
   [[ -z $(git -C "$repository" status --porcelain) ]] || die "$description has uncommitted or untracked files"
 }
+transfer_device_revision() (
+  # The compute revision is already verified against origin. The device can
+  # receive those same Git objects over SSH when its DNS/Internet is unavailable.
+  local previous bundle remote_bundle
+  local exclusions=()
+  previous=$("${ssh_command[@]}" git -C "$remote_repo" rev-parse HEAD)
+  [[ $previous =~ ^[0-9a-f]{40}$ ]] || die "invalid device revision"
+  [[ $previous != "$target" ]] || return 0
+  if git -C "$project_root" cat-file -e "$previous^{commit}" 2>/dev/null; then
+    exclusions=("^$previous")
+  fi
+  bundle=$(mktemp)
+  remote_bundle=$("${ssh_command[@]}" mktemp /tmp/lekiwi-source.XXXXXXXX.bundle)
+  [[ $remote_bundle =~ ^/tmp/lekiwi-source\.[A-Za-z0-9]+\.bundle$ ]] || die "invalid device bundle path"
+  trap 'rm -f -- "$bundle"; "${ssh_command[@]}" rm -f -- "$remote_bundle"' EXIT
+  git -C "$project_root" bundle create "$bundle" HEAD "${exclusions[@]}"
+  "${ssh_command[@]}" "cat > '$remote_bundle'" < "$bundle"
+  "${ssh_command[@]}" git -C "$remote_repo" fetch "$remote_bundle" HEAD
+)
 ros_setup() {
   export LEKIWI_WS=$workspace
   set +u
@@ -151,8 +170,10 @@ target=$(git -C "$project_root" rev-parse HEAD)
 remote_branch=$("${ssh_command[@]}" git -C "$remote_repo" symbolic-ref --quiet --short HEAD) || \
   die "remote repository must be on a branch"
 [[ $remote_branch == "$branch" ]] || die "branch mismatch: local $branch, device $remote_branch"
-"${ssh_command[@]}" timeout 30 git -C "$remote_repo" fetch --quiet origin || \
-  die "device cannot fetch origin within 30 seconds"
+if ! "${ssh_command[@]}" timeout 30 git -C "$remote_repo" fetch --quiet origin; then
+  log "Device origin fetch failed; transferring the pushed revision over SSH"
+  transfer_device_revision
+fi
 "${ssh_command[@]}" git -C "$remote_repo" merge --ff-only "$target"
 [[ $("${ssh_command[@]}" git -C "$remote_repo" rev-parse HEAD) == "$target" ]] || \
   die "device did not reach revision $target"
