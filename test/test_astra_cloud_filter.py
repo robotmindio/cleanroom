@@ -115,6 +115,8 @@ def test_rgb_encoding_is_eager_rate_limited_and_keeps_capture_stamp(monkeypatch)
         assert len(frames) == 2
         assert all(f.header.stamp.sec == 7 and f.format == "jpeg" for f in frames)
         assert cv2.imdecode(np.frombuffer(frames[0].data, np.uint8), cv2.IMREAD_COLOR).shape == (2, 2, 3)
+        _,expected = cv2.imencode('.jpg',np.zeros((2,2,3),dtype=np.uint8),[cv2.IMWRITE_JPEG_QUALITY,70])
+        assert bytes(frames[0].data) == expected.tobytes()
         depth = np.array([[0, 456], [1000, 2345]], dtype=np.uint16)
         image = Image(width=2, height=2, encoding="16UC1", step=4, data=depth.tobytes())
         node._on_image(serialize_message(image), "depth", ".png", "16UC1; png compressed", publisher)

@@ -7,3 +7,5 @@ astra_cloud_filter:
     max_rate_hz: 10.0
     # Visual registration needs dense measured depth, paired with RGB.
     image_max_rate_hz: 2.0
+    # Bound RGB traffic even when Tailscale has to relay the sensor connection.
+    jpeg_quality: 70

@@ -63,9 +63,13 @@ class AstraCloudFilter(Node):
         self.declare_parameter("pixel_stride", 4)
         self.declare_parameter("max_rate_hz", 5.0)
         self.declare_parameter("image_max_rate_hz", 2.0)
+        self.declare_parameter("jpeg_quality", 70)
         self._stride = int(self.get_parameter("pixel_stride").value)
         rate = float(self.get_parameter("max_rate_hz").value)
         image_rate = float(self.get_parameter("image_max_rate_hz").value)
+        self._jpeg_quality = self.get_parameter("jpeg_quality").value
+        if type(self._jpeg_quality) is not int or not 1 <= self._jpeg_quality <= 100:
+            raise ValueError("jpeg_quality must be an integer from 1 to 100")
         if self._stride < 1 or not math.isfinite(rate) or rate <= 0.0:
             raise ValueError("pixel_stride must be positive and max_rate_hz must be finite and positive")
         if not math.isfinite(image_rate) or image_rate <= 0:
@@ -100,7 +104,8 @@ class AstraCloudFilter(Node):
             if camera == "depth" and image.encoding != "16UC1":
                 raise ValueError(f"expected depth in millimetres as 16UC1, got {image.encoding}")
             desired = "passthrough" if camera == "depth" else "bgr8"
-            ok, compressed = cv2.imencode(extension, self._bridge.imgmsg_to_cv2(image, desired))
+            parameters = [cv2.IMWRITE_JPEG_QUALITY,self._jpeg_quality] if camera == "color" else []
+            ok, compressed = cv2.imencode(extension, self._bridge.imgmsg_to_cv2(image, desired),parameters)
             if not ok:
                 raise RuntimeError(f"{extension} encoding failed")
         except Exception as error:
