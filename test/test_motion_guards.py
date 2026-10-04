@@ -94,6 +94,34 @@ def test_marker_plane_rectification_recovers_motion_under_perspective():
     assert pose==pytest.approx([.02,-.015,.12],abs=1e-6)
 
 
+@pytest.mark.parametrize('tilt',[0,.14,.6])
+def test_floor_tracking_recovers_ground_motion_of_a_raised_tilted_marker(tilt):
+    import runpy
+    from pathlib import Path
+    import numpy as np
+    functions = runpy.run_path(str(Path(__file__).parents[1]/'scripts/test-braking.py'))
+    eye = np.array([-.2,-.3,.8])
+    z = -eye/np.linalg.norm(eye)
+    x = np.cross(z,[0,0,1]); x /= np.linalg.norm(x)
+    view = np.array([x,np.cross(z,x),z])
+    intrinsic = np.array([[1000,0,640],[0,1000,480],[0,0,1]])
+    def project(points):
+        pixels = (points-eye)@view.T@intrinsic.T
+        return pixels[:,:2]/pixels[:,2,None]
+    unit = np.array([[-.5,-.5],[.5,-.5],[.5,.5],[-.5,.5]])
+    floor = np.column_stack((unit*.044,np.zeros(4)))
+    center = np.array([.12,.02,.15])
+    body = center+unit@np.array([[math.cos(tilt),0,math.sin(tilt)],[0,1,0]])*.035
+    reference = functions['floor_reference']({33:project(floor),53:project(body)},33,.044,53,.035)
+    yaw = .12
+    rotation = np.array([[math.cos(yaw),-math.sin(yaw)],[math.sin(yaw),math.cos(yaw)]])
+    moved = body.copy(); moved[:,:2] = body[:,:2]@rotation.T+[.02,-.015]
+    pose = functions['floor_pose']({53:project(moved)},reference)
+    expected = center[:2]@rotation.T+[.02,-.015]-center[:2]
+    assert pose == pytest.approx([*expected,yaw],abs=2e-6)
+    assert functions['floor_pose']({},reference) is None
+
+
 def test_stopping_clearance_uses_farthest_point_excursion_without_summing_jitter():
     import runpy
     from pathlib import Path

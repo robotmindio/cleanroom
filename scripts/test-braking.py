@@ -72,6 +72,43 @@ def metric_pose(markers, matrix, origin, reference):
             math.atan2(rotation[1, 0], rotation[0, 0])], error, common
 
 
+def floor_reference(markers, floor_id, floor_side, body_id, body_side):
+    """Rectify the floor and account for the tracked square's raised plane."""
+    if any(not math.isfinite(s) or s <= 0 for s in (floor_side, body_side)):
+        raise ValueError('invalid floor or body marker dimensions')
+    unit = np.float32([[-.5,-.5],[.5,-.5],[.5,.5],[-.5,.5]])
+    matrix = cv2.getPerspectiveTransform(np.float32(markers[floor_id]), unit*floor_side)
+    body = cv2.getPerspectiveTransform(unit*body_side, np.float32(markers[body_id]))
+    ground = matrix@body
+    ground /= ground[2,2]
+    gradient = ground[2,:2]
+    axis = np.array([-gradient[1],gradient[0]])
+    axis = axis/np.linalg.norm(axis) if np.linalg.norm(axis)>1e-8 else np.array([1.,0.])
+    jacobian = ground[:2,:2]-np.outer(ground[:2,2],gradient)
+    magnification = float(np.linalg.norm(jacobian@axis))
+    if not math.isfinite(magnification) or not .8<magnification<5:
+        raise ValueError('inconsistent raised-marker magnification')
+    points = plane_points([[0,0],*(-body_side/2*axis,body_side/2*axis)],ground,np.zeros(2))
+    direction = points[2]-points[1]
+    return {'matrix':matrix.tolist(), 'body_id':body_id, 'body_side_m':body_side,
+            'axis':axis.tolist(), 'magnification':magnification, 'origin':points[0].tolist(),
+            'heading':math.atan2(direction[1],direction[0])}
+
+
+def floor_pose(markers, reference):
+    key = reference['body_id']
+    if key not in markers:
+        return None
+    side,axis = reference['body_side_m'],np.array(reference['axis'])
+    square = np.float32([[-side/2,-side/2],[side/2,-side/2],[side/2,side/2],[-side/2,side/2]])
+    body = cv2.getPerspectiveTransform(square,np.float32(markers[key]))
+    points = plane_points([[0,0],*(-side/2*axis,side/2*axis)],np.array(reference['matrix'])@body,np.zeros(2))
+    translation = (points[0]-reference['origin'])/reference['magnification']
+    direction = points[2]-points[1]
+    heading = navigation['angle'](math.atan2(direction[1],direction[0])-reference['heading'])
+    return [float(translation[0]),float(translation[1]),heading]
+
+
 def maximum_swept_excursion(poses, radius):
     """Bound any body's point displacement from the pre-stop pose.
 
@@ -130,6 +167,7 @@ class Camera:
         self.config = config
         self.output = output
         self.calibration = None
+        self.floor_calibration = None
         self.reference_samples = []
         self.last_pose = None
         self.last_time = 0.0
@@ -142,6 +180,8 @@ class Camera:
                            else cv2.aruco.DetectorParameters())
         self.parameters.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_APRILTAG
         self.parameters.aprilTagQuadDecimate = 1.5
+        if config.get('floor_marker_id') is not None:
+            self.parameters.minDistanceToBorder = 0
         if self.pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
             message = self.pipeline.get_bus().pop_filtered(Gst.MessageType.ERROR)
             details = message.parse_error() if message is not None else 'no GStreamer error detail'
@@ -150,6 +190,8 @@ class Camera:
 
     def detect(self, image):
         wanted = set(self.config['marker_ids'])
+        if self.config.get('floor_marker_id') is not None:
+            wanted.add(self.config['floor_marker_id'])
         for region in ([self.roi,None] if self.roi is not None else [None]):
             x,y,w,h = region or (0,0,image.shape[1],image.shape[0])
             corners,ids,_ = cv2.aruco.detectMarkers(image[y:y+h,x:x+w],self.detector,
@@ -198,27 +240,36 @@ class Camera:
             self.records.write(json.dumps(record)+'\n')
             return record
         markers = self.detect(image)
-        if self.calibration is None and all(key in markers for key in self.config['marker_ids']):
-            self.reference_samples.append({key:markers[key] for key in self.config['marker_ids']})
+        identifiers = self.config['marker_ids']+[self.config['floor_marker_id']] if self.config.get('floor_marker_id') is not None else self.config['marker_ids']
+        if self.calibration is None and all(key in markers for key in identifiers):
+            self.reference_samples.append({key:markers[key] for key in identifiers})
             if len(self.reference_samples) < 10:
                 record = {'time':received,'pts_ns':int(buffer.pts),'pose':None,
                           'ids':list(markers),'bytes':len(raw)}
                 self.records.write(json.dumps(record)+'\n')
                 return record
             stable = {key:np.median([s[key] for s in self.reference_samples],axis=0)
-                      for key in self.config['marker_ids']}
+                      for key in identifiers}
             self.calibration = metric_reference(stable, self.config['marker_ids'], self.config['marker_side_m'])
+            if self.config.get('floor_marker_id') is not None:
+                self.floor_calibration = floor_reference(stable,self.config['floor_marker_id'],
+                    self.config['floor_marker_side_m'],self.config['marker_ids'][0],self.config['marker_side_m'])
             matrix,origin,reference,error = self.calibration
             (self.output/'calibration.json').write_text(json.dumps({
                 'matrix':matrix.tolist(),'origin_px':origin.tolist(),
                 'reference':{key:value.tolist() for key,value in reference.items()},
-                'marker_edge_residual_m':error,'opencv':cv2.__version__},indent=2)+'\n')
+                'marker_edge_residual_m':error,'floor_reference':self.floor_calibration,'opencv':cv2.__version__},indent=2)+'\n')
         pose = None if self.calibration is None else metric_pose(markers, *self.calibration[:3])
+        marker_pose = pose
+        if pose is not None and self.floor_calibration is not None:
+            ground = floor_pose(markers,self.floor_calibration)
+            pose = None if ground is None else (ground,pose[1],pose[2])
         if pose is not None:
             self.last_pose = pose[0]
             self.last_time = received
         self.count += 1
         record = {'time':received, 'pts_ns':int(buffer.pts), 'pose':None if pose is None else pose[0],
+                  'marker_pose':None if marker_pose is None else marker_pose[0],
                   'fit_error_m':None if pose is None else pose[1], 'ids':list(markers),'bytes':len(raw)}
         self.records.write(json.dumps(record)+'\n')
         return record
@@ -242,6 +293,8 @@ class BrakingTest(navigation['Test']):
         self.feedback = (output/'feedback.jsonl').open('w')
         self.checks = {'trials':[], 'navigation':[], 'measurement_scope':'marker-plane characterization',
                        'floor_plane_alignment_verified':False, 'physical_acceptance_granted':False}
+        if camera.floor_calibration is not None:
+            self.checks.update(measurement_scope='floor-referenced raised-marker tracking',floor_plane_alignment_verified=True)
         self.latest_safe = None
         self.return_transform = None
         self.optical_center = None
