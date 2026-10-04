@@ -169,8 +169,10 @@ confirm 0.03 m/s and 0.06 rad/s. The return ended near the original test center.
 139 targeted checks and fourteen camera configuration checks passed. The first
 full rerun found an obsolete expected dictionary missing the configured JPEG 70
 field; its assertion was corrected and the full suite rerun successfully.
-Subsequent commits change tests/documentation only; the revision above identifies
-the deployed runtime.
+The revision above identifies the runtime used for this recorded physical
+verification. Future validations use five repetitions per direction, as
+documented in [the current safety procedure](safety.md); these historical
+measured counts and bounds are retained.
 
 All five Pi production services are active. The transient qualification host
 and rollback timers are inactive, the test firewall table is absent, and all
