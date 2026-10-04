@@ -47,7 +47,7 @@ maximum_command_stop_latency_s: 1.149 # Includes conservative at-rest replay den
 # measured results cannot define their own passing threshold afterward.
 maximum_allowed_command_stop_latency_s: 1.5
 maximum_allowed_stopping_distance_m: 0.05
-measurement_uncertainty_m: 0.01 # Declared; independent floor check is still pending.
+measurement_uncertainty_m: 0.02 # Floor-tag qualification; leaves 30 mm for stopping within the 50 mm budget.
 directions:
   forward: {trials: 31, worst_stopping_distance_m: 0.034502}
   reverse: {trials: 31, worst_stopping_distance_m: 0.024016}

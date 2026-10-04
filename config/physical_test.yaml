@@ -24,7 +24,7 @@ maximum_center_radius_m: 0.15
 # margin. The preceding camera frame remains the conservative stop baseline;
 # the stop is held for observation before any return command.
 maximum_frame_age_s: 0.50
-measurement_uncertainty_m: 0.010
+measurement_uncertainty_m: 0.020
 # Predeclared budget: StopZone has 5 cm footprint clearance, including error.
 maximum_stopping_distance_m: 0.050
 maximum_stop_time_s: 1.5
