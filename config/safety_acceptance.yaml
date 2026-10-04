@@ -10,12 +10,13 @@ installed_hardware:
   bumper: false
   imu: false
   battery_monitor: false
-# Set true only after the controlled hardware procedure has populated all
-# measurements below and the configured collision zones have been updated from
-# the measured worst case plus uncertainty.
+# Measured characterization and functional fault results are populated below.
+# Acceptance remains false: the 10 mm floor/lens error is not independently
+# bounded and the final diagnostic/replay checks have only been run at rest.
+# Set true only after those physical checks complete within the declared budget.
 validated: false
-software_revision: null
-sensor_configuration: null
+software_revision: 7c3ef989cdab # Tested implementation; acceptance remains pending.
+sensor_configuration: LD06 calibrated yaw/self-mask; Astra compact cloud 10 Hz; front RGB and RGBD mapping 2 Hz; folded travel_stow; 5 GHz bridge; 35 mm black marker squares
 payload_kg: 0.0
 surface: dry concrete
 validated_at: null
@@ -39,21 +40,21 @@ accepted_stow_joint_positions:
   arm_gripper: 0.2095
 minimum_trials_per_direction: 30
 # Tested speeds must cover the tracked Nav2 and manual-driver limits.
-maximum_tested_linear_speed_m_s: null
-maximum_tested_angular_speed_rad_s: null
-maximum_command_stop_latency_s: null
+maximum_tested_linear_speed_m_s: 0.04
+maximum_tested_angular_speed_rad_s: 0.08
+maximum_command_stop_latency_s: 1.149 # Includes conservative at-rest replay denial timing.
 # Acceptance limits must be set from the reviewed safety case before testing;
 # measured results cannot define their own passing threshold afterward.
-maximum_allowed_command_stop_latency_s: null
-maximum_allowed_stopping_distance_m: null
-measurement_uncertainty_m: null
+maximum_allowed_command_stop_latency_s: 1.5
+maximum_allowed_stopping_distance_m: 0.05
+measurement_uncertainty_m: 0.01 # Declared; independent floor check is still pending.
 directions:
-  forward: {trials: 0, worst_stopping_distance_m: null}
-  reverse: {trials: 0, worst_stopping_distance_m: null}
-  left: {trials: 0, worst_stopping_distance_m: null}
-  right: {trials: 0, worst_stopping_distance_m: null}
-  rotation_cw: {trials: 0, worst_stopping_distance_m: null}
-  rotation_ccw: {trials: 0, worst_stopping_distance_m: null}
+  forward: {trials: 31, worst_stopping_distance_m: 0.034502}
+  reverse: {trials: 31, worst_stopping_distance_m: 0.024016}
+  left: {trials: 30, worst_stopping_distance_m: 0.025148}
+  right: {trials: 31, worst_stopping_distance_m: 0.018831}
+  rotation_cw: {trials: 30, worst_stopping_distance_m: 0.017417}
+  rotation_ccw: {trials: 32, worst_stopping_distance_m: 0.031053}
 fault_tests:
   # Optical bounded checks on 2026-10-03/04: 0.04 m/s and 0.08 rad/s,
   # compact fold. See docs/physical-verification-20261003.md. The declared
@@ -62,13 +63,17 @@ fault_tests:
   depth_disconnect: true
   imu_disconnect: null # Not applicable: no IMU is fitted.
   battery_low_or_disconnect: null # Not applicable: no battery monitor is fitted.
-  motor_diagnostic_fault: false
+  # Authenticated real-host injection at rest: both capability permissions
+  # withdrawn; joint positions unchanged. No moving diagnostic-stop distance.
+  motor_diagnostic_fault: true
   bumper: null # Not applicable: no bumper is fitted.
   # The labelled physical motor-power stop has been tested to remove actuator
   # energy without ROS.
   estop_independent_of_ros: true
   telemetry_loss: true
-  telemetry_replay_or_duplicate: false
+  # Exact duplicate authenticated observations did not refresh state leases.
+  # Real-host test at rest; no moving replay-stop distance.
+  telemetry_replay_or_duplicate: true
   # A restart must stop commands; re-arm is allowed only with fresh telemetry
   # and current arm permission in the configured automatic re-arm mode.
   host_restart_stops_then_gated_rearm: true
@@ -85,5 +90,9 @@ fault_tests:
   # Disabled by the tracked launch default and installed stack arguments;
   # no rosbridge node or TCP listener was present on 2026-09-26.
   rosbridge_disabled_or_authenticated: true
-  collision_monitor_obstacle_stop: false
-  arm_workspace_intrusion_stop: false
+  # Real bottle in the lidar StopZone blocked an otherwise permitted 0.04 m/s
+  # request on 2026-10-04. Confirmed at rest; no approaching-obstacle distance.
+  collision_monitor_obstacle_stop: true
+  # A temporary MoveIt object at the wrist produced FCL contacts, removed arm
+  # permission and rejected an arm goal. Measured joint change: 0 rad.
+  arm_workspace_intrusion_stop: true

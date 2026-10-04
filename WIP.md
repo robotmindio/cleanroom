@@ -1,11 +1,9 @@
-# Physical acceptance pending independent measurement and fault fixtures
+# Physical acceptance: final measurement prerequisites
 
-Completed: thirty algorithm-eligible nominal stopping repetitions in all six directions; five optical linear and five rotation fault cases, whole-ROS crash, twelve Nav2 goals, fresh-map growth to eleven nodes and spatial closure with 35 visual inliers. Surface dry concrete, 0 kg payload, confirmed 35 mm black marker edges. HOME and compact travel_stow unchanged; production database retained.
+Completed: 185 eligible nominal stops across all six directions, ten moving linear/angular fault cases, repeated sensor cases, whole-ROS crash, sixteen Nav2 goals and fresh-map spatial closure. All applicable functional fault flags are now true; counters, distances and declared limits are populated. Physical acceptance remains false.
 
-Root fixes deployed: folded lidar mask geometry, shared test speed defaults/cleanup, 5 GHz Pi reception, 10 Hz compact depth clouds, persistent 8 MiB Pi DDS buffers, removal of MoveIt's second cloud throttle, and no replacement of a cloud awaiting its joint TF. Final 20-second pipeline probe had a 0.211 s processed-cloud maximum gap and zero workspace denials; subsequent four-goal navigation likewise had zero workspace withdrawals. Affected sensor faults were repeated successfully after those fixes.
+Additional live checks: real bottle blocks an otherwise authorized command; temporary MoveIt wrist collision rejects an arm goal with zero joint change; authenticated motor-error and exact-duplicate telemetry injections withdraw permission at rest. The motor-error test found normal mode overriding arm health. That override is removed, deployed and retested; driver feedback-gap holding remains intact. No named pose or production map was changed.
 
-Tracked limits: 0.04 m/s and 0.08 rad/s, 5 cm StopZone clearance, depth/perception deadlines 0.5 s. Higher 0.05 m/s depth-loss and 0.10 rad/s lidar-loss rotation exceeded the budget including the declared 10 mm uncertainty. Characterization is provisional; validated remains false and qualifying fields unset.
+Verified implementation: 7c3ef989cdab, 57/57 CTests including nine launch tests; 151 targeted checks. Test host/injections are finite and restore production.
 
-Final verification: deployed c6afe474f597, 57/57 CTests passed in 36.56 s. Production restored with arm ARMED, stationary across 81 joint samples, MoveIt-valid and all ten Nav2 nodes active. No test clients remain; acceptance is the only base-permission blocker.
-
-Next: independently bound floor/lens/timing measurement error, then complete motor-diagnostic, telemetry replay/duplicate, external obstacle and arm-workspace intrusion fault evidence before reviewing formal acceptance. Global appearance-only relocalization and whole-house accuracy are not established by this small route. Evidence: docs/physical-verification-20261003.md.
+Next: remove the bottle for moving motor-diagnostic/replay stop measurements, and place readable floor-ruler graduations in the external camera view to independently bound the declared 10 mm error. Latest image shows no ruler. Only then review validated:true, deploy and verify production base permission. Retain the current 0.04 m/s / 0.08 rad/s limits and 5 cm clearance. Evidence: docs/physical-verification-20261003.md.

@@ -2,7 +2,7 @@
 
 This document records which requested safety functions can be provided by the
 current robot hardware and which require an additional physical signal source.
-The repository safety supervisor denies base motion when a required input is
+The repository safety supervisor denies the affected capability when a required input is
 absent, stale, or unhealthy. Normal hold mode restores permission when inputs
 recover, while strict mode (`LEKIWI_DISARM_ON_FAILURE=true`, and always in
 simulation) also latches faults. A ROS topic alone is not evidence of a real
@@ -98,7 +98,7 @@ The diagnostics use these units:
 | Load | raw value and signed duty-cycle estimate (`raw / 1000`), not physical torque |
 | Temperature | internal servo temperature in °C |
 
-The following conditions are `ERROR` and revoke base permission in both modes;
+The following conditions are `ERROR` and revoke base and arm permission in both modes;
 strict mode additionally latches the fault:
 
 - communication failure, incomplete readback, or invalid value;

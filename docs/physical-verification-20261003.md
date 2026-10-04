@@ -160,10 +160,13 @@ nodes. Evidence: `.benchmarks/physical-navigation/20261004-002217/`.
 ## Remaining qualification
 
 The provisional marker-plane evidence does not establish an independently
-bounded floor/lens measurement error. Formal acceptance counters and distances
-remain unset. Applicable motor-diagnostic, replay/duplicate telemetry, external
-obstacle and arm-workspace intrusion fault evidence is still incomplete.
-The present rig cannot complete those physical cases by software assertions.
+bounded floor/lens measurement error. The acceptance record now contains the
+185 eligible nominal stops and conservatively rounded distances, including
+the larger measured moving fault bounds. It remains `validated: false`.
+The declared 10 mm measurement error is still unverified: the floor ruler's
+graduations are absent from the external camera image. Moving diagnostic and
+duplicate-telemetry stopping distances also remain unmeasured; the bottle must
+be removed before those two cases can attain the test speed.
 Meaningful Nav2 movement, fresh-map growth and spatial closure were observed;
 this small route does not establish whole-house accuracy or global relocalization. The production SLAM database is
 retained; fresh test databases are separate artifacts.
@@ -200,3 +203,27 @@ services are active, temporary fault firewall rules and rollback timers absent.
 Finite test clients have exited; production is restored and no test monitor stays
 running. Subsequent commits update this report only; the recorded runtime
 revision identifies the tested deployment.
+
+## Additional live gates — 2026-10-04
+
+| Case | Actual input and response |
+| --- | --- |
+| External obstacle | Operator's bottle appears in Astra RGB and depth and the lidar StopZone. An otherwise permitted 0.04 m/s request was forced to zero; wheel translation stayed below 0.7 mm. This was a stationary blocking check. |
+| Arm workspace | A temporary MoveIt collision object at the wrist produced FCL contacts, withdrew permission and rejected an arm goal. All six measured joints remained unchanged. This tests injected planning-scene geometry, not camera detection of that object. The object was removed. |
+| Motor diagnostics | ERROR injected only into authenticated outgoing observations withdrew base permission but initially left arm permission true. The normal-mode override was the cause. Removing that override makes both capabilities obey their health gates; the driver's existing feedback-gap hold remains intact. |
+| Duplicate telemetry | Exact copies of the last successful authenticated observation did not renew state leases. Driver/joint freshness expired and permission was withdrawn; normal fresh observations restored permission. |
+
+The last two cases used the real servo host and driver **at rest**, preserving
+servo registers and the local watchdog. Injection expired after four seconds;
+a finite native test unit and independent rollback restored the production
+host. Final repeat on revision `7c3ef989cdab`: motor-error permission response
+upper bound 0.432 s, replay response upper bound 1.149 s, maximum joint change
+0 rad in both cases; camera swept excursions below 0.4 mm. These response times
+include the fault request and transport; they are not moving stopping times.
+All applicable functional fault flags are now recorded as passed. The full
+CTest suite after the correction passed **57/57 in 154.53 s**, including nine
+launch checks. Targeted supervisor/driver/torque checks passed 151/151.
+
+Evidence: `.benchmarks/acceptance-gates/20261004-083003/`,
+`20261004-083219/`, `.benchmarks/physical-telemetry-gates/20261004-084631/`
+and `.benchmarks/physical-rig/arm-health-fixed-ctest.log`.
