@@ -27,7 +27,7 @@ def test_qualification_socket_changes_only_wire_data_and_expires():
     new = [frames[0].replace(b'1', b'2', 1), b'new jpeg']
     socket.send_multipart(new)
     assert sent[-1] == frames
-    now[0] = 4.0
+    now[0] = 8.0
     socket.send_multipart(new)
     assert sent[-1] == new
     socket.inject('diagnostic')
@@ -35,7 +35,7 @@ def test_qualification_socket_changes_only_wire_data_and_expires():
     assert json.loads(sent[-1][0])['_lekiwi_motor_health']['statuses']['motor_bus']['level'] == 2
     assert json.loads(new[0])['_lekiwi_motor_health']['statuses']['motor_bus']['level'] == 0
     assert sent[-1][1] == b'new jpeg'
-    now[0] = 8.0
+    now[0] = 16.0
     socket.send_multipart(new)
     assert sent[-1] == new
     with pytest.raises(ValueError, match='unsupported'):

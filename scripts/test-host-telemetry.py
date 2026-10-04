@@ -2,7 +2,7 @@
 """Explicit live qualification host: USR1 diagnostic error, USR2 duplicate frame.
 
 Only the transmitted observation changes. Servo reads, commands, authenticated
-transport and the local watchdog run unchanged. Injection expires after 4 s.
+transport and the local watchdog run unchanged. Injection expires after 8 s.
 Never used by the production service; start with robot-host.sh's test option.
 """
 import importlib.util
@@ -23,7 +23,7 @@ class FaultSocket:
             raise ValueError('unsupported telemetry fault')
         if mode == 'duplicate' and self.last is None:
             raise RuntimeError('cannot replay before a successful observation')
-        self.mode, self.until = mode, self.clock()+4
+        self.mode, self.until = mode, self.clock()+8
         print('qualification telemetry fault:', mode, flush=True)
 
     def __getattr__(self, name):

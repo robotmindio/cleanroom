@@ -32,12 +32,16 @@ def metric_reference(markers, identifiers, side):
     if not math.isfinite(side) or side <= 0 or len(identifiers) < 2:
         raise ValueError('invalid marker dimensions or reference identifiers')
     corners = [np.asarray(markers[key], dtype=float) for key in identifiers]
-    origin = corners[0].mean(axis=0)
     square = np.float32([[-side/2,-side/2],[side/2,-side/2],[side/2,side/2],[-side/2,side/2]])
-    matrix = cv2.getPerspectiveTransform(np.float32(corners[0]-origin),square)
-    reference = {key:plane_points(markers[key],matrix,origin) for key in identifiers}
-    error = max(abs(np.linalg.norm(c-np.roll(c, -1, axis=0), axis=1)-side).max()
-                for c in reference.values())
+    candidates = []
+    for anchor in corners:
+        origin = anchor.mean(axis=0)
+        matrix = cv2.getPerspectiveTransform(np.float32(anchor-origin),square)
+        reference = {key:plane_points(markers[key],matrix,origin) for key in identifiers}
+        error = max(abs(np.linalg.norm(c-np.roll(c, -1, axis=0), axis=1)-side).max()
+                    for c in reference.values())
+        candidates.append((matrix,origin,reference,float(error)))
+    matrix,origin,reference,error = min(candidates,key=lambda c:c[3])
     if not math.isfinite(error) or error > side*.15:
         raise ValueError(f'marker scale is inconsistent: {error:.4f} m edge residual')
     return matrix, origin, reference, float(error)
@@ -120,6 +124,7 @@ class Camera:
         self.config = config
         self.output = output
         self.calibration = None
+        self.reference_samples = []
         self.last_pose = None
         self.last_time = 0.0
         self.closed = False
@@ -130,7 +135,7 @@ class Camera:
         self.parameters = (cv2.aruco.DetectorParameters_create() if hasattr(cv2.aruco,'DetectorParameters_create')
                            else cv2.aruco.DetectorParameters())
         self.parameters.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_APRILTAG
-        self.parameters.aprilTagQuadDecimate = 1.0
+        self.parameters.aprilTagQuadDecimate = 1.5
         if self.pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
             message = self.pipeline.get_bus().pop_filtered(Gst.MessageType.ERROR)
             details = message.parse_error() if message is not None else 'no GStreamer error detail'
@@ -188,7 +193,15 @@ class Camera:
             return record
         markers = self.detect(image)
         if self.calibration is None and all(key in markers for key in self.config['marker_ids']):
-            self.calibration = metric_reference(markers, self.config['marker_ids'], self.config['marker_side_m'])
+            self.reference_samples.append({key:markers[key] for key in self.config['marker_ids']})
+            if len(self.reference_samples) < 10:
+                record = {'time':received,'pts_ns':int(buffer.pts),'pose':None,
+                          'ids':list(markers),'bytes':len(raw)}
+                self.records.write(json.dumps(record)+'\n')
+                return record
+            stable = {key:np.median([s[key] for s in self.reference_samples],axis=0)
+                      for key in self.config['marker_ids']}
+            self.calibration = metric_reference(stable, self.config['marker_ids'], self.config['marker_side_m'])
             matrix,origin,reference,error = self.calibration
             (self.output/'calibration.json').write_text(json.dumps({
                 'matrix':matrix.tolist(),'origin_px':origin.tolist(),

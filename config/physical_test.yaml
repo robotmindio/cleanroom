@@ -17,7 +17,10 @@ maximum_optical_displacement_m: 0.08
 # lies up to 20 cm away from that center and the base rotates during a trial.
 marker_center_offset_bound_m: 0.20
 maximum_center_radius_m: 0.15
-maximum_frame_age_s: 0.20
+# At 0.04 m/s this bounds unobserved travel to 2 cm, inside the early radius
+# margin. The preceding camera frame remains the conservative stop baseline;
+# the stop is held for observation before any return command.
+maximum_frame_age_s: 0.50
 measurement_uncertainty_m: 0.010
 # Predeclared budget: StopZone has 5 cm footprint clearance, including error.
 maximum_stopping_distance_m: 0.050
