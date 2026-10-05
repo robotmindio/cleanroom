@@ -13,7 +13,9 @@ TELEMETRY_MONOTONIC_NS_KEY = "_lekiwi_sample_monotonic_ns"
 TELEMETRY_TORQUE_ENABLED_KEY = "_lekiwi_torque_enabled"
 HOST_ODOMETRY_KEY = "_lekiwi_odometry"
 BASE_XY_SCALE = 1.0
-BASE_YAW_SCALE = 0.90
+# 2026-10-05: source-time-aligned native lidar measured 1.08453 times the
+# wheel yaw at the former 0.90 scale; independent RGB-D agreed on the turn.
+BASE_YAW_SCALE = 0.976
 TELEMETRY_KEYS = (
     TELEMETRY_PROTOCOL_KEY,
     TELEMETRY_SESSION_KEY,

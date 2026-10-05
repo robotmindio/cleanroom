@@ -98,6 +98,8 @@ def test_odometry_does_not_bridge_restart_link_loss_or_large_gap():
 def test_host_odometry_keeps_motion_across_lost_packets_and_reanchors_restart(tmp_path):
     from lekiwi_rmf.odometry import HostOdometry, HostPoseTracker, load_base_scales, parse_host_odometry, HOST_ODOMETRY_KEY
 
+    assert load_base_scales(tmp_path / "missing.conf") == (1.0, 0.976)
+    assert HostOdometry().scales == (1.0, 0.976)
     calibration = tmp_path / "calibration.conf"
     calibration.write_text("camera_pitch=0.02\nxy_velocity_scale=2\nyaw_velocity_scale=0.9\n")
     assert load_base_scales(calibration) == (2.0, 0.9)

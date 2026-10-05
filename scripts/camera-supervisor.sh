@@ -71,7 +71,8 @@ stop_child() { # stop_child <reason>; bounded TERM -> KILL for a wedged camera
 device_healthy() {
   [ -e "$device" ] || return 1
   command -v v4l2-ctl >/dev/null 2>&1 || return 0
-  timeout 2 v4l2-ctl --device "$device" --all >/dev/null 2>&1
+  # QUERYCAP detects ENODEV without polling exposure/focus controls every second.
+  timeout 2 v4l2-ctl --device "$device" --info >/dev/null 2>&1
 }
 
 topic_healthy() {
@@ -89,7 +90,7 @@ driver_camera_name() {
   # names such as `lekiwi_front`, so adapt a private runtime copy below rather
   # than rejecting calibrated intrinsics or overwriting the user's source YAML.
   command -v v4l2-ctl >/dev/null 2>&1 || return 1
-  v4l2-ctl --device "$device" --all 2>/dev/null |
+  v4l2-ctl --device "$device" --info 2>/dev/null |
     sed -nE 's/^[[:space:]]*Card type[[:space:]]*:[[:space:]]*(.*)$/\1/p' |
     head -n 1 |
     tr '[:upper:]' '[:lower:]' |
