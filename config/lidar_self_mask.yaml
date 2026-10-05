@@ -9,7 +9,11 @@ scan_self_filter:
     # latter without extending its reach outside the footprint. This is pose-specific:
     # remeasure after moving the arm, lidar, or hardware within 20 cm of it. Angles
     # are laser-frame degrees, counter-clockwise from +x. Each value is per sector.
-    body_start_deg: [214.0, 254.0, 299.0, 315.0]
+    # 2026-10-05: 200 stationary raw scans in travel_stow found 34 returns
+    # at 210.9-213.8 deg / 0.136-0.195 m outside the old 214 deg edge.
+    # Their base coordinates are inside the chassis; extending to 210 deg
+    # at the same 0.24 m reach stays entirely inside the folded footprint.
+    body_start_deg: [210.0, 254.0, 299.0, 315.0]
     body_end_deg: [233.0, 284.0, 315.0, 350.0]
     # Folded-arm verification 2026-10-03 found 0.188-0.194 m self-returns
     # around 300-302 deg, at base x=0.027-0.029, y=0.101-0.108 m.

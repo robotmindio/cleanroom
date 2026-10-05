@@ -74,10 +74,15 @@ class OnboardTest(NAV['Test']):
         if math.hypot(sample['x'], sample['y']) > .16:
             raise RuntimeError('early 16 cm independent visual boundary reached')
 
-    def tick(self, twist=None, check=True):
-        if check and self.center is not None:
-            self.check_visual_feedback(time.monotonic())
-        super().tick(twist, check)
+    def check_feedback(self):
+        super().check_feedback()
+        def fresh():
+            return (self.visual and self.visual_info and not self.visual_info[-1]['lost']
+                    and -.2 <= self.visual[-1]['source_age_s']
+                    + time.monotonic() - self.visual[-1]['t'] <= 2.)
+        if not fresh():
+            self.pause_until(fresh, 'fresh independent Astra tracking')
+        self.check_visual_feedback(time.monotonic())
 
     def mark(self, name):
         end = time.monotonic() + 1

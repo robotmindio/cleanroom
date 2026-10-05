@@ -330,7 +330,7 @@ def test_runner_drains_callbacks_and_reports_a_physical_stop(monkeypatch):
                                  monitor_action=('StopZone',1),blocked_at=time.monotonic()-4)
     command = Twist()
     command.linear.x = .03
-    with pytest.raises(RuntimeError,match='physical obstacle'):
+    with pytest.raises(RuntimeError,match='StopZone blocks motion'):
         functions['Test'].tick(node,command)
     assert len(calls) == 21
     assert commands[-1].linear.x == commands[-1].angular.z == 0
@@ -513,6 +513,7 @@ def test_navigation_probe_withdraws_lease_until_feedback_recovers(monkeypatch,un
         lease=types.SimpleNamespace(publish=lambda m:leases.append(m.data)),
         command=types.SimpleNamespace(publish=commands.append))
     node.tick = lambda *args,**kwargs:Test.tick(node,*args,**kwargs)
+    node.check_feedback = lambda:Test.check_feedback(node)
     node.pause_until = lambda *args:Test.pause_until(node,*args)
     def spin_once(node,timeout_sec):
         if not node.active:

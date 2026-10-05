@@ -121,32 +121,37 @@ class Test(Node):
 
     def tick(self, twist=None, check=True):
         self.lease.publish(Bool(data=self.active))
-        if twist is not None:
+        requested = twist is not None and any((twist.linear.x,twist.linear.y,twist.angular.z))
+        if twist is not None and not requested:
             self.command.publish(twist)
         rclpy.spin_once(self,timeout_sec=0.04)
         # Camera processing can take a frame period. Drain ready callbacks so
         # high-rate sensor topics cannot leave our pose/permissions queued.
         for _ in range(20):
             rclpy.spin_once(self,timeout_sec=0)
-        requested = twist is not None and any((twist.linear.x,twist.linear.y,twist.angular.z))
         if check and requested and self.monitor_action == ('StopZone',CollisionMonitorState.STOP):
             if self.blocked_at is None:
                 self.blocked_at = time.monotonic()
             elif time.monotonic()-self.blocked_at > 3:
                 self.command.publish(Twist())
-                raise RuntimeError('physical obstacle in collision-monitor StopZone blocks motion')
+                raise RuntimeError('collision-monitor StopZone blocks motion')
         else:
             self.blocked_at = None
         if check and self.center is not None:
-            if time.monotonic()>self.deadline:
-                raise RuntimeError('total test deadline expired')
-            def unverified():
-                return (time.monotonic()-self.odom_at>0.5 or
-                        not self.flags.get('arm_stowed') or self.flags.get('driver')!='ARMED')
-            if unverified():
-                self.pause_until(lambda:not unverified(),'verified motion feedback')
-            if math.dist(self.pose[:2],self.center[:2])>=0.18:
-                raise RuntimeError('early 18 cm test boundary reached')
+            self.check_feedback()
+        if requested:
+            self.command.publish(twist)
+
+    def check_feedback(self):
+        if time.monotonic()>self.deadline:
+            raise RuntimeError('total test deadline expired')
+        def unverified():
+            return (time.monotonic()-self.odom_at>0.5 or
+                    not self.flags.get('arm_stowed') or self.flags.get('driver')!='ARMED')
+        if unverified():
+            self.pause_until(lambda:not unverified(),'verified motion feedback')
+        if math.dist(self.pose[:2],self.center[:2])>=0.18:
+            raise RuntimeError('early 18 cm test boundary reached')
 
     def wait(self, condition, seconds):
         end = time.monotonic()+seconds
