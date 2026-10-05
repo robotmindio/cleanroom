@@ -1,5 +1,12 @@
 # Onboard camera verification — 2026-10-05
 
+**Verification closed for initial attended trials:** unloaded arm motion and
+local Nav2/SLAM tests can start within the existing 30 cm test area, at the
+accepted 0.03 m/s and 0.06 rad/s base limits on dry concrete, with the operator
+at the physical motor-power stop. The wrist USB fault and standalone camera
+translation drift remain open. See [the closeout](#verification-closeout-for-initial-trials)
+for the verified scope and evidence.
+
 **Latest follow-up:** runtime revision `1937e3923ce8` is deployed. After the wrist
 camera connector was tightened, the finite arm and production Nav2 checks
 passed. Wrist USB still disconnected at 20:25:10 and recovered in about five
@@ -395,3 +402,53 @@ Local evidence under `.benchmarks/onboard-verification/`:
 - `20261005-202511-rotation-comparison/`: reverted planar-observer experiment.
 - `cable-tightened-streams.json`, `cable-tightened-usb-events.log`: source-frame
   intervals and kernel/service evidence after tightening the connector.
+
+## Verification closeout for initial trials
+
+Observations collected at 21:30–21:37 close the initial stage for **attended, unloaded functional
+trials** in the existing 30 cm area. It retains the measured acceptance record
+from 2026-10-04; no stopping trial, fault result or payload rating was invented
+or re-dated. Follow-up checks used the installed runtime and sent no motion
+commands. Earlier finite arm and Nav2 execution results remain the functional
+movement evidence.
+
+| Component | Result and evidence |
+| --- | --- |
+| Physical acceptance | Installed schema-4 record validated against the configured stow, hardware, Nav2 footprint and clearance. Worst recorded stop distance plus uncertainty is 0.047712 m against the 0.05 m budget. |
+| Base limits | Installed production limits match acceptance: 0.03 m/s linear and 0.06 rad/s angular. Added payload remains 0 kg; accepted surface is dry concrete. |
+| Arm / MoveIt | Current folded pose is collision-valid with no contacts; arm permission is true. Stored HOME and travel_stow executions passed within 0.02 rad. MoveGroup and arm trajectory action servers are available. |
+| Nav2 | Planner, controller, navigator, behavior server and CollisionMonitor are active. NavigateToPose is available; the preceding two production goals passed. |
+| SLAM inputs and map | 16 dual-view arrays all contained both views; 44 fused clouds arrived, minimum 687 points. The saved graph returned 65 poses and 195 links. Front 2D RGB, Astra RGB-D and measured fused lidar/depth are the mapping inputs. |
+| Current safety state | ARMED, arm stowed, both permissions true, no current/latched faults. All six normal compute/device services were active. |
+
+The final eight-second snapshot received 84 joint states, 42 scans, 18 wrist
+images, 17 front images and 16 Astra RGB-D pairs. Front/Astra images contained
+782/884 ORB features; image source ages were 0.10–0.46 s. The installed acceptance,
+production-safety, Nav2 and EKF YAML values matched the tracked configuration.
+
+Two exceptions remain outside the completed functional scope:
+
+- **Wrist USB reliability:** tightening did not prevent the 20:25 disconnect.
+  Its camera is an arm preview, separate from the two fixed mapping views.
+  Vision-dependent manipulation with that stream remains unverified.
+- **Independent visual distance accuracy:** standalone Astra odometry drifted
+  during the small turns. Production EKF uses `/wheel/odometry` only; the
+  diagnostic RGB-D odometry is not one of its inputs. Production SLAM still
+  uses visual registration alongside lidar, so room-scale localization accuracy
+  and precision placement remain unverified.
+
+Initial trials therefore cover empty-arm pose/motion checks and supervised
+local navigation/mapping. Base travel uses the accepted folded travel_stow.
+Payload and higher speeds require new physical measurements; a larger route
+requires a scope extension and further navigation verification. The operator
+maintains the 30 cm test area during normal production operation. All finite
+clients ended; the robot remained
+folded, ARMED and quiet with normal services running.
+
+Evidence under `.benchmarks/onboard-verification/`:
+
+- `20261005-213055/`: current posture, camera freshness and healthy permissions.
+- `verification-closeout-acceptance.json`: installed acceptance and speed checks.
+- `verification-closeout-runtime.json`: action/lifecycle readiness, mapper inputs
+  and saved map graph. These observations do not replace the recorded physical
+  fault and stopping measurements.

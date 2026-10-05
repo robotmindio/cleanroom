@@ -44,8 +44,8 @@ safety_supervisor:
     arm_workspace_topic: /safety/arm_workspace_clear
     minimum_battery_voltage: 10.5
     minimum_battery_percentage: 0.15
-    # Physically set compact fold; footprint and stopping acceptance
-    # remain unverified, so autonomous base acceptance remains false.
+    # Physically accepted compact fold. Base permission also requires healthy
+    # inputs and the matching recorded footprint/stopping acceptance.
     stow_tolerance: 0.02
     stow_joint_names:
       - arm_shoulder_pan
