@@ -1,9 +1,10 @@
 # Onboard camera verification — 2026-10-05
 
-**Latest follow-up:** runtime revision `1937e3923ce8` is deployed. Arm posture
-and the final lidar turn/scan-mask check passed. The latest visual SLAM/Nav2
-recheck is blocked by dark images; wrist USB disconnection cause remains
-unidentified. Earlier successful camera/navigation tests are recorded below.
+**Latest follow-up:** runtime revision `1937e3923ce8` is deployed. With lighting
+restored, the existing map relocalized, two production Nav2 goals passed, and
+MoveIt executed HOME and travel_stow successfully. Wrist USB disconnection
+recurred and recovered; its physical cause remains unidentified. Earlier dark
+conditions and the completed recovery checks are recorded below.
 
 Finite unloaded tests used the robot's front, wrist and Astra cameras, registered
 depth and lidar. No external measurement camera was used. All commanded base
@@ -190,7 +191,7 @@ keeping all masked endpoints within the original footprint. The same 95 tests
 passed again. Normal split deployment completed at revision `1937e3923ce8`,
 with verified re-arm and the compact arm posture preserved.
 
-### Current visual verification blocker
+### Dark-interval visual verification blocker (18:26–18:35)
 
 The interrupted routes left approximately 39.8° of accumulated rotation,
 measured by independent lidar. A finite two-step return measured 37.2° of
@@ -252,6 +253,69 @@ Follow-up local evidence:
 - `20261005-183546/`: final arm, camera, permission and localization snapshot.
 - `final-mask-tests.log`, `final-deployment.log`: 95 checks and verified split
   deployment of `1937e3923ce8`.
+
+## Illuminated recovery and current production verification (18:57–19:08)
+
+The new snapshot measured 835 front-camera and 909 Astra ORB features, with
+mean brightness 98.58 and 39.45 respectively. No database reset or replacement
+was performed. A finite ±0.15 rad orientation search recovered the saved view:
+RTAB-Map accepted the global link **1–6741 with 20 visual inliers**, followed by
+spatial recognitions against saved nodes 80 and 81. Production registration
+thresholds and mapping settings were unchanged.
+
+Two Nav2 goals on the active production map (8 cm forward and return) both
+returned status 4. Native onboard RGB-D odometry measured **5.74 cm** of forward
+movement. Maximum radius was **9.84 cm visually** and 6.34 cm in wheel odometry,
+within the attended 30 cm area. Camera tracking losses and supervisor fault
+samples were both zero during that route. All **65 dual-view arrays had two
+views**; the graph had grown to **45 nodes with 87–241 image features per
+node**. These are local checks with the accepted unloaded speed profile, not a
+room-wide survey or qualification of added payload.
+
+MoveIt then executed the stored HOME target and returned to travel_stow:
+
+| Movement | Execution time | Maximum joint error |
+| --- | ---: | ---: |
+| HOME | 8.500 s | 0.01841 rad |
+| travel_stow | 7.617 s | 0.01382 rad |
+
+Both actions returned status 4 / MoveIt error code 1, below the 0.02 rad
+controller tolerance. HOME encountered a stale state-validity result and a
+joint-feedback gap; the driver held the goal and resumed it successfully.
+The return to stow recorded no supervisor faults. Base permission was withdrawn
+while unfolded and restored at stow.
+
+### Wrist USB recurrence: recovered, cause not resolved
+
+At **19:01:07**, during the orientation search with the arm stowed, the kernel
+recorded device 4-1 disconnecting (address 11), URB status -19, and immediate
+re-enumeration at address 12. The capture process then reported ENODEV; the
+supervisor detected it at 19:01:08 and restarted wrist capture at 19:01:12,
+about **five seconds** after the disappearance. Front and Astra services stayed
+active. No undervoltage or overcurrent event was logged, and Pi throttling was
+zero. This recurrence confirms that the health-query hardening did not remove
+the underlying USB fault. Cable/connector, local camera power and firmware
+remain unseparated; a cable substitution in the same port is the next
+controlled physical comparison.
+
+The final eight-second snapshot received 84 joint states, 42 scans, 17 wrist
+images, 17 front images and 16 Astra RGB-D pairs. All image source ages were
+0.43–0.58 s. MoveIt reported a valid state with no contacts; the driver was
+ARMED, the arm stowed, both permissions true, with no current/latched faults.
+The mapper retained an accepted closure (last ID 7020). All finite test clients,
+captures and independent observers ended; normal production services remain
+active.
+
+Local evidence:
+
+- `20261005-185751/`: restored lighting and valid arm snapshot.
+- `20261005-190055-rotation-comparison/`: view search and accepted global link.
+- `20261005-190255-production-navigation/`: two production Nav2 goals, camera
+  measurements, graph and dual-view counts.
+- `20261005-190520-arm-home/`, `20261005-190537-arm-travel_stow/`: MoveIt actions
+  and before/after onboard camera views.
+- `usb-recurrence-1901.log`: kernel disappearance and capture recovery sequence.
+- `20261005-190834/`: final production snapshot.
 
 ### Wrist USB: physical cause remains unresolved
 
