@@ -64,7 +64,7 @@ def test_sensor_bridge_caps_previews_and_drops_stale_sensor_samples_on_congestio
     assert '"^/pi/lidar/scan$=5"' in device
     assert '"^/camera/depth/points$=3"' not in device
     assert '"^/pi/camera/front/image_raw/compressed$=2"' in device
-    assert '"^/pi/camera/wrist/image_raw/compressed$=0.1"' in device
+    assert '"^/pi/camera/wrist/image_raw/compressed$=2"' in device
     assert '"^/camera/astra/depth/image_raw/compressed$"' in device
     assert '"^/camera/astra/depth/image_raw/compressed$=6"' in device
     assert '"^/camera/astra/(color|depth)/image_raw/compressed$=2"' not in device

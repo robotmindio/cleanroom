@@ -33,7 +33,8 @@
       pub_max_frequencies: [
         "^/pi/lidar/scan$=5",
         "^/pi/camera/front/image_raw/compressed$=2",
-        "^/pi/camera/wrist/image_raw/compressed$=0.1",
+        // Keep the gripper view current during short arm movements.
+        "^/pi/camera/wrist/image_raw/compressed$=2",
       ],
       // This is a sensor-only bridge. Congestion must drop an old sample rather
       // than block a reliable DDS writer and make every later scan stale.
