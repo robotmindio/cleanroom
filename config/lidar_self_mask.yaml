@@ -13,13 +13,17 @@ scan_self_filter:
     # at 210.9-213.8 deg / 0.136-0.195 m outside the old 214 deg edge.
     # Their base coordinates are inside the chassis; extending to 210 deg
     # at the same 0.24 m reach stays entirely inside the folded footprint.
-    body_start_deg: [210.0, 254.0, 299.0, 315.0]
-    body_end_deg: [233.0, 284.0, 315.0, 350.0]
+    # During the return rotation, four scans also found 233.1 deg / 0.202 m
+    # and 340.2-341.8 deg / 0.214-0.220 m body returns. Cover the first edge
+    # to 234 deg and split the last reach at 342 deg to stay inside y=0.22 m.
+    body_start_deg: [210.0, 254.0, 299.0, 315.0, 342.0]
+    body_end_deg: [234.0, 284.0, 315.0, 342.0, 350.0]
     # Folded-arm verification 2026-10-03 found 0.188-0.194 m self-returns
     # around 300-302 deg, at base x=0.027-0.029, y=0.101-0.108 m.
     # A 200-scan replay also found 278.1 deg / 0.217 m, 1 mm beyond its bound.
     # Later scans found 0.213-0.225 m returns at 299.6-301.3 deg, still inside
     # the body. Split the same angular union at 315 deg: the first piece can
-    # reach 0.26 m without crossing the footprint; the second stays at 0.205 m.
-    # All added range remains inside the footprint; total scan coverage is unchanged.
-    body_max_range_m: [0.24, 0.228, 0.26, 0.205]
+    # reach 0.26 m without crossing the footprint. The later 342 deg split
+    # keeps the extended rear reach within y=0.22 m as well.
+    # All added range remains inside the footprint.
+    body_max_range_m: [0.24, 0.228, 0.26, 0.226, 0.218]
