@@ -1,5 +1,10 @@
 # Onboard camera verification — 2026-10-05
 
+**Latest follow-up:** runtime revision `1937e3923ce8` is deployed. Arm posture
+and the final lidar turn/scan-mask check passed. The latest visual SLAM/Nav2
+recheck is blocked by dark images; wrist USB disconnection cause remains
+unidentified. Earlier successful camera/navigation tests are recorded below.
+
 Finite unloaded tests used the robot's front, wrist and Astra cameras, registered
 depth and lidar. No external measurement camera was used. All commanded base
 movements stayed inside the requested 30 cm area; the largest observed radius
@@ -77,8 +82,9 @@ native RTAB-Map RGB-D odometry, with no wheel guess, automatic tracking reset or
 competing TF publisher.
 
 The wheel and native visual headings differed by approximately 4.84° at the end
-of the first route. This short experiment cannot separate visual drift from
-wheel slip or calibration error, so no wheel scale was changed. Native visual
+of the first route. That experiment did not separate visual drift from
+wheel slip or calibration error; the subsequent calibration below uses an
+independent lidar observer as well. Native visual
 odometry also has not been calibrated to the external rig's accepted absolute
 measurement uncertainty. These results do not replace braking measurements.
 
@@ -93,8 +99,8 @@ not a fully surveyed room. Added payload remains qualified at **0 g**.
 
 The Pi produced about 30 wrist frames/s while the compute bridge received only
 one in eight seconds: `config/zenoh_device.json5` capped the preview at 0.1 Hz.
-Revision `967e7c5` raised that cap to 2 Hz. Normal split deployment succeeded;
-both runtime revision markers match
+Revision `967e7c5` raised that cap to 2 Hz. That split deployment succeeded;
+both runtime revision markers then matched
 `967e7c569dd78ef02a83aeb8c332350f09992a16`. Four targeted bridge tests passed.
 
 The final eight-second production check received 82 joint states, 41 lidar scans,
@@ -137,3 +143,131 @@ Local artifacts under `.benchmarks/onboard-verification/`:
 - `20261005-171327-production-navigation/`: two normal production Nav2 goals,
   native camera measurements and the relocalized graph.
 - `20261005-171435/`: final camera, permission, joint and MoveIt snapshot.
+
+## Follow-up root fixes
+
+An independent native RTAB-Map ICP observer used `/scan`, without wheel guesses,
+TF publication or automatic tracking resets. The completed three-turn baseline
+provided 198 source-timestamp-aligned wheel/lidar pairs: lidar yaw gain was
+**1.08453** relative to wheel yaw, with 0.241° regression residual RMS over
+32.95°. Independent RGB-D also measured larger turns than the wheel estimate.
+The shared yaw scale was corrected from **0.90 to 0.976** in
+`lekiwi_rmf/odometry.py`, used by the Pi integrator and compute driver. Saved
+calibration overrides remain supported. Both deployed instances used 0.976.
+
+The device had a saved 5 GHz Wi-Fi profile at priority 10 while its active
+2.4 GHz fallback had priority 50. The existing tracked switch script now reuses
+the matching saved profile and sets its priority above the fallback (51 here),
+preserving native timed rollback. Automatic channel selection uses an empty
+setting; NetworkManager rejected the former numeric zero when selecting band
+`a`. The Pi joined 5 GHz at 5785 MHz, with observed transmit rates of 433.3 Mbit/s.
+This corrects profile selection; it does not establish that every transport gap
+has disappeared.
+
+The finite observer checked cached poses before processing queued ROS callbacks.
+The shared navigation tick now drains callbacks and validates feedback before
+publishing nonzero manual commands. The onboard guard reuses the existing
+bounded zero-command pause while fresh visual tracking recovers. Capture-age
+bounds and the early 16 cm visual/18 cm wheel boundaries remain unchanged.
+A live interrupted turn recovered from three transient visual tracking losses;
+its subsequent stop exposed the separate scan-mask error below.
+
+Two hundred stationary raw lidar scans in `travel_stow` found 34 body returns
+in 14 scans at **210.9–213.8°**, ranges **0.136–0.195 m**. Their transformed
+coordinates were x=-0.064 to -0.028 m, y=-0.158 to -0.111 m, inside the chassis.
+The first self-mask sector started at 214°, so these returns reached
+CollisionMonitor's one-point StopZone and caused intermittent false stops.
+Its start is now **210°**, with the same 0.24 m range bound. The entire extended
+sector lies inside the folded footprint; exterior obstacle returns and the
+accepted stopping clearance remain unchanged. Targeted motion, scan-mask and
+safety tests passed: **95 tests**.
+
+An eight-second deployed check received 39 filtered scans with no StopZone
+points. A subsequent return rotation exposed four additional affected scans:
+233.1° at up to 0.202 m and 340.2–341.8° at 0.214–0.220 m. The first sector now
+ends at 234°. The last sector's reach is split at 342° into 0.226 m and 0.218 m,
+keeping all masked endpoints within the original footprint. The same 95 tests
+passed again. Normal split deployment completed at revision `1937e3923ce8`,
+with verified re-arm and the compact arm posture preserved.
+
+### Current visual verification blocker
+
+The interrupted routes left approximately 39.8° of accumulated rotation,
+measured by independent lidar. A finite two-step return measured 37.2° of
+physical rotation toward the initial view, with a source-aged lidar guard and
+unchanged collision monitoring. The mapper still did not accept a global
+closure, so the next production Nav2 check stopped before issuing any goal.
+The existing map was preserved.
+
+At 18:26, the front camera's mean brightness was **0.31/255** and Astra's was
+**4.48/255**; both had **zero ORB features**. The frontal camera's automatic
+exposure was active. Depth still supplied valid ranges over 34.5% of the raster,
+and all camera streams were arriving. These images cannot support the visual
+relocalization or independent camera motion verification. Earlier successful
+Nav2 tests remain historical evidence; the final production recheck is **not
+passed** under these lighting conditions. It needs usable illumination first.
+
+The additional yaw comparisons reduced the baseline error but showed remaining
+gain variation between interrupted routes. They do not establish one exact
+wheel-to-ground scale under every turn, traction condition or scan match.
+No visual matching threshold, accepted speed or stopping budget was relaxed.
+
+### Final finite lidar check: passed
+
+After the final mask deployment, left/right/return turns to ±0.15 rad completed
+in normal production. The independent source-aged lidar observer recorded no
+tracking losses and a maximum radius of **6.03 mm**; wheel radius was 1.31 mm.
+No filtered scan point entered StopZone during the check. Across 153 paired
+source timestamps, lidar/wheel yaw gain was **1.02655**, with residual RMS
+**0.218°**, compared with the initial gain 1.08453. The remaining local scale
+difference is 2.65%; this is not a claim of exact odometry on every surface.
+Transient `scan: stale` permission gaps still occurred; zero commands held the
+base until permission recovered, and all three turns completed. The final state
+was ARMED, arm stowed, both permissions true, no supervisor or latched faults.
+The camera observer remained lost in the dark images and was not used as a
+physical displacement measurement for this check.
+
+The final eight-second snapshot received 84 joint states, 42 lidar scans,
+17 front images, 17 wrist images and 16 Astra RGB-D pairs. MoveIt reported a
+valid arm state with no contacts, the arm remained stowed, and all six normal
+services were active. Both installed revision markers matched
+`1937e3923ce8ace75d391ba60b8b72968c3f4ae0`. Front/Astra images were still too
+dark (mean 0.45/2.68, with 0/1 ORB features), and global localization remained
+unaccepted. All finite observers, captures and motion clients were closed.
+
+Follow-up local evidence:
+
+- `20261005-172749-rotation-comparison/`: completed baseline yaw comparison.
+- `rotation-followup-fits.json`: source-time fits for interrupted comparisons.
+- `usb-root-cause.log`, `usb-camera-service.log`, `camera-query-ioctls.log`:
+  kernel/capture correlation and health-query work.
+- `self-mask-edge-measurement.json`: 200 raw stationary scans.
+- `20261005-181803-stopzone-scan.json`: deployed first-edge check.
+- `20261005-182341-rotation-comparison/`: return-heading recovery and the
+  remaining mask-edge measurements.
+- `20261005-182032-production-navigation/`: production localization timeout
+  before any Nav2 goal was sent.
+- `20261005-182612/`: dark camera images, calibration, fresh depth and valid arm.
+- `20261005-183250-rotation-comparison/`: completed final lidar/scan-mask check.
+- `20261005-183546/`: final arm, camera, permission and localization snapshot.
+- `final-mask-tests.log`, `final-deployment.log`: 95 checks and verified split
+  deployment of `1937e3923ce8`.
+
+### Wrist USB: physical cause remains unresolved
+
+Kernel USB disappearance preceded capture-supervisor restarts. The camera was
+stationary and connected during the failures. It occupies its own USB bus,
+separate from the Astra hub, and no competing capture process was found. Pi
+throttling was zero and the log contained no undervoltage/overcurrent event.
+A controlled suspend/resume and camera-service restart preserved the USB device
+identity and did not reproduce the failure. Those observations do not exclude
+a short local power or connector fault, or a camera/controller firmware fault.
+Separating those possibilities requires a cable/port/camera substitution or an
+electrical measurement; software observations have not identified which one.
+
+The supervisor's repeated health query used `v4l2-ctl --all`, unnecessarily
+reading hardware controls. It now uses `--info`: a traced invocation issued
+31 ioctls rather than 119. This reduces polling work but is **not proof** that
+the USB disconnect cause is fixed. No new USB disconnect was recorded after
+16:15 during the finite follow-up tests. Runtime deployment and final movement
+evidence are recorded below.
