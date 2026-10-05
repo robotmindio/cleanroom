@@ -1,16 +1,17 @@
 # Onboard camera verification — 2026-10-05
 
-**Latest follow-up:** runtime revision `1937e3923ce8` is deployed. With lighting
-restored, the existing map relocalized, two production Nav2 goals passed, and
-MoveIt executed HOME and travel_stow successfully. Wrist USB disconnection
-recurred and recovered; its physical cause remains unidentified. Earlier dark
-conditions and the completed recovery checks are recorded below.
+**Latest follow-up:** runtime revision `1937e3923ce8` is deployed. After the wrist
+camera connector was tightened, the finite arm and production Nav2 checks
+passed. Wrist USB still disconnected at 20:25:10 and recovered in about five
+seconds; tightening did not resolve it. Independent Astra translation drift
+also remains unresolved; the follow-up measurements are recorded below.
 
 Finite unloaded tests used the robot's front, wrist and Astra cameras, registered
 depth and lidar. No external measurement camera was used. All commanded base
-movements stayed inside the requested 30 cm area; the largest observed radius
-was 8.02 cm. These checks supplement the existing physical acceptance. They do
-not qualify added payload, higher speeds or accuracy across the whole room.
+movements stayed inside the requested 30 cm area; the initial series' largest
+observed radius was 8.02 cm. These checks supplement the existing physical
+acceptance. They do not qualify added payload, higher speeds or accuracy across
+the whole room.
 
 ## Arm and MoveIt: passed
 
@@ -317,7 +318,7 @@ Local evidence:
 - `usb-recurrence-1901.log`: kernel disappearance and capture recovery sequence.
 - `20261005-190834/`: final production snapshot.
 
-### Wrist USB: physical cause remains unresolved
+### Earlier wrist USB hardware isolation
 
 Kernel USB disappearance preceded capture-supervisor restarts. The camera was
 stationary and connected during the failures. It occupies its own USB bus,
@@ -332,6 +333,65 @@ electrical measurement; software observations have not identified which one.
 The supervisor's repeated health query used `v4l2-ctl --all`, unnecessarily
 reading hardware controls. It now uses `--info`: a traced invocation issued
 31 ioctls rather than 119. This reduces polling work but is **not proof** that
-the USB disconnect cause is fixed. No new USB disconnect was recorded after
-16:15 during the finite follow-up tests. Runtime deployment and final movement
-evidence are recorded below.
+the USB disconnect cause is fixed. The earlier finite follow-up did not reproduce
+the disconnect; the subsequent 19:01 recurrence is recorded above.
+
+## Tightened camera connector: finite follow-up (20:18–20:32)
+
+The wrist camera remained on the same Pi port with the same cable after its
+connector was tightened. The initial arm, Nav2 and small-turn checks through
+20:23 recorded no USB disconnect or capture restart, retaining USB address 12.
+However, at **20:25:10**, before the next commanded turn and with the arm still
+stowed, the kernel recorded another disappearance and enumeration as address
+13. ENODEV followed in the capture process. The supervisor restarted capture at
+20:25:14 and image conversion resumed at 20:25:15, about **five seconds** later.
+Pi throttling remained zero and no undervoltage/overcurrent was logged.
+Tightening the connector did **not** resolve the intermittent USB fault.
+
+A 90-second stream check spanning both arm movements and the Nav2 route
+received 180 wrist images. Maximum source-frame interval was **0.528 s** and
+maximum reception interval **0.513 s**; no reception gap exceeded one second.
+Front and Astra streams also had no reception gap over one second. Joint states
+arrived 895 times, with maximum source interval **0.137 s**.
+
+MoveIt executed unchanged HOME and travel_stow successfully, without supervisor
+fault samples. HOME took **8.137 s**, maximum joint error **0.01841 rad**;
+travel_stow took **7.424 s**, maximum error **0.01382 rad**. Both were inside the
+0.02 rad controller tolerance. Base permission returned after folding.
+
+Two production Nav2 goals, 8 cm forward and return, both returned status 4. There
+were zero supervisor fault samples and zero independent visual tracking losses;
+all **53 RGB-D arrays contained both mapping views**. Maximum wheel radius was
+**5.13 cm**, while the standalone camera observer reported **14.49 cm**. Its
+13.65 cm forward estimate differs substantially from wheel odometry, so it is
+not an accurate physical distance measurement in this scene.
+
+A ±0.15 rad left/right/return sequence used independent source-aged lidar
+tracking as the motion guard. Lidar maximum translation radius was **7.03 mm**,
+while the camera observer reported **14.57 cm**. There were no tracking losses,
+motion pauses or unmasked StopZone points. A controlled repeat using native
+`Reg/Force3DoF=true` still produced **11.93 cm** of camera drift versus **11.32 mm**
+in lidar. That experiment did not establish a correction and was reverted.
+Production SLAM already uses that planar constraint; remaining camera drift
+cannot be attributed solely to unrestricted roll/pitch. These tests have not
+isolated image/depth calibration, scene geometry and visual-estimator error.
+
+The last movement ended with the arm stowed, driver ARMED, both motion
+permissions true and no current/latched faults. All finite clients and observers
+ended. The existing production map and normal services were preserved. A cable
+substitution on the same port remains the next physical isolation step; this
+run did not identify the faulty component. A final eight-second snapshot after
+recovery received 17 wrist frames, with latest source age 0.645 s. MoveIt
+reported a valid folded state with no contacts; both permissions remained true
+and current/latched faults were empty.
+
+Local evidence under `.benchmarks/onboard-verification/`:
+
+- `20261005-201849/`, `20261005-202325/`: camera, arm-validity and health snapshots.
+- `20261005-203149/`: fresh wrist images and valid stow after USB recovery.
+- `20261005-201957-arm-home/`, `20261005-202010-arm-travel_stow/`: MoveIt results.
+- `20261005-202054-production-navigation/`: Nav2, map and dual-view measurements.
+- `20261005-202206-rotation-comparison/`: independent lidar and camera comparison.
+- `20261005-202511-rotation-comparison/`: reverted planar-observer experiment.
+- `cable-tightened-streams.json`, `cable-tightened-usb-events.log`: source-frame
+  intervals and kernel/service evidence after tightening the connector.
