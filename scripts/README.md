@@ -75,6 +75,7 @@ units refer to them directly.
 
 ## Maps, simulation and qualification
 
+- `test-onboard-navigation.py` runs four short Nav2 goals and rotations with independent native Astra RGB-D odometry and snapshots from all robot cameras. It uses a temporary map, stops at an early 16 cm visual boundary, and restores production without changing its map or physical acceptance. Source `scripts/setup.bash` first; the arm must be in `travel_stow` and the attended 30 cm area clear.
 - `test-physical-acceptance.py` runs finite live lidar, depth and telemetry-loss checks within the attended 30 cm envelope; `--restart-tests` tests compute-driver suspension and the Pi motor-host restart. It restores services and records fault evidence without approving physical braking distances.
 - `test-braking.py` uses the fixed USB camera and the configured 35 mm chassis markers for finite speed/stopping characterization. `--inspect` checks stationary tracking; `--explore-only` omits the configured repetitions (five per direction by default); `--directions left right rotation_cw rotation_ccw` resumes only those directions, leaving earlier evidence in its original run. The tracked specification is `config/physical_test.yaml`; raw frames and measurements go under `.benchmarks/physical-braking/`. It restores production and never automatically grants physical acceptance.
 - `free_space.py` turns the front camera into a floor-edge `LaserScan`.
