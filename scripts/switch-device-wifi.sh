@@ -25,7 +25,7 @@ priority=$(nmcli -g connection.autoconnect-priority connection show uuid "$origi
   exit 1
 }
 nmcli connection modify uuid "$target" 802-11-wireless.ssid "$ssid" \
-  802-11-wireless.band a 802-11-wireless.bssid "" 802-11-wireless.channel 0 \
+  802-11-wireless.band a 802-11-wireless.bssid "" 802-11-wireless.channel "" \
   802-11-wireless.powersave 2 connection.autoconnect-priority "$((priority + 1))"
 sudo -n systemd-run --quiet --collect --unit=lekiwi-wifi-rollback --on-active=45s \
   /usr/bin/nmcli connection up uuid "$original"

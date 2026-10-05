@@ -34,6 +34,10 @@ if [[ $1 == -g ]]; then
 fi
 if [[ $1 == connection && $2 == clone ]]; then touch "$LEKIWI_TEST_CLONED"; fi
 if [[ $1 == --wait ]]; then exit "$LEKIWI_TEST_FAIL"; fi
+while (( $# )); do
+  if [[ $1 == 802-11-wireless.channel && ${2:-} == 0 ]]; then exit 2; fi
+  shift
+done
 ''')
     _executable(fakes/'sudo','shift\nexec "$@"\n')
     for name in ('systemd-run','systemctl'):
