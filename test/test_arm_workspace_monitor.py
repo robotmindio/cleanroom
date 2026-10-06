@@ -104,3 +104,31 @@ def test_gate_blocks_until_the_perception_cloud_arrives_and_when_it_goes_stale()
     assert state.decision(SECOND * 2 + 1, SECOND * 3, SECOND, SECOND * 3) == (
         False, "perception cloud stale"
     )
+
+
+def test_delayed_validity_response_keeps_the_queried_pose_age():
+    future = types.SimpleNamespace(result=lambda: types.SimpleNamespace(valid=True))
+    state = ArmWorkspaceState(joint_received_ns=2 * SECOND,
+                              perception_received_ns=2 * SECOND)
+    node = types.SimpleNamespace(
+        _pending=future, _pending_sent_ns=1_850_000_000,
+        _pending_pose_ns=1_800_000_000, _state=state,
+        _monotonic_ns=lambda: 2 * SECOND,
+    )
+    ArmWorkspaceMonitor._on_check_complete(node, future)
+    assert state.checked_ns == 1_800_000_000
+    assert node._last_check_latency_ns == 150_000_000
+    assert node._pending is None and node._pending_pose_ns is None
+    assert state.decision(2 * SECOND, SECOND, SECOND, 350_000_000)[0]
+    state.joint_received_ns = state.perception_received_ns = 2_200_000_000
+    assert state.decision(2_200_000_000, SECOND, SECOND, 350_000_000) == (
+        False, "state-validity result stale"
+    )
+
+
+def test_expired_validity_response_cannot_refresh_the_lease():
+    future = types.SimpleNamespace(result=lambda: types.SimpleNamespace(valid=True))
+    state = ArmWorkspaceState(checked_ns=SECOND, collision_free=False)
+    node = types.SimpleNamespace(_pending=None, _state=state)
+    ArmWorkspaceMonitor._on_check_complete(node, future)
+    assert state.checked_ns == SECOND and not state.collision_free

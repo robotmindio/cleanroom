@@ -72,5 +72,8 @@ arm_workspace_monitor:
     # 0.40 s. Bound tolerance below the motor host's 0.50 s command watchdog.
     joint_timeout: 0.45
     perception_timeout: 0.50
-    validity_timeout: 0.15
-    service_timeout: 0.10
+    # CAD validity checks contend with planning. Their lease starts at the
+    # queried joint acquisition, so RPC latency cannot renew an old pose.
+    # Keep both budgets below the 0.45 s joint-feedback bound.
+    validity_timeout: 0.35
+    service_timeout: 0.25

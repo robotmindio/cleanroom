@@ -22,7 +22,7 @@ from lekiwi_rmf.motion_guards import FUTURE_STAMP_TOLERANCE_NS, positive_seconds
 
 @dataclass
 class ArmWorkspaceState:
-    """Receive-time leases for the inputs and latest MoveIt verdict."""
+    """Freshness leases for inputs and the pose queried through MoveIt."""
 
     joint_received_ns: int | None = None
     perception_received_ns: int | None = None
@@ -118,6 +118,8 @@ class ArmWorkspaceMonitor(Node):
         self._joint_snapshot: JointState | None = None
         self._pending = None
         self._pending_sent_ns: int | None = None
+        self._pending_pose_ns: int | None = None
+        self._last_check_latency_ns: int | None = None
         self._last_clear: bool | None = None
         self._confirmed_collision = False
 
@@ -196,6 +198,7 @@ class ArmWorkspaceMonitor(Node):
         future = self._pending
         self._pending = None
         self._pending_sent_ns = None
+        self._pending_pose_ns = None
         try:
             self._client.remove_pending_request(future)
         except (AttributeError, KeyError):
@@ -211,14 +214,18 @@ class ArmWorkspaceMonitor(Node):
         future = self._client.call_async(request)
         self._pending = future
         self._pending_sent_ns = now_ns
+        self._pending_pose_ns = self._state.joint_received_ns
         future.add_done_callback(self._on_check_complete)
 
     def _on_check_complete(self, future) -> None:
         if future is not self._pending:
             return
+        now_ns = self._monotonic_ns()
+        self._last_check_latency_ns = now_ns - self._pending_sent_ns
+        checked_pose_ns = self._pending_pose_ns
         self._pending = None
         self._pending_sent_ns = None
-        now_ns = self._monotonic_ns()
+        self._pending_pose_ns = None
         try:
             response = future.result()
         except Exception as error:
@@ -237,14 +244,16 @@ class ArmWorkspaceMonitor(Node):
                 f"{contact.contact_body_1}/{contact.contact_body_2}"
                 for contact in response.contacts
             })
-            self._state.checked_ns = now_ns
+            self._state.checked_ns = checked_pose_ns
             self._state.collision_free = False
             self._state.detail = (
                 "MoveIt reports collision" + (f": {', '.join(contacts)}" if contacts else "")
             )
             self._publish(False, self._state.detail)
             return
-        self._state.checked_ns = now_ns
+        # A delayed response checks the request's pose, not the robot's pose
+        # at response receipt. Preserve acquisition age across the RPC.
+        self._state.checked_ns = checked_pose_ns
         self._state.collision_free = True
         self._state.detail = "collision-free"
 
@@ -280,6 +289,10 @@ class ArmWorkspaceMonitor(Node):
         status.values = [
             KeyValue(key="arm_workspace_clear", value=str(bool(clear)).lower()),
             KeyValue(key="detail", value=detail),
+            KeyValue(key="state_validity_roundtrip_s", value=(
+                "" if self._last_check_latency_ns is None
+                else str(self._last_check_latency_ns / 1e9)
+            )),
         ]
         diagnostics = DiagnosticArray()
         diagnostics.header.stamp = self.get_clock().now().to_msg()
