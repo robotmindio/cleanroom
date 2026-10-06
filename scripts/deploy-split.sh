@@ -354,12 +354,7 @@ activate_release() { # activate_release <workspace> <release>, only after servic
   mv -Tf "$temporary" "$root/current"
 }
 
-on_exit() {
-  local code=$?
-  echo "$0: deployment failed; previous releases and bootstrap installation are retained; no automatic rollback or resume" >&2
-  return "$code"
-}
-trap on_exit EXIT
+trap 'echo "$0: deployment failed; previous releases and bootstrap installation are retained; no automatic rollback or resume" >&2' EXIT
 
 log "Confirming torque-off and stopping the compute stack"
 ros_setup

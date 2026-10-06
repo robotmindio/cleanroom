@@ -178,7 +178,7 @@ while [[ ! -e $LEKIWI_TEST_CONTINUE ]]; do sleep 0.01; done
 
 def test_activation_retains_the_previous_release_and_refuses_an_unknown_previous_file(tmp_path):
     deploy = (ROOT / "scripts/deploy-split.sh").read_text()
-    function = "activate_release() {" + deploy.split("activate_release() {", 1)[1].split("\non_exit()", 1)[0]
+    function = "activate_release() {" + deploy.split("activate_release() {", 1)[1].split("\ntrap ", 1)[0]
     before, after = tmp_path / "before", tmp_path / "after"
     before.mkdir()
     after.mkdir()
@@ -219,3 +219,11 @@ device=device.example
     subprocess.run(["bash", "-ec", script, "migration", str(tmp_path)], check=True,
                    env={**os.environ, "LEKIWI_TEST_OUTPUT": str(output), "LEKIWI_TEST_SETTINGS": str(settings)})
     assert output.read_text().splitlines() == ["--no-start", "--curve-dir", "/private/curve", "--rosbridge-tailnet"]
+
+
+def test_deployment_failure_trap_preserves_the_original_failure_status():
+    trap = next(line for line in (ROOT / "scripts/deploy-split.sh").read_text().splitlines()
+                if line.startswith("trap ") and "deployment failed" in line)
+    result = subprocess.run(["bash", "-c", trap + "\nexit 42"], capture_output=True, text=True)
+    assert result.returncode == 42
+    assert "previous releases and bootstrap installation are retained" in result.stderr
