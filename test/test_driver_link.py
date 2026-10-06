@@ -475,83 +475,59 @@ def test_planar_velocity_is_clamped_by_vector_magnitude():
 
 
 def test_odometry_covariance_never_claims_perfect_pose_or_twist():
-    def pose():
-        return types.SimpleNamespace(
-            position=types.SimpleNamespace(), orientation=types.SimpleNamespace()
-        )
+    from builtin_interfaces.msg import Time
 
-    class Odometry:
-        def __init__(self):
-            self.header = types.SimpleNamespace()
-            self.pose = types.SimpleNamespace(pose=pose())
-            self.twist = types.SimpleNamespace(twist=types.SimpleNamespace(
-                linear=types.SimpleNamespace(), angular=types.SimpleNamespace()
-            ))
-
-    driver.Odometry = Odometry
-    driver.TransformStamped = lambda: types.SimpleNamespace(
-        transform=types.SimpleNamespace(
-            translation=types.SimpleNamespace(), rotation=types.SimpleNamespace()
-        )
+    odometry = driver.odometry_message(
+        Time(sec=3), (1.0, 2.0, math.pi / 2), (0.1, 0.0, 0.2), (0.05, 0.10), (0.10, 0.20),
     )
-    driver.JointState = lambda: types.SimpleNamespace(header=types.SimpleNamespace())
-    driver.ARM_JOINTS = ("joint",)
-    odometry, transform, joints = [], [], []
-    node = make_node()
-    node.pose = (1.0, 2.0, 0.0)
-    node.odom_xy_stddev, node.odom_yaw_stddev = 0.05, 0.10
-    node.twist_xy_stddev, node.twist_yaw_stddev = 0.10, 0.20
-    node.odom_pub = types.SimpleNamespace(publish=odometry.append)
-    node.tf = types.SimpleNamespace(sendTransform=transform.append)
-    node.publish_odom_tf = True
-    node.arm_positions = {"joint": 0.0}
-    node.joint_pub = types.SimpleNamespace(publish=joints.append)
-    raw_joints = []
-    node.raw_joint_pub = types.SimpleNamespace(publish=raw_joints.append)
-    driver.raw_joint_positions = lambda observation: {"joint": 0.75}
+    assert (odometry.header.frame_id, odometry.child_frame_id) == ("odom", "base_footprint")
+    assert odometry.pose.pose.orientation.z == pytest.approx(math.sqrt(0.5))
+    assert odometry.pose.covariance[0] == pytest.approx(0.05 ** 2)
+    assert odometry.pose.covariance[35] == pytest.approx(0.10 ** 2)
+    assert odometry.twist.covariance[0] == pytest.approx(0.10 ** 2)
+    assert odometry.twist.covariance[35] == pytest.approx(0.20 ** 2)
+    assert odometry.pose.covariance[14] == 1e6
+    transform = driver.odometry_transform(odometry)
+    assert transform.header.stamp.sec == 3
+    assert (transform.transform.translation.x, transform.transform.translation.y) == (1.0, 2.0)
+    assert transform.transform.rotation.w == odometry.pose.pose.orientation.w
 
-    node.publish_state(object(), {}, (0.0, 0.0, 0.0))
-    assert raw_joints[0].position == [0.75]
-    assert joints[0].position == [0.0]
 
-    assert odometry[0].pose.covariance[0] == 0.05 ** 2
-    assert odometry[0].pose.covariance[35] == 0.10 ** 2
-    assert odometry[0].twist.covariance[0] == 0.10 ** 2
-    assert odometry[0].twist.covariance[35] == 0.20 ** 2
-    assert odometry[0].pose.covariance[14] == 1e6
+def test_published_state_reports_calibrated_and_raw_joints():
+    from builtin_interfaces.msg import Time
+
+    published = {name: [] for name in ("odom", "tf", "joints", "raw")}
+    node = make_node(publish_odom_tf=True)
+    node.odom_pub = types.SimpleNamespace(publish=published["odom"].append)
+    node.tf = types.SimpleNamespace(sendTransform=published["tf"].append)
+    node.joint_pub = types.SimpleNamespace(publish=published["joints"].append)
+    node.raw_joint_pub = types.SimpleNamespace(publish=published["raw"].append)
+    node.arm_positions["arm_shoulder_pan"] = 0.25
+
+    node.publish_state(Time(sec=5), {"arm_shoulder_pan.pos": 90.0}, (0.0, 0.0, 0.0))
+
+    assert all(len(messages) == 1 for messages in published.values())
+    joints, raw = published["joints"][0], published["raw"][0]
+    assert joints.position[joints.name.index("arm_shoulder_pan")] == 0.25
+    assert raw.position[raw.name.index("arm_shoulder_pan")] == pytest.approx(math.pi / 2)
+    assert raw.header.stamp.sec == 5
 
 
 def test_validated_motor_health_is_published_as_diagnostics():
-    class DiagnosticArray:
-        def __init__(self):
-            self.header = types.SimpleNamespace()
+    from builtin_interfaces.msg import Time
 
-    class DiagnosticStatus:
-        def __init__(self):
-            self.values = []
-
-    class KeyValue:
-        pass
-
-    driver.DiagnosticArray = DiagnosticArray
-    driver.DiagnosticStatus = DiagnosticStatus
-    driver.KeyValue = KeyValue
-    published = []
-    node = make_node()
-    node.robot = types.SimpleNamespace(observation_motor_health=(
+    message = driver.diagnostics_message(Time(sec=7), (
         types.SimpleNamespace(
             name="motor_bus", level=0, message="OK",
             values=(("torque_enabled", "false"),),
         ),
     ))
-    node.motor_health_pub = types.SimpleNamespace(publish=published.append)
 
-    node.publish_motor_health("stamp")
-
-    assert published[0].header.stamp == "stamp"
-    assert published[0].status[0].name == "motor_bus"
-    assert published[0].status[0].level == b"\x00"
-    assert published[0].status[0].values[0].key == "torque_enabled"
+    assert message.header.stamp.sec == 7
+    assert message.status[0].name == "motor_bus"
+    assert message.status[0].level == b"\x00"
+    assert message.status[0].hardware_id == "lekiwi_servo_bus"
+    assert message.status[0].values[0].key == "torque_enabled"
 
 
 def test_non_finite_twist_is_rejected_and_disarms():

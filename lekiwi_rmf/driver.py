@@ -135,6 +135,72 @@ SETTING_PARAMETERS = {
 }
 
 
+def odometry_message(stamp, pose, velocity, pose_stddev, twist_stddev):
+    """Planar odom->base_footprint odometry; each stddev pair is (xy, yaw)."""
+    x, y, yaw = pose
+    odom = Odometry()
+    odom.header.stamp = stamp
+    odom.header.frame_id = "odom"
+    odom.child_frame_id = "base_footprint"
+    odom.pose.pose.position.x = x
+    odom.pose.pose.position.y = y
+    odom.pose.pose.orientation.z = math.sin(yaw / 2)
+    odom.pose.pose.orientation.w = math.cos(yaw / 2)
+    odom.twist.twist.linear.x, odom.twist.twist.linear.y, odom.twist.twist.angular.z = velocity
+    # Indices follow ROS's row-major [x, y, z, roll, pitch, yaw] convention.
+    # z/roll/pitch are unobserved by this planar driver, so their deliberately
+    # large variance prevents a 3D estimator mistaking them for measurements.
+    for covariance, (xy_stddev, yaw_stddev) in (
+        ("pose", pose_stddev), ("twist", twist_stddev),
+    ):
+        values = [0.0] * 36
+        values[0] = values[7] = xy_stddev ** 2
+        values[14] = values[21] = values[28] = 1e6
+        values[35] = yaw_stddev ** 2
+        getattr(odom, covariance).covariance = values
+    return odom
+
+
+def odometry_transform(odom):
+    """The odom->base_footprint transform matching an odometry message."""
+    transform = TransformStamped()
+    transform.header = odom.header
+    transform.child_frame_id = odom.child_frame_id
+    transform.transform.translation.x = odom.pose.pose.position.x
+    transform.transform.translation.y = odom.pose.pose.position.y
+    transform.transform.rotation.z = odom.pose.pose.orientation.z
+    transform.transform.rotation.w = odom.pose.pose.orientation.w
+    return transform
+
+
+def arm_joint_state(stamp, positions):
+    joints = JointState()
+    joints.header.stamp = stamp
+    joints.name = list(ARM_JOINTS)
+    joints.position = [positions[name] for name in ARM_JOINTS]
+    return joints
+
+
+def diagnostics_message(stamp, statuses):
+    """Republish validated motor-health statuses as ROS diagnostics."""
+    message = DiagnosticArray()
+    message.header.stamp = stamp
+    message.status = []
+    for source in statuses:
+        status = DiagnosticStatus()
+        status.name = source.name
+        status.level = bytes((source.level,))
+        status.message = source.message
+        status.hardware_id = "lekiwi_servo_bus"
+        status.values = []
+        for key, value in source.values:
+            item = KeyValue()
+            item.key, item.value = key, value
+            status.values.append(item)
+        message.status.append(status)
+    return message
+
+
 @dataclasses.dataclass
 class ArmGoal:
     """One FollowJointTrajectory goal, executed by the motor host's local executor."""
@@ -1308,52 +1374,16 @@ class LeKiwiDriver(Node):
         self.publish_safety()
 
     def publish_state(self, stamp, observation, velocity):
-        x, y, yaw = self.pose
-        qz, qw = math.sin(yaw / 2), math.cos(yaw / 2)
-
-        odom = Odometry()
-        odom.header.stamp = stamp
-        odom.header.frame_id = "odom"
-        odom.child_frame_id = "base_footprint"
-        odom.pose.pose.position.x = x
-        odom.pose.pose.position.y = y
-        odom.pose.pose.orientation.z = qz
-        odom.pose.pose.orientation.w = qw
-        odom.twist.twist.linear.x, odom.twist.twist.linear.y, odom.twist.twist.angular.z = velocity
-        # Indices follow ROS's row-major [x, y, z, roll, pitch, yaw] convention.
-        # z/roll/pitch are unobserved by this planar driver, so their deliberately
-        # large variance prevents a 3D estimator mistaking them for measurements.
-        odom.pose.covariance = [0.0] * 36
-        odom.pose.covariance[0] = odom.pose.covariance[7] = self.odom_xy_stddev ** 2
-        odom.pose.covariance[14] = odom.pose.covariance[21] = odom.pose.covariance[28] = 1e6
-        odom.pose.covariance[35] = self.odom_yaw_stddev ** 2
-        odom.twist.covariance = [0.0] * 36
-        odom.twist.covariance[0] = odom.twist.covariance[7] = self.twist_xy_stddev ** 2
-        odom.twist.covariance[14] = odom.twist.covariance[21] = odom.twist.covariance[28] = 1e6
-        odom.twist.covariance[35] = self.twist_yaw_stddev ** 2
+        odom = odometry_message(
+            stamp, self.pose, velocity,
+            (self.odom_xy_stddev, self.odom_yaw_stddev),
+            (self.twist_xy_stddev, self.twist_yaw_stddev),
+        )
         self.odom_pub.publish(odom)
-
-        transform = TransformStamped()
-        transform.header = odom.header
-        transform.child_frame_id = odom.child_frame_id
-        transform.transform.translation.x = x
-        transform.transform.translation.y = y
-        transform.transform.rotation.z = qz
-        transform.transform.rotation.w = qw
         if self.publish_odom_tf:
-            self.tf.sendTransform(transform)
-
-        joints = JointState()
-        joints.header.stamp = stamp
-        joints.name = list(ARM_JOINTS)
-        joints.position = [self.arm_positions[name] for name in ARM_JOINTS]
-        self.joint_pub.publish(joints)
-        raw = JointState()
-        raw.header.stamp = stamp
-        raw.name = list(ARM_JOINTS)
-        positions = raw_joint_positions(observation)
-        raw.position = [positions[name] for name in ARM_JOINTS]
-        self.raw_joint_pub.publish(raw)
+            self.tf.sendTransform(odometry_transform(odom))
+        self.joint_pub.publish(arm_joint_state(stamp, self.arm_positions))
+        self.raw_joint_pub.publish(arm_joint_state(stamp, raw_joint_positions(observation)))
 
     def publish_motor_health(self, stamp):
         """Publish only the snapshot validated with this fresh host observation."""
@@ -1361,23 +1391,7 @@ class LeKiwiDriver(Node):
             return
         # The client rejects absent or malformed health telemetry before a
         # sample reaches update(), so a fresh sample always carries a snapshot.
-        statuses = self.robot.observation_motor_health
-        message = DiagnosticArray()
-        message.header.stamp = stamp
-        message.status = []
-        for source in statuses:
-            status = DiagnosticStatus()
-            status.name = source.name
-            status.level = bytes((source.level,))
-            status.message = source.message
-            status.hardware_id = "lekiwi_servo_bus"
-            status.values = []
-            for key, value in source.values:
-                item = KeyValue()
-                item.key, item.value = key, value
-                status.values.append(item)
-            message.status.append(status)
-        self.motor_health_pub.publish(message)
+        self.motor_health_pub.publish(diagnostics_message(stamp, self.robot.observation_motor_health))
 
     def destroy_node(self):
         try:
