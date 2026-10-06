@@ -97,7 +97,11 @@ class TorqueSafetyConfig:
     state_file: str = "~/.ros/lekiwi/servo_torque_state"
     bind_address: str = "0.0.0.0"
     arm_calibration_file: str = "~/.ros/lekiwi_arm_calibration.json"
-    nav2_params_file: str = str(Path(__file__).resolve().parents[1] / "config/nav2_params.yaml")
+    nav2_params_file: str = str(
+        Path(__file__).resolve().parents[1] / "config/nav2_params.yaml"
+        if (Path(__file__).resolve().parents[1] / "config/nav2_params.yaml").is_file()
+        else Path(__file__).resolve().parents[2] / "share/lekiwi_rmf/config/nav2_params.yaml"
+    )
     # False: command silence stops the base and freezes the arm with torque left on; the
     # driver re-arms itself. True (larger robots): it cuts all servo torque.
     disarm_on_failure: bool = False

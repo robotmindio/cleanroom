@@ -271,7 +271,7 @@ class _Again(Exception):
     pass
 
 
-def _host_module(monkeypatch):
+def _host_module(monkeypatch, filename=None):
     fake_zmq = types.SimpleNamespace(
         Again=_Again, NOBLOCK=1, REP=4, PULL=7, PUSH=8, LINGER=17, CONFLATE=54, SNDHWM=23,
         HEARTBEAT_IVL=75, HEARTBEAT_TIMEOUT=77, MAXMSGSIZE=22,
@@ -311,11 +311,29 @@ def _host_module(monkeypatch):
     for name, module in modules.items():
         monkeypatch.setitem(sys.modules, name, module)
     spec = importlib.util.spec_from_file_location(
-        "torque_host", pathlib.Path(__file__).parents[1] / "scripts" / "torque-host.py",
+        "torque_host", filename or pathlib.Path(__file__).parents[1] / "scripts" / "torque-host.py",
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+@pytest.mark.parametrize("installed", [False, True])
+def test_host_speed_profile_is_resolved_in_source_and_installed_layouts(monkeypatch, tmp_path, installed):
+    root = pathlib.Path(__file__).parents[1]
+    if installed:
+        filename = tmp_path / "install/lekiwi_rmf/lib/lekiwi_rmf/torque-host.py"
+        profile = tmp_path / "install/lekiwi_rmf/share/lekiwi_rmf/config/nav2_params.yaml"
+    else:
+        filename = tmp_path / "source/scripts/torque-host.py"
+        profile = tmp_path / "source/config/nav2_params.yaml"
+    filename.parent.mkdir(parents=True)
+    profile.parent.mkdir(parents=True)
+    filename.write_text((root / "scripts/torque-host.py").read_text())
+    profile.write_text((root / "config/nav2_params.yaml").read_text())
+    host = _host_module(monkeypatch, filename)
+    assert pathlib.Path(host.TorqueSafetyConfig().nav2_params_file) == profile
+    assert host.load_base_speed_limits(profile) == (0.03, 0.06)
 
 
 class _Bus:
