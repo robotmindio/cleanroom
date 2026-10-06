@@ -1037,13 +1037,107 @@ def test_stack_retries_startup_and_host_gets_time_to_pass_its_gate():
     assert timeout > 2 * 120
 
 
-def test_long_running_startup_children_do_not_inherit_the_start_lock():
-    for name in ("up.sh", "pi-up.sh", "workstation-up.sh"):
+LAUNCHERS = ("up.sh", "pi-up.sh", "workstation-up.sh", "sim-up.sh")
+
+
+def _launcher(tmp_path, body, *args, **env):
+    """Run body after sourcing scripts/lib/launcher.sh with private log/runtime dirs."""
+    script = 'set -Eeuo pipefail\nsource "$LAUNCHER_LIB"\n' + body
+    return subprocess.run(
+        ["bash", "-c", script, "launcher-test", *args],
+        env={**os.environ, "LAUNCHER_LIB": str(ROOT / "scripts/lib/launcher.sh"),
+             "LEKIWI_LOGS": str(tmp_path / "logs"), **env},
+        capture_output=True, text=True, timeout=30,
+    )
+
+
+def test_launcher_init_serializes_startup_and_children_never_hold_the_lock(tmp_path):
+    runtime = tmp_path / "logs" / "runtime"
+    # The first launcher starts a long-running child, then keeps the lock while a
+    # second launcher of the same name tries to start.
+    result = _launcher(tmp_path, r'''
+launcher_init demo
+[[ $LEKIWI_RUNTIME_DIR == "$RUNTIME_DIR" && $(stat -c %a "$RUNTIME_DIR") == 700 ]]
+start_recorded child sleep 30
+start_recorded other --log other-name bash -c 'echo started'
+second=0
+bash -c 'source "$LAUNCHER_LIB"; launcher_init demo; echo second-started' > "$LOGS/second" 2>&1 || second=$?
+[[ $second == 0 && $(<"$LOGS/second") == *"startup is already in progress"* ]]
+launcher_release
+# Released: the child does not keep the lock alive.
+bash -c 'source "$LAUNCHER_LIB"; launcher_init demo; echo third-started' > "$LOGS/third" 2>&1
+[[ $(<"$LOGS/third") == third-started ]]
+''')
+    assert result.returncode == 0, result.stderr
+    child = int((runtime / "child.pid").read_text())
+    try:
+        # The recorded PID leads its own session and process group, which ros-stop signals.
+        assert os.getsid(child) == child and os.getpgid(child) == child
+        fds = {os.readlink(f"/proc/{child}/fd/{fd}") for fd in os.listdir(f"/proc/{child}/fd")}
+        assert not any(target.endswith("demo-start.lock") for target in fds)
+    finally:
+        os.killpg(child, 9)
+    deadline = time.monotonic() + 5
+    while not (tmp_path / "logs" / "other-name.log").read_text() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert (tmp_path / "logs" / "other-name.log").read_text() == "started\n"
+    assert (runtime / "other.pid").exists()
+
+
+def test_launchers_start_long_running_children_only_through_start_recorded():
+    for name in LAUNCHERS:
         script = (ROOT / "scripts" / name).read_text(encoding="utf-8")
-        launches = [line for line in script.splitlines() if "setsid" in line and "&" in line]
-        assert launches, name
-        assert all("9>&-" in line for line in launches), name
-        assert "flock -n 9" in script
+        assert "launcher_init " in script and "setsid" not in script, name
+    workstation = (ROOT / "scripts" / "workstation-up.sh").read_text(encoding="utf-8")
+    # A shared workstation's other stacks are never discovered by name.
+    assert "pgrep" not in workstation
+    assert "start_recorded rviz scripts/rviz.sh" in workstation
+
+
+@pytest.mark.parametrize("kind,name", [
+    ("stack", "ros2 launch lekiwi_rmf bringup.launch.py profile:=split"),
+    ("stack", "bash scripts/ros-start.sh profile:=split"),
+    ("host", "bash scripts/robot-host.sh --no-cameras"),
+    ("host", "python3 -m lerobot.robots.lekiwi.lekiwi_host"),
+    ("rviz", "bash scripts/rviz.sh"),
+    ("rviz", "rviz2 -d lekiwi.rviz"),
+    ("astra", "ros2 launch lekiwi_rmf pi_astra.launch.py"),
+    ("cameras", "ros2 launch launch/pi_cameras.launch.py"),
+    ("lidar", "ros2 run ldlidar_stl_ros2 ldlidar_stl_ros2_node"),
+    ("zenoh", "zenoh-bridge-ros2dds -c config/zenoh_device.json5"),
+])
+def test_recorded_running_identifies_each_kind_by_its_recorded_pid(tmp_path, kind, name):
+    sentinel = subprocess.Popen(["bash", "-c", f'exec -a "{name}" sleep 60'])
+    runtime = tmp_path / "logs" / "runtime"
+    runtime.mkdir(parents=True)
+    try:
+        (runtime / f"{kind}.pid").write_text(f"{sentinel.pid}\n", encoding="utf-8")
+        other = "zenoh" if kind != "zenoh" else "host"
+        (runtime / f"{other}.pid").write_text(f"{sentinel.pid}\n", encoding="utf-8")
+        result = _launcher(tmp_path, '''
+launcher_dirs
+recorded_running "$1"
+! recorded_running "$2"
+! recorded_running missing
+''', kind, other)
+        assert result.returncode == 0, result.stderr
+    finally:
+        sentinel.kill()
+        sentinel.wait()
+    # A recorded PID that has exited is not running, whatever it was.
+    result = _launcher(tmp_path, 'launcher_dirs\n! recorded_running "$1"\n', kind)
+    assert result.returncode == 0, result.stderr
+
+
+def test_stack_service_refusal_depends_on_the_unit_state(tmp_path):
+    fakes = tmp_path / "bin"
+    _executable(fakes / "systemctl", '[[ $1 == is-active && $3 == lekiwi-stack.service ]] && exit "$UNIT_STATE"\nexit 3\n')
+    for state, expected in (("0", 1), ("3", 0)):
+        result = _launcher(tmp_path, "refuse_while_stack_service_runs\n",
+                           PATH=f"{fakes}:{os.environ['PATH']}", UNIT_STATE=state)
+        assert result.returncode == expected, result.stderr
+    assert "stop it first" in _launcher(tmp_path, "refuse_while_stack_service_runs\n",
+                                        PATH=f"{fakes}:{os.environ['PATH']}", UNIT_STATE="0").stderr
 
 
 def test_ros_stop_leaves_unit_owned_stack_alone(tmp_path):
@@ -1122,6 +1216,38 @@ def test_ros_stop_stops_recorded_sim_when_stack_unit_is_active(tmp_path):
         if stop.poll() is None:
             stop.kill()
             stop.wait()
+
+
+def test_ros_stop_stops_a_recorded_rviz_launcher_and_refuses_a_reused_pid(tmp_path):
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    fakes = tmp_path / "bin"
+    _executable(fakes / "systemctl", "exit 3\n")
+    # workstation-up.sh records rviz.sh itself, before it execs rviz2.
+    launcher = subprocess.Popen(["bash", "-c", 'exec -a "bash scripts/rviz.sh" sleep 60'],
+                                start_new_session=True)
+    # A recorded PID now reused by an unrelated program must never be signalled.
+    unrelated = subprocess.Popen(["sleep", "60"], start_new_session=True)
+    try:
+        (runtime / "rviz.pid").write_text(f"{launcher.pid}\n", encoding="utf-8")
+        (runtime / "host.pid").write_text(f"{unrelated.pid}\n", encoding="utf-8")
+        result = subprocess.run(
+            ["bash", str(ROOT / "scripts" / "ros-stop.sh")],
+            env={**os.environ, "LEKIWI_RUNTIME_DIR": str(runtime),
+                 "PATH": f"{fakes}:{os.environ['PATH']}"},
+            capture_output=True, text=True, timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
+        assert f"stopping recorded rviz (PID {launcher.pid})" in result.stdout
+        assert launcher.wait(timeout=5) is not None
+        assert not (runtime / "rviz.pid").exists()
+        assert f"refusing to signal unrecognised PID {unrelated.pid}" in result.stderr
+        assert unrelated.poll() is None
+    finally:
+        for process in (launcher, unrelated):
+            if process.poll() is None:
+                process.kill()
+                process.wait()
 
 
 def test_sync_calibration_uses_the_configured_robot_and_gives_up(tmp_path):

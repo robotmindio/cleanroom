@@ -49,7 +49,7 @@ before using them; the robot runtime does not require it.
 
 - `up.sh` starts the LeRobot host and ROS stack on a wired robot.
 - `pi-up.sh` starts the device half of a split robot: motor host, cameras, LD06, Astra and zenoh bridge.
-- `workstation-up.sh [DEVICE] [launch args]` starts the ROS stack (remote sensors, MoveIt) and RViz.
+- `workstation-up.sh [DEVICE] [launch args]` starts the ROS stack (remote sensors, MoveIt) and RViz, refusing while a recorded stack or `lekiwi-stack.service` runs.
 - `sim-up.sh [launch args]` checks the renderer and starts a managed headless simulation.
 - `ros-start.sh [launch args]` runs `bringup.launch.py` against the real robot; `up.sh`, `workstation-up.sh` and `lekiwi-stack.service` execute it.
 - `ros-stop.sh` stops the process groups the launchers recorded and leaves systemd units alone.
@@ -101,8 +101,10 @@ before using them; the robot runtime does not require it.
 
 ## lib/
 
-Source-only shell helpers, not commands: `runtime-common.sh` (`.env`, waits, port
-probes), `self-heal.sh` (service self-heal watcher), `service-install-common.sh`
+Source-only shell helpers, not commands: `runtime-common.sh` (`log`/`die`, `.env`,
+waits, port probes), `launcher.sh` (startup lock, recorded process groups and
+their signatures, shared by the launchers and `ros-stop.sh`), `self-heal.sh`
+(service self-heal watcher), `service-install-common.sh`
 (unit rendering, restart tracking) and `service-install-revision.sh` (service
 configuration fingerprints).
 

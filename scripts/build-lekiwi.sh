@@ -4,12 +4,10 @@ set -Eeuo pipefail
 
 cd "$(dirname "$0")/.."
 project_root=$PWD
+# shellcheck source=/dev/null
+source scripts/lib/runtime-common.sh
 workspace=${LEKIWI_WS:-$HOME/lekiwi_ws}
-[[ $workspace == /* && -d $workspace/install ]] || {
-  echo "$0: installed workspace not found: $workspace" >&2
-  exit 1
-}
-die() { echo "$0: $*" >&2; exit 1; }
+[[ $workspace == /* && -d $workspace/install ]] || die "installed workspace not found: $workspace"
 build_compute=ON
 if [[ ${1:-} == --device ]]; then build_compute=OFF; shift; fi
 [[ $# == 0 ]] || die "usage: $0 [--device]"

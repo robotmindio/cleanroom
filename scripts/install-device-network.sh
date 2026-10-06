@@ -16,7 +16,8 @@
 # LEKIWI_NETWORK_ROOT=DIR writes under DIR and skips live network changes (tests only).
 set -Eeuo pipefail
 
-die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+# shellcheck source=/dev/null
+source "$(dirname -- "${BASH_SOURCE[0]}")/lib/runtime-common.sh"
 
 usage="usage: $0 --user USER [--country CC]"
 [[ ${1:-} == --user && $# -ge 2 ]] || die "$usage"

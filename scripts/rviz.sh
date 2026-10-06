@@ -62,7 +62,10 @@ fi
 old_rviz_pids=()
 if [[ -r "$rviz_pid_file" ]]; then
   old_rviz_pid=$(<"$rviz_pid_file")
-  if [[ $old_rviz_pid =~ ^[1-9][0-9]*$ ]] && kill -0 "$old_rviz_pid" 2>/dev/null; then
+  # workstation-up.sh records this launcher's own PID before it reaches here.
+  if [[ $old_rviz_pid == "$$" ]]; then
+    :
+  elif [[ $old_rviz_pid =~ ^[1-9][0-9]*$ ]] && kill -0 "$old_rviz_pid" 2>/dev/null; then
     old_rviz_command=$(tr '\0' ' ' < "/proc/$old_rviz_pid/cmdline" 2>/dev/null || true)
     if [[ $old_rviz_command == *"rviz2"* && $old_rviz_command == *"-d $run_config"* ]]; then
       old_rviz_pids=("$old_rviz_pid")

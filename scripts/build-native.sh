@@ -3,7 +3,8 @@
 set -Eeuo pipefail
 project_root=$(cd -- "$(dirname -- "$0")/.." && pwd)
 workspace=${LEKIWI_WS:-$HOME/lekiwi_ws}
-die() { echo "$0: $*" >&2; exit 1; }
+# shellcheck disable=SC1091 # Resolve the helper from this checkout at runtime.
+source "$project_root/scripts/lib/runtime-common.sh"
 [[ $workspace == /* && -d $workspace/install ]] || die "installed workspace not found: $workspace"
 [[ ! -L $workspace/current && ! -f $workspace/release.json ]] || die "stage a release instead of rebuilding a live or sealed workspace"
 # shellcheck disable=SC1091 # Resolve the helper from this checkout at runtime.

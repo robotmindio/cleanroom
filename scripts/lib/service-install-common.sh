@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Shared, deliberately small helpers for the systemd installers. This file is
-# sourced by installers that already provide log() and die(); the unit helpers
+# sourced by installers after scripts/lib/runtime-common.sh (log() and die()); the unit helpers
 # also need PROJECT_ROOT and UNIT_DIR.
 
 if ! declare -F as_root >/dev/null; then

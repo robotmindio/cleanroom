@@ -9,8 +9,6 @@ usage() {
   echo "usage: $0 [[USER@]DEVICE] [--remote-repo PATH] [--workspace PATH] [--remote-workspace PATH]" >&2
   exit 2
 }
-die() { echo "$0: $*" >&2; exit 1; }
-log() { printf '\n==> %s\n' "$*"; }
 
 original_args=("$@")
 project_root=$(cd -- "$(dirname -- "$0")/.." && pwd)

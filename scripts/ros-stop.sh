@@ -2,27 +2,14 @@
 # Stop only processes recorded by this repository's launchers.
 #
 # A process-name sweep can kill a different robot's Nav2/RViz instance on a
-# shared workstation. up.sh, pi-up.sh and ros-start.sh record their own
+# shared workstation. The launchers (scripts/lib/launcher.sh) and ros-start.sh record their own
 # process-group leaders, so cleanup remains complete for this stack without that
 # collateral damage. Usage: scripts/ros-stop.sh
 set -Eeuo pipefail
 
-runtime_dir="${LEKIWI_RUNTIME_DIR:-${LEKIWI_LOGS:-$HOME/.ros/lekiwi}/runtime}"
-
-pid_matches() { # pid_matches <pid> <stack|host|rviz|astra|cameras|lidar|zenoh>
-  local pid=$1 kind=$2 command
-  [ -r "/proc/$pid/cmdline" ] || return 1
-  command=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)
-  case "$kind" in
-    stack) [[ $command == *"ros2 launch lekiwi_rmf"* || $command == *"bringup.launch.py"* ]] ;;
-    host) [[ $command == *"robot-host.sh"* || $command == *"torque-host.py"* || $command == *"lerobot.robots.lekiwi.lekiwi_host"* ]] ;;
-    rviz) [[ $command == *"rviz2"* ]] ;;
-    astra) [[ $command == *"ros-astra.sh"* || $command == *"pi_astra.launch.py"* ]] ;;
-    cameras) [[ $command == *"ros-cameras.sh"* || $command == *"pi_cameras.launch.py"* ]] ;;
-    lidar) [[ $command == *"ros-lidar.sh"* || $command == *"ldlidar_stl_ros2"* ]] ;;
-    zenoh) [[ $command == *"ros-zenoh.sh"* || $command == *"zenoh-bridge-ros2dds"* ]] ;;
-  esac
-}
+# shellcheck source=/dev/null
+source "$(dirname -- "$0")/lib/launcher.sh"
+launcher_dirs
 
 stop_recorded() { # stop_recorded <file> <kind> [owning-unit]
   local file=$1 kind=$2 unit=${3:-} pid pgid deadline grouped=0 ownership_status
@@ -104,7 +91,7 @@ unit_owns_pid() { # 0: unit owns pid, 1: it does not, 2: ownership cannot be che
 stopped=0
 stop_kind() { # stop_kind <kind> [owning-unit]
   local kind=$1 unit=${2:-}
-  if stop_recorded "$runtime_dir/$kind.pid" "$kind" "$unit"; then
+  if stop_recorded "$RUNTIME_DIR/$kind.pid" "$kind" "$unit"; then
     stopped=1
   fi
 }

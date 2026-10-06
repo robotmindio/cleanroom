@@ -12,8 +12,6 @@
 # LEKIWI_NETWORK_ROOT=DIR writes under DIR instead of / (tests only).
 set -Eeuo pipefail
 
-die() { printf 'error: %s\n' "$*" >&2; exit 1; }
-
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck source=/dev/null
 source "$PROJECT_ROOT/scripts/lib/runtime-common.sh"

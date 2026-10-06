@@ -2,7 +2,7 @@
 
 # Shared pinned third-party sources and binaries. Consumed by the installers
 # that source this file, which ShellCheck cannot follow across entry points.
-# Callers provide die().
+# Callers source scripts/lib/runtime-common.sh for die().
 # shellcheck disable=SC2034
 ZENOH_VERSION=1.5.0
 THIRDPARTY_PATCH_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../thirdparty" && pwd)

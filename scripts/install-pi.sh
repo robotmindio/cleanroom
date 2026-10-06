@@ -10,8 +10,8 @@ EXAMPLES=${LEKIWI_LEROBOT_SRC:-"$HOME/lerobot-src"}
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 WORKSPACE=${LEKIWI_WS:-"$HOME/lekiwi_ws"}
 
-log() { printf '\n==> %s\n' "$*"; }
-die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+# shellcheck source=/dev/null
+source "$PROJECT_ROOT/scripts/lib/runtime-common.sh"
 trap 'printf "error: installer failed at line %s\n" "$LINENO" >&2' ERR
 # shellcheck source=/dev/null
 source "$PROJECT_ROOT/scripts/thirdparty-common.sh"
