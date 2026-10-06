@@ -8,11 +8,13 @@ import json
 import pytest
 
 
-def test_production_runner_records_payload_without_restarting_or_shutting_down(monkeypatch, tmp_path):
+@pytest.mark.parametrize('cleanup_failure',[False,True])
+def test_production_runner_records_payload_without_restarting_or_shutting_down(monkeypatch, tmp_path, cleanup_failure):
     module = runpy.run_path(str(Path(__file__).parents[1] / 'scripts/test-navigation.py'))
     main = module['main']
     shared = main.__globals__
     commands = []
+    released = []
     monkeypatch.setitem(shared, 'installed_stack_arguments', lambda: [])
     def system_command(args, **kwargs):
         commands.append(args)
@@ -21,7 +23,7 @@ def test_production_runner_records_payload_without_restarting_or_shutting_down(m
     monkeypatch.setattr(shared['subprocess'], 'run', system_command)
     monkeypatch.setattr(shared['subprocess'], 'check_output', lambda *args, **kwargs: 'verified-source\n')
     monkeypatch.setattr(shared['rclpy'], 'init', lambda **kwargs: None)
-    monkeypatch.setattr(shared['rclpy'], 'try_shutdown', lambda: None)
+    monkeypatch.setattr(shared['rclpy'], 'try_shutdown', lambda: released.append('ros'))
     def forbidden(*args, **kwargs):
         raise AssertionError('production services must remain running')
     monkeypatch.setattr(shared['subprocess'], 'Popen', forbidden)
@@ -30,13 +32,20 @@ def test_production_runner_records_payload_without_restarting_or_shutting_down(m
         trace=[(0., 0., 0.)], slam=[], health_faults=[], monitor_action=None,
         map_client=SimpleNamespace(wait_for_service=lambda **kwargs: False),
         lifecycle_client=SimpleNamespace(wait_for_service=forbidden),
-        listener=SimpleNamespace(unregister=lambda: None),
-        navigation=SimpleNamespace(destroy=lambda: None),
-        run=lambda: None, stop=lambda: None, destroy_node=lambda: None,
+        listener=SimpleNamespace(unregister=lambda: released.append('listener')),
+        navigation=SimpleNamespace(destroy=lambda: released.append('navigation')),
+        run=lambda: None, stop=lambda: None, destroy_node=lambda: released.append('node'),
     )
-    main(lambda: node, tmp_path, production=True, payload_kg=.2)
-    result = json.loads((tmp_path / 'result.json').read_text())
-    assert result['reported_payload_kg'] == .2 and result['mode'] == 'production'
+    if cleanup_failure:
+        def fail_stop():raise RuntimeError('callback failed while stopping')
+        node.stop=fail_stop
+        with pytest.raises(RuntimeError,match='callback failed'):
+            main(lambda:node,tmp_path,production=True,payload_kg=.2)
+    else:
+        main(lambda: node, tmp_path, production=True, payload_kg=.2)
+        result = json.loads((tmp_path / 'result.json').read_text())
+        assert result['reported_payload_kg'] == .2 and result['mode'] == 'production'
+    assert released==['listener','navigation','node','ros']
     assert len(commands) == 1
     for mass in (-1., float('nan'), float('inf')):
         with pytest.raises(ValueError):

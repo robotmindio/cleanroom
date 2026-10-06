@@ -4,6 +4,7 @@
 Source scripts/setup.bash first. Requires a clear 30 cm radius around the base
 center and the arm already in travel_stow. Never changes physical acceptance.
 """
+from contextlib import ExitStack
 import json
 import math
 import os
@@ -305,51 +306,54 @@ def main(test_class=Test, output=OUTPUT, launch_arguments=(), production=False, 
             # zero commands, withdraw the test lease and shut down Nav2 first.
             rclpy.init(signal_handler_options=SignalHandlerOptions.NO)
             node = test_class()
-            try:
-                node.run()
-            except (Exception,KeyboardInterrupt) as e:
-                error = str(e) or type(e).__name__
-                raise
-            finally:
-                if node.goal is not None:
-                    future=node.goal.cancel_goal_async()
-                    end=time.monotonic()+2
-                    while not future.done() and time.monotonic()<end:
-                        node.tick(Twist(),check=False)
-                node.active=False
-                node.stop()
-                graph = None
-                if node.map_client.wait_for_service(timeout_sec=1):
-                    future=node.map_client.call_async(GetMap.Request(global_map=True,optimized=True,graph_only=False))
-                    end=time.monotonic()+3
-                    while not future.done() and time.monotonic()<end:
-                        node.tick(Twist(),check=False)
-                    if future.done() and future.result():
-                        data=future.result().data
-                        graph={'nodes':[{'id':m.id,'session':m.map_id,'features':len(m.word_kpts),
-                            'valid_3d_features':sum(all(math.isfinite(v) for v in (p.x,p.y,p.z)) and
-                                math.hypot(p.x,p.y,p.z)>.01 for p in m.word_pts)} for m in data.nodes],
-                            'links':[(link.from_id,link.to_id,link.type) for link in data.graph.links]}
-                report={'error':error,'origin':node.center,'final_pose':node.pose,'sensors':node.counts,'health':node.health,
-                    'mode':'production' if production else 'bounded_test', 'reported_payload_kg':payload_kg,
-                    'source_revision':subprocess.check_output(['git','-C',str(ROOT),'rev-parse','HEAD'],text=True).strip(),
-                    'collision_monitor_action':node.monitor_action,
-                    'max_radius_m':max((math.dist(p[:2],node.center[:2]) for p in node.trace),default=0) if node.center else None,
-                    'trace':node.trace,'slam':node.slam,'graph':graph,'health_faults':node.health_faults,
-                    'fault_checks':getattr(node,'checks',None)}
-                (output/'result.json').write_text(json.dumps(report,indent=2)+'\n')
-                print('report',output/'result.json',flush=True)
-                if not production and node.lifecycle_client.wait_for_service(timeout_sec=1):
-                    future=node.lifecycle_client.call_async(ManageLifecycleNodes.Request(command=ManageLifecycleNodes.Request.SHUTDOWN))
-                    end=time.monotonic()+8
-                    while not future.done() and time.monotonic()<end:
-                        node.tick(Twist(),check=False)
-                    if not future.done() or not future.result().success:
-                        print('Nav2 did not confirm graceful lifecycle shutdown',flush=True)
-                node.listener.unregister()
-                node.navigation.destroy()
-                node.destroy_node()
-                rclpy.try_shutdown()
+            # Reporting can itself dispatch a failing sensor callback. Always
+            # release clients/observer processes even when that cleanup fails.
+            with ExitStack() as cleanup:
+                cleanup.callback(rclpy.try_shutdown)
+                cleanup.callback(node.destroy_node)
+                cleanup.callback(node.navigation.destroy)
+                cleanup.callback(node.listener.unregister)
+                try:
+                    node.run()
+                except (Exception,KeyboardInterrupt) as e:
+                    error = str(e) or type(e).__name__
+                    raise
+                finally:
+                    if node.goal is not None:
+                        future=node.goal.cancel_goal_async()
+                        end=time.monotonic()+2
+                        while not future.done() and time.monotonic()<end:
+                            node.tick(Twist(),check=False)
+                    node.active=False
+                    node.stop()
+                    graph = None
+                    if node.map_client.wait_for_service(timeout_sec=1):
+                        future=node.map_client.call_async(GetMap.Request(global_map=True,optimized=True,graph_only=False))
+                        end=time.monotonic()+3
+                        while not future.done() and time.monotonic()<end:
+                            node.tick(Twist(),check=False)
+                        if future.done() and future.result():
+                            data=future.result().data
+                            graph={'nodes':[{'id':m.id,'session':m.map_id,'features':len(m.word_kpts),
+                                'valid_3d_features':sum(all(math.isfinite(v) for v in (p.x,p.y,p.z)) and
+                                    math.hypot(p.x,p.y,p.z)>.01 for p in m.word_pts)} for m in data.nodes],
+                                'links':[(link.from_id,link.to_id,link.type) for link in data.graph.links]}
+                    report={'error':error,'origin':node.center,'final_pose':node.pose,'sensors':node.counts,'health':node.health,
+                        'mode':'production' if production else 'bounded_test', 'reported_payload_kg':payload_kg,
+                        'source_revision':subprocess.check_output(['git','-C',str(ROOT),'rev-parse','HEAD'],text=True).strip(),
+                        'collision_monitor_action':node.monitor_action,
+                        'max_radius_m':max((math.dist(p[:2],node.center[:2]) for p in node.trace),default=0) if node.center else None,
+                        'trace':node.trace,'slam':node.slam,'graph':graph,'health_faults':node.health_faults,
+                        'fault_checks':getattr(node,'checks',None)}
+                    (output/'result.json').write_text(json.dumps(report,indent=2)+'\n')
+                    print('report',output/'result.json',flush=True)
+                    if not production and node.lifecycle_client.wait_for_service(timeout_sec=1):
+                        future=node.lifecycle_client.call_async(ManageLifecycleNodes.Request(command=ManageLifecycleNodes.Request.SHUTDOWN))
+                        end=time.monotonic()+8
+                        while not future.done() and time.monotonic()<end:
+                            node.tick(Twist(),check=False)
+                        if not future.done() or not future.result().success:
+                            print('Nav2 did not confirm graceful lifecycle shutdown',flush=True)
     finally:
         try:
             if stack is not None and stack.poll() is None:

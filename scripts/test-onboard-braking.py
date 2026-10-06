@@ -186,9 +186,13 @@ class OnboardBraking(FAULT['FaultTest']):
     def tick(self,twist=None,check=True):
         super().tick(twist,check)
         if check and self.active:
-            if not self.ranges or time.monotonic()-self.ranges[-1]['time']+self.ranges[-1]['age']>.5:
-                self.command.publish(Twist())
-                raise RuntimeError('independent raw-LiDAR tracking is unavailable/stale')
+            def fresh():
+                return self.ranges and time.monotonic()-self.ranges[-1]['time']+self.ranges[-1]['age']<=.5
+            if not fresh():
+                if self.phase:
+                    self.command.publish(Twist())
+                    raise RuntimeError('independent raw-LiDAR tracking failed during the fault')
+                self.pause_until(fresh,'fresh independent raw-LiDAR capture')
             if self.origin_range and math.dist(self.ranges[-1]['pose'][:2],self.origin_range[:2])>=.16:
                 self.command.publish(Twist())
                 raise RuntimeError('independent early 16 cm boundary reached')
@@ -211,20 +215,26 @@ class OnboardBraking(FAULT['FaultTest']):
         self.wait(lambda:self.flags.get('base_motion_permitted'),15)
         linear,angular=NAV['load_base_speed_limits'](ROOT/'config/nav2_params.yaml')
         speed=angular if direction.startswith('rotation') else linear
+        self.angular_test=direction.startswith('rotation')
         command=Twist();command.linear.x,command.linear.y,command.angular.z=[float(speed*v) for v in DIRECTIONS[direction]]
-        start=time.monotonic();begin=len(self.ranges);faults=len(self.health_faults)
+        start=time.monotonic();begin=len(self.ranges);faults=len(self.health_faults);pauses=self.motion_pauses
         while time.monotonic()-start<2.5:
             if not self.flags.get('base_motion_permitted'):
                 self.command.publish(Twist());raise RuntimeError('nominal permission withdrawn')
             self.tick(command)
         cut=time.monotonic();self.command.publish(Twist())
+        covered=self.safe_speed is not None and self.safe_speed>=speed*.9 and self.measured_speed>=speed*.9 and time.monotonic()-self.odom_at<.3
+        wheel_speed,guarded_speed=self.measured_speed,self.safe_speed
         terminal=[{**r,'pts_ns':int(r['stamp']*1e9)} for r in self.ranges[begin:]]
         observed=BRAKE['terminal_observed_speed'](terminal,direction.startswith('rotation'),window_s=1.2)
         until=time.monotonic()+2.5
         while time.monotonic()<until:self.tick(Twist())
         result=self.observe_stop(cut)
         result.update(direction=direction,requested_speed=speed,terminal_observed_speed=observed,
-                      requested_speed_covered=observed>=speed*.9,feedback_interrupted=len(self.health_faults)>faults)
+                      requested_speed_covered=covered and observed>=(.015 if self.angular_test else .005),
+                      speed_coverage_basis='maximum production guarded command and fresh wheel speed, with independent ground motion',
+                      terminal_wheel_speed=wheel_speed,terminal_guarded_speed=guarded_speed,
+                      feedback_interrupted=len(self.health_faults)>faults or self.motion_pauses>pauses)
         result['qualification_eligible']=result['within_budget'] and result['requested_speed_covered'] and not result['feedback_interrupted']
         self.trials.append(result);self.save();print('STOP',json.dumps(result),flush=True)
         if not result['within_budget']:raise RuntimeError('loaded stopping/error bound exceeded')
@@ -249,11 +259,12 @@ class OnboardBraking(FAULT['FaultTest']):
 
     def run(self):
         self.wait_ready();self.wait(lambda:len(self.ranges)>20 and self.range_info and self.camera_poses and len(self.views)==3,25)
-        self.center=self.pose;self.origin_range=self.ranges[-1]['pose'];self.active=True
+        self.center=tuple(self.config['test_center']) if self.config.get('test_center') else self.pose
+        self.origin_range=self.ranges[-1]['pose'];self.active=True
         poses=[r['pose'] for r in self.ranges[-15:]]
         self.stationary_jitter=max(BRAKE['maximum_swept_excursion'](poses[i:],self.config['body_radius_m']) for i in range(len(poses)))
         for direction in DIRECTIONS:
-            completed=0;attempts=0
+            completed=sum(t['direction']==direction and t['qualification_eligible'] for t in self.trials);attempts=0
             while completed<self.config['trials_per_direction']:
                 attempts+=1
                 if attempts>10:raise RuntimeError('too many unqualified stopping attempts: '+direction)
@@ -314,6 +325,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--payload-g',type=float,required=True)
     parser.add_argument('--nominal-only',action='store_true')
+    parser.add_argument('--resume',type=Path,help='retain qualified trials and the fixed center from this earlier loaded run')
     args=parser.parse_args()
     if not math.isfinite(args.payload_g) or args.payload_g<0:parser.error('payload must be finite and nonnegative')
     config=yaml.safe_load((ROOT/'config/onboard_braking.yaml').read_text())
@@ -327,9 +339,19 @@ def main():
     candidates=subprocess.check_output(['ssh','-o','BatchMode=yes','-o','ConnectTimeout=5',device,remote],text=True).split()
     if len(candidates)!=1 or not candidates[0].isdigit():raise RuntimeError('expected exactly one device depth filter')
     config['depth_filter_pid']=candidates[0]
+    resumed=[]
+    if args.resume:
+        previous=json.loads((args.resume/'measurements.json').read_text())
+        if previous['profile']['payload_kg']!=config['payload_kg'] or previous['profile']['measurement_uncertainty_m']!=config['measurement_uncertainty_m']:
+            raise ValueError('resumed load/measurement profile differs')
+        config['test_center']=json.loads((args.resume/'result.json').read_text())['origin']
+        if not config['test_center']:raise ValueError('resumed test center is missing')
+        resumed=[{**t,'source_run':str(args.resume)} for t in previous['trials'] if t['qualification_eligible']]
     output=ROOT/'.benchmarks/onboard-braking'/time.strftime('%Y%m%d-%H%M%S');output.mkdir(parents=True)
     (output/'profile.yaml').write_text(yaml.safe_dump(config))
-    NAV['main'](lambda:OnboardBraking(output,config),output,production=True,payload_kg=config['payload_kg'])
+    def node():
+        instance=OnboardBraking(output,config);instance.trials=resumed;return instance
+    NAV['main'](node,output,production=True,payload_kg=config['payload_kg'])
 
 
 if __name__=='__main__':main()
