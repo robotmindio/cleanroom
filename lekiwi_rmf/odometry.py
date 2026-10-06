@@ -3,27 +3,18 @@
 from dataclasses import dataclass
 from math import cos, isfinite, sin
 
+from lekiwi_rmf.host_protocol import (
+    HOST_ODOMETRY_KEY, TELEMETRY_KEYS, TELEMETRY_MONOTONIC_NS_KEY, TELEMETRY_PROTOCOL_KEY,
+    TELEMETRY_PROTOCOL_VERSION, TELEMETRY_SEQUENCE_KEY, TELEMETRY_SESSION_KEY,
+    TELEMETRY_TORQUE_ENABLED_KEY,
+)
 from lekiwi_rmf.launch_calibration import load_launch_calibration
 
 
-TELEMETRY_PROTOCOL_VERSION = 2
-TELEMETRY_PROTOCOL_KEY = "_lekiwi_protocol"
-TELEMETRY_SESSION_KEY = "_lekiwi_session"
-TELEMETRY_SEQUENCE_KEY = "_lekiwi_sequence"
-TELEMETRY_MONOTONIC_NS_KEY = "_lekiwi_sample_monotonic_ns"
-TELEMETRY_TORQUE_ENABLED_KEY = "_lekiwi_torque_enabled"
-HOST_ODOMETRY_KEY = "_lekiwi_odometry"
 BASE_XY_SCALE = 1.0
 # 2026-10-05: source-time-aligned native lidar measured 1.08453 times the
 # wheel yaw at the former 0.90 scale; independent RGB-D agreed on the turn.
 BASE_YAW_SCALE = 0.976
-TELEMETRY_KEYS = (
-    TELEMETRY_PROTOCOL_KEY,
-    TELEMETRY_SESSION_KEY,
-    TELEMETRY_SEQUENCE_KEY,
-    TELEMETRY_MONOTONIC_NS_KEY,
-    TELEMETRY_TORQUE_ENABLED_KEY,
-)
 
 
 @dataclass(frozen=True)

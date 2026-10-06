@@ -27,29 +27,23 @@ from typing import Mapping
 
 import zmq
 
-from lekiwi_rmf.odometry import (
+from lekiwi_rmf.host_protocol import (
+    ARM_LEASE_KEYS,
+    ARM_TRAJECTORY_STATUS_KEY,
+    CAMERAS_KEY,
+    MOTOR_HEALTH_KEY,
+    MOTOR_NAMES,
+    STATE_KEYS,
     TELEMETRY_MONOTONIC_NS_KEY,
     TELEMETRY_PROTOCOL_KEY,
     TELEMETRY_PROTOCOL_VERSION,
     TELEMETRY_SEQUENCE_KEY,
     TELEMETRY_SESSION_KEY,
     TELEMETRY_TORQUE_ENABLED_KEY,
+    TorqueCommand,
 )
 from lekiwi_rmf.motor_health import healthy_snapshot
-from lekiwi_rmf.local_arm_executor import LocalArmExecutor, STATUS_KEY, LEASE_KEYS
-
-
-LEKIWI_STATE_KEYS = (
-    "arm_shoulder_pan.pos",
-    "arm_shoulder_lift.pos",
-    "arm_elbow_flex.pos",
-    "arm_wrist_flex.pos",
-    "arm_wrist_roll.pos",
-    "arm_gripper.pos",
-    "x.vel",
-    "y.vel",
-    "theta.vel",
-)
+from lekiwi_rmf.local_arm_executor import LocalArmExecutor
 
 
 class ObservationFault(str, Enum):
@@ -86,7 +80,7 @@ class FakeLeKiwiHost:
     observation_port: int = 0
     torque_port: int = 0
     context: zmq.Context | None = None
-    state: dict[str, float] = field(default_factory=lambda: {key: 0.0 for key in LEKIWI_STATE_KEYS})
+    state: dict[str, float] = field(default_factory=lambda: {key: 0.0 for key in STATE_KEYS})
     motor_health: dict | None = None
 
     def __post_init__(self) -> None:
@@ -119,7 +113,9 @@ class FakeLeKiwiHost:
         self.actions: list[dict[str, float]] = []
         self.torque_enabled = False
         self.torque_requests: list[str] = []
-        self._torque_failures: dict[str, deque[str]] = {"enable": deque(), "disable": deque()}
+        self._torque_failures: dict[str, deque[str]] = {
+            TorqueCommand.ENABLE: deque(), TorqueCommand.DISABLE: deque(),
+        }
         self._faults: deque[ObservationFault] = deque()
         self._session = uuid.uuid4().hex
         self.arm_executor = LocalArmExecutor(time.monotonic, 0.5)
@@ -130,13 +126,9 @@ class FakeLeKiwiHost:
         self._camera_frames: dict[str, bytes] = {}
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
-        self._motor_names = (
-            "arm_shoulder_pan", "arm_shoulder_lift", "arm_elbow_flex", "arm_wrist_flex",
-            "arm_wrist_roll", "arm_gripper", "wheel_left", "wheel_right", "wheel_back",
-        )
         self._motor_health_injected = self.motor_health is not None
         if self.motor_health is None:
-            self.motor_health = healthy_snapshot(self._motor_names, False)
+            self.motor_health = healthy_snapshot(MOTOR_NAMES, False)
 
     @property
     def session(self) -> str:
@@ -199,7 +191,7 @@ class FakeLeKiwiHost:
     def set_state(self, **updates: float) -> None:
         """Set finite feedback values that are included in later observations."""
         for key, value in updates.items():
-            if key not in LEKIWI_STATE_KEYS:
+            if key not in STATE_KEYS:
                 raise KeyError(f"unknown LeKiwi state key {key!r}")
             value = float(value)
             if not isfinite(value):
@@ -230,18 +222,18 @@ class FakeLeKiwiHost:
     def _valid_frames(self, *, stale_timestamp: bool = False) -> list[bytes]:
         with self._protocol_lock:
             if not self._motor_health_injected:
-                self.motor_health = healthy_snapshot(self._motor_names, self.torque_enabled)
+                self.motor_health = healthy_snapshot(MOTOR_NAMES, self.torque_enabled)
             sample_ns = self._last_sample_ns if stale_timestamp and self._last_sample_ns is not None else time.monotonic_ns()
             payload = {
-                "_cams": list(self._camera_frames),
+                CAMERAS_KEY: list(self._camera_frames),
                 **self.state,
                 TELEMETRY_PROTOCOL_KEY: TELEMETRY_PROTOCOL_VERSION,
                 TELEMETRY_SESSION_KEY: self._session,
                 TELEMETRY_SEQUENCE_KEY: self._sequence,
                 TELEMETRY_MONOTONIC_NS_KEY: sample_ns,
                 TELEMETRY_TORQUE_ENABLED_KEY: self.torque_enabled,
-                "_lekiwi_motor_health": self.motor_health,
-                STATUS_KEY: self.arm_executor.status,
+                MOTOR_HEALTH_KEY: self.motor_health,
+                ARM_TRAJECTORY_STATUS_KEY: self.arm_executor.status,
             }
             self._sequence += 1
             self._last_sample_ns = sample_ns
@@ -294,8 +286,8 @@ class FakeLeKiwiHost:
             except (UnicodeDecodeError, TypeError, ValueError, json.JSONDecodeError):
                 continue
             self.actions.append(action)
-            if LEASE_KEYS[0] in action:
-                self.arm_executor.renew(action[LEASE_KEYS[0]], bool(action.get(LEASE_KEYS[1], 0)))
+            if ARM_LEASE_KEYS[0] in action:
+                self.arm_executor.renew(action[ARM_LEASE_KEYS[0]], bool(action.get(ARM_LEASE_KEYS[1], 0)))
             if not self.arm_executor.active:
                 action.update(self.arm_executor.hold)
                 for key, value in action.items():
@@ -328,19 +320,19 @@ class FakeLeKiwiHost:
                 "error": self._torque_failures[command].popleft(),
                 "torque_enabled": self.torque_enabled,
             })
-        elif command == "enable":
+        elif command == TorqueCommand.ENABLE:
             self.torque_enabled = True
             self._torque_socket.send_json({"ok": True, "torque_enabled": True})
-        elif command == "disable":
+        elif command == TorqueCommand.DISABLE:
             self.torque_enabled = False
             self.arm_executor.cancel()
             self.arm_executor.hold = {}
             self._torque_socket.send_json({"ok": True, "torque_enabled": False})
-        elif command in {"trajectory_start", "trajectory_cancel"}:
+        elif command in {TorqueCommand.TRAJECTORY_START, TorqueCommand.TRAJECTORY_CANCEL}:
             try:
                 if request.get("session") != self.session or not self.torque_enabled:
                     raise ValueError("invalid trajectory session or disabled torque")
-                if command == "trajectory_start":
+                if command == TorqueCommand.TRAJECTORY_START:
                     self.arm_executor.start(request["trajectory"], self.state)
                 else:
                     if self.arm_executor.status is None or request.get("id") != self.arm_executor.status["id"]:
@@ -350,7 +342,7 @@ class FakeLeKiwiHost:
                 self._torque_socket.send_json({"ok": True, "trajectory": self.arm_executor.status})
             except Exception as error:
                 self._torque_socket.send_json({"ok": False, "error": str(error)})
-        elif command == "state":
+        elif command == TorqueCommand.STATE:
             self._torque_socket.send_json({"ok": True, "torque_enabled": self.torque_enabled})
         else:
             self._torque_socket.send_json({"ok": False, "error": "command must be enable, disable, or state"})

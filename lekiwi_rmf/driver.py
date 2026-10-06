@@ -29,6 +29,7 @@ from lekiwi_rmf.arm_trajectory import (
     duration_seconds, position_tolerances, prepare_trajectory, sample_trajectory,
     stamp_nanoseconds, trajectory_rows,
 )
+from lekiwi_rmf.host_protocol import STATE_KEYS, TorqueCommand
 from lekiwi_rmf.motion_guards import (
     bounded_test_speed_limits, inside_base_test_boundary, lease_is_fresh, load_base_speed_limits, twist_is_finite,
 )
@@ -139,11 +140,8 @@ class LeKiwiDriver(Node):
         curve_credentials = CurveClientCredentials(
             curve_client_secret, curve_server_public
         ).validate()
-        state_keys = tuple(f"{joint}.pos" for joint in ARM_JOINTS) + (
-            "x.vel", "y.vel", "theta.vel",
-        )
         self.robot = LeKiwiZmqClient(
-            remote_ip, command_port, observation_port, state_keys,
+            remote_ip, command_port, observation_port, STATE_KEYS,
             curve_credentials=curve_credentials,
         )
         self.robot.connect()
@@ -832,7 +830,7 @@ class LeKiwiDriver(Node):
                     current = self.trajectory is trajectory
                 if current:
                     response = self.torque.trajectory_request(
-                        "trajectory_start", session=trajectory["host_session"], trajectory={
+                        TorqueCommand.TRAJECTORY_START, session=trajectory["host_session"], trajectory={
                             "id": trajectory["host_id"], "names": list(names), "points": requested_points,
                             "zeros": self.arm_zero_positions, "directions": self.arm_directions,
                             "path": path_tolerances, "goal": goal_tolerances,
@@ -895,7 +893,7 @@ class LeKiwiDriver(Node):
     def _cancel_host_trajectory(self, trajectory):
         try:
             self.torque.trajectory_request(
-                "trajectory_cancel", id=trajectory["host_id"], session=trajectory["host_session"],
+                TorqueCommand.TRAJECTORY_CANCEL, id=trajectory["host_id"], session=trajectory["host_session"],
             )
         except Exception as error:
             # The bounded Pi lease has already stopped advancement; report the

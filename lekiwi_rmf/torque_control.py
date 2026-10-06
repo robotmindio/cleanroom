@@ -6,9 +6,8 @@ import ipaddress
 import json
 import math
 
-from lekiwi_rmf.zmq_security import (
-    CurveClientCredentials,
-)
+from lekiwi_rmf.host_protocol import TorqueCommand
+from lekiwi_rmf.zmq_security import CurveClientCredentials
 
 
 class TorqueControlError(RuntimeError):
@@ -165,7 +164,7 @@ class TorqueControlClient:
         error = None
         for _attempt in range(self.ATTEMPTS):
             try:
-                response = self._request({"command": "enable" if enabled else "disable"})
+                response = self._request({"command": TorqueCommand.ENABLE if enabled else TorqueCommand.DISABLE})
                 break
             except Exception as failure:
                 error = failure

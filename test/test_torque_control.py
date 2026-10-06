@@ -48,6 +48,36 @@ from lekiwi_rmf.torque_control import (
 )
 
 
+def test_wire_contract_matches_the_deployed_motor_host():
+    from lekiwi_rmf import host_protocol as protocol
+
+    payload = protocol.observation_payload(
+        {"arm_shoulder_pan.pos": 1.5, "x.vel": 0.0}, ["front"], session="s", sequence=3,
+        sample_monotonic_ns=7, torque_enabled=True, motor_health={"version": 1},
+        odometry={"pose": [0, 0, 0]}, arm_status=None,
+    )
+    # Byte-for-byte the header the Pi host already in service sends (protocol 2).
+    assert json.dumps(payload) == (
+        '{"_cams": ["front"], "arm_shoulder_pan.pos": 1.5, "x.vel": 0.0, '
+        '"_lekiwi_protocol": 2, "_lekiwi_session": "s", "_lekiwi_sequence": 3, '
+        '"_lekiwi_sample_monotonic_ns": 7, "_lekiwi_torque_enabled": true, '
+        '"_lekiwi_motor_health": {"version": 1}, "_lekiwi_odometry": {"pose": [0, 0, 0]}, '
+        '"_lekiwi_arm_trajectory": null}'
+    )
+    assert protocol.ARM_LEASE_KEYS == ("_lekiwi_arm_goal", "_lekiwi_arm_permission")
+    assert protocol.STATE_KEYS == (
+        "arm_shoulder_pan.pos", "arm_shoulder_lift.pos", "arm_elbow_flex.pos",
+        "arm_wrist_flex.pos", "arm_wrist_roll.pos", "arm_gripper.pos",
+        "x.vel", "y.vel", "theta.vel",
+    )
+    assert [protocol.TorqueCommand.ENABLE, protocol.TorqueCommand.DISABLE,
+            protocol.TorqueCommand.STATE, protocol.TorqueCommand.TRAJECTORY_START,
+            protocol.TorqueCommand.TRAJECTORY_CANCEL] == [
+        "enable", "disable", "state", "trajectory_start", "trajectory_cancel"]
+    assert protocol.valid_goal_id(1) and protocol.valid_goal_id(2**48 - 1)
+    assert not any(map(protocol.valid_goal_id, (0, 2**48, True, 1.0, -1)))
+
+
 class _Socket:
     def __init__(self, response):
         self.response = response

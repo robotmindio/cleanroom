@@ -10,7 +10,7 @@ import pytest
 zmq = pytest.importorskip("zmq", reason="fake host requires pyzmq (provided by the LeRobot test environment)")
 
 from lekiwi_rmf.fake_host import FakeLeKiwiHost, ObservationFault
-from lekiwi_rmf.odometry import (
+from lekiwi_rmf.host_protocol import (
     TELEMETRY_MONOTONIC_NS_KEY,
     TELEMETRY_SEQUENCE_KEY,
     TELEMETRY_SESSION_KEY,

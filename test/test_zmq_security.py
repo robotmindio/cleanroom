@@ -10,7 +10,7 @@ import pytest
 from lekiwi_rmf.zmq_security import (
     CurveClientCredentials, CurveConfigurationError, CurveServerSecurity,
 )
-from lekiwi_rmf.odometry import (
+from lekiwi_rmf.host_protocol import (
     TELEMETRY_MONOTONIC_NS_KEY, TELEMETRY_PROTOCOL_KEY,
     TELEMETRY_PROTOCOL_VERSION, TELEMETRY_SEQUENCE_KEY, TELEMETRY_SESSION_KEY,
     TELEMETRY_TORQUE_ENABLED_KEY,
