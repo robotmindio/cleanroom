@@ -348,6 +348,7 @@ def main():
     parser.add_argument('--payload-g',type=float,required=True)
     parser.add_argument('--nominal-only',action='store_true')
     parser.add_argument('--resume',type=Path,help='retain qualified trials and the fixed center from this earlier loaded run')
+    parser.add_argument('--center',type=float,nargs=3,metavar=('X','Y','YAW'),help='clear test center in wheel coordinates; the existing 12 cm relocation guard still applies')
     args=parser.parse_args()
     if not math.isfinite(args.payload_g) or args.payload_g<0:parser.error('payload must be finite and nonnegative')
     config=yaml.safe_load((ROOT/'config/onboard_braking.yaml').read_text())
@@ -369,6 +370,9 @@ def main():
         config['test_center']=json.loads((args.resume/'result.json').read_text())['origin']
         if not config['test_center']:raise ValueError('resumed test center is missing')
         resumed=[{**t,'source_run':t.get('source_run',str(args.resume))} for t in previous['trials'] if t['qualification_eligible']]
+    if args.center:
+        if not all(math.isfinite(v) for v in args.center):parser.error('test center must be finite')
+        config['test_center']=args.center
     output=ROOT/'.benchmarks/onboard-braking'/time.strftime('%Y%m%d-%H%M%S');output.mkdir(parents=True)
     (output/'profile.yaml').write_text(yaml.safe_dump(config))
     def node():
