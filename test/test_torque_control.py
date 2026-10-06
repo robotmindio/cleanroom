@@ -4,6 +4,7 @@ import dataclasses
 import importlib.util
 import json
 import logging
+import math
 import pathlib
 import sys
 import types
@@ -41,6 +42,9 @@ def test_qualification_socket_changes_only_wire_data_and_expires():
     with pytest.raises(ValueError, match='unsupported'):
         socket.inject('unknown')
 
+from lekiwi_rmf.arm_trajectory import JOINT_LIMITS, action_positions, load_calibration
+from lekiwi_rmf.motion_guards import load_base_speed_limits
+from lekiwi_rmf.odometry import BASE_XY_SCALE, BASE_YAW_SCALE
 from lekiwi_rmf.torque_control import (
     TorqueControlClient, TorqueControlError, enable_with_rollback,
     react_to_command_silence, run_all_safety_steps, torque_readback_matches,
@@ -283,25 +287,31 @@ def test_client_gives_up_after_two_silent_attempts_and_never_retries_a_refusal()
 
 
 # ---------------------------------------------------------------------------
-# scripts/torque-host.py against a fake motor bus. LeRobot, draccus, OpenCV and
-# pyzmq are replaced by minimal stand-ins so the host's own logic runs anywhere.
+# lekiwi_rmf.motor_host, the bus-independent host core, against a fake motor bus.
 
 ARM = ("arm_shoulder_pan", "arm_gripper")
 BASE = ("base_left_wheel",)
 MOTORS = ARM + BASE
+ROOT = pathlib.Path(__file__).parents[1]
 
 
-class _Again(Exception):
-    pass
+@pytest.fixture
+def host():
+    pytest.importorskip("zmq", reason="the motor host requires pyzmq")
+    from lekiwi_rmf import motor_host
+
+    return motor_host
 
 
-def _host_module(monkeypatch, filename=None):
-    fake_zmq = types.SimpleNamespace(
-        Again=_Again, NOBLOCK=1, REP=4, PULL=7, PUSH=8, LINGER=17, CONFLATE=54, SNDHWM=23,
-        HEARTBEAT_IVL=75, HEARTBEAT_TIMEOUT=77, MAXMSGSIZE=22,
-    )
-    fake_cv2 = types.SimpleNamespace(IMWRITE_JPEG_QUALITY=1, imencode=lambda *_args: (True, b"jpeg"))
-    fake_draccus = types.SimpleNamespace(wrap=lambda: (lambda function: function))
+def _again():
+    import zmq
+
+    return zmq.Again()
+
+
+def _torque_host_script(monkeypatch, filename=None):
+    """Load scripts/torque-host.py, which only adds LeRobot wiring, with LeRobot stubbed."""
+    pytest.importorskip("zmq", reason="the motor host requires pyzmq")
 
     @dataclasses.dataclass
     class LeKiwiConfig:
@@ -319,7 +329,8 @@ def _host_module(monkeypatch, filename=None):
             self.config = config
 
     modules = {
-        "zmq": fake_zmq, "cv2": fake_cv2, "draccus": fake_draccus,
+        "cv2": types.SimpleNamespace(IMWRITE_JPEG_QUALITY=1, imencode=lambda *_args: (True, b"jpeg")),
+        "draccus": types.SimpleNamespace(wrap=lambda: (lambda function: function)),
         "lerobot": types.ModuleType("lerobot"),
         "lerobot.motors": types.ModuleType("lerobot.motors"),
         "lerobot.motors.feetech": types.SimpleNamespace(OperatingMode=types.SimpleNamespace(
@@ -335,7 +346,7 @@ def _host_module(monkeypatch, filename=None):
     for name, module in modules.items():
         monkeypatch.setitem(sys.modules, name, module)
     spec = importlib.util.spec_from_file_location(
-        "torque_host", filename or pathlib.Path(__file__).parents[1] / "scripts" / "torque-host.py",
+        "torque_host", filename or ROOT / "scripts" / "torque-host.py",
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -355,7 +366,7 @@ def test_host_speed_profile_is_resolved_in_source_and_installed_layouts(monkeypa
     profile.parent.mkdir(parents=True)
     filename.write_text((root / "scripts/torque-host.py").read_text())
     profile.write_text((root / "config/nav2_params.yaml").read_text())
-    host = _host_module(monkeypatch, filename)
+    host = _torque_host_script(monkeypatch, filename)
     assert pathlib.Path(host.TorqueSafetyConfig().nav2_params_file) == profile
     assert host.load_base_speed_limits(profile) == (0.03, 0.06)
 
@@ -466,7 +477,7 @@ class _RepSocket:
 
     def recv_json(self, flags=0):
         if not self.requests:
-            raise _Again()
+            raise _again()
         request = self.requests.pop(0)
         if isinstance(request, Exception):
             raise request
@@ -481,10 +492,9 @@ class _RepSocket:
 
 def _control(host, tmp_path, bus=None):
     socket = _RepSocket()
-    context = types.SimpleNamespace(socket=lambda _kind: socket)
-    security = types.SimpleNamespace(configure_socket=lambda _socket: None)
     control = host.TorqueControlServer(
-        context, host.TorqueSafetyConfig(bind_address="127.0.0.1"), security,
+        socket, host.LocalArmExecutor(lambda: 0.0, 0.5),
+        load_calibration(tmp_path / "arm_calibration.json"), "test-session",
     )
     robot = _Robot(bus or _Bus())
     return control, socket, robot
@@ -497,7 +507,7 @@ def _request(control, socket, robot, request):
 
 
 def test_configure_never_energizes_the_servos(monkeypatch):
-    host = _host_module(monkeypatch)
+    host = _torque_host_script(monkeypatch)
     robot = host.SafetyLeKiwi(host.LeKiwiConfig())
     robot.bus = _Bus()
     robot.arm_motors, robot.base_motors = list(ARM), list(BASE)
@@ -511,7 +521,7 @@ def test_configure_never_energizes_the_servos(monkeypatch):
 
 
 def test_loaded_arm_joints_get_tuned_position_gain(monkeypatch):
-    host = _host_module(monkeypatch)
+    host = _torque_host_script(monkeypatch)
     robot = host.SafetyLeKiwi(host.LeKiwiConfig())
     robot.bus = _Bus()
     robot.arm_motors = ["arm_shoulder_pan", "arm_shoulder_lift", "arm_elbow_flex", "arm_wrist_flex"]
@@ -529,7 +539,7 @@ def test_loaded_arm_joints_get_tuned_position_gain(monkeypatch):
 
 
 def test_configure_rejects_unconfirmed_arm_gains(monkeypatch):
-    host = _host_module(monkeypatch)
+    host = _torque_host_script(monkeypatch)
     robot = host.SafetyLeKiwi(host.LeKiwiConfig())
     robot.bus = _Bus()
     robot.arm_motors, robot.base_motors = list(ARM), list(BASE)
@@ -542,15 +552,14 @@ def test_configure_rejects_unconfirmed_arm_gains(monkeypatch):
 
 
 def test_shutdown_signal_waits_for_the_serial_operation_to_finish(monkeypatch):
-    host = _host_module(monkeypatch)
+    host = _torque_host_script(monkeypatch)
 
     host._shutdown_signal(None, None)
 
     assert host._shutdown_requested is True
 
 
-def test_enable_holds_the_measured_arm_pose_before_confirming_torque(monkeypatch, tmp_path):
-    host = _host_module(monkeypatch)
+def test_enable_holds_the_measured_arm_pose_before_confirming_torque(host, tmp_path):
     control, socket, robot = _control(host, tmp_path)
 
     command, reply = _request(control, socket, robot, {"command": "enable"})
@@ -566,8 +575,7 @@ def test_enable_holds_the_measured_arm_pose_before_confirming_torque(monkeypatch
     assert robot.bus.calls == ["read Torque_Enable"]
 
 
-def test_enable_rolls_torque_back_off_when_a_servo_does_not_confirm(monkeypatch, tmp_path):
-    host = _host_module(monkeypatch)
+def test_enable_rolls_torque_back_off_when_a_servo_does_not_confirm(host, tmp_path):
     bus = _Bus()
     bus.enable_skips = ("arm_gripper",)
     control, socket, robot = _control(host, tmp_path, bus)
@@ -582,8 +590,7 @@ def test_enable_rolls_torque_back_off_when_a_servo_does_not_confirm(monkeypatch,
     assert control.torque_enabled is False
 
 
-def test_disable_broadcast_reaches_every_motor_past_an_overloaded_gripper(monkeypatch, tmp_path):
-    host = _host_module(monkeypatch)
+def test_disable_broadcast_reaches_every_motor_past_an_overloaded_gripper(host, tmp_path):
     bus = _Bus()
     bus.faults["disable_torque"] = RuntimeError("gripper overload aborts per-servo write")
     control, socket, robot = _control(host, tmp_path, bus)
@@ -596,8 +603,7 @@ def test_disable_broadcast_reaches_every_motor_past_an_overloaded_gripper(monkey
     assert "disable_torque" not in bus.calls
 
 
-def test_shutdown_fallback_attempts_every_motor_after_an_overload(monkeypatch):
-    host = _host_module(monkeypatch)
+def test_shutdown_fallback_attempts_every_motor_after_an_overload(host):
     bus = _Bus()
     bus.torque = dict.fromkeys(MOTORS, 1)
     bus.faults["Torque_Enable_write"] = RuntimeError("broadcast failed")
@@ -611,8 +617,7 @@ def test_shutdown_fallback_attempts_every_motor_after_an_overload(monkeypatch):
     assert bus.torque == {motor: int(motor == "arm_gripper") for motor in MOTORS}
 
 
-def test_disable_reports_torque_on_until_the_bus_confirms_the_cut(monkeypatch, tmp_path):
-    host = _host_module(monkeypatch)
+def test_disable_reports_torque_on_until_the_bus_confirms_the_cut(host, tmp_path):
     control, socket, robot = _control(host, tmp_path)
     _request(control, socket, robot, {"command": "enable"})
     robot.bus.torque_off_skips = ("arm_gripper",)
@@ -629,13 +634,12 @@ def test_disable_reports_torque_on_until_the_bus_confirms_the_cut(monkeypatch, t
     assert (command, reply) == ("disable", {"ok": True, "torque_enabled": False})
 
 
-def test_torque_requests_answer_every_malformed_request(monkeypatch, tmp_path):
-    host = _host_module(monkeypatch)
+def test_torque_requests_answer_every_malformed_request(host, tmp_path):
     control, socket, robot = _control(host, tmp_path)
 
     assert control.process_one(robot) is None and socket.replies == []  # nothing pending
     assert _request(control, socket, robot, {"command": "state"}) == (
-        "state", {"ok": True, "torque_enabled": False},
+        "state", {"ok": True, "torque_enabled": False, "trajectory": None},
     )
     undecodable = _request(control, socket, robot, ValueError("Expecting value"))
     assert undecodable == (None, {"ok": False, "error": "invalid request: Expecting value"})
@@ -659,7 +663,7 @@ class _CommandSocket:
 
     def recv_string(self, flags=0):
         if not self.messages:
-            raise _Again()
+            raise _again()
         return self.messages.pop(0)
 
 
@@ -670,21 +674,25 @@ class _ObservationSocket:
 
     def send_multipart(self, frames, flags=0):
         if self.full:
-            raise _Again()
+            raise _again()
         self.sent.append(frames)
 
 
 def _loop(host, tmp_path, *, disarm_on_failure=False):
-    control, socket, robot = _control(host, tmp_path)
-    control.config.arm_calibration_file = str(tmp_path / "arm_calibration.json")
     bound = types.SimpleNamespace(
         zmq_cmd_socket=_CommandSocket(), zmq_observation_socket=_ObservationSocket(),
-        watchdog_timeout_ms=500, max_loop_freq_hz=30,
+        torque_socket=_RepSocket(), watchdog_timeout_ms=500,
     )
     clock = _Clock()
     health = types.SimpleNamespace(collect=lambda _robot, enabled: {"torque": enabled})
-    loop = host.HostLoop(robot, bound, control, health, disarm_on_failure, clock=clock)
-    return loop, clock, socket, robot
+    robot = _Robot(_Bus())
+    loop = host.HostLoop(
+        robot, bound, health, disarm_on_failure=disarm_on_failure,
+        arm_calibration=load_calibration(tmp_path / "arm_calibration.json"),
+        base_limits=load_base_speed_limits(ROOT / "config/nav2_params.yaml"),
+        base_scales=(BASE_XY_SCALE, BASE_YAW_SCALE), encode_camera=bytes, clock=clock,
+    )
+    return loop, clock, bound.torque_socket, robot
 
 
 def _action(**overrides):
@@ -697,9 +705,8 @@ def _action(**overrides):
     return json.dumps(action)
 
 
-def test_valid_commands_reach_the_robot_and_refresh_the_watchdog(monkeypatch, tmp_path):
-    host = _host_module(monkeypatch)
-    assert set(json.loads(_action())) == set(host.ACTION_KEYS)
+def test_valid_commands_reach_the_robot_and_refresh_the_watchdog(host, tmp_path):
+    assert set(json.loads(_action())) == set(host.STATE_KEYS)
     loop, clock, _socket, robot = _loop(host, tmp_path)
     loop.control.torque_enabled = True
 
@@ -714,8 +721,7 @@ def test_valid_commands_reach_the_robot_and_refresh_the_watchdog(monkeypatch, tm
     assert "stop_base" not in robot.bus.calls
 
 
-def test_out_of_envelope_commands_never_reach_motors_or_refresh_watchdog(monkeypatch, tmp_path):
-    host = _host_module(monkeypatch)
+def test_out_of_envelope_commands_never_reach_motors_or_refresh_watchdog(host, tmp_path):
     loop, clock, _socket, robot = _loop(host, tmp_path)
     loop.control.torque_enabled = True
     last_command = loop.last_cmd_time
@@ -728,10 +734,9 @@ def test_out_of_envelope_commands_never_reach_motors_or_refresh_watchdog(monkeyp
     assert loop.control.torque_enabled
 
 
-def test_host_rejects_a_trajectory_that_changes_its_calibration(monkeypatch, tmp_path):
+def test_host_rejects_a_trajectory_that_changes_its_calibration(host, tmp_path):
     from test_local_arm_executor import setup_executor
 
-    host = _host_module(monkeypatch)
     loop, _clock, socket, robot = _loop(host, tmp_path)
     loop.control.torque_enabled = True
     _executor, _now, _observation, trajectory = setup_executor()
@@ -745,10 +750,9 @@ def test_host_rejects_a_trajectory_that_changes_its_calibration(monkeypatch, tmp
     assert not robot.actions and not robot.bus.calls
 
 
-def test_real_host_local_goal_holds_through_command_silence(monkeypatch, tmp_path):
+def test_real_host_local_goal_holds_through_command_silence(host, tmp_path):
     from test_local_arm_executor import setup_executor
 
-    host = _host_module(monkeypatch)
     loop, clock, socket, robot = _loop(host, tmp_path)
     loop.control.torque_enabled = True
     _executor, _now, observation, trajectory = setup_executor()
@@ -786,8 +790,7 @@ def test_real_host_local_goal_holds_through_command_silence(monkeypatch, tmp_pat
     assert reply["trajectory"] == loop.arm_executor.status
 
 
-def test_host_keeps_command_loop_fast_and_limits_observation_bandwidth(monkeypatch, tmp_path):
-    host = _host_module(monkeypatch)
+def test_host_keeps_command_loop_fast_and_limits_observation_bandwidth(host, tmp_path):
     loop, clock, _socket, robot = _loop(host, tmp_path)
     loop.control.torque_enabled = True
     commands = loop.host.zmq_cmd_socket.messages
@@ -807,8 +810,7 @@ def test_host_keeps_command_loop_fast_and_limits_observation_bandwidth(monkeypat
     assert len(loop.host.zmq_observation_socket.sent) == 2
 
 
-def test_host_reports_the_stage_causing_a_slow_observation(monkeypatch, tmp_path, caplog):
-    host = _host_module(monkeypatch)
+def test_host_reports_the_stage_causing_a_slow_observation(host, monkeypatch, tmp_path, caplog):
     loop, _clock, _socket, _robot = _loop(host, tmp_path)
     timings = iter((100.0, 100.01, 100.02, 100.03, 100.34))
     monkeypatch.setattr(host.time, "perf_counter", lambda: next(timings))
@@ -819,8 +821,7 @@ def test_host_reports_the_stage_causing_a_slow_observation(monkeypatch, tmp_path
     assert "observation=0.310s" in caplog.text
 
 
-def test_a_repeated_malformed_command_is_logged_once_per_distinct_error(monkeypatch, tmp_path, caplog):
-    host = _host_module(monkeypatch)
+def test_a_repeated_malformed_command_is_logged_once_per_distinct_error(host, tmp_path, caplog):
     loop, _clock, _socket, robot = _loop(host, tmp_path)
     loop.control.torque_enabled = True
     commands = loop.host.zmq_cmd_socket.messages
@@ -839,8 +840,7 @@ def test_a_repeated_malformed_command_is_logged_once_per_distinct_error(monkeypa
     assert len(rejections()) == 4
 
 
-def test_command_silence_holds_the_robot_once_with_torque_left_on(monkeypatch, tmp_path):
-    host = _host_module(monkeypatch)
+def test_command_silence_holds_the_robot_once_with_torque_left_on(host, tmp_path):
     loop, clock, socket, robot = _loop(host, tmp_path)
     socket.requests.append({"command": "enable"})
     loop.handle_control_request()
@@ -860,8 +860,7 @@ def test_command_silence_holds_the_robot_once_with_torque_left_on(monkeypatch, t
     assert loop.watchdog_active is True
 
 
-def test_command_silence_cuts_torque_only_in_strict_mode(monkeypatch, tmp_path):
-    host = _host_module(monkeypatch)
+def test_command_silence_cuts_torque_only_in_strict_mode(host, tmp_path):
     loop, clock, socket, robot = _loop(host, tmp_path, disarm_on_failure=True)
     socket.requests.append({"command": "enable"})
     loop.handle_control_request()
@@ -873,8 +872,7 @@ def test_command_silence_cuts_torque_only_in_strict_mode(monkeypatch, tmp_path):
     assert loop.control.torque_enabled is False
 
 
-def test_an_unconfirmed_watchdog_action_is_retried_at_a_bounded_rate(monkeypatch, tmp_path):
-    host = _host_module(monkeypatch)
+def test_an_unconfirmed_watchdog_action_is_retried_at_a_bounded_rate(host, tmp_path):
     loop, clock, _socket, robot = _loop(host, tmp_path)
     loop.control.torque_enabled = True
     robot.bus.faults["Present_Position"] = OSError("bus timeout")
@@ -893,8 +891,7 @@ def test_an_unconfirmed_watchdog_action_is_retried_at_a_bounded_rate(monkeypatch
     assert loop.watchdog_active is True
 
 
-def test_a_disarm_request_stops_the_watchdog_from_acting_again(monkeypatch, tmp_path):
-    host = _host_module(monkeypatch)
+def test_a_disarm_request_stops_the_watchdog_from_acting_again(host, tmp_path):
     loop, clock, socket, robot = _loop(host, tmp_path)
     socket.requests.append({"command": "disable"})
     loop.handle_control_request()
@@ -906,8 +903,7 @@ def test_a_disarm_request_stops_the_watchdog_from_acting_again(monkeypatch, tmp_
     assert robot.bus.calls == []
 
 
-def test_disarmed_host_never_sends_goals_that_reenable_servo_torque(monkeypatch, tmp_path):
-    host = _host_module(monkeypatch)
+def test_disarmed_host_never_sends_goals_that_reenable_servo_torque(host, tmp_path):
     loop, clock, _socket, robot = _loop(host, tmp_path)
     clock.now += 1
     loop.enforce_watchdog()
@@ -919,8 +915,7 @@ def test_disarmed_host_never_sends_goals_that_reenable_servo_torque(monkeypatch,
     assert robot.bus.torque == dict.fromkeys(MOTORS, 0)
 
 
-def test_telemetry_reports_torque_state_health_and_a_gapless_sequence(monkeypatch, tmp_path):
-    host = _host_module(monkeypatch)
+def test_telemetry_reports_torque_state_health_and_a_gapless_sequence(host, tmp_path):
     loop, _clock, socket, _robot = _loop(host, tmp_path)
     observations = loop.host.zmq_observation_socket
 
@@ -940,6 +935,39 @@ def test_telemetry_reports_torque_state_health_and_a_gapless_sequence(monkeypatc
     assert (first[sequence], second[sequence]) == (0, 2)
 
 
+def test_motor_action_limits_use_calibrated_joint_and_base_units(host):
+    zeros = dict.fromkeys(JOINT_LIMITS, 0.0)
+    directions = dict.fromkeys(JOINT_LIMITS, 1.0)
+    zeros["arm_shoulder_pan"], directions["arm_shoulder_pan"] = 2.0, -1.0
+    action = {f"{name}.pos": value for name, value in action_positions(
+        tuple(JOINT_LIMITS), [0.0] * len(JOINT_LIMITS), zeros, directions,
+    ).items()}
+    action.update({"x.vel": 0.03 / 0.8, "y.vel": 0.0, "theta.vel": math.degrees(0.06 / 0.976)})
+    args = ((0.03, 0.06), (0.8, 0.976), (zeros, directions))
+    host.validate_motion_action(action, *args)
+    for changes in (
+        {"x.vel": 1000000.0}, {"y.vel": 0.01}, {"theta.vel": math.degrees(0.061 / 0.976)},
+        {"arm_shoulder_pan.pos": 0.0}, {"arm_gripper.pos": -1.0}, {"arm_gripper.pos": 101.0},
+        {"x.vel": float("nan")},
+    ):
+        with pytest.raises(ValueError):
+            host.validate_motion_action({**action, **changes}, *args)
+
+
+def test_motor_action_retains_an_out_of_bounds_measured_hold_without_extending_it(host):
+    zeros, directions = dict.fromkeys(JOINT_LIMITS, 0.0), dict.fromkeys(JOINT_LIMITS, 1.0)
+    action = {f"{name}.pos": 0.0 for name in JOINT_LIMITS}
+    action.update({"x.vel": 0.0, "y.vel": 0.0, "theta.vel": 0.0})
+    action["arm_shoulder_lift.pos"] = math.degrees(JOINT_LIMITS["arm_shoulder_lift"][0] - 0.02)
+    args = ((0.03, 0.06), (1.0, 1.0), (zeros, directions))
+    with pytest.raises(ValueError, match="position limits"):
+        host.validate_motion_action(action, *args)
+    host.validate_motion_action(action, *args, held_positions=action)
+    with pytest.raises(ValueError, match="position limits"):
+        host.validate_motion_action({**action, "arm_shoulder_lift.pos": action["arm_shoulder_lift.pos"] - 1.0},
+                               *args, held_positions=action)
+
+
 def _collector(host, bus):
     robot = _Robot(bus)
     return host.MotorHealthCollector(robot), robot
@@ -949,8 +977,7 @@ def _levels(snapshot):
     return {name: status["level"] for name, status in snapshot["statuses"].items()}
 
 
-def test_motor_health_reports_every_servo_with_its_limits(monkeypatch):
-    host = _host_module(monkeypatch)
+def test_motor_health_reports_every_servo_with_its_limits(host, monkeypatch):
     now = [100.0]
     monkeypatch.setattr(host.time, "monotonic", lambda: now[0])
     bus = _Bus()
@@ -982,8 +1009,7 @@ def test_motor_health_reports_every_servo_with_its_limits(monkeypatch):
 
 
 @pytest.mark.parametrize("fault", ["torque mismatch", "status", "incomplete", "bus error"])
-def test_motor_health_fails_closed(monkeypatch, fault):
-    host = _host_module(monkeypatch)
+def test_motor_health_fails_closed(host, monkeypatch, fault):
     bus = _Bus()
     if fault == "torque mismatch":
         bus.torque["arm_gripper"] = 1

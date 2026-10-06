@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import time
 import unittest
+from pathlib import Path
 
 import launch
 import launch_ros.actions
@@ -29,6 +30,8 @@ from std_srvs.srv import Trigger
 from lekiwi_rmf.fake_host import FakeLeKiwiHost, ObservationFault
 from lekiwi_rmf.arm_trajectory import ARM_JOINTS
 
+NAV2_PARAMS = Path(__file__).parents[1] / "config" / "nav2_params.yaml"
+
 
 @pytest.mark.rostest
 def generate_test_description():
@@ -45,6 +48,7 @@ def generate_test_description():
             "remote_observation_port": fake_host.observation_endpoint_port,
             "torque_control_port": fake_host.torque_endpoint_port,
             "torque_control_timeout_ms": 500,
+            "nav2_params_file": str(NAV2_PARAMS),
             "link_timeout": 0.30,
             "command_timeout": 2.0,
             "permission_timeout": 0.20,
@@ -180,10 +184,11 @@ class TestDriverFakeHostGraph(unittest.TestCase):
         self._permission(self.base_permission, True)
         start = len(fake_host.actions)
         command = Twist()
-        command.linear.x = 0.2
+        # Within the tracked Nav2 limit, which the fake host enforces like the Pi.
+        command.linear.x = 0.02
         self.assertTrue(self._until(
             lambda: self.commands.publish(command) is None
-            and any(action.get("x.vel") == pytest.approx(0.2)
+            and any(action.get("x.vel") == pytest.approx(0.02)
                     for action in fake_host.actions[start:])
         ))
 

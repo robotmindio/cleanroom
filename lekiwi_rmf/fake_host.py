@@ -1,14 +1,15 @@
-"""Deterministic, no-hardware LeKiwi ZMQ host for integration tests.
+"""Deterministic, no-hardware LeKiwi motor host for integration tests.
 
-The real motor host owns three endpoints: a PULL socket for JSON actions, a
-PUSH socket for multipart observations, and a REP socket for the torque
-interlock.  This module intentionally speaks that wire protocol without
-importing LeRobot, ROS, cameras, or any motor library.  It is therefore safe
-to use in unit tests, ``launch_testing`` fixtures, and a headless simulator.
+This is the real host core (:mod:`lekiwi_rmf.motor_host`) on an in-memory
+motor bus. It binds the same three endpoints as the Pi host -- a PULL socket
+for JSON actions, a PUSH socket for multipart observations, and a REP socket
+for the torque interlock -- and enforces the same torque-off, motion-envelope,
+arm-lease and command-watchdog rules, including host odometry in every
+observation. It imports no LeRobot, ROS, camera or serial library.
 
 The host is manual by default: a test calls :meth:`step` or
-:meth:`publish_observation` at a known time.  ``start()`` is provided for
-tests which need a continuously publishing peer.  All endpoints bind to
+:meth:`publish_observation` at a known time. ``start()`` is provided for
+tests which need a continuously publishing peer. All endpoints bind to
 loopback by default and use ephemeral ports, so a test cannot discover or
 command physical hardware by accident.
 """
@@ -18,32 +19,24 @@ from __future__ import annotations
 import json
 import threading
 import time
-import uuid
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from math import isfinite
+from pathlib import Path
+from types import SimpleNamespace
 from typing import Mapping
 
 import zmq
 
+from lekiwi_rmf.arm_trajectory import ARM_JOINTS, load_calibration
 from lekiwi_rmf.host_protocol import (
-    ARM_LEASE_KEYS,
-    ARM_TRAJECTORY_STATUS_KEY,
-    CAMERAS_KEY,
-    MOTOR_HEALTH_KEY,
-    MOTOR_NAMES,
-    STATE_KEYS,
-    TELEMETRY_MONOTONIC_NS_KEY,
-    TELEMETRY_PROTOCOL_KEY,
-    TELEMETRY_PROTOCOL_VERSION,
-    TELEMETRY_SEQUENCE_KEY,
-    TELEMETRY_SESSION_KEY,
-    TELEMETRY_TORQUE_ENABLED_KEY,
-    TorqueCommand,
+    BASE_VELOCITY_KEYS, MOTOR_NAMES, STATE_KEYS, TELEMETRY_MONOTONIC_NS_KEY, TorqueCommand,
 )
+from lekiwi_rmf.motion_guards import load_base_speed_limits
 from lekiwi_rmf.motor_health import healthy_snapshot
-from lekiwi_rmf.local_arm_executor import LocalArmExecutor
+from lekiwi_rmf.motor_host import HostLoop
+from lekiwi_rmf.odometry import BASE_XY_SCALE, BASE_YAW_SCALE
 
 
 class ObservationFault(str, Enum):
@@ -65,82 +58,211 @@ class FakeHostEndpoints:
     torque: str
 
 
-@dataclass
-class FakeLeKiwiHost:
-    """A controllable implementation of the LeKiwi host's ZMQ boundary.
+def _default_nav2_params() -> Path:
+    path = Path(__file__).parents[1] / "config/nav2_params.yaml"
+    if path.is_file():
+        return path
+    from ament_index_python.packages import get_package_share_directory
 
-    The class owns an in-memory state model only.  Actions received at the
-    command endpoint are recorded and update finite numeric state entries, so
-    tests can verify the exact command that a driver emitted and then publish
-    matching feedback.  Nothing in this class opens a serial device.
+    return Path(get_package_share_directory("lekiwi_rmf")) / "config/nav2_params.yaml"
+
+
+class FakeMotorBus:
+    """Torque and position registers of the nine LeKiwi servos, with injectable faults."""
+
+    def __init__(self, state: dict[str, float]):
+        self.state = state
+        self.motors = dict.fromkeys(MOTOR_NAMES)
+        self.torque = dict.fromkeys(MOTOR_NAMES, 0)
+        self.failures: dict[str, deque[str]] = {
+            TorqueCommand.ENABLE: deque(), TorqueCommand.DISABLE: deque(),
+        }
+
+    def _fail(self, command: str) -> None:
+        if self.failures[command]:
+            raise RuntimeError(self.failures[command].popleft())
+
+    def enable_torque(self, num_retry=0) -> None:
+        self._fail(TorqueCommand.ENABLE)
+        self.torque = dict.fromkeys(MOTOR_NAMES, 1)
+
+    def disable_torque(self, motor, num_retry=0) -> None:
+        self.torque[motor] = 0
+
+    def sync_read(self, register, motors, normalize=True, num_retry=0) -> dict:
+        if register == "Torque_Enable":
+            return {motor: self.torque[motor] for motor in motors}
+        if register == "Present_Position":
+            return {motor: self.state[f"{motor}.pos"] for motor in motors}
+        raise KeyError(f"the fake motor bus does not model {register}")
+
+    def sync_write(self, register, values, num_retry=0) -> None:
+        if register == "Torque_Enable":
+            if not values:
+                self._fail(TorqueCommand.DISABLE)
+            self.torque = dict.fromkeys(MOTOR_NAMES, int(values))
+        elif register != "Goal_Position":
+            raise KeyError(f"the fake motor bus does not model {register}")
+
+
+class FakeLeKiwiRobot:
+    """The LeKiwi surface used by the host core: feedback follows each accepted command."""
+
+    def __init__(self, state: dict[str, float], actions: list[dict[str, float]]):
+        self.state = state
+        self.actions = actions
+        self.bus = FakeMotorBus(state)
+        self.arm_motors = list(ARM_JOINTS)
+        self.cameras: dict[str, bytes] = {}
+
+    def get_observation(self) -> dict:
+        return {**self.state, **self.cameras}
+
+    def send_action(self, action: Mapping[str, float]) -> dict[str, float]:
+        action = dict(action)
+        self.actions.append(action)
+        self.state.update((key, value) for key, value in action.items() if key in self.state)
+        return action
+
+    def stop_base(self) -> None:
+        self.state.update(dict.fromkeys(BASE_VELOCITY_KEYS, 0.0))
+
+
+class FakeMotorHealth:
+    """All-OK health for the reported torque state, unless a test injects a snapshot."""
+
+    def __init__(self, snapshot: Mapping | None = None):
+        self.snapshot = None if snapshot is None else dict(snapshot)
+
+    def collect(self, _robot, torque_enabled: bool) -> dict:
+        return self.snapshot if self.snapshot is not None else healthy_snapshot(MOTOR_NAMES, torque_enabled)
+
+
+class FaultInjectingSocket:
+    """Wrap the observation PUSH socket; only transmitted frames change."""
+
+    def __init__(self, socket):
+        self.socket = socket
+        self.faults: deque[ObservationFault] = deque()
+        self.last_sent: list[bytes] | None = None
+        self._last_valid: list[bytes] | None = None
+        self._last_sample_ns: int | None = None
+
+    def send_multipart(self, frames, flags=0) -> None:
+        fault = self.faults.popleft() if self.faults else ObservationFault.VALID
+        frames = [bytes(frame) for frame in frames]
+        header = json.loads(frames[0])
+        sample_ns = header[TELEMETRY_MONOTONIC_NS_KEY]
+        if fault is ObservationFault.DROP:
+            self.last_sent = None
+            return
+        if fault is ObservationFault.MALFORMED:
+            outgoing = [b"{malformed lekiwi observation"]
+        elif fault is ObservationFault.DUPLICATE:
+            if self._last_valid is None:
+                raise RuntimeError("cannot duplicate before a valid observation")
+            outgoing = list(self._last_valid)
+        elif fault is ObservationFault.STALE and self._last_sample_ns is not None:
+            header[TELEMETRY_MONOTONIC_NS_KEY] = self._last_sample_ns
+            outgoing = [json.dumps(header).encode(), *frames[1:]]
+        else:
+            outgoing = frames
+            self._last_valid = list(frames)
+            self._last_sample_ns = sample_ns
+        self.last_sent = outgoing
+        # Lossy when no client is connected, like the real host; teardown must
+        # never strand the fake's thread in send().
+        self.socket.send_multipart(outgoing, flags=flags)
+
+
+class FakeLeKiwiHost:
+    """The LeKiwi host's ZMQ boundary and host core over an in-memory robot.
+
+    Accepted actions are recorded in ``actions`` and move the in-memory
+    feedback, so tests can verify the exact command a driver emitted and see
+    it reflected in later observations. Nothing in this class opens a serial
+    device.
     """
 
-    bind_host: str = "127.0.0.1"
-    command_port: int = 0
-    observation_port: int = 0
-    torque_port: int = 0
-    context: zmq.Context | None = None
-    state: dict[str, float] = field(default_factory=lambda: {key: 0.0 for key in STATE_KEYS})
-    motor_health: dict | None = None
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.bind_host, str) or not self.bind_host:
+    def __init__(
+        self, bind_host: str = "127.0.0.1", command_port: int = 0, observation_port: int = 0,
+        torque_port: int = 0, context: zmq.Context | None = None,
+        state: dict[str, float] | None = None, motor_health: Mapping | None = None, *,
+        disarm_on_failure: bool = False, watchdog_timeout_s: float = 0.5,
+        arm_calibration_file: str = "", nav2_params_file: str | Path | None = None,
+        base_scales: tuple[float, float] = (BASE_XY_SCALE, BASE_YAW_SCALE),
+    ):
+        if not isinstance(bind_host, str) or not bind_host:
             raise ValueError("bind_host must be a non-empty string")
         for name, port in (
-            ("command_port", self.command_port),
-            ("observation_port", self.observation_port),
-            ("torque_port", self.torque_port),
+            ("command_port", command_port),
+            ("observation_port", observation_port),
+            ("torque_port", torque_port),
         ):
             if isinstance(port, bool) or not isinstance(port, int) or not 0 <= port <= 65535:
                 raise ValueError(f"{name} must be an integer from 0 through 65535")
-        self._owns_context = self.context is None
-        self._context = self.context or zmq.Context()
-        self._command_socket = self._context.socket(zmq.PULL)
-        self._observation_socket = self._context.socket(zmq.PUSH)
-        self._torque_socket = self._context.socket(zmq.REP)
-        for socket in (self._command_socket, self._observation_socket, self._torque_socket):
-            socket.setsockopt(zmq.LINGER, 0)
-        self._command_socket.setsockopt(zmq.CONFLATE, 1)
-        self._observation_socket.setsockopt(zmq.SNDHWM, 2)
-        self._command_socket.bind(f"tcp://{self.bind_host}:{self.command_port}")
-        self._observation_socket.bind(f"tcp://{self.bind_host}:{self.observation_port}")
-        self._torque_socket.bind(f"tcp://{self.bind_host}:{self.torque_port}")
-        self.endpoints = FakeHostEndpoints(
-            command=self._command_socket.getsockopt_string(zmq.LAST_ENDPOINT),
-            observation=self._observation_socket.getsockopt_string(zmq.LAST_ENDPOINT),
-            torque=self._torque_socket.getsockopt_string(zmq.LAST_ENDPOINT),
-        )
+        self.state = {key: 0.0 for key in STATE_KEYS} if state is None else state
         self.actions: list[dict[str, float]] = []
-        self.torque_enabled = False
-        self.torque_requests: list[str] = []
-        self._torque_failures: dict[str, deque[str]] = {
-            TorqueCommand.ENABLE: deque(), TorqueCommand.DISABLE: deque(),
-        }
-        self._faults: deque[ObservationFault] = deque()
-        self._session = uuid.uuid4().hex
-        self.arm_executor = LocalArmExecutor(time.monotonic, 0.5)
-        self._sequence = 0
-        self._protocol_lock = threading.Lock()
-        self._last_frames: list[bytes] | None = None
-        self._last_sample_ns: int | None = None
-        self._camera_frames: dict[str, bytes] = {}
+        self.robot = FakeLeKiwiRobot(self.state, self.actions)
+        self.health = FakeMotorHealth(motor_health)
+        self._settings = dict(
+            disarm_on_failure=disarm_on_failure,
+            # Like the real host, a missing calibration file means identity calibration.
+            arm_calibration=load_calibration(arm_calibration_file or "/nonexistent/arm-calibration.json"),
+            base_limits=load_base_speed_limits(nav2_params_file or _default_nav2_params()),
+            base_scales=base_scales,
+            # Tests set already-encoded JPEG bytes, and observe at every step.
+            encode_camera=bytes,
+            observation_period_s=0.0,
+        )
+        self._owns_context = context is None
+        self._context = context or zmq.Context()
+        command = self._context.socket(zmq.PULL)
+        observation = self._context.socket(zmq.PUSH)
+        torque = self._context.socket(zmq.REP)
+        for socket in (command, observation, torque):
+            socket.setsockopt(zmq.LINGER, 0)
+        command.setsockopt(zmq.CONFLATE, 1)
+        observation.setsockopt(zmq.SNDHWM, 2)
+        command.bind(f"tcp://{bind_host}:{command_port}")
+        observation.bind(f"tcp://{bind_host}:{observation_port}")
+        torque.bind(f"tcp://{bind_host}:{torque_port}")
+        self.endpoints = FakeHostEndpoints(
+            command=command.getsockopt_string(zmq.LAST_ENDPOINT),
+            observation=observation.getsockopt_string(zmq.LAST_ENDPOINT),
+            torque=torque.getsockopt_string(zmq.LAST_ENDPOINT),
+        )
+        self._observations = FaultInjectingSocket(observation)
+        self.transport = SimpleNamespace(
+            zmq_cmd_socket=command, zmq_observation_socket=self._observations,
+            torque_socket=torque, watchdog_timeout_ms=watchdog_timeout_s * 1000,
+        )
+        self._lock = threading.RLock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
-        self._motor_health_injected = self.motor_health is not None
-        if self.motor_health is None:
-            self.motor_health = healthy_snapshot(MOTOR_NAMES, False)
+        self.loop = HostLoop(self.robot, self.transport, self.health, **self._settings)
 
     @property
     def session(self) -> str:
         """The session identifier that will be used for the next sample."""
-        with self._protocol_lock:
-            return self._session
+        return self.loop.telemetry_session
 
     @property
     def sequence(self) -> int:
         """The sequence number that will be used for the next sample."""
-        with self._protocol_lock:
-            return self._sequence
+        return self.loop.telemetry_sequence
+
+    @property
+    def torque_enabled(self) -> bool:
+        return self.loop.control.torque_enabled
+
+    @property
+    def arm_executor(self):
+        return self.loop.arm_executor
+
+    @property
+    def motor_health(self) -> dict:
+        return self.health.collect(self.robot, self.torque_enabled)
 
     @staticmethod
     def _endpoint_port(endpoint: str) -> int:
@@ -166,37 +288,37 @@ class FakeLeKiwiHost:
             raise ValueError(f"unknown observation fault {fault!r}") from error
         if isinstance(count, bool) or not isinstance(count, int) or count <= 0:
             raise ValueError("fault count must be a positive integer")
-        self._faults.extend([selected] * count)
+        with self._lock:
+            self._observations.faults.extend([selected] * count)
 
     def fail_next_torque(self, command: str, message: str = "injected torque failure") -> None:
-        """Make the next ``enable`` or ``disable`` request return an error."""
-        if command not in self._torque_failures:
+        """Make the servo bus fail the next ``enable`` or ``disable`` torque write."""
+        if command not in self.robot.bus.failures:
             raise ValueError("command must be enable or disable")
         if not isinstance(message, str) or not message:
             raise ValueError("message must be a non-empty string")
-        self._torque_failures[command].append(message)
+        with self._lock:
+            self.robot.bus.failures[command].append(message)
 
     def restart_session(self) -> str:
-        """Simulate a host restart; state survives but packet identity restarts."""
-        with self._protocol_lock:
-            self._session = uuid.uuid4().hex
-            self._sequence = 0
-            self.torque_enabled = False
-            self.arm_executor.cancel()
-            self.arm_executor.hold = {}
-            self._last_frames = None
-            self._last_sample_ns = None
-            return self._session
+        """Simulate a host restart: torque off and a new telemetry session; feedback survives."""
+        with self._lock:
+            self.robot.bus.torque = dict.fromkeys(MOTOR_NAMES, 0)
+            self.loop = HostLoop(self.robot, self.transport, self.health, **self._settings)
+            return self.loop.telemetry_session
 
     def set_state(self, **updates: float) -> None:
         """Set finite feedback values that are included in later observations."""
+        checked = {}
         for key, value in updates.items():
             if key not in STATE_KEYS:
                 raise KeyError(f"unknown LeKiwi state key {key!r}")
             value = float(value)
             if not isfinite(value):
                 raise ValueError(f"state {key!r} must be finite")
-            self.state[key] = value
+            checked[key] = value
+        with self._lock:
+            self.state.update(checked)
 
     def set_camera_frames(self, frames: Mapping[str, bytes]) -> None:
         """Set already-JPEG-encoded camera frames for multipart observations."""
@@ -207,157 +329,33 @@ class FakeLeKiwiHost:
             if not isinstance(frame, bytes):
                 raise TypeError("camera frames must be JPEG bytes")
             copied[name] = frame
-        self._camera_frames = copied
+        with self._lock:
+            self.robot.cameras = copied
 
     def set_motor_health(self, snapshot: Mapping) -> None:
         """Set an arbitrary diagnostic snapshot for wire/fault-injection tests."""
         if not isinstance(snapshot, Mapping):
             raise TypeError("motor health snapshot must be a mapping")
-        self.motor_health = dict(snapshot)
-        self._motor_health_injected = True
-
-    def _next_fault(self) -> ObservationFault:
-        return self._faults.popleft() if self._faults else ObservationFault.VALID
-
-    def _valid_frames(self, *, stale_timestamp: bool = False) -> list[bytes]:
-        with self._protocol_lock:
-            if not self._motor_health_injected:
-                self.motor_health = healthy_snapshot(MOTOR_NAMES, self.torque_enabled)
-            sample_ns = self._last_sample_ns if stale_timestamp and self._last_sample_ns is not None else time.monotonic_ns()
-            payload = {
-                CAMERAS_KEY: list(self._camera_frames),
-                **self.state,
-                TELEMETRY_PROTOCOL_KEY: TELEMETRY_PROTOCOL_VERSION,
-                TELEMETRY_SESSION_KEY: self._session,
-                TELEMETRY_SEQUENCE_KEY: self._sequence,
-                TELEMETRY_MONOTONIC_NS_KEY: sample_ns,
-                TELEMETRY_TORQUE_ENABLED_KEY: self.torque_enabled,
-                MOTOR_HEALTH_KEY: self.motor_health,
-                ARM_TRAJECTORY_STATUS_KEY: self.arm_executor.status,
-            }
-            self._sequence += 1
-            self._last_sample_ns = sample_ns
-        return [json.dumps(payload, sort_keys=True).encode("utf-8"), *self._camera_frames.values()]
+        with self._lock:
+            self.health.snapshot = dict(snapshot)
 
     def publish_observation(self) -> list[bytes] | None:
         """Publish one valid or fault-injected observation and return its frames.
 
-        ``DROP`` deliberately sends nothing.  ``MALFORMED`` sends invalid JSON;
-        ``DUPLICATE`` repeats the prior packet byte-for-byte; ``STALE`` creates a
-        new sequence carrying the previous source timestamp.  These distinct
+        ``DROP`` deliberately sends nothing. ``MALFORMED`` sends invalid JSON;
+        ``DUPLICATE`` repeats the prior packet byte-for-byte; ``STALE`` sends a
+        new sequence carrying the previous source timestamp. These distinct
         cases exercise decoder, ordering, and watchdog behavior separately.
         """
-        fault = self._next_fault()
-        if fault is ObservationFault.DROP:
-            return None
-        if fault is ObservationFault.MALFORMED:
-            frames = [b"{malformed lekiwi observation"]
-        elif fault is ObservationFault.DUPLICATE:
-            if self._last_frames is None:
-                raise RuntimeError("cannot duplicate before a valid observation")
-            frames = list(self._last_frames)
-        else:
-            frames = self._valid_frames(stale_timestamp=fault is ObservationFault.STALE)
-            if fault is ObservationFault.VALID:
-                self._last_frames = list(frames)
-        try:
-            self._observation_socket.send_multipart(frames, flags=zmq.NOBLOCK)
-        except zmq.Again:
-            # Match the real host: observations are lossy when no client is
-            # connected, and teardown must never strand the fake's thread in send().
-            pass
-        return frames
+        with self._lock:
+            self.loop.publish_observation()
+            return self._observations.last_sent
 
-    def process_actions(self) -> int:
-        """Drain available JSON actions and return how many were accepted."""
-        accepted = 0
-        while True:
-            try:
-                encoded = self._command_socket.recv(zmq.NOBLOCK)
-            except zmq.Again:
-                return accepted
-            try:
-                decoded = json.loads(encoded.decode("utf-8"))
-                if not isinstance(decoded, dict):
-                    raise ValueError("action must be a JSON object")
-                action = {str(key): float(value) for key, value in decoded.items()}
-                if not all(isfinite(value) for value in action.values()):
-                    raise ValueError("action contains non-finite value")
-            except (UnicodeDecodeError, TypeError, ValueError, json.JSONDecodeError):
-                continue
-            self.actions.append(action)
-            if ARM_LEASE_KEYS[0] in action:
-                self.arm_executor.renew(action[ARM_LEASE_KEYS[0]], bool(action.get(ARM_LEASE_KEYS[1], 0)))
-            if not self.arm_executor.active:
-                action.update(self.arm_executor.hold)
-                for key, value in action.items():
-                    if key in self.state:
-                        self.state[key] = value
-            accepted += 1
-
-    def process_torque(self) -> bool:
-        """Process at most one torque request; return whether a request arrived."""
-        try:
-            request = self._torque_socket.recv_json(zmq.NOBLOCK)
-        except zmq.Again:
-            return False
-        except Exception as error:
-            # Match the real REP endpoint: malformed JSON consumes one request
-            # but must not kill the continuously running fake-host thread.
-            self._torque_socket.send_json({
-                "ok": False, "error": f"invalid request: {error}",
-                "torque_enabled": self.torque_enabled,
-            })
-            return True
-        if not isinstance(request, dict) or not isinstance(request.get("command"), str):
-            self._torque_socket.send_json({"ok": False, "error": "command must be enable, disable, or state"})
-            return True
-        command = request["command"]
-        self.torque_requests.append(command)
-        if command in self._torque_failures and self._torque_failures[command]:
-            self._torque_socket.send_json({
-                "ok": False,
-                "error": self._torque_failures[command].popleft(),
-                "torque_enabled": self.torque_enabled,
-            })
-        elif command == TorqueCommand.ENABLE:
-            self.torque_enabled = True
-            self._torque_socket.send_json({"ok": True, "torque_enabled": True})
-        elif command == TorqueCommand.DISABLE:
-            self.torque_enabled = False
-            self.arm_executor.cancel()
-            self.arm_executor.hold = {}
-            self._torque_socket.send_json({"ok": True, "torque_enabled": False})
-        elif command in {TorqueCommand.TRAJECTORY_START, TorqueCommand.TRAJECTORY_CANCEL}:
-            try:
-                if request.get("session") != self.session or not self.torque_enabled:
-                    raise ValueError("invalid trajectory session or disabled torque")
-                if command == TorqueCommand.TRAJECTORY_START:
-                    self.arm_executor.start(request["trajectory"], self.state)
-                else:
-                    if self.arm_executor.status is None or request.get("id") != self.arm_executor.status["id"]:
-                        raise ValueError("invalid arm goal id")
-                    self.arm_executor.cancel(request["id"])
-                    self.arm_executor.hold = {key: value for key, value in self.state.items() if key.endswith(".pos")}
-                self._torque_socket.send_json({"ok": True, "trajectory": self.arm_executor.status})
-            except Exception as error:
-                self._torque_socket.send_json({"ok": False, "error": str(error)})
-        elif command == TorqueCommand.STATE:
-            self._torque_socket.send_json({"ok": True, "torque_enabled": self.torque_enabled})
-        else:
-            self._torque_socket.send_json({"ok": False, "error": "command must be enable, disable, or state"})
-        return True
-
-    def step(self, *, publish: bool = True) -> list[bytes] | None:
-        """Advance all protocol endpoints once without sleeping."""
-        self.process_actions()
-        self.process_torque()
-        if self.torque_enabled and self.arm_executor.active:
-            action = self.arm_executor.step(self.state, time.monotonic())
-            if action is not None:
-                self.actions.append(action)
-                self.state.update(action)
-        return self.publish_observation() if publish else None
+    def step(self) -> list[bytes] | None:
+        """Run one host-loop pass without sleeping; return the observation it sent."""
+        with self._lock:
+            self.loop.step()
+            return self._observations.last_sent
 
     def start(self, period_s: float = 1 / 30) -> None:
         """Start a daemon thread which steps the host at ``period_s`` intervals."""
@@ -384,7 +382,9 @@ class FakeLeKiwiHost:
             if self._thread.is_alive():
                 raise RuntimeError("fake host thread did not stop")
             self._thread = None
-        for socket in (self._torque_socket, self._observation_socket, self._command_socket):
+        for socket in (
+            self.transport.torque_socket, self._observations.socket, self.transport.zmq_cmd_socket,
+        ):
             socket.close()
         if self._owns_context:
             self._context.term()
