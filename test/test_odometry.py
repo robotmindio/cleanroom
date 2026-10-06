@@ -8,7 +8,7 @@ from lekiwi_rmf.host_protocol import (
     TELEMETRY_TORQUE_ENABLED_KEY,
 )
 from lekiwi_rmf.odometry import (
-    OdometrySampleClock, TelemetrySequenceTracker, accept_validated_telemetry, integrate_pose,
+    TelemetrySequenceTracker, accept_validated_telemetry, integrate_pose,
     parse_telemetry_metadata,
 )
 
@@ -36,7 +36,7 @@ def test_telemetry_sequence_advances_only_for_valid_ordered_metadata():
     second = tracker.accept(metadata(sequence=1, sample_ns=1_100_000_000))
 
     assert first.token == ("host", "boot-a", 0)
-    assert second.sample_monotonic_ns == 1_100_000_000
+    assert second.token == ("host", "boot-a", 1)
     assert second.session_changed is False
     with pytest.raises(ValueError, match="duplicate or backward"):
         tracker.accept(metadata(sequence=1, sample_ns=1_200_000_000))
@@ -75,28 +75,6 @@ def test_invalid_state_does_not_consume_a_freshness_sequence():
     assert accepted.token == ("host", "boot-a", 0)
 
 
-def test_odometry_uses_accepted_sample_time_not_timer_frequency():
-    clock = OdometrySampleClock()
-    assert clock.accept(("host", "a", 1), 10_000_000_000, 1_000_000_000) is None
-    # ROS timer/arrival jitter does not affect a host-timestamped sample.
-    assert clock.accept(
-        ("host", "a", 2), 10_173_000_000, 1_100_000_000
-    ) == pytest.approx(0.1)
-
-
-def test_odometry_does_not_bridge_restart_link_loss_or_large_gap():
-    clock = OdometrySampleClock(max_interval=0.2)
-    assert clock.accept(("host", "a", 1), 0, 1_000_000_000) is None
-    assert clock.accept(("host", "a", 2), 100_000_000, 1_100_000_000) == pytest.approx(0.1)
-    assert clock.accept(("host", "b", 0), 200_000_000, 10_000_000) is None
-    assert clock.discontinuity == "telemetry source session changed"
-    clock.reset()
-    assert clock.accept(("host", "b", 1), 5_000_000_000, 110_000_000) is None
-    assert clock.accept(("host", "b", 2), 5_500_000_000, 610_000_000) is None
-    assert "exceeds" in clock.discontinuity
-    assert clock.accept(("host", "b", 3), 5_600_000_000, 710_000_000) == pytest.approx(0.1)
-
-
 def test_host_odometry_keeps_motion_across_lost_packets_and_reanchors_restart(tmp_path):
     from lekiwi_rmf.host_protocol import HOST_ODOMETRY_KEY
     from lekiwi_rmf.odometry import HostOdometry, HostPoseTracker, load_base_scales, parse_host_odometry
@@ -117,3 +95,5 @@ def test_host_odometry_keeps_motion_across_lost_packets_and_reanchors_restart(tm
     assert tracker.update("b", (0, 0, 0), pose) == pytest.approx(pose)
     with pytest.raises(ValueError):
         parse_host_odometry({HOST_ODOMETRY_KEY: {**sample, "pose": [float("nan"), 0, 0]}})
+    with pytest.raises(ValueError):
+        parse_host_odometry({})  # every deployed host sends its integrated pose

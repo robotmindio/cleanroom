@@ -11,9 +11,7 @@ from lekiwi_rmf.zmq_security import (
     CurveClientCredentials, CurveConfigurationError, CurveServerSecurity,
 )
 from lekiwi_rmf.host_protocol import (
-    TELEMETRY_MONOTONIC_NS_KEY, TELEMETRY_PROTOCOL_KEY,
-    TELEMETRY_PROTOCOL_VERSION, TELEMETRY_SEQUENCE_KEY, TELEMETRY_SESSION_KEY,
-    TELEMETRY_TORQUE_ENABLED_KEY,
+    HOST_ODOMETRY_KEY, TELEMETRY_MONOTONIC_NS_KEY, TELEMETRY_SESSION_KEY, observation_payload,
 )
 from lekiwi_rmf.zmq_client import LeKiwiZmqClient
 from lekiwi_rmf.motor_health import healthy_snapshot
@@ -65,17 +63,19 @@ def test_secret_key_permissions_are_enforced(tmp_path):
         CurveClientCredentials(str(secret), str(public)).validate()
 
 
+def _payload(sequence=0, value=1.25, torque_enabled=False, sample_ns=None):
+    return observation_payload(
+        {"joint.pos": value}, [], session="test-session", sequence=sequence,
+        sample_monotonic_ns=100 + sequence if sample_ns is None else sample_ns,
+        torque_enabled=torque_enabled,
+        motor_health=healthy_snapshot(("joint",), torque_enabled),
+        odometry={"pose": [0.0, 0.0, 0.0], "scales": [1.0, 0.976], "stamp_ns": 1},
+        arm_status=None,
+    )
+
+
 def _state_frames(sequence=0, value=1.25, torque_enabled=False):
-    return [json.dumps({
-        "_cams": [],
-        "joint.pos": value,
-        TELEMETRY_PROTOCOL_KEY: TELEMETRY_PROTOCOL_VERSION,
-        TELEMETRY_SESSION_KEY: "test-session",
-        TELEMETRY_SEQUENCE_KEY: sequence,
-        TELEMETRY_MONOTONIC_NS_KEY: 100 + sequence,
-        TELEMETRY_TORQUE_ENABLED_KEY: torque_enabled,
-        "_lekiwi_motor_health": healthy_snapshot(("joint",), torque_enabled),
-    }).encode("utf-8")]
+    return [json.dumps(_payload(sequence, value, torque_enabled)).encode("utf-8")]
 
 
 def test_repository_client_commits_only_decoded_complete_ordered_state():
@@ -102,6 +102,17 @@ def test_repository_client_commits_only_decoded_complete_ordered_state():
     }).encode("utf-8")]
     client.get_observation()
     assert client.observation_session_changed is True
+
+
+def test_repository_client_rejects_a_packet_without_host_odometry():
+    client = LeKiwiZmqClient("127.0.0.1", 5555, 5556, ("joint.pos",))
+    client.connected = True
+    payload = _payload()
+    del payload[HOST_ODOMETRY_KEY]
+    client._poll_latest = lambda: [json.dumps(payload).encode("utf-8")]
+
+    assert client.get_observation() == {}
+    assert client.observation_token is None
 
 
 def test_repository_client_exposes_missing_state_without_zero_filling():
@@ -242,16 +253,7 @@ def test_repository_client_speaks_authenticated_state_protocol(tmp_path):
     command_endpoint = f"tcp://127.0.0.1:{command_port}"
     command.unbind(command_endpoint)
     observation_port = observation.bind_to_random_port("tcp://127.0.0.1")
-    payload = {
-        "_cams": [],
-        "joint.pos": 1.25,
-        TELEMETRY_PROTOCOL_KEY: TELEMETRY_PROTOCOL_VERSION,
-        TELEMETRY_SESSION_KEY: "test-session",
-        TELEMETRY_SEQUENCE_KEY: 0,
-        TELEMETRY_MONOTONIC_NS_KEY: 123,
-        TELEMETRY_TORQUE_ENABLED_KEY: False,
-        "_lekiwi_motor_health": healthy_snapshot(("joint",), False),
-    }
+    payload = _payload(sample_ns=123)
     publisher = threading.Thread(
         target=observation.send_multipart,
         args=([json.dumps(payload).encode("utf-8")],),

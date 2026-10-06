@@ -56,7 +56,6 @@ class LeKiwiZmqClient:
         self.missing_state_keys = self.state_keys
         self.observation_sequence = 0
         self.observation_token = None
-        self.observation_sample_monotonic_ns = None
         self.observation_session_changed = False
         self.observation_torque_enabled = None
         self.observation_motor_health = None
@@ -187,7 +186,6 @@ class LeKiwiZmqClient:
             return self.last_remote_state
         self.observation_sequence += 1
         self.observation_token = accepted.token
-        self.observation_sample_monotonic_ns = accepted.sample_monotonic_ns
         self.observation_session_changed = accepted.session_changed
         self.observation_torque_enabled = accepted.torque_enabled
         self.observation_motor_health = motor_health
