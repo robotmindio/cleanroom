@@ -44,7 +44,6 @@
   <exec_depend>moveit_simple_controller_manager</exec_depend>
   <exec_depend>moveit_msgs</exec_depend>
   <exec_depend>python3-opencv</exec_depend>
-  <exec_depend>python3-matplotlib</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>python3-yaml</exec_depend>
   <exec_depend>python3-zmq</exec_depend>

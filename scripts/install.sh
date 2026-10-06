@@ -130,7 +130,6 @@ apt_get install -y \
   libuvc-dev \
   iw \
   logrotate \
-  python3-matplotlib \
   python3-opencv \
   python3-yaml \
   python3-zmq \

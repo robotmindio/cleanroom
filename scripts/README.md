@@ -19,6 +19,10 @@ environment variables; see [Configuration](../docs/real-robot.md#configuration).
 Scripts that systemd, ROS or another script runs are kept here because installed
 units refer to them directly.
 
+`checkerboard.py` and `render-model.py` are optional calibration/model tools.
+Install their plotting dependency with `sudo apt install python3-matplotlib`
+before using them; the robot runtime does not require it.
+
 ## Installation and deployment
 
 - `install.sh [--simulation]` installs a workstation, or with `--simulation` a simulation-only machine.

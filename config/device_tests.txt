@@ -3,6 +3,7 @@ test_local_arm_executor
 test_torque_control
 test_motor_health
 test_odometry
+test_launch_calibration
 test_zmq_security
 test_astra_cloud_filter
 test_astra_pro_configuration

@@ -55,28 +55,12 @@ for arg in "$@"; do
 done
 : "${camera_source:=local}"
 
-# Geometry and odometry measurements are machine-local, not source-controlled. The
-# calibration tools write only numeric KEY=VALUE lines; reject anything malformed rather
-# than sourcing a user file into this launcher.
+# The writer, launcher and motor host share the same validated calibration reader.
 calibration_args=()
-has_launch_arg() { # has_launch_arg <key>
-  local key=$1 arg
-  for arg in "$@"; do [[ $arg == "$key":=* ]] && return 0; done
-  return 1
-}
-load_launch_calibration() {
-  local file="${LEKIWI_LAUNCH_CALIBRATION:-$HOME/.ros/lekiwi_launch_calibration.conf}"
-  local key value
-  [ -r "$file" ] || return 0
-  while IFS='=' read -r key value; do
-    case "$key" in camera_height|camera_pitch|xy_velocity_scale|yaw_velocity_scale) ;;
-      *) continue ;;
-    esac
-    [[ $value =~ ^[0-9]+([.][0-9]+)?$ ]] || continue
-    has_launch_arg "$key" "$@" || calibration_args+=("$key:=$value")
-  done < "$file"
-}
-load_launch_calibration "$@"
+calibration_output=$(python3 -m lekiwi_rmf.launch_calibration "$@")
+if [[ -n $calibration_output ]]; then
+  mapfile -t calibration_args <<< "$calibration_output"
+fi
 
 if [[ $camera_source == local ]]; then
   FRONT="${LEKIWI_FRONT:-$(first_match '/dev/v4l/by-id/*WEBCAM*-video-index0')}"
