@@ -8,7 +8,7 @@ import argparse
 import json
 import math
 from pathlib import Path
-import runpy
+from importlib import import_module
 import signal
 import shlex
 import subprocess
@@ -24,10 +24,10 @@ from sensor_msgs.msg import JointState, LaserScan, PointCloud2
 from lekiwi_rmf.scan_self_filter import blank_body_sectors, parse_sectors
 
 ROOT = Path(__file__).resolve().parents[1]
-FAULT = runpy.run_path(str(ROOT/'scripts/test-physical-acceptance.py'))
-NAV = FAULT['navigation']
-BRAKE = runpy.run_path(str(ROOT/'scripts/test-braking.py'))
-DIRECTIONS = BRAKE['DIRECTIONS']
+FAULT = import_module('test-physical-acceptance')
+NAV = FAULT.navigation
+BRAKE = import_module('test-braking')
+DIRECTIONS = BRAKE.DIRECTIONS
 
 
 def register_scan(reference, points, guess, radius):
@@ -93,7 +93,7 @@ def stopping_measurement(samples, cut, config, stationary_jitter):
         raise ValueError('independent capture timestamps are discontinuous')
     radius = config['body_radius_m']
     poses = [s['pose'] for s in samples]
-    sweep = BRAKE['maximum_swept_excursion'](poses,radius)
+    sweep = BRAKE.maximum_swept_excursion(poses,radius)
     # A hidden excursion between bounded-speed endpoints needs travel out and
     # back. Lipschitz continuity bounds it by speed * capture gap / 2.
     blind = config['point_speed_bound_m_s']*float(gaps.max())/2
@@ -103,7 +103,7 @@ def stopping_measurement(samples, cut, config, stationary_jitter):
     terminal = np.median(np.array(poses[-8:]),axis=0)
     filtered = [np.median(np.array(poses[max(0,i-2):i+1]),axis=0) for i in range(len(poses))]
     outside = [i for i,p in enumerate(filtered) if math.dist(p[:2],terminal[:2])>.005
-               or abs(NAV['angle'](p[2]-terminal[2]))>.015]
+               or abs(NAV.angle(p[2]-terminal[2]))>.015]
     stable = samples[min(max(outside)+1 if outside else 1,len(samples)-1)]
     latency = max(0.,stable['time']-cut)+float(gaps.max())
     distance = sweep+blind
@@ -116,7 +116,7 @@ def stopping_measurement(samples, cut, config, stationary_jitter):
               and latency<=config['maximum_stop_time_s'] and error<=config['measurement_uncertainty_m']}
 
 
-class OnboardBraking(FAULT['FaultTest']):
+class OnboardBraking(FAULT.FaultTest):
     def __init__(self, output, config):
         super().__init__(output=output)
         self.config = config
@@ -127,17 +127,17 @@ class OnboardBraking(FAULT['FaultTest']):
         self.reference_scans=[]
         mask=yaml.safe_load((ROOT/'config/lidar_self_mask.yaml').read_text())['scan_self_filter']['ros__parameters']
         self.sectors=parse_sectors(*(mask[k] for k in ('body_start_deg','body_end_deg','body_max_range_m')))
-        self.create_subscription(LaserScan,'/pi/lidar/scan',self.direct_scan,NAV['qos_profile_sensor_data'])
+        self.create_subscription(LaserScan,'/pi/lidar/scan',self.direct_scan,NAV.qos_profile_sensor_data)
         self.origin_range = None
         self.stationary_jitter = 0.
         self.trials = []
-        self.create_subscription(Odometry,'/verification/loaded_range_odometry',self.range_pose,NAV['qos_profile_sensor_data'])
+        self.create_subscription(Odometry,'/verification/loaded_range_odometry',self.range_pose,NAV.qos_profile_sensor_data)
         self.create_subscription(OdomInfo,'/verification/loaded_range_info',
-            lambda m:self.range_info.append({'time':time.monotonic(),'lost':m.lost,'ratio':m.icp_inliers_ratio}),NAV['qos_profile_sensor_data'])
+            lambda m:self.range_info.append({'time':time.monotonic(),'lost':m.lost,'ratio':m.icp_inliers_ratio}),NAV.qos_profile_sensor_data)
         self.create_subscription(Odometry,'/verification/loaded_camera_odometry',
-            lambda m:self.camera_poses.append(self.pose_row(m)),NAV['qos_profile_sensor_data'])
+            lambda m:self.camera_poses.append(self.pose_row(m)),NAV.qos_profile_sensor_data)
         for topic,kind in [('/scan',LaserScan),('/camera/depth/points',PointCloud2),('/joint_states',JointState)]:
-            self.create_subscription(kind,topic,lambda m,t=topic:self.source_sample(t,m),NAV['qos_profile_sensor_data'])
+            self.create_subscription(kind,topic,lambda m,t=topic:self.source_sample(t,m),NAV.qos_profile_sensor_data)
         self.observers=[]
         for binary,name,topic,odom,info,parameters in [
             ('icp_odometry','loaded_braking_range','/pi/lidar/scan','loaded_range_odometry','loaded_range_info',
@@ -157,7 +157,7 @@ class OnboardBraking(FAULT['FaultTest']):
         stamp=message.header.stamp.sec+message.header.stamp.nanosec/1e9
         return {'time':time.monotonic(),'stamp':stamp,
                 'age':self.get_clock().now().nanoseconds/1e9-stamp,
-                'pose':[p.position.x,p.position.y,NAV['yaw'](p.orientation)],
+                'pose':[p.position.x,p.position.y,NAV.yaw(p.orientation)],
                 'covariance':[message.pose.covariance[i] for i in (0,7,35)]}
 
     def range_pose(self,message):
@@ -174,10 +174,10 @@ class OnboardBraking(FAULT['FaultTest']):
         points=np.column_stack((ranges[valid]*np.cos(angles[valid]),ranges[valid]*np.sin(angles[valid])))
         if len(points)<100:
             raise RuntimeError('too few independent raw-LiDAR points')
-        if not self.buffer.can_transform('base_footprint',scan.header.frame_id,NAV['Time']()):
+        if not self.buffer.can_transform('base_footprint',scan.header.frame_id,NAV.Time()):
             return
-        transform=self.buffer.lookup_transform('base_footprint',scan.header.frame_id,NAV['Time']()).transform
-        heading=NAV['yaw'](transform.rotation)
+        transform=self.buffer.lookup_transform('base_footprint',scan.header.frame_id,NAV.Time()).transform
+        heading=NAV.yaw(transform.rotation)
         c,s=math.cos(heading),math.sin(heading)
         points=points@np.array([[c,s],[-s,c]])+[transform.translation.x,transform.translation.y]
         stamp=message.header.stamp.sec+message.header.stamp.nanosec/1e9
@@ -237,7 +237,7 @@ class OnboardBraking(FAULT['FaultTest']):
     def trial(self,direction):
         self.move(self.center,linear_limit=.02,angular_limit=.06)
         self.wait(lambda:self.flags.get('base_motion_permitted'),15)
-        linear,angular=NAV['load_base_speed_limits'](ROOT/'config/nav2_params.yaml')
+        linear,angular=NAV.load_base_speed_limits(ROOT/'config/nav2_params.yaml')
         speed=angular if direction.startswith('rotation') else linear
         self.angular_test=direction.startswith('rotation')
         command=Twist()
@@ -259,7 +259,7 @@ class OnboardBraking(FAULT['FaultTest']):
         covered=self.safe_speed is not None and self.safe_speed>=speed*.9 and self.measured_speed>=(.015 if self.angular_test else .005) and time.monotonic()-self.odom_at<.3
         wheel_speed,guarded_speed=self.measured_speed,self.safe_speed
         terminal=[{**r,'pts_ns':int(r['stamp']*1e9)} for r in self.ranges[begin:]]
-        observed=BRAKE['terminal_observed_speed'](terminal,direction.startswith('rotation'),window_s=1.2)
+        observed=BRAKE.terminal_observed_speed(terminal,direction.startswith('rotation'),window_s=1.2)
         until=time.monotonic()+2.5
         while time.monotonic()<until:
             self.tick(Twist())
@@ -318,7 +318,7 @@ class OnboardBraking(FAULT['FaultTest']):
         self.origin_range=self.ranges[-1]['pose']
         self.active=True
         poses=[r['pose'] for r in self.ranges[-15:]]
-        self.stationary_jitter=max(BRAKE['maximum_swept_excursion'](poses[i:],self.config['body_radius_m']) for i in range(len(poses)))
+        self.stationary_jitter=max(BRAKE.maximum_swept_excursion(poses[i:],self.config['body_radius_m']) for i in range(len(poses)))
         for direction in DIRECTIONS:
             completed=sum(t['direction']==direction and t['qualification_eligible'] for t in self.trials)
             attempts=0
@@ -405,10 +405,10 @@ def main():
     if not math.isfinite(args.payload_g) or args.payload_g<0:
         parser.error('payload must be finite and nonnegative')
     config=yaml.safe_load((ROOT/'config/onboard_braking.yaml').read_text())
-    linear,angular=NAV['load_base_speed_limits'](ROOT/'config/nav2_params.yaml')
+    linear,angular=NAV.load_base_speed_limits(ROOT/'config/nav2_params.yaml')
     config.update(payload_kg=args.payload_g/1000,linear_speed_m_s=linear,angular_speed_rad_s=angular,
                   nominal_only=args.nominal_only,point_speed_bound_m_s=1.15*(linear+config['body_radius_m']*angular))
-    device=next(a.partition(':=')[2] for a in NAV['installed_stack_arguments']() if a.startswith('remote_ip:='))
+    device=next(a.partition(':=')[2] for a in NAV.installed_stack_arguments() if a.startswith('remote_ip:='))
     # The stream filter publishes required safety depth. Its raw camera remains
     # powered; pausing it exercises missing input without resetting the USB hub.
     remote='pgrep -f '+shlex.quote('^python3 .*/lib/lekiwi_rmf/astra_cloud_filter ')
@@ -440,7 +440,7 @@ def main():
         instance.trials=resumed
         instance.checks=resumed_faults
         return instance
-    NAV['main'](node,output,production=True,payload_kg=config['payload_kg'])
+    NAV.main(node,output,production=True,payload_kg=config['payload_kg'])
 
 
 if __name__=='__main__':

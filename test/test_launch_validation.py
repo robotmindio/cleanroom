@@ -3,6 +3,114 @@ from __future__ import annotations
 import pytest
 
 from lekiwi_rmf.launch_validation import astra_serial_from_hardware_config, validate_launch_arguments
+from ros_test_utils import bringup_configuration, node_parameters
+
+
+@pytest.mark.parametrize("profile,mode,source,laser", [
+    ("sim", "sim", "local", "auto"), ("wired", "real", "local", "auto"),
+    ("split", "real", "remote", "ld06"),
+])
+def test_deployment_profiles_resolve_coherent_defaults(monkeypatch, profile, mode, source, laser):
+    context, _ = bringup_configuration(monkeypatch, profile=profile)
+    values = context.launch_configurations
+    assert (values["mode"], values["camera_source"], values["lidar_source"], values["laser_source"]) == (
+        mode, source, source, laser,
+    )
+    assert values["auto_arm_on_startup"] == "false"
+    assert values["disarm_on_failure"] == "false"
+    assert values["slam_mode"] == "mapping"
+    validate_launch_arguments(values)
+
+
+def test_profiles_preserve_installed_explicit_topology_arguments(monkeypatch):
+    context, _ = bringup_configuration(
+        monkeypatch, profile="wired", mode="real", camera_source="remote",
+        lidar_source="remote", laser_source="ld06",
+    )
+    assert context.launch_configurations["camera_source"] == "remote"
+    assert context.launch_configurations["lidar_source"] == "remote"
+    validate_launch_arguments(context.launch_configurations)
+
+
+@pytest.mark.parametrize("profile,publish_astra,strategy,visual,rgb,depth,rgbd,cameras", [
+    ("split", "true", "2", "0", False, False, True, 0),
+    ("wired", "false", "2", "1", True, True, False, 1),
+    ("sim", "true", "2", "1", True, True, False, 1),
+])
+def test_mapper_yaml_and_dynamic_view_parameters_preserve_behavior(
+    monkeypatch, profile, publish_astra, strategy, visual, rgb, depth, rgbd, cameras,
+):
+    context, specs = bringup_configuration(monkeypatch, profile=profile, publish_astra=publish_astra)
+    mapper = next(spec for spec in specs if spec.get("name") == "rtabmap")
+    parameters = node_parameters(context, mapper)
+    assert parameters["Reg/Strategy"] == strategy
+    assert parameters["Vis/EstimationType"] == visual
+    assert (parameters["subscribe_rgb"], parameters["subscribe_depth"], parameters["subscribe_rgbd"],
+            parameters["rgbd_cameras"]) == (rgb, depth, rgbd, cameras)
+    assert parameters["Mem/IncrementalMemory"] == "True"
+    assert parameters["Mem/InitWMWithAllNodes"] == "True"
+    for key, expected in {
+        "Kp/MaxFeatures": "500", "RGBD/NeighborLinkRefining": "false",
+        "RGBD/LoopCovLimited": "true", "RGBD/LinearUpdate": "0.04",
+        "RGBD/ProximityMaxGraphDepth": "0", "RGBD/ProximityOdomGuess": "true",
+        "Rtabmap/ImagesAlreadyRectified": "false", "Mem/NotLinkedNodesKept": "false",
+        "odom_sensor_sync": True, "qos_image": 1, "sync_queue_size": 5, "topic_queue_size": 5,
+    }.items():
+        assert parameters[key] == expected
+
+
+@pytest.mark.parametrize("profile,local", [("wired", True), ("split", False), ("sim", False)])
+def test_shared_camera_launches_preserve_local_configuration(monkeypatch, profile, local):
+    from launch.actions import DeclareLaunchArgument, ExecuteProcess
+    from launch.utilities import normalize_to_list_of_substitutions, perform_substitutions
+    import runpy
+    from pathlib import Path
+
+    context, specs = bringup_configuration(monkeypatch, profile=profile, wrist_camera_device="/dev/wrist")
+    # Loading a description resolves includes; no process or node is executed.
+    includes = {}
+    for spec in specs:
+        action = spec.get("include")
+        if action is None:
+            continue
+        source = action.launch_description_source
+        source.get_launch_description(context)
+        includes[Path(source.location).name] = action
+    for filename in ("pi_cameras.launch.py", "pi_astra.launch.py"):
+        action = includes[filename]
+        assert action.condition.evaluate(context) is local
+        if not local:
+            continue
+        for key, value in action.launch_arguments:
+            context.launch_configurations[key] = perform_substitutions(context, normalize_to_list_of_substitutions(value))
+        module = runpy.run_path(str(Path(__file__).parents[1] / "launch" / filename))
+        generate = module["generate_launch_description"]
+        description = generate()
+        for argument in description.entities:
+            if isinstance(argument, DeclareLaunchArgument):
+                argument.execute(context)
+        if filename == "pi_cameras.launch.py":
+            commands = [perform_substitutions(context, part) for process in description.entities
+                        if isinstance(process, ExecuteProcess) for part in process.cmd]
+            assert "/camera/front" in commands and "/camera/wrist" in commands
+            assert "[320, 240]" in commands and "[352, 288]" in commands
+            assert commands[commands.index("--jpeg-quality") + 1] == ""
+        else:
+            nodes = []
+            monkeypatch.setitem(module["_astra_nodes"].__globals__, "Node", lambda **kwargs: nodes.append(kwargs))
+            module["_astra_nodes"](context)
+            assert len(nodes) == 2
+            assert all(node["respawn"].perform(context) == "false" for node in nodes)
+            assert nodes[0]["parameters"][1]["serial_number"]
+
+
+def test_camera_scan_uses_tracked_offsets_and_signed_saved_geometry(monkeypatch):
+    context, specs = bringup_configuration(monkeypatch, camera_height="0.2", camera_pitch="-0.031")
+    camera = next(spec for spec in specs if spec.get("name") == "free_space")
+    assert node_parameters(context, camera) == {
+        "camera_height": 0.2, "camera_pitch": -0.031, "camera_offset_x": 0.03,
+        "camera_offset_y": 0.0, "camera_yaw": 0.0, "camera_roll": 0.0,
+    }
 
 
 def test_bounded_launch_defaults_follow_current_production_speed_limits(monkeypatch):

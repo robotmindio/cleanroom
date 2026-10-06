@@ -152,7 +152,8 @@ refresh_compute_service() {
 }
 compute_configuration_current() {
   grep -Fq "remote_ip:=$device_address" /etc/default/lekiwi-stack &&
-    grep -Fq 'laser_source:=ld06 lidar_source:=remote' /etc/default/lekiwi-stack &&
+    { grep -Fq 'profile:=split' /etc/default/lekiwi-stack ||
+      grep -Fq 'laser_source:=ld06 lidar_source:=remote' /etc/default/lekiwi-stack; } &&
     [[ $(cat "$service_marker" 2>/dev/null || true) == "$expected_service_fingerprint" &&
        $(systemctl show -P WorkingDirectory lekiwi-stack.service) == "$workspace/current/source" ]]
 }

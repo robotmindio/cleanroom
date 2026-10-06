@@ -28,6 +28,7 @@ def generate_launch_description():
     camera_info_url = LaunchConfiguration("camera_info_url")
     wrist_camera_info_url = LaunchConfiguration("wrist_camera_info_url")
     jpeg_quality = LaunchConfiguration("jpeg_quality")
+    namespace = LaunchConfiguration("camera_namespace")
     no_wrist = PythonExpression(["'", wrist_device, "' == 'none'"])
 
     return LaunchDescription(
@@ -45,11 +46,12 @@ def generate_launch_description():
                 default_value=["file://", EnvironmentVariable("HOME"), "/.ros/camera_info/lekiwi_wrist.yaml"],
             ),
             DeclareLaunchArgument("jpeg_quality", default_value="50"),
+            DeclareLaunchArgument("camera_namespace", default_value="/pi/camera"),
             ExecuteProcess(
                 cmd=[
                     camera_supervisor,
                     "--device", front_device, "--name", "front_camera",
-                    "--namespace", "/pi/camera/front", "--camera-name", "lekiwi_front",
+                    "--namespace", [namespace, "/front"], "--camera-name", "lekiwi_front",
                     # The supervisor scales the 640x480 calibration into its
                     # private CameraInfo copy. This cuts the floor-scan and
                     # JPEG decode work by four while preserving geometry.
@@ -65,7 +67,7 @@ def generate_launch_description():
                 cmd=[
                     camera_supervisor,
                     "--device", wrist_device, "--name", "wrist_camera",
-                    "--namespace", "/pi/camera/wrist", "--camera-name", "lekiwi_wrist",
+                    "--namespace", [namespace, "/wrist"], "--camera-name", "lekiwi_wrist",
                     "--frame", "wrist_camera_optical_frame", "--size", "[352, 288]",
                     "--camera-info-url", wrist_camera_info_url,
                 ],

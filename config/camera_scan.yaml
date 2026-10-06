@@ -1,0 +1,8 @@
+free_space:
+  ros__parameters:
+    # Measured front-camera pose in base_footprint; recalibrate after mount changes.
+    # Height and pitch remain launch calibration values saved by free_space.py.
+    camera_offset_x: 0.03
+    camera_offset_y: 0.0
+    camera_yaw: 0.0
+    camera_roll: 0.0

@@ -24,7 +24,7 @@ from tf2_ros import TransformBroadcaster
 from visualization_msgs.msg import Marker
 
 from lekiwi_rmf.arm_trajectory import (
-    ARM_JOINTS, JOINT_LIMITS, action_positions, joint_positions,
+    ARM_JOINTS, action_positions, joint_positions,
     raw_joint_positions, load_calibration,
     duration_seconds, position_tolerances, prepare_trajectory, sample_trajectory,
     stamp_nanoseconds, trajectory_rows,
@@ -90,7 +90,6 @@ class LeKiwiDriver(Node):
             "gripper_trajectory_tolerance", 0.005
         ).value
         self.trajectory_timeout = self.declare_parameter("trajectory_timeout", 5.0).value
-        self.local_arm_execution = bool(self.declare_parameter("local_arm_execution", False).value)
         # This is velocity-integrated odometry, not an encoder/SLAM pose
         # measurement. Never publish the ROS all-zero covariance (perfect
         # certainty); these conservative values let consumers fuse it honestly.
@@ -361,14 +360,8 @@ class LeKiwiDriver(Node):
             started = self._feedback_gap_started_at
             if started is None:
                 last = self._last_fresh_monotonic
-                if not self.local_arm_execution and (last is None or now - last < 0.3):
-                    return False
-                if not self.local_arm_execution and now - last >= self.link_timeout:
-                    return False
                 started = now if last is None else last
                 self._feedback_gap_started_at = started
-            if not self.local_arm_execution and now - started >= self.link_timeout:
-                return False
         with self.trajectory_lock:
             if self.trajectory and self.trajectory.get("paused_at") is None:
                 self.trajectory["paused_at"] = started
@@ -805,10 +798,9 @@ class LeKiwiDriver(Node):
             "goal_tolerances": goal_tolerances,
             "goal_time_tolerance": goal_time_tolerance,
         }
-        if self.local_arm_execution:
-            trajectory["host_id"] = (uuid.uuid4().int % (2**48 - 1)) + 1
-            trajectory["host_session"] = self.last_observation_token[1]
-            trajectory["host_elapsed"] = 0.0
+        trajectory["host_id"] = (uuid.uuid4().int % (2**48 - 1)) + 1
+        trajectory["host_session"] = self.last_observation_token[1]
+        trajectory["host_elapsed"] = 0.0
         waiting_since = time.monotonic()
         while self.armed and not self._arm_permission_is_current() and self._hold_feedback_gap():
             # The plan has not started. Wait for measured joints and the full
@@ -853,31 +845,30 @@ class LeKiwiDriver(Node):
             self.command = Twist()
             self.command_stamp = self.get_clock().now()
 
-        if self.local_arm_execution:
-            try:
-                # Serialize uploads with torque transitions. A preempted callback
-                # must never upload its older goal after the replacement's upload.
-                with self.torque_lock:
-                    with self.trajectory_lock:
-                        current = self.trajectory is trajectory
-                    if current:
-                        response = self.torque.trajectory_request(
-                            "trajectory_start", session=trajectory["host_session"], trajectory={
-                                "id": trajectory["host_id"], "names": list(names), "points": requested_points,
-                                "zeros": self.arm_zero_positions, "directions": self.arm_directions,
-                                "path": path_tolerances, "goal": goal_tolerances,
-                                "settling": goal_time_tolerance, "delay": max(0.0, trajectory["start"] - time.monotonic()),
-                            },
-                        )
-                        if response.get("trajectory", {}).get("id") != trajectory["host_id"]:
-                            raise RuntimeError("motor host did not acknowledge this arm goal")
-            except Exception as error:
+        try:
+            # Serialize uploads with torque transitions. A preempted callback
+            # must never upload its older goal after the replacement's upload.
+            with self.torque_lock:
                 with self.trajectory_lock:
-                    if self.trajectory is trajectory:
-                        trajectory["outcome"] = f"local arm upload failed: {error}"
-                        trajectory["result_code"] = FollowJointTrajectory.Result.INVALID_GOAL
-                        trajectory["done"].set()
-                        self.trajectory = None
+                    current = self.trajectory is trajectory
+                if current:
+                    response = self.torque.trajectory_request(
+                        "trajectory_start", session=trajectory["host_session"], trajectory={
+                            "id": trajectory["host_id"], "names": list(names), "points": requested_points,
+                            "zeros": self.arm_zero_positions, "directions": self.arm_directions,
+                            "path": path_tolerances, "goal": goal_tolerances,
+                            "settling": goal_time_tolerance, "delay": max(0.0, trajectory["start"] - time.monotonic()),
+                        },
+                    )
+                    if response.get("trajectory", {}).get("id") != trajectory["host_id"]:
+                        raise RuntimeError("motor host did not acknowledge this arm goal")
+        except Exception as error:
+            with self.trajectory_lock:
+                if self.trajectory is trajectory:
+                    trajectory["outcome"] = f"local arm upload failed: {error}"
+                    trajectory["result_code"] = FollowJointTrajectory.Result.INVALID_GOAL
+                    trajectory["done"].set()
+                    self.trajectory = None
 
         while not trajectory["done"].is_set():
             if goal_handle.is_cancel_requested:
@@ -887,37 +878,33 @@ class LeKiwiDriver(Node):
                     trajectory["outcome"] = "canceled"
                     trajectory["done"].set()
                 goal_handle.canceled()
-                if self.local_arm_execution:
-                    self._cancel_host_trajectory(trajectory)
+                self._cancel_host_trajectory(trajectory)
                 return FollowJointTrajectory.Result(error_code=FollowJointTrajectory.Result.SUCCESSFUL)
-            if self.local_arm_execution:
-                status = getattr(self.robot, "arm_trajectory_status", None)
-                if status is not None and status["id"] == trajectory["host_id"]:
-                    trajectory["host_elapsed"] = status["elapsed"]
-                    if status["state"] in {"succeeded", "aborted", "canceled"}:
-                        with self.trajectory_lock:
-                            if self.trajectory is trajectory and not trajectory["done"].is_set():
-                                trajectory["outcome"] = "succeeded" if status["state"] == "succeeded" else status["detail"]
-                                trajectory["result_code"] = status["code"]
-                                trajectory["done"].set()
-                                self.trajectory = None
+            status = getattr(self.robot, "arm_trajectory_status", None)
+            if status is not None and status["id"] == trajectory["host_id"]:
+                trajectory["host_elapsed"] = status["elapsed"]
+                if status["state"] in {"succeeded", "aborted", "canceled"}:
+                    with self.trajectory_lock:
+                        if self.trajectory is trajectory and not trajectory["done"].is_set():
+                            trajectory["outcome"] = "succeeded" if status["state"] == "succeeded" else status["detail"]
+                            trajectory["result_code"] = status["code"]
+                            trajectory["done"].set()
+                            self.trajectory = None
             self.publish_trajectory_feedback(goal_handle, trajectory)
             # Keep control-loop timers, safety updates, and action cancellation
             # serviceable while this goal waits for measured servo feedback.
             await self._yield_for_control(0.05)
 
         if trajectory.get("outcome") == "succeeded":
-            if self.local_arm_execution:
-                final = trajectory["points"][-1].positions
-                with self.state_lock:
-                    if self.arm_hold_action is not None:
-                        self.arm_hold_action.update({f"{name}.pos": value for name, value in action_positions(
-                            final.keys(), final.values(), self.arm_zero_positions, self.arm_directions,
-                        ).items()})
+            final = trajectory["points"][-1].positions
+            with self.state_lock:
+                if self.arm_hold_action is not None:
+                    self.arm_hold_action.update({f"{name}.pos": value for name, value in action_positions(
+                        final.keys(), final.values(), self.arm_zero_positions, self.arm_directions,
+                    ).items()})
             goal_handle.succeed()
             return FollowJointTrajectory.Result(error_code=FollowJointTrajectory.Result.SUCCESSFUL)
-        if self.local_arm_execution:
-            self._cancel_host_trajectory(trajectory)
+        self._cancel_host_trajectory(trajectory)
         goal_handle.abort()
         return FollowJointTrajectory.Result(
             error_code=trajectory.get(
@@ -951,8 +938,7 @@ class LeKiwiDriver(Node):
         return path, goal_tolerances, goal_time or self.trajectory_timeout
 
     def publish_trajectory_feedback(self, goal_handle, trajectory):
-        elapsed = max(0.0, trajectory.get("paused_at", time.monotonic()) - trajectory["start"])
-        elapsed = trajectory.get("host_elapsed", elapsed)
+        elapsed = trajectory["host_elapsed"]
         with self.trajectory_lock:
             actual = {
                 name: self.arm_positions[name] for name in trajectory["names"]
@@ -1126,7 +1112,7 @@ class LeKiwiDriver(Node):
         self.get_logger().error(reason)
         self.link_lost = True
         self.odom_samples.reset()
-        if (self.local_arm_execution and not self.disarm_on_failure
+        if (not self.disarm_on_failure
                 and reason.startswith("No fresh LeKiwi telemetry")):
             # The Pi's lease expires and freezes motion independently. Preserve
             # its goal through transport silence; invalid telemetry, motor faults,
@@ -1280,81 +1266,6 @@ class LeKiwiDriver(Node):
         self.publish_state(now.to_msg(), observation, velocity)
         self.publish_safety()
 
-    def _apply_trajectory(self, action, hold_action):
-        """Put the active trajectory's setpoint into ``action``; return whether one ran."""
-        with self.trajectory_lock:
-            trajectory = self.trajectory
-            if not trajectory:
-                return False
-            paused_at = trajectory.pop("paused_at", None)
-            if paused_at is not None:
-                pause = time.monotonic() - paused_at
-                if pause >= self.link_timeout:
-                    trajectory["outcome"] = "arm feedback gap exceeded link timeout"
-                    trajectory["result_code"] = FollowJointTrajectory.Result.INVALID_GOAL
-                    trajectory["done"].set()
-                    self.trajectory = None
-                    action.update(hold_action)
-                    return True
-                trajectory["start"] += max(0.0, pause)
-            elapsed = time.monotonic() - trajectory["start"]
-            positions, _velocities, _accelerations = sample_trajectory(
-                trajectory["names"], trajectory["start_positions"],
-                trajectory["points"], elapsed,
-            )
-            setpoints = {}
-            for name, value in positions.items():
-                lower, upper = JOINT_LIMITS[name]
-                start = trajectory["start_positions"][name]
-                if start < lower and value < lower:
-                    value = lower
-                elif start > upper and value > upper:
-                    value = upper
-                setpoints[name] = value
-            action.update({
-                f"{name}.pos": value for name, value in action_positions(
-                    setpoints.keys(), setpoints.values(),
-                    self.arm_zero_positions, self.arm_directions,
-                ).items()
-            })
-            final_point = trajectory["points"][-1]
-            path_violation = next((
-                name for name, tolerance in trajectory["path_tolerances"].items()
-                if elapsed < final_point.time
-                and abs(self.arm_positions[name] - positions[name]) > tolerance
-            ), None)
-            if path_violation:
-                trajectory["outcome"] = f"path tolerance exceeded for {path_violation}"
-                trajectory["result_code"] = FollowJointTrajectory.Result.PATH_TOLERANCE_VIOLATED
-                trajectory["done"].set()
-                self.trajectory = None
-                # The setpoint that failed the check must not reach the servos.
-                action.update(hold_action)
-            elif elapsed >= final_point.time and all(
-                abs(self.arm_positions[name] - final_point.positions[name]) <= tolerance
-                for name, tolerance in trajectory["goal_tolerances"].items()
-            ):
-                trajectory["outcome"] = "succeeded"
-                trajectory["done"].set()
-                self.trajectory = None
-            elif elapsed > final_point.time + trajectory["goal_time_tolerance"]:
-                worst = max(
-                    trajectory["goal_tolerances"],
-                    key=lambda name: abs(
-                        self.arm_positions[name] - final_point.positions[name]
-                    ) / trajectory["goal_tolerances"][name],
-                )
-                error = abs(self.arm_positions[worst] - final_point.positions[worst])
-                trajectory["outcome"] = (
-                    f"goal tolerance exceeded for {worst}: "
-                    f"error={error:.4f} rad, limit={trajectory['goal_tolerances'][worst]:.4f} rad"
-                )
-                trajectory["result_code"] = FollowJointTrajectory.Result.GOAL_TOLERANCE_VIOLATED
-                trajectory["done"].set()
-                self.trajectory = None
-                action.update(hold_action)
-            return True
-
     def _send_armed_command(self, now, observation, velocity):
         with self.state_lock:
             if not self.armed:
@@ -1375,9 +1286,7 @@ class LeKiwiDriver(Node):
         if arm_permitted:
             with self.state_lock:
                 self._feedback_gap_started_at = None
-        trajectory_ran = bool(self.trajectory) if self.local_arm_execution else (
-            self._apply_trajectory(action, measured_hold) if arm_permitted else False
-        )
+        trajectory_ran = bool(self.trajectory)
         if trajectory_ran:
             cmd = Twist()
         # The scales divide here and multiply below: LeRobot's kinematics use a nominal
@@ -1423,7 +1332,7 @@ class LeKiwiDriver(Node):
                 action["x.vel"] = action["y.vel"] = action["theta.vel"] = 0.0
             with self.trajectory_lock:
                 remote_goal = self.trajectory.get("host_id") if self.trajectory else None
-            if self.local_arm_execution and remote_goal is not None:
+            if remote_goal is not None:
                 self.robot.send_action(action, arm_goal_id=remote_goal, arm_permitted=arm_permitted)
             else:
                 self.robot.send_action(action)

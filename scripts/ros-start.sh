@@ -20,7 +20,7 @@ load_lekiwi_env
 if [[ -n ${LEKIWI_ROBOT_HOST:-} ]]; then
   use_env_host=true
   for arg in "$@"; do
-    case $arg in remote_ip:=*|camera_source:=local) use_env_host=false ;; esac
+    case $arg in remote_ip:=*|camera_source:=local|profile:=wired) use_env_host=false ;; esac
   done
   $use_env_host && set -- "remote_ip:=$LEKIWI_ROBOT_HOST" "$@"
 fi
@@ -50,10 +50,14 @@ for arg in "$@"; do
   case "$arg" in
     camera_source:=remote) camera_source=remote ;;
     camera_source:=local) camera_source=local ;;
+    profile:=split) camera_source=remote ;;
+    profile:=wired) camera_source=local ;;
     remote_ip:=*) [[ -n $camera_source ]] || camera_source=remote ;;
   esac
 done
 : "${camera_source:=local}"
+profile="wired"
+[[ $camera_source == local ]] || profile="split"
 
 # The writer, launcher and motor host share the same validated calibration reader.
 calibration_args=()
@@ -77,8 +81,7 @@ front_camera_info="file://${LEKIWI_CAMERA_INFO:-$HOME/.ros/camera_info/lekiwi_fr
 wrist_camera_info="file://${LEKIWI_WRIST_CAMERA_INFO:-$HOME/.ros/camera_info/lekiwi_wrist.yaml}"
 
 self_heal
-exec ros2 launch lekiwi_rmf bringup.launch.py mode:=real \
-  camera_source:="$camera_source" \
+exec ros2 launch lekiwi_rmf bringup.launch.py profile:="$profile" \
   camera_device:="$FRONT" wrist_camera_device:="${WRIST:-none}" \
   camera_info_url:="$front_camera_info" wrist_camera_info_url:="$wrist_camera_info" \
   "${calibration_args[@]}" "$@"
