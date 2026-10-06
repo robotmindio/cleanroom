@@ -190,17 +190,48 @@ Reinstalling a stale compute configuration also needs full sudo; the deployer
 checks `sudo -n true` before it touches the robot and stops with the command to
 run instead of waiting for a password.
 
-The deployer first exits quickly when the requested revision, both built
-workspaces, and all services are already current. Otherwise it fast-forwards
-both clean checkouts to the same pushed commit, disarms and confirms
-torque-off, stops the compute stack, reinstalls a stale or misconfigured compute
-service configuration without starting it, stops the device services, rebuilds both service workspaces, and starts the host,
-Astra, cameras, LD06 and zenoh bridge before the compute stack. It verifies
-revision, motor health, cameras, the Astra cloud and the LD06 scan with the
-driver disarmed, then re-arms it unless `LEKIWI_DISARM_ON_FAILURE=true`, in
-which case the robot stays disarmed for an operator. Any failure does not roll
-back or resume a partially deployed robot. Inspect the failure and rerun the
-deploy.
+The local checkout must be clean and exactly match its pushed upstream revision.
+The device anchor checkout also stays clean; neither checkout is advanced during
+deployment. The deployer builds detached worktrees under each bootstrap
+workspace's `releases/REVISION/`, applies the pinned native patches, and runs the
+entire CTest suite on both hosts before stopping services. A build or test failure
+leaves the active source, installed files, and release pointers unchanged.
+
+Each qualified release contains `source/`, `build/`, `install/`, and a
+`release.json` manifest. The manifest checks the exact source revision, tracked
+source files, installed artifacts, private `.env` snapshot, and passing results
+for every source test. Generated Python caches are excluded. The existing
+bootstrap install remains a dependency underlay, and its virtual environments
+are reused; OS packages, those environments, and local calibration files still
+need separate qualification. Cold native builds can take substantial time and
+disk space. Do not delete retained releases while a service uses them.
+
+After qualification, the deployer confirms torque-off, stops both stacks, and
+atomically selects each host's `current` symlink. Services use `current/source`
+and `current/install`; the initial migration needs administrator authentication
+to reinstall their paths. Stale service configuration is reinstalled with
+`--no-start` while both stacks are stopped. The host, Astra, cameras, LD06, and
+zenoh bridge then start before the compute stack. The deployer verifies release
+hashes, motor health, attached cameras, the Astra cloud, and the LD06 scan with
+the driver disarmed. It retains the existing verified-deployment re-arm unless
+`LEKIWI_DISARM_ON_FAILURE=true`, which keeps the robot disarmed for an operator.
+
+When the target release, service configuration, deployed revision markers, and
+running services already match, deployment exits without stopping the robot.
+Builders refuse to rebuild the bootstrap workspace once `current` exists: use
+the deployer to stage the next release instead.
+
+A cutover or runtime verification failure does not automatically roll back or
+resume motion. Both release directories and the original bootstrap installation
+remain available. `previous` records the previously selected release, which may
+not have passed runtime verification; `~/.ros/lekiwi/deployed-revision` on each
+host records the last verified deployment. Inspect service logs and those markers
+before recovery. A deployment retry requires the compute stack and motor host
+to be running so it can confirm torque-off again. If either stopped, an operator
+must secure the robot and restore the services using the repository service
+installers with `--no-start` and the retained release workspace before retrying;
+restarting the motor host uses its normal arming policy. Do not treat retained
+files as evidence that the new revision passed physical acceptance.
 
 The two halves can also mix ownership: keep the device services running, stop
 `lekiwi-stack.service`, and run `scripts/workstation-up.sh` on the compute

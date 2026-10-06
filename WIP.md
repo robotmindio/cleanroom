@@ -7,7 +7,12 @@ re-arm behavior. No live deployment has been performed.
 - Completed: qualification collection, test discovery/registration, and stale
   acceptance guidance corrected; motor actions enforce calibrated base/joint
   limits and uploaded trajectories must match the host calibration.
-- Next: stage releases before the split deployment cutover.
+- Completed: staged split releases with full pre-cutover qualification, artifact
+  manifests, retained previous installations, and stable service paths.
+- Next: exercise a real staged build, then remove this checkpoint note and open
+  the draft review.
 - Verified: 56 qualification/braking/reload tests and 70 arm/motor-host tests
   passed; changed Python files pass Ruff.
-- Pending: fresh build/integration checks and review of deployment fault paths.
+- Verified: fresh package build, all 61 CTest targets (nine launch tests), full
+  Ruff/flake8/ShellCheck, both URDFs, package XML, and configuration/map YAMLs.
+  Staging success/failure and activation regressions passed.

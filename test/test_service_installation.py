@@ -355,7 +355,7 @@ def test_simulation_installer_excludes_astra_hardware_setup():
     assert "0002-finite-camera-calibration.patch" in installer
     builder = (ROOT / "scripts/build-lekiwi.sh").read_text()
     assert '"$project_root/thirdparty/ros2_astra_camera/"*.patch' in builder
-    assert 'packages+=(astra_camera)' in builder
+    assert 'packages+=(astra_camera_msgs astra_camera)' in builder
     assert "/MemAvailable/" in builder
     assert "/MemTotal/" not in builder
     assert 'Simulation-only installation: skipping Astra driver and udev setup' in installer
@@ -609,9 +609,9 @@ def test_pi_and_manual_split_startup_include_the_ld06():
     assert 'apply_pinned_patch "$lidar_source" "$lidar_qos_patch"' in pi_installer
     assert 'apply_pinned_patch "$lidar_source" "$lidar_baud_patch"' in pi_installer
     build = (ROOT / "scripts" / "build-lekiwi.sh").read_text(encoding="utf-8")
-    assert 'apply_pinned_patch "$lidar_source" "$lidar_qos_patch"' in build
-    assert 'apply_pinned_patch "$lidar_source" "$lidar_baud_patch"' in build
-    for source in (installer, pi_installer, build):
+    assert '"$project_root/thirdparty/ldlidar_stl_ros2/"*.patch' in build
+    assert 'apply_pinned_patch "$lidar_source" "$patch"' in build
+    for source in (installer, pi_installer):
         assert "0004-acquisition-timestamps.patch" in source
         assert '"$lidar_timing_patch"' in source or '"$ldlidar_timing_patch"' in source
     assert 'packages+=(ldlidar_stl_ros2)' in build
@@ -640,17 +640,26 @@ def test_deploy_order_fails_closed_around_the_device_restart():
     start_host = deploy.index("start lekiwi-host.service", stop_host)
     start_stack = deploy.index("start lekiwi-stack.service", start_host)
     assert disarm < stop_stack < stop_host < start_host < start_stack
+    stage_device = deploy.index('nice -n 10 bash -s -- device')
+    stage_compute = deploy.index('nice -n 10 "$project_root/scripts/stage-release.sh" compute')
+    verify = deploy.index('verify "$compute_release" "$target" compute', stage_compute)
+    activate = deploy.index('\nactivate_release "$workspace" "$compute_release"')
+    assert stage_device < stage_compute < verify < disarm
+    assert stop_host < activate < start_host
+    assert 'git -C "$project_root" merge' not in deploy
+    assert 'git -C "$remote_repo" merge' not in deploy
     # A stale compute configuration is reinstalled only once the robot is disarmed and
     # its stack stopped, never started early, and its sudo need is checked up front.
     refresh = deploy.index("\n  refresh_compute_service\n")
-    assert stop_stack < refresh < stop_host
+    assert stop_host < refresh < start_host
     assert deploy.count("refresh_compute_service\n") == 1
     refresh_device = deploy.index('"${ssh_command[@]}" sudo -n "${remote_installer[@]}"', stop_host)
     assert stop_host < refresh_device < start_host
     assert '--bind-address "$remote_bind_address" --no-start' in deploy
     device_installer = (ROOT / "scripts" / "install-device-services.sh").read_text(encoding="utf-8")
     assert 'as_root systemctl enable "${units[@]}" lekiwi-ros-logrotate.timer' in device_installer
-    assert '"$project_root/scripts/reinstall-compute.sh" --no-start' in deploy
+    assert '"$compute_current/source/scripts/reinstall-compute.sh" "${installer_args[@]}"' in deploy
+    assert 'local installer_args=(--no-start)' in deploy
     assert deploy.index("sudo -n true") < disarm
     assert disarm < deploy.index('sudo -n /usr/bin/systemctl reboot') < stop_host
     assert 'vcgencmd get_config usb_max_current_enable' in deploy
@@ -662,13 +671,13 @@ def test_deploy_order_fails_closed_around_the_device_restart():
     assert "device_units=(lekiwi-host.service lekiwi-lidar.service lekiwi-zenoh.service)" in deploy
     assert "for unit in lekiwi-lidar.service lekiwi-zenoh.service; do" in deploy
     assert 'if remote_unit_exists "$unit"; then device_units+=("$unit"); fi' in deploy
-    assert ".lekiwi-source-revision" in deploy
+    assert "check-release.py" in deploy
     assert "expected_service_fingerprint" in deploy
     assert "canonical /scan is not the LD06 frame" in deploy
     assert 'awk \'NF && $1 != "---" { print $1; exit }\'' in deploy
     assert "has_nopasswd_systemctl" in deploy
     assert 'compute_sudoers=$(sudo -n -l)' in deploy
-    assert 'git -C "$project_root" merge --ff-only' in deploy
+    assert ' merge --ff-only' not in deploy
     # The deployer runs from any directory: every git call names its repository.
     assert not re.search(r"(?<![\w-])git (?!-C )", deploy)
     assert "cannot fetch origin within 30 seconds" in deploy
