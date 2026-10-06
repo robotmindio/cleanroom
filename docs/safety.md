@@ -154,6 +154,11 @@ with the arm stowed and before acceptance trials: chassis self-returns that
 reach the StopZone cause intermittent false stops, and nearby hardware changes
 them. Full surrounding coverage needs a moved lidar or a second sensor.
 
+The Astra depth cloud is not a collision-monitor source: it faces
+sideways/rearward and its minimum depth (~0.55 m) lies beyond both zones, so it
+cannot see an obstacle inside them. `require_depth` gates base motion on its
+freshness only; obstacles below the LD06 plane are not detected.
+
 ## Motor-host motion limits
 
 The motor host validates every streamed or locally sampled action before writing
