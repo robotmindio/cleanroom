@@ -219,7 +219,8 @@ while time.monotonic()<end:
 node.destroy_node(); rclpy.shutdown()
 assert sys.argv[1]=="pub" or received
 '''
-    env = {**os.environ, "ROS_DOMAIN_ID": "94", "RMW_IMPLEMENTATION": "rmw_cyclonedds_cpp",
+    # Both processes inherit this test's isolated (or conftest's private) domain.
+    env = {**os.environ, "RMW_IMPLEMENTATION": "rmw_cyclonedds_cpp",
            "CYCLONEDDS_URI": f"file://{ROOT / 'config/cyclonedds.xml'}"}
     with subprocess.Popen([sys.executable, "-c", source, "pub"], env=env,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as publisher:

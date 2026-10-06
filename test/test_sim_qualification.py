@@ -140,16 +140,29 @@ def test_expected_ctests_match_every_test_the_package_registers():
     cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
     registered = set(re.findall(r"add_lekiwi_pytest\((\w+)", cmake))
     registered |= set(re.findall(r"add_test\(NAME\s+(\w+)", cmake))
-    registered |= {f"test_{name}" for name in re.findall(r"add_launch_test\(test/(\S+)", cmake)}
+    registered |= set(re.findall(r"ament_add_test\((\w+)", cmake))
+    registered |= {f"test_{name}.py" for name in re.findall(r"add_lekiwi_launch_test\((\w+) \d+\)", cmake)}
     assert registered == set(_load().EXPECTED_CTESTS)
     unit_tests = {path.stem for path in (ROOT / "test").glob("test_*.py") if not path.stem.endswith("_launch")}
     assert unit_tests <= registered
 
 
-def test_every_ctest_ros_domain_is_unique_and_avoids_ephemeral_ports():
+def test_every_ctest_dds_test_gets_an_isolated_domain_below_ephemeral_ports():
+    from domain_coordinator.impl import default_selector
+
     cmake = (ROOT / "CMakeLists.txt").read_text(encoding="utf-8")
-    domains = re.findall(r"add_lekiwi_pytest\(\w+ (\d+)\)", cmake)
-    domains += re.findall(r"ROS_DOMAIN_ID=(\d+)", cmake)
-    assert len(domains) == len(set(domains))
-    assert all(40 <= int(domain) <= 86 and
-               7400+250*int(domain)+11+2*119<32768 for domain in domains)
+    assert not re.search(r"ROS_DOMAIN_ID=\d", cmake)
+    # Tests register only through the isolated helpers; the C++ contact test
+    # opens no DDS participant.
+    registrations = re.findall(
+        r"^\s*(add_test|add_launch_test|ament_add_test|ament_add_pytest_test|"
+        r"ament_add_ros_isolated_pytest_test)\(", cmake, flags=re.MULTILINE)
+    assert sorted(registrations) == [
+        "add_launch_test", "add_test", "ament_add_ros_isolated_pytest_test", "ament_add_test"]
+    assert cmake.count('RUNNER "${test_isolated_runner}"') == 2
+    assert "ROS_DOMAIN_ID=unset:;DISABLE_ROS_ISOLATION=unset:" in cmake
+    # The coordinator hands out domains 1-100; Cyclone's highest discovery
+    # port for domain 100 stays below Linux's ephemeral range.
+    selector = default_selector()
+    assert max(selector() for _ in range(200)) == 100
+    assert 7400 + 250 * 100 + 11 + 2 * 119 < 32768
