@@ -164,6 +164,9 @@ class FaultTest(navigation['Test']):
         self.wait(lambda:time.monotonic()-self.odom_at<0.3 and self.speed<=0.001,10)
         self.wait(lambda:self.flags.get('base_motion_permitted') and
                   self.flags.get('arm_stowed') and self.flags.get('driver')=='ARMED',45)
+        # Permission recovery can dispatch newer wheel feedback. Recheck the
+        # stopped state before recording it or starting the return movement.
+        self.wait(lambda:time.monotonic()-self.odom_at<0.3 and self.speed<=0.001,10)
         self.checks[name].update({'passed':True,'denial':denial,'recovered_driver':self.flags['driver'],
                              'stopped_wheel_speed':self.speed,
                              'observed_displacement_m':math.dist(origin[:2],self.pose[:2])})
