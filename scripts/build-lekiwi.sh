@@ -10,7 +10,10 @@ workspace=${LEKIWI_WS:-$HOME/lekiwi_ws}
   exit 1
 }
 die() { echo "$0: $*" >&2; exit 1; }
-[[ ! -L $workspace/current ]] || die "stage a release instead of rebuilding the bootstrap workspace"
+build_compute=ON
+if [[ ${1:-} == --device ]]; then build_compute=OFF; shift; fi
+[[ $# == 0 ]] || die "usage: $0 [--device]"
+[[ ! -L $workspace/current && ! -f $workspace/release.json ]] || die "stage a release instead of rebuilding a live or sealed workspace"
 
 # shellcheck source=scripts/thirdparty-common.sh
 source "$project_root/scripts/thirdparty-common.sh"
@@ -67,7 +70,8 @@ colcon --log-base "$workspace/log" build \
   --build-base "$workspace/build" \
   --install-base "$workspace/install" \
   "${parallel_args[@]}" \
-  --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_IGNORE_PREFIX_PATH="$HOME/.local" \
+  --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DLEKIWI_BUILD_COMPUTE="$build_compute" \
+    -DCMAKE_IGNORE_PREFIX_PATH="$HOME/.local" \
     -DPython3_EXECUTABLE=/usr/bin/python3
 
 installed_driver=$workspace/install/lekiwi_rmf/lib/lekiwi_rmf/lekiwi_driver

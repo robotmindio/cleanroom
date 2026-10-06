@@ -49,7 +49,9 @@ done
 if [[ ! -f $release/install/setup.bash ]]; then
   printf 'source %q\n' "$workspace/install/setup.bash" > "$release/install/setup.bash"
 fi
-for dependency in ldlidar_stl_ros2 ros2_astra_camera class_loader rclcpp navigation2 rviz ament_cmake; do
+dependencies=(ldlidar_stl_ros2 ros2_astra_camera)
+[[ $role != compute ]] || dependencies+=(class_loader rclcpp navigation2 rviz ament_cmake)
+for dependency in "${dependencies[@]}"; do
   if [[ -d $workspace/src/$dependency/.git && ! -d $release/src/$dependency/.git ]]; then
     # Installer caches are partial clones; copying their full history can ask
     # for blobs they deliberately never downloaded. Only HEAD is materialized.
@@ -59,8 +61,13 @@ for dependency in ldlidar_stl_ros2 ros2_astra_camera class_loader rclcpp navigat
   fi
 done
 export LEKIWI_WS=$release
-"$release/source/scripts/build-native.sh"
-"$release/source/scripts/build-lekiwi.sh"
+build_args=()
+if [[ $role == compute ]]; then
+  "$release/source/scripts/build-native.sh"
+else
+  build_args+=(--device)
+fi
+"$release/source/scripts/build-lekiwi.sh" "${build_args[@]}"
 set +u
 # shellcheck source=/dev/null
 source "$release/install/setup.bash"

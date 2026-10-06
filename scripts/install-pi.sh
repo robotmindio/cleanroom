@@ -134,8 +134,11 @@ http://packages.ros.org/ros2/ubuntu $codename main" |
     "ros-$pi_ros_distro-v4l2-camera" \
     "ros-$pi_ros_distro-image-transport-plugins" \
     "ros-$pi_ros_distro-rmw-cyclonedds-cpp" \
+    "ros-$pi_ros_distro-ament-cmake-python" \
+    "ros-$pi_ros_distro-ament-cmake-pytest" \
     ros-dev-tools \
     python3-yaml \
+    python3-pytest python3-zmq shellcheck \
     v4l-utils
 
   log "Installing the pinned LD06 ROS driver"

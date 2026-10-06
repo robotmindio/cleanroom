@@ -199,13 +199,16 @@ The local checkout must be clean and exactly match its pushed upstream revision.
 The device anchor checkout also stays clean; neither checkout is advanced during
 deployment. The deployer builds detached worktrees under each bootstrap
 workspace's `releases/REVISION/`, applies the pinned native patches, and runs the
-entire CTest suite on both hosts before stopping services. A build or test failure
+complete role-specific CTest suite before stopping services. Compute runs every
+source test; device runs the motor-host, sensor, transport, and deployment checks
+listed in `config/device_tests.txt`. Device builds omit Gazebo, MoveIt, RViz, and
+compute-native patches (`build-lekiwi.sh --device`). A build or test failure
 leaves the active source, installed files, and release pointers unchanged.
 
 Each qualified release contains `source/`, `build/`, `install/`, and a
 `release.json` manifest. The manifest checks the exact source revision, tracked
 source files, installed artifacts, private `.env` snapshot, and passing results
-for every source test. Generated Python caches are excluded. The existing
+for every selected source test. Generated Python caches are excluded. The existing
 bootstrap install remains a dependency underlay, and its virtual environments
 are reused; OS packages, those environments, and local calibration files still
 need separate qualification. Cold native builds can take substantial time and
@@ -223,8 +226,10 @@ the driver disarmed. It retains the existing verified-deployment re-arm unless
 
 When the target release, service configuration, deployed revision markers, and
 running services already match, deployment exits without stopping the robot.
-Builders refuse to rebuild the bootstrap workspace once `current` exists: use
-the deployer to stage the next release instead.
+Builders refuse to rebuild sealed releases or the bootstrap workspace once
+`current` exists: use the deployer to stage the next release instead. Tools that
+rebuild an existing install, including `reload-moveit.py`, are development
+workflows; deploy tracked planner changes as a new release once staging is in use.
 
 A cutover or runtime verification failure does not automatically roll back or
 resume motion. Both release directories and the original bootstrap installation

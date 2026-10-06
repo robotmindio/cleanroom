@@ -14,7 +14,7 @@ def digest(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def inventory(release):
+def inventory(release, role):
     source = release / "source"
     revision = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
     if subprocess.check_output(["git", "-C", str(source), "status", "--porcelain"], text=True).strip():
@@ -28,13 +28,14 @@ def inventory(release):
         raise ValueError("release package is not installed")
     if (release / "install/lekiwi_rmf/.lekiwi-source-revision").read_text().strip() != revision:
         raise ValueError("installed package revision does not match release source")
-    if (release / "install/.lekiwi-native-revision").read_text().strip() != revision:
+    if role == "compute" and (release / "install/.lekiwi-native-revision").read_text().strip() != revision:
         raise ValueError("native overlay revision does not match release source")
-    for name in (
+    native_artifacts = (
         "rclcpp/lib/librclcpp.so", "class_loader/lib/libclass_loader.so",
         "nav2_lifecycle_manager/lib/nav2_lifecycle_manager/lifecycle_manager",
         "rviz_ogre_vendor/opt/rviz_ogre_vendor/lib/OGRE/RenderSystem_GL.so",
-    ):
+    ) if role == "compute" else ()
+    for name in native_artifacts:
         path = release / "install" / name
         if not path.is_file() or path.stat().st_size == 0:
             raise ValueError(f"native release artifact is missing: {name}")
@@ -42,11 +43,16 @@ def inventory(release):
     result = ET.parse(report).getroot()
     expected = {f"test_{path.name}" if path.name.endswith("_launch.py") else path.stem
                 for suffix in ("py", "cpp") for path in (source / "test").glob(f"test_*.{suffix}")}
+    if role == "device":
+        selected = set((source / "config/device_tests.txt").read_text().split())
+        if not selected <= expected:
+            raise ValueError("device qualification names a missing source test")
+        expected = selected
     cases = list(result.iter("testcase"))
     if not expected or {case.get("name") for case in cases} != expected or any(
         case.find(tag) is not None for case in cases for tag in ("failure", "error", "skipped")
     ) or len(cases) != len(expected):
-        raise ValueError("release qualification requires every source test to pass")
+        raise ValueError("release qualification requires every source test selected for this role to pass")
     evidence = {str(path.relative_to(release)): digest(path)
                 for path in sorted((release / "build/lekiwi_rmf/test_results").rglob("*.xml"))}
     evidence[str(report.relative_to(release))] = digest(report)
@@ -58,7 +64,7 @@ def inventory(release):
 
 def check_release(release, revision, role, seal=False):
     release = release.resolve()
-    actual = {**inventory(release), "role": role}
+    actual = {**inventory(release, role), "role": role}
     if actual["revision"] != revision:
         raise ValueError("release revision differs from requested revision")
     manifest = release / "release.json"

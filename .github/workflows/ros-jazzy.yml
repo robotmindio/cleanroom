@@ -58,6 +58,16 @@ jobs:
           . install/setup.sh
           colcon test --packages-select lekiwi_rmf --event-handlers console_cohesion+
           colcon test-result --verbose
+      - name: Device-only package build and tests
+        run: |
+          . /opt/ros/jazzy/setup.sh
+          device_workspace="$GITHUB_WORKSPACE/.benchmarks/device"
+          colcon --log-base "$device_workspace/log" build \
+            --base-paths "$GITHUB_WORKSPACE" --packages-select lekiwi_rmf \
+            --build-base "$device_workspace/build" --install-base "$device_workspace/install" \
+            --cmake-args -DLEKIWI_BUILD_COMPUTE=OFF -DBUILD_TESTING=ON
+          . "$device_workspace/install/setup.sh"
+          ctest --test-dir "$device_workspace/build/lekiwi_rmf" --output-on-failure
       - name: Static repository validation
         run: |
           . /opt/ros/jazzy/setup.sh

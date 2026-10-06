@@ -12,6 +12,16 @@ import pytest
 ROOT = Path(__file__).parents[1]
 
 
+@pytest.mark.parametrize("builder", ["build-lekiwi.sh", "build-native.sh"])
+def test_builders_refuse_a_sealed_release_before_building(tmp_path, builder):
+    (tmp_path / "install").mkdir()
+    (tmp_path / "release.json").write_text("{}")
+    result = subprocess.run(["bash", str(ROOT / "scripts" / builder)],
+                            env={**os.environ, "LEKIWI_WS": str(tmp_path)}, capture_output=True, text=True)
+    assert result.returncode != 0 and "sealed workspace" in result.stderr
+    assert list((tmp_path / "install").iterdir()) == []
+
+
 @pytest.fixture
 def tmp_path():
     # Fixture repositories contain Git worktrees, which must survive outside /tmp.
@@ -31,6 +41,8 @@ def release_fixture(tmp_path):
     repo, workspace, binaries = (tmp_path / name for name in ("repo", "workspace", "bin"))
     (repo / "scripts").mkdir(parents=True)
     (repo / "test").mkdir()
+    (repo / "config").mkdir()
+    (repo / "config/device_tests.txt").write_text("test_example\n")
     (repo / ".gitignore").write_text(".env\n__pycache__/\n")
     (repo / "test/test_example.py").write_text("def test_example(): pass\n")
     (repo / ".env").write_text("LEKIWI_WRIST=none\n")
@@ -47,6 +59,7 @@ for file in rclcpp/lib/librclcpp.so class_loader/lib/libclass_loader.so nav2_lif
 done
 ''')
     write_executable(repo / "scripts/build-lekiwi.sh", '''
+[[ ${LEKIWI_TEST_BUILD_FAIL:-0} != 1 ]] || exit 42
 mkdir -p "$LEKIWI_WS/install/lekiwi_rmf/share/lekiwi_rmf" "$LEKIWI_WS/build/lekiwi_rmf"
 git -C "$(dirname "$0")/.." rev-parse HEAD > "$LEKIWI_WS/install/lekiwi_rmf/.lekiwi-source-revision"
 printf '<package/>' > "$LEKIWI_WS/install/lekiwi_rmf/share/lekiwi_rmf/package.xml"
@@ -74,9 +87,10 @@ printf '<testsuite><testcase name="test_example"/></testsuite>' > "$report"
 
 
 @pytest.mark.parametrize("fail", [False, True])
-def test_staging_keeps_live_source_artifacts_and_pointer_unchanged(tmp_path, fail):
+@pytest.mark.parametrize("role", ["compute", "device"])
+def test_staging_keeps_live_source_artifacts_and_pointer_unchanged(tmp_path, fail, role):
     repo, workspace, revision, environment = release_fixture(tmp_path)
-    command = ["bash", str(repo / "scripts/stage-release.sh"), "compute", str(workspace), revision]
+    command = ["bash", str(repo / "scripts/stage-release.sh"), role, str(workspace), revision]
     result = subprocess.run(command, env={**environment, "LEKIWI_TEST_BUILD_FAIL": str(int(fail))},
                             text=True, capture_output=True, timeout=30)
     assert result.returncode == (42 if fail else 0), result.stdout + result.stderr
@@ -86,6 +100,7 @@ def test_staging_keeps_live_source_artifacts_and_pointer_unchanged(tmp_path, fai
     release = workspace / "releases" / revision
     assert (release / "release.json").exists() is not fail
     if not fail:
+        assert (release / "install/.lekiwi-native-revision").is_file() is (role == "compute")
         assert subprocess.run(command, env=environment, capture_output=True, timeout=30).returncode == 0
         cache = release / "install/lekiwi_rmf/__pycache__/runtime.cpython-312.pyc"
         cache.parent.mkdir()
