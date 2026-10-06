@@ -121,6 +121,7 @@ class OnboardBraking(FAULT['FaultTest']):
         self.deadline = time.monotonic()+config['maximum_runtime_s']
         self.ranges,self.range_info,self.camera_poses,self.sources = [],[],[],{}
         self.native_poses,self.scans,self.reference_points = [],[],None
+        self.reference_scans=[]
         mask=yaml.safe_load((ROOT/'config/lidar_self_mask.yaml').read_text())['scan_self_filter']['ros__parameters']
         self.sectors=parse_sectors(*(mask[k] for k in ('body_start_deg','body_end_deg','body_max_range_m')))
         self.create_subscription(LaserScan,'/pi/lidar/scan',self.direct_scan,NAV['qos_profile_sensor_data'])
@@ -174,7 +175,14 @@ class OnboardBraking(FAULT['FaultTest']):
         points=points@np.array([[c,s],[-s,c]])+[transform.translation.x,transform.translation.y]
         stamp=message.header.stamp.sec+message.header.stamp.nanosec/1e9
         self.scans.append({'stamp':stamp,'time':time.monotonic(),'points':points.tolist()})
-        if self.reference_points is None:self.reference_points=points
+        if self.reference_points is None:
+            self.reference_scans.append(points)
+            if len(self.reference_scans)<10:return
+            # A stationary median reference prevents noise in one initial scan
+            # from becoming a persistent wall/heading error in every later fit.
+            cloud=np.concatenate(self.reference_scans)
+            bins=(np.degrees(np.arctan2(cloud[:,1],cloud[:,0]))%360).astype(int)
+            self.reference_points=np.array([np.median(cloud[bins==key],axis=0) for key in np.unique(bins) if (bins==key).sum()>=5])
         pose,covariance,sensitivity=register_scan(self.reference_points,points,self.ranges[-1]['pose'] if self.ranges else [0.,0.,0.],self.config['body_radius_m'])
         self.ranges.append({'time':time.monotonic(),'stamp':stamp,'age':self.get_clock().now().nanoseconds/1e9-stamp,
             'pose':pose,'covariance':covariance,'sector_sensitivity_m':sensitivity})
@@ -248,7 +256,10 @@ class OnboardBraking(FAULT['FaultTest']):
                       feedback_interrupted=len(self.health_faults)>faults or self.motion_pauses>pauses)
         result['qualification_eligible']=result['within_budget'] and result['requested_speed_covered'] and not result['feedback_interrupted']
         self.trials.append(result);self.save();print('STOP',json.dumps(result),flush=True)
-        if not result['within_budget']:raise RuntimeError('loaded stopping/error bound exceeded')
+        if not result['within_budget']:
+            if result['conservative_swept_distance_m']+max(result['uncertainty_upper_m'],self.config['measurement_uncertainty_m'])>self.config['maximum_stopping_distance_m'] or result['stop_time_receive_upper_s']>self.config['maximum_stop_time_s']:
+                raise RuntimeError('loaded physical stopping bound exceeded')
+            print('UNQUALIFIED STOP',direction,'measurement uncertainty exceeds the declared limit',flush=True)
         return result['qualification_eligible']
 
     def fault(self,name,begin,restore,expected):
