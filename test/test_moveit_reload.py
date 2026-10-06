@@ -2,6 +2,7 @@
 from pathlib import Path
 import runpy
 import xml.etree.ElementTree as ET
+import yaml
 
 
 def test_reload_replaces_collision_pairs_and_preserves_live_poses():
@@ -23,3 +24,13 @@ def test_reload_uses_the_managed_process_mount_namespace():
     assert resolve(123, ["move_group", "--params-file", "/tmp/launch_params_test"]) == Path(
         "/proc/123/root/tmp/launch_params_test"
     )
+
+
+def test_reload_omits_unserializable_empty_array_defaults(tmp_path):
+    script = Path(__file__).parents[1] / "scripts/reload-moveit.py"
+    write = runpy.run_path(str(script))["write_parameters"]
+    path = tmp_path / "parameters.yaml"
+    write(path, {"empty_default": [], "limits": [0.1], "robot_description_semantic": "<robot/>"})
+    assert yaml.safe_load(path.read_text())["/**"]["ros__parameters"] == {
+        "limits": [0.1], "robot_description_semantic": "<robot/>"
+    }

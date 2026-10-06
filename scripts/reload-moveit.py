@@ -52,6 +52,19 @@ def planner_parameter_path(pid, args):
     return Path(f"/proc/{pid}/root") / paths[0].relative_to("/")
 
 
+def write_parameters(path, parameters):
+    # YAML [] loses its array type in rcl's parser. Empty arrays observed in
+    # MoveIt are declared defaults; let the plugin declare them on restart.
+    parameters = {name: value for name, value in parameters.items() if value != []}
+    with tempfile.NamedTemporaryFile("w", dir=path.parent, delete=False) as temporary:
+        yaml.safe_dump({"/**": {"ros__parameters": parameters}}, temporary)
+        temporary_path = Path(temporary.name)
+    try:
+        os.replace(temporary_path, path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+
+
 def main():
     import rclpy
     from ament_index_python.packages import get_package_share_directory
@@ -115,18 +128,13 @@ def main():
         )
         # Launch's temporary file may have been removed while its child stayed
         # alive. Recreate it from live parameters so respawn remains repeatable.
-        with tempfile.NamedTemporaryFile("w", dir=parameter_path.parent, delete=False) as temporary:
-            yaml.safe_dump({"/**": {"ros__parameters": parameters}}, temporary)
-            temporary_path = Path(temporary.name)
-        try:
-            os.replace(temporary_path, parameter_path)
-        finally:
-            temporary_path.unlink(missing_ok=True)
+        write_parameters(parameter_path, parameters)
         os.kill(pid, signal.SIGINT)
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
             replacements = managed_planners()
-            if len(replacements) == 1 and replacements[0][0] != pid:
+            if (len(replacements) == 1 and replacements[0][0] != pid and
+                    clients["/move_group/get_parameters"].wait_for_service(timeout_sec=0.25)):
                 response = call("/move_group/get_parameters", GetParameters,
                                 GetParameters.Request(names=["robot_description_semantic"]))
                 if response.values and response.values[0].string_value == parameters["robot_description_semantic"]:
