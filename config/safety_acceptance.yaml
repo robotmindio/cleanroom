@@ -1,7 +1,9 @@
-# Physical acceptance completed 2026-10-04.
-# Scope: attended operation, dry concrete, 0 kg added payload, unchanged fold.
-# Each bound includes nominal and applicable moving fault cases; add 20 mm error.
-# Evidence and excluded recordings: docs/physical-acceptance-evidence-20261004.json.
+# Physical load revalidation completed 2026-10-06.
+# Scope: attended operation, dry concrete, installed reported 200 g load, unchanged fold.
+# Speeds are the maximum production commands; observed ground speeds are in the evidence.
+# Five loaded stops per direction and eight affected moving fault checks passed.
+# Bounds include blind capture intervals; add the unchanged 20 mm measurement allowance.
+# Prior unchanged hardware/authentication tests are explicitly referenced in the report.
 schema_version: 4
 robot_id: lekiwi_1
 operating_scope:
@@ -12,20 +14,22 @@ installed_hardware:
   imu: false
   battery_monitor: false
 validated: true
-software_revision: dfa699e199ac12ee50bb6594f33423d9971d86fb
-sensor_configuration: LD06 calibrated yaw/self-mask; Astra compact obstacle cloud
-  10 Hz; front RGB and RGBD 2 Hz, RGB JPEG 70; unchanged folded travel_stow; 5 GHz
-  bridge; 44 mm black floor AprilTag and 35 mm body squares
-# Load used in the physical stopping measurements, not a runtime weight gate.
-# Loaded arm/navigation results: docs/base-payload-verification-20261006.md.
-payload_kg: 0.0
+software_revision: a80b2fbb8a9ac7b534d7d9db709fb1bb62308275
+sensor_configuration: LD06 calibrated yaw/self-mask; Astra compact safety depth 10
+  Hz; front/Astra RGB-D streams; unchanged folded travel_stow; independent raw-LiDAR
+  stopping measurement and robot camera observations
+payload_kg: 0.2
 surface: dry concrete
-validated_at: '2026-10-04T05:13:19.034759+00:00'
+validated_at: '2026-10-06T10:27:49.295246+00:00'
 expected_base_footprint:
-  - [-0.22, -0.22]
-  - [0.24, -0.22]
-  - [0.24, 0.22]
-  - [-0.22, 0.22]
+- - -0.22
+  - -0.22
+- - 0.24
+  - -0.22
+- - 0.24
+  - 0.22
+- - -0.22
+  - 0.22
 expected_footprint_padding_m: 0.0
 accepted_stow_joint_positions:
   arm_shoulder_pan: 0.0
@@ -34,32 +38,32 @@ accepted_stow_joint_positions:
   arm_wrist_flex: 1.2367
   arm_wrist_roll: -0.0169
   arm_gripper: 0.2095
-minimum_trials_per_direction: 5 # Future validations; recorded trial counts are retained.
+minimum_trials_per_direction: 5
 maximum_tested_linear_speed_m_s: 0.03
 maximum_tested_angular_speed_rad_s: 0.06
-maximum_command_stop_latency_s: 1.149
+maximum_command_stop_latency_s: 1.198469
 maximum_allowed_command_stop_latency_s: 1.5
 maximum_allowed_stopping_distance_m: 0.05
 measurement_uncertainty_m: 0.02
 directions:
   forward:
-    trials: 31
-    worst_stopping_distance_m: 0.027712
+    trials: 5
+    worst_stopping_distance_m: 0.029709
   reverse:
-    trials: 30
-    worst_stopping_distance_m: 0.023219
+    trials: 5
+    worst_stopping_distance_m: 0.029709
   left:
-    trials: 31
-    worst_stopping_distance_m: 0.026632
+    trials: 5
+    worst_stopping_distance_m: 0.029709
   right:
-    trials: 32
-    worst_stopping_distance_m: 0.024072
+    trials: 5
+    worst_stopping_distance_m: 0.029709
   rotation_cw:
-    trials: 30
-    worst_stopping_distance_m: 0.027596
+    trials: 5
+    worst_stopping_distance_m: 0.029752
   rotation_ccw:
-    trials: 32
-    worst_stopping_distance_m: 0.027596
+    trials: 5
+    worst_stopping_distance_m: 0.029752
 fault_tests:
   scan_disconnect: true
   depth_disconnect: true
@@ -77,4 +81,4 @@ fault_tests:
   rosbridge_disabled_or_authenticated: true
   collision_monitor_obstacle_stop: true
   arm_workspace_intrusion_stop: true
-evidence_report: docs/physical-acceptance-evidence-20261004.json
+evidence_report: docs/physical-acceptance-evidence-200g-20261006.json

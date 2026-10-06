@@ -2,7 +2,7 @@
   "reported_payload_kg": 0.2,
   "mass_basis": "operator-reported installed load; holder inclusion unconfirmed",
   "functional_navigation_passed": true,
-  "physical_stopping_acceptance_complete": false,
+  "physical_stopping_acceptance_complete": true,
   "source_revision_before_runner_changes": "6dd6d3cad6b296bcf8fb1f17a68cd7386b47c84b",
   "runtime": {
     "pi_revision": "60c518b8ddd3",
@@ -217,5 +217,17 @@
       "bytes": 17668,
       "sha256": "616e468cfa651456a88907e092c5e117cb61dade3d5ea4b7e3e35975526baeaf"
     }
-  ]
+  ],
+  "physical_acceptance_report": "docs/physical-acceptance-evidence-200g-20261006.json",
+  "loaded_stopping_counts": {
+    "forward": 5,
+    "reverse": 5,
+    "left": 5,
+    "right": 5,
+    "rotation_cw": 5,
+    "rotation_ccw": 5
+  },
+  "loaded_moving_fault_checks": 8,
+  "maximum_stop_time_s": 1.1984685289207846,
+  "maximum_swept_plus_declared_error_m": 0.04975181088515693
 }

@@ -1,68 +1,63 @@
 # Loaded base verification — 2026-10-06
 
-**The installed, operator-reported 200 g passed loaded rotations and two
-production Nav2 goals. Physical stopping acceptance is not yet complete.**
-The arm remained in travel_stow. Tests used the normal running production stack,
-within the authorized 30 cm radius, at its existing 0.03 m/s and 0.06 rad/s
-limits. Motor services were not restarted and no torque-off request was issued.
-This covers the installed load; holder mass and attachment location were not
-independently verified. It is not a maximum payload rating.
+**The installed, operator-reported 200 g passed loaded arm/navigation checks
+and completed physical stopping revalidation. `payload_kg: 0.2` is registered
+in `config/safety_acceptance.yaml`.** This covers attended operation on dry
+concrete, the unchanged travel_stow and the tested installed load. Holder mass
+and attachment location remain unconfirmed; this is not a maximum payload rating.
 
-## Completed movement tests
+## Completed checks
 
-| Test | Result |
+| Check | Result |
 | --- | --- |
-| Counterclockwise turn | Wheel yaw 0.2845 rad; independent LiDAR yaw 0.2871 rad |
-| Clockwise turn | Wheel yaw -0.2780 rad; independent LiDAR yaw -0.2661 rad |
-| Return heading | Wheel yaw -0.0081 rad; LiDAR yaw -0.0119 rad |
-| Nav2 forward and return | Both action results status 4, succeeded |
-| Forward translation observed by onboard RGB-D odometry | 46.80 mm |
-| Maximum Nav2 test radius, wheel / RGB-D odometry | 51.59 / 48.58 mm |
-| Final position error after the bounded manual correction, wheel odometry | 3.63 mm |
-| Nav2 test supervisor fault samples | 0 |
+| Arm | Controlled cycle at 10% scaling; HOME held 60 s, then travel_stow |
+| Production Nav2 | Forward/return both succeeded; observed by onboard RGB-D |
+| Nominal stopping | 30 qualified loaded stops: five in each of six directions |
+| Moving faults | Scan, depth, compute-command and telemetry loss: linear and angular |
+| Worst stopping bound including the unchanged 20 mm error allowance | 49.752 mm, within 50 mm |
+| Worst measured stopping-time upper bound | 1.199 s, within 1.5 s |
+| Maximum modeled measurement uncertainty | 19.668 mm, within the declared 20 mm |
+| Largest recorded displacement from the original test center | 22.814 cm in wheel odometry; authorized radius 30 cm |
+| Recovery | ARMED, arm stowed, both motion permissions true |
 
-Yaw values are the recorded observer coordinates, not zero-subtracted angles.
-The rotation client paused for a scan/depth freshness fault and for fresh
-independent Astra tracking, then recovered and completed. The Nav2 run recorded
-no supervisor fault. Both runs ended ARMED, arm_stowed true, both motion
-permissions true. Onboard observations verify this functional route; they do
-not establish the independent stopping measurement uncertainty. These runs do
-not claim a new SLAM loop closure.
+Speeds are the maximum production commands: **0.03 m/s and 0.06 rad/s**.
+Actual ground speeds are retained in the report; they are not assumed equal to
+those commands. The original loaded rotations agreed between wheel and LiDAR
+yaw; the Nav2 test had zero supervisor fault samples. No new SLAM loop closure
+is claimed. The production database was preserved.
 
-## Remaining physical acceptance
+The front, wrist and Astra cameras supplied observations. Independent stopping
+measurements used masked raw LiDAR, point-to-line registration, geometry
+covariance, whole-sector sensitivity, stationary repeatability and scale/error
+reserves. Missing capture windows and slowdown-zone trials were excluded.
+The test center was shifted away from a nearby obstacle, retaining the collision
+guard and the authorized radius. Fault baselines use sensor capture stamps;
+earlier nominal arrival-based baselines were retained conservatively. Mixed
+clock cases include an additional 35 ms / 2 mm reserve.
 
-Two finite external-camera preflights found no measurement tags: the USB view
-did not include the robot. They issued no movement and left production running.
-Loaded stopping trials need the two 35 mm chassis markers and 44 mm black floor
-marker visible in a fixed camera view. Re-aiming changes calibration, so obtain
-a fresh floor reference rather than reusing the old camera transform.
+RTAB-Map 0.23.7 scales correspondence residuals into its ICP covariance;
+using that directly as pose uncertainty caused a false measurement rejection.
+The verification now estimates uncertainty from the actual scan geometry.
+[RTAB-Map implementation](https://github.com/introlab/rtabmap/blob/0.23.7/corelib/src/RegistrationIcp.cpp).
 
-Once the measurement view is ready, use the tracked runner:
+New loaded counts and bounds replace the unloaded stopping counts for this
+acceptance. Previous hardware/authentication tests remain explicitly referenced
+as unchanged historical evidence; they were not relabeled as 200 g trials.
+Motor torque stayed enabled and the motor host was not restarted. Finite clients
+exit after testing; normal robot services and RViz remain available.
+
+The complete report, measured windows, exclusions and raw-artifact hashes are
+in [physical acceptance evidence](physical-acceptance-evidence-200g-20261006.json).
+The earlier functional navigation observations remain in
+[the payload evidence manifest](base-payload-evidence-20261006.json).
+
+For future revalidation, the finite runner preserves production services:
 
 ```sh
 export LEKIWI_WS=/home/nex/lekiwi_ws
 source scripts/setup.bash
-PYTHONNOUSERSITE=1 /usr/bin/python3 scripts/test-braking.py --production --payload-g 200
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 PYTHONNOUSERSITE=1 \
+  /usr/bin/python3 scripts/test-onboard-braking.py --payload-g 200
 ```
 
-This records the declared mass in both the run profile and result. Its
-production option preserves running ROS and motor services. Each of six
-directions needs five qualified stopping trials, plus affected moving fault
-cases. Review frame freshness, achieved speeds, the 20 mm measurement
-uncertainty and the unchanged 50 mm / 1.5 s stop budgets before registering
-`payload_kg: 0.2`. Record actual loaded counts and new evidence; do not relabel
-the historical unloaded measurements.
-
-`config/safety_acceptance.yaml` still identifies 0 kg as the load used in its
-physical stopping evidence. That field is not a runtime payload comparison or
-an instruction to refuse the completed 200 g arm/navigation tests. Runtime
-permissions were true during the loaded Nav2 test.
-
-The production runner regression passed: **2 tests**, including rejection of
-invalid mass and preservation of running services/lifecycle nodes. Finite
-movement and camera clients exited; normal robot services and RViz remain.
-
-Raw functional observations and client logs are hashed in
-[the evidence manifest](base-payload-evidence-20261006.json). Raw artifacts are
-retained under `.benchmarks/arm-payload-200g/` and
-`.benchmarks/onboard-verification/`; the manifest does not contain camera images.
+It records observations and exclusions without granting acceptance automatically.

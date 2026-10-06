@@ -268,7 +268,7 @@ collision_monitor:
       type: polygon
       # Folded footprint plus 5 cm on every side: 0.56 x 0.54 m.
       # Acceptance must cover measured stopping travel plus uncertainty at
-      # the indoor speed limits; this smaller envelope is not yet accepted.
+      # the indoor speed limits; see config/safety_acceptance.yaml for the record.
       points: "[[0.29, 0.27], [0.29, -0.27], [-0.27, -0.27], [-0.27, 0.27]]"
       action_type: stop
       min_points: 1

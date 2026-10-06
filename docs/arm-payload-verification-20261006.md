@@ -11,8 +11,9 @@ Attachment location and whether the reported mass includes the holder remain
 unconfirmed. This verifies this installed load and tested route/speed; it is
 not a maximum payload rating, retention measurement or endurance test. Subsequent
 loaded rotations and production Nav2 goals passed; see
-[the base test record](base-payload-verification-20261006.md). Physical braking
-acceptance remains recorded for 0 g added payload until loaded stops are measured.
+[the base test record](base-payload-verification-20261006.md). Loaded base braking
+acceptance is now complete and registered for this installed 200 g load; see
+`docs/physical-acceptance-evidence-200g-20261006.json`.
 
 ## Corrected restriction and powered recovery
 
