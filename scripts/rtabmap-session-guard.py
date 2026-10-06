@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Stop a mapping session from growing its RTAB-Map database past its quota.
 
-This companion exits with ``QUOTA_EXIT`` when the database plus sidecars
-reaches the configured size or the mapping session reaches its duration. The
-launch file translates that exit into switching RTAB-Map to localization, so
-the map stops growing while the robot keeps running on it.
+This standalone utility reports ``QUOTA_EXIT`` when a limit is reached. Normal
+bringup uses robot_explorer's persistent ROS monitor, which also sees mode
+changes after localization startup and switches RTAB-Map to localization.
 """
 
 from __future__ import annotations
@@ -15,24 +14,11 @@ import signal
 import time
 from pathlib import Path
 
+from lekiwi_rmf.exploration import database_size
+
 
 QUOTA_EXIT = 75
-SIDECARS = ("-wal", "-shm", "-journal")
 _stop = False
-
-
-def database_size(database: Path) -> int:
-    total = 0
-    for candidate in (database, *(Path(f"{database}{suffix}") for suffix in SIDECARS)):
-        try:
-            if candidate.is_file():
-                total += candidate.stat().st_size
-        except OSError:
-            # SQLite sidecars can be created/deleted between is_file() and
-            # stat() while RTAB-Map checkpoints.  Re-sample next poll rather
-            # than turning a transient race into an unsafe launcher failure.
-            continue
-    return total
 
 
 def _request_stop(_signum, _frame) -> None:

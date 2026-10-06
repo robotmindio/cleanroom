@@ -1,0 +1,11 @@
+<!-- Exploration plans through known space; normal navigation stays unchanged. -->
+<root BTCPP_format="4" main_tree_to_execute="Explore">
+  <BehaviorTree ID="Explore">
+    <PipelineSequence>
+      <RateController hz="1.0">
+        <ComputePathToPose goal="{goal}" path="{path}" planner_id="ExploreKnown"/>
+      </RateController>
+      <FollowPath path="{path}" controller_id="FollowPath"/>
+    </PipelineSequence>
+  </BehaviorTree>
+</root>

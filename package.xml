@@ -8,6 +8,9 @@
 
   <buildtool_depend>ament_cmake</buildtool_depend>
   <buildtool_depend>ament_cmake_python</buildtool_depend>
+  <buildtool_depend>rosidl_default_generators</buildtool_depend>
+  <exec_depend>rosidl_default_runtime</exec_depend>
+  <member_of_group>rosidl_interface_packages</member_of_group>
   <!-- Gazebo Sim 8's exported CMake package is named gz-sim8, while the
        ROS/Jazzy rosdep key is the vendor package below. -->
   <build_depend>gz_sim_vendor</build_depend>
@@ -16,7 +19,7 @@
   <depend>moveit_ros_visualization</depend>
   <depend>rviz_common</depend>
 
-  <exec_depend>geometry_msgs</exec_depend>
+  <depend>geometry_msgs</depend>
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>builtin_interfaces</exec_depend>
   <exec_depend>camera_calibration</exec_depend>

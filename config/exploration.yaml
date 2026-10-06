@@ -1,0 +1,16 @@
+robot_explorer:
+  ros__parameters:
+    # Idle until an explicit /robot/explore goal arrives.
+    max_duration_sec: 900.0
+    max_radius_m: 5.0
+    # Folded footprint corner radius (0.326 m) plus accepted 0.05 m stop bound.
+    clearance_m: 0.38
+    observation_distance_m: 0.8
+    target_spacing_m: 0.5
+    revisit_spacing_m: 1.0
+    free_threshold: 20
+    max_map_cells: 250000
+    data_timeout_sec: 1.0
+    service_timeout_sec: 3.0
+    navigation_timeout_sec: 180.0
+    settle_sec: 1.0

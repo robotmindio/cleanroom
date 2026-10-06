@@ -132,7 +132,7 @@ def test_map_gate_requests_the_saved_rtabmap_grid_once():
 
 def test_rtabmap_restarts_after_a_runtime_exit():
     source = (ROOT / "launch" / "bringup.launch.py").read_text()
-    node = source.split("rtabmap_node = Node(", 1)[1].split("mapping_guard = ExecuteProcess(", 1)[0]
+    node = source.split("rtabmap_node = Node(", 1)[1].split("robot_explorer = Node(", 1)[0]
     assert "respawn=True, respawn_delay=2.0" in node
 
 

@@ -6,10 +6,9 @@ from ament_index_python.packages import get_package_share_directory
 from lekiwi_rmf.motion_guards import load_base_speed_limits
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, EmitEvent, ExecuteProcess, IncludeLaunchDescription, LogInfo, OpaqueFunction, RegisterEventHandler, SetEnvironmentVariable, SetLaunchConfiguration
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, IncludeLaunchDescription, LogInfo, OpaqueFunction, RegisterEventHandler, SetEnvironmentVariable, SetLaunchConfiguration
 from launch.conditions import IfCondition
 from launch.event_handlers import OnProcessExit
-from launch.events import Shutdown
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import Command, EnvironmentVariable, IfElseSubstitution, LaunchConfiguration, PathJoinSubstitution, PythonExpression
 from launch_ros.actions import Node
@@ -86,18 +85,6 @@ def _after_success(stage, actions):
         return [LogInfo(msg=f"ERROR: {stage} readiness gate exited with {event.returncode}; dependents remain stopped")]
 
     return on_exit
-
-
-def _mapping_guard_exit(event, context):
-    """Freeze map growth at its quota while keeping the robot and map available."""
-    if context.is_shutdown or event.returncode in (0, 130, -2, -15):
-        return []
-    if event.returncode == 75:
-        return [ExecuteProcess(
-            cmd=["ros2", "service", "call", "/rtabmap/set_mode_localization", "std_srvs/srv/Empty"],
-            output="screen",
-        )]
-    return [EmitEvent(event=Shutdown(reason=f"RTAB-Map mapping guard failed ({event.returncode})"))]
 
 
 def _mapping_relocalization_gate(context):
@@ -345,14 +332,20 @@ def generate_launch_description():
         condition=IfCondition(visual_slam), output="screen",
         respawn=True, respawn_delay=2.0,
     )
-    mapping_guard = ExecuteProcess(
-        cmd=[
-            PathJoinSubstitution([FindPackagePrefix("lekiwi_rmf"), "lib", "lekiwi_rmf", "rtabmap-session-guard.py"]),
-            rtabmap_database,
-            "--maximum-bytes", LaunchConfiguration("rtabmap_mapping_max_bytes"),
-            "--maximum-seconds", LaunchConfiguration("rtabmap_mapping_max_seconds"),
-        ],
-        condition=IfCondition(PythonExpression([visual_slam, " and ", slam_mapping])),
+    robot_explorer = Node(
+        package="lekiwi_rmf", executable="robot_explorer", name="robot_explorer",
+        parameters=[PathJoinSubstitution([package, "config", "exploration.yaml"]), {
+            "use_sim_time": ParameterValue(sim, value_type=bool),
+            "database_path": rtabmap_database,
+            "mapping_max_bytes": ParameterValue(LaunchConfiguration("rtabmap_mapping_max_bytes"), value_type=int),
+            "mapping_max_seconds": ParameterValue(LaunchConfiguration("rtabmap_mapping_max_seconds"), value_type=float),
+            "allow_exploration": ParameterValue(IfElseSubstitution(
+                static_map, if_value="false", else_value=IfElseSubstitution(
+                    start_rmf, if_value="false", else_value="true")), value_type=bool),
+        }],
+        # Keep watching mapping transitions even when startup selected localization.
+        condition=IfCondition(visual_slam),
+        additional_env={"OPENBLAS_NUM_THREADS": "1", "OMP_NUM_THREADS": "1"},
         output="screen",
     )
     navigation_launch = IncludeLaunchDescription(
@@ -983,11 +976,7 @@ def generate_launch_description():
             )),
             RegisterEventHandler(OnProcessExit(
                 target_action=slam_sensor_gate,
-                on_exit=_after_success("SLAM sensor", [rtabmap_node, mapping_guard]),
-            )),
-            RegisterEventHandler(OnProcessExit(
-                target_action=mapping_guard,
-                on_exit=_mapping_guard_exit,
+                on_exit=_after_success("SLAM sensor", [rtabmap_node, robot_explorer]),
             )),
             odom_ready_gate,
             RegisterEventHandler(OnProcessExit(

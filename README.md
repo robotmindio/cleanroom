@@ -342,14 +342,17 @@ scripts/workstation-up.sh localization:=amcl slam_mode:=localization \
   start_rmf:=true map_bundle:=/absolute/path/to/maps/bundles/site-v1.yaml
 ```
 
-Mapping is a separate, bounded activity. The session guard includes the
-database and SQLite sidecars (`-wal`, `-shm`, and `-journal`) and exits with a
-quota status when `rtabmap_mapping_max_bytes` or
-`rtabmap_mapping_max_seconds` is reached. The launch then shuts down RTAB-Map
-so the closed database can be archived safely. Do not rename an active SQLite
-database. The repository-managed default database is rotated at startup;
-explicit map databases are retained for export and must be managed by the
-map-bundle workflow.
+Mapping is bounded by an always-running ROS monitor, including transitions
+from localization after startup. It counts the database and SQLite sidecars
+(`-wal`, `-shm`, and `-journal`) and switches RTAB-Map to localization at
+`rtabmap_mapping_max_bytes` or `rtabmap_mapping_max_seconds`, preserving the
+map and normal robot operation. The active database is retained at startup;
+do not rename or copy a live SQLite database as an archival procedure.
+
+An explicit `/robot/explore` action enables bounded frontier exploration and
+optional revisits of known space through Nav2, with feedback and cancellation.
+See [ROS and MCP exploration](docs/exploration.md) for requests, limits and
+the mapping lifecycle. The server remains idle until a goal arrives.
 
 ## Troubleshooting
 
