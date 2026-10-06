@@ -1,0 +1,223 @@
+{
+ "arm_calibration_file": {
+  "choices": null,
+  "default": "$(env HOME)/.ros/lekiwi_arm_calibration.json"
+ },
+ "auto_arm_on_startup": {
+  "choices": [
+   "true",
+   "false"
+  ],
+  "default": "false"
+ },
+ "base_test_angular_limit": {
+  "choices": null,
+  "default": "0.06"
+ },
+ "base_test_linear_limit": {
+  "choices": null,
+  "default": "0.03"
+ },
+ "bounded_base_test": {
+  "choices": [
+   "true",
+   "false"
+  ],
+  "default": "false"
+ },
+ "camera_device": {
+  "choices": null,
+  "default": "/dev/video0"
+ },
+ "camera_height": {
+  "choices": null,
+  "default": "0.093"
+ },
+ "camera_info_url": {
+  "choices": null,
+  "default": "file://$(env HOME)/.ros/camera_info/lekiwi_front.yaml"
+ },
+ "camera_namespace": {
+  "choices": null,
+  "default": "/pi/camera"
+ },
+ "camera_pitch": {
+  "choices": null,
+  "default": "0.031"
+ },
+ "curve_client_secret_key_file": {
+  "choices": null,
+  "default": ""
+ },
+ "curve_server_public_key_file": {
+  "choices": null,
+  "default": ""
+ },
+ "disarm_on_failure": {
+  "choices": [
+   "true",
+   "false"
+  ],
+  "default": "false"
+ },
+ "foxglove_address": {
+  "choices": null,
+  "default": "127.0.0.1"
+ },
+ "foxglove_port": {
+  "choices": null,
+  "default": "8765"
+ },
+ "front_device": {
+  "choices": null,
+  "default": "/dev/video0"
+ },
+ "hardware_config": {
+  "choices": null,
+  "default": "$(share lekiwi_rmf)/config/hardware.yaml"
+ },
+ "headless": {
+  "choices": [
+   "true",
+   "false"
+  ],
+  "default": "true"
+ },
+ "jpeg_quality": {
+  "choices": null,
+  "default": "50"
+ },
+ "laser_source": {
+  "choices": [
+   "auto",
+   "camera",
+   "ld06",
+   "none"
+  ],
+  "default": "auto"
+ },
+ "lidar_port": {
+  "choices": null,
+  "default": "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0"
+ },
+ "localization": {
+  "choices": [
+   "amcl",
+   "visual_slam"
+  ],
+  "default": "visual_slam"
+ },
+ "map_bundle": {
+  "choices": null,
+  "default": "$(share lekiwi_rmf)/maps/bundles/cleanroom-development.yaml"
+ },
+ "profile": {
+  "choices": [
+   "sim",
+   "wired",
+   "split"
+  ],
+  "default": "sim"
+ },
+ "publish_astra": {
+  "choices": [
+   "true",
+   "false"
+  ],
+  "default": "true"
+ },
+ "publish_camera": {
+  "choices": null,
+  "default": "true"
+ },
+ "remote_ip": {
+  "choices": null,
+  "default": "127.0.0.1"
+ },
+ "respawn": {
+  "choices": [
+   "true",
+   "false"
+  ],
+  "default": "true"
+ },
+ "rmf_domain": {
+  "choices": null,
+  "default": "0"
+ },
+ "rosbridge_address": {
+  "choices": null,
+  "default": "127.0.0.1"
+ },
+ "rosbridge_domain": {
+  "choices": null,
+  "default": "0"
+ },
+ "rosbridge_port": {
+  "choices": null,
+  "default": "9090"
+ },
+ "rtabmap_database": {
+  "choices": null,
+  "default": "$(env HOME)/.ros/lekiwi_rtabmap.db"
+ },
+ "rtabmap_mapping_max_bytes": {
+  "choices": null,
+  "default": "536870912"
+ },
+ "rtabmap_mapping_max_seconds": {
+  "choices": null,
+  "default": "14400"
+ },
+ "rtabmap_wm_nodes": {
+  "choices": null,
+  "default": "300"
+ },
+ "slam_mode": {
+  "choices": [
+   "mapping",
+   "localization"
+  ],
+  "default": "mapping"
+ },
+ "start_foxglove": {
+  "choices": null,
+  "default": "true"
+ },
+ "start_moveit": {
+  "choices": null,
+  "default": "false"
+ },
+ "start_rmf": {
+  "choices": null,
+  "default": "false"
+ },
+ "start_rosbridge": {
+  "choices": null,
+  "default": "false"
+ },
+ "static_map": {
+  "choices": null,
+  "default": "false"
+ },
+ "wrist_camera_device": {
+  "choices": null,
+  "default": "none"
+ },
+ "wrist_camera_info_url": {
+  "choices": null,
+  "default": "file://$(env HOME)/.ros/camera_info/lekiwi_wrist.yaml"
+ },
+ "wrist_device": {
+  "choices": null,
+  "default": "none"
+ },
+ "xy_velocity_scale": {
+  "choices": null,
+  "default": "1.0"
+ },
+ "yaw_velocity_scale": {
+  "choices": null,
+  "default": "0.976"
+ }
+}

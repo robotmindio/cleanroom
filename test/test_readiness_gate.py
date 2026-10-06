@@ -1,6 +1,7 @@
 """Keep launch dependency gates tied to concrete ROS message types."""
 
 import importlib.util
+import os
 import pathlib
 import types
 
@@ -11,6 +12,7 @@ from lifecycle_msgs.msg import State
 from nav_msgs.msg import OccupancyGrid, Odometry
 from sensor_msgs.msg import Image, JointState, LaserScan, PointCloud2
 
+from launch_snapshot import find_node, find_nodes, gate_stage, resolve_bringup
 from lekiwi_rmf.readiness_gate import ReadinessGate, TOPIC_TYPES, topic_qos
 
 
@@ -131,9 +133,8 @@ def test_map_gate_requests_the_saved_rtabmap_grid_once():
 
 
 def test_rtabmap_restarts_after_a_runtime_exit():
-    source = (ROOT / "launch" / "bringup.launch.py").read_text()
-    node = source.split("rtabmap_node = Node(", 1)[1].split("robot_explorer = Node(", 1)[0]
-    assert "respawn=True, respawn_delay=2.0" in node
+    mapper = find_node(resolve_bringup(profile="sim"), name="rtabmap")
+    assert (mapper["respawn"], mapper["respawn_delay"]) == (True, 2.0)
 
 
 def test_map_gate_retries_when_the_publish_service_call_fails():
@@ -199,11 +200,12 @@ def test_failed_gate_does_not_start_its_dependents():
 
 
 def test_safety_supervisor_is_not_blocked_by_map_relocalization():
-    source = (ROOT / "launch" / "bringup.launch.py").read_text()
-    joint_gate = source[source.index("target_action=joint_state_ready_gate"):]
-    map_gate = source[source.index("target_action=map_ready_gate"):]
-    assert "safety_supervisor_node" in joint_gate.split("RegisterEventHandler", 1)[0]
-    assert "safety_supervisor_node" not in map_gate.split("RegisterEventHandler", 1)[0]
+    for profile in ("sim", "wired", "split"):
+        records = resolve_bringup(profile=profile)
+        joint_stage = gate_stage(records, "wait_for_stable_joint_states")["start"]
+        assert [node["name"] for node in find_nodes(joint_stage)] == ["safety_supervisor"]
+        assert not find_nodes(gate_stage(records, "wait_for_map")["start"], name="safety_supervisor")
+        assert not find_nodes(gate_stage(records, "wait_for_odom")["start"], name="safety_supervisor")
 
 
 def test_shutdown_gate_does_not_start_dependents():
@@ -221,32 +223,46 @@ def test_shutdown_gate_does_not_start_dependents():
 
 
 def test_simulation_base_controller_consumes_only_the_guarded_velocity_topic():
-    source = (ROOT / "launch" / "bringup.launch.py").read_text()
     controller = (ROOT / "lekiwi_rmf" / "sim_omni_controller.py").read_text()
     assert '"/cmd_vel_safe"' in controller
     assert '"/cmd_vel"' not in controller
-    assert "/sim/sim_base_left_wheel/cmd_vel" in source
+    simulation = resolve_bringup(profile="sim")
+    bridges = [argument for node in find_nodes(simulation, node="ros_gz_bridge/parameter_bridge")
+               for argument in node["arguments"]]
+    assert "/sim/sim_base_left_wheel/cmd_vel@std_msgs/msg/Float64]gz.msgs.Double" in bridges
     # Real LD06 and simulated Gazebo scans both pass through body masking.
-    assert source.count('executable="scan_self_filter"') == 2
-    assert "'/pi/lidar/scan' if " in source
-    assert '"topic_name": "/lidar/scan_raw"' in source
-    assert '"topic_name": "/scan"' not in source
+    for arguments, scan in (({"profile": "sim"}, "/sim/scan_raw"),
+                            ({"profile": "wired", "laser_source": "ld06"}, "/lidar/scan_raw"),
+                            ({"profile": "split"}, "/pi/lidar/scan")):
+        records = resolve_bringup(**arguments)
+        assert find_node(records, name="scan_self_filter")["parameters"]["input_topic"] == scan
+        assert not any(remap[1] == "/scan" for node in find_nodes(records) for remap in node["remappings"]
+                       if node["name"] != "free_space")
+    lidar = find_node(resolve_bringup(profile="wired", laser_source="ld06"), name="ld06_lidar")
+    assert lidar["parameters"]["topic_name"] == "/lidar/scan_raw"
 
 
 def test_simulation_uses_a_database_separate_from_the_real_robot():
-    source = (ROOT / "launch" / "bringup.launch.py").read_text()
-    assert "lekiwi_rtabmap_sim.db" in source
+    for profile, database in (("sim", "lekiwi_rtabmap_sim.db"), ("wired", "lekiwi_rtabmap.db")):
+        records = resolve_bringup(profile=profile)
+        for name in ("rtabmap", "robot_explorer"):
+            assert find_node(records, name=name)["parameters"]["database_path"] == (
+                f"$(env HOME)/.ros/{database}")
 
 
 def test_moveit_receives_a_lowercase_sim_argument():
-    source = (ROOT / "launch" / "bringup.launch.py").read_text()
-    assert "\"'true' if '\", mode, \"' == 'sim' else 'false'\"" in source
+    for profile, sim in (("sim", "true"), ("wired", "false")):
+        stage = gate_stage(resolve_bringup(profile=profile, start_moveit="true"), "wait_for_arm_controller")
+        (moveit,) = stage["start"]
+        assert moveit["include"] == "$(share lekiwi_rmf)/launch/moveit.launch.py"
+        assert moveit["arguments"]["sim"] == sim
 
 
 def test_simulation_exports_a_resource_path_for_vendored_cad_meshes():
-    source = (ROOT / "launch" / "bringup.launch.py").read_text()
-    assert "SetEnvironmentVariable" in source
-    assert "GZ_SIM_RESOURCE_PATH" in source
+    spawner = find_node(resolve_bringup(profile="sim"), node="ros_gz_sim/create")
+    assert spawner["env"]["GZ_SIM_RESOURCE_PATH"].split(os.pathsep)[-1] == "$(share lekiwi_rmf)/.."
+    assert spawner["env"]["GZ_SIM_SYSTEM_PLUGIN_PATH"].split(os.pathsep)[-1] == (
+        "$(prefix lekiwi_rmf)/lib/lekiwi_rmf")
 
 
 def test_simulation_selects_ogre2_without_an_unsupported_host_override():
@@ -297,10 +313,9 @@ def test_interrupted_readiness_gate_is_not_a_successful_dependency():
 
 
 def test_real_driver_restart_is_rate_limited():
-    source = (ROOT / "launch" / "bringup.launch.py").read_text()
-    start = source.index('executable="lekiwi_driver"')
-    driver = source[start:source.index("arm_ready_gate", start)]
-    assert "respawn_delay=60.0" in driver
+    for profile in ("wired", "split"):
+        driver = find_node(resolve_bringup(profile=profile), node="lekiwi_rmf/lekiwi_driver")
+        assert (driver["respawn"], driver["respawn_delay"]) == (True, 60.0)
 
 
 def test_readiness_gate_exits_nonzero_when_ros_shuts_down_before_ready(monkeypatch):

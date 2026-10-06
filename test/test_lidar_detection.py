@@ -1,47 +1,39 @@
 """Keep the LD06 auto-selection tied to the actual stable CP2102 port."""
 
-import ast
 import math
 import pathlib
-import types
 import xml.etree.ElementTree as ET
 
+from launch_snapshot import find_node, find_nodes, resolve_bringup
 
-_SOURCE = (pathlib.Path(__file__).parents[1] / "launch" / "bringup.launch.py").read_text()
 _URDF_SOURCE = (pathlib.Path(__file__).parents[1] / "urdf" / "lekiwi.urdf.xacro").read_text()
 _CAD = ET.parse(pathlib.Path(__file__).parents[1] / "urdf" / "lekiwi_cad.urdf").getroot()
-_TREE = ast.parse(_SOURCE)
-_NAMES = {"LD06_SERIAL_PORTS", "_lidar_serial_present", "_lidar_default_port"}
-_NODES = [
-    node
-    for node in _TREE.body
-    if (isinstance(node, ast.Assign) and any(getattr(target, "id", None) in _NAMES for target in node.targets))
-    or getattr(node, "name", None) in _NAMES
-]
-lidar = types.ModuleType("lidar_detection_under_test")
-exec(compile(ast.Module(body=_NODES, type_ignores=[]), "bringup.launch.py", "exec"), lidar.__dict__)
+ACTUAL = "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0"
+LEGACY = "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if0-port0"
 
 
-def test_actual_cp2102_interface_name_is_detected_and_selected(monkeypatch):
-    actual = "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0"
-    lidar.os = types.SimpleNamespace(path=types.SimpleNamespace(exists=lambda path: path == actual))
-
-    assert lidar._lidar_serial_present()
-    assert lidar._lidar_default_port() == actual
+def test_actual_cp2102_interface_name_is_detected_and_selected():
+    records = resolve_bringup(profile="wired", serial_devices=[ACTUAL])
+    assert find_node(records, name="ld06_lidar")["parameters"]["port_name"] == ACTUAL
+    assert not find_nodes(records, name="free_space")
 
 
 def test_auto_detection_keeps_the_legacy_interface_name_compatible():
-    legacy = "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if0-port0"
-    lidar.os = types.SimpleNamespace(path=types.SimpleNamespace(exists=lambda path: path == legacy))
+    records = resolve_bringup(profile="wired", serial_devices=[LEGACY])
+    assert find_node(records, name="ld06_lidar")["parameters"]["port_name"] == LEGACY
 
-    assert lidar._lidar_serial_present()
-    assert lidar._lidar_default_port() == legacy
+
+def test_auto_detection_without_an_ld06_uses_the_camera_laser():
+    records = resolve_bringup(profile="wired")
+    assert not find_nodes(records, name="ld06_lidar")
+    assert ["scan", "/scan"] in find_node(records, name="free_space")["remappings"]
 
 
 def test_scan_filter_subscribes_before_the_pi_publisher_appears():
     # A typed subscription needs no publisher yet, unlike a type-inferring relay.
-    assert 'executable="scan_self_filter"' in _SOURCE
-    assert "'/pi/lidar/scan' if " in _SOURCE
+    records = resolve_bringup(profile="split")
+    assert find_node(records, name="scan_self_filter")["parameters"]["input_topic"] == "/pi/lidar/scan"
+    assert not find_nodes(records, name="ld06_lidar")
 
 
 def test_laser_frame_has_a_measured_correction_after_the_nominal_cad_pose():

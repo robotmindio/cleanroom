@@ -8,6 +8,8 @@ import xml.etree.ElementTree as ET
 import pytest
 import yaml
 
+from launch_snapshot import find_node, resolve_bringup
+
 
 ROOT = Path(__file__).parents[1]
 
@@ -27,28 +29,42 @@ def test_astra_pro_publishes_registered_rgbd_in_the_robot_camera_frame():
 
 
 def test_real_bringup_maps_both_calibrated_views_with_measured_depth():
-    source = (ROOT / "launch" / "bringup.launch.py").read_text()
+    records = resolve_bringup(profile="wired")
+    astra = find_node(records, node="astra_camera/astra_camera_node")
+    assert ["/color/image_raw", "/camera/astra/color/image_raw"] in astra["remappings"]
+    assert ["/depth/image_raw", "/camera/astra/depth/image_raw"] in astra["remappings"]
+    front = next(process["process"] for process in records
+                 if "process" in process and "front_camera" in process["process"])
+    assert front[front.index("--namespace") + 1] == "/camera/front"
 
-    astra_source = (ROOT / "launch/pi_astra.launch.py").read_text()
-    assert 'package="astra_camera", executable="astra_camera_node"' in astra_source
-    assert '("/color/image_raw", "/camera/astra/color/image_raw")' in astra_source
-    assert '("/depth/image_raw", "/camera/astra/depth/image_raw")' in astra_source
-    assert '"camera_namespace": "/camera"' in source
-    assert 'slam_rgb_topic = "/camera/front/image_raw"' in source
-    assert '"subscribe_rgbd": ParameterValue(dual_rgbd' in source
-    assert '("rgbd_image0", "/slam/astra/rgbd_image")' in source
-    assert '("rgbd_image1", "/slam/front/rgbd_image")' in source
-    assert 'executable="rgbdx_sync"' in source
-    assert '["0 if ", dual_rgbd, " else 1"]' in source
-    assert '("rgbd_images", "/slam/rgbd_images")' in source
-    assert '"Vis/EstimationType": ParameterValue' in source
-    assert '"\'0\' if ", dual_rgbd, " else \'1\'"' in source
-    assert '("cloud", "/slam/cloud")' in source
-    assert '("astra", "astra/color", 2, 2, "/camera/astra/depth/image_raw")' in source
+    mapper = find_node(records, name="rtabmap")
+    remappings = dict(map(tuple, mapper["remappings"]))
+    assert remappings["rgb/image"] == "/camera/front/image_raw"
+    assert remappings["rgbd_images"] == "/slam/rgbd_images"
+    parameters = mapper["parameters"]
+    assert (parameters["subscribe_rgbd"], parameters["rgbd_cameras"], parameters["Vis/EstimationType"]) == (
+        True, 0, "0")
+    assert "qos_depth" not in parameters
     assert yaml.safe_load((ROOT / "config/rtabmap.yaml").read_text())["rtabmap"]["ros__parameters"]["qos_image"] == 1
-    assert '"qos_depth"' not in source
+    views = find_node(records, node="rtabmap_sync/rgbdx_sync")
+    assert views["remappings"] == [["rgbd_image0", "/slam/astra/rgbd_image"],
+                                   ["rgbd_image1", "/slam/front/rgbd_image"],
+                                   ["rgbd_images", "/slam/rgbd_images"]]
+    assert ["cloud", "/slam/cloud"] in find_node(records, name="slam_front_depth")["remappings"]
+    astra_view = find_node(records, name="slam_astra_rgbd")
+    assert ["depth/image", "/camera/astra/depth/image_raw"] in astra_view["remappings"]
+    assert ["rgb/image", "/camera/astra/color/image_raw"] in astra_view["remappings"]
+    assert (astra_view["parameters"]["decimation"], astra_view["parameters"]["qos_camera_info"]) == (2, 2)
     # Both calibration/image synchronizers retain metadata across 2 Hz frames.
-    assert source.count('"topic_queue_size": 5, "sync_queue_size": 30') == 2
+    for name in ("slam_front_depth", "slam_front_rgbd", "slam_astra_rgbd"):
+        parameters = find_node(records, name=name)["parameters"]
+        assert (parameters["topic_queue_size"], parameters["sync_queue_size"]) == (5, 30)
+
+    # Without the Astra the front camera alone feeds RTAB-Map's RGB-D inputs.
+    mapper = find_node(resolve_bringup(profile="wired", publish_astra="false"), name="rtabmap")
+    assert (mapper["parameters"]["subscribe_rgbd"], mapper["parameters"]["rgbd_cameras"],
+            mapper["parameters"]["Vis/EstimationType"]) == (False, 1, "1")
+    assert ["rgb/image", "/camera/front/image_raw"] in mapper["remappings"]
 
 
 def test_astra_identity_is_pinned_in_tracked_hardware_configuration():
@@ -78,8 +94,8 @@ def test_local_and_remote_astra_cloud_filters_share_the_bandwidth_profile():
     values = yaml.safe_load(filter_config.read_text())["astra_cloud_filter"]["ros__parameters"]
     assert values == {"pixel_stride": 8, "max_rate_hz": 10.0, "image_max_rate_hz": 2.0,
                       "jpeg_quality": 70}
-    assert "astra_cloud_filter.yaml" in (ROOT / "launch/pi_astra.launch.py").read_text()
-    assert "pi_astra.launch.py" in (ROOT / "launch/bringup.launch.py").read_text()
+    # The real local bringup starts the same device-side filter configuration.
+    assert find_node(resolve_bringup(profile="wired"), name="astra_cloud_filter")["parameters"] == values
     assert 1.0 / values["max_rate_hz"] < 0.5  # production depth freshness timeout
 
 
@@ -140,14 +156,16 @@ def test_late_rviz_receives_the_latched_robot_description():
 
 def test_sensor_calibration_has_one_xacro_source_for_all_model_consumers():
     description = (ROOT / "urdf" / "lekiwi.urdf.xacro").read_text()
-    bringup = (ROOT / "launch" / "bringup.launch.py").read_text()
     rviz = (ROOT / "scripts" / "rviz.sh").read_text()
     moveit = (ROOT / "lekiwi_rmf" / "moveit_config.py").read_text()
 
     assert 'property name="astra_mount_xyz"' in description
     assert 'property name="wrist_camera_xyz"' in description
     assert 'property name="lidar_offset_xyz"' in description
-    assert "lidar_offset_x:=" not in bringup
+    for profile, sim in (("wired", "False"), ("sim", "True")):
+        publisher = find_node(resolve_bringup(profile=profile), node="robot_state_publisher/robot_state_publisher")
+        assert publisher["parameters"]["robot_description"] == (
+            f"$(command xacro $(share lekiwi_rmf)/urdf/lekiwi.urdf.xacro sim:={sim})")
     assert "moveit_config_builder(\"false\")" in rviz
     assert "apply_gripper_calibration(config" in rviz
     assert 'file_path="urdf/lekiwi.urdf.xacro"' in moveit

@@ -3,16 +3,15 @@ from __future__ import annotations
 import pytest
 
 from lekiwi_rmf.launch_validation import astra_serial_from_hardware_config, validate_launch_arguments
-from ros_test_utils import bringup_configuration, node_parameters
+from launch_snapshot import find_node, find_nodes, gate_stage, resolve_bringup, resolve_launch
 
 
 @pytest.mark.parametrize("profile,mode,source,laser", [
     ("sim", "sim", "local", "auto"), ("wired", "real", "local", "auto"),
     ("split", "real", "remote", "ld06"),
 ])
-def test_deployment_profiles_resolve_coherent_defaults(monkeypatch, profile, mode, source, laser):
-    context, _ = bringup_configuration(monkeypatch, profile=profile)
-    values = context.launch_configurations
+def test_deployment_profiles_resolve_coherent_defaults(profile, mode, source, laser):
+    _, values = resolve_launch(profile=profile)
     assert (values["mode"], values["camera_source"], values["lidar_source"], values["laser_source"]) == (
         mode, source, source, laser,
     )
@@ -22,14 +21,14 @@ def test_deployment_profiles_resolve_coherent_defaults(monkeypatch, profile, mod
     validate_launch_arguments(values)
 
 
-def test_profiles_preserve_installed_explicit_topology_arguments(monkeypatch):
-    context, _ = bringup_configuration(
-        monkeypatch, profile="wired", mode="real", camera_source="remote",
+def test_profiles_preserve_installed_explicit_topology_arguments():
+    _, values = resolve_launch(
+        profile="wired", mode="real", camera_source="remote",
         lidar_source="remote", laser_source="ld06",
     )
-    assert context.launch_configurations["camera_source"] == "remote"
-    assert context.launch_configurations["lidar_source"] == "remote"
-    validate_launch_arguments(context.launch_configurations)
+    assert values["camera_source"] == "remote"
+    assert values["lidar_source"] == "remote"
+    validate_launch_arguments(values)
 
 
 @pytest.mark.parametrize("profile,publish_astra,strategy,visual,rgb,depth,rgbd,cameras", [
@@ -38,11 +37,10 @@ def test_profiles_preserve_installed_explicit_topology_arguments(monkeypatch):
     ("sim", "true", "2", "1", True, True, False, 1),
 ])
 def test_mapper_yaml_and_dynamic_view_parameters_preserve_behavior(
-    monkeypatch, profile, publish_astra, strategy, visual, rgb, depth, rgbd, cameras,
+    profile, publish_astra, strategy, visual, rgb, depth, rgbd, cameras,
 ):
-    context, specs = bringup_configuration(monkeypatch, profile=profile, publish_astra=publish_astra)
-    mapper = next(spec for spec in specs if spec.get("name") == "rtabmap")
-    parameters = node_parameters(context, mapper)
+    parameters = find_node(resolve_bringup(profile=profile, publish_astra=publish_astra),
+                           name="rtabmap")["parameters"]
     assert parameters["Reg/Strategy"] == strategy
     assert parameters["Vis/EstimationType"] == visual
     assert (parameters["subscribe_rgb"], parameters["subscribe_depth"], parameters["subscribe_rgbd"],
@@ -60,102 +58,64 @@ def test_mapper_yaml_and_dynamic_view_parameters_preserve_behavior(
 
 
 @pytest.mark.parametrize("profile,local", [("wired", True), ("split", False), ("sim", False)])
-def test_shared_camera_launches_preserve_local_configuration(monkeypatch, profile, local):
-    from launch.actions import DeclareLaunchArgument, ExecuteProcess
-    from launch.utilities import normalize_to_list_of_substitutions, perform_substitutions
-    import runpy
-    from pathlib import Path
-
-    context, specs = bringup_configuration(monkeypatch, profile=profile, wrist_camera_device="/dev/wrist")
-    # Loading a description resolves includes; no process or node is executed.
-    includes = {}
-    for spec in specs:
-        action = spec.get("include")
-        if action is None:
-            continue
-        source = action.launch_description_source
-        source.get_launch_description(context)
-        includes[Path(source.location).name] = action
-    for filename in ("pi_cameras.launch.py", "pi_astra.launch.py"):
-        action = includes[filename]
-        assert action.condition.evaluate(context) is local
-        if not local:
-            continue
-        for key, value in action.launch_arguments:
-            context.launch_configurations[key] = perform_substitutions(context, normalize_to_list_of_substitutions(value))
-        module = runpy.run_path(str(Path(__file__).parents[1] / "launch" / filename))
-        generate = module["generate_launch_description"]
-        description = generate()
-        for argument in description.entities:
-            if isinstance(argument, DeclareLaunchArgument):
-                argument.execute(context)
-        if filename == "pi_cameras.launch.py":
-            commands = [perform_substitutions(context, part) for process in description.entities
-                        if isinstance(process, ExecuteProcess) for part in process.cmd]
-            assert "/camera/front" in commands and "/camera/wrist" in commands
-            assert "[320, 240]" in commands and "[352, 288]" in commands
-            assert commands[commands.index("--jpeg-quality") + 1] == ""
-        else:
-            nodes = []
-            monkeypatch.setitem(module["_astra_nodes"].__globals__, "Node", lambda **kwargs: nodes.append(kwargs))
-            module["_astra_nodes"](context)
-            assert len(nodes) == 2
-            assert all(node["respawn"].perform(context) == "false" for node in nodes)
-            assert nodes[0]["parameters"][1]["serial_number"]
+def test_shared_camera_launches_preserve_local_configuration(profile, local):
+    records = resolve_bringup(profile=profile, wrist_camera_device="/dev/wrist")
+    commands = [part for record in records if "process" in record for part in record["process"]]
+    astra = find_nodes(records, node="astra_camera/astra_camera_node") + find_nodes(
+        records, name="astra_cloud_filter")
+    if not local:
+        assert "--camera-name" not in commands and not astra
+        return
+    assert "/camera/front" in commands and "/camera/wrist" in commands
+    assert "[320, 240]" in commands and "[352, 288]" in commands
+    assert commands[commands.index("--jpeg-quality") + 1] == ""
+    assert len(astra) == 2
+    assert all(node["respawn"] is False for node in astra)
+    assert astra[0]["parameters"]["serial_number"]
 
 
-def test_camera_scan_uses_tracked_offsets_and_signed_saved_geometry(monkeypatch):
-    context, specs = bringup_configuration(monkeypatch, camera_height="0.2", camera_pitch="-0.031")
-    camera = next(spec for spec in specs if spec.get("name") == "free_space")
-    assert node_parameters(context, camera) == {
+def test_camera_scan_uses_tracked_offsets_and_signed_saved_geometry():
+    camera = find_node(resolve_bringup(profile="wired", camera_height="0.2", camera_pitch="-0.031"),
+                       name="free_space")
+    assert camera["parameters"] == {
         "camera_height": 0.2, "camera_pitch": -0.031, "camera_offset_x": 0.03,
         "camera_offset_y": 0.0, "camera_yaw": 0.0, "camera_roll": 0.0,
     }
 
 
-def test_bounded_launch_defaults_follow_current_production_speed_limits(monkeypatch):
-    import runpy
+def test_bounded_launch_defaults_follow_current_production_speed_limits():
     from pathlib import Path
-    from launch import LaunchContext
-    from launch.actions import DeclareLaunchArgument
-    from launch.utilities import perform_substitutions
     from lekiwi_rmf.motion_guards import load_base_speed_limits
-    root=Path(__file__).parents[1]
-    generate=runpy.run_path(str(root/'launch/bringup.launch.py'))['generate_launch_description']
-    monkeypatch.setitem(generate.__globals__,'get_package_share_directory',lambda name:str(root))
-    description=generate()
-    arguments={a.name:a.default_value for a in description.entities if isinstance(a,DeclareLaunchArgument)}
-    limits=tuple(float(perform_substitutions(LaunchContext(),arguments[name])) for name in
-                 ('base_test_linear_limit','base_test_angular_limit'))
-    assert limits==load_base_speed_limits(root/'config/nav2_params.yaml')
+
+    root = Path(__file__).parents[1]
+    driver = find_node(resolve_bringup(profile="wired", bounded_base_test="true"),
+                       node="lekiwi_rmf/lekiwi_driver")["parameters"]
+    assert (driver["base_test_linear_limit"], driver["base_test_angular_limit"]) == (
+        load_base_speed_limits(root / "config/nav2_params.yaml"))
 
 
 def test_nav2_bounded_profile_matches_the_driver_and_preserves_production():
-    import runpy
-    from pathlib import Path
-    import yaml
-    from launch import LaunchContext
-    from launch.substitutions import LaunchConfiguration
+    def navigation_parameters(bounded):
+        stage = gate_stage(resolve_bringup(profile="wired", bounded_base_test=bounded), "wait_for_map")
+        (navigation,) = [item for item in stage["start"] if "include" in item]
+        supervisor = find_node(resolve_bringup(profile="wired", bounded_base_test=bounded),
+                               name="safety_supervisor")["parameters"]
+        # The supervisor validates its stop zone against the exact file Nav2 runs.
+        assert supervisor["nav2_params_file"] == navigation["arguments"]["params_file"]
+        return navigation["arguments"]["params_file"]
 
-    root = Path(__file__).parents[1]
-    profile = runpy.run_path(str(root / 'launch/bringup.launch.py'))['_navigation_params']
-    source = root / 'config/nav2_params.yaml'
-    context = LaunchContext()
-    context.launch_configurations['bounded_base_test'] = 'false'
-    substitution = profile(str(source), LaunchConfiguration('bounded_base_test'))
-    assert substitution.perform(context) == str(source)
-    context.launch_configurations['bounded_base_test'] = 'true'
-    rewritten = Path(substitution.perform(context))
-    assert rewritten != source
-    try:
-        parameters = yaml.safe_load(rewritten.read_text())['controller_server']['ros__parameters']
-        controller = parameters['FollowPath']
-        assert (controller['vx_max'], controller['vx_min'], controller['vy_max'], controller['wz_max']) == (0.03, -0.03, 0.03, 0.20)
-        assert (controller['vx_std'], controller['vy_std'], controller['wz_std']) == (0.012, 0.012, 0.04)
-        assert parameters['progress_checker']['required_movement_radius'] == 0.02
-        assert parameters['goal_checker']['xy_goal_tolerance'] == 0.03
-    finally:
-        rewritten.unlink()
+    assert navigation_parameters("false") == "$(share lekiwi_rmf)/config/nav2_params.yaml"
+    parameters = navigation_parameters("true")["generated_yaml"]["controller_server"]["ros__parameters"]
+    controller = parameters['FollowPath']
+    from pathlib import Path
+    from lekiwi_rmf.motion_guards import load_base_speed_limits
+
+    linear, angular = load_base_speed_limits(Path(__file__).parents[1] / "config/nav2_params.yaml")
+    assert (controller['vx_max'], controller['vx_min'], controller['vy_max'], controller['wz_max']) == (
+        linear, -linear, linear, angular)
+    assert (controller['vx_std'], controller['vy_std'], controller['wz_std']) == (0.012, 0.012, 0.04)
+    assert parameters['progress_checker']['required_movement_radius'] == 0.02
+    assert parameters['goal_checker']['xy_goal_tolerance'] == 0.03
 
 
 def valid_arguments(**overrides):
