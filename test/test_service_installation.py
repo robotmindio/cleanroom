@@ -249,16 +249,61 @@ def test_full_installer_includes_qualification_tooling_dependencies():
     assert universe_line < shellcheck_line
 
 
-def test_installer_reapplies_the_pinned_free_fleet_patch_on_rerun():
-    installer = (ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
-    patch = ROOT / "thirdparty" / "free_fleet" / "0001-retry-nav2-goal-during-activation.patch"
+@pytest.mark.skipif(shutil.which("git") is None, reason="git is required")
+def test_checkout_with_patches_applies_every_tracked_patch_and_reruns(tmp_path):
+    script = r'''
+set -Eeuo pipefail
+die() { printf '%s\n' "$*" >&2; exit 1; }
+source "$1/scripts/thirdparty-common.sh"
+THIRDPARTY_PATCH_ROOT=$2/thirdparty
+git() { command git -c user.name=test -c user.email=test@example.invalid "$@"; }
+cd "$2"
+git init -q upstream
+printf 'one\n' > upstream/a.txt
+printf 'one\n' > upstream/b.txt
+git -C upstream add .
+git -C upstream commit -qm base
+revision=$(git -C upstream rev-parse HEAD)
+mkdir -p thirdparty/dep thirdparty/plain
+printf 'two\n' > upstream/a.txt
+git -C upstream diff > thirdparty/dep/0001-first.patch
+git -C upstream checkout -q a.txt
+printf 'three\n' > upstream/b.txt
+git -C upstream diff > thirdparty/dep/0002-second.patch
+git -C upstream checkout -q b.txt
 
-    assert patch.is_file()
-    assert 'apply_pinned_patch "$free_fleet_source" "$free_fleet_patch"' in installer
-    assert '"$free_fleet_source" "$FREE_FLEET_REV" "$free_fleet_patch"' in installer
-    # One implementation of the pinned checkout, shared with install-pi.sh.
-    assert "checkout_pinned() {" not in installer
-    assert "reset --hard" not in installer
+checkout_with_patches dep "$PWD/upstream" "$PWD/dest" "$revision" >/dev/null 2>&1
+[[ $(cat dest/a.txt) == two && $(cat dest/b.txt) == three ]]
+checkout_with_patches dep "$PWD/upstream" "$PWD/dest" "$revision" >/dev/null 2>&1
+[[ $(cat dest/a.txt) == two && $(cat dest/b.txt) == three ]]
+apply_thirdparty_patches dep dest
+[[ $(cat dest/a.txt) == two && $(cat dest/b.txt) == three ]]
+# A dependency without tracked patches is a plain pinned checkout.
+checkout_with_patches plain "$PWD/upstream" "$PWD/clean" "$revision" >/dev/null 2>&1
+[[ $(cat clean/a.txt) == one && -z $(git -C clean status --porcelain) ]]
+# A conflicting edit names the patch that could not be applied.
+printf 'mine\n' > clean/a.txt
+if message=$(apply_thirdparty_patches dep clean 2>&1); then exit 1; fi
+[[ $message == *"dep/0001-first.patch"* ]]
+'''
+    subprocess.run(["bash", "-c", script, "patched-checkout", str(ROOT), str(tmp_path)], check=True)
+
+
+def test_installers_and_builders_apply_every_tracked_third_party_patch_set():
+    scripts = {name: (ROOT / "scripts" / name).read_text(encoding="utf-8")
+               for name in ("install.sh", "install-pi.sh", "build-lekiwi.sh", "build-native.sh")}
+    assert "checkout_with_patches free_fleet " in scripts["install.sh"]
+    assert "checkout_with_patches ros2_astra_camera " in scripts["install.sh"]
+    for name in ("install.sh", "install-pi.sh"):
+        assert "checkout_with_patches ldlidar_stl_ros2 " in scripts[name]
+    for dependency in ("ldlidar_stl_ros2", "ros2_astra_camera"):
+        assert f"apply_thirdparty_patches {dependency} " in scripts["build-lekiwi.sh"]
+    assert 'checkout_with_patches "$dependency"' in scripts["build-native.sh"]
+    assert 'apply_thirdparty_patches "$dependency"' in scripts["build-native.sh"]
+    # Every tracked patch belongs to a dependency some script checks out.
+    native = re.search(r"for dependency in ([a-z_0-9 ]+); do", scripts["build-native.sh"]).group(1).split()
+    used = {"free_fleet", "ros2_astra_camera", "ldlidar_stl_ros2", *native}
+    assert {patch.parent.name for patch in (ROOT / "thirdparty").glob("*/*.patch")} == used
 
 
 def test_downloads_are_pinned_and_rejected_on_a_checksum_mismatch(tmp_path):
@@ -347,9 +392,7 @@ def test_simulation_installer_excludes_astra_hardware_setup():
     assert 'if [[ $install_mode == full ]]; then\n  log "Fetching the pinned Orbbec Astra Pro ROS 2 driver"' in installer
     assert 'extra_source_paths+=("$astra_source")' in installer
     assert 'extra_packages+=(astra_camera astra_camera_msgs)' in installer
-    assert "0002-finite-camera-calibration.patch" in installer
     builder = (ROOT / "scripts/build-lekiwi.sh").read_text()
-    assert '"$project_root/thirdparty/ros2_astra_camera/"*.patch' in builder
     assert 'packages+=(astra_camera_msgs astra_camera)' in builder
     assert "/MemAvailable/" in builder
     assert "/MemTotal/" not in builder
@@ -563,27 +606,13 @@ def test_sensor_services_keep_retrying_after_intermittent_usb_resets():
 
 
 def test_pi_and_manual_split_startup_include_the_ld06():
-    installer = (ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
     pi_installer = (ROOT / "scripts" / "install-pi.sh").read_text(encoding="utf-8")
     pi_up = (ROOT / "scripts" / "pi-up.sh").read_text(encoding="utf-8")
     workstation_up = (ROOT / "scripts" / "workstation-up.sh").read_text(encoding="utf-8")
     lidar = (ROOT / "scripts" / "ros-lidar.sh").read_text(encoding="utf-8")
 
     assert "Installing the pinned LD06 ROS driver" in pi_installer
-    assert "0002-latest-scan-qos.patch" in installer
-    assert "0003-initialize-ld06-baudrate.patch" in installer
-    assert "0002-latest-scan-qos.patch" in pi_installer
-    assert "0003-initialize-ld06-baudrate.patch" in pi_installer
-    assert 'apply_pinned_patch "$ldlidar_source" "$ldlidar_qos_patch"' in installer
-    assert 'apply_pinned_patch "$ldlidar_source" "$ldlidar_baud_patch"' in installer
-    assert 'apply_pinned_patch "$lidar_source" "$lidar_qos_patch"' in pi_installer
-    assert 'apply_pinned_patch "$lidar_source" "$lidar_baud_patch"' in pi_installer
     build = (ROOT / "scripts" / "build-lekiwi.sh").read_text(encoding="utf-8")
-    assert '"$project_root/thirdparty/ldlidar_stl_ros2/"*.patch' in build
-    assert 'apply_pinned_patch "$lidar_source" "$patch"' in build
-    for source in (installer, pi_installer):
-        assert "0004-acquisition-timestamps.patch" in source
-        assert '"$lidar_timing_patch"' in source or '"$ldlidar_timing_patch"' in source
     assert 'packages+=(ldlidar_stl_ros2)' in build
     assert "ldlidar_stl_ros2_node" in pi_installer
     assert "start_recorded lidar scripts/ros-lidar.sh" in pi_up

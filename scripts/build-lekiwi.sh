@@ -22,9 +22,7 @@ base_paths=("$project_root")
 packages=(lekiwi_rmf)
 lidar_source=$workspace/src/ldlidar_stl_ros2
 if [[ -d $lidar_source/.git ]]; then
-  for patch in "$project_root/thirdparty/ldlidar_stl_ros2/"*.patch; do
-    apply_pinned_patch "$lidar_source" "$patch" "the LD06 native fixes"
-  done
+  apply_thirdparty_patches ldlidar_stl_ros2 "$lidar_source"
   base_paths+=("$lidar_source")
   packages+=(ldlidar_stl_ros2)
 fi
@@ -32,9 +30,7 @@ fi
 # Rebuild the USB camera driver where it is installed, including device deploys.
 astra_source=$workspace/src/ros2_astra_camera
 if [[ -d $astra_source/.git ]]; then
-  for patch in "$project_root/thirdparty/ros2_astra_camera/"*.patch; do
-    apply_pinned_patch "$astra_source" "$patch" "the Astra native camera fixes"
-  done
+  apply_thirdparty_patches ros2_astra_camera "$astra_source"
   base_paths+=("$astra_source")
   packages+=(astra_camera_msgs astra_camera)
 fi

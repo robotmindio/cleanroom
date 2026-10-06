@@ -5,8 +5,9 @@
 # Callers provide die().
 # shellcheck disable=SC2034
 ZENOH_VERSION=1.5.0
+THIRDPARTY_PATCH_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../thirdparty" && pwd)
 # LDROBOT LD06 lidar driver, tag v3.0.3. Not released into the ROS apt repos;
-# thirdparty/ldlidar_stl_ros2/ carries a build fix applied after the clone.
+# thirdparty/ldlidar_stl_ros2/ carries the fixes applied after the clone.
 # shellcheck disable=SC2034
 LDLIDAR_STL_REV=cac5d3d4c15522c6126ef65cfa8a65b08531a66b
 # shellcheck disable=SC2034
@@ -43,6 +44,22 @@ checkout_pinned() { # checkout_pinned <url> <destination> <revision> [known-patc
   fi
   git -C "$destination" fetch --depth 1 origin "$revision"
   git -C "$destination" checkout --detach FETCH_HEAD
+}
+
+apply_thirdparty_patches() { # apply_thirdparty_patches <dependency> <destination>
+  # Applies thirdparty/<dependency>/*.patch in name order; already applied ones are kept.
+  local patch
+  for patch in "$THIRDPARTY_PATCH_ROOT/$1/"*.patch; do
+    [[ -e $patch ]] || continue
+    apply_pinned_patch "$2" "$patch" "${patch#"$THIRDPARTY_PATCH_ROOT"/}"
+  done
+}
+
+checkout_with_patches() { # checkout_with_patches <dependency> <url> <destination> <revision>
+  local -a patches=("$THIRDPARTY_PATCH_ROOT/$1/"*.patch)
+  [[ -e ${patches[0]} ]] || patches=()
+  checkout_pinned "$2" "$3" "$4" "${patches[@]}"
+  apply_thirdparty_patches "$1" "$3"
 }
 
 apply_pinned_patch() { # apply_pinned_patch <destination> <patch> <description>

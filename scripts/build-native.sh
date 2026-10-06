@@ -25,13 +25,11 @@ for dependency in class_loader rclcpp navigation2 rviz; do
     rviz) revision=feb01669f1297df2af755ce9cd2ed18083e7a8b2; repository=https://github.com/ros2/rviz.git ;;
   esac
   source_dir=$workspace/src/$dependency
-  patches=("$project_root/thirdparty/$dependency/"*.patch)
   if [[ ! -d $source_dir/.git || $(git -C "$source_dir" rev-parse HEAD) != "$revision" ]]; then
-    checkout_pinned "$repository" "$source_dir" "$revision" "${patches[@]}"
+    checkout_with_patches "$dependency" "$repository" "$source_dir" "$revision"
+  else
+    apply_thirdparty_patches "$dependency" "$source_dir"
   fi
-  for patch in "${patches[@]}"; do
-    apply_pinned_patch "$source_dir" "$patch" "$dependency native reliability fix"
-  done
 done
 
 set +u
