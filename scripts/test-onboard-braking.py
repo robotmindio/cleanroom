@@ -84,7 +84,7 @@ def register_scan(reference, points, guess, radius):
 
 
 def stopping_measurement(samples, cut, config, stationary_jitter):
-    if len(samples)<8 or samples[0]['time']>cut:
+    if len(samples)<8 or samples[0].get('capture_time',samples[0]['time'])>cut:
         raise ValueError('independent stop window needs a preceding sample and eight captures')
     gaps = np.diff([s['stamp'] for s in samples])
     if not np.all(gaps>0) or gaps.max()>config['maximum_frame_gap_s']:
@@ -109,7 +109,7 @@ def stopping_measurement(samples, cut, config, stationary_jitter):
             'conservative_swept_distance_m':distance,'uncertainty_upper_m':error,
             'maximum_capture_gap_s':float(gaps.max()),'stop_time_receive_upper_s':latency,
             'first_sample_time':samples[0]['time'],'last_sample_time':samples[-1]['time'],
-            'fault_cut_time':cut,'samples':len(samples),
+            'fault_cut_time':cut,'samples':len(samples),'baseline_time_basis':'sensor_capture_stamp',
             'within_budget':distance+config['measurement_uncertainty_m']<=config['maximum_stopping_distance_m']
               and latency<=config['maximum_stop_time_s'] and error<=config['measurement_uncertainty_m']}
 
@@ -120,6 +120,7 @@ class OnboardBraking(FAULT['FaultTest']):
         self.config = config
         self.deadline = time.monotonic()+config['maximum_runtime_s']
         self.ranges,self.range_info,self.camera_poses,self.sources = [],[],[],{}
+        self.source_stamps={}
         self.native_poses,self.scans,self.reference_points = [],[],None
         self.reference_scans=[]
         mask=yaml.safe_load((ROOT/'config/lidar_self_mask.yaml').read_text())['scan_self_filter']['ros__parameters']
@@ -184,12 +185,14 @@ class OnboardBraking(FAULT['FaultTest']):
             bins=(np.degrees(np.arctan2(cloud[:,1],cloud[:,0]))%360).astype(int)
             self.reference_points=np.array([np.median(cloud[bins==key],axis=0) for key in np.unique(bins) if (bins==key).sum()>=5])
         pose,covariance,sensitivity=register_scan(self.reference_points,points,self.ranges[-1]['pose'] if self.ranges else [0.,0.,0.],self.config['body_radius_m'])
-        self.ranges.append({'time':time.monotonic(),'stamp':stamp,'age':self.get_clock().now().nanoseconds/1e9-stamp,
+        received=time.monotonic();age=self.get_clock().now().nanoseconds/1e9-stamp
+        self.ranges.append({'time':received,'stamp':stamp,'age':age,'capture_time':received-age,
             'pose':pose,'covariance':covariance,'sector_sensitivity_m':sensitivity})
 
     def source_sample(self,topic,message):
         stamp=message.header.stamp.sec+message.header.stamp.nanosec/1e9
         self.sources[topic]=time.monotonic()-(self.get_clock().now().nanoseconds/1e9-stamp)
+        self.source_stamps[topic]=stamp
 
     def tick(self,twist=None,check=True):
         super().tick(twist,check)
@@ -205,12 +208,16 @@ class OnboardBraking(FAULT['FaultTest']):
                 self.command.publish(Twist())
                 raise RuntimeError('independent early 16 cm boundary reached')
 
-    def observe_stop(self,cut,end=None):
+    def observe_stop(self,cut,end=None,cut_stamp=None):
         rows=self.ranges if end is None else self.ranges[:end]
-        before=[i for i,r in enumerate(rows) if r['time']<=cut]
+        before=[i for i,r in enumerate(rows) if (r['stamp']<=cut_stamp if cut_stamp is not None else r['capture_time']<=cut)]
         if not before:
             raise RuntimeError('no independent pose precedes the stop')
-        return stopping_measurement(rows[before[-1]:],cut,self.config,self.stationary_jitter)
+        selected=rows[before[-1]:]
+        # An exact matching scan/depth capture stamp shares the device clock;
+        # avoid a microsecond conversion difference selecting an older scan.
+        if cut_stamp is not None:selected=[{**r,'capture_time':cut+(r['stamp']-cut_stamp)} for r in selected]
+        return stopping_measurement(selected,cut,self.config,self.stationary_jitter)
 
     def save(self):
         (self.output/'measurements.json').write_text(json.dumps({
@@ -271,7 +278,7 @@ class OnboardBraking(FAULT['FaultTest']):
                 captured['end']=len(self.ranges)
                 topic={'scan_disconnect':'/scan','depth_disconnect':'/camera/depth/points','telemetry_loss':'/joint_states'}.get(name)
                 if topic:captured['cut']=self.sources[topic]
-                captured['measurement']=self.observe_stop(captured['cut'],captured['end'])
+                captured['measurement']=self.observe_stop(captured['cut'],captured['end'],self.source_stamps[topic] if topic else None)
             finally:
                 restore()
         super().fault(name,inject,recover,expected)

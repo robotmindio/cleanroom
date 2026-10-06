@@ -34,6 +34,8 @@ def test_independent_stop_bounds_hidden_motion_and_rejects_bad_windows():
     assert result['within_budget']
     assert result['unobserved_excursion_bound_m']==pytest.approx(.005)
     assert result['conservative_swept_distance_m']==pytest.approx(.015)
+    delayed=[{**s,'capture_time':s['time'],'time':s['time']+.3} for s in samples]
+    assert measure(delayed,.1,config,.001)['within_budget']
     assert not measure([{**s,'covariance':[.001,.001,.001]} for s in samples],.1,config,.001)['within_budget']
     assert not measure([{**s,'pose':[s['pose'][0]*5,0.,0.]} for s in samples],.1,config,.001)['within_budget']
     for invalid in (samples[:5],samples[1:],samples[:5]+[{**samples[5],'stamp':.1}]+samples[6:]):
