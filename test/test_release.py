@@ -110,6 +110,28 @@ def test_release_sealing_refuses_failed_or_missing_source_tests(tmp_path):
             checker.check_release(release, revision, "compute")
 
 
+def test_staging_clones_only_the_materialized_vendor_revision(tmp_path):
+    repo, workspace, revision, environment = release_fixture(tmp_path)
+    cached = workspace / "src/ldlidar_stl_ros2"
+    subprocess.run(["git", "clone", str(repo), str(cached)], check=True, capture_output=True)
+    for key, value in (("user.name", "Test"), ("user.email", "test@example.invalid")):
+        subprocess.run(["git", "-C", str(cached), "config", key, value], check=True)
+    missing = cached / "history-only"
+    missing.write_text("historical blob deliberately absent from a partial clone")
+    for args in (("add", "history-only"), ("commit", "-m", "old blob")):
+        subprocess.run(["git", "-C", str(cached), *args], check=True, capture_output=True)
+    blob = subprocess.check_output(["git", "-C", str(cached), "rev-parse", "HEAD:history-only"], text=True).strip()
+    missing.unlink()
+    for args in (("add", "-u"), ("commit", "-m", "materialized HEAD"),
+                 ("config", "remote.origin.promisor", "true")):
+        subprocess.run(["git", "-C", str(cached), *args], check=True, capture_output=True)
+    (cached / ".git/objects" / blob[:2] / blob[2:]).unlink()
+    result = subprocess.run(["bash", str(repo / "scripts/stage-release.sh"), "compute", str(workspace), revision],
+                            env=environment, text=True, capture_output=True, timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (workspace / "releases" / revision / "release.json").is_file()
+
+
 def test_activation_retains_the_previous_release_and_refuses_an_unknown_previous_file(tmp_path):
     deploy = (ROOT / "scripts/deploy-split.sh").read_text()
     function = "activate_release() {" + deploy.split("activate_release() {", 1)[1].split("\non_exit()", 1)[0]

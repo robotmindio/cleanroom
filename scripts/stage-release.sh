@@ -51,7 +51,11 @@ if [[ ! -f $release/install/setup.bash ]]; then
 fi
 for dependency in ldlidar_stl_ros2 ros2_astra_camera class_loader rclcpp navigation2 rviz ament_cmake; do
   if [[ -d $workspace/src/$dependency/.git && ! -d $release/src/$dependency/.git ]]; then
-    git clone --no-hardlinks "$workspace/src/$dependency" "$release/src/$dependency"
+    # Installer caches are partial clones; copying their full history can ask
+    # for blobs they deliberately never downloaded. Only HEAD is materialized.
+    git clone --depth 1 "file://$workspace/src/$dependency" "$release/src/$dependency"
+    git -C "$release/src/$dependency" remote set-url origin \
+      "$(git -C "$workspace/src/$dependency" remote get-url origin)"
   fi
 done
 export LEKIWI_WS=$release
