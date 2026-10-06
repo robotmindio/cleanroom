@@ -1,4 +1,4 @@
-"""Pure checks for the driver's stale-telemetry detector."""
+"""Driver boundary checks with a loopback host for native ROS construction."""
 
 import asyncio
 import math
@@ -67,7 +67,6 @@ def make_node(**overrides):
         "link_lost": False,
         "_healthy_telemetry_at": None,
         "_last_fresh_monotonic": None,
-        "_feedback_gap_started_at": None,
         "arm_workspace_collision": False,
         "stop_pending": True,
         "_disarm_epoch": 0,
@@ -1123,23 +1122,10 @@ def test_idle_arm_hold_keeps_its_goal_when_feedback_sags():
 
 
 def test_arm_permission_withdrawn_at_the_final_check_holds_the_arm():
-    # The active trajectory's setpoint is well away from the measured position.
-    driver.sample_trajectory = lambda *_: ({"joint": 0.5}, {}, {})
-    driver.action_positions = lambda names, values, *_: dict(zip(names, values))
     canceled = []
-    node = control_loop_node(
-        armed=True,
-        trajectory={
-            "start": time.monotonic(),
-            "done": threading.Event(),
-            "names": ("joint",),
-            "start_positions": {"joint": 0.0},
-            "points": [types.SimpleNamespace(time=10.0, positions={"joint": 0.5})],
-            "path_tolerances": {"joint": 1.0},
-            "goal_tolerances": {"joint": 0.01},
-            "goal_time_tolerance": 1.0,
-        },
-    )
+    node = control_loop_node(armed=True, trajectory={"host_id": 1})
+    leases = []
+    node.robot.send_action = lambda action, **kwargs: (node.sent.append(action), leases.append(kwargs))
     grant_fresh_base_permission(node)
     # The withdrawal lands after this cycle's lease check but before the final
     # armed/permission check under action_lock.
@@ -1149,6 +1135,7 @@ def test_arm_permission_withdrawn_at_the_final_check_holds_the_arm():
     node.update()
 
     assert canceled == ["arm safety permission withdrawn"]
+    assert leases == [{"arm_goal_id": 1, "arm_permitted": False}]
     assert node.sent == [{"joint.pos": 0.0, "x.vel": 0.0, "y.vel": 0.0, "theta.vel": 0.0}]
 
 

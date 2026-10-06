@@ -49,7 +49,7 @@ def test_missing_calibration_and_invalid_writer_values(tmp_path, monkeypatch):
     monkeypatch.setenv("LEKIWI_LAUNCH_CALIBRATION", str(path))
     assert load_launch_calibration() == {}
     assert load_base_scales(path) == (1.0, 0.976)
-    for values in ({"camera_pitch": float("nan")}, {"xy_velocity_scale": 0}, {"unknown": 1}):
+    for values in ({"camera_pitch": float("nan")}, {"xy_velocity_scale": 0}, {"camera_height": 1e-9}, {"unknown": 1}):
         with pytest.raises(ValueError):
             save_launch_calibration(**values)
     assert not path.exists()

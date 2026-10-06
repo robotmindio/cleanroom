@@ -169,7 +169,6 @@ class LeKiwiDriver(Node):
         self.last_observation_token = None
         self.last_fresh = now
         self._last_fresh_monotonic = None
-        self._feedback_gap_started_at = None
         self.arm_workspace_collision = False
         self.link_lost = False
         # When update() last accepted telemetry that passed the host-session and
@@ -299,8 +298,6 @@ class LeKiwiDriver(Node):
             self.arm_motion_permitted = permitted
             self._arm_permission_received_at_ns = received_at_ns
             self._arm_permission_expired = not permitted
-            if permitted:
-                self._feedback_gap_started_at = None
             armed = self.armed
             base_current = self._permission_is_current(
                 self.base_motion_permitted,
@@ -351,22 +348,8 @@ class LeKiwiDriver(Node):
         The Pi freezes the arm if commands stop. A confirmed MoveIt collision
         retains the ordinary immediate cancel path, even during a feedback gap.
         """
-        now = time.monotonic()
         with self.state_lock:
-            if self.disarm_on_failure or not self.armed:
-                return False
-            if self.arm_workspace_collision:
-                return False
-            started = self._feedback_gap_started_at
-            if started is None:
-                last = self._last_fresh_monotonic
-                started = now if last is None else last
-                self._feedback_gap_started_at = started
-        with self.trajectory_lock:
-            if self.trajectory and self.trajectory.get("paused_at") is None:
-                self.trajectory["paused_at"] = started
-                self.get_logger().warning("Holding arm goal through a motor-feedback gap")
-        return True
+            return not self.disarm_on_failure and self.armed and not self.arm_workspace_collision
 
     def enforce_permission_leases(self, now_monotonic_ns=None):
         """Expire stale supervisor decisions independently of DDS delivery."""
@@ -495,7 +478,6 @@ class LeKiwiDriver(Node):
             self.command_stamp = self.get_clock().now()
             self.stop_pending = True
             self.arm_hold_action = None
-            self._feedback_gap_started_at = None
             if defer_cut:
                 # Only strict mode cuts torque after a failure.
                 self._deferred_cut = self._deferred_cut or bool(self.disarm_on_failure)
@@ -794,13 +776,10 @@ class LeKiwiDriver(Node):
         trajectory = {
             "start": now_monotonic + max(0, start_delay_ns) / 1e9,
             "done": threading.Event(),
-            "path_tolerances": path_tolerances,
-            "goal_tolerances": goal_tolerances,
-            "goal_time_tolerance": goal_time_tolerance,
+            "host_id": (uuid.uuid4().int % (2**48 - 1)) + 1,
+            "host_session": self.last_observation_token[1],
+            "host_elapsed": 0.0,
         }
-        trajectory["host_id"] = (uuid.uuid4().int % (2**48 - 1)) + 1
-        trajectory["host_session"] = self.last_observation_token[1]
-        trajectory["host_elapsed"] = 0.0
         waiting_since = time.monotonic()
         while self.armed and not self._arm_permission_is_current() and self._hold_feedback_gap():
             # The plan has not started. Wait for measured joints and the full
@@ -1282,10 +1261,6 @@ class LeKiwiDriver(Node):
             hold_action = self.arm_hold_action.copy()
         measured_hold = self._hold_action(observation)
         action = dict(hold_action)
-        arm_permitted = self._arm_permission_is_current()
-        if arm_permitted:
-            with self.state_lock:
-                self._feedback_gap_started_at = None
         trajectory_ran = bool(self.trajectory)
         if trajectory_ran:
             cmd = Twist()
@@ -1324,7 +1299,7 @@ class LeKiwiDriver(Node):
             if not arm_permitted:
                 if not self._hold_feedback_gap():
                     self.cancel_trajectory("arm safety permission withdrawn")
-                # The prepared action may carry that trajectory's setpoint.
+                # Withdrawn permission holds the measured pose at the host.
                 action.update(measured_hold)
             if not base_permitted:
                 action["x.vel"] = action["y.vel"] = action["theta.vel"] = 0.0

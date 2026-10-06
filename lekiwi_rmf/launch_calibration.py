@@ -44,6 +44,8 @@ def load_launch_calibration(path=None) -> dict[str, float]:
 
 def save_launch_calibration(**values: float) -> Path:
     values = {key: _validated_value(key, value) for key, value in values.items()}
+    # Reject positive measurements that would round to an unreadable zero.
+    values = {key: _validated_value(key, float(f"{value:.6f}")) for key, value in values.items()}
     path = calibration_path()
     saved = load_launch_calibration(path)
     saved.update(values)
