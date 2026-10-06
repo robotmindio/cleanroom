@@ -8,8 +8,8 @@
 
 namespace lekiwi_rmf
 {
-// Keep the measured resting contact and its short release motion. Every other
-// part and every contact outside this 0.10 rad neighborhood remains checked.
+// Resting contact follows the relative placement of the two physical parts.
+// A coupled release can move several joints while leaving those parts together.
 class RestCollisionEnv : public collision_detection::CollisionEnvFCL
 {
 public:
@@ -23,15 +23,22 @@ public:
     const auto* arm = state.getRobotModel()->getJointModelGroup("arm");
     if (!arm || !rest.setToDefaultValues(arm, "travel_stow"))
       throw std::runtime_error("MechanicalRest requires the named arm travel_stow pose");
-    bool folded = true;
-    for (const auto& name : arm->getVariableNames())
-      if (name != "arm_shoulder_pan" &&
-          std::abs(state.getVariablePosition(name) - rest.getVariablePosition(name)) > 0.10)
-        folded = false;
+    rest.update();
     auto guarded = original;
     for (const auto& pair : state.getRobotModel()->getSRDF()->getDisabledCollisionPairs())
       if (pair.reason_ == "MechanicalRest")
-        guarded.setEntry(pair.link1_, pair.link2_, folded);
+      {
+        const Eigen::Isometry3d expected = rest.getGlobalLinkTransform(pair.link1_).inverse() *
+                                          rest.getGlobalLinkTransform(pair.link2_);
+        const Eigen::Isometry3d actual = state.getGlobalLinkTransform(pair.link1_).inverse() *
+                                        state.getGlobalLinkTransform(pair.link2_);
+        // Confirmed folded/release poses shift these frames by at most 17 mm.
+        // Keep an 8 mm margin around that observation; retain the 0.10 rad bound
+        // on the parts' relative orientation, not on unrelated joint angles.
+        const bool resting = (actual.translation() - expected.translation()).norm() <= 0.025 &&
+            Eigen::AngleAxisd(expected.linear().transpose() * actual.linear()).angle() <= 0.10;
+        guarded.setEntry(pair.link1_, pair.link2_, resting);
+      }
     return guarded;
   }
 

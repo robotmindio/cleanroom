@@ -49,6 +49,7 @@ install(PROGRAMS
   scripts/gripper-diagnose.py
   scripts/gripper-calibrate.py
   scripts/host-health-check.py
+  scripts/reload-moveit.py
   scripts/rtabmap-db-maintenance.py
   scripts/rtabmap-session-guard.py
   scripts/torque-host.py

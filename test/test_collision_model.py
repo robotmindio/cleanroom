@@ -375,6 +375,7 @@ def test_resting_contacts_only_exempt_the_confirmed_parts():
         frozenset(("shoulder_motor_collision_proxy", "forearm_link_collision_proxy")),
         frozenset(("shoulder_motor_collision_proxy", "forearm_holder_collision_proxy")),
         frozenset(("shoulder_holder_collision_proxy", "roll_holder_collision_proxy")),
+        frozenset(("shoulder_collision_proxy", "roll_holder_collision_proxy")),
     }
     # In particular, neither distal servo body is exempt against the shoulder.
     exemptions = {frozenset((item.get("link1"), item.get("link2")))
