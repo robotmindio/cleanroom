@@ -37,26 +37,25 @@ The folded `travel_stow` in SRDF and `safety_production.yaml` is the required
 navigation posture; starting a base goal does not automatically move the arm.
 
 `config/safety_acceptance.yaml` records an **attended autonomous base** scope:
-0 kg added payload, dry concrete, and an operator continuously next to the physical
+the installed reported 200 g load, dry concrete, and an operator continuously next to the physical
 motor-power stop. The installed hardware record marks the bumper, IMU, and
 battery monitor absent. Their fault tests are `null` (not applicable), and the
 validator checks that this record agrees with the production profile's
 `require_bumper`, `require_imu`, and `require_battery` settings. All other fault
 tests and six-direction stopping trials remain mandatory. The operating
 condition is a site procedure; software cannot verify that the operator is
-present. The 2026-10-04 physical evidence is reviewed and the record is
+present. The 2026-10-06 loaded stopping evidence is reviewed and the record is
 `validated: true`, at 0.03 m/s and 0.06 rad/s with 20 mm measurement uncertainty
 inside the unchanged 50 mm stopping budget. See
-[the verification report](physical-verification-20261003.md). It grants no
-unattended scope or additional payload.
+[the loaded stopping evidence](physical-acceptance-evidence-200g-20261006.json).
+It grants no unattended scope or other load placement or payload.
 
 `payload_kg` identifies the load in those stopping measurements. The supervisor
 validates its format; it has no measured-payload input and does not compare the
 current load with that field. The installed reported 200 g passed the arm cycle
-and a bounded production navigation test on 2026-10-06. Loaded stopping
-acceptance is pending independent measurements; see
-[the loaded verification record](base-payload-verification-20261006.md). Preserve
-that distinction when interpreting the historical 0 kg record.
+and bounded production navigation and stopping tests on 2026-10-06. See
+[the loaded verification record](base-payload-verification-20261006.md) and
+the acceptance evidence above; the older 0 kg record remains historical.
 
 The configured hold mode automatically re-arms after a fault or restart only
 when telemetry and arm permission recover. The acceptance tests for host and
@@ -88,6 +87,18 @@ remain at the physical motor-power stop. Remeasure the mask after the arm is
 stowed and before acceptance trials because nearby hardware can change the
 self-returns. Full surrounding coverage requires moving the lidar or adding a
 second sensor.
+
+## Motor-host motion limits
+
+The motor host validates every streamed or locally sampled action before writing
+it to LeRobot. Base commands are checked against the tracked Nav2 limits after
+applying the saved wheel scales. Arm commands use the tracked joint limits and
+the host's saved `~/.ros/lekiwi_arm_calibration.json`; trajectory uploads must
+match that calibration. The gripper remains within its normalized 0–100 range.
+An exact previously measured hold is retained even if torque-off sag put it
+outside a joint boundary; new out-of-bounds targets are rejected. Rejected
+streamed actions do not refresh the existing command watchdog or change torque.
+This envelope does not establish obstacle clearance or extend physical acceptance.
 
 ## Current motor-health behavior
 

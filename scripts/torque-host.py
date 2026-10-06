@@ -28,7 +28,8 @@ from lekiwi_rmf.torque_control import (
     enable_with_rollback, react_to_command_silence, run_all_safety_steps,
     torque_readback_matches, validate_action_payload, validated_bind_address,
 )
-from lekiwi_rmf.arm_trajectory import ARM_JOINTS
+from lekiwi_rmf.arm_trajectory import ARM_JOINTS, load_calibration, validate_motion_action
+from lekiwi_rmf.motion_guards import load_base_speed_limits
 from lekiwi_rmf.local_arm_executor import LocalArmExecutor, STATUS_KEY, LEASE_KEYS
 from lekiwi_rmf.zmq_security import CurveServerSecurity, configure_link_liveness
 from lekiwi_rmf.odometry import (
@@ -95,6 +96,8 @@ class TorqueSafetyConfig:
     port_zmq: int = 5557
     state_file: str = "~/.ros/lekiwi/servo_torque_state"
     bind_address: str = "0.0.0.0"
+    arm_calibration_file: str = "~/.ros/lekiwi_arm_calibration.json"
+    nav2_params_file: str = str(Path(__file__).resolve().parents[1] / "config/nav2_params.yaml")
     # False: command silence stops the base and freezes the arm with torque left on; the
     # driver re-arms itself. True (larger robots): it cuts all servo torque.
     disarm_on_failure: bool = False
@@ -225,6 +228,7 @@ class TorqueControlServer:
         security.configure_socket(self.socket)
         self.socket.bind(f"tcp://{validated_bind_address(config.bind_address)}:{config.port_zmq}")
         self.latch = latch
+        self.config = config
         self.torque_enabled = False
 
     def disconnect(self):
@@ -304,6 +308,9 @@ class TorqueControlServer:
             elif command == "trajectory_start":
                 if not self.torque_enabled or request.get("session") != self.host_session:
                     raise ValueError("trajectory requires enabled torque and the current host session")
+                trajectory = request["trajectory"]
+                if (trajectory["zeros"], trajectory["directions"]) != self.arm_calibration:
+                    raise ValueError("trajectory calibration differs from the motor host")
                 # Stop wheels before validation, without an extra arm read/write
                 # transaction that delays the host's regular feedback publication.
                 robot.stop_base()
@@ -502,7 +509,10 @@ class HostLoop:
         self.next_watchdog_attempt = 0.0
         self.telemetry_session = uuid.uuid4().hex
         self.arm_executor = LocalArmExecutor(clock, host.watchdog_timeout_ms / 1000)
+        self.arm_calibration = load_calibration(control.config.arm_calibration_file)
+        self.base_limits = load_base_speed_limits(control.config.nav2_params_file)
         control.arm_executor = self.arm_executor
+        control.arm_calibration = self.arm_calibration
         control.host_session = self.telemetry_session
         self.local_observation = None
         self.local_feedback_at = None
@@ -529,7 +539,7 @@ class HostLoop:
         if self.control.torque_enabled and self.arm_executor.active:
             action = self.arm_executor.step(self.local_observation, self.local_feedback_at)
             if action is not None:
-                self.robot.send_action(action)
+                self.send_action(action)
         finished = time.perf_counter()
         gap = 0.0 if self._last_step_started is None else started - self._last_step_started
         self._last_step_started = started
@@ -541,6 +551,13 @@ class HostLoop:
                 watchdog_done - control_done, finished - watchdog_done,
             )
             self._last_slow_log = started
+
+    def send_action(self, action) -> None:
+        validate_motion_action(
+            action, self.base_limits, self.odometry.scales, self.arm_calibration,
+            self.arm_executor.hold or self.local_observation,
+        )
+        self.robot.send_action(action)
 
     def receive_command(self) -> None:
         try:
@@ -560,7 +577,7 @@ class HostLoop:
             # overwrite it. The retained final target also survives reply latency.
             if not self.arm_executor.active:
                 action.update(self.arm_executor.hold)
-                self.robot.send_action(action)
+                self.send_action(action)
         except zmq.Again:
             # Between commands is the normal state; silence past the watchdog
             # timeout is handled by enforce_watchdog().

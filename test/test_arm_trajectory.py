@@ -16,10 +16,44 @@ from lekiwi_rmf.arm_trajectory import (
     position_tolerances,
     prepare_trajectory,
     sample_trajectory,
+    validate_motion_action,
 )
 
 
 ROOT = pathlib.Path(__file__).parents[1]
+
+
+def test_motor_action_limits_use_calibrated_joint_and_base_units():
+    zeros = dict.fromkeys(JOINT_LIMITS, 0.0)
+    directions = dict.fromkeys(JOINT_LIMITS, 1.0)
+    zeros["arm_shoulder_pan"], directions["arm_shoulder_pan"] = 2.0, -1.0
+    action = {f"{name}.pos": value for name, value in action_positions(
+        tuple(JOINT_LIMITS), [0.0] * len(JOINT_LIMITS), zeros, directions,
+    ).items()}
+    action.update({"x.vel": 0.03 / 0.8, "y.vel": 0.0, "theta.vel": math.degrees(0.06 / 0.976)})
+    args = ((0.03, 0.06), (0.8, 0.976), (zeros, directions))
+    validate_motion_action(action, *args)
+    for changes in (
+        {"x.vel": 1000000.0}, {"y.vel": 0.01}, {"theta.vel": math.degrees(0.061 / 0.976)},
+        {"arm_shoulder_pan.pos": 0.0}, {"arm_gripper.pos": -1.0}, {"arm_gripper.pos": 101.0},
+        {"x.vel": float("nan")},
+    ):
+        with pytest.raises(ValueError):
+            validate_motion_action({**action, **changes}, *args)
+
+
+def test_motor_action_retains_an_out_of_bounds_measured_hold_without_extending_it():
+    zeros, directions = dict.fromkeys(JOINT_LIMITS, 0.0), dict.fromkeys(JOINT_LIMITS, 1.0)
+    action = {f"{name}.pos": 0.0 for name in JOINT_LIMITS}
+    action.update({"x.vel": 0.0, "y.vel": 0.0, "theta.vel": 0.0})
+    action["arm_shoulder_lift.pos"] = math.degrees(JOINT_LIMITS["arm_shoulder_lift"][0] - 0.02)
+    args = ((0.03, 0.06), (1.0, 1.0), (zeros, directions))
+    with pytest.raises(ValueError, match="position limits"):
+        validate_motion_action(action, *args)
+    validate_motion_action(action, *args, held_positions=action)
+    with pytest.raises(ValueError, match="position limits"):
+        validate_motion_action({**action, "arm_shoulder_lift.pos": action["arm_shoulder_lift.pos"] - 1.0},
+                               *args, held_positions=action)
 
 
 def test_zero_time_start_uses_local_feedback_within_moveit_start_tolerance():
