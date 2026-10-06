@@ -44,7 +44,6 @@ shared saved calibration, including negative pitch.
 | `xy_velocity_scale` | float | `1.0` | Correction for reported and commanded translation |
 | `yaw_velocity_scale` | float | `0.90` | Correction for reported and commanded rotation |
 | `start_rmf` | `true`, `false` | `false` | Start Zenoh, RMF schedule, dispatcher, and fleet adapter; requires `localization:=amcl`, `slam_mode:=localization` and an approved `map_bundle` |
-| `rmf_domain` | integer | `0` | DDS domain used by RMF processes; validation currently requires `0` because no tracked cross-domain bridge is configured |
 | `start_foxglove` | `true`, `false` | `true` | Start the read-only Foxglove WebSocket bridge |
 | `foxglove_address` | bind address | `127.0.0.1` | Interface exposed by Foxglove; loopback by default |
 | `foxglove_port` | TCP port | `8765` | Foxglove WebSocket listening port |
