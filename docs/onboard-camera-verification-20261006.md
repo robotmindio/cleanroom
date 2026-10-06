@@ -1,5 +1,10 @@
 # Robot verification follow-up — 2026-10-06
 
+**Later loaded trial:** the [200 g arm trial](arm-payload-verification-20261006.md)
+stopped on a shoulder/wrist-holder collision. Its wider tests remain pending;
+the arm is held at a collision-invalid pose with motion permissions withdrawn.
+The unloaded results and earlier closeout below retain their original scope.
+
 Runtime revision **`60c518b8ddd3`** was deployed successfully to compute and the
 Pi using `scripts/deploy-split.sh`, including its verified re-arm. Initial
 attended trials can continue at the existing unloaded acceptance limits:
