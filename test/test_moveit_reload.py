@@ -15,3 +15,11 @@ def test_reload_replaces_collision_pairs_and_preserves_live_poses():
         {"link1": "shoulder", "link2": "wrist", "reason": "MechanicalRest"}
     ]
     assert "torque_request" not in script.read_text()
+
+
+def test_reload_uses_the_managed_process_mount_namespace():
+    script = Path(__file__).parents[1] / "scripts/reload-moveit.py"
+    resolve = runpy.run_path(str(script))["planner_parameter_path"]
+    assert resolve(123, ["move_group", "--params-file", "/tmp/launch_params_test"]) == Path(
+        "/proc/123/root/tmp/launch_params_test"
+    )

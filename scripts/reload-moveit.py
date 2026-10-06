@@ -43,6 +43,15 @@ def managed_planners():
     return matches
 
 
+def planner_parameter_path(pid, args):
+    paths = [Path(args[i + 1]) for i, arg in enumerate(args) if arg == "--params-file"]
+    if len(paths) != 1 or not paths[0].is_absolute():
+        raise RuntimeError("expected one absolute managed planner parameter file")
+    # systemd PrivateTmp gives the planner a different /tmp. Access its mount
+    # namespace; the same path in our shell refers to an unrelated file.
+    return Path(f"/proc/{pid}/root") / paths[0].relative_to("/")
+
+
 def main():
     import rclpy
     from ament_index_python.packages import get_package_share_directory
@@ -55,9 +64,7 @@ def main():
     if len(planners) != 1:
         raise RuntimeError(f"expected one managed move_group, found {len(planners)}")
     pid, args = planners[0]
-    paths = [Path(args[i + 1]) for i, arg in enumerate(args) if arg == "--params-file"]
-    if len(paths) != 1:
-        raise RuntimeError("expected one managed planner parameter file")
+    parameter_path = planner_parameter_path(pid, args)
     rclpy.init()
     node = rclpy.create_node("stationary_moveit_reload")
     state = []
@@ -108,11 +115,11 @@ def main():
         )
         # Launch's temporary file may have been removed while its child stayed
         # alive. Recreate it from live parameters so respawn remains repeatable.
-        with tempfile.NamedTemporaryFile("w", dir=paths[0].parent, delete=False) as temporary:
+        with tempfile.NamedTemporaryFile("w", dir=parameter_path.parent, delete=False) as temporary:
             yaml.safe_dump({"/**": {"ros__parameters": parameters}}, temporary)
             temporary_path = Path(temporary.name)
         try:
-            os.replace(temporary_path, paths[0])
+            os.replace(temporary_path, parameter_path)
         finally:
             temporary_path.unlink(missing_ok=True)
         os.kill(pid, signal.SIGINT)
@@ -120,8 +127,11 @@ def main():
         while time.monotonic() < deadline:
             replacements = managed_planners()
             if len(replacements) == 1 and replacements[0][0] != pid:
-                print(f"planner respawned: {pid} -> {replacements[0][0]}")
-                return
+                response = call("/move_group/get_parameters", GetParameters,
+                                GetParameters.Request(names=["robot_description_semantic"]))
+                if response.values and response.values[0].string_value == parameters["robot_description_semantic"]:
+                    print(f"planner respawned with verified collision rules: {pid} -> {replacements[0][0]}")
+                    return
             time.sleep(0.25)
         raise RuntimeError("managed planner did not respawn within 30 seconds")
     finally:
