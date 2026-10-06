@@ -30,6 +30,17 @@ LD06_SERIAL_PORTS = (
 )
 
 
+def _deployment_defaults(context):
+    mode, source = {
+        "sim": ("sim", "local"), "wired": ("real", "local"), "split": ("real", "remote"),
+    }[LaunchConfiguration("profile").perform(context)]
+    defaults = {"mode": mode, "camera_source": source, "lidar_source": source,
+                "laser_source": "ld06" if source == "remote" else "auto"}
+    # Retain explicit topology values from previously installed service arguments.
+    return [SetLaunchConfiguration(key, value) for key, value in defaults.items()
+            if key not in context.launch_configurations]
+
+
 def _lidar_serial_present():
     # /dev/ttyUSB0 is only a kernel-assigned slot: it can just as easily be a
     # console cable or another USB-UART.  Auto mode is deliberately conservative.
@@ -119,7 +130,6 @@ def generate_launch_description():
     package = FindPackageShare("lekiwi_rmf")
     test_linear, test_angular = load_base_speed_limits(
         Path(get_package_share_directory("lekiwi_rmf")) / "config/nav2_params.yaml")
-    camera_supervisor = PathJoinSubstitution([package, "scripts", "camera-supervisor.sh"])
     mode = LaunchConfiguration("mode")
     remote_ip = LaunchConfiguration("remote_ip")
     curve_client_secret = LaunchConfiguration("curve_client_secret_key_file")
@@ -145,7 +155,6 @@ def generate_launch_description():
     wrist_camera_info_url = LaunchConfiguration("wrist_camera_info_url")
     camera_device = LaunchConfiguration("camera_device")
     publish_astra = LaunchConfiguration("publish_astra")
-    astra_serial = LaunchConfiguration("astra_serial")
     camera_source = LaunchConfiguration("camera_source")
     wrist_device = LaunchConfiguration("wrist_camera_device")
     xy_velocity_scale = LaunchConfiguration("xy_velocity_scale")
@@ -166,7 +175,6 @@ def generate_launch_description():
     dual_rgbd = PythonExpression([camera_on, " and ", real, " and '", publish_astra, "' == 'true'"])
     slam_rgb_topic = "/camera/front/image_raw"
     slam_camera_info_topic = "/camera/front/camera_info"
-    wrist_here = PythonExpression([camera_here, " and '", wrist_device, "' != 'none'"])
     remote_camera = PythonExpression([camera_on, " and ", real, " and '", camera_source, "' == 'remote'"])
     # The canonical camera topics, wherever the frames were read: a local v4l2_camera
     # publishes here directly, and in remote mode the relays below reconstruct them
@@ -297,9 +305,8 @@ def generate_launch_description():
     )
     rtabmap_node = Node(
         package="rtabmap_slam", executable="rtabmap", name="rtabmap",
-        parameters=[{
+        parameters=[PathJoinSubstitution([package, "config", "rtabmap.yaml"]), {
             "use_sim_time": ParameterValue(sim, value_type=bool),
-            "frame_id": "base_footprint", "map_frame_id": "map", "odom_frame_id": "odom",
             # Keep appearance-based retrieval enabled alongside LiDAR ICP.
             # A restarted odometry session cannot use proximity ICP until it
             # has globally relocalized, so the camera must find that first link.
@@ -313,31 +320,10 @@ def generate_launch_description():
             "Vis/EstimationType": ParameterValue(PythonExpression([
                 "'0' if ", dual_rgbd, " else '1'",
             ]), value_type=str),
-            # A prior ICP-only database can persist -1 here, which disables
-            # visual word extraction even after RGB is enabled at launch.
-            "Kp/MaxFeatures": "500",
-            "Icp/VoxelSize": "0.05", "Icp/MaxCorrespondenceDistance": "0.1",
-            "Icp/PointToPlane": "false", "RGBD/ProximityPathMaxNeighbors": "10",
-            # The front topic is image_raw and its CameraInfo has nonzero lens
-            # distortion; RTAB-Map must rectify it before geometric verification.
-            "Rtabmap/ImagesAlreadyRectified": "false",
-            "Mem/NotLinkedNodesKept": "false",
-            "RGBD/LinearUpdate": "0.04", "RGBD/ProximityMaxGraphDepth": "0",
-            "RGBD/ProximityOdomGuess": "true",
-            "Rtabmap/DetectionRate": "2",
             "subscribe_depth": ParameterValue(PythonExpression([camera_on, " and not ", dual_rgbd]), value_type=bool),
             "subscribe_rgbd": ParameterValue(dual_rgbd, value_type=bool),
             "rgbd_cameras": ParameterValue(PythonExpression(["0 if ", dual_rgbd, " else 1"]), value_type=int),
-            "subscribe_scan": False,
             "subscribe_scan_cloud": ParameterValue(lidar_on, value_type=bool),
-            # slam_cloud already removed the floor; project every point.
-            "Grid/3D": "false", "Grid/NormalsSegmentation": "false", "Grid/RayTracing": "true",
-            "Grid/MaxObstacleHeight": "1.0", "Grid/MaxGroundHeight": "0.05",
-            "subscribe_odom_info": False, "approx_sync": True, "publish_tf": True,
-            # The two cameras and fused scan have different capture stamps.
-            # Native TF motion compensation places each in the reference pose.
-            "odom_sensor_sync": True,
-            "qos_image": 1, "qos_camera_info": 1, "qos_scan": 1, "qos_odom": 1,
             "Rtabmap/MemoryThr": ParameterValue(LaunchConfiguration("rtabmap_wm_nodes"), value_type=str),
             "Mem/IncrementalMemory": ParameterValue(slam_mapping, value_type=str),
             # ICP proximity closure only searches working memory. Reload the
@@ -349,15 +335,6 @@ def generate_launch_description():
             # A one-node seed needs another observation before a visual closure
             # is possible. Populated maps retain the normal relocalization gate.
             "Rtabmap/StartNewMapOnLoopClosure": ParameterValue(LaunchConfiguration("rtabmap_wait_for_loop"), value_type=str),
-            # Sub-voxel motions cannot justify replacing wheel uncertainty with
-            # a millimetre-tight ICP neighbor constraint. Keep native odometry.
-            "RGBD/NeighborLinkRefining": "false", "RGBD/ProximityBySpace": "true",
-            "RGBD/LoopCovLimited": "true",
-            "Reg/Force3DoF": "true", "Grid/Sensor": "0", "Grid/RangeMax": "3.0",
-            "Grid/CellSize": "0.05",
-            # Five-message sync queues keep temporary link jitter from turning
-            # the map into a several-second replay of stale sensor data.
-            "sync_queue_size": 5, "topic_queue_size": 5,
         }],
         remappings=[
             ("rgb/image", slam_rgb_topic), ("rgb/camera_info", slam_camera_info_topic),
@@ -455,7 +432,8 @@ def generate_launch_description():
 
     return LaunchDescription(
         [
-            DeclareLaunchArgument("mode", default_value="sim", choices=["sim", "real"]),
+            DeclareLaunchArgument("profile", default_value="sim", choices=["sim", "wired", "split"]),
+            OpaqueFunction(function=_deployment_defaults),
             # RViz is the normal visualization for this stack. Running Gazebo's server
             # only also works from CI and a machine reached over SSH without an X/GLX
             # display. Pass headless:=false to open Gazebo's own GUI.
@@ -526,9 +504,6 @@ def generate_launch_description():
                 default_value=PathJoinSubstitution([package, "config", "hardware.yaml"]),
             ),
             DeclareLaunchArgument("camera_device", default_value="/dev/video0"),
-            DeclareLaunchArgument(
-                "camera_source", default_value="local", choices=["local", "remote"]
-            ),
             # "none" leaves the wrist camera out. Both cameras hang off one USB 2.0 hub and
             # neither can be compressed here, so the wrist runs small -- see the node below.
             DeclareLaunchArgument("wrist_camera_device", default_value="none"),
@@ -580,9 +555,6 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "laser_source", default_value="auto", choices=["auto", "camera", "ld06", "none"]
             ),
-            DeclareLaunchArgument(
-                "lidar_source", default_value="local", choices=["local", "remote"]
-            ),
             # Prefer a /dev/serial/by-id/... path for the same reason as camera_device.
             DeclareLaunchArgument(
                 "lidar_port",
@@ -594,10 +566,6 @@ def generate_launch_description():
             # 20 cm. Re-measure after touching the mount.
             DeclareLaunchArgument("camera_height", default_value="0.093"),
             DeclareLaunchArgument("camera_pitch", default_value="0.031"),
-            DeclareLaunchArgument("camera_offset_x", default_value="0.03"),
-            DeclareLaunchArgument("camera_offset_y", default_value="0.0"),
-            DeclareLaunchArgument("camera_yaw", default_value="0.0"),
-            DeclareLaunchArgument("camera_roll", default_value="0.0"),
             # Evaluate cross-argument invariants before the first node, process,
             # or included launch description is allowed to start.
             OpaqueFunction(function=validate_context),
@@ -743,71 +711,20 @@ def generate_launch_description():
                 condition=IfCondition(sim),
                 output="screen",
             ),
-            # The Astra Pro is read through its OpenNI/UVC ROS driver, rather than relayed
-            # through the LeRobot host. Registered RGB-D supplies RTAB-Map and the MoveIt
-            # octomap on their canonical topics; its frame IDs are pinned in astra_pro.yaml.
-            Node(
-                package="astra_camera", executable="astra_camera_node", name="astra_pro",
-                parameters=[PathJoinSubstitution([package, "config", "astra_pro.yaml"]), {
-                    "serial_number": astra_serial,
-                }],
-                remappings=[
-                    # astra_camera publishes these at the root namespace. Keep
-                    # the source names accurate: remapping /camera/... here
-                    # silently creates no canonical RGB-D topics.
-                    ("/color/image_raw", "/camera/astra/color/image_raw"),
-                    ("/color/camera_info", "/camera/astra/color/camera_info"),
-                    ("/depth/image_raw", "/camera/astra/depth/image_raw"),
-                    ("/depth/camera_info", "/camera/astra/depth/camera_info"),
-                    ("/depth/points", "/camera/depth/points_raw"),
-                ],
-                condition=IfCondition(astra_here), output="screen",
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(PathJoinSubstitution([package, "launch", "pi_astra.launch.py"])),
+                launch_arguments={"hardware_config": LaunchConfiguration("hardware_config"),
+                                  "respawn": "false"}.items(),
+                condition=IfCondition(astra_here),
             ),
-            Node(
-                package="lekiwi_rmf", executable="astra_cloud_filter", name="astra_cloud_filter",
-                parameters=[PathJoinSubstitution([package, "config", "astra_cloud_filter.yaml"])],
-                condition=IfCondition(astra_here), output="screen",
-            ),
-            # A V4L2 front camera is read straight off the device rather than relayed through the
-            # LeRobot host: the host aborts the whole robot -- motor control included --
-            # when a camera frame arrives half a second late, which a USB webcam does. Off
-            # the critical path, a stalled camera costs frames instead of the robot.
-            ExecuteProcess(
-                cmd=[
-                    camera_supervisor,
-                    "--device", camera_device, "--name", "front_camera",
-                    "--namespace", "/camera/front", "--camera-name", "lekiwi_front",
-                    # RTAB-Map's detection rate is 1 Hz and the safety scan runs
-                    # at 5 Hz; 320x240 preserves calibrated geometry while keeping
-                    # the local RGB pipeline inside the Pi's CPU/RAM budget.
-                    "--frame", "front_camera_optical_frame", "--size", "[320, 240]",
-                    "--camera-info-url", camera_info_url,
-                ],
-                # A namespace rather than remappings: image_transport builds its extra
-                # transport topics from the unremapped base name, so remapping image_raw
-                # leaves compressed advertised at /image_raw/compressed.
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(PathJoinSubstitution([package, "launch", "pi_cameras.launch.py"])),
+                launch_arguments={
+                    "front_device": camera_device, "wrist_device": wrist_device,
+                    "camera_info_url": camera_info_url, "wrist_camera_info_url": wrist_camera_info_url,
+                    "camera_namespace": "/camera", "jpeg_quality": "",
+                }.items(),
                 condition=IfCondition(PythonExpression([camera_here, " and ", real])),
-                output="screen",
-            ),
-            # The wrist camera is for watching the gripper, not for SLAM. Its CAD-backed
-            # mount now has a dedicated optical frame; it must never inherit the generic
-            # tool frame because that makes RViz show the image in the wrong pose.
-            ExecuteProcess(
-                cmd=[
-                    camera_supervisor,
-                    "--device", wrist_device, "--name", "wrist_camera",
-                    "--namespace", "/camera/wrist", "--camera-name", "lekiwi_wrist",
-                    "--frame", "wrist_camera_optical_frame", "--size", "[352, 288]",
-                    "--camera-info-url", wrist_camera_info_url,
-                ],
-                    # v4l2_camera has no JPEG decoder -- ask it for MJPG and it aborts on the
-                    # first frame, so this is uncompressed and has to stay small: both cameras
-                    # share one USB 2.0 hub, and a second 640x480 YUYV feed starves the front
-                    # camera into solid green frames. This camera's smallest native YUYV mode
-                    # is 352x288; requesting 160x120 can succeed at format negotiation but
-                    # then produce no frames on this UVC device.
-                condition=IfCondition(PythonExpression([wrist_here, " and ", real])),
-                output="screen",
             ),
             # Remote topology: the cameras are read by v4l2_camera on the machine they
             # are plugged into (launch/pi_cameras.launch.py, usually via the
@@ -832,13 +749,9 @@ def generate_launch_description():
             # and wrong numbers put phantom walls in the costmap.
             Node(
                 package="lekiwi_rmf", executable="free_space.py", name="free_space",
-                parameters=[{
+                parameters=[PathJoinSubstitution([package, "config", "camera_scan.yaml"]), {
                     "camera_height": ParameterValue(LaunchConfiguration("camera_height"), value_type=float),
                     "camera_pitch": ParameterValue(LaunchConfiguration("camera_pitch"), value_type=float),
-                    "camera_offset_x": ParameterValue(LaunchConfiguration("camera_offset_x"), value_type=float),
-                    "camera_offset_y": ParameterValue(LaunchConfiguration("camera_offset_y"), value_type=float),
-                    "camera_yaw": ParameterValue(LaunchConfiguration("camera_yaw"), value_type=float),
-                    "camera_roll": ParameterValue(LaunchConfiguration("camera_roll"), value_type=float),
                 }],
                 remappings=[("image", "/camera/front/image_raw"), ("camera_info", camera_info_topic), ("scan", "/scan")],
                 condition=IfCondition(camera_laser), output="screen",
@@ -897,7 +810,6 @@ def generate_launch_description():
                 parameters=[{
                     "remote_ip": remote_ip,
                     "nav2_params_file": PathJoinSubstitution([package, "config", "nav2_params.yaml"]),
-                    "local_arm_execution": True,
                     "bounded_base_test": ParameterValue(bounded_base_test, value_type=bool),
                     "base_test_linear_limit": ParameterValue(LaunchConfiguration("base_test_linear_limit"), value_type=float),
                     "base_test_angular_limit": ParameterValue(LaunchConfiguration("base_test_angular_limit"), value_type=float),

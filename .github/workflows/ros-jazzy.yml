@@ -53,8 +53,13 @@ jobs:
           . /opt/ros/jazzy/setup.sh
           # The container runs as root while checkout files belong to the runner.
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          colcon build --symlink-install --event-handlers console_cohesion+
+          # CTest freezes build-time package/library paths. Build the patched
+          # overlay before configuring this package so tests use those binaries.
+          mkdir -p install
+          printf 'source /opt/ros/jazzy/setup.bash\n' > install/setup.bash
           LEKIWI_WS="$GITHUB_WORKSPACE" scripts/build-native.sh
+          . install/setup.sh
+          colcon build --packages-select lekiwi_rmf --symlink-install --event-handlers console_cohesion+
           . install/setup.sh
           colcon test --packages-select lekiwi_rmf --event-handlers console_cohesion+
           colcon test-result --verbose

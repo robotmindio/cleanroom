@@ -5,5 +5,10 @@ workstation that also runs the robot stack (domain 0 by default) would otherwise
 publish test safety states, commands and TF into the live graph.
 """
 import os
+from pathlib import Path
+import sys
 
 os.environ.setdefault("ROS_DOMAIN_ID", "231")
+
+# Operational scripts import sibling modules through Python's normal import cache.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))

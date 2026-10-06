@@ -29,11 +29,11 @@ def test_astra_pro_publishes_registered_rgbd_in_the_robot_camera_frame():
 def test_real_bringup_maps_both_calibrated_views_with_measured_depth():
     source = (ROOT / "launch" / "bringup.launch.py").read_text()
 
-    assert 'package="astra_camera", executable="astra_camera_node"' in source
-    assert '("/color/image_raw", "/camera/astra/color/image_raw")' in source
-    assert '("/depth/image_raw", "/camera/astra/depth/image_raw")' in source
-    assert '"--namespace", "/camera/front"' in source
-    assert '"--namespace", "/camera/wrist"' in source
+    astra_source = (ROOT / "launch/pi_astra.launch.py").read_text()
+    assert 'package="astra_camera", executable="astra_camera_node"' in astra_source
+    assert '("/color/image_raw", "/camera/astra/color/image_raw")' in astra_source
+    assert '("/depth/image_raw", "/camera/astra/depth/image_raw")' in astra_source
+    assert '"camera_namespace": "/camera"' in source
     assert 'slam_rgb_topic = "/camera/front/image_raw"' in source
     assert '"subscribe_rgbd": ParameterValue(dual_rgbd' in source
     assert '("rgbd_image0", "/slam/astra/rgbd_image")' in source
@@ -45,7 +45,7 @@ def test_real_bringup_maps_both_calibrated_views_with_measured_depth():
     assert '"\'0\' if ", dual_rgbd, " else \'1\'"' in source
     assert '("cloud", "/slam/cloud")' in source
     assert '("astra", "astra/color", 2, 2, "/camera/astra/depth/image_raw")' in source
-    assert '"qos_image": 1' in source
+    assert yaml.safe_load((ROOT / "config/rtabmap.yaml").read_text())["rtabmap"]["ros__parameters"]["qos_image"] == 1
     assert '"qos_depth"' not in source
     # Both calibration/image synchronizers retain metadata across 2 Hz frames.
     assert source.count('"topic_queue_size": 5, "sync_queue_size": 30') == 2
@@ -78,8 +78,8 @@ def test_local_and_remote_astra_cloud_filters_share_the_bandwidth_profile():
     values = yaml.safe_load(filter_config.read_text())["astra_cloud_filter"]["ros__parameters"]
     assert values == {"pixel_stride": 8, "max_rate_hz": 10.0, "image_max_rate_hz": 2.0,
                       "jpeg_quality": 70}
-    for launch in (ROOT / "launch" / "bringup.launch.py", ROOT / "launch" / "pi_astra.launch.py"):
-        assert "astra_cloud_filter.yaml" in launch.read_text()
+    assert "astra_cloud_filter.yaml" in (ROOT / "launch/pi_astra.launch.py").read_text()
+    assert "pi_astra.launch.py" in (ROOT / "launch/bringup.launch.py").read_text()
     assert 1.0 / values["max_rate_hz"] < 0.5  # production depth freshness timeout
 
 

@@ -6,9 +6,18 @@ Arguments of `launch/bringup.launch.py`. The repository scripts pass extra
 `name:=value` arguments straight through (`scripts/sim-up.sh`, `scripts/up.sh`,
 `scripts/workstation-up.sh`, `scripts/ros-start.sh`).
 
+Use `profile:=sim`, `profile:=wired`, or `profile:=split` for the supported
+deployment layouts. The repository startup scripts select the matching profile.
+Split uses the device's camera and LD06 services; wired opens local devices.
+Previously installed explicit `mode`, `camera_source`, and `lidar_source`
+arguments remain compatible, including a local stack using the lidar service.
+Static mapper tuning lives in `config/rtabmap.yaml`; front-camera scan offsets,
+yaw and roll live in `config/camera_scan.yaml`. Height and pitch still use the
+shared saved calibration, including negative pitch.
+
 | Argument | Values | Default | Purpose |
 | --- | --- | --- | --- |
-| `mode` | `sim`, `real` | `sim` | Select Gazebo or the LeRobot hardware bridge |
+| `profile` | `sim`, `wired`, `split` | `sim` | Select simulation, local hardware, or device-service streams |
 | `headless` | `true`, `false` | `true` | Run Gazebo server-only with offscreen rendering; set false to open its GUI |
 | `localization` | `visual_slam`, `amcl` | `visual_slam` | Select the sole `map -> odom` provider; `visual_slam` is RTAB-Map running lidar-only |
 | `slam_mode` | `mapping`, `localization` | `mapping` | Extend or reuse the RTAB-Map database; the session quota switches mapping to localization |
@@ -25,15 +34,13 @@ Arguments of `launch/bringup.launch.py`. The repository scripts pass extra
 | `hardware_config` | YAML path | `config/hardware.yaml` | Tracked hardware identities, including the required Astra serial when the Astra is launched |
 | `camera_info_url` | ROS camera URL | `file://~/.ros/camera_info/lekiwi_front.yaml` | V4L2 front-camera calibration (not used by Astra Pro) |
 | `wrist_camera_info_url` | ROS camera URL | `file://~/.ros/camera_info/lekiwi_wrist.yaml` | Optional wrist-camera calibration |
-| `camera_source` | `local`, `remote` | `local` | Read the camera here, or decompress what the robot's Pi publishes |
 | `camera_device` | V4L2 path | `/dev/video0` | Existing front V4L2 camera |
 | `wrist_camera_device` | V4L2 path, `none` | `none` | Wrist camera; `scripts/ros-start.sh` passes the detected JYU2C, or `none` when `LEKIWI_WRIST=none` |
 | `laser_source` | `auto`, `camera`, `ld06`, `none` | `auto` | Select camera fallback or LD06 on real hardware; Gazebo supplies `/scan` in sim |
-| `lidar_source` | `local`, `remote` | `local` | Machine that opens the LD06 serial port; remote reads `/pi/lidar/scan` |
 | `lidar_port` | serial path | CP2102 `/dev/serial/by-id/...` | LD06 device when `laser_source:=ld06` |
 | `urdf/lekiwi.urdf.xacro` sensor-calibration properties | metres, radians | Astra `0 0 0.0155`, `-8°`; others `0.0` | Astra's CAD compact-mount contact pose plus measured wrist and LD06 corrections, shared by RViz, MoveIt, and robot_state_publisher |
-| `camera_height`, `camera_offset_x`, `camera_offset_y` | metres | `0.093`, `0.03`, `0.0` | Front-camera pose used by the camera scan |
-| `camera_pitch`, `camera_yaw`, `camera_roll` | radians | `0.031`, `0.0`, `0.0` | Front-camera orientation used by the camera scan |
+| `camera_height` | metres | `0.093` | Measured front-camera height used by the camera scan |
+| `camera_pitch` | radians | `0.031` | Measured front-camera pitch used by the camera scan |
 | `xy_velocity_scale` | float | `1.0` | Correction for reported and commanded translation |
 | `yaw_velocity_scale` | float | `0.90` | Correction for reported and commanded rotation |
 | `start_rmf` | `true`, `false` | `false` | Start Zenoh, RMF schedule, dispatcher, and fleet adapter; requires `localization:=amcl`, `slam_mode:=localization` and an approved `map_bundle` |

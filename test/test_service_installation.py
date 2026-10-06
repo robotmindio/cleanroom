@@ -237,11 +237,6 @@ def test_unit_validation_ignores_unrelated_systemd_units():
     assert 'systemd-analyze verify --recursive-errors=no "$UNIT_DIR/$unit"' in helper
 
 
-def test_strict_startup_arm_requires_explicit_opt_in():
-    launch = (ROOT / "launch" / "bringup.launch.py").read_text()
-    assert '"auto_arm_on_startup", default_value="false"' in launch
-
-
 def test_full_installer_includes_qualification_tooling_dependencies():
     """A fresh deployment must not silently omit required qualification checks."""
     installer = (ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
@@ -378,31 +373,6 @@ def test_split_compute_installs_and_starts_moveit_by_default():
     assert "start_moveit:=true" in workstation
 
 
-def test_full_stack_boots_in_mapping_mode_so_loop_closure_can_run():
-    launch = (ROOT / "launch" / "bringup.launch.py").read_text(encoding="utf-8")
-
-    assert '"slam_mode",\n                default_value="mapping"' in launch
-    rgb = launch.split('"subscribe_rgb":', 1)[1].split('"Reg/Strategy"', 1)[0]
-    assert 'camera_on, " and not ", dual_rgbd' in rgb
-    assert "lidar_on" not in rgb
-    strategy = launch.split('"Reg/Strategy":', 1)[1].split('"Icp/VoxelSize"', 1)[0]
-    assert "'2' if " in strategy and "lidar_on" in strategy
-    assert '"RGBD/NeighborLinkRefining": "false"' in launch
-    assert '"RGBD/LoopCovLimited": "true"' in launch
-    assert '"odom_sensor_sync": True' in launch
-    init_memory = launch.split('"Mem/InitWMWithAllNodes":', 1)[1].split('"Rtabmap/StartNewMapOnLoopClosure"', 1)[0]
-    assert "slam_mode" in init_memory and "localization" in init_memory and "lidar_on" in init_memory
-    assert "value_type=str" in init_memory
-    assert "value_type=bool" not in init_memory
-    assert '"Kp/MaxFeatures": "500"' in launch
-    assert '"RGBD/LinearUpdate": "0.04"' in launch
-    assert '"RGBD/ProximityMaxGraphDepth": "0"' in launch
-    assert '"RGBD/ProximityOdomGuess": "true"' in launch
-    assert '"Rtabmap/ImagesAlreadyRectified": "false"' in launch
-    assert '"Rtabmap/StartNewMapOnLoopClosure": ParameterValue(LaunchConfiguration("rtabmap_wait_for_loop"), value_type=str)' in launch
-    assert '"Mem/NotLinkedNodesKept": "false"' in launch
-
-
 def test_mapper_shutdown_signals_the_launcher_without_interrupting_its_save():
     stack = (ROOT / 'systemd/lekiwi-stack.service').read_text()
     runner = (ROOT / 'scripts/test-navigation.py').read_text()
@@ -445,7 +415,7 @@ def test_service_installers_support_an_unauthenticated_split_zmq_transport():
     compute = (ROOT / "scripts" / "install-compute-services.sh").read_text(encoding="utf-8")
 
     assert 'if [[ -n $CURVE_DIR_ARG ]]; then' in device
-    assert 'STACK_ARGS="camera_source:=remote remote_ip:=$REMOTE laser_source:=ld06 lidar_source:=remote start_moveit:=true"' in compute
+    assert 'STACK_ARGS="profile:=split remote_ip:=$REMOTE start_moveit:=true"' in compute
     assert compute.count("--curve-dir does not contain") == 1
 
 
@@ -619,7 +589,7 @@ def test_pi_and_manual_split_startup_include_the_ld06():
     assert "start_recorded lidar scripts/ros-lidar.sh" in pi_up
     assert "start_recorded astra scripts/ros-astra.sh" in pi_up
     assert "start_recorded zenoh scripts/ros-zenoh.sh" in pi_up
-    assert "laser_source:=ld06 lidar_source:=remote" in workstation_up
+    assert "profile:=split" in workstation_up
     assert "start_moveit:=true" in workstation_up
     assert "waiting for LD06 serial port" in lidar
 

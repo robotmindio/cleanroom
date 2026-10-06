@@ -153,7 +153,7 @@ class LocalArmExecutor:
         if self.status["state"] == "aborted":
             self.hold = {f"{name}.pos": observation[f"{name}.pos"] for name in ARM_JOINTS}
         else:
-            # Match the driver's small-boundary recovery clamp.
+            # A measured start beyond a joint bound may recover inward; every setpoint stays bounded.
             bounded = {name: min(JOINT_LIMITS[name][1], max(JOINT_LIMITS[name][0], value))
                        for name, value in positions.items()}
             self.hold.update({f"{name}.pos": value for name, value in action_positions(

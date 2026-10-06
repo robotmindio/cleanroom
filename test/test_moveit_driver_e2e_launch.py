@@ -103,7 +103,6 @@ def generate_test_description():
         output="screen",
         parameters=[{
             "remote_ip": "127.0.0.1",
-            "local_arm_execution": True,
             "remote_command_port": fake_host.command_endpoint_port,
             "remote_observation_port": fake_host.observation_endpoint_port,
             "torque_control_port": fake_host.torque_endpoint_port,
