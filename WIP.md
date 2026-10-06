@@ -21,3 +21,6 @@ re-arm behavior. No live deployment has been performed.
   Staging success/failure and activation regressions passed.
 - Verified: device-only package build and all 15 tests passed; compute rebuild,
   sealed-release guards, migration settings, and MoveIt integration passed.
+- Verified: real isolated device staging built sensor drivers, passed all 15
+  tests, and sealed/verified its artifact manifest. The real compute native
+  overlay and sensor drivers built successfully; package/qualification is next.

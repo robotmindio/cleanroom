@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # Deploy one pushed revision to the compute machine and its remote device host.
+# Parse the complete command group before long builds; edits to this caller
+# checkout must not change the running deployment sequence.
+{
 set -Eeuo pipefail
 
 usage() {
@@ -485,3 +488,5 @@ if [[ ${LEKIWI_DISARM_ON_FAILURE:-false} != true ]]; then
   fi
 fi
 echo "deployed ${target:0:12} to compute and $device; $outcome"
+exit
+}

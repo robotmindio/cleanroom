@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # Build and test a detached, persistent release without changing live paths.
+# Parse all commands before building: Bash otherwise rereads an edited caller
+# file at its old offset when a long-running child returns.
+{
 set -Eeuo pipefail
 umask 077
 export GIT_TERMINAL_PROMPT=0
@@ -82,3 +85,5 @@ mapfile -t shell_scripts < <(find "$release/source/scripts" -type f \( -name '*.
 shellcheck "${shell_scripts[@]}"
 ctest --test-dir "$release/build/lekiwi_rmf" --output-on-failure --output-junit "$release/build/lekiwi_rmf/release-ctest.xml"
 /usr/bin/python3 "$release/source/scripts/check-release.py" seal "$release" "$revision" "$role"
+exit
+}

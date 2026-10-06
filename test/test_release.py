@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import time
 
 import pytest
 
@@ -144,6 +145,34 @@ def test_staging_clones_only_the_materialized_vendor_revision(tmp_path):
     result = subprocess.run(["bash", str(repo / "scripts/stage-release.sh"), "compute", str(workspace), revision],
                             env=environment, text=True, capture_output=True, timeout=30)
     assert result.returncode == 0, result.stdout + result.stderr
+    assert (workspace / "releases" / revision / "release.json").is_file()
+
+
+def test_staging_finishes_its_original_commands_when_the_caller_file_changes(tmp_path):
+    repo, workspace, _, environment = release_fixture(tmp_path)
+    builder = repo / "scripts/build-native.sh"
+    builder.write_text(builder.read_text() + '''
+touch "$LEKIWI_TEST_ENTERED"
+while [[ ! -e $LEKIWI_TEST_CONTINUE ]]; do sleep 0.01; done
+''')
+    for args in (("add", "scripts/build-native.sh"), ("commit", "-m", "blocking build")):
+        subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+    revision = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
+    entered, resume = tmp_path / "entered", tmp_path / "resume"
+    script = repo / "scripts/stage-release.sh"
+    process = subprocess.Popen(["bash", str(script), "compute", str(workspace), revision],
+                               env={**environment, "LEKIWI_TEST_ENTERED": str(entered), "LEKIWI_TEST_CONTINUE": str(resume)},
+                               text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        deadline = time.monotonic() + 5
+        while not entered.exists() and process.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert entered.exists()
+        script.write_text("exit 99\n" * 10000)
+    finally:
+        resume.touch()
+        stdout, stderr = process.communicate(timeout=30)
+    assert process.returncode == 0, stdout + stderr
     assert (workspace / "releases" / revision / "release.json").is_file()
 
 
