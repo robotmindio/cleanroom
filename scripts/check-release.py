@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import stat
 import subprocess
 import xml.etree.ElementTree as ET
 
@@ -21,7 +22,7 @@ def inventory(release, role):
         raise ValueError("release source is dirty")
     tracked = subprocess.check_output(["git", "-C", str(source), "ls-files", "-z"]).decode().split("\0")
     sources = {name: digest(source / name) for name in tracked if name}
-    installed = {str(path.relative_to(release)): digest(path)
+    installed = {str(path.relative_to(release)): {"sha256": digest(path), "mode": stat.S_IMODE(path.stat().st_mode)}
                  for path in sorted((release / "install").rglob("*"))
                  if path.is_file() and "__pycache__" not in path.parts and path.suffix not in (".pyc", ".pyo")}
     if not installed or not (release / "install/lekiwi_rmf/share/lekiwi_rmf/package.xml").is_file():
@@ -53,11 +54,22 @@ def inventory(release, role):
         case.find(tag) is not None for case in cases for tag in ("failure", "error", "skipped")
     ) or len(cases) != len(expected):
         raise ValueError("release qualification requires every source test selected for this role to pass")
+    python_tests = {f"test_{path.name}" if path.name.endswith("_launch.py") else path.stem
+                    for path in (source / "test").glob("test_*.py")} & expected
+    for name in sorted(python_tests):
+        path = release / "build/lekiwi_rmf/test_results/lekiwi_rmf" / f"{name}.xunit.xml"
+        if not path.is_file():
+            raise ValueError(f"release qualification is missing Python test evidence: {name}")
+        result = ET.parse(path).getroot()
+        if not list(result.iter("testcase")) or any(
+            list(result.iter(tag)) for tag in ("failure", "error", "skipped")
+        ):
+            raise ValueError(f"release qualification requires every Python test case to pass: {name}")
     evidence = {str(path.relative_to(release)): digest(path)
                 for path in sorted((release / "build/lekiwi_rmf/test_results").rglob("*.xml"))}
     evidence[str(report.relative_to(release))] = digest(report)
     settings = source / ".env"
-    return {"schema_version": 1, "revision": revision, "source": sources,
+    return {"schema_version": 2, "revision": revision, "source": sources,
             "install": installed, "test_results": evidence,
             "settings": digest(settings) if settings.is_file() else None}
 

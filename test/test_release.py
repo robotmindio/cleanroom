@@ -74,6 +74,8 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 printf '<testsuite><testcase name="test_example"/></testsuite>' > "$report"
+mkdir -p "${report%/*}/test_results/lekiwi_rmf"
+printf '<testsuite><testcase name="test_example"/></testsuite>' > "${report%/*}/test_results/lekiwi_rmf/test_example.xunit.xml"
 ''')
     for args in (("init",), ("config", "user.name", "Test"),
                  ("config", "user.email", "test@example.invalid"), ("add", "."), ("commit", "-m", "fixture")):
@@ -107,6 +109,11 @@ def test_staging_keeps_live_source_artifacts_and_pointer_unchanged(tmp_path, fai
         cache.parent.mkdir()
         cache.write_bytes(b"runtime cache")
         assert subprocess.run(command, env=environment, capture_output=True, timeout=30).returncode == 0
+        package = release / "install/lekiwi_rmf/share/lekiwi_rmf/package.xml"
+        mode = package.stat().st_mode & 0o7777
+        package.chmod(mode ^ 0o111)
+        assert subprocess.run(command, env=environment, capture_output=True, timeout=30).returncode != 0
+        package.chmod(mode)
         (release / "install/lekiwi_rmf/share/lekiwi_rmf/package.xml").write_text("changed")
         assert subprocess.run(command, env=environment, capture_output=True, timeout=30).returncode != 0
 
@@ -120,10 +127,21 @@ def test_release_sealing_refuses_failed_or_missing_source_tests(tmp_path):
     spec.loader.exec_module(checker)
     release = workspace / "releases" / revision
     report = release / "build/lekiwi_rmf/release-ctest.xml"
+    original = report.read_text()
     for contents in ("<testsuite/>", '<testsuite><testcase name="test_example"><failure/></testcase></testsuite>'):
         report.write_text(contents)
         with pytest.raises(ValueError, match="every source test"):
             checker.check_release(release, revision, "compute")
+    report.write_text(original)
+    individual = release / "build/lekiwi_rmf/test_results/lekiwi_rmf/test_example.xunit.xml"
+    for contents in ("<testsuite/>", '<testsuite><testcase name="test_example"><skipped/></testcase></testsuite>',
+                     '<testsuite><testcase name="test_example"><failure/></testcase></testsuite>'):
+        individual.write_text(contents)
+        with pytest.raises(ValueError, match="every Python test case"):
+            checker.check_release(release, revision, "compute")
+    individual.unlink()
+    with pytest.raises(ValueError, match="missing Python test evidence"):
+        checker.check_release(release, revision, "compute")
 
 
 def test_staging_clones_only_the_materialized_vendor_revision(tmp_path):
