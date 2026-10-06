@@ -6,6 +6,7 @@ import re
 import sys
 
 import pytest
+import yaml
 
 
 ROOT = Path(__file__).parents[1]
@@ -31,6 +32,37 @@ Total Tests: 2
     assert qualification.ctest_names(output) == {
         "test_odometry", "test_test_moveit_driver_e2e_launch.py"
     }
+
+
+def test_timed_out_command_preserves_partial_output(tmp_path):
+    qualification = _load()
+    (tmp_path / "commands").mkdir()
+    result = qualification.run_command(
+        tmp_path, "timeout", [sys.executable, "-u", "-c",
+                              "import time; print('partial output'); time.sleep(10)"],
+        timeout=0.5,
+    )
+    assert not result.passed and result.returncode is None
+    assert "partial output" in (tmp_path / result.log).read_text()
+    assert "command timed out" in (tmp_path / result.log).read_text()
+
+
+@pytest.mark.parametrize("physical_accepted", [False, True])
+def test_simulation_guards_are_independent_of_physical_acceptance(tmp_path, monkeypatch, physical_accepted):
+    qualification = _load()
+    monkeypatch.setattr(qualification, "ROOT", tmp_path)
+    (tmp_path / "config").mkdir()
+    (tmp_path / "commands").mkdir()
+    (tmp_path / "config/safety_acceptance.yaml").write_text(f"validated: {physical_accepted}\n")
+    profile = yaml.safe_load((ROOT / "config/safety_simulation.yaml").read_text())
+    path = tmp_path / "config/safety_simulation.yaml"
+    path.write_text(yaml.safe_dump(profile))
+    assert qualification.simulation_safety_result(tmp_path).passed
+    profile["safety_supervisor"]["ros__parameters"]["require_depth"] = False
+    path.write_text(yaml.safe_dump(profile))
+    assert not qualification.simulation_safety_result(tmp_path).passed
+    path.write_text("[invalid YAML")
+    assert not qualification.simulation_safety_result(tmp_path).passed
 
 
 def test_configured_python_uses_build_cache(tmp_path):

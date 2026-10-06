@@ -6,7 +6,6 @@ temporary MoveIt collision object and verifies the real arm rejects a goal.
 Neither case edits named poses, collision padding or physical acceptance.
 """
 import argparse
-import json
 import math
 from pathlib import Path
 import runpy
@@ -124,7 +123,8 @@ class Gates(nav['Test']):
                     if result.result().status == 4:
                         raise RuntimeError('arm action succeeded with a confirmed collision')
                 end = time.monotonic()+1
-                while time.monotonic()<end:self.tick(Twist(),check=False)
+                while time.monotonic()<end:
+                    self.tick(Twist(),check=False)
                 delta = max(abs(p-before[n]) for n,p in zip(self.joints.name,self.joints.position))
                 if delta>.02:
                     raise RuntimeError('arm moved during the collision gate test')

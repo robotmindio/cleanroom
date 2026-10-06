@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # Deploy one pushed revision to the compute machine and its remote device host.
+# Parse the complete command group before long builds; edits to this caller
+# checkout must not change the running deployment sequence.
+{
 set -Eeuo pipefail
 
 usage() {
@@ -55,6 +58,10 @@ remote_home=$("${ssh_command[@]}" 'printf %s "$HOME"') || die "cannot reach $dev
 for path in "$workspace" "$remote_home" "$remote_repo" "$remote_workspace"; do
   [[ $path =~ ^/[A-Za-z0-9._/-]+$ ]] || die "deployment paths must be absolute and contain no whitespace: $path"
 done
+workspace=$(realpath -e "$workspace") || die "local workspace not found"
+remote_workspace=$("${ssh_command[@]}" realpath -e "$remote_workspace") || die "device workspace not found"
+[[ $workspace =~ ^/[A-Za-z0-9._/-]+$ && $remote_workspace =~ ^/[A-Za-z0-9._/-]+$ ]] || \
+  die "resolved workspace paths must contain no whitespace"
 
 require_clean() { # require_clean <repository> [description]
   local repository=$1 description=${2:-$1}
@@ -81,6 +88,7 @@ transfer_device_revision() (
 )
 ros_setup() {
   export LEKIWI_WS=$workspace
+  [[ ! -L $workspace/current ]] || export LEKIWI_WS=$workspace/current
   set +u
   # shellcheck source=/dev/null
   source "$project_root/scripts/setup.bash"
@@ -122,14 +130,31 @@ has_nopasswd_systemctl() { # has_nopasswd_systemctl <sudo -l output> <action> <u
 }
 refresh_compute_service() {
   log "Refreshing stale compute service configuration"
-  # --no-start: the stack is stopped here and starts after both builds below.
-  LEKIWI_ROBOT_HOST=${device#*@} LEKIWI_WS=$workspace \
-    "$project_root/scripts/reinstall-compute.sh" --no-start
+  local setting curve_directory
+  local installer_args=(--no-start) stack_arguments=()
+  read -r -a stack_arguments <<<"$(sed -n 's/^LEKIWI_STACK_ARGS=//p' /etc/default/lekiwi-stack)"
+  for setting in "${stack_arguments[@]}"; do
+    if [[ $setting == curve_client_secret_key_file:=* ]]; then
+      curve_directory=${setting#*=}
+      [[ $curve_directory == */clients/driver.key_secret ]] || die "unexpected compute CURVE key path"
+      curve_directory=${curve_directory%/clients/driver.key_secret}
+      [[ $curve_directory =~ ^/[A-Za-z0-9._/-]+$ ]] || die "invalid compute CURVE directory"
+      installer_args+=(--curve-dir "$curve_directory")
+    fi
+  done
+  if grep -Fq 'start_rosbridge:=true' /etc/default/lekiwi-stack &&
+     grep -Fq 'rosbridge_address:=' /etc/default/lekiwi-stack; then
+    installer_args+=(--rosbridge-tailnet)
+  fi
+  # The stack is stopped here; preserve its optional tailnet access on migration.
+  LEKIWI_ROBOT_HOST=${device#*@} LEKIWI_WS=$compute_current \
+    "$compute_current/source/scripts/reinstall-compute.sh" "${installer_args[@]}"
 }
 compute_configuration_current() {
   grep -Fq "remote_ip:=$device_address" /etc/default/lekiwi-stack &&
     grep -Fq 'laser_source:=ld06 lidar_source:=remote' /etc/default/lekiwi-stack &&
-    [[ $(cat "$service_marker" 2>/dev/null || true) == "$expected_service_fingerprint" ]]
+    [[ $(cat "$service_marker" 2>/dev/null || true) == "$expected_service_fingerprint" &&
+       $(systemctl show -P WorkingDirectory lekiwi-stack.service) == "$workspace/current/source" ]]
 }
 compute_tls_current() {
   local file
@@ -154,35 +179,35 @@ require_clean "$project_root" "local repository"
 branch=$(git -C "$project_root" symbolic-ref --quiet --short HEAD) || die "local repository must be on a branch"
 timeout 30 git -C "$project_root" fetch --quiet origin || die "cannot fetch origin within 30 seconds"
 upstream=$(git -C "$project_root" rev-parse --verify '@{upstream}') || die "$branch has no upstream"
-before=$(git -C "$project_root" rev-parse HEAD)
-git -C "$project_root" merge --ff-only "$upstream"
-if [[ $before != $(git -C "$project_root" rev-parse HEAD) && ${LEKIWI_DEPLOY_REFRESHED:-} != 1 ]]; then
-  export LEKIWI_DEPLOY_REFRESHED=1
-  exec "$project_root/scripts/deploy-split.sh" "${original_args[@]}"
-fi
-require_clean "$project_root" "updated local repository"
 target=$(git -C "$project_root" rev-parse HEAD)
-[[ $target == $(git -C "$project_root" rev-parse '@{upstream}') ]] || die "local HEAD is not the pushed upstream revision"
+[[ $target == "$upstream" ]] || die "local HEAD is not the pushed upstream revision"
 
-"${ssh_command[@]}" test -d "$remote_repo/.git" || die "remote repository not found: $remote_repo"
+"${ssh_command[@]}" git -C "$remote_repo" rev-parse --git-dir >/dev/null || die "remote repository not found: $remote_repo"
 [[ -z $("${ssh_command[@]}" git -C "$remote_repo" status --porcelain) ]] || \
   die "remote repository has uncommitted or untracked files"
-remote_branch=$("${ssh_command[@]}" git -C "$remote_repo" symbolic-ref --quiet --short HEAD) || \
-  die "remote repository must be on a branch"
-[[ $remote_branch == "$branch" ]] || die "branch mismatch: local $branch, device $remote_branch"
 if ! "${ssh_command[@]}" timeout 30 git -C "$remote_repo" fetch --quiet origin; then
   log "Device origin fetch failed; transferring the pushed revision over SSH"
   transfer_device_revision
 fi
-"${ssh_command[@]}" git -C "$remote_repo" merge --ff-only "$target"
-[[ $("${ssh_command[@]}" git -C "$remote_repo" rev-parse HEAD) == "$target" ]] || \
-  die "device did not reach revision $target"
+"${ssh_command[@]}" git -C "$remote_repo" cat-file -e "$target^{commit}" || \
+  die "device does not have revision $target"
+compute_release=$workspace/releases/$target
+device_release=$remote_workspace/releases/$target
+compute_current=$workspace/current
+device_current=$remote_workspace/current
+[[ ! -e $compute_current || -L $compute_current ]] || die "release pointer is not a symlink: $compute_current"
+"${ssh_command[@]}" "test ! -e '$device_current' || test -L '$device_current'" || \
+  die "device release pointer is not a symlink"
 
 [[ -d $workspace/install ]] || die "local workspace is not installed: $workspace"
 "${ssh_command[@]}" test -d "$remote_workspace/install" || \
   die "device workspace is not installed: $remote_workspace"
 /usr/bin/systemctl cat lekiwi-stack.service >/dev/null 2>&1 || die "lekiwi-stack.service is not installed"
 remote_unit_exists lekiwi-host.service || die "lekiwi-host.service is not installed"
+[[ $(systemctl show -P User lekiwi-stack.service) == "$(id -un)" ]] || \
+  die "run deployment as the compute service account"
+[[ $("${ssh_command[@]}" systemctl show -P User lekiwi-host.service) == $("${ssh_command[@]}" id -un) ]] || \
+  die "connect as the device service account"
 for unit in lekiwi-lidar.service lekiwi-zenoh.service; do
   remote_unit_exists "$unit" || \
     die "$unit is not installed; rerun scripts/install-device-services.sh on $device"
@@ -253,7 +278,8 @@ if [[ $remote_is_pi5 == true ]]; then
 fi
 expected_device_service_fingerprint=$(service_fingerprint device) || die "cannot calculate device service configuration fingerprint"
 refresh_device=false
-if [[ $("${ssh_command[@]}" "cat '$remote_service_marker' 2>/dev/null || true") != "$expected_device_service_fingerprint" ]]; then
+if [[ $("${ssh_command[@]}" "cat '$remote_service_marker' 2>/dev/null || true") != "$expected_device_service_fingerprint" ||
+      $("${ssh_command[@]}" systemctl show -P WorkingDirectory lekiwi-host.service) != "$device_current/source" ]]; then
   refresh_device=true
   if ! "${ssh_command[@]}" sudo -n true 2>/dev/null; then
     [[ -t 0 ]] || die "device service refresh needs an interactive terminal for sudo"
@@ -284,43 +310,51 @@ fi
 
 marker=$logs/deployed-revision
 remote_marker=$remote_home/.ros/lekiwi/deployed-revision
-workspace_revision() { cat "$1/install/lekiwi_rmf/.lekiwi-source-revision" 2>/dev/null || true; }
-remote_workspace_revision() {
-  "${ssh_command[@]}" "cat '$remote_workspace/install/lekiwi_rmf/.lekiwi-source-revision' 2>/dev/null || true"
+verify_release() {
+  [[ $(readlink -f "$compute_current") == "$compute_release" ]] &&
+    [[ $("${ssh_command[@]}" readlink -f "$device_current") == "$device_release" ]] &&
+    /usr/bin/python3 "$compute_release/source/scripts/check-release.py" verify "$compute_release" "$target" compute &&
+    "${ssh_command[@]}" /usr/bin/python3 "$device_release/source/scripts/check-release.py" verify "$device_release" "$target" device
 }
-if [[ $refresh_compute == false && $refresh_device == false && \
-      $(cat "$marker" 2>/dev/null || true) == "$target" && \
-      $("${ssh_command[@]}" "cat '$remote_marker' 2>/dev/null || true") == "$target" && \
-      $(workspace_revision "$workspace") == "$target" && \
-      $(cat "$workspace/install/.lekiwi-native-revision" 2>/dev/null || true) == "$target" && \
-      -s $workspace/install/rclcpp/lib/librclcpp.so && \
-      -s $workspace/install/class_loader/lib/libclass_loader.so && \
-      -x $workspace/install/nav2_lifecycle_manager/lib/nav2_lifecycle_manager/lifecycle_manager &&
-      -s $workspace/install/rviz_ogre_vendor/opt/rviz_ogre_vendor/lib/OGRE/RenderSystem_GL.so && \
-      $(remote_workspace_revision) == "$target" ]] && \
-    /usr/bin/systemctl is-active --quiet lekiwi-stack.service && \
-    remote_unit_active_all "${device_units[@]}"; then
-  echo "already deployed ${target:0:12}; services and both workspaces are current"
+if [[ $refresh_compute == false && $refresh_device == false &&
+      -L $compute_current && $(readlink -f "$compute_current") == "$compute_release" &&
+      $("${ssh_command[@]}" readlink -f "$device_current") == "$device_release" &&
+      $(cat "$marker" 2>/dev/null || true) == "$target" &&
+      $("${ssh_command[@]}" "cat '$remote_marker' 2>/dev/null || true") == "$target" ]] &&
+    /usr/bin/systemctl is-active --quiet lekiwi-stack.service &&
+    remote_unit_active_all "${device_units[@]}" && verify_release; then
+  echo "already deployed ${target:0:12}; services and sealed releases are current"
   exit 0
 fi
 
 /usr/bin/systemctl is-active --quiet lekiwi-stack.service || die "lekiwi-stack.service must be running before deployment"
 remote_unit_active lekiwi-host.service || die "lekiwi-host.service must be running before deployment"
 
-# Build at low CPU priority before torque-off. This shortens the unsupported-arm
-# interval, and a build failure leaves the running services untouched.
-log "Building revision ${target:0:12} on the device"
-"${ssh_command[@]}" nice -n 10 env LEKIWI_WS="$remote_workspace" "$remote_repo/scripts/build-lekiwi.sh"
-log "Building revision ${target:0:12} on compute"
-nice -n 10 env LEKIWI_WS="$workspace" "$project_root/scripts/build-native.sh"
-nice -n 10 env LEKIWI_WS="$workspace" "$project_root/scripts/build-lekiwi.sh"
+# Build and qualify persistent detached worktrees before touching live services.
+# A staging failure leaves both the active source and install prefixes unchanged.
+log "Staging revision ${target:0:12} on the device"
+# The anchor checkout stays on its existing revision. Run the pushed staging tool
+# from compute so initial migration does not require updating live device source.
+"${ssh_command[@]}" nice -n 10 bash -s -- device "$remote_workspace" "$target" "$remote_repo" < "$project_root/scripts/stage-release.sh"
+log "Staging revision ${target:0:12} on compute"
+nice -n 10 "$project_root/scripts/stage-release.sh" compute "$workspace" "$target"
+/usr/bin/python3 "$compute_release/source/scripts/check-release.py" verify "$compute_release" "$target" compute
+"${ssh_command[@]}" /usr/bin/python3 "$device_release/source/scripts/check-release.py" verify "$device_release" "$target" device
+load_lekiwi_env "$compute_release/source/.env"
 
-on_exit() {
-  local code=$?
-  echo "$0: deployment stopped safely; services are not automatically rolled back or resumed" >&2
-  return "$code"
+activate_release() { # activate_release <workspace> <release>, only after services stop
+  local root=$1 release=$2 previous temporary=$1/.current-$$
+  [[ ! -e $root/previous || -L $root/previous ]] || return 1
+  previous=$(readlink -f "$root/current" 2>/dev/null || true)
+  if [[ -L $root/current && $previous != "$release" ]]; then
+    ln -s "$previous" "$root/.previous-$$"
+    mv -Tf "$root/.previous-$$" "$root/previous"
+  fi
+  ln -s "$release" "$temporary"
+  mv -Tf "$temporary" "$root/current"
 }
-trap on_exit EXIT
+
+trap 'echo "$0: deployment failed; previous releases and bootstrap installation are retained; no automatic rollback or resume" >&2' EXIT
 
 log "Confirming torque-off and stopping the compute stack"
 ros_setup
@@ -350,10 +384,6 @@ if [[ $pi_reboot_needed == true ]]; then
   [[ $("${ssh_command[@]}" vcgencmd get_config usb_max_current_enable) == usb_max_current_enable=1 ]] || \
     die "Pi USB current setting did not apply after reboot"
 fi
-if [[ $refresh_compute == true ]]; then
-  refresh_compute_service
-  verify_compute_configuration
-fi
 
 log "Stopping device services"
 for unit in lekiwi-cameras.service lekiwi-astra.service lekiwi-lidar.service lekiwi-zenoh.service lekiwi-host.service; do
@@ -362,10 +392,18 @@ for unit in lekiwi-cameras.service lekiwi-astra.service lekiwi-lidar.service lek
   fi
 done
 
+log "Selecting the qualified releases while both stacks are stopped"
+activate_release "$workspace" "$compute_release"
+"${ssh_command[@]}" bash -se < <(declare -f activate_release; printf 'activate_release %q %q\n' "$remote_workspace" "$device_release")
+if [[ $refresh_compute == true ]]; then
+  refresh_compute_service
+  verify_compute_configuration
+fi
+
 if [[ $refresh_device == true ]]; then
   log "Refreshing stale device service configuration"
-  remote_installer=("$remote_repo/scripts/install-device-services.sh" --service-user "$remote_service_user" \
-    --workspace "$remote_workspace" --lerobot-venv "$remote_lerobot_venv" \
+  remote_installer=("$device_current/source/scripts/install-device-services.sh" --service-user "$remote_service_user" \
+    --workspace "$device_current" --lerobot-venv "$remote_lerobot_venv" \
     --bind-address "$remote_bind_address" --no-start)
   [[ -z $remote_curve_dir ]] || remote_installer+=(--curve-dir "$remote_curve_dir")
   if "${ssh_command[@]}" sudo -n true 2>/dev/null; then
@@ -429,11 +467,10 @@ lidar_frame=$(timeout 30 ros2 topic echo --once --field header.frame_id /scan | 
   die "device LD06 scan did not reach compute"
 [[ $lidar_frame == laser ]] || die "canonical /scan is not the LD06 frame: $lidar_frame"
 
+verify_release || die "qualified release changed during deployment"
 log "Recording the verified deployment revision"
 printf '%s\n' "$target" > "$marker"
 "${ssh_command[@]}" "mkdir -p '$remote_home/.ros/lekiwi' && printf '%s\\n' '$target' > '$remote_marker'"
-[[ $("${ssh_command[@]}" git -C "$remote_repo" rev-parse HEAD) == "$target" ]] || \
-  die "device revision changed during deployment"
 trap - EXIT
 # The verification above left the driver deliberately disarmed. A domestic robot stays
 # armed, so arm it again; only LEKIWI_DISARM_ON_FAILURE=true keeps it disarmed for an operator.
@@ -446,3 +483,5 @@ if [[ ${LEKIWI_DISARM_ON_FAILURE:-false} != true ]]; then
   fi
 fi
 echo "deployed ${target:0:12} to compute and $device; $outcome"
+exit
+}

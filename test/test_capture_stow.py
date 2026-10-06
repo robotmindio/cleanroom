@@ -15,8 +15,9 @@ SPEC.loader.exec_module(capture)
 
 def test_both_files_receive_the_same_pose_and_keep_their_comments():
     stow = dict(zip(capture.STOW_JOINTS, (0.1, -1.5708, 1.4, 0.95, -0.02, 0.3)))
+    original = (ROOT / "config/safety_production.yaml").read_text(encoding="utf-8")
     production, acceptance = capture.write_stow(
-        (ROOT / "config/safety_production.yaml").read_text(encoding="utf-8"),
+        original,
         (ROOT / "config/safety_acceptance.yaml").read_text(encoding="utf-8")
         .replace("validated: false", "validated: true")
         .replace("validated_at: null", 'validated_at: "2026-09-30"'),
@@ -26,7 +27,9 @@ def test_both_files_receive_the_same_pose_and_keep_their_comments():
     configured = dict(zip(params["stow_joint_names"], params["stow_joint_positions"]))
     accepted = yaml.safe_load(acceptance)["accepted_stow_joint_positions"]
     assert configured == accepted == stow
-    assert "Physically set compact fold" in production
+    assert [line for line in original.splitlines() if line.lstrip().startswith("#")] == [
+        line for line in production.splitlines() if line.lstrip().startswith("#")
+    ]
     assert yaml.safe_load(acceptance)["validated"] is False
     assert yaml.safe_load(acceptance)["validated_at"] is None
 

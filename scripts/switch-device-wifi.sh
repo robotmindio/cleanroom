@@ -20,10 +20,10 @@ else
   target=$(nmcli -g connection.uuid connection show "$profile")
 fi
 priority=$(nmcli -g connection.autoconnect-priority connection show uuid "$original")
-[[ $priority =~ ^-?(0|[1-9][0-9]{0,2})$ ]] && (( priority >= -999 && priority < 999 )) || {
+if [[ ! $priority =~ ^-?(0|[1-9][0-9]{0,2})$ ]] || (( priority < -999 || priority >= 999 )); then
   echo 'original Wi-Fi priority must be between -999 and 998 to prefer 5 GHz' >&2
   exit 1
-}
+fi
 nmcli connection modify uuid "$target" 802-11-wireless.ssid "$ssid" \
   802-11-wireless.band a 802-11-wireless.bssid "" 802-11-wireless.channel "" \
   802-11-wireless.powersave 2 connection.autoconnect-priority "$((priority + 1))"

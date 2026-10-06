@@ -122,14 +122,14 @@ system's numpy — 1.26 on Jazzy/Ubuntu 24.04. That mismatch does not merely war
 | Venv | numpy | Holds | Used by |
 | --- | --- | --- | --- |
 | `.venv` | 1.26 | zenoh, pycdr2, nudged, rosbags, transforms3d | Everything ROS; `scripts/setup.bash` activates it |
-| `.venv-lerobot` | 2.2 | lerobot + feetech/pyzmq | LeRobot CLIs and the hardware driver only |
+| `.venv-lerobot` | 2.2 | lerobot + feetech/pyzmq | LeRobot CLIs and the motor host only |
 
 **For every command in this document, activate the LeRobot venv — never
 `scripts/setup.bash`, which activates the ROS one and has no `lerobot` in it.**
 
-`bringup.launch.py` handles this itself for `mode:=real`: it puts
-`.venv-lerobot/bin` on the driver node's PATH, so the driver runs against numpy 2
-while every other node keeps numpy 1.26.
+The ROS driver runs in the ROS environment and communicates over ZMQ.
+`robot-host.sh` runs the motor host in the LeRobot environment; LeRobot never
+imports into the ROS process.
 
 Two extras are deliberately **not** installed, because they cost hundreds of
 megabytes and only matter for dataset work:

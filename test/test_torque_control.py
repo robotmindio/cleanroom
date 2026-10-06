@@ -271,7 +271,7 @@ class _Again(Exception):
     pass
 
 
-def _host_module(monkeypatch):
+def _host_module(monkeypatch, filename=None):
     fake_zmq = types.SimpleNamespace(
         Again=_Again, NOBLOCK=1, REP=4, PULL=7, PUSH=8, LINGER=17, CONFLATE=54, SNDHWM=23,
         HEARTBEAT_IVL=75, HEARTBEAT_TIMEOUT=77, MAXMSGSIZE=22,
@@ -311,11 +311,29 @@ def _host_module(monkeypatch):
     for name, module in modules.items():
         monkeypatch.setitem(sys.modules, name, module)
     spec = importlib.util.spec_from_file_location(
-        "torque_host", pathlib.Path(__file__).parents[1] / "scripts" / "torque-host.py",
+        "torque_host", filename or pathlib.Path(__file__).parents[1] / "scripts" / "torque-host.py",
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+@pytest.mark.parametrize("installed", [False, True])
+def test_host_speed_profile_is_resolved_in_source_and_installed_layouts(monkeypatch, tmp_path, installed):
+    root = pathlib.Path(__file__).parents[1]
+    if installed:
+        filename = tmp_path / "install/lekiwi_rmf/lib/lekiwi_rmf/torque-host.py"
+        profile = tmp_path / "install/lekiwi_rmf/share/lekiwi_rmf/config/nav2_params.yaml"
+    else:
+        filename = tmp_path / "source/scripts/torque-host.py"
+        profile = tmp_path / "source/config/nav2_params.yaml"
+    filename.parent.mkdir(parents=True)
+    profile.parent.mkdir(parents=True)
+    filename.write_text((root / "scripts/torque-host.py").read_text())
+    profile.write_text((root / "config/nav2_params.yaml").read_text())
+    host = _host_module(monkeypatch, filename)
+    assert pathlib.Path(host.TorqueSafetyConfig().nav2_params_file) == profile
+    assert host.load_base_speed_limits(profile) == (0.03, 0.06)
 
 
 class _Bus:
@@ -665,6 +683,7 @@ class _ObservationSocket:
 
 def _loop(host, tmp_path, *, disarm_on_failure=False):
     control, socket, robot, _latch = _control(host, tmp_path)
+    control.config.arm_calibration_file = str(tmp_path / "arm_calibration.json")
     bound = types.SimpleNamespace(
         zmq_cmd_socket=_CommandSocket(), zmq_observation_socket=_ObservationSocket(),
         watchdog_timeout_ms=500, max_loop_freq_hz=30,
@@ -692,14 +711,45 @@ def test_valid_commands_reach_the_robot_and_refresh_the_watchdog(monkeypatch, tm
     loop.control.torque_enabled = True
 
     clock.now += 0.4
-    loop.host.zmq_cmd_socket.messages.append(_action(**{"x.vel": 0.1}))
+    loop.host.zmq_cmd_socket.messages.append(_action(**{"x.vel": 0.01}))
     loop.receive_command()
     clock.now += 0.4
     loop.enforce_watchdog()
 
-    assert robot.actions[0]["x.vel"] == 0.1
+    assert robot.actions[0]["x.vel"] == 0.01
     assert loop.watchdog_active is False
     assert "stop_base" not in robot.bus.calls
+
+
+def test_out_of_envelope_commands_never_reach_motors_or_refresh_watchdog(monkeypatch, tmp_path):
+    host = _host_module(monkeypatch)
+    loop, clock, _socket, robot = _loop(host, tmp_path)
+    loop.control.torque_enabled = True
+    last_command = loop.last_cmd_time
+    clock.now += 0.4
+    for changes in ({"x.vel": 1000000.0}, {"x.vel": 0.03, "y.vel": 0.03},
+                    {"arm_shoulder_pan.pos": 180.0}, {"arm_gripper.pos": 101.0}):
+        loop.host.zmq_cmd_socket.messages.append(_action(**changes))
+        loop.receive_command()
+    assert not robot.actions and loop.last_cmd_time == last_command
+    assert loop.control.torque_enabled
+
+
+def test_host_rejects_a_trajectory_that_changes_its_calibration(monkeypatch, tmp_path):
+    from test_local_arm_executor import setup_executor
+
+    host = _host_module(monkeypatch)
+    loop, _clock, socket, robot = _loop(host, tmp_path)
+    loop.control.torque_enabled = True
+    _executor, _now, _observation, trajectory = setup_executor()
+    trajectory["zeros"]["arm_shoulder_pan"] = 1.0
+    robot.bus.calls.clear()
+    command, reply = _request(loop.control, socket, robot, {
+        "command": "trajectory_start", "session": loop.telemetry_session, "trajectory": trajectory,
+    })
+    assert command is None and not reply["ok"]
+    assert "calibration differs" in reply["error"]
+    assert not robot.actions and not robot.bus.calls
 
 
 def test_real_host_local_goal_holds_through_command_silence(monkeypatch, tmp_path):
@@ -749,9 +799,9 @@ def test_host_keeps_command_loop_fast_and_limits_observation_bandwidth(monkeypat
     loop.control.torque_enabled = True
     commands = loop.host.zmq_cmd_socket.messages
     commands.extend((
-        _action(**{"x.vel": 0.1}),
-        _action(**{"x.vel": 0.2}),
-        _action(**{"x.vel": 0.3}),
+        _action(**{"x.vel": 0.01}),
+        _action(**{"x.vel": 0.02}),
+        _action(**{"x.vel": 0.03}),
     ))
 
     loop.step()
@@ -760,7 +810,7 @@ def test_host_keeps_command_loop_fast_and_limits_observation_bandwidth(monkeypat
     clock.now += host.OBSERVATION_PERIOD_S
     loop.step()
 
-    assert [action["x.vel"] for action in robot.actions] == [0.1, 0.2, 0.3]
+    assert [action["x.vel"] for action in robot.actions] == [0.01, 0.02, 0.03]
     assert len(loop.host.zmq_observation_socket.sent) == 2
 
 

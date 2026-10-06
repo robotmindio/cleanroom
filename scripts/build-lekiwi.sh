@@ -10,6 +10,10 @@ workspace=${LEKIWI_WS:-$HOME/lekiwi_ws}
   exit 1
 }
 die() { echo "$0: $*" >&2; exit 1; }
+build_compute=ON
+if [[ ${1:-} == --device ]]; then build_compute=OFF; shift; fi
+[[ $# == 0 ]] || die "usage: $0 [--device]"
+[[ ! -L $workspace/current && ! -f $workspace/release.json ]] || die "stage a release instead of rebuilding a live or sealed workspace"
 
 # shellcheck source=scripts/thirdparty-common.sh
 source "$project_root/scripts/thirdparty-common.sh"
@@ -18,24 +22,21 @@ base_paths=("$project_root")
 packages=(lekiwi_rmf)
 lidar_source=$workspace/src/ldlidar_stl_ros2
 if [[ -d $lidar_source/.git ]]; then
-  lidar_qos_patch=$project_root/thirdparty/ldlidar_stl_ros2/0002-latest-scan-qos.patch
-  lidar_baud_patch=$project_root/thirdparty/ldlidar_stl_ros2/0003-initialize-ld06-baudrate.patch
-  lidar_timing_patch=$project_root/thirdparty/ldlidar_stl_ros2/0004-acquisition-timestamps.patch
-  apply_pinned_patch "$lidar_source" "$lidar_qos_patch" "the LD06 latest-scan QoS fix"
-  apply_pinned_patch "$lidar_source" "$lidar_baud_patch" "the LD06 baud-rate default fix"
-  apply_pinned_patch "$lidar_source" "$lidar_timing_patch" "the LD06 acquisition timestamp fix"
+  for patch in "$project_root/thirdparty/ldlidar_stl_ros2/"*.patch; do
+    apply_pinned_patch "$lidar_source" "$patch" "the LD06 native fixes"
+  done
   base_paths+=("$lidar_source")
   packages+=(ldlidar_stl_ros2)
 fi
 
 # Rebuild the USB camera driver where it is installed, including device deploys.
 astra_source=$workspace/src/ros2_astra_camera
-if [[ -d $astra_source/.git && -d $workspace/install/astra_camera ]]; then
+if [[ -d $astra_source/.git ]]; then
   for patch in "$project_root/thirdparty/ros2_astra_camera/"*.patch; do
     apply_pinned_patch "$astra_source" "$patch" "the Astra native camera fixes"
   done
-  base_paths+=("$astra_source/astra_camera")
-  packages+=(astra_camera)
+  base_paths+=("$astra_source")
+  packages+=(astra_camera_msgs astra_camera)
 fi
 
 set +u
@@ -69,7 +70,8 @@ colcon --log-base "$workspace/log" build \
   --build-base "$workspace/build" \
   --install-base "$workspace/install" \
   "${parallel_args[@]}" \
-  --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_IGNORE_PREFIX_PATH="$HOME/.local" \
+  --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DLEKIWI_BUILD_COMPUTE="$build_compute" \
+    -DCMAKE_IGNORE_PREFIX_PATH="$HOME/.local" \
     -DPython3_EXECUTABLE=/usr/bin/python3
 
 installed_driver=$workspace/install/lekiwi_rmf/lib/lekiwi_rmf/lekiwi_driver

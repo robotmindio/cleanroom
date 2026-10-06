@@ -13,12 +13,13 @@ scripts/sim-qualification.py \
 The command is intentionally strict: it requires the selected CMake build and
 installed package to come from this checkout, the selected test Python to
 import pyzmq, every expected CTest (including the three pyzmq-dependent tests),
-ShellCheck, static source/default-deny checks, all CTests, and the headless EGL
+ShellCheck, static source and simulation safety-profile checks, all CTests, and the headless EGL
 renderer probe. It writes command output, the exact revision/dirty state, and
 `summary.json` to the output directory, including when a check fails.
 The evidence directory must be outside the source checkout; this preserves the
 revision's clean provenance rather than making the runner's own output a dirty
-change.
+change. Physical acceptance is independent: the runner neither changes the
+physical acceptance record nor requires an existing approval to be revoked.
 
 The runner directly invokes `scripts/moveit-shutdown-probe.py` and keeps its
 revision-bound JSON in the new evidence directory. It puts the selected
