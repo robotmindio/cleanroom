@@ -356,6 +356,8 @@ def test_simulation_installer_excludes_astra_hardware_setup():
     builder = (ROOT / "scripts/build-lekiwi.sh").read_text()
     assert '"$project_root/thirdparty/ros2_astra_camera/"*.patch' in builder
     assert 'packages+=(astra_camera)' in builder
+    assert "/MemAvailable/" in builder
+    assert "/MemTotal/" not in builder
     assert 'Simulation-only installation: skipping Astra driver and udev setup' in installer
 
 

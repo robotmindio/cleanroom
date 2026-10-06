@@ -56,7 +56,9 @@ if [[ -f $cache && $(awk -F= '$1 == "CMAKE_HOME_DIRECTORY:INTERNAL" {print $2}' 
 fi
 
 parallel_args=()
-if (( $(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo) < 8000 )); then
+# Other applications can consume most RAM even on a large compute host.
+# Size the compile batch from available memory to avoid swapping ROS callbacks.
+if (( $(awk '/MemAvailable/ {print int($2/1024)}' /proc/meminfo) < 8000 )); then
   parallel_args=(--parallel-workers 1)
   export MAKEFLAGS=-j1
 fi
