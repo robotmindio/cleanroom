@@ -69,7 +69,8 @@ def generate_test_description():
         output="screen",
     )
     smoke = ExecuteProcess(
-        cmd=["python3", "-m", "lekiwi_rmf.sim_physics_smoke", "--ros-args", "-p", "use_sim_time:=true"],
+        cmd=["python3", str(Path(__file__).with_name("sim_physics_smoke.py")),
+             "--ros-args", "-p", "use_sim_time:=true"],
         output="screen",
     )
     description = launch.LaunchDescription([
