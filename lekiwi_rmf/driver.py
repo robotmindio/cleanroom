@@ -135,6 +135,280 @@ SETTING_PARAMETERS = {
 }
 
 
+@dataclasses.dataclass
+class ArmGoal:
+    """One FollowJointTrajectory goal, executed by the motor host's local executor."""
+
+    host_id: int
+    host_session: str
+    # Monotonic time at which the host starts the first segment.
+    start: float
+    names: tuple = ()
+    start_positions: dict = dataclasses.field(default_factory=dict)
+    points: list = dataclasses.field(default_factory=list)
+    host_elapsed: float = 0.0
+    outcome: str | None = None
+    result_code: int | None = None
+    done: threading.Event = dataclasses.field(default_factory=threading.Event)
+
+    def finish(self, outcome, result_code=None):
+        self.outcome = outcome
+        self.result_code = result_code
+        self.done.set()
+
+
+class ArmTrajectoryBridge:
+    """The arm_controller action: validate goals, upload them to the motor host and
+    report its progress. Arming and permission state stay with the driver, which
+    holds the current goal in ``driver.trajectory`` under ``driver.trajectory_lock``.
+    """
+
+    def __init__(self, driver):
+        self.driver = driver
+
+    def accept(self, goal):
+        node = self.driver
+        if not node.armed or (
+            not node._arm_permission_is_current() and not node._hold_feedback_gap()
+        ):
+            # MoveIt surfaces this only as an unexplained "goal was rejected"; say why here.
+            node.get_logger().warn(
+                "Rejecting arm trajectory: driver is disarmed or arm safety permission is absent"
+            )
+            return GoalResponse.REJECT
+        if not node.arm_calibrated:
+            node.get_logger().warn(
+                "Rejecting arm trajectory: no valid arm calibration is installed"
+            )
+            return GoalResponse.REJECT
+        try:
+            points = trajectory_rows(goal.trajectory)
+            with node.trajectory_lock:
+                start_positions = node.arm_positions.copy()
+            prepare_trajectory(
+                goal.trajectory.joint_names, points, start_positions,
+                node.arm_zero_positions, node.arm_directions,
+            )
+            self.requested_tolerances(goal, goal.trajectory.joint_names)
+            stamp_nanoseconds(goal.trajectory.header.stamp)
+            if goal.multi_dof_trajectory.joint_names or goal.multi_dof_trajectory.points:
+                raise ValueError("multi-DOF trajectories are unsupported")
+        except (IndexError, ValueError) as error:
+            node.get_logger().warn(f"Rejecting arm trajectory: {error}")
+            return GoalResponse.REJECT
+        return GoalResponse.ACCEPT
+
+    async def execute(self, goal_handle):
+        node = self.driver
+        names = goal_handle.request.trajectory.joint_names
+        requested_points = trajectory_rows(goal_handle.request.trajectory)
+        path_tolerances, goal_tolerances, goal_time_tolerance = self.requested_tolerances(
+            goal_handle.request, names
+        )
+        scheduled_ns = stamp_nanoseconds(goal_handle.request.trajectory.header.stamp)
+        # The header is ROS time, but execution is timed on the monotonic clock so a
+        # wall-clock step cannot stretch or skip a trajectory. Read both together and
+        # convert the offset once.
+        now_ns = node.get_clock().now().nanoseconds
+        now_monotonic = time.monotonic()
+        start_delay_ns = scheduled_ns - now_ns if scheduled_ns else 0
+        if start_delay_ns < -100_000_000:
+            goal_handle.abort()
+            return FollowJointTrajectory.Result(
+                error_code=FollowJointTrajectory.Result.OLD_HEADER_TIMESTAMP,
+                error_string="trajectory header timestamp is in the past",
+            )
+        if start_delay_ns > MAX_TRAJECTORY_START_DELAY_NS:
+            # A far-future stamp would hold the arm and block this goal for as long.
+            goal_handle.abort()
+            return FollowJointTrajectory.Result(
+                error_code=FollowJointTrajectory.Result.INVALID_GOAL,
+                error_string=(
+                    "trajectory header timestamp is more than "
+                    f"{MAX_TRAJECTORY_START_DELAY_NS / 1e9:.0f}s in the future"
+                ),
+            )
+        goal = ArmGoal(
+            host_id=(uuid.uuid4().int % (2**48 - 1)) + 1,
+            host_session=node.last_observation_token[1],
+            start=now_monotonic + max(0, start_delay_ns) / 1e9,
+        )
+        waiting_since = time.monotonic()
+        while node.armed and not node._arm_permission_is_current() and node._hold_feedback_gap():
+            # The plan has not started. Wait for measured joints and the full
+            # supervisor permission instead of failing a goal queued in the gap.
+            if goal_handle.is_cancel_requested:
+                goal_handle.canceled()
+                return FollowJointTrajectory.Result(
+                    error_code=FollowJointTrajectory.Result.SUCCESSFUL
+                )
+            await self._yield_for_control(0.05)
+        goal.start += time.monotonic() - waiting_since
+        with node.state_lock:
+            if not node.armed or not node._arm_permission_is_current():
+                goal_handle.abort()
+                return FollowJointTrajectory.Result(
+                    error_code=FollowJointTrajectory.Result.INVALID_GOAL,
+                    error_string="driver was disarmed before trajectory execution",
+                )
+            with node.trajectory_lock:
+                start_positions = {name: node.arm_positions[name] for name in names}
+                try:
+                    # Feedback can change between goal acceptance and this callback.
+                    # Recheck the first segment against its actual execution start.
+                    points = prepare_trajectory(
+                        names, requested_points, start_positions,
+                        node.arm_zero_positions, node.arm_directions,
+                    )
+                except ValueError as error:
+                    goal_handle.abort()
+                    return FollowJointTrajectory.Result(
+                        error_code=FollowJointTrajectory.Result.INVALID_GOAL,
+                        error_string=str(error),
+                    )
+                if node.trajectory:
+                    node.trajectory.finish("preempted", FollowJointTrajectory.Result.INVALID_GOAL)
+                goal.start_positions = start_positions
+                goal.names = tuple(names)
+                goal.points = points
+                node.trajectory = goal
+            node._zero_command()
+
+        try:
+            # Serialize uploads with torque transitions. A preempted callback
+            # must never upload its older goal after the replacement's upload.
+            with node.torque_lock:
+                with node.trajectory_lock:
+                    current = node.trajectory is goal
+                if current:
+                    response = node.torque.trajectory_request(
+                        TorqueCommand.TRAJECTORY_START, session=goal.host_session, trajectory={
+                            "id": goal.host_id, "names": list(names), "points": requested_points,
+                            "zeros": node.arm_zero_positions, "directions": node.arm_directions,
+                            "path": path_tolerances, "goal": goal_tolerances,
+                            "settling": goal_time_tolerance, "delay": max(0.0, goal.start - time.monotonic()),
+                        },
+                    )
+                    if response.get("trajectory", {}).get("id") != goal.host_id:
+                        raise RuntimeError("motor host did not acknowledge this arm goal")
+        except Exception as error:
+            with node.trajectory_lock:
+                if node.trajectory is goal:
+                    goal.finish(f"local arm upload failed: {error}", FollowJointTrajectory.Result.INVALID_GOAL)
+                    node.trajectory = None
+
+        while not goal.done.is_set():
+            if goal_handle.is_cancel_requested:
+                with node.trajectory_lock:
+                    if node.trajectory is goal:
+                        node.trajectory = None
+                    goal.finish("canceled")
+                goal_handle.canceled()
+                self._cancel_on_host(goal)
+                return FollowJointTrajectory.Result(error_code=FollowJointTrajectory.Result.SUCCESSFUL)
+            status = node.robot.arm_trajectory_status
+            if status is not None and status["id"] == goal.host_id:
+                goal.host_elapsed = status["elapsed"]
+                if status["state"] in {"succeeded", "aborted", "canceled"}:
+                    with node.trajectory_lock:
+                        if node.trajectory is goal and not goal.done.is_set():
+                            goal.finish(
+                                "succeeded" if status["state"] == "succeeded" else status["detail"],
+                                status["code"],
+                            )
+                            node.trajectory = None
+            self.publish_feedback(goal_handle, goal)
+            # Keep control-loop timers, safety updates, and action cancellation
+            # serviceable while this goal waits for measured servo feedback.
+            await self._yield_for_control(0.05)
+
+        if goal.outcome == "succeeded":
+            final = goal.points[-1].positions
+            with node.state_lock:
+                if node.arm_hold_action is not None:
+                    node.arm_hold_action.update({f"{name}.pos": value for name, value in action_positions(
+                        final.keys(), final.values(), node.arm_zero_positions, node.arm_directions,
+                    ).items()})
+            goal_handle.succeed()
+            return FollowJointTrajectory.Result(error_code=FollowJointTrajectory.Result.SUCCESSFUL)
+        self._cancel_on_host(goal)
+        goal_handle.abort()
+        return FollowJointTrajectory.Result(
+            error_code=(
+                FollowJointTrajectory.Result.GOAL_TOLERANCE_VIOLATED
+                if goal.result_code is None else goal.result_code
+            ),
+            error_string="trajectory preempted" if goal.outcome is None else goal.outcome,
+        )
+
+    def _cancel_on_host(self, goal):
+        try:
+            self.driver.torque.trajectory_request(
+                TorqueCommand.TRAJECTORY_CANCEL, id=goal.host_id, session=goal.host_session,
+            )
+        except Exception as error:
+            # The bounded Pi lease has already stopped advancement; report the
+            # failed cancellation rather than assuming its retained goal is gone.
+            self.driver.get_logger().error(f"Local arm cancellation was not confirmed: {error}")
+
+    def requested_tolerances(self, goal, names):
+        node = self.driver
+        if goal.component_path_tolerance or goal.component_goal_tolerance:
+            raise ValueError("component tolerances are unsupported for revolute arm joints")
+        default_path = dict.fromkeys(names, node.trajectory_path_tolerance)
+        path = position_tolerances(names, goal.path_tolerance, default_path)
+        default_goal = {
+            name: node.gripper_trajectory_tolerance if name == "arm_gripper"
+            else node.trajectory_tolerance
+            for name in names
+        }
+        goal_tolerances = position_tolerances(names, goal.goal_tolerance, default_goal)
+        goal_time = duration_seconds(goal.goal_time_tolerance)
+        return path, goal_tolerances, goal_time or node.trajectory_timeout
+
+    def publish_feedback(self, goal_handle, goal):
+        with self.driver.trajectory_lock:
+            actual = {name: self.driver.arm_positions[name] for name in goal.names}
+        goal_handle.publish_feedback(trajectory_feedback(goal, actual))
+
+    async def _yield_for_control(self, delay):
+        node = self.driver
+        future = Future(executor=node.executor)
+        timer = None
+
+        def resume():
+            timer.cancel()
+            future.set_result(None)
+
+        timer = node.create_timer(delay, resume)
+        try:
+            await future
+        finally:
+            timer.cancel()
+            node.destroy_timer(timer)
+
+
+def trajectory_feedback(goal, actual):
+    """FollowJointTrajectory feedback at the host's reported elapsed time."""
+    elapsed = goal.host_elapsed
+    desired, velocities, accelerations = sample_trajectory(
+        goal.names, goal.start_positions, goal.points, elapsed,
+    )
+    feedback = FollowJointTrajectory.Feedback()
+    feedback.joint_names = list(goal.names)
+    feedback.desired.positions = [desired[name] for name in goal.names]
+    feedback.desired.velocities = [velocities[name] for name in goal.names]
+    feedback.desired.accelerations = [accelerations[name] for name in goal.names]
+    feedback.actual.positions = [actual[name] for name in goal.names]
+    feedback.error.positions = [desired[name] - actual[name] for name in goal.names]
+    seconds = int(elapsed)
+    nanoseconds = int((elapsed - seconds) * 1e9)
+    for point in (feedback.desired, feedback.actual, feedback.error):
+        point.time_from_start.sec = seconds
+        point.time_from_start.nanosec = nanoseconds
+    return feedback
+
+
 class LeKiwiDriver(Node):
     def __init__(self):
         super().__init__("lekiwi_driver")
@@ -262,7 +536,7 @@ class LeKiwiDriver(Node):
         )
         self.trajectory_server = ActionServer(
             self, FollowJointTrajectory, "arm_controller/follow_joint_trajectory",
-            execute_callback=self.execute_trajectory, goal_callback=self.accept_trajectory,
+            execute_callback=self.arm_trajectories.execute, goal_callback=self.arm_trajectories.accept,
             cancel_callback=lambda _: CancelResponse.ACCEPT,
             callback_group=ReentrantCallbackGroup(),
         )
@@ -325,8 +599,10 @@ class LeKiwiDriver(Node):
         self.arm_zero_positions, self.arm_directions = load_calibration(arm_calibration_file)
         self.arm_positions = {name: 0.0 for name in ARM_JOINTS}
         self.arm_hold_action = None
+        # The current arm goal (ArmGoal or None), guarded by trajectory_lock.
         self.trajectory = None
         self.trajectory_lock = threading.Lock()
+        self.arm_trajectories = ArmTrajectoryBridge(self)
         self.safety_publish_lock = threading.Lock()
         self.safety_state = "DISARMED"
 
@@ -474,12 +750,10 @@ class LeKiwiDriver(Node):
     def cancel_trajectory(self, outcome, result_code=None):
         with self.trajectory_lock:
             if self.trajectory:
-                self.trajectory["outcome"] = outcome
-                self.trajectory["result_code"] = (
-                    FollowJointTrajectory.Result.INVALID_GOAL
-                    if result_code is None else result_code
+                self.trajectory.finish(
+                    outcome,
+                    FollowJointTrajectory.Result.INVALID_GOAL if result_code is None else result_code,
                 )
-                self.trajectory["done"].set()
                 self.trajectory = None
 
     def set_disarmed(
@@ -736,249 +1010,6 @@ class LeKiwiDriver(Node):
             else "commands disabled, but the motor host did not confirm servo torque cut; use the physical emergency stop"
         )
         return response
-
-    def accept_trajectory(self, goal):
-        if not self.armed or (
-            not self._arm_permission_is_current() and not self._hold_feedback_gap()
-        ):
-            # MoveIt surfaces this only as an unexplained "goal was rejected"; say why here.
-            self.get_logger().warn(
-                "Rejecting arm trajectory: driver is disarmed or arm safety permission is absent"
-            )
-            return GoalResponse.REJECT
-        if not self.arm_calibrated:
-            self.get_logger().warn(
-                "Rejecting arm trajectory: no valid arm calibration is installed"
-            )
-            return GoalResponse.REJECT
-        try:
-            points = trajectory_rows(goal.trajectory)
-            with self.trajectory_lock:
-                start_positions = self.arm_positions.copy()
-            prepare_trajectory(
-                goal.trajectory.joint_names, points, start_positions,
-                self.arm_zero_positions, self.arm_directions,
-            )
-            self.requested_tolerances(goal, goal.trajectory.joint_names)
-            stamp_nanoseconds(goal.trajectory.header.stamp)
-            if goal.multi_dof_trajectory.joint_names or goal.multi_dof_trajectory.points:
-                raise ValueError("multi-DOF trajectories are unsupported")
-        except (IndexError, ValueError) as error:
-            self.get_logger().warn(f"Rejecting arm trajectory: {error}")
-            return GoalResponse.REJECT
-        return GoalResponse.ACCEPT
-
-    async def execute_trajectory(self, goal_handle):
-        names = goal_handle.request.trajectory.joint_names
-        requested_points = trajectory_rows(goal_handle.request.trajectory)
-        path_tolerances, goal_tolerances, goal_time_tolerance = self.requested_tolerances(
-            goal_handle.request, names
-        )
-        scheduled_ns = stamp_nanoseconds(goal_handle.request.trajectory.header.stamp)
-        # The header is ROS time, but execution is timed on the monotonic clock so a
-        # wall-clock step cannot stretch or skip a trajectory. Read both together and
-        # convert the offset once.
-        now_ns = self.get_clock().now().nanoseconds
-        now_monotonic = time.monotonic()
-        start_delay_ns = scheduled_ns - now_ns if scheduled_ns else 0
-        if start_delay_ns < -100_000_000:
-            goal_handle.abort()
-            return FollowJointTrajectory.Result(
-                error_code=FollowJointTrajectory.Result.OLD_HEADER_TIMESTAMP,
-                error_string="trajectory header timestamp is in the past",
-            )
-        if start_delay_ns > MAX_TRAJECTORY_START_DELAY_NS:
-            # A far-future stamp would hold the arm and block this goal for as long.
-            goal_handle.abort()
-            return FollowJointTrajectory.Result(
-                error_code=FollowJointTrajectory.Result.INVALID_GOAL,
-                error_string=(
-                    "trajectory header timestamp is more than "
-                    f"{MAX_TRAJECTORY_START_DELAY_NS / 1e9:.0f}s in the future"
-                ),
-            )
-        trajectory = {
-            "start": now_monotonic + max(0, start_delay_ns) / 1e9,
-            "done": threading.Event(),
-            "host_id": (uuid.uuid4().int % (2**48 - 1)) + 1,
-            "host_session": self.last_observation_token[1],
-            "host_elapsed": 0.0,
-        }
-        waiting_since = time.monotonic()
-        while self.armed and not self._arm_permission_is_current() and self._hold_feedback_gap():
-            # The plan has not started. Wait for measured joints and the full
-            # supervisor permission instead of failing a goal queued in the gap.
-            if goal_handle.is_cancel_requested:
-                goal_handle.canceled()
-                return FollowJointTrajectory.Result(
-                    error_code=FollowJointTrajectory.Result.SUCCESSFUL
-                )
-            await self._yield_for_control(0.05)
-        trajectory["start"] += time.monotonic() - waiting_since
-        with self.state_lock:
-            if not self.armed or not self._arm_permission_is_current():
-                goal_handle.abort()
-                return FollowJointTrajectory.Result(
-                    error_code=FollowJointTrajectory.Result.INVALID_GOAL,
-                    error_string="driver was disarmed before trajectory execution",
-                )
-            with self.trajectory_lock:
-                start_positions = {name: self.arm_positions[name] for name in names}
-                try:
-                    # Feedback can change between goal acceptance and this callback.
-                    # Recheck the first segment against its actual execution start.
-                    points = prepare_trajectory(
-                        names, requested_points, start_positions,
-                        self.arm_zero_positions, self.arm_directions,
-                    )
-                except ValueError as error:
-                    goal_handle.abort()
-                    return FollowJointTrajectory.Result(
-                        error_code=FollowJointTrajectory.Result.INVALID_GOAL,
-                        error_string=str(error),
-                    )
-                if self.trajectory:
-                    self.trajectory["outcome"] = "preempted"
-                    self.trajectory["result_code"] = FollowJointTrajectory.Result.INVALID_GOAL
-                    self.trajectory["done"].set()
-                trajectory["start_positions"] = start_positions
-                trajectory["names"] = tuple(names)
-                trajectory["points"] = points
-                self.trajectory = trajectory
-            self._zero_command()
-
-        try:
-            # Serialize uploads with torque transitions. A preempted callback
-            # must never upload its older goal after the replacement's upload.
-            with self.torque_lock:
-                with self.trajectory_lock:
-                    current = self.trajectory is trajectory
-                if current:
-                    response = self.torque.trajectory_request(
-                        TorqueCommand.TRAJECTORY_START, session=trajectory["host_session"], trajectory={
-                            "id": trajectory["host_id"], "names": list(names), "points": requested_points,
-                            "zeros": self.arm_zero_positions, "directions": self.arm_directions,
-                            "path": path_tolerances, "goal": goal_tolerances,
-                            "settling": goal_time_tolerance, "delay": max(0.0, trajectory["start"] - time.monotonic()),
-                        },
-                    )
-                    if response.get("trajectory", {}).get("id") != trajectory["host_id"]:
-                        raise RuntimeError("motor host did not acknowledge this arm goal")
-        except Exception as error:
-            with self.trajectory_lock:
-                if self.trajectory is trajectory:
-                    trajectory["outcome"] = f"local arm upload failed: {error}"
-                    trajectory["result_code"] = FollowJointTrajectory.Result.INVALID_GOAL
-                    trajectory["done"].set()
-                    self.trajectory = None
-
-        while not trajectory["done"].is_set():
-            if goal_handle.is_cancel_requested:
-                with self.trajectory_lock:
-                    if self.trajectory is trajectory:
-                        self.trajectory = None
-                    trajectory["outcome"] = "canceled"
-                    trajectory["done"].set()
-                goal_handle.canceled()
-                self._cancel_host_trajectory(trajectory)
-                return FollowJointTrajectory.Result(error_code=FollowJointTrajectory.Result.SUCCESSFUL)
-            status = self.robot.arm_trajectory_status
-            if status is not None and status["id"] == trajectory["host_id"]:
-                trajectory["host_elapsed"] = status["elapsed"]
-                if status["state"] in {"succeeded", "aborted", "canceled"}:
-                    with self.trajectory_lock:
-                        if self.trajectory is trajectory and not trajectory["done"].is_set():
-                            trajectory["outcome"] = "succeeded" if status["state"] == "succeeded" else status["detail"]
-                            trajectory["result_code"] = status["code"]
-                            trajectory["done"].set()
-                            self.trajectory = None
-            self.publish_trajectory_feedback(goal_handle, trajectory)
-            # Keep control-loop timers, safety updates, and action cancellation
-            # serviceable while this goal waits for measured servo feedback.
-            await self._yield_for_control(0.05)
-
-        if trajectory.get("outcome") == "succeeded":
-            final = trajectory["points"][-1].positions
-            with self.state_lock:
-                if self.arm_hold_action is not None:
-                    self.arm_hold_action.update({f"{name}.pos": value for name, value in action_positions(
-                        final.keys(), final.values(), self.arm_zero_positions, self.arm_directions,
-                    ).items()})
-            goal_handle.succeed()
-            return FollowJointTrajectory.Result(error_code=FollowJointTrajectory.Result.SUCCESSFUL)
-        self._cancel_host_trajectory(trajectory)
-        goal_handle.abort()
-        return FollowJointTrajectory.Result(
-            error_code=trajectory.get(
-                "result_code", FollowJointTrajectory.Result.GOAL_TOLERANCE_VIOLATED
-            ),
-            error_string=trajectory.get("outcome", "trajectory preempted"),
-        )
-
-    def _cancel_host_trajectory(self, trajectory):
-        try:
-            self.torque.trajectory_request(
-                TorqueCommand.TRAJECTORY_CANCEL, id=trajectory["host_id"], session=trajectory["host_session"],
-            )
-        except Exception as error:
-            # The bounded Pi lease has already stopped advancement; report the
-            # failed cancellation rather than assuming its retained goal is gone.
-            self.get_logger().error(f"Local arm cancellation was not confirmed: {error}")
-
-    def requested_tolerances(self, goal, names):
-        if goal.component_path_tolerance or goal.component_goal_tolerance:
-            raise ValueError("component tolerances are unsupported for revolute arm joints")
-        default_path = dict.fromkeys(names, self.trajectory_path_tolerance)
-        path = position_tolerances(names, goal.path_tolerance, default_path)
-        default_goal = {
-            name: self.gripper_trajectory_tolerance if name == "arm_gripper"
-            else self.trajectory_tolerance
-            for name in names
-        }
-        goal_tolerances = position_tolerances(names, goal.goal_tolerance, default_goal)
-        goal_time = duration_seconds(goal.goal_time_tolerance)
-        return path, goal_tolerances, goal_time or self.trajectory_timeout
-
-    def publish_trajectory_feedback(self, goal_handle, trajectory):
-        elapsed = trajectory["host_elapsed"]
-        with self.trajectory_lock:
-            actual = {
-                name: self.arm_positions[name] for name in trajectory["names"]
-            }
-        desired, velocities, accelerations = sample_trajectory(
-            trajectory["names"], trajectory["start_positions"],
-            trajectory["points"], elapsed,
-        )
-        feedback = FollowJointTrajectory.Feedback()
-        feedback.joint_names = list(trajectory["names"])
-        feedback.desired.positions = [desired[name] for name in trajectory["names"]]
-        feedback.desired.velocities = [velocities[name] for name in trajectory["names"]]
-        feedback.desired.accelerations = [accelerations[name] for name in trajectory["names"]]
-        feedback.actual.positions = [actual[name] for name in trajectory["names"]]
-        feedback.error.positions = [
-            desired[name] - actual[name] for name in trajectory["names"]
-        ]
-        seconds = int(elapsed)
-        nanoseconds = int((elapsed - seconds) * 1e9)
-        for point in (feedback.desired, feedback.actual, feedback.error):
-            point.time_from_start.sec = seconds
-            point.time_from_start.nanosec = nanoseconds
-        goal_handle.publish_feedback(feedback)
-
-    async def _yield_for_control(self, delay):
-        future = Future(executor=self.executor)
-        timer = None
-
-        def resume():
-            timer.cancel()
-            future.set_result(None)
-
-        timer = self.create_timer(delay, resume)
-        try:
-            await future
-        finally:
-            timer.cancel()
-            self.destroy_timer(timer)
 
     @staticmethod
     def clamp(value, limit):
@@ -1254,7 +1285,7 @@ class LeKiwiDriver(Node):
             if self.bounded_base_test and not inside_base_test_boundary(self.pose, self._base_test_center):
                 action["x.vel"] = action["y.vel"] = action["theta.vel"] = 0.0
             with self.trajectory_lock:
-                remote_goal = self.trajectory.get("host_id") if self.trajectory else None
+                remote_goal = self.trajectory.host_id if self.trajectory else None
             if remote_goal is not None:
                 self.robot.send_action(action, arm_goal_id=remote_goal, arm_permitted=arm_permitted)
             else:

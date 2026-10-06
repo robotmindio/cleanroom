@@ -303,7 +303,7 @@ def test_gripper_trajectory_uses_its_tighter_completion_tolerance():
         path_tolerance=[], goal_tolerance=[],
         goal_time_tolerance=types.SimpleNamespace(sec=0, nanosec=0),
     )
-    _, tolerances, _ = node.requested_tolerances(
+    _, tolerances, _ = node.arm_trajectories.requested_tolerances(
         goal, ("arm_shoulder_lift", "arm_gripper")
     )
     assert tolerances == {"arm_shoulder_lift": 0.02, "arm_gripper": 0.005}
@@ -1049,7 +1049,7 @@ def test_idle_arm_hold_keeps_its_goal_when_feedback_sags():
 
 def test_arm_permission_withdrawn_at_the_final_check_holds_the_arm():
     canceled = []
-    node = control_loop_node(armed=True, trajectory={"host_id": 1})
+    node = control_loop_node(armed=True, trajectory=driver.ArmGoal(host_id=1, host_session="s", start=0.0))
     leases = []
     node.robot.send_action = lambda action, **kwargs: (node.sent.append(action), leases.append(kwargs))
     grant_fresh_base_permission(node)
@@ -1202,7 +1202,7 @@ def test_trajectory_header_stamps_must_start_close_to_now(offset_ns, expected):
     driver.trajectory_rows = lambda _trajectory: []
     driver.stamp_nanoseconds = lambda stamp: stamp
     node = make_node(armed=True)
-    node.requested_tolerances = lambda *_: ({}, {}, 1.0)
+    node.arm_trajectories.requested_tolerances = lambda *_: ({}, {}, 1.0)
     node.get_clock = lambda: types.SimpleNamespace(
         now=lambda: types.SimpleNamespace(nanoseconds=now_ns)
     )
@@ -1214,7 +1214,7 @@ def test_trajectory_header_stamps_must_start_close_to_now(offset_ns, expected):
         abort=lambda: aborted.append(True),
     )
 
-    result = asyncio.run(node.execute_trajectory(goal))
+    result = asyncio.run(node.arm_trajectories.execute(goal))
 
     assert aborted == [True]
     assert result.error_code == expected
@@ -1238,20 +1238,20 @@ def test_goal_waiting_for_joint_recovery_starts_its_clock_after_wait(monkeypatch
         last_observation_token=("host", "test-session", 1),
         arm_hold_action={"joint.pos": 10.0},
     )
-    node.requested_tolerances = lambda *_: ({}, {}, 1.0)
+    node.arm_trajectories.requested_tolerances = lambda *_: ({}, {}, 1.0)
     node.get_clock = lambda: types.SimpleNamespace(
         now=lambda: types.SimpleNamespace(nanoseconds=0)
     )
     node._arm_permission_is_current = lambda: allowed[0]
     node._hold_feedback_gap = lambda: True
-    node.publish_trajectory_feedback = lambda *_: None
+    node.arm_trajectories.publish_feedback = lambda *_: None
     uploaded = []
     started = []
 
     def upload(command, **request):
         assert command == "trajectory_start"
         uploaded.append(request)
-        started.append(node.trajectory["start"])
+        started.append(node.trajectory.start)
         node.robot.arm_trajectory_status = {
             "id": request["trajectory"]["id"], "state": "succeeded",
             "elapsed": 1.0, "code": 0, "detail": "",
@@ -1266,7 +1266,7 @@ def test_goal_waiting_for_joint_recovery_starts_its_clock_after_wait(monkeypatch
         clock[0] += 0.5
         allowed[0] = True
 
-    node._yield_for_control = yield_control
+    node.arm_trajectories._yield_for_control = yield_control
     succeeded = []
     goal = types.SimpleNamespace(
         request=types.SimpleNamespace(trajectory=types.SimpleNamespace(
@@ -1276,7 +1276,7 @@ def test_goal_waiting_for_joint_recovery_starts_its_clock_after_wait(monkeypatch
         succeed=lambda: succeeded.append(True),
     )
 
-    result = asyncio.run(node.execute_trajectory(goal))
+    result = asyncio.run(node.arm_trajectories.execute(goal))
 
     assert result.error_code == _Result.SUCCESSFUL
     assert succeeded == [True]
@@ -1289,7 +1289,7 @@ def test_goal_waiting_for_joint_recovery_starts_its_clock_after_wait(monkeypatch
 
 def test_local_goal_survives_telemetry_silence_beyond_link_timeout(monkeypatch):
     node = make_node(armed=True, disarm_on_failure=False)
-    node.trajectory = {"done": threading.Event()}
+    node.trajectory = driver.ArmGoal(host_id=1, host_session="s", start=0.0)
     node.get_logger = lambda: types.SimpleNamespace(warning=lambda *_: None, error=lambda *_: None)
     states, disarmed = [], []
     node.publish_safety = states.append
@@ -1298,14 +1298,14 @@ def test_local_goal_survives_telemetry_silence_beyond_link_timeout(monkeypatch):
     node.record_link_loss("No fresh LeKiwi telemetry for 12.0s; waiting for recovery")
     assert node.link_lost and node.armed
     assert node._hold_feedback_gap()
-    assert not node.trajectory["done"].is_set()
+    assert not node.trajectory.done.is_set()
     assert states == ["LINK_LOST"] and not disarmed
 
 
 def test_local_goal_waits_for_collision_check_after_motor_feedback_recovers(monkeypatch):
     node = make_node(armed=True, disarm_on_failure=False)
     node.arm_permission.value = True
-    node.trajectory = {"done": threading.Event()}
+    node.trajectory = driver.ArmGoal(host_id=1, host_session="s", start=0.0)
     node.get_logger = lambda: types.SimpleNamespace(warning=lambda *_: None, error=lambda *_: None)
     canceled, disarmed = [], []
     node.cancel_trajectory = canceled.append
