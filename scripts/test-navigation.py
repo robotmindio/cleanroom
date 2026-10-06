@@ -93,7 +93,6 @@ class Test(Node):
         self.monitor_action = None
         self.blocked_at = None
         self.motion_pauses = 0
-        self.paused_seconds = 0.0
         self.create_subscription(CollisionMonitorState, '/collision_monitor_state',
             lambda m:setattr(self,'monitor_action',(m.polygon_name,m.action_type)), 10)
         self.map_client = self.create_client(GetMap, '/rtabmap/get_map_data')
@@ -176,7 +175,6 @@ class Test(Node):
             self.tick(Twist(),check=False)
             if time.monotonic()-start>3:
                 raise RuntimeError(reason+' did not recover: '+str(self.health))
-        self.paused_seconds += time.monotonic()-start
         self.active = was_active
 
     def wait_ready(self):
