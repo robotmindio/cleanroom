@@ -7,11 +7,12 @@ at the physical motor-power stop. The wrist USB fault and standalone camera
 translation drift remain open. See [the closeout](#verification-closeout-for-initial-trials)
 for the verified scope and evidence.
 
-**Latest follow-up:** runtime revision `1937e3923ce8` is deployed. After the wrist
-camera connector was tightened, the finite arm and production Nav2 checks
-passed. Wrist USB still disconnected at 20:25:10 and recovered in about five
-seconds; tightening did not resolve it. Independent Astra translation drift
-also remains unresolved; the follow-up measurements are recorded below.
+**Latest follow-up:** runtime revision `60c518b8ddd3` is deployed. The
+[2026-10-06 report](onboard-camera-verification-20261006.md) records LD06 timing,
+Ogre rendering, Astra metadata, validity-budget and deployment-build fixes,
+followed by successful arm and production Nav2 checks. Wrist USB faults,
+measured Astra optical calibration and intermittent feedback gaps remain open.
+The historical measurements below retain their original scope.
 
 Finite unloaded tests used the robot's front, wrist and Astra cameras, registered
 depth and lidar. No external measurement camera was used. All commanded base
