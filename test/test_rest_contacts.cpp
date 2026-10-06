@@ -45,7 +45,7 @@ int main(int argc, char** argv)
     state.setVariablePosition("arm_elbow_flex", pose[1]);
     state.setVariablePosition("arm_wrist_flex", pose[2]);
     state.setVariablePosition("arm_wrist_roll", -0.013809198477317652);
-    state.setVariablePosition("gripper", 0.21214683802333567);
+    state.setVariablePosition("arm_gripper", 0.21214683802333567);
     state.update();
     result.clear();
     detector.checkSelfCollision(request, result, state, only_rest);
