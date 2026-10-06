@@ -149,5 +149,5 @@ def test_every_ctest_ros_domain_is_unique_and_avoids_ephemeral_ports():
     domains = re.findall(r"add_lekiwi_pytest\(\w+ (\d+)\)", cmake)
     domains += re.findall(r"ROS_DOMAIN_ID=(\d+)", cmake)
     assert len(domains) == len(set(domains))
-    assert all(40 <= int(domain) <= 84 and
+    assert all(40 <= int(domain) <= 86 and
                7400+250*int(domain)+11+2*119<32768 for domain in domains)

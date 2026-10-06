@@ -1,0 +1,17 @@
+# Zero limits select the tracked defaults; positive limits may only reduce them.
+bool revisit_known
+float64 max_duration_sec
+float64 max_radius_m
+---
+# Complete means no further accessible targets in the requested area.
+bool complete
+string message
+uint32 visited_targets
+uint32 unreachable_targets
+float64 mapped_area_m2
+---
+string stage
+geometry_msgs/PoseStamped current_pose
+uint32 visited_targets
+uint32 unreachable_targets
+float64 mapped_area_m2

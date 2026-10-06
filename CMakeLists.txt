@@ -3,6 +3,10 @@ project(lekiwi_rmf)
 
 find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_python REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
+find_package(geometry_msgs REQUIRED)
+rosidl_generate_interfaces(${PROJECT_NAME} "action/Explore.action" DEPENDENCIES geometry_msgs)
+ament_export_dependencies(rosidl_default_runtime)
 option(LEKIWI_BUILD_COMPUTE "Build compute-only Gazebo and MoveIt plugins" ON)
 if(LEKIWI_BUILD_COMPUTE)
   find_package(gz-sim8 REQUIRED)
@@ -30,7 +34,11 @@ if(LEKIWI_BUILD_COMPUTE)
   install(TARGETS lekiwi_sim_native_failsafe LIBRARY DESTINATION lib/${PROJECT_NAME})
 endif()
 
-ament_python_install_package(${PROJECT_NAME})
+# rosidl owns the Python package installation; install application modules into
+# it without a second ament_python_install_package target of the same name.
+install(DIRECTORY lekiwi_rmf/ DESTINATION "${PYTHON_INSTALL_DIR}/${PROJECT_NAME}"
+  FILES_MATCHING PATTERN "*.py" PATTERN "__init__.py" EXCLUDE PATTERN "__pycache__" EXCLUDE)
+install(PROGRAMS lekiwi_rmf/exploration_node.py DESTINATION lib/${PROJECT_NAME} RENAME robot_explorer)
 # install(PROGRAMS) accepts a single RENAME value, so each renamed script gets its own call.
 install(PROGRAMS lekiwi_rmf/driver.py DESTINATION lib/${PROJECT_NAME} RENAME lekiwi_driver)
 install(PROGRAMS lekiwi_rmf/astra_cloud_filter.py DESTINATION lib/${PROJECT_NAME} RENAME astra_cloud_filter)
@@ -106,7 +114,7 @@ if(BUILD_TESTING)
   # Test the package under construction, not a similarly named package sourced
   # from another overlay workspace.
   set(test_python_environment
-    "PYTHONNOUSERSITE=1;PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/test:${CMAKE_CURRENT_SOURCE_DIR}:$ENV{PYTHONPATH}")
+    "PYTHONNOUSERSITE=1;PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/test:${CMAKE_CURRENT_SOURCE_DIR}:${CMAKE_INSTALL_PREFIX}/${PYTHON_INSTALL_DIR}:$ENV{PYTHONPATH};LD_LIBRARY_PATH=${CMAKE_INSTALL_PREFIX}/lib:$ENV{LD_LIBRARY_PATH}")
   set(test_ament_prefix_path
     "AMENT_PREFIX_PATH=${CMAKE_INSTALL_PREFIX}:$ENV{AMENT_PREFIX_PATH}")
   set(test_launch_environment "${test_python_environment};${test_ament_prefix_path}")
@@ -133,7 +141,7 @@ if(BUILD_TESTING)
     endforeach()
   else()
     # Never let a test discover a running robot or a parallel test. These are
-    # distinct DDS domains (40-84), away from the live default (0) and
+    # distinct DDS domains (40-86), away from the live default (0) and
     # Linux ephemeral UDP ports (32768-60999). Higher domains collided with a
     # live node's ephemeral socket during discovery. Tests
     # without one never open a DDS participant.
@@ -170,6 +178,9 @@ if(BUILD_TESTING)
     add_lekiwi_pytest(test_map_bundle 55)
     add_lekiwi_pytest(test_launch_validation 56)
     add_lekiwi_pytest(test_rtabmap_session_guard 57)
+    add_lekiwi_pytest(test_exploration)
+    add_lekiwi_pytest(test_exploration_ros 85)
+    add_lekiwi_pytest(test_exploration_nav2 86)
     add_lekiwi_pytest(test_rmf_owner_guard 71)
     add_lekiwi_pytest(test_moveit_shutdown_probe 73)
     add_lekiwi_pytest(test_moveit_reload)
