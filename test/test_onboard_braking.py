@@ -12,7 +12,8 @@ def test_scan_geometry_recovers_motion_and_rejects_a_single_wall():
     reference=np.concatenate([np.column_stack((x,np.ones_like(x)*2)),
                               np.column_stack((np.ones_like(x)*-2,x)),
                               np.column_stack((np.ones_like(x)*2,x))])
-    angle=.05;c,s=np.cos(angle),np.sin(angle)
+    angle=.05
+    c,s=np.cos(angle),np.sin(angle)
     points=(reference-[.03,-.015])@np.array([[c,-s],[s,c]])
     points+=np.random.default_rng(7).normal(0,.001,points.shape)
     pose,covariance,sensitivity=fit(reference,points,[0.,0.,0.],.33)
@@ -39,7 +40,8 @@ def test_independent_stop_bounds_hidden_motion_and_rejects_bad_windows():
     assert not measure([{**s,'covariance':[.001,.001,.001]} for s in samples],.1,config,.001)['within_budget']
     assert not measure([{**s,'pose':[s['pose'][0]*5,0.,0.]} for s in samples],.1,config,.001)['within_budget']
     for invalid in (samples[:5],samples[1:],samples[:5]+[{**samples[5],'stamp':.1}]+samples[6:]):
-        with pytest.raises(ValueError):measure(invalid,.1,config,.001)
+        with pytest.raises(ValueError):
+            measure(invalid,.1,config,.001)
 
 
 def test_terminal_capture_fit_and_dual_envelope():
@@ -51,5 +53,7 @@ def test_terminal_capture_fit_and_dual_envelope():
     result=module['dual_stop_measurement'](samples,.53,.01)
     assert result['conservative_swept_distance_m']==pytest.approx(.036)
     assert result['conservative_swept_distance_m']>=result['floor_swept_distance_m']
-    with pytest.raises(ValueError):module['terminal_observed_speed'](samples[:3],False)
-    with pytest.raises(ValueError):module['dual_stop_measurement']([{**s,'marker_pose':None} for s in samples],.53,.01)
+    with pytest.raises(ValueError):
+        module['terminal_observed_speed'](samples[:3],False)
+    with pytest.raises(ValueError):
+        module['dual_stop_measurement']([{**s,'marker_pose':None} for s in samples],.53,.01)

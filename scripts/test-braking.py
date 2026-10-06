@@ -118,7 +118,6 @@ def reference_marker_corners(markers, reference):
 
 
 def floor_pose(markers, reference):
-    key = reference['body_id']
     corners = reference_marker_corners(markers,reference)
     if corners is None:
         return None
