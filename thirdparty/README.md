@@ -33,6 +33,11 @@ split deployer and CI invoke the same builder.
   premature validation; actual link status and OpenGL error reporting remain.
   Shader code, palette textures and map rendering are unchanged.
 
+The builder also bootstraps **ament_cmake_vendor_package 2.5.6**, commit
+`5741cff5b9f83253bf3521bd8f44108fde3504ad`, into the same user-owned workspace.
+This is a CMake build tool missing from runtime-only ROS installations; it
+requires no privileged package installation during deployment.
+
 The changes preserve the packaged ABI. Review these patches against new native
 versions before changing their pins. Shutdown evidence records the selected
 native package prefixes as well as the system package versions.

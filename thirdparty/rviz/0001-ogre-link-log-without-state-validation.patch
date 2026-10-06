@@ -8,7 +8,7 @@ new file mode 100644
 +@@ -86,9 +86,9 @@
 +         {
 +             GLint infologLength = 0;
-+ 
++
 +-            if(glIsProgram(obj))
 +-                glValidateProgram(obj);
 +-
@@ -16,5 +16,5 @@ new file mode 100644
 ++            // Sampler units are assigned by Ogre after linking, so validating
 ++            // here reports a false conflict while both uniforms still use 0.
 +             glGetObjectParameterivARB(obj, GL_OBJECT_INFO_LOG_LENGTH_ARB, &infologLength);
-+ 
++
 +             if (infologLength > 0)

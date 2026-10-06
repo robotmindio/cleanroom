@@ -63,6 +63,8 @@ done
 def test_native_builder_accepts_colcon_without_optional_override_extension(help_text, expected):
     builder = (ROOT / "scripts/build-native.sh").read_text()
     assert "feb01669f1297df2af755ce9cd2ed18083e7a8b2" in builder
+    assert "5741cff5b9f83253bf3521bd8f44108fde3504ad" in builder
+    assert '"$vendor_tools/ament_cmake_vendor_package"' in builder
     assert '"$workspace/src/rviz/rviz_ogre_vendor"' in builder
     options = builder.split("override_args=()\n", 1)[1].split("\ncolcon --log-base", 1)[0]
     result = subprocess.run(

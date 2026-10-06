@@ -8,6 +8,14 @@ die() { echo "$0: $*" >&2; exit 1; }
 # shellcheck disable=SC1091 # Resolve the helper from this checkout at runtime.
 source "$project_root/scripts/thirdparty-common.sh"
 
+# Runtime ROS binaries do not install this CMake build tool. Build the pinned
+# macro package in the same overlay, so deploy does not need privileged apt.
+vendor_tools=$workspace/src/ament_cmake
+vendor_tools_revision=5741cff5b9f83253bf3521bd8f44108fde3504ad
+if [[ ! -d $vendor_tools/.git || $(git -C "$vendor_tools" rev-parse HEAD) != "$vendor_tools_revision" ]]; then
+  checkout_pinned https://github.com/ament/ament_cmake.git "$vendor_tools" "$vendor_tools_revision"
+fi
+
 for dependency in class_loader rclcpp navigation2 rviz; do
   case $dependency in
     class_loader) revision=c404b82f04e6b0cce5c6205626b2d35fdf4dc882; repository=https://github.com/ros/class_loader.git ;;
@@ -36,13 +44,13 @@ export MAKEFLAGS=-j1
 export PATH=/usr/bin:/bin:$PATH
 override_args=()
 if [[ $(colcon build --help) == *--allow-overriding* ]]; then
-  override_args=(--allow-overriding class_loader rclcpp nav2_util nav2_lifecycle_manager nav2_bringup rviz_ogre_vendor)
+  override_args=(--allow-overriding class_loader rclcpp nav2_util nav2_lifecycle_manager nav2_bringup rviz_ogre_vendor ament_cmake_vendor_package)
 fi
 colcon --log-base "$workspace/log" build \
-  --base-paths "$workspace/src/class_loader" "$workspace/src/rclcpp/rclcpp" \
+  --base-paths "$vendor_tools/ament_cmake_vendor_package" "$workspace/src/class_loader" "$workspace/src/rclcpp/rclcpp" \
     "$workspace/src/navigation2/nav2_util" "$workspace/src/navigation2/nav2_lifecycle_manager" \
     "$workspace/src/navigation2/nav2_bringup" "$workspace/src/rviz/rviz_ogre_vendor" \
-  --packages-select class_loader rclcpp nav2_util nav2_lifecycle_manager nav2_bringup rviz_ogre_vendor \
+  --packages-select ament_cmake_vendor_package class_loader rclcpp nav2_util nav2_lifecycle_manager nav2_bringup rviz_ogre_vendor \
   --executor sequential "${override_args[@]}" \
   --build-base "$workspace/build" --install-base "$workspace/install" \
   --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
