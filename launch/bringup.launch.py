@@ -7,6 +7,8 @@ live in their own included launch files.
 
 from pathlib import Path
 
+import yaml
+
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, ExecuteProcess, IncludeLaunchDescription, OpaqueFunction, SetLaunchConfiguration
@@ -17,9 +19,10 @@ from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 from nav2_common.launch import RewrittenYaml
 
+from lekiwi_rmf.arm_trajectory import ARM_JOINTS
 from lekiwi_rmf.launch_gates import gated
 from lekiwi_rmf.launch_validation import (
-    CHOICES, PROFILES, launch_topology, lidar_default_port, validate_context)
+    CHOICES, PROFILES, launch_topology, lidar_default_port, permission_timeout, validate_context)
 from lekiwi_rmf.motion_guards import load_base_speed_limits
 from lekiwi_rmf.odometry import BASE_XY_SCALE, BASE_YAW_SCALE
 
@@ -27,10 +30,6 @@ from lekiwi_rmf.odometry import BASE_XY_SCALE, BASE_YAW_SCALE
 # actions. Those live on the primary ROS graph (domain 0); another domain
 # isolates RMF from the robot and prevents initialization.
 RMF_DOMAIN = "0"
-ARM_JOINTS = [
-    "arm_shoulder_pan", "arm_shoulder_lift", "arm_elbow_flex",
-    "arm_wrist_flex", "arm_wrist_roll", "arm_gripper",
-]
 
 
 def _profile_defaults(context):
@@ -92,7 +91,9 @@ def _stack(context):
         config("nav2_params.yaml"), bounded_base_test,
         LaunchConfiguration("base_test_linear_limit"), LaunchConfiguration("base_test_angular_limit"),
     )
-    safety_params_file = config("safety_simulation.yaml" if sim else "safety_production.yaml")
+    # Simulation layers its few differences over the physical robot's profile.
+    safety_params_files = [config("safety_production.yaml"), *([config("safety_simulation.yaml")] if sim else [])]
+    lease = permission_timeout(Path(get_package_share_directory("lekiwi_rmf")) / "config")
     use_sim_time = str(sim)
 
     # Start safety once feedback is genuinely flowing. It does not depend on a
@@ -102,7 +103,7 @@ def _stack(context):
         package="lekiwi_rmf",
         executable="safety_supervisor",
         name="safety_supervisor",
-        parameters=[safety_params_file, {
+        parameters=[*safety_params_files, {
             "use_sim_time": sim,
             "bounded_base_test": bounded_base_test,
             # Simulation keeps its qualified enforcement; real mode is strict only
@@ -187,7 +188,7 @@ def _stack(context):
                 "initial_y": 0.0,
                 "xy_velocity_scale": ParameterValue(LaunchConfiguration("xy_velocity_scale"), value_type=float),
                 "yaw_velocity_scale": ParameterValue(LaunchConfiguration("yaw_velocity_scale"), value_type=float),
-                "permission_timeout": 0.5,
+                "permission_timeout": lease,
                 # The driver still requires current supervisor permission
                 # and fresh host telemetry before energizing servos. Without
                 # disarm_on_failure it arms at startup regardless; with it,
@@ -227,7 +228,7 @@ def _stack(context):
                 package="lekiwi_rmf",
                 executable="arm_workspace_monitor",
                 name="arm_workspace_monitor",
-                parameters=[safety_params_file, {"use_sim_time": sim}],
+                parameters=[*safety_params_files, {"use_sim_time": sim}],
                 output="screen",
             ),
             Node(
@@ -247,7 +248,7 @@ def _stack(context):
             package="lekiwi_rmf",
             executable="cmd_vel_mux",
             name="cmd_vel_mux",
-            parameters=[{"permission_timeout": 0.5}],
+            parameters=[{"permission_timeout": lease}],
             output="screen",
         ),
         *_include(nav2_launch("localization_launch.py"), topology.amcl,
@@ -274,7 +275,7 @@ def _stack(context):
         *_include(launch_file("slam.launch.py"), topology.visual_slam),
         *gated(
             _readiness_gate("wait_for_stable_joint_states", kind="joint_states", topic="/joint_states",
-                            joint_names=ARM_JOINTS, minimum_joint_samples=20),
+                            joint_names=list(ARM_JOINTS), minimum_joint_samples=20),
             "joint states", [safety_supervisor]),
         # Nav2 waits for odometry and the resulting map; fixed delays made
         # both components race slow sensors and telemetry reconnects.
@@ -325,8 +326,10 @@ def _stack(context):
 
 def generate_launch_description():
     package = FindPackageShare("lekiwi_rmf")
-    test_linear, test_angular = load_base_speed_limits(
-        Path(get_package_share_directory("lekiwi_rmf")) / "config/nav2_params.yaml")
+    config = Path(get_package_share_directory("lekiwi_rmf")) / "config"
+    test_linear, test_angular = load_base_speed_limits(config / "nav2_params.yaml")
+    # robot_explorer's tracked quota is the default for the overridable arguments.
+    mapping_quota = yaml.safe_load((config / "exploration.yaml").read_text())["robot_explorer"]["ros__parameters"]
     return LaunchDescription(
         [
             DeclareLaunchArgument("profile", default_value="sim", choices=list(PROFILES)),
@@ -431,8 +434,8 @@ def generate_launch_description():
             # the robot returns near them, so loop closure still works. Raise it on a
             # machine with memory to spare -- larger working memory closes loops sooner.
             DeclareLaunchArgument("rtabmap_wm_nodes", default_value="300"),
-            DeclareLaunchArgument("rtabmap_mapping_max_bytes", default_value="536870912"),
-            DeclareLaunchArgument("rtabmap_mapping_max_seconds", default_value="14400"),
+            DeclareLaunchArgument("rtabmap_mapping_max_bytes", default_value=str(mapping_quota["mapping_max_bytes"])),
+            DeclareLaunchArgument("rtabmap_mapping_max_seconds", default_value=str(mapping_quota["mapping_max_seconds"]).removesuffix(".0")),
             DeclareLaunchArgument(
                 "map_bundle",
                 default_value=PathJoinSubstitution([

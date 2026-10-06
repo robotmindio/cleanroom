@@ -1,3 +1,5 @@
+# Base safety profile: the physical robot. Simulation loads
+# safety_simulation.yaml on top of this file.
 safety_supervisor:
   ros__parameters:
     publish_frequency: 20.0
@@ -6,6 +8,9 @@ safety_supervisor:
     # the measured maximum compute gap was 0.173 s over 60 s.
     depth_timeout: 0.50
     state_timeout: 0.75
+    # The receive-time lease on the supervisor's permission. bringup passes
+    # this one value to every node acting on it: cmd_vel_mux, the driver and
+    # the simulated arm controller.
     permission_timeout: 0.5
     battery_timeout: 2.0
     require_driver_state: true

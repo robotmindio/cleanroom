@@ -24,6 +24,7 @@ import rclpy
 from geometry_msgs.msg import Twist
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
+from rclpy.parameter import Parameter
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from std_msgs.msg import Bool
 
@@ -54,8 +55,9 @@ class CmdVelMux(Node):
         self.declare_parameter("permission_topic", "/safety/base_motion_permitted")
         # Bool has no source timestamp.  A transient-local sample is only a
         # restart convenience, never a permission lease: stop accepting motion
-        # when the supervisor stops refreshing its decision.
-        self.declare_parameter("permission_timeout", 0.5)
+        # when the supervisor stops refreshing its decision. No default: the
+        # lease comes from the supervisor's tracked profile via bringup.
+        self.declare_parameter("permission_timeout", Parameter.Type.DOUBLE)
 
         self._manual_timeout_ns = self._positive_seconds("manual_timeout")
         self._navigation_timeout_ns = self._positive_seconds("navigation_timeout")

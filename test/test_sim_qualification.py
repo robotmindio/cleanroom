@@ -54,6 +54,8 @@ def test_simulation_guards_are_independent_of_physical_acceptance(tmp_path, monk
     (tmp_path / "config").mkdir()
     (tmp_path / "commands").mkdir()
     (tmp_path / "config/safety_acceptance.yaml").write_text(f"validated: {physical_accepted}\n")
+    (tmp_path / "config/safety_production.yaml").write_text(
+        (ROOT / "config/safety_production.yaml").read_text())
     profile = yaml.safe_load((ROOT / "config/safety_simulation.yaml").read_text())
     path = tmp_path / "config/safety_simulation.yaml"
     path.write_text(yaml.safe_dump(profile))

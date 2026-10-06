@@ -91,7 +91,10 @@ def simulation_safety_result(evidence: Path) -> Result:
     path = ROOT / "config" / "safety_simulation.yaml"
     log = evidence / "commands" / "simulation-safety-profile.json"
     try:
-        params = yaml.safe_load(path.read_text(encoding="utf-8"))["safety_supervisor"]["ros__parameters"]
+        # Simulation layers its overrides over the physical robot's profile.
+        params = {}
+        for profile in (ROOT / "config" / "safety_production.yaml", path):
+            params.update(yaml.safe_load(profile.read_text(encoding="utf-8"))["safety_supervisor"]["ros__parameters"])
         valid = isinstance(params, dict) and params.get("require_acceptance") is False and all(
             params.get(name) is True for name in (
                 "require_scan", "require_full_scan", "require_depth", "require_odometry", "require_joint_states",

@@ -208,9 +208,13 @@
     "output": "screen",
     "parameters": {
      "acceptance_file": "$(share lekiwi_rmf)/config/safety_acceptance.yaml",
+     "arm_workspace_topic": "/safety/arm_workspace_clear",
+     "battery_timeout": 2.0,
      "bounded_base_test": false,
      "depth_timeout": 0.75,
      "maximum_depth_range": 20.0,
+     "minimum_battery_percentage": 0.1,
+     "minimum_battery_voltage": 10.5,
      "minimum_depth_range": 0.05,
      "minimum_depth_valid_fraction": 0.001,
      "minimum_depth_valid_points": 4,
@@ -639,7 +643,9 @@
    "lekiwi_rmf.sim_arm_controller",
    "--ros-args",
    "-p",
-   "use_sim_time:=true"
+   "use_sim_time:=true",
+   "-p",
+   "permission_timeout:=0.5"
   ],
   "respawn": false,
   "respawn_delay": null

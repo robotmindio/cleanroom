@@ -6,7 +6,9 @@ robot_state_publisher / MoveIt alternate between fake and actual arm positions.
 """
 
 import os
+from pathlib import Path
 
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import ExecuteProcess, IncludeLaunchDescription, SetEnvironmentVariable
 from launch.launch_description_sources import PythonLaunchDescriptionSource
@@ -14,16 +16,20 @@ from launch.substitutions import Command, EnvironmentVariable, IfElseSubstitutio
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackagePrefix, FindPackageShare
 
+from lekiwi_rmf.launch_validation import permission_timeout
 
-def _sim_process(module):
+
+def _sim_process(module, *parameters):
+    arguments = [part for parameter in ("use_sim_time:=true", *parameters) for part in ("-p", parameter)]
     return ExecuteProcess(
-        cmd=["python3", "-m", f"lekiwi_rmf.{module}", "--ros-args", "-p", "use_sim_time:=true"],
+        cmd=["python3", "-m", f"lekiwi_rmf.{module}", "--ros-args", *arguments],
         output="screen",
     )
 
 
 def generate_launch_description():
     package = FindPackageShare("lekiwi_rmf")
+    config = Path(get_package_share_directory("lekiwi_rmf")) / "config"
     return LaunchDescription([
         # Gazebo resolves the CAD's ``model://lekiwi_rmf/...`` URIs from
         # resource-path roots, not from ament's package index. The parent
@@ -135,5 +141,5 @@ def generate_launch_description():
         ),
         _sim_process("sim_omni_controller"),
         _sim_process("sim_sensor_delay"),
-        _sim_process("sim_arm_controller"),
+        _sim_process("sim_arm_controller", f"permission_timeout:={permission_timeout(config)}"),
     ])

@@ -186,6 +186,13 @@ def astra_serial_from_hardware_config(path: str | Path, *, required: bool) -> st
     return serial
 
 
+def permission_timeout(config_directory: str | Path) -> float:
+    """The supervisor's motion-permission lease from the base safety profile."""
+    path = Path(config_directory) / "safety_production.yaml"
+    parameters = yaml.safe_load(path.read_text(encoding="utf-8"))["safety_supervisor"]["ros__parameters"]
+    return float(parameters["permission_timeout"])
+
+
 def validate_launch_arguments(
     arguments: Mapping[str, object],
     *,

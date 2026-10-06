@@ -32,6 +32,7 @@ from sensor_msgs.msg import BatteryState, Imu, JointState, LaserScan, PointCloud
 from std_msgs.msg import Bool, String
 from std_srvs.srv import Trigger
 
+from lekiwi_rmf.arm_trajectory import ARM_JOINTS
 from lekiwi_rmf.motion_guards import (
     FUTURE_STAMP_TOLERANCE_NS, load_base_speed_limits, positive_seconds_ns, stamp_ns,
 )
@@ -709,10 +710,7 @@ class SafetySupervisor(Node):
         self.declare_parameter("minimum_battery_voltage", 10.5)
         self.declare_parameter("minimum_battery_percentage", 0.10)
         self.declare_parameter("stow_tolerance", 0.08)
-        self.declare_parameter("stow_joint_names", [
-            "arm_shoulder_pan", "arm_shoulder_lift", "arm_elbow_flex",
-            "arm_wrist_flex", "arm_wrist_roll", "arm_gripper",
-        ])
+        self.declare_parameter("stow_joint_names", list(ARM_JOINTS))
         self.declare_parameter("stow_joint_positions", [0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         self.declare_parameter("require_acceptance", True)
         self.declare_parameter("bounded_base_test", False)
