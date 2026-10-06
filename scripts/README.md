@@ -105,3 +105,6 @@ Source-only shell helpers, not commands: `runtime-common.sh` (`.env`, waits, por
 probes), `self-heal.sh` (service self-heal watcher), `service-install-common.sh`
 (unit rendering, restart tracking) and `service-install-revision.sh` (service
 configuration fingerprints).
+
+Onboard braking measurements and CAD geometry checks use SciPy, declared as a
+test dependency; install it for those tools with `sudo apt install python3-scipy`.
