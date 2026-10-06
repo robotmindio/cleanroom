@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from lekiwi_rmf.arm_trajectory import ARM_JOINTS
+from lekiwi_rmf.arm_trajectory import ARM_JOINTS, JOINT_LIMITS
 from lekiwi_rmf.local_arm_executor import LocalArmExecutor, validate_status
 
 
@@ -100,3 +100,29 @@ def test_invalid_local_feedback_cannot_advance_motion():
     with pytest.raises(ValueError, match="non-finite"):
         executor.step(observation, now[0])
     assert executor.status["elapsed"] == 0
+
+
+def test_recovery_setpoints_stay_inside_the_joint_bound():
+    executor, now, observation, request = setup_executor()
+    joint = ARM_JOINTS[0]
+    upper = JOINT_LIMITS[joint][1]
+    observation[f"{joint}.pos"] = math.degrees(upper + 0.07)
+    request["id"] += 1
+    request["points"] = [[2.0, [upper - 0.02], [], [], []]]
+    executor.start(request, observation)
+    executor.renew(request["id"], True)
+    action = executor.step(observation, now[0])
+    assert action[f"{joint}.pos"] == pytest.approx(math.degrees(upper))
+
+
+def test_goal_timeout_reports_the_joint_and_holds_measured_feedback():
+    executor, now, observation, request = setup_executor()
+    for _ in range(220):
+        now[0] += 0.033
+        executor.renew(request["id"], True)
+        executor.step(observation, now[0])
+    assert executor.status["state"] == "aborted" and executor.status["code"] == -5
+    assert executor.status["detail"] == (
+        f"goal tolerance exceeded for {ARM_JOINTS[0]}: error=0.1000 rad, limit=0.0200 rad"
+    )
+    assert executor.hold[f"{ARM_JOINTS[0]}.pos"] == observation[f"{ARM_JOINTS[0]}.pos"]

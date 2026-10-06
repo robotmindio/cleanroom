@@ -8,15 +8,7 @@ source scripts/lib/runtime-common.sh
 # shellcheck source=/dev/null
 source scripts/lib/self-heal.sh
 
-if [ -f "${LEKIWI_WS:-$HOME/lekiwi_ws}/install/setup.bash" ]; then
-  set +u
-  # shellcheck source=/dev/null
-  source scripts/setup.bash
-  set -u
-else
-  # shellcheck source=/dev/null
-  source scripts/setup-pi.bash
-fi
+source_device_ros_env
 
 self_heal
 exec ros2 launch lekiwi_rmf pi_astra.launch.py

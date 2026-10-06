@@ -1,6 +1,5 @@
 """The onboard observer rejects bad/stale poses before another motion tick."""
-import runpy
-from pathlib import Path
+from importlib import import_module
 from types import SimpleNamespace
 import time
 import json
@@ -10,8 +9,8 @@ import pytest
 
 @pytest.mark.parametrize('cleanup_failure',[False,True])
 def test_production_runner_records_payload_without_restarting_or_shutting_down(monkeypatch, tmp_path, cleanup_failure):
-    module = runpy.run_path(str(Path(__file__).parents[1] / 'scripts/test-navigation.py'))
-    main = module['main']
+    module = import_module('test-navigation')
+    main = module.main
     shared = main.__globals__
     commands = []
     released = []
@@ -53,9 +52,8 @@ def test_production_runner_records_payload_without_restarting_or_shutting_down(m
 
 
 def test_onboard_visual_boundary_and_capture_age(monkeypatch):
-    module = runpy.run_path(str(Path(__file__).parents[1] /
-                               'scripts/test-onboard-navigation.py'))
-    check = module['OnboardTest'].check_visual_feedback
+    module = import_module('test-onboard-navigation')
+    check = module.OnboardTest.check_visual_feedback
     sample = {'t': 10., 'source_age_s': .4, 'x': .08, 'y': .02, 'yaw': .1}
     info = [{'lost': False}]
     check(SimpleNamespace(visual=[sample], visual_info=info), 10.5)
@@ -69,7 +67,7 @@ def test_onboard_visual_boundary_and_capture_age(monkeypatch):
         with pytest.raises(RuntimeError):
             check(SimpleNamespace(visual=[sample], visual_info=unavailable), 10.)
     published = []
-    node = object.__new__(module['OnboardTest'])
+    node = object.__new__(module.OnboardTest)
     node.center, node.pose, node.visual, node.visual_info = (0.,0.,0.), (0.,0.,0.), [], []
     node.active, node.flags, node.health = True, {'driver':'ARMED','arm_stowed':True}, {}
     node.odom_at, node.deadline = time.monotonic(), time.monotonic()+20
@@ -79,8 +77,8 @@ def test_onboard_visual_boundary_and_capture_age(monkeypatch):
     def receive(*a, **k):
         node.visual = [{**sample, 't':time.monotonic()}]
         node.visual_info = info
-    monkeypatch.setattr(module['NAV']['rclpy'], 'spin_once', receive)
-    command = module['NAV']['Twist']()
+    monkeypatch.setattr(module.NAV.rclpy, 'spin_once', receive)
+    command = module.NAV.Twist()
     command.linear.x = .03
     node.tick(command)  # Queued feedback must be drained before rejecting it.
     assert published == [command]
@@ -88,11 +86,11 @@ def test_onboard_visual_boundary_and_capture_age(monkeypatch):
     def recover(*a, **k):
         if not node.active:
             receive()
-    monkeypatch.setattr(module['NAV']['rclpy'], 'spin_once', recover)
+    monkeypatch.setattr(module.NAV.rclpy, 'spin_once', recover)
     node.tick(command)
     assert published[-2].linear.x == 0 and published[-1] is command
     assert node.motion_pauses == 1 and node.active
-    monkeypatch.setattr(module['NAV']['rclpy'], 'spin_once', lambda *a,**k:None)
+    monkeypatch.setattr(module.NAV.rclpy, 'spin_once', lambda *a,**k:None)
     node.visual[-1]['x'] = .17
     count = len(published)
     with pytest.raises(RuntimeError, match='16 cm'):

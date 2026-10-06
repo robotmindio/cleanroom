@@ -85,6 +85,6 @@ def test_sim_up_records_one_launch_session_and_passes_arguments_through(tmp_path
         time.sleep(0.05)
     setup, pid, *command = record.read_text().split()
     assert setup == "1"
-    assert command == ["launch", "lekiwi_rmf", "bringup.launch.py", "mode:=sim", "slam_mode:=localization", "gui:=false"]
+    assert command == ["launch", "lekiwi_rmf", "bringup.launch.py", "profile:=sim", "slam_mode:=localization", "gui:=false"]
     # The recorded stack PID is the process that became ros2 launch.
     assert (logs / "runtime" / "stack.pid").read_text().strip() == pid

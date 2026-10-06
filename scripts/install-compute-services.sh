@@ -109,7 +109,7 @@ if [[ -n $REMOTE ]]; then
     log "warning: device services are also installed on this machine -- an"
     log "unusual split. If the devices are actually here, drop --remote."
   fi
-  STACK_ARGS="camera_source:=remote remote_ip:=$REMOTE laser_source:=ld06 lidar_source:=remote start_moveit:=true"
+  STACK_ARGS="profile:=split remote_ip:=$REMOTE start_moveit:=true"
 else
   # All-in-one: add the local motor host dependency. systemd dependencies
   # cannot be removed by an empty drop-in, so the base unit has none.
@@ -124,7 +124,7 @@ else
     # would -- over loopback.
     log "Camera publisher service found here: stack takes its frames over"
     log "loopback, so each USB device keeps exactly one reader."
-    STACK_ARGS="camera_source:=remote remote_ip:=127.0.0.1 laser_source:=ld06 lidar_source:=remote"
+    STACK_ARGS="profile:=split remote_ip:=127.0.0.1"
   else
     if [[ ! -f $host_unit ]]; then
       log "No device services here yet. If the motors and cameras end up on"
@@ -133,7 +133,7 @@ else
     fi
     # The standard device installer owns the LD06 serial port through its
     # service, even when this compute stack shares the same machine.
-    [[ -f $lidar_unit ]] && STACK_ARGS="laser_source:=ld06 lidar_source:=remote" || STACK_ARGS=""
+    [[ -f $lidar_unit ]] && STACK_ARGS="profile:=wired laser_source:=ld06 lidar_source:=remote" || STACK_ARGS="profile:=wired"
   fi
 fi
 

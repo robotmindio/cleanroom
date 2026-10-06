@@ -1,0 +1,46 @@
+rtabmap:
+  ros__parameters:
+    frame_id: base_footprint
+    map_frame_id: map
+    odom_frame_id: odom
+    # Core RTAB-Map settings are strings, including booleans and numbers.
+    # Override persisted ICP-only maps that otherwise disable visual features.
+    Kp/MaxFeatures: "500"
+    Icp/VoxelSize: "0.05"
+    Icp/MaxCorrespondenceDistance: "0.1"
+    Icp/PointToPlane: "false"
+    RGBD/ProximityPathMaxNeighbors: "10"
+    # Front image_raw has measured distortion and must be rectified.
+    Rtabmap/ImagesAlreadyRectified: "false"
+    Mem/NotLinkedNodesKept: "false"
+    RGBD/LinearUpdate: "0.04"
+    RGBD/ProximityMaxGraphDepth: "0"
+    RGBD/ProximityOdomGuess: "true"
+    Rtabmap/DetectionRate: "2"
+    subscribe_scan: false
+    # slam_cloud already removed the floor; project every point.
+    Grid/3D: "false"
+    Grid/NormalsSegmentation: "false"
+    Grid/RayTracing: "true"
+    Grid/MaxObstacleHeight: "1.0"
+    Grid/MaxGroundHeight: "0.05"
+    subscribe_odom_info: false
+    approx_sync: true
+    publish_tf: true
+    # TF compensates differing camera/scan capture stamps into one reference pose.
+    odom_sensor_sync: true
+    qos_image: 1
+    qos_camera_info: 1
+    qos_scan: 1
+    qos_odom: 1
+    # Preserve wheel uncertainty instead of millimetre-tight ICP neighbor links.
+    RGBD/NeighborLinkRefining: "false"
+    RGBD/ProximityBySpace: "true"
+    RGBD/LoopCovLimited: "true"
+    Reg/Force3DoF: "true"
+    Grid/Sensor: "0"
+    Grid/RangeMax: "3.0"
+    Grid/CellSize: "0.05"
+    # Short queues keep temporary jitter from becoming seconds of stale replay.
+    sync_queue_size: 5
+    topic_queue_size: 5

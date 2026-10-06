@@ -29,7 +29,7 @@ scripts/sim-renderer-check.py
 # a stuck Gazebo child without sweeping unrelated ROS processes on a shared server.
 # ROS setup scripts reference optional variables, so -u stays off in there.
 # shellcheck disable=SC2016 # Expanded by the launched shell.
-setsid bash -c 'source scripts/setup.bash && exec ros2 launch lekiwi_rmf bringup.launch.py mode:=sim "$@"' \
+setsid bash -c 'source scripts/setup.bash && exec ros2 launch lekiwi_rmf bringup.launch.py profile:=sim "$@"' \
   sim-stack "$@" 9>&- >"$logs_dir/sim-stack.log" 2>&1 &
 stack_pid=$!
 printf '%s\n' "$stack_pid" > "$runtime_dir/stack.pid"

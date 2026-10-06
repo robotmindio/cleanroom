@@ -19,6 +19,10 @@ environment variables; see [Configuration](../docs/real-robot.md#configuration).
 Scripts that systemd, ROS or another script runs are kept here because installed
 units refer to them directly.
 
+`checkerboard.py` and `render-model.py` are optional calibration/model tools.
+Install their plotting dependency with `sudo apt install python3-matplotlib`
+before using them; the robot runtime does not require it.
+
 ## Installation and deployment
 
 - `install.sh [--simulation]` installs a workstation, or with `--simulation` a simulation-only machine.
@@ -101,3 +105,6 @@ Source-only shell helpers, not commands: `runtime-common.sh` (`.env`, waits, por
 probes), `self-heal.sh` (service self-heal watcher), `service-install-common.sh`
 (unit rendering, restart tracking) and `service-install-revision.sh` (service
 configuration fingerprints).
+
+Onboard braking measurements and CAD geometry checks use SciPy, declared as a
+test dependency; install it for those tools with `sudo apt install python3-scipy`.

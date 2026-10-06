@@ -7,8 +7,7 @@ Wheel readings prove the fault response, not an independent stopping distance.
 """
 import argparse
 import math
-from pathlib import Path
-import runpy
+from importlib import import_module
 import shlex
 import subprocess
 import time
@@ -19,10 +18,10 @@ from geometry_msgs.msg import Twist
 from sensor_msgs.msg import Image
 from lekiwi_rmf.motion_guards import load_base_speed_limits
 
-navigation = runpy.run_path(str(Path(__file__).with_name('test-navigation.py')))
+navigation = import_module('test-navigation')
 
 
-class FaultTest(navigation['Test']):
+class FaultTest(navigation.Test):
     def __init__(self, restart_tests=False, output=None, angular_test=False, telemetry_tests=False):
         super().__init__()
         self.deadline = time.monotonic()+360
@@ -32,7 +31,7 @@ class FaultTest(navigation['Test']):
         self.output = output
         self.angular_test = angular_test
         self.telemetry_tests = telemetry_tests
-        self.test_speed = load_base_speed_limits(navigation['ROOT']/'config/nav2_params.yaml')[int(angular_test)]
+        self.test_speed = load_base_speed_limits(navigation.ROOT/'config/nav2_params.yaml')[int(angular_test)]
         self.phase = None
         self.safe_speed = None
         self.measured_speed = math.inf
@@ -40,10 +39,10 @@ class FaultTest(navigation['Test']):
         self.bridge = CvBridge()
         for camera in ('front','wrist','astra/color'):
             self.create_subscription(Image,'/camera/'+camera+'/image_raw',
-                lambda m,c=camera:self.views.update({c:m}),navigation['qos_profile_sensor_data'])
+                lambda m,c=camera:self.views.update({c:m}),navigation.qos_profile_sensor_data)
         self.create_subscription(Twist,'/cmd_vel_safe',lambda m:setattr(self,'safe_speed',
             math.hypot(m.linear.x,m.linear.y)+abs(m.angular.z)),10)
-        arguments = navigation['installed_stack_arguments']()
+        arguments = navigation.installed_stack_arguments()
         self.device = next(a.partition(':=')[2] for a in arguments if a.startswith('remote_ip:='))
         self.ssh = ['ssh','-o','BatchMode=yes','-o','ConnectTimeout=5',
                     '-o','ControlMaster=no','-o','ControlPath=none',self.device]
@@ -108,9 +107,9 @@ class FaultTest(navigation['Test']):
         start = self.pose
         end = time.monotonic()+5
         while (self.measured_speed<self.test_speed*.9 or self.safe_speed is None or self.safe_speed<self.test_speed*.9 or
-               (abs(navigation['angle'](self.pose[2]-start[2]))<0.015 if self.angular_test else
+               (abs(navigation.angle(self.pose[2]-start[2]))<0.015 if self.angular_test else
                 math.dist(self.pose[:2],start[:2])<0.003) or time.monotonic()-self.odom_at>0.3):
-            if self.monitor_action and self.monitor_action[1]!=navigation['CollisionMonitorState'].DO_NOTHING:
+            if self.monitor_action and self.monitor_action[1]!=navigation.CollisionMonitorState.DO_NOTHING:
                 action = self.monitor_action
                 self.stop()
                 raise RuntimeError('fault speed test blocked by collision monitor: '+str(action))
@@ -267,5 +266,5 @@ if __name__=='__main__':
     parser.add_argument('--telemetry-fault-tests',action='store_true',
                         help='use the finite qualification host for motor diagnostics and duplicate telemetry')
     args = parser.parse_args()
-    output = navigation['ROOT']/'.benchmarks/physical-faults'/time.strftime('%Y%m%d-%H%M%S')
-    navigation['main'](lambda:FaultTest(args.restart_tests,output,args.angular,args.telemetry_fault_tests),output)
+    output = navigation.ROOT/'.benchmarks/physical-faults'/time.strftime('%Y%m%d-%H%M%S')
+    navigation.main(lambda:FaultTest(args.restart_tests,output,args.angular,args.telemetry_fault_tests),output)

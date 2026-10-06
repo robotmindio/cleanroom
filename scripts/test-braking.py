@@ -8,8 +8,7 @@ validated:false or claims independent camera/floor calibration.
 import argparse
 import json
 import math
-from pathlib import Path
-import runpy
+from importlib import import_module
 import time
 
 import cv2
@@ -17,8 +16,8 @@ import numpy as np
 import yaml
 from geometry_msgs.msg import Twist
 
-navigation = runpy.run_path(str(Path(__file__).with_name('test-navigation.py')))
-ROOT = navigation['ROOT']
+navigation = import_module('test-navigation')
+ROOT = navigation.ROOT
 DIRECTIONS = {'forward':(1,0,0), 'reverse':(-1,0,0), 'left':(0,1,0), 'right':(0,-1,0),
               'rotation_cw':(0,0,-1), 'rotation_ccw':(0,0,1)}
 
@@ -127,12 +126,12 @@ def floor_pose(markers, reference):
     points = plane_points([[0,0],*(-side/2*axis,side/2*axis)],np.array(reference['matrix'])@body,np.zeros(2))
     translation = (points[0]-reference['origin'])/reference['magnification']
     direction = points[2]-points[1]
-    heading = navigation['angle'](math.atan2(direction[1],direction[0])-reference['heading'])
+    heading = navigation.angle(math.atan2(direction[1],direction[0])-reference['heading'])
     headings = [heading]
     for other in reference.get('others',[]):
         pose = floor_pose(markers,other)
         if pose is not None:
-            headings.append(heading+navigation['angle'](pose[2]-heading))
+            headings.append(heading+navigation.angle(pose[2]-heading))
     heading = float(np.median(headings))
     return [float(translation[0]),float(translation[1]),heading]
 
@@ -145,7 +144,7 @@ def maximum_swept_excursion(poses, radius):
     """
     start = poses[0]
     return max(math.dist(start[:2], pose[:2]) +
-               2*radius*abs(math.sin(navigation['angle'](pose[2]-start[2])/2))
+               2*radius*abs(math.sin(navigation.angle(pose[2]-start[2])/2))
                for pose in poses)
 
 
@@ -164,7 +163,7 @@ def stop_time_upper(samples, stopped_at):
                 for i in range(len(samples))]
     outside = [i for i,pose in enumerate(filtered)
                if math.dist(pose[:2],final[:2]) > .002
-               or abs(navigation['angle'](pose[2]-final[2])) > .01]
+               or abs(navigation.angle(pose[2]-final[2])) > .01]
     stable = samples[min(max(outside)+1 if outside else 1,len(samples)-1)]
     return max(0.,stable['time']-stopped_at)
 
@@ -176,7 +175,7 @@ def observed_speeds(samples,angular):
             raise RuntimeError('camera capture timestamps are invalid')
         dt = (b['pts_ns']-a['pts_ns'])/1e9
         if .005<dt<=.20:
-            distance = (abs(navigation['angle'](b['pose'][2]-a['pose'][2])) if angular
+            distance = (abs(navigation.angle(b['pose'][2]-a['pose'][2])) if angular
                         else math.dist(b['pose'][:2],a['pose'][:2]))
             rates.append(distance/dt)
     return rates
@@ -214,7 +213,7 @@ def dual_stop_measurement(samples, radius, stopped_at):
 
 def optical_return_twist(pose, target, body_to_marker):
     handedness = math.copysign(1,np.linalg.det(body_to_marker))
-    heading = handedness*navigation['angle'](pose[2]-target[2])
+    heading = handedness*navigation.angle(pose[2]-target[2])
     dx,dy = np.linalg.solve(body_to_marker,np.subtract(target[:2],pose[:2]))
     vx,vy = 2*(math.cos(heading)*dx+math.sin(heading)*dy), 2*(-math.sin(heading)*dx+math.cos(heading)*dy)
     scale = min(1,.05/max(math.hypot(vx,vy),1e-9))
@@ -393,7 +392,7 @@ class Camera:
             self.closed = True
 
 
-class BrakingTest(navigation['Test']):
+class BrakingTest(navigation.Test):
     def __init__(self, config, output, camera):
         super().__init__()
         self.config = config
@@ -419,7 +418,7 @@ class BrakingTest(navigation['Test']):
             return super().move(target, linear_limit=.10, angular_limit=.40)
         end = time.monotonic()+30
         while (math.dist(self.camera.last_pose[:2],self.optical_center[:2])>.002 or
-               abs(navigation['angle'](self.camera.last_pose[2]-self.optical_center[2]))>.015):
+               abs(navigation.angle(self.camera.last_pose[2]-self.optical_center[2]))>.015):
             if time.monotonic()>end:
                 raise RuntimeError('optical return to the fixed test center timed out')
             if not self.flags.get('base_motion_permitted'):
@@ -502,7 +501,7 @@ class BrakingTest(navigation['Test']):
         while True:
             self.tick(command)
             x, y, a = self.camera.last_pose
-            distance = abs(navigation['angle'](a-before[2])) if angular else math.dist((x,y), before[:2])
+            distance = abs(navigation.angle(a-before[2])) if angular else math.dist((x,y), before[:2])
             if distance >= self.config['trial_rotation_rad' if angular else 'trial_displacement_m']:
                 break
             if time.monotonic() > timeout+self.paused_seconds-paused_seconds:
@@ -514,7 +513,7 @@ class BrakingTest(navigation['Test']):
         for a, b in zip(moving, moving[1:]):
             dt = b['time']-a['time']
             if dt > .005:
-                distance = abs(navigation['angle'](b['pose'][2]-a['pose'][2])) if angular else math.dist(b['pose'][:2], a['pose'][:2])
+                distance = abs(navigation.angle(b['pose'][2]-a['pose'][2])) if angular else math.dist(b['pose'][:2], a['pose'][:2])
                 receive_rates.append(distance/dt)
         rates = observed_speeds(moving,angular)
         # Initial command/feedback waits are stationary. Verify the terminal
@@ -528,7 +527,7 @@ class BrakingTest(navigation['Test']):
         self.command.publish(Twist())
         post = [baseline, *self.settle()]
         path = sum(math.dist(a['pose'][:2], b['pose'][:2]) for a,b in zip(post,post[1:]))
-        rotation = sum(abs(navigation['angle'](b['pose'][2]-a['pose'][2])) for a,b in zip(post,post[1:]))
+        rotation = sum(abs(navigation.angle(b['pose'][2]-a['pose'][2])) for a,b in zip(post,post[1:]))
         # ponytail: conservative swept-point bound; surveyed marker-to-center
         # extrinsics can replace the 20 cm offset allowance after calibration.
         dual = dual_stop_measurement(post,.33+self.config['marker_center_offset_bound_m'],stopped_at)
@@ -605,9 +604,9 @@ class BrakingTest(navigation['Test']):
                         completed += 1
             self.move(self.center)
             self.wait(lambda:self.navigation.server_is_ready(), 10)
-            self.wait(lambda:self.buffer.can_transform('map','base_footprint',navigation['Time']()), 10)
-            tf = self.buffer.lookup_transform('map','base_footprint',navigation['Time']()).transform
-            x, y, a = tf.translation.x, tf.translation.y, navigation['yaw'](tf.rotation)
+            self.wait(lambda:self.buffer.can_transform('map','base_footprint',navigation.Time()), 10)
+            tf = self.buffer.lookup_transform('map','base_footprint',navigation.Time()).transform
+            x, y, a = tf.translation.x, tf.translation.y, navigation.yaw(tf.rotation)
             for target in [(x+.04*math.cos(a),y+.04*math.sin(a),a),(x,y,a)]:
                 self.navigate(target)
                 self.checks['navigation'].append({'target':target,'optical_pose':self.camera.last_pose.copy(),'wheel_pose':self.pose})
@@ -660,7 +659,7 @@ def main():
                     raise RuntimeError('measurement camera cannot establish a fresh marker reference; production untouched')
             if args.explore_only:
                 config['trials_per_direction'] = 0
-            navigation['main'](lambda:BrakingTest(config,output,camera),output,
+            navigation.main(lambda:BrakingTest(config,output,camera),output,
                                (f"base_test_linear_limit:={config['maximum_linear_speed_m_s']}",
                                 f"base_test_angular_limit:={config['maximum_angular_speed_rad_s']}"),
                                production=args.production, payload_kg=config['payload_kg'])

@@ -7,7 +7,7 @@ travel_stow. Restores the production service and preserves its map/acceptance.
 import json
 import math
 from pathlib import Path
-import runpy
+from importlib import import_module
 import signal
 import subprocess
 import time
@@ -21,11 +21,11 @@ from rtabmap_msgs.msg import OdomInfo, RGBDImages
 from sensor_msgs.msg import Image
 
 ROOT = Path(__file__).resolve().parents[1]
-NAV = runpy.run_path(str(ROOT / 'scripts/test-navigation.py'))
+NAV = import_module('test-navigation')
 OUTPUT = ROOT / '.benchmarks/onboard-navigation' / time.strftime('%Y%m%d-%H%M%S')
 
 
-class OnboardTest(NAV['Test']):
+class OnboardTest(NAV.Test):
     def __init__(self):
         super().__init__()
         self.bridge = CvBridge()
@@ -58,7 +58,7 @@ class OnboardTest(NAV['Test']):
         age = (self.get_clock().now().nanoseconds - stamp.sec*10**9 - stamp.nanosec)/1e9
         self.visual.append({'t': time.monotonic(), 'source_age_s': age,
                             'x': pose.position.x, 'y': pose.position.y,
-                            'yaw': NAV['yaw'](pose.orientation)})
+                            'yaw': NAV.yaw(pose.orientation)})
 
     def check_visual_feedback(self, now):
         if not self.visual:
@@ -104,9 +104,9 @@ class OnboardTest(NAV['Test']):
         self.active = True
         self.wait(lambda: self.flags.get('base_motion_permitted'), 10)
         self.wait(self.navigation.server_is_ready, 20)
-        self.wait(lambda: self.buffer.can_transform('map', 'base_footprint', NAV['Time']()), 15)
-        transform = self.buffer.lookup_transform('map', 'base_footprint', NAV['Time']()).transform
-        x, y, a = transform.translation.x, transform.translation.y, NAV['yaw'](transform.rotation)
+        self.wait(lambda: self.buffer.can_transform('map', 'base_footprint', NAV.Time()), 15)
+        transform = self.buffer.lookup_transform('map', 'base_footprint', NAV.Time()).transform
+        x, y, a = transform.translation.x, transform.translation.y, NAV.yaw(transform.rotation)
         self.mark('origin')
         for name, goal, minimum in (
             ('forward', (x+.10*math.cos(a), y+.10*math.sin(a), a), .025),
@@ -148,5 +148,5 @@ class OnboardTest(NAV['Test']):
 
 
 if __name__ == '__main__':
-    NAV['main'](test_class=OnboardTest, output=OUTPUT,
+    NAV.main(test_class=OnboardTest, output=OUTPUT,
                 launch_arguments=(f'rtabmap_database:={OUTPUT}/test-map.db',))

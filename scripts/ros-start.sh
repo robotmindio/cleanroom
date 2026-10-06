@@ -20,7 +20,7 @@ load_lekiwi_env
 if [[ -n ${LEKIWI_ROBOT_HOST:-} ]]; then
   use_env_host=true
   for arg in "$@"; do
-    case $arg in remote_ip:=*|camera_source:=local) use_env_host=false ;; esac
+    case $arg in remote_ip:=*|camera_source:=local|profile:=wired) use_env_host=false ;; esac
   done
   $use_env_host && set -- "remote_ip:=$LEKIWI_ROBOT_HOST" "$@"
 fi
@@ -50,33 +50,21 @@ for arg in "$@"; do
   case "$arg" in
     camera_source:=remote) camera_source=remote ;;
     camera_source:=local) camera_source=local ;;
+    profile:=split) camera_source=remote ;;
+    profile:=wired) camera_source=local ;;
     remote_ip:=*) [[ -n $camera_source ]] || camera_source=remote ;;
   esac
 done
 : "${camera_source:=local}"
+profile="wired"
+[[ $camera_source == local ]] || profile="split"
 
-# Geometry and odometry measurements are machine-local, not source-controlled. The
-# calibration tools write only numeric KEY=VALUE lines; reject anything malformed rather
-# than sourcing a user file into this launcher.
+# The writer, launcher and motor host share the same validated calibration reader.
 calibration_args=()
-has_launch_arg() { # has_launch_arg <key>
-  local key=$1 arg
-  for arg in "$@"; do [[ $arg == "$key":=* ]] && return 0; done
-  return 1
-}
-load_launch_calibration() {
-  local file="${LEKIWI_LAUNCH_CALIBRATION:-$HOME/.ros/lekiwi_launch_calibration.conf}"
-  local key value
-  [ -r "$file" ] || return 0
-  while IFS='=' read -r key value; do
-    case "$key" in camera_height|camera_pitch|xy_velocity_scale|yaw_velocity_scale) ;;
-      *) continue ;;
-    esac
-    [[ $value =~ ^[0-9]+([.][0-9]+)?$ ]] || continue
-    has_launch_arg "$key" "$@" || calibration_args+=("$key:=$value")
-  done < "$file"
-}
-load_launch_calibration "$@"
+calibration_output=$(python3 -m lekiwi_rmf.launch_calibration "$@")
+if [[ -n $calibration_output ]]; then
+  mapfile -t calibration_args <<< "$calibration_output"
+fi
 
 if [[ $camera_source == local ]]; then
   FRONT="${LEKIWI_FRONT:-$(first_match '/dev/v4l/by-id/*WEBCAM*-video-index0')}"
@@ -93,8 +81,7 @@ front_camera_info="file://${LEKIWI_CAMERA_INFO:-$HOME/.ros/camera_info/lekiwi_fr
 wrist_camera_info="file://${LEKIWI_WRIST_CAMERA_INFO:-$HOME/.ros/camera_info/lekiwi_wrist.yaml}"
 
 self_heal
-exec ros2 launch lekiwi_rmf bringup.launch.py mode:=real \
-  camera_source:="$camera_source" \
+exec ros2 launch lekiwi_rmf bringup.launch.py profile:="$profile" \
   camera_device:="$FRONT" wrist_camera_device:="${WRIST:-none}" \
   camera_info_url:="$front_camera_info" wrist_camera_info_url:="$wrist_camera_info" \
   "${calibration_args[@]}" "$@"

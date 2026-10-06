@@ -146,6 +146,7 @@ if(BUILD_TESTING)
     # live node's ephemeral socket during discovery. Tests
     # without one never open a DDS participant.
     add_lekiwi_pytest(test_odometry 40)
+    add_lekiwi_pytest(test_launch_calibration)
     add_lekiwi_pytest(test_motor_health 76)
     add_lekiwi_pytest(test_odom_scale 41)
     add_lekiwi_pytest(test_free_space 42)

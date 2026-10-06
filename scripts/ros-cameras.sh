@@ -16,18 +16,7 @@ source scripts/lib/runtime-common.sh
 # shellcheck source=/dev/null
 source scripts/lib/self-heal.sh
 
-# The Pi runs ros-base only (scripts/setup-pi.bash); a machine with a
-# workspace gets the same DDS settings through setup.bash. Either way the
-# transport must match the workstation's or discovery is one-sided.
-if [ -f "${LEKIWI_WS:-$HOME/lekiwi_ws}/install/setup.bash" ]; then
-  set +u # ROS's own setup scripts read unset variables
-  # shellcheck source=/dev/null
-  source scripts/setup.bash
-  set -u
-else
-  # shellcheck source=/dev/null
-  source scripts/setup-pi.bash
-fi
+source_device_ros_env
 
 calibration="${LEKIWI_CAMERA_INFO:-$HOME/.ros/camera_info/lekiwi_front.yaml}"
 front_camera_info="file://${LEKIWI_CAMERA_INFO:-$HOME/.ros/camera_info/lekiwi_front.yaml}"

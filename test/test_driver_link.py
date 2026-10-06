@@ -1,6 +1,5 @@
-"""Pure checks for the driver's stale-telemetry detector."""
+"""Driver boundary checks with a loopback host for native ROS construction."""
 
-import ast
 import asyncio
 import math
 import pathlib
@@ -11,53 +10,42 @@ import types
 import pytest
 import yaml
 
-from lekiwi_rmf.arm_trajectory import (
-    ARM_JOINTS, JOINT_LIMITS, action_positions, duration_seconds,
-    position_tolerances,
-)
-from lekiwi_rmf.motion_guards import inside_base_test_boundary, lease_is_fresh, twist_is_finite
+from lekiwi_rmf import driver
+from lekiwi_rmf.motion_guards import lease_is_fresh
 
-_SOURCE = (pathlib.Path(__file__).parents[1] / "lekiwi_rmf" / "driver.py").read_text()
-_TREE = ast.parse(_SOURCE)
-_NODE = next(node for node in _TREE.body if getattr(node, "name", None) == "LeKiwiDriver")
-_NODE.bases = []
-_NODE.body = [
-    item for item in _NODE.body
-    if getattr(item, "name", None) in (
-        "arm", "disarm", "clamp", "clamp_planar", "observation_is_fresh", "observation_is_valid",
-        "handle_host_session_change",
-        "enforce_reported_torque_state",
-        "arm_after_startup_telemetry", "on_command", "publish_safety", "publish_state", "publish_motor_health",
-        "set_disarmed", "set_servo_torque", "cut_torque_after_failure", "_retry_rearm_soon",
-        "_enable_torque_and_arm", "_arm_permission_is_current", "_run_deferred_cut",
-        "_permission_is_current",
-        "_capability_permission_is_current", "_hold_feedback_gap", "enforce_permission_leases",
-        "on_base_permission", "on_arm_permission", "on_arm_collision",
-        "record_link_loss", "update", "validate_motion_parameters",
-        "_poll_telemetry", "_hold_action", "_send_pending_stop", "_apply_trajectory",
-        "_send_armed_command", "auto_arm_tick", "execute_trajectory",
-        "requested_tolerances", "destroy_node",
-    )
-]
-_CONSTANTS = [
-    node for node in _TREE.body
-    if isinstance(node, ast.Assign)
-    and getattr(node.targets[0], "id", "") == "MAX_TRAJECTORY_START_DELAY_NS"
-]
-driver = types.ModuleType("driver_under_test")
-exec(
-    compile(ast.Module(body=[*_CONSTANTS, _NODE], type_ignores=[]), "driver.py", "exec"),
-    driver.__dict__,
-)
-driver.math = math
-driver.time = time
-driver.asyncio = asyncio
-driver.JOINT_LIMITS = {**JOINT_LIMITS, "joint": (-2.0, 2.0)}
-driver.lease_is_fresh = lease_is_fresh
-driver.twist_is_finite = twist_is_finite
-driver.inside_base_test_boundary = inside_base_test_boundary
-driver.duration_seconds = duration_seconds
-driver.position_tolerances = position_tolerances
+
+@pytest.fixture(autouse=True)
+def restore_driver_imports(monkeypatch):
+    # Existing boundary fakes patch imported messages/clients. Keep each check isolated.
+    for name, value in vars(driver).copy().items():
+        if not name.startswith("__"):
+            monkeypatch.setattr(driver, name, value)
+
+
+@pytest.fixture
+def connected_driver():
+    from lekiwi_rmf.fake_host import FakeLeKiwiHost
+    import rclpy
+
+    host = FakeLeKiwiHost()
+    host.start(period_s=0.02)
+    rclpy.init(args=[
+        "--ros-args", "-p", f"remote_command_port:={host.command_endpoint_port}",
+        "-p", f"remote_observation_port:={host.observation_endpoint_port}",
+        "-p", f"torque_control_port:={host.torque_endpoint_port}",
+        "-p", "arm_calibration_file:=/test/missing-calibration.json",
+    ])
+    node = None
+    try:
+        node = driver.LeKiwiDriver()
+        yield node
+    finally:
+        try:
+            if node is not None:
+                node.destroy_node()
+        finally:
+            rclpy.try_shutdown()
+            host.close()
 
 
 def make_node(**overrides):
@@ -71,7 +59,6 @@ def make_node(**overrides):
     state = {
         "disarm_on_failure": True,
         "bounded_base_test": False,
-        "local_arm_execution": False,
         "operator_disarmed": False,
         "auto_arm_pending": False,
         "_next_rearm_at": 0.0,
@@ -80,7 +67,6 @@ def make_node(**overrides):
         "link_lost": False,
         "_healthy_telemetry_at": None,
         "_last_fresh_monotonic": None,
-        "_feedback_gap_started_at": None,
         "arm_workspace_collision": False,
         "stop_pending": True,
         "_disarm_epoch": 0,
@@ -98,7 +84,7 @@ def make_node(**overrides):
         "gripper_trajectory_tolerance": 0.005,
         "trajectory_timeout": 5.0,
         "robot": None,
-        "context": None,
+        "_context": None,
         "last_observation": None,
         "last_observation_token": None,
         "arm_hold_action": None,
@@ -376,8 +362,8 @@ def test_gripper_trajectory_uses_its_tighter_completion_tolerance():
     assert tolerances == {"arm_shoulder_lift": 0.02, "arm_gripper": 0.005}
 
 
-def test_guarded_command_topic_is_the_default_and_must_not_be_empty():
-    assert 'declare_parameter("cmd_vel_topic", "/cmd_vel_safe")' in _SOURCE
+def test_guarded_command_topic_is_the_default_and_must_not_be_empty(connected_driver):
+    assert connected_driver.get_parameter("cmd_vel_topic").value == "/cmd_vel_safe"
     node = make_node()
     node.xy_scale = node.yaw_scale = 1.0
     node.command_timeout = node.link_timeout = node.permission_timeout = 1.0
@@ -715,7 +701,7 @@ def test_shutdown_style_disarm_latches_fault_without_publishing_on_rpc_exception
     driver.Twist = object
     driver.rclpy = types.SimpleNamespace(ok=lambda **_kwargs: False)
     node = make_node()
-    node.context = object()
+    node._context = object()
     node.state_lock = threading.Lock()
     node.action_lock = threading.Lock()
     node.torque_lock = threading.Lock()
@@ -1135,46 +1121,11 @@ def test_idle_arm_hold_keeps_its_goal_when_feedback_sags():
     assert [action["joint.pos"] for action in node.sent] == [10.0, 10.0]
 
 
-def test_arm_hold_follows_last_trajectory_goal(monkeypatch):
-    node = control_loop_node(armed=True)
-    grant_fresh_arm_permission(node)
-    grant_fresh_base_permission(node)
-    monkeypatch.setattr(driver, "sample_trajectory", lambda *_: ({"joint": 0.5}, {}, {}), raising=False)
-    monkeypatch.setattr(driver, "action_positions", lambda *_: {"joint": 20.0}, raising=False)
-    node.trajectory = {
-        "start": time.monotonic(), "done": threading.Event(),
-        "names": ("joint",), "start_positions": {"joint": 0.0},
-        "points": [types.SimpleNamespace(time=10.0, positions={"joint": 0.5})],
-        "path_tolerances": {"joint": 1.0},
-        "goal_tolerances": {"joint": 0.01},
-        "goal_time_tolerance": 1.0,
-    }
-
-    node._send_armed_command(_Stamp(), {"joint.pos": 10.0}, (0.0, 0.0, 0.0))
-    node.trajectory = None
-    node._send_armed_command(_Stamp(), {"joint.pos": 15.0}, (0.0, 0.0, 0.0))
-
-    assert [action["joint.pos"] for action in node.sent] == [20.0, 20.0]
-
-
 def test_arm_permission_withdrawn_at_the_final_check_holds_the_arm():
-    # The active trajectory's setpoint is well away from the measured position.
-    driver.sample_trajectory = lambda *_: ({"joint": 0.5}, {}, {})
-    driver.action_positions = lambda names, values, *_: dict(zip(names, values))
     canceled = []
-    node = control_loop_node(
-        armed=True,
-        trajectory={
-            "start": time.monotonic(),
-            "done": threading.Event(),
-            "names": ("joint",),
-            "start_positions": {"joint": 0.0},
-            "points": [types.SimpleNamespace(time=10.0, positions={"joint": 0.5})],
-            "path_tolerances": {"joint": 1.0},
-            "goal_tolerances": {"joint": 0.01},
-            "goal_time_tolerance": 1.0,
-        },
-    )
+    node = control_loop_node(armed=True, trajectory={"host_id": 1})
+    leases = []
+    node.robot.send_action = lambda action, **kwargs: (node.sent.append(action), leases.append(kwargs))
     grant_fresh_base_permission(node)
     # The withdrawal lands after this cycle's lease check but before the final
     # armed/permission check under action_lock.
@@ -1184,6 +1135,7 @@ def test_arm_permission_withdrawn_at_the_final_check_holds_the_arm():
     node.update()
 
     assert canceled == ["arm safety permission withdrawn"]
+    assert leases == [{"arm_goal_id": 1, "arm_permitted": False}]
     assert node.sent == [{"joint.pos": 0.0, "x.vel": 0.0, "y.vel": 0.0, "theta.vel": 0.0}]
 
 
@@ -1260,16 +1212,15 @@ def test_automatic_arm_tick_acts_only_on_recent_healthy_telemetry():
     assert attempts == [True]
 
 
-def test_torque_transitions_run_outside_the_control_loop_callback_group():
-    source = " ".join(_SOURCE.split())
-    for registration in (
-        'Trigger, "safety/arm", self.arm,',
-        'Trigger, "safety/disarm", self.disarm,',
-        "0.1, self.auto_arm_tick,",
-    ):
-        assert f"{registration} callback_group=self.transition_callback_group" in source
-    # update() stays in the node's default group, apart from every torque RPC.
-    assert "self.create_timer(0.05, self.update)" in source
+def test_torque_transitions_run_outside_the_control_loop_callback_group(connected_driver):
+    node = connected_driver
+    for service in node.services:
+        if service.srv_name in ("/safety/arm", "/safety/disarm"):
+            assert service.callback_group is node.transition_callback_group
+    callbacks = {timer.callback: timer.callback_group for timer in node.timers}
+    assert callbacks[node.auto_arm_tick] is node.transition_callback_group
+    assert callbacks[node.update] is node.default_callback_group
+    assert node.default_callback_group is not node.transition_callback_group
 
 
 def test_a_failed_command_send_is_a_recorded_link_loss():
@@ -1353,12 +1304,15 @@ def test_goal_waiting_for_joint_recovery_starts_its_clock_after_wait(monkeypatch
     monkeypatch.setattr(driver, "FollowJointTrajectory", types.SimpleNamespace(Result=_Result))
     monkeypatch.setattr(driver, "Twist", object)
     monkeypatch.setattr(driver, "threading", threading, raising=False)
-    monkeypatch.setattr(driver, "trajectory_rows", lambda *_: [object()])
+    point = types.SimpleNamespace(time=1.0, positions={"joint": 0.5})
+    monkeypatch.setattr(driver, "trajectory_rows", lambda *_: [point])
     monkeypatch.setattr(driver, "stamp_nanoseconds", lambda *_: 0)
     monkeypatch.setattr(driver, "prepare_trajectory", lambda _names, points, *_: points, raising=False)
     node = make_node(
         armed=True, arm_positions={"joint": 0.0},
         arm_zero_positions={"joint": 0.0}, arm_directions={"joint": 1.0},
+        last_observation_token=("host", "test-session", 1),
+        arm_hold_action={"joint.pos": 10.0},
     )
     node.requested_tolerances = lambda *_: ({}, {}, 1.0)
     node.get_clock = lambda: types.SimpleNamespace(
@@ -1367,14 +1321,26 @@ def test_goal_waiting_for_joint_recovery_starts_its_clock_after_wait(monkeypatch
     node._arm_permission_is_current = lambda: allowed[0]
     node._hold_feedback_gap = lambda: True
     node.publish_trajectory_feedback = lambda *_: None
+    uploaded = []
+    started = []
+
+    def upload(command, **request):
+        assert command == "trajectory_start"
+        uploaded.append(request)
+        started.append(node.trajectory["start"])
+        node.robot.arm_trajectory_status = {
+            "id": request["trajectory"]["id"], "state": "succeeded",
+            "elapsed": 1.0, "code": 0, "detail": "",
+        }
+        return {"trajectory": node.robot.arm_trajectory_status}
+
+    node.robot = types.SimpleNamespace(arm_trajectory_status=None)
+    node.torque = types.SimpleNamespace(trajectory_request=upload)
+    monkeypatch.setattr(driver, "action_positions", lambda *_: {"joint": 20.0})
 
     async def yield_control(_delay):
         clock[0] += 0.5
-        if not allowed[0]:
-            allowed[0] = True
-        else:
-            node.trajectory["outcome"] = "succeeded"
-            node.trajectory["done"].set()
+        allowed[0] = True
 
     node._yield_for_control = yield_control
     succeeded = []
@@ -1390,97 +1356,15 @@ def test_goal_waiting_for_joint_recovery_starts_its_clock_after_wait(monkeypatch
 
     assert result.error_code == _Result.SUCCESSFUL
     assert succeeded == [True]
-    assert node.trajectory["start"] == pytest.approx(10.5)
-
-
-def test_recovery_setpoint_stays_inside_joint_limit(monkeypatch):
-    joint = "arm_shoulder_lift"
-    upper = JOINT_LIMITS[joint][1]
-    start = upper + 0.07
-    node = make_node()
-    node.trajectory = {
-        "start": 0.0,
-        "start_positions": {joint: start},
-        "names": (joint,),
-        "points": [types.SimpleNamespace(time=2.0, positions={joint: upper - 0.02})],
-        "path_tolerances": {joint: 0.2},
-        "goal_tolerances": {joint: 0.05},
-        "goal_time_tolerance": 5.0,
-        "done": threading.Event(),
-    }
-    node.arm_positions = {joint: start}
-    node.arm_zero_positions = dict.fromkeys(ARM_JOINTS, 0.0)
-    node.arm_directions = dict.fromkeys(ARM_JOINTS, 1.0)
-    driver.action_positions = action_positions
-    driver.sample_trajectory = lambda *_: ({joint: start}, {}, {})
-    monkeypatch.setattr(driver.time, "monotonic", lambda: 0.0)
-    action = {}
-
-    assert node._apply_trajectory(action, {})
-    assert action[f"{joint}.pos"] == pytest.approx(math.degrees(upper))
-
-
-def test_brief_joint_gap_pauses_trajectory_clock_and_resumes(monkeypatch):
-    node = make_node(armed=True, disarm_on_failure=False, _last_fresh_monotonic=10.0)
-    node.trajectory = {
-        "start": 10.0, "start_positions": {"joint": 0.0}, "names": ("joint",),
-        "points": [types.SimpleNamespace(time=5.0, positions={"joint": 0.5})],
-        "path_tolerances": {"joint": 1.0}, "goal_tolerances": {"joint": 0.01},
-        "goal_time_tolerance": 5.0, "done": threading.Event(),
-    }
-    node.arm_positions = {"joint": 0.0}
-    node.arm_zero_positions = {"joint": 0.0}
-    node.arm_directions = {"joint": 1.0}
-    node.get_logger = lambda: types.SimpleNamespace(warning=lambda *_: None)
-    monkeypatch.setattr(driver, "sample_trajectory", lambda *_: ({"joint": 0.0}, {}, {}))
-    monkeypatch.setattr(driver, "action_positions", lambda *_: {"joint": 0.0})
-
-    monkeypatch.setattr(driver.time, "monotonic", lambda: 10.35)
-    assert node._hold_feedback_gap()
-    assert node.trajectory["paused_at"] == 10.0
-    monkeypatch.setattr(driver.time, "monotonic", lambda: 10.6)
-    assert node._apply_trajectory({}, {})
-    assert node.trajectory["start"] == pytest.approx(10.6)
-    assert "paused_at" not in node.trajectory
-
-
-def test_permission_loss_during_motor_gap_holds_goal_but_times_out(monkeypatch):
-    node = make_node(armed=True, disarm_on_failure=False, _last_fresh_monotonic=9.5)
-    node.trajectory = {"paused_at": None}
-    node.arm_motion_permitted = True
-    node._arm_permission_expired = False
-    node.get_logger = lambda: types.SimpleNamespace(warning=lambda *_: None, error=lambda *_: None)
-    node.get_clock = lambda: types.SimpleNamespace(now=lambda: object())
-    canceled, disarmed = [], []
-    node.cancel_trajectory = canceled.append
-    node.set_disarmed = disarmed.append
-    monkeypatch.setattr(driver, "Twist", object)
-    monkeypatch.setattr(driver.time, "monotonic", lambda: 10.1)
-
-    node.on_arm_permission(types.SimpleNamespace(data=False))
-    assert node.trajectory["paused_at"] == 9.5
-    assert canceled == disarmed == []
-    monkeypatch.setattr(driver.time, "monotonic", lambda: 10.51)
-    assert not node._hold_feedback_gap()
-
-
-def test_permission_loss_with_fresh_motor_feedback_cancels_goal(monkeypatch):
-    node = make_node(armed=True, disarm_on_failure=False, _last_fresh_monotonic=10.0)
-    node.arm_motion_permitted = True
-    node._arm_permission_expired = False
-    node.get_logger = lambda: types.SimpleNamespace(error=lambda *_: None)
-    canceled, disarmed = [], []
-    node.cancel_trajectory = canceled.append
-    node.set_disarmed = disarmed.append
-    monkeypatch.setattr(driver.time, "monotonic", lambda: 10.1)
-
-    node.on_arm_permission(types.SimpleNamespace(data=False))
-    assert canceled == ["arm safety permission withdrawn"]
-    assert disarmed == ["DISARMED"]
+    assert started == [pytest.approx(10.5)]
+    assert len(uploaded) == 1 and uploaded[0]["session"] == "test-session"
+    assert uploaded[0]["trajectory"]["delay"] == 0.0
+    assert node.trajectory is None
+    assert node.arm_hold_action == {"joint.pos": 20.0}
 
 
 def test_local_goal_survives_telemetry_silence_beyond_link_timeout(monkeypatch):
-    node = make_node(armed=True, local_arm_execution=True, disarm_on_failure=False,
+    node = make_node(armed=True, disarm_on_failure=False,
                      _last_fresh_monotonic=10.0)
     node.trajectory = {"done": threading.Event()}
     node.odom_samples = types.SimpleNamespace(reset=lambda: None)
@@ -1497,7 +1381,7 @@ def test_local_goal_survives_telemetry_silence_beyond_link_timeout(monkeypatch):
 
 
 def test_local_goal_waits_for_collision_check_after_motor_feedback_recovers(monkeypatch):
-    node = make_node(armed=True, local_arm_execution=True, disarm_on_failure=False,
+    node = make_node(armed=True, disarm_on_failure=False,
                      _last_fresh_monotonic=10.0, arm_motion_permitted=True)
     node.trajectory = {"done": threading.Event()}
     node.get_logger = lambda: types.SimpleNamespace(warning=lambda *_: None, error=lambda *_: None)
@@ -1517,37 +1401,6 @@ def test_local_goal_waits_for_collision_check_after_motor_feedback_recovers(monk
     assert disarmed == ["DISARMED"]
     node.on_arm_permission(types.SimpleNamespace(data=True))
     assert not node._arm_permission_is_current()
-
-
-def test_goal_timeout_names_the_joint_that_missed_tolerance(monkeypatch):
-    lift, elbow = "arm_shoulder_lift", "arm_elbow_flex"
-    node = make_node()
-    node.arm_positions = {lift: 1.0232, elbow: -0.988}
-    node.arm_zero_positions = dict.fromkeys(ARM_JOINTS, 0.0)
-    node.arm_directions = dict.fromkeys(ARM_JOINTS, 1.0)
-    node.trajectory = {
-        "start": 0.0,
-        "start_positions": {lift: 1.1, elbow: -0.9},
-        "names": (lift, elbow),
-        "points": [types.SimpleNamespace(time=1.0, positions={lift: 1.0, elbow: -1.0})],
-        "path_tolerances": {lift: 0.2, elbow: 0.2},
-        "goal_tolerances": {lift: 0.02, elbow: 0.02},
-        "goal_time_tolerance": 5.0,
-        "done": threading.Event(),
-    }
-    trajectory = node.trajectory
-    monkeypatch.setattr(driver, "sample_trajectory", lambda *_: ({lift: 1.0, elbow: -1.0}, {}, {}))
-    monkeypatch.setattr(driver, "action_positions", lambda *_: {lift: 57.3, elbow: -57.3})
-    monkeypatch.setattr(driver.time, "monotonic", lambda: 6.1)
-    monkeypatch.setattr(driver, "FollowJointTrajectory", types.SimpleNamespace(
-        Result=types.SimpleNamespace(GOAL_TOLERANCE_VIOLATED=-5)
-    ), raising=False)
-
-    assert node._apply_trajectory({}, {})
-    assert trajectory["outcome"] == (
-        "goal tolerance exceeded for arm_shoulder_lift: error=0.0232 rad, limit=0.0200 rad"
-    )
-    assert trajectory["done"].is_set()
 
 
 def _disarmable(node):
@@ -1631,19 +1484,10 @@ def test_a_disarm_during_an_in_flight_enable_wins_and_armed_is_never_published()
 
 
 
-class _NodeBase:
-    def destroy_node(self):
-        self.calls.append("node")
-
-
-class _ShutdownDriver(driver.LeKiwiDriver, _NodeBase):
-    pass
-
-
 def make_shutdown_node(monkeypatch, liveness, disarm_error):
     node = make_node()
-    node.__class__ = _ShutdownDriver
     node.calls = []
+    monkeypatch.setattr(driver.Node, "destroy_node", lambda self: self.calls.append("node"))
     monkeypatch.setattr(
         driver, "rclpy", types.SimpleNamespace(ok=lambda context=None: next(liveness)),
         raising=False,

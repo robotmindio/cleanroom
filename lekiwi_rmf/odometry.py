@@ -2,7 +2,8 @@
 
 from dataclasses import dataclass
 from math import cos, isfinite, sin
-from pathlib import Path
+
+from lekiwi_rmf.launch_calibration import load_launch_calibration
 
 
 TELEMETRY_PROTOCOL_VERSION = 2
@@ -175,16 +176,9 @@ def integrate_pose(pose, velocity, dt):
 
 def load_base_scales(path):
     """Use the same saved wheel calibration as ros-start.sh."""
-    scales = {"xy_velocity_scale": BASE_XY_SCALE, "yaw_velocity_scale": BASE_YAW_SCALE}
-    path = Path(path).expanduser()
-    if path.exists():
-        for line in path.read_text().splitlines():
-            key, separator, value = line.partition("=")
-            if separator and key in scales:
-                scales[key] = float(value)
-    if not all(isfinite(value) and value > 0 for value in scales.values()):
-        raise ValueError(f"invalid wheel calibration in {path}")
-    return tuple(scales.values())
+    values = load_launch_calibration(path)
+    return (values.get("xy_velocity_scale", BASE_XY_SCALE),
+            values.get("yaw_velocity_scale", BASE_YAW_SCALE))
 
 
 def parse_host_odometry(payload):

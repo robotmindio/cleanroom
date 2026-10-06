@@ -7,8 +7,7 @@ Neither case edits named poses, collision padding or physical acceptance.
 """
 import argparse
 import math
-from pathlib import Path
-import runpy
+from importlib import import_module
 import time
 
 from control_msgs.action import FollowJointTrajectory
@@ -22,10 +21,10 @@ from std_msgs.msg import Bool
 from trajectory_msgs.msg import JointTrajectoryPoint
 from visualization_msgs.msg import MarkerArray
 
-nav = runpy.run_path(str(Path(__file__).with_name('test-navigation.py')))
+nav = import_module('test-navigation')
 
 
-class Gates(nav['Test']):
+class Gates(nav.Test):
     def __init__(self, case):
         super().__init__()
         self.case, self.checks, self.points, self.safe, self.joints = case, {}, [], None, None
@@ -84,7 +83,7 @@ class Gates(nav['Test']):
                 if math.dist(self.center[:2],self.pose[:2])>.005:
                     raise RuntimeError('obstacle gate allowed physical movement')
             self.stop()
-            if not (self.monitor_action == ('StopZone',nav['CollisionMonitorState'].STOP)
+            if not (self.monitor_action == ('StopZone',nav.CollisionMonitorState.STOP)
                     and self.safe is not None and self.safe.linear.x == 0
                     and self.flags.get('base_motion_permitted')):
                 raise RuntimeError('obstacle did not independently stop the authorized command')
@@ -142,5 +141,5 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('case', choices=['obstacle','workspace'])
     args = parser.parse_args()
-    output = nav['ROOT']/'.benchmarks/acceptance-gates'/time.strftime('%Y%m%d-%H%M%S')
-    nav['main'](lambda:Gates(args.case), output)
+    output = nav.ROOT/'.benchmarks/acceptance-gates'/time.strftime('%Y%m%d-%H%M%S')
+    nav.main(lambda:Gates(args.case), output)

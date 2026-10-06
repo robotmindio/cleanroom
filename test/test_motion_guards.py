@@ -273,7 +273,7 @@ def test_missing_measurement_camera_does_not_interrupt_production(monkeypatch,tm
     else:
         monkeypatch.setitem(globals_,'Camera',missing_camera)
     calls = []
-    monkeypatch.setitem(globals_['navigation'],'main',lambda *args:calls.append(args))
+    monkeypatch.setattr(globals_['navigation'],'main',lambda *args:calls.append(args))
     with pytest.raises(RuntimeError,match='measurement camera'):
         functions['main']()
     assert not calls
