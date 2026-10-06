@@ -976,7 +976,7 @@ def test_torque_on_failure_key_is_validated_and_reaches_both_machines(tmp_path):
     # Both sides must pass the same opt-in on, and default to holding torque.
     stack = (ROOT / "scripts" / "ros-start.sh").read_text(encoding="utf-8")
     host = (ROOT / "scripts" / "robot-host.sh").read_text(encoding="utf-8")
-    assert "disarm_on_failure:=true" in stack
+    assert "safety_policy:=strict" in stack
     assert '--safety.disarm_on_failure="${LEKIWI_DISARM_ON_FAILURE:-false}"' in host
 
 

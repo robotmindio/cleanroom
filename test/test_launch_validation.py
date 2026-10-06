@@ -15,8 +15,7 @@ def test_deployment_profiles_resolve_coherent_defaults(profile, mode, source, la
     assert (values["mode"], values["camera_source"], values["lidar_source"], values["laser_source"]) == (
         mode, source, source, laser,
     )
-    assert values["auto_arm_on_startup"] == "false"
-    assert values["disarm_on_failure"] == "false"
+    assert values["safety_policy"] == "hold"
     assert values["slam_mode"] == "mapping"
     validate_launch_arguments(values)
 
@@ -124,8 +123,7 @@ def valid_arguments(**overrides):
         "remote_ip": "192.0.2.10",
         "curve_client_secret_key_file": "/tmp/client.key_secret",
         "curve_server_public_key_file": "/tmp/server.key",
-        "auto_arm_on_startup": "true",
-        "disarm_on_failure": "false",
+        "safety_policy": "hold",
         "start_rmf": "false",
         "start_moveit": "false",
         "start_foxglove": "true",
@@ -167,7 +165,7 @@ def test_accepts_a_coherent_real_mapping_configuration():
         ({"laser_source": "none"}, "real navigation requires"),
         ({"localization": "amcl", "publish_camera": "false", "laser_source": "camera"}, "laser_source:=camera requires"),
         ({"start_rmf": "true"}, "requires slam_mode:=localization"),
-        ({"disarm_on_failure": "maybe"}, "disarm_on_failure must be true or false"),
+        ({"safety_policy": "maybe"}, "safety_policy must be one of hold, strict"),
         ({"laser_source": "sonar"}, "laser_source must be one of auto, camera, ld06, none"),
         ({"mode": "hybrid"}, "mode must be one of real, sim"),
         ({"mode": "sim", "camera_source": "remote"}, "unsupported in simulation"),

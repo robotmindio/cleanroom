@@ -4,8 +4,8 @@ This document records which requested safety functions can be provided by the
 current robot hardware and which require an additional physical signal source.
 The repository safety supervisor denies the affected capability when a required input is
 absent, stale, or unhealthy. Normal hold mode restores permission when inputs
-recover, while strict mode (`LEKIWI_DISARM_ON_FAILURE=true`, and always in
-simulation) also latches faults. A ROS topic alone is not evidence of a real
+recover, while strict mode (`LEKIWI_DISARM_ON_FAILURE=true`, which launches
+`safety_policy:=strict`, and always in simulation) also latches faults. A ROS topic alone is not evidence of a real
 safety function.
 
 | Function | Software support exists? | What is required for a real implementation |

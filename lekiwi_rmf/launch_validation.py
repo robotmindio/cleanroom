@@ -49,6 +49,7 @@ CHOICES = {
     "camera_source": ("local", "remote"),
     "laser_source": ("auto", "camera", "ld06", "none"),
     "lidar_source": ("local", "remote"),
+    "safety_policy": ("hold", "strict"),
 }
 LD06_SERIAL_PORTS = (
     # CP2102's usual Linux interface suffix. This is the device presently
@@ -76,8 +77,7 @@ ARGUMENT_NAMES = (
     "remote_ip",
     "curve_client_secret_key_file",
     "curve_server_public_key_file",
-    "auto_arm_on_startup",
-    "disarm_on_failure",
+    "safety_policy",
     "start_rmf",
     "start_moveit",
     "start_foxglove",
@@ -222,8 +222,6 @@ def validate_launch_arguments(
             raise ValueError(f"{name} must be one of {', '.join(choices)}, got {arguments[name]!r}")
 
     start_rmf = _bool(arguments["start_rmf"], "start_rmf")
-    _bool(arguments["auto_arm_on_startup"], "auto_arm_on_startup")
-    _bool(arguments["disarm_on_failure"], "disarm_on_failure")
     _bool(arguments["start_moveit"], "start_moveit")
     start_foxglove = _bool(arguments["start_foxglove"], "start_foxglove")
     foxglove_address = str(arguments["foxglove_address"]).strip()

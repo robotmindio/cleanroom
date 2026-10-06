@@ -3,13 +3,6 @@
   "choices": null,
   "default": "$(env HOME)/.ros/lekiwi_arm_calibration.json"
  },
- "auto_arm_on_startup": {
-  "choices": [
-   "true",
-   "false"
-  ],
-  "default": "false"
- },
  "base_test_angular_limit": {
   "choices": null,
   "default": "0.06"
@@ -52,13 +45,6 @@
  "curve_server_public_key_file": {
   "choices": null,
   "default": ""
- },
- "disarm_on_failure": {
-  "choices": [
-   "true",
-   "false"
-  ],
-  "default": "false"
  },
  "foxglove_address": {
   "choices": null,
@@ -168,6 +154,13 @@
  "rtabmap_wm_nodes": {
   "choices": null,
   "default": "300"
+ },
+ "safety_policy": {
+  "choices": [
+   "hold",
+   "strict"
+  ],
+  "default": "hold"
  },
  "slam_mode": {
   "choices": [

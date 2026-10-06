@@ -16,7 +16,7 @@ source scripts/lib/runtime-common.sh
 source scripts/lib/self-heal.sh
 load_lekiwi_env
 # By default the robot stays armed after a failure; only the strict opt-in is passed on.
-[[ ${LEKIWI_DISARM_ON_FAILURE:-false} != true ]] || set -- disarm_on_failure:=true "$@"
+[[ ${LEKIWI_DISARM_ON_FAILURE:-false} != true ]] || set -- safety_policy:=strict "$@"
 if [[ -n ${LEKIWI_ROBOT_HOST:-} ]]; then
   use_env_host=true
   for arg in "$@"; do

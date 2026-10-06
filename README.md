@@ -375,7 +375,7 @@ the physical acceptance record and its revalidation procedure. In short:
 - Real mode evaluates its safety inputs continuously. Missing, stale or
   unhealthy required inputs deny the affected capability. By default the robot
   stays armed and recovers permission when inputs recover; with
-  `LEKIWI_DISARM_ON_FAILURE=true` (strict mode) faults disarm, cut torque and
+  `LEKIWI_DISARM_ON_FAILURE=true` (launch argument `safety_policy:=strict`) faults disarm, cut torque and
   latch until an operator re-arms. See
   [Arming and recovery](docs/launch-options.md#arming-and-recovery).
 - `config/safety_acceptance.yaml` is validated (2026-10-06) for attended

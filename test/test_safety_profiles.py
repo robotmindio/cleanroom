@@ -21,7 +21,7 @@ GOLDEN = Path(__file__).parent / "safety_parameters.json"
 PROFILES = {
     "sim": {"profile": "sim", "start_moveit": "true"},
     "wired": {"profile": "wired", "start_moveit": "true"},
-    "wired_strict": {"profile": "wired", "start_moveit": "true", "disarm_on_failure": "true"},
+    "wired_strict": {"profile": "wired", "start_moveit": "true", "safety_policy": "strict"},
 }
 
 

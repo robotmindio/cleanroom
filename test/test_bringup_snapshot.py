@@ -35,7 +35,7 @@ CASES = {
     "wired_ld06_detected": {"profile": "wired", "serial_devices": [LD06_PORTS[0]]},
     "wired_ld06_bounded_strict": {
         "profile": "wired", "laser_source": "ld06", "publish_astra": "false",
-        "bounded_base_test": "true", "disarm_on_failure": "true", "auto_arm_on_startup": "true",
+        "bounded_base_test": "true", "safety_policy": "strict",
         "wrist_camera_device": "/dev/wrist",
     },
     "wired_remote_camera": {"profile": "wired", "camera_source": "remote", "laser_source": "camera"},
