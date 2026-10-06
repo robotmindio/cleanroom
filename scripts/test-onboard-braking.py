@@ -270,15 +270,17 @@ class OnboardBraking(FAULT['FaultTest']):
         return result['qualification_eligible']
 
     def fault(self,name,begin,restore,expected):
+        self.wait(lambda:self.ranges and time.monotonic()-self.ranges[-1]['capture_time']<.3,10)
         captured={}
         def inject(command):
             captured['cut']=time.monotonic();begin(command)
         def recover():
             try:
-                captured['end']=len(self.ranges)
-                topic={'scan_disconnect':'/scan','depth_disconnect':'/camera/depth/points','telemetry_loss':'/joint_states'}.get(name)
-                if topic:captured['cut']=self.sources[topic]
-                captured['measurement']=self.observe_stop(captured['cut'],captured['end'],self.source_stamps[topic] if topic else None)
+                if 'denial' in self.checks[name]:
+                    captured['end']=len(self.ranges)
+                    topic={'scan_disconnect':'/scan','depth_disconnect':'/camera/depth/points','telemetry_loss':'/joint_states'}.get(name)
+                    if topic:captured['cut']=self.sources[topic]
+                    captured['measurement']=self.observe_stop(captured['cut'],captured['end'],self.source_stamps[topic] if topic else None)
             finally:
                 restore()
         super().fault(name,inject,recover,expected)
@@ -307,6 +309,7 @@ class OnboardBraking(FAULT['FaultTest']):
             self.angular_test=angular;self.test_speed=self.config['angular_speed_rad_s' if angular else 'linear_speed_m_s']
             axis='angular' if angular else 'linear'
             for label,pid,reason in [('scan_disconnect',scan[0],'scan:'),('compute_command_loss',driver[0],'driver:')]:
+                if axis+'/'+label in self.checks:continue
                 timer=f'lekiwi-loaded-{label}-{axis}'
                 def stop(command,pid=pid,timer=timer):
                     self.action(['systemd-run','--user','--quiet','--collect',f'--unit={timer}','--on-active=8s','/usr/bin/kill','-CONT',pid],command)
@@ -323,16 +326,18 @@ class OnboardBraking(FAULT['FaultTest']):
             def resume_depth():
                 self.remote(['kill','-CONT',self.config['depth_filter_pid']],Twist())
                 self.remote(['sudo','-n','systemctl','stop','lekiwi-loaded-depth-restore.timer'],Twist())
-            self.fault('depth_disconnect',pause_depth,resume_depth,'depth:')
-            self.checks[axis+'/depth_disconnect']=self.checks.pop('depth_disconnect');self.save()
+            if axis+'/depth_disconnect' not in self.checks:
+                self.fault('depth_disconnect',pause_depth,resume_depth,'depth:')
+                self.checks[axis+'/depth_disconnect']=self.checks.pop('depth_disconnect');self.save()
+            if axis+'/telemetry_loss' in self.checks:continue
             table='lekiwi_loaded_acceptance'
             def block(command):
-                self.remote(['sudo','-n','systemd-run','--quiet','--collect','--unit=lekiwi-loaded-telemetry-restore','--on-active=12s','/usr/sbin/nft','delete','table','inet',table],command)
+                self.remote(['sudo','-n','systemd-run','--quiet','--collect','--unit=lekiwi-loaded-telemetry-restore','--on-active=12s','/usr/sbin/nft','destroy','table','inet',table],command)
                 rules=f'add table inet {table}\nadd chain inet {table} output {{ type filter hook output priority 0; policy accept; }}\nadd rule inet {table} output tcp sport 5556 drop\n'
                 self.remote(['sudo','-n','/usr/sbin/nft','-f','-'],command,rules)
             def unblock():
-                self.remote(['sudo','-n','/usr/sbin/nft','delete','table','inet',table],Twist())
-                self.remote(['sudo','-n','systemctl','stop','lekiwi-loaded-telemetry-restore.timer'],Twist())
+                try:self.remote(['sudo','-n','/usr/sbin/nft','destroy','table','inet',table],Twist())
+                finally:self.remote(['sudo','-n','systemctl','stop','lekiwi-loaded-telemetry-restore.timer'],Twist())
             self.fault('telemetry_loss',block,unblock,'driver:')
             self.checks[axis+'/telemetry_loss']=self.checks.pop('telemetry_loss');self.save()
 
@@ -369,7 +374,7 @@ def main():
     candidates=subprocess.check_output(['ssh','-o','BatchMode=yes','-o','ConnectTimeout=5',device,remote],text=True).split()
     if len(candidates)!=1 or not candidates[0].isdigit():raise RuntimeError('expected exactly one device depth filter')
     config['depth_filter_pid']=candidates[0]
-    resumed=[]
+    resumed=[];resumed_faults={}
     if args.resume:
         previous=json.loads((args.resume/'measurements.json').read_text())
         if previous['profile']['payload_kg']!=config['payload_kg'] or previous['profile']['measurement_uncertainty_m']!=config['measurement_uncertainty_m']:
@@ -377,13 +382,15 @@ def main():
         config['test_center']=json.loads((args.resume/'result.json').read_text())['origin']
         if not config['test_center']:raise ValueError('resumed test center is missing')
         resumed=[{**t,'source_run':t.get('source_run',str(args.resume))} for t in previous['trials'] if t['qualification_eligible']]
+        resumed_faults={key:{**case,'source_run':case.get('source_run',str(args.resume))} for key,case in previous['faults'].items()
+            if '/' in key and case.get('passed') and case.get('independent',{}).get('within_budget')}
     if args.center:
         if not all(math.isfinite(v) for v in args.center):parser.error('test center must be finite')
         config['test_center']=args.center
     output=ROOT/'.benchmarks/onboard-braking'/time.strftime('%Y%m%d-%H%M%S');output.mkdir(parents=True)
     (output/'profile.yaml').write_text(yaml.safe_dump(config))
     def node():
-        instance=OnboardBraking(output,config);instance.trials=resumed;return instance
+        instance=OnboardBraking(output,config);instance.trials=resumed;instance.checks=resumed_faults;return instance
     NAV['main'](node,output,production=True,payload_kg=config['payload_kg'])
 
 
