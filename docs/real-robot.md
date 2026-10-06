@@ -168,7 +168,8 @@ and key material; serial and V4L2 devices remain visible because their dynamic
 device paths are required by the host, camera and lidar services.
 
 The motor host runs continuously. A clean stop or restart of
-`lekiwi-host.service` disconnects it and cuts servo torque; the arming policy is
+`lekiwi-host.service` disconnects it and cuts servo torque, and each new host
+session starts with torque off; the arming policy is
 described in [Arming and recovery](launch-options.md#arming-and-recovery).
 
 ## Coordinated split deployment

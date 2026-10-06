@@ -190,13 +190,13 @@ until hardware publishes them:
 | Motor health | `/hardware/diagnostics` | Servo/bus faults |
 | Arm collision gate | `/safety/arm_workspace_clear` | Live MoveIt scene/state validity |
 
-The repository records completed 2026-10-04 physical acceptance in
-`config/safety_acceptance.yaml`: attended operation, dry concrete, 0 kg added
-payload, unchanged folded stow, 0.03 m/s and 0.06 rad/s. Its 50 mm stopping
-budget includes 20 mm measurement uncertainty. See
-[the measured evidence](physical-verification-20261003.md). A change to the
-accepted conditions requires new physical evidence; software tests alone do
-not establish physical stopping or obstacle coverage.
+`config/safety_acceptance.yaml` records the validated physical acceptance
+scope: attended operation, dry concrete, the installed 200 g load, folded
+`travel_stow`, 0.03 m/s and 0.06 rad/s, within a 50 mm stopping budget that
+includes 20 mm measurement uncertainty. See
+[Physical acceptance](safety.md#physical-acceptance). A change to the accepted
+conditions requires new physical evidence; software tests alone do not
+establish physical stopping or obstacle coverage.
 
 ## Where the camera comes from
 
