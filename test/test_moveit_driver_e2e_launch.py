@@ -108,6 +108,7 @@ def generate_test_description():
             "remote_observation_port": fake_host.observation_endpoint_port,
             "torque_control_port": fake_host.torque_endpoint_port,
             "torque_control_timeout_ms": 500,
+            "nav2_params_file": str(Path(__file__).parents[1] / "config" / "nav2_params.yaml"),
             "link_timeout": 1.0,
             "command_timeout": 2.0,
             "permission_timeout": 0.30,

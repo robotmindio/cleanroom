@@ -16,6 +16,7 @@ from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallb
 from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
+from rclpy.parameter import Parameter
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from rclpy.task import Future
 from sensor_msgs.msg import JointState
@@ -51,15 +52,15 @@ class DriverSettings:
     # Base speed caps from the tracked Nav2 controller limits.
     max_linear: float
     max_angular: float
+    # Bool permissions have no source timestamp.  The receive-time lease
+    # makes a transient-local sample a restart convenience, not an
+    # unbounded authorization.
+    permission_timeout: float
     xy_scale: float = BASE_XY_SCALE
     yaw_scale: float = BASE_YAW_SCALE
     bounded_base_test: bool = False
     command_timeout: float = 0.4
     link_timeout: float = 1.0
-    # Bool permissions have no source timestamp.  The receive-time lease
-    # makes a transient-local sample a restart convenience, not an
-    # unbounded authorization.
-    permission_timeout: float = 0.5
     trajectory_path_tolerance: float = 0.20
     # Match the production travel-stow gate: a successful MoveIt action
     # must not leave the arm outside its base-motion stow tolerance.
@@ -88,6 +89,8 @@ class DriverSettings:
     def __post_init__(self):
         """Reject values that would make a command unsafe or undefined."""
         positive = {
+            "max_linear": self.max_linear,
+            "max_angular": self.max_angular,
             "xy_velocity_scale": self.xy_scale,
             "yaw_velocity_scale": self.yaw_scale,
             "command_timeout": self.command_timeout,
@@ -102,16 +105,9 @@ class DriverSettings:
             "twist_xy_stddev": self.twist_xy_stddev,
             "twist_yaw_stddev": self.twist_yaw_stddev,
         }
-        nonnegative = {
-            "max_linear_speed": self.max_linear,
-            "max_angular_speed": self.max_angular,
-        }
         for name, value in positive.items():
             if not math.isfinite(value) or value <= 0:
                 raise ValueError(f"{name} must be finite and greater than zero")
-        for name, value in nonnegative.items():
-            if not math.isfinite(value) or value < 0:
-                raise ValueError(f"{name} must be finite and non-negative")
         if not isinstance(self.cmd_vel_topic, str) or not self.cmd_vel_topic.strip():
             raise ValueError("cmd_vel_topic must be a non-empty topic name")
 
@@ -123,7 +119,6 @@ SETTING_PARAMETERS = {
     "bounded_base_test": "bounded_base_test",
     "command_timeout": "command_timeout",
     "link_timeout": "link_timeout",
-    "permission_timeout": "permission_timeout",
     "trajectory_path_tolerance": "trajectory_path_tolerance",
     "trajectory_tolerance": "trajectory_tolerance",
     "gripper_trajectory_tolerance": "gripper_trajectory_tolerance",
@@ -157,14 +152,13 @@ class LeKiwiDriver(Node):
             field: self.declare_parameter(name, defaults[field]).value
             for name, field in SETTING_PARAMETERS.items()
         }
-        nav2_file = self.declare_parameter("nav2_params_file", "").value
-        speed_limits = load_base_speed_limits(nav2_file) if nav2_file else (0.3, math.pi / 2)
-        max_linear = min(
-            self.declare_parameter("max_linear_speed", speed_limits[0]).value, speed_limits[0]
-        )
-        max_angular = min(
-            self.declare_parameter("max_angular_speed", speed_limits[1]).value, speed_limits[1]
-        )
+        # Both have no code default: every launcher passes the tracked value.
+        nav2_file = self.declare_parameter("nav2_params_file", Parameter.Type.STRING).value
+        permission_timeout = self.declare_parameter("permission_timeout", Parameter.Type.DOUBLE).value
+        if not nav2_file or permission_timeout is None:
+            raise ValueError("nav2_params_file and permission_timeout parameters are required")
+        speed_limits = load_base_speed_limits(nav2_file)
+        max_linear, max_angular = speed_limits
         if values["bounded_base_test"]:
             linear, angular = bounded_test_speed_limits(
                 self.declare_parameter("base_test_linear_limit", 0.03).value,
@@ -173,7 +167,10 @@ class LeKiwiDriver(Node):
             )
             max_linear = min(max_linear, linear)
             max_angular = min(max_angular, angular)
-        settings = DriverSettings(max_linear=max_linear, max_angular=max_angular, **values)
+        settings = DriverSettings(
+            max_linear=max_linear, max_angular=max_angular,
+            permission_timeout=permission_timeout, **values,
+        )
         odom_topic = self.declare_parameter("odom_topic", "/wheel/odometry").value
         base_permission_topic = self.declare_parameter(
             "base_motion_permission_topic", "/safety/base_motion_permitted"
@@ -295,7 +292,6 @@ class LeKiwiDriver(Node):
         self.last_observation = None
         self.last_observation_token = None
         self.last_fresh = now
-        self._last_fresh_monotonic = None
         self.arm_workspace_collision = False
         self.link_lost = False
         # When update() last accepted telemetry that passed the host-session and
@@ -1112,10 +1108,9 @@ class LeKiwiDriver(Node):
         self.link_lost = True
         if (not self.disarm_on_failure
                 and reason.startswith("No fresh LeKiwi telemetry")):
-            # The Pi's lease expires and freezes motion independently. Preserve
-            # its goal through transport silence; invalid telemetry, motor faults,
-            # explicit disarm, and host-session changes still cancel normally.
-            self._hold_feedback_gap()
+            # The Pi's lease expires and freezes motion independently. Stay armed
+            # and keep its goal through transport silence; invalid telemetry, motor
+            # faults, explicit disarm, and host-session changes still cancel normally.
             self.publish_safety("LINK_LOST")
             return
         self.set_disarmed("LINK_LOST", defer_cut=True)
@@ -1154,7 +1149,6 @@ class LeKiwiDriver(Node):
 
         if not self.observation_is_fresh(observation):
             quiet = (now - self.last_fresh).nanoseconds / 1e9
-            self._hold_feedback_gap()
             if quiet > self.link_timeout:
                 self.record_link_loss(
                     f"No fresh LeKiwi telemetry for {quiet:.1f}s; waiting for recovery"
@@ -1173,8 +1167,6 @@ class LeKiwiDriver(Node):
             return None
         self.observation_stamp = rclpy.time.Time(nanoseconds=stamp_ns).to_msg()
         self.last_fresh = now
-        with self.state_lock:
-            self._last_fresh_monotonic = time.monotonic()
         self.publish_motor_health(now.to_msg())
         arm_positions = joint_positions(
             observation, self.arm_zero_positions, self.arm_directions

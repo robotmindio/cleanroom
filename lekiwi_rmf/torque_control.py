@@ -157,36 +157,30 @@ class TorqueControlClient:
             socket.close()
             context.term()
 
-    def set_enabled(self, enabled: bool) -> None:
-        """Require the host to confirm that all servo torque is on or off."""
-        if not isinstance(enabled, bool):
-            raise ValueError("torque state must be boolean")
+    def _call(self, message: dict) -> dict:
+        """Send one request, once more if it got no reply, and require an ``ok`` reply."""
         error = None
         for _attempt in range(self.ATTEMPTS):
             try:
-                response = self._request({"command": TorqueCommand.ENABLE if enabled else TorqueCommand.DISABLE})
+                response = self._request(message)
                 break
             except Exception as failure:
                 error = failure
         else:
             raise TorqueControlError(f"torque host {self.host}:{self.port} did not reply: {error}") from error
-
         if not isinstance(response, dict) or response.get("ok") is not True:
             detail = response.get("error", "invalid response") if isinstance(response, dict) else "invalid response"
-            raise TorqueControlError(f"torque host rejected the request: {detail}")
+            raise TorqueControlError(f"torque host rejected {message['command']}: {detail}")
+        return response
+
+    def set_enabled(self, enabled: bool) -> None:
+        """Require the host to confirm that all servo torque is on or off."""
+        if not isinstance(enabled, bool):
+            raise ValueError("torque state must be boolean")
+        response = self._call({"command": TorqueCommand.ENABLE if enabled else TorqueCommand.DISABLE})
         if response.get("torque_enabled") is not enabled:
             raise TorqueControlError("torque host confirmed an unexpected torque state")
 
     def trajectory_request(self, command, **fields):
         """Goal ids make uploads and cancellations safe to retry after a lost reply."""
-        for attempt in range(self.ATTEMPTS):
-            try:
-                response = self._request({"command": command, **fields})
-                break
-            except Exception:
-                if attempt + 1 == self.ATTEMPTS:
-                    raise
-        if not isinstance(response, dict) or response.get("ok") is not True:
-            detail = response.get("error", "invalid reply") if isinstance(response, dict) else "invalid reply"
-            raise TorqueControlError(f"motor host rejected trajectory request: {detail}")
-        return response
+        return self._call({"command": command, **fields})

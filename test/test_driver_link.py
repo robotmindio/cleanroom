@@ -35,6 +35,8 @@ def connected_driver():
         "-p", f"remote_observation_port:={host.observation_endpoint_port}",
         "-p", f"torque_control_port:={host.torque_endpoint_port}",
         "-p", "arm_calibration_file:=/test/missing-calibration.json",
+        "-p", f"nav2_params_file:={pathlib.Path(__file__).parents[1] / 'config/nav2_params.yaml'}",
+        "-p", "permission_timeout:=0.5",
     ])
     node = None
     try:
@@ -292,7 +294,7 @@ def test_link_loss_is_logged_and_disarmed_once():
 ])
 def test_unsafe_or_undefined_settings_are_rejected(field, value, parameter):
     with pytest.raises(ValueError, match=parameter):
-        driver.DriverSettings(max_linear=1.0, max_angular=1.0, **{field: value})
+        driver.DriverSettings(max_linear=1.0, max_angular=1.0, **{"permission_timeout": 0.5, field: value})
 
 
 def test_gripper_trajectory_uses_its_tighter_completion_tolerance():
@@ -309,6 +311,17 @@ def test_gripper_trajectory_uses_its_tighter_completion_tolerance():
         goal, ("arm_shoulder_lift", "arm_gripper")
     )
     assert tolerances == {"arm_shoulder_lift": 0.02, "arm_gripper": 0.005}
+
+
+def test_driver_requires_the_tracked_speed_limits_and_permission_lease():
+    import rclpy
+
+    rclpy.init(args=["--ros-args", "-p", "permission_timeout:=0.5"])
+    try:
+        with pytest.raises(ValueError, match="nav2_params_file"):
+            driver.LeKiwiDriver()
+    finally:
+        rclpy.try_shutdown()
 
 
 def test_guarded_command_topic_is_the_default(connected_driver):
@@ -1279,8 +1292,7 @@ def test_goal_waiting_for_joint_recovery_starts_its_clock_after_wait(monkeypatch
 
 
 def test_local_goal_survives_telemetry_silence_beyond_link_timeout(monkeypatch):
-    node = make_node(armed=True, disarm_on_failure=False,
-                     _last_fresh_monotonic=10.0)
+    node = make_node(armed=True, disarm_on_failure=False)
     node.trajectory = {"done": threading.Event()}
     node.get_logger = lambda: types.SimpleNamespace(warning=lambda *_: None, error=lambda *_: None)
     states, disarmed = [], []
@@ -1295,8 +1307,7 @@ def test_local_goal_survives_telemetry_silence_beyond_link_timeout(monkeypatch):
 
 
 def test_local_goal_waits_for_collision_check_after_motor_feedback_recovers(monkeypatch):
-    node = make_node(armed=True, disarm_on_failure=False,
-                     _last_fresh_monotonic=10.0, arm_motion_permitted=True)
+    node = make_node(armed=True, disarm_on_failure=False, arm_motion_permitted=True)
     node.trajectory = {"done": threading.Event()}
     node.get_logger = lambda: types.SimpleNamespace(warning=lambda *_: None, error=lambda *_: None)
     canceled, disarmed = [], []
