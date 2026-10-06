@@ -10,10 +10,10 @@ import yaml
 from sensor_msgs.msg import BatteryState, LaserScan, PointCloud2, PointField
 from diagnostic_msgs.msg import DiagnosticStatus
 
+from lekiwi_rmf.safety_acceptance import validate_acceptance_file
 from lekiwi_rmf.safety_supervisor import (
     Requirement, SafetyState, SafetyStateMachine, SafetySupervisor, _valid_battery,
     _scan_masked_angle, _valid_depth_points, _valid_scan_ranges,
-    validate_acceptance_file,
 )
 
 

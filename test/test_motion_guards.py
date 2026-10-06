@@ -307,7 +307,9 @@ def test_braking_exploration_stops_a_speed_step_at_its_first_failed_direction(tm
 def test_indoor_stop_zone_and_speed_profile_match_the_acceptance_budget():
     from pathlib import Path
     import yaml
-    from lekiwi_rmf.safety_supervisor import _polygon, _polygon_boundary_distance, _point_in_polygon
+    from lekiwi_rmf.geometry import (
+        point_in_polygon as _point_in_polygon, polygon as _polygon,
+        polygon_boundary_distance as _polygon_boundary_distance)
     root = Path(__file__).parents[1]
     nav2 = yaml.safe_load((root/'config/nav2_params.yaml').read_text())
     profile = yaml.safe_load((root/'config/physical_test.yaml').read_text())

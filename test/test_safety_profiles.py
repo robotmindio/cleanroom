@@ -137,3 +137,9 @@ def test_mapping_quota_has_one_tracked_source():
     arguments = declared_arguments(profile="sim")
     assert int(arguments["rtabmap_mapping_max_bytes"]["default"]) == explorer["mapping_max_bytes"]
     assert float(arguments["rtabmap_mapping_max_seconds"]["default"]) == explorer["mapping_max_seconds"]
+
+
+def test_tracked_acceptance_fits_the_tracked_nav2_and_stow_configuration():
+    from lekiwi_rmf.safety_acceptance import validate_tracked_acceptance
+
+    assert validate_tracked_acceptance(ROOT / "config") == (True, "physical safety acceptance validated")
