@@ -62,9 +62,12 @@ def main():
     node = rclpy.create_node("stationary_moveit_reload")
     state = []
     node.create_subscription(String, "/safety/driver_state", lambda msg: state.append(msg.data), 10)
+    clients = {}
 
     def call(service, kind, request):
-        client = node.create_client(kind, service)
+        if service not in clients:
+            clients[service] = node.create_client(kind, service)
+        client = clients[service]
         if not client.wait_for_service(timeout_sec=3):
             raise RuntimeError(f"service unavailable: {service}")
         future = client.call_async(request)
@@ -80,14 +83,25 @@ def main():
         if not state or state[-1] != "DISARMED":
             raise RuntimeError("planner reload requires the already-stopped driver")
         names = call("/move_group/list_parameters", ListParameters, ListParameters.Request()).result.names
-        response = call("/move_group/get_parameters", GetParameters, GetParameters.Request(names=names))
         parameters = {}
-        for name, value in zip(names, response.values):
+        uninitialized = []
+        # MoveIt declares optional limits without initializing them. One such
+        # name makes rclcpp reject an entire batch, so read each name separately.
+        for name in names:
+            response = call("/move_group/get_parameters", GetParameters, GetParameters.Request(names=[name]))
+            if not response.values:
+                uninitialized.append(name)
+                continue
+            if len(response.values) != 1:
+                raise RuntimeError(f"unexpected parameter response: {name}")
+            value = response.values[0]
             if value.type:
                 decoded = Parameter.from_parameter_msg(ParameterMessage(name=name, value=value)).value
                 parameters[name] = list(decoded) if value.type >= 5 else decoded
         if parameters.get("collision_detector") != "lekiwi_rmf/RestFCL":
             raise RuntimeError("managed planner is not using the repository collision plugin")
+        if uninitialized:
+            print(f"preserved {len(parameters)} parameters; omitted {len(uninitialized)} uninitialized declarations")
         source = Path(get_package_share_directory("lekiwi_rmf")) / "config/lekiwi.srdf"
         parameters["robot_description_semantic"] = refresh_collision_pairs(
             parameters["robot_description_semantic"], source.read_text()
