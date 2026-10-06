@@ -9,9 +9,10 @@ ARMED and both permissions true.
 
 Attachment location and whether the reported mass includes the holder remain
 unconfirmed. This verifies this installed load and tested route/speed; it is
-not a maximum payload rating, retention measurement or endurance test. No base
-navigation or braking acceptance was changed; `config/safety_acceptance.yaml`
-remains qualified for 0 g added payload.
+not a maximum payload rating, retention measurement or endurance test. Subsequent
+loaded rotations and production Nav2 goals passed; see
+[the base test record](base-payload-verification-20261006.md). Physical braking
+acceptance remains recorded for 0 g added payload until loaded stops are measured.
 
 ## Corrected restriction and powered recovery
 
@@ -85,7 +86,8 @@ The hold variations are joint telemetry, not an independent tip displacement
 measurement. Current is reported servo telemetry, not calibrated joint torque.
 The wrist view remained obscured; payload attachment and retention were not
 independently observed. Higher speeds, other load placements, higher masses,
-repeated cycles, longer thermal endurance and loaded navigation remain untested.
+repeated cycles and longer thermal endurance remain untested. The subsequent
+loaded base test covers the bounded route described in its separate record.
 
 Regression verification: **18 Python tests passed** and the native resting
 contact test passed, including the full collision matrix at both recorded

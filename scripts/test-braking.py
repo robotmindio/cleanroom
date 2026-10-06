@@ -326,6 +326,9 @@ class Camera:
             (self.output/'calibration.json').write_text(json.dumps({
                 'matrix':matrix.tolist(),'origin_px':origin.tolist(),
                 'reference':{key:value.tolist() for key,value in reference.items()},
+                'reference_markers_px':{key:value.tolist() for key,value in stable.items()},
+                'floor_marker_id':self.config.get('floor_marker_id'),
+                'floor_marker_side_m':self.config.get('floor_marker_side_m'),
                 'marker_edge_residual_m':error,'floor_reference':self.floor_calibration,'opencv':cv2.__version__},indent=2)+'\n')
         pose = None if self.calibration is None else metric_pose(markers, *self.calibration[:3])
         marker_pose = pose
@@ -586,12 +589,17 @@ class BrakingTest(navigation['Test']):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--inspect', action='store_true', help='measure ten seconds of stationary camera data without touching ROS services')
+    parser.add_argument('--production', action='store_true', help='test the running accepted stack without restarting services')
+    parser.add_argument('--payload-g', type=float, default=0., help='operator-reported installed added mass in grams')
     parser.add_argument('--explore-only', action='store_true', help='explore speed steps without the configured final repetitions')
     parser.add_argument('--directions', nargs='+', choices=list(DIRECTIONS), default=list(DIRECTIONS),
                         help='test only these directions; earlier evidence remains in its original run')
     args = parser.parse_args()
+    if not math.isfinite(args.payload_g) or args.payload_g < 0:
+        parser.error('--payload-g must be finite and nonnegative')
     config = yaml.safe_load((ROOT/'config/physical_test.yaml').read_text())
     config['directions'] = args.directions
+    config['payload_kg'] = args.payload_g / 1000.
     output = ROOT/'.benchmarks/physical-braking'/time.strftime('%Y%m%d-%H%M%S')
     output.mkdir(parents=True)
     (output/'profile.yaml').write_text(yaml.safe_dump(config))
@@ -617,7 +625,8 @@ def main():
                 config['trials_per_direction'] = 0
             navigation['main'](lambda:BrakingTest(config,output,camera),output,
                                (f"base_test_linear_limit:={config['maximum_linear_speed_m_s']}",
-                                f"base_test_angular_limit:={config['maximum_angular_speed_rad_s']}"))
+                                f"base_test_angular_limit:={config['maximum_angular_speed_rad_s']}"),
+                               production=args.production, payload_kg=config['payload_kg'])
     finally:
         camera.close()
 

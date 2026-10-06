@@ -1,0 +1,221 @@
+{
+  "reported_payload_kg": 0.2,
+  "mass_basis": "operator-reported installed load; holder inclusion unconfirmed",
+  "functional_navigation_passed": true,
+  "physical_stopping_acceptance_complete": false,
+  "source_revision_before_runner_changes": "6dd6d3cad6b296bcf8fb1f17a68cd7386b47c84b",
+  "runtime": {
+    "pi_revision": "60c518b8ddd3",
+    "compute_collision_revision": "57d20c0",
+    "compute_installation_revision": "832181b",
+    "motor_host_pid": 631571,
+    "torque_off_requested": false,
+    "motor_services_restarted": false
+  },
+  "limits": {
+    "linear_speed_m_s": 0.03,
+    "angular_speed_rad_s": 0.06,
+    "authorized_center_radius_m": 0.3
+  },
+  "navigation": {
+    "statuses": [
+      4,
+      4
+    ],
+    "forward_visual_distance_m": 0.0468012299762155,
+    "maximum_wheel_radius_m": 0.051586604909731874,
+    "maximum_visual_radius_m": 0.04857613945404668,
+    "final_wheel_position_error_m": 0.0036262270586372727,
+    "supervisor_fault_samples": 0,
+    "final_flags": {
+      "arm_stowed": true,
+      "base_motion_permitted": true,
+      "arm_motion_permitted": true,
+      "driver": "ARMED"
+    }
+  },
+  "rotation": {
+    "stationary_steps": [
+      {
+        "name": "origin",
+        "wheel": {
+          "t": 1945326.270636437,
+          "stamp": 1791272843.0857518,
+          "source_age_s": 0.0188596248626709,
+          "x": -0.03118784701565411,
+          "y": -0.010480444216117116,
+          "yaw": 0.0037016985785648725,
+          "yaw_variance": 0.010000000000000002
+        },
+        "visual": {
+          "t": 1945325.91511272,
+          "stamp": 1791272842.40899,
+          "source_age_s": 0.34009575843811035,
+          "x": 0.012374870479106903,
+          "y": -0.003727041417732835,
+          "yaw": 0.0029766053110138824,
+          "yaw_variance": 0.0008586329148570077
+        },
+        "lidar": {
+          "t": 1945326.15791379,
+          "stamp": 1791272842.8445544,
+          "source_age_s": 0.14733600616455078,
+          "x": 0.0004943790845572948,
+          "y": -0.0027649961411952972,
+          "yaw": -0.0028796322306124653,
+          "yaw_variance": 4.716483282114496e-06
+        }
+      },
+      {
+        "name": "left",
+        "wheel": {
+          "t": 1945336.008613489,
+          "stamp": 1791272852.8201125,
+          "source_age_s": 0.0224761962890625,
+          "x": -0.030074360123321868,
+          "y": -0.010360380469779962,
+          "yaw": 0.2845363939010421,
+          "yaw_variance": 0.010000000000000002
+        },
+        "visual": {
+          "t": 1945335.883415256,
+          "stamp": 1791272852.2728703,
+          "source_age_s": 0.4445192813873291,
+          "x": -0.03352411463856697,
+          "y": 0.0032919850200414658,
+          "yaw": 0.29025144109825174,
+          "yaw_variance": 0.0008031775770499373
+        },
+        "lidar": {
+          "t": 1945336.018949275,
+          "stamp": 1791272852.8103278,
+          "source_age_s": 0.04259443283081055,
+          "x": -0.0013322518207132816,
+          "y": 0.00144143623765558,
+          "yaw": 0.28708472439167115,
+          "yaw_variance": 8.390351048146841e-06
+        }
+      },
+      {
+        "name": "right",
+        "wheel": {
+          "t": 1945352.822515071,
+          "stamp": 1791272869.6401823,
+          "source_age_s": 0.016307830810546875,
+          "x": -0.029939061295610164,
+          "y": -0.01137316413923516,
+          "yaw": -0.27798652140486346,
+          "yaw_variance": 0.010000000000000002
+        },
+        "visual": {
+          "t": 1945352.566937226,
+          "stamp": 1791272868.820266,
+          "source_age_s": 0.580641508102417,
+          "x": 0.06301039457321167,
+          "y": 0.04336899518966675,
+          "yaw": -0.26201761656607964,
+          "yaw_variance": 0.001145961522641592
+        },
+        "lidar": {
+          "t": 1945352.711678584,
+          "stamp": 1791272869.4585993,
+          "source_age_s": 0.0870504379272461,
+          "x": 0.004989358596503735,
+          "y": 0.004853726364672184,
+          "yaw": -0.2660788185208115,
+          "yaw_variance": 1.0367464292416118e-05
+        }
+      },
+      {
+        "name": "return",
+        "wheel": {
+          "t": 1945362.363061766,
+          "stamp": 1791272879.1716342,
+          "source_age_s": 0.025398969650268555,
+          "x": -0.02830184655634285,
+          "y": -0.010128690661980164,
+          "yaw": -0.008133173270092466,
+          "yaw_variance": 0.010000000000000002
+        },
+        "visual": {
+          "t": 1945362.142692959,
+          "stamp": 1791272878.5224602,
+          "source_age_s": 0.4542043209075928,
+          "x": 0.002566929906606674,
+          "y": 0.0065212552435696125,
+          "yaw": -0.01425212031166265,
+          "yaw_variance": 0.0013911447349190713
+        },
+        "lidar": {
+          "t": 1945362.368726267,
+          "stamp": 1791272879.0276222,
+          "source_age_s": 0.1750779151916504,
+          "x": -0.0007559675141237676,
+          "y": 0.004558423534035683,
+          "yaw": -0.01189559905546571,
+          "yaw_variance": 5.079182779489202e-06
+        }
+      }
+    ],
+    "transient_scan_depth_stale_pause": true,
+    "independent_tracking_pauses": true,
+    "final_flags": {
+      "arm_stowed": true,
+      "base_motion_permitted": true,
+      "arm_motion_permitted": true,
+      "driver": "ARMED"
+    }
+  },
+  "runner_regression": {
+    "passed": 2,
+    "report": ".benchmarks/arm-payload-200g/loaded-runner-tests.log"
+  },
+  "remaining": "Fresh external floor/chassis marker calibration, loaded stopping repetitions and affected moving fault cases; historical stopping payload remains 0 kg.",
+  "artifacts": [
+    {
+      "path": ".benchmarks/arm-payload-200g/20261006-155011-production-navigation/result.json",
+      "bytes": 96847,
+      "sha256": "388d4d26b11d073437a79f8ae78cb36b8ef001b8262e5a31ddb3f5d2d02a5855"
+    },
+    {
+      "path": ".benchmarks/onboard-verification/20261006-154715-rotation-comparison/comparison.json",
+      "bytes": 221419,
+      "sha256": "c7ab988830f47fd7f7f3e29be78d70c5c6096179d63e8f27bf8e8e5d6aaad4f3"
+    },
+    {
+      "path": ".benchmarks/arm-payload-200g/loaded-production-navigation.log",
+      "bytes": 2191,
+      "sha256": "ee3c6accac4e4c5e06dec31f2ddb9b79add9263d7ab9f7581a49a6e7ea62fcf5"
+    },
+    {
+      "path": ".benchmarks/arm-payload-200g/loaded-rotation.log",
+      "bytes": 3970,
+      "sha256": "03216b3a99eb21f0bd0480da48c085a3e031f98d866f5868f04422e70779aac9"
+    },
+    {
+      "path": ".benchmarks/arm-payload-200g/production-navigation-loaded.py",
+      "bytes": 3310,
+      "sha256": "945708e87fd12efb1505d273efe94410ee5cdac222095592dbdb8f0c8db29ced"
+    },
+    {
+      "path": ".benchmarks/onboard-verification/compare-rotation.py",
+      "bytes": 4415,
+      "sha256": "262695669678948a120d385f037572d8dd10c87465896224ddf799a655211756"
+    },
+    {
+      "path": ".benchmarks/arm-payload-200g/loaded-runner-tests.log",
+      "bytes": 98,
+      "sha256": "dfc57cd82ca5a247bf00800f9b55c0612e97dc311847125b98158a83039c230b"
+    },
+    {
+      "path": "scripts/test-braking.py",
+      "bytes": 34567,
+      "sha256": "751422ce64df0ef4b0121ef5769cd341f782be3f27460ba6d7b0eaa788785d81"
+    },
+    {
+      "path": "scripts/test-navigation.py",
+      "bytes": 17668,
+      "sha256": "616e468cfa651456a88907e092c5e117cb61dade3d5ea4b7e3e35975526baeaf"
+    }
+  ]
+}

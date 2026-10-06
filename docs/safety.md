@@ -50,6 +50,14 @@ inside the unchanged 50 mm stopping budget. See
 [the verification report](physical-verification-20261003.md). It grants no
 unattended scope or additional payload.
 
+`payload_kg` identifies the load in those stopping measurements. The supervisor
+validates its format; it has no measured-payload input and does not compare the
+current load with that field. The installed reported 200 g passed the arm cycle
+and a bounded production navigation test on 2026-10-06. Loaded stopping
+acceptance is pending independent measurements; see
+[the loaded verification record](base-payload-verification-20261006.md). Preserve
+that distinction when interpreting the historical 0 kg record.
+
 The configured hold mode automatically re-arms after a fault or restart only
 when telemetry and arm permission recover. The acceptance tests for host and
 ROS restarts must show immediate command stop, then re-arm only after those

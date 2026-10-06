@@ -280,7 +280,9 @@ class Test(Node):
             self.tick(Twist())
 
 
-def main(test_class=Test, output=OUTPUT, launch_arguments=()):
+def main(test_class=Test, output=OUTPUT, launch_arguments=(), production=False, payload_kg=None):
+    if payload_kg is not None and (not math.isfinite(payload_kg) or payload_kg < 0):
+        raise ValueError('reported payload must be a finite nonnegative mass')
     output.mkdir(parents=True,exist_ok=True)
     stack = None
     node = None
@@ -288,13 +290,17 @@ def main(test_class=Test, output=OUTPUT, launch_arguments=()):
     arguments = installed_stack_arguments()
     linear,angular = load_base_speed_limits(ROOT/'config/nav2_params.yaml')
     was_active = subprocess.run(['systemctl','is-active','--quiet','lekiwi-stack.service']).returncode==0
-    subprocess.run(['sudo','-n','/usr/bin/systemctl','stop','lekiwi-stack.service'],check=True)
+    if production and not was_active:
+        raise RuntimeError('production verification requires the running managed stack')
+    if not production:
+        subprocess.run(['sudo','-n','/usr/bin/systemctl','stop','lekiwi-stack.service'],check=True)
     try:
         with (output/'stack.log').open('w') as log:
-            stack = subprocess.Popen([str(ROOT/'scripts/ros-start.sh'), *arguments,
-                'bounded_base_test:=true',f'base_test_linear_limit:={linear}',
-                f'base_test_angular_limit:={angular}',*launch_arguments], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
-                env={**os.environ,'LEKIWI_RUNTIME_DIR':str(output/'runtime')}, start_new_session=True)
+            if not production:
+                stack = subprocess.Popen([str(ROOT/'scripts/ros-start.sh'), *arguments,
+                    'bounded_base_test:=true',f'base_test_linear_limit:={linear}',
+                    f'base_test_angular_limit:={angular}',*launch_arguments], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
+                    env={**os.environ,'LEKIWI_RUNTIME_DIR':str(output/'runtime')}, start_new_session=True)
             # Keep ROS alive through Python's interrupt cleanup so it can send
             # zero commands, withdraw the test lease and shut down Nav2 first.
             rclpy.init(signal_handler_options=SignalHandlerOptions.NO)
@@ -325,6 +331,7 @@ def main(test_class=Test, output=OUTPUT, launch_arguments=()):
                                 math.hypot(p.x,p.y,p.z)>.01 for p in m.word_pts)} for m in data.nodes],
                             'links':[(link.from_id,link.to_id,link.type) for link in data.graph.links]}
                 report={'error':error,'origin':node.center,'final_pose':node.pose,'sensors':node.counts,'health':node.health,
+                    'mode':'production' if production else 'bounded_test', 'reported_payload_kg':payload_kg,
                     'source_revision':subprocess.check_output(['git','-C',str(ROOT),'rev-parse','HEAD'],text=True).strip(),
                     'collision_monitor_action':node.monitor_action,
                     'max_radius_m':max((math.dist(p[:2],node.center[:2]) for p in node.trace),default=0) if node.center else None,
@@ -332,7 +339,7 @@ def main(test_class=Test, output=OUTPUT, launch_arguments=()):
                     'fault_checks':getattr(node,'checks',None)}
                 (output/'result.json').write_text(json.dumps(report,indent=2)+'\n')
                 print('report',output/'result.json',flush=True)
-                if node.lifecycle_client.wait_for_service(timeout_sec=1):
+                if not production and node.lifecycle_client.wait_for_service(timeout_sec=1):
                     future=node.lifecycle_client.call_async(ManageLifecycleNodes.Request(command=ManageLifecycleNodes.Request.SHUTDOWN))
                     end=time.monotonic()+8
                     while not future.done() and time.monotonic()<end:
@@ -357,7 +364,7 @@ def main(test_class=Test, output=OUTPUT, launch_arguments=()):
                         os.killpg(stack.pid,signal.SIGKILL)
                         stack.wait(timeout=3)
         finally:
-            if was_active:
+            if was_active and not production:
                 subprocess.run(['sudo','-n','/usr/bin/systemctl','start','lekiwi-stack.service'],check=True)
 
 

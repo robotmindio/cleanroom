@@ -16,6 +16,8 @@ software_revision: dfa699e199ac12ee50bb6594f33423d9971d86fb
 sensor_configuration: LD06 calibrated yaw/self-mask; Astra compact obstacle cloud
   10 Hz; front RGB and RGBD 2 Hz, RGB JPEG 70; unchanged folded travel_stow; 5 GHz
   bridge; 44 mm black floor AprilTag and 35 mm body squares
+# Load used in the physical stopping measurements, not a runtime weight gate.
+# Loaded arm/navigation results: docs/base-payload-verification-20261006.md.
 payload_kg: 0.0
 surface: dry concrete
 validated_at: '2026-10-04T05:13:19.034759+00:00'
