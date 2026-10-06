@@ -1,0 +1,65 @@
+diff --git a/src/demo.cpp b/src/demo.cpp
+--- a/src/demo.cpp
++++ b/src/demo.cpp
+@@ -148,19 +148,18 @@
+ void  ToLaserscanMessagePublish(ldlidar::Points2D& src,  double lidar_spin_freq, LaserScanSetting& setting,
+   rclcpp::Node::SharedPtr& node, rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr& lidarpub) {
+   float angle_min, angle_max, range_min, range_max, angle_increment;
+-  double scan_time;
+-  rclcpp::Time start_scan_time;
+-  static rclcpp::Time end_scan_time;
+-  static bool first_scan = true;
+-
+-  start_scan_time = node->now();
+-  scan_time = (start_scan_time.seconds() - end_scan_time.seconds());
+-
+-  if (first_scan) {
+-    first_scan = false;
+-    end_scan_time = start_scan_time;
++  // The SDK sorts beams by acquisition timestamp. Publication time is later
++  // than the entire sweep and cannot be used as the first ray's timestamp.
++  if (src.size() < 2 || lidar_spin_freq <= 0 || src.front().stamp == 0 ||
++      src.back().stamp <= src.front().stamp) {
++    RCLCPP_WARN(node->get_logger(), "discarding scan with invalid acquisition timing");
+     return;
+   }
++  const double sweep_time = static_cast<double>(src.back().stamp - src.front().stamp) / 1e9;
++  // Clockwise scans retain the existing increasing-angle range array. Its
++  // first entry is the newest ray, so time runs backwards through that array.
++  const rclcpp::Time first_ray_time(static_cast<int64_t>(
++    setting.laser_scan_dir ? src.back().stamp : src.front().stamp));
+   // Adjust the parameters according to the demand
+   angle_min = 0;
+   angle_max = (2 * M_PI);
+@@ -171,19 +170,16 @@
+   // Calculate the number of scanning points
+   if (lidar_spin_freq > 0) {
+     sensor_msgs::msg::LaserScan output;
+-    output.header.stamp = start_scan_time;
++    output.header.stamp = first_ray_time;
+     output.header.frame_id = setting.frame_id;
+     output.angle_min = angle_min;
+     output.angle_max = angle_max;
+     output.range_min = range_min;
+     output.range_max = range_max;
+     output.angle_increment = angle_increment;
+-    if (beam_size <= 1) {
+-      output.time_increment = 0;
+-    } else {
+-      output.time_increment = static_cast<float>(scan_time / (double)(beam_size - 1));
+-    }
+-    output.scan_time = scan_time;
++    output.time_increment = static_cast<float>(
++      (setting.laser_scan_dir ? -sweep_time : sweep_time) / (beam_size - 1));
++    output.scan_time = 1.0 / lidar_spin_freq;
+     // First fill all the data with Nan
+     output.ranges.assign(beam_size, std::numeric_limits<float>::quiet_NaN());
+     output.intensities.assign(beam_size, std::numeric_limits<float>::quiet_NaN());
+@@ -239,7 +235,6 @@
+       }
+     }
+     lidarpub->publish(output);
+-    end_scan_time = start_scan_time;
+   } 
+ }
+ 

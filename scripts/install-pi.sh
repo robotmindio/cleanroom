@@ -143,12 +143,14 @@ http://packages.ros.org/ros2/ubuntu $codename main" |
   lidar_patch="$PROJECT_ROOT/thirdparty/ldlidar_stl_ros2/0001-linux-build-fixes.patch"
   lidar_qos_patch="$PROJECT_ROOT/thirdparty/ldlidar_stl_ros2/0002-latest-scan-qos.patch"
   lidar_baud_patch="$PROJECT_ROOT/thirdparty/ldlidar_stl_ros2/0003-initialize-ld06-baudrate.patch"
+  lidar_timing_patch="$PROJECT_ROOT/thirdparty/ldlidar_stl_ros2/0004-acquisition-timestamps.patch"
   mkdir -p "$WORKSPACE/src"
   checkout_pinned "$LDLIDAR_STL_REPOSITORY" "$lidar_source" "$LDLIDAR_STL_REV" \
-    "$lidar_patch" "$lidar_qos_patch" "$lidar_baud_patch"
+    "$lidar_patch" "$lidar_qos_patch" "$lidar_baud_patch" "$lidar_timing_patch"
   apply_pinned_patch "$lidar_source" "$lidar_patch" "the LD06 Linux build fixes"
   apply_pinned_patch "$lidar_source" "$lidar_qos_patch" "the LD06 latest-scan QoS fix"
   apply_pinned_patch "$lidar_source" "$lidar_baud_patch" "the LD06 baud-rate default fix"
+  apply_pinned_patch "$lidar_source" "$lidar_timing_patch" "the LD06 acquisition timestamp fix"
   set +u
   # shellcheck source=/dev/null
   source /opt/ros/jazzy/setup.bash

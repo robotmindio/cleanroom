@@ -78,7 +78,7 @@ device_healthy() {
 topic_healthy() {
   # `echo --once` verifies that a fresh Image message crosses the ROS graph;
   # topic discovery alone does not prove v4l2_camera is dequeuing frames.
-  timeout "$heartbeat_timeout" ros2 topic echo --once --qos-reliability reliable \
+  timeout "$heartbeat_timeout" ros2 topic echo --once --qos-reliability reliable --field header \
     "${namespace}/image_raw" >/dev/null 2>&1
 }
 

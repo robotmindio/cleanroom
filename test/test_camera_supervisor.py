@@ -14,12 +14,14 @@ def test_camera_supervisor_kills_reparented_camera_process(tmp_path):
     device = tmp_path / "video"
     device.touch()
     query_log = tmp_path / "v4l-queries.log"
+    ros_log = tmp_path / "ros-queries.log"
     v4l2 = fake_bin / "v4l2-ctl"
     v4l2.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$CAMERA_V4L_LOG"\n'
                    'case " $* " in *" --info "*) exit 0 ;; *) exit 2 ;; esac\n')
     ros2 = fake_bin / "ros2"
     ros2.write_text(
         "#!/bin/bash\n"
+        'printf "%s\\n" "$*" >> "$CAMERA_ROS_LOG"\n'
         'if [[ $1 == run ]]; then\n'
         '  (trap "" TERM; exec sleep 60) &\n'
         '  child=$!\n'
@@ -34,6 +36,7 @@ def test_camera_supervisor_kills_reparented_camera_process(tmp_path):
         "PATH": f"{fake_bin}:{os.environ['PATH']}",
         "CAMERA_CHILD_PID": str(child_pid_file),
         "CAMERA_V4L_LOG": str(query_log),
+        "CAMERA_ROS_LOG": str(ros_log),
     }
     process = subprocess.Popen(
         [
@@ -41,7 +44,8 @@ def test_camera_supervisor_kills_reparented_camera_process(tmp_path):
             "--device", str(device), "--name", "test_camera",
             "--namespace", "/test", "--camera-name", "test",
             "--frame", "test_frame", "--size", "[320, 240]",
-            "--camera-info-url", "none", "--startup-grace", "30",
+            "--camera-info-url", "none", "--startup-grace", "0",
+            "--heartbeat-interval", "1",
         ],
         env=env,
         start_new_session=True,
@@ -55,6 +59,13 @@ def test_camera_supervisor_kills_reparented_camera_process(tmp_path):
         assert child_pid_file.exists()
         queries = query_log.read_text().splitlines()
         assert queries and set(queries) == {f"--device {device} --info"}
+        deadline = time.monotonic() + 5
+        while not any(line.startswith("topic echo") for line in ros_log.read_text().splitlines()):
+            assert time.monotonic() < deadline, "camera heartbeat was never checked"
+            time.sleep(0.05)
+        heartbeat = next(line for line in ros_log.read_text().splitlines() if line.startswith("topic echo"))
+        assert "--field header" in heartbeat
+        assert "/test/image_raw" in heartbeat
         child_pid = int(child_pid_file.read_text())
         process.terminate()
         process.wait(timeout=8)

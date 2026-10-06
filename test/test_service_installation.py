@@ -601,6 +601,9 @@ def test_pi_and_manual_split_startup_include_the_ld06():
     build = (ROOT / "scripts" / "build-lekiwi.sh").read_text(encoding="utf-8")
     assert 'apply_pinned_patch "$lidar_source" "$lidar_qos_patch"' in build
     assert 'apply_pinned_patch "$lidar_source" "$lidar_baud_patch"' in build
+    for source in (installer, pi_installer, build):
+        assert "0004-acquisition-timestamps.patch" in source
+        assert '"$lidar_timing_patch"' in source or '"$ldlidar_timing_patch"' in source
     assert 'packages+=(ldlidar_stl_ros2)' in build
     assert "ldlidar_stl_ros2_node" in pi_installer
     assert "start_recorded lidar scripts/ros-lidar.sh" in pi_up

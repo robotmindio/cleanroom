@@ -29,4 +29,12 @@ get the newest scan or trip their existing stale-source stop.
 default to 230400 before declaring the ROS parameter. The launch also supplies
 230400, but the uninitialized C++ default was evaluated before that override.
 
+`0004-acquisition-timestamps.patch` uses the SDK's per-ray acquisition timestamps
+instead of stamping a completed scan at publication time. The existing clockwise
+range array is ordered newest to oldest, so its `time_increment` is negative;
+counterclockwise arrays retain positive timing. Both endpoints lie within the
+actual sweep, allowing RViz and RTAB-Map to transform and deskew measured data
+without requesting future TF. Range ordering, angles and mounting calibration
+are unchanged. Invalid or incomplete acquisition timing is rejected.
+
 Drop these patches once a release supersedes all of them.

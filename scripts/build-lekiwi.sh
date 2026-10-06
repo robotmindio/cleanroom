@@ -19,8 +19,10 @@ if [[ -d $lidar_source/.git ]]; then
   source "$project_root/scripts/thirdparty-common.sh"
   lidar_qos_patch=$project_root/thirdparty/ldlidar_stl_ros2/0002-latest-scan-qos.patch
   lidar_baud_patch=$project_root/thirdparty/ldlidar_stl_ros2/0003-initialize-ld06-baudrate.patch
+  lidar_timing_patch=$project_root/thirdparty/ldlidar_stl_ros2/0004-acquisition-timestamps.patch
   apply_pinned_patch "$lidar_source" "$lidar_qos_patch" "the LD06 latest-scan QoS fix"
   apply_pinned_patch "$lidar_source" "$lidar_baud_patch" "the LD06 baud-rate default fix"
+  apply_pinned_patch "$lidar_source" "$lidar_timing_patch" "the LD06 acquisition timestamp fix"
   base_paths+=("$lidar_source")
   packages+=(ldlidar_stl_ros2)
 fi
