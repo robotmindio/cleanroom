@@ -8,8 +8,10 @@ module ROS-free so the same rules have ordinary, fast unit tests.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 import ipaddress
 import math
+import os
 from pathlib import Path
 import subprocess
 from typing import TYPE_CHECKING
@@ -32,6 +34,43 @@ def _is_tailscale_address(address: str) -> bool:
     except ValueError:
         return False
 
+
+# Each deployment profile fills in topology arguments the operator did not
+# pass explicitly, so previously installed service arguments keep working.
+PROFILES = {
+    "sim": {"mode": "sim", "camera_source": "local", "lidar_source": "local", "laser_source": "auto"},
+    "wired": {"mode": "real", "camera_source": "local", "lidar_source": "local", "laser_source": "auto"},
+    "split": {"mode": "real", "camera_source": "remote", "lidar_source": "remote", "laser_source": "ld06"},
+}
+CHOICES = {
+    "mode": ("real", "sim"),
+    "localization": ("amcl", "visual_slam"),
+    "slam_mode": ("mapping", "localization"),
+    "camera_source": ("local", "remote"),
+    "laser_source": ("auto", "camera", "ld06", "none"),
+    "lidar_source": ("local", "remote"),
+}
+LD06_SERIAL_PORTS = (
+    # CP2102's usual Linux interface suffix. This is the device presently
+    # attached to this robot (ID_SERIAL_SHORT=0001).
+    "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0",
+    # Kept for an earlier udev naming variant seen on the same adapter family.
+    "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if0-port0",
+)
+_TOPOLOGY_KEY = "lekiwi_topology"
+
+
+def lidar_serial_present() -> bool:
+    # /dev/ttyUSB0 is only a kernel-assigned slot: it can just as easily be a
+    # console cable or another USB-UART.  Auto mode is deliberately conservative.
+    return any(os.path.exists(path) for path in LD06_SERIAL_PORTS)
+
+
+def lidar_default_port() -> str:
+    """Select the stable serial name that actually exists at launch time."""
+    return next((path for path in LD06_SERIAL_PORTS if os.path.exists(path)), LD06_SERIAL_PORTS[0])
+
+
 ARGUMENT_NAMES = (
     "mode",
     "remote_ip",
@@ -40,7 +79,6 @@ ARGUMENT_NAMES = (
     "auto_arm_on_startup",
     "disarm_on_failure",
     "start_rmf",
-    "rmf_domain",
     "start_moveit",
     "start_foxglove",
     "foxglove_address",
@@ -172,18 +210,9 @@ def validate_launch_arguments(
     curve_server_public = str(arguments["curve_server_public_key_file"]).strip()
     rtabmap_database = str(arguments["rtabmap_database"]).strip()
     map_bundle = str(arguments["map_bundle"]).strip()
-    if mode not in {"real", "sim"}:
-        raise ValueError(f"mode must be real or sim, got {mode!r}")
-    if localization not in {"amcl", "visual_slam"}:
-        raise ValueError(f"localization must be amcl or visual_slam, got {localization!r}")
-    if slam_mode not in {"mapping", "localization"}:
-        raise ValueError(f"slam_mode must be mapping or localization, got {slam_mode!r}")
-    if camera_source not in {"local", "remote"}:
-        raise ValueError(f"camera_source must be local or remote, got {camera_source!r}")
-    if laser_source not in {"auto", "camera", "ld06", "none"}:
-        raise ValueError(f"laser_source must be auto, camera, ld06, or none, got {laser_source!r}")
-    if lidar_source not in {"local", "remote"}:
-        raise ValueError(f"lidar_source must be local or remote, got {lidar_source!r}")
+    for name, choices in CHOICES.items():
+        if str(arguments[name]) not in choices:
+            raise ValueError(f"{name} must be one of {', '.join(choices)}, got {arguments[name]!r}")
 
     start_rmf = _bool(arguments["start_rmf"], "start_rmf")
     _bool(arguments["auto_arm_on_startup"], "auto_arm_on_startup")
@@ -198,7 +227,6 @@ def validate_launch_arguments(
     static_map = _bool(arguments["static_map"], "static_map")
     _port(arguments["foxglove_port"], "foxglove_port")
     _port(arguments["rosbridge_port"], "rosbridge_port")
-    rmf_domain = _nonnegative_int(arguments["rmf_domain"], "rmf_domain", maximum=232)
     _nonnegative_int(arguments["rosbridge_domain"], "rosbridge_domain", maximum=232)
     _positive_float(arguments["xy_velocity_scale"], "xy_velocity_scale")
     _positive_float(arguments["yaw_velocity_scale"], "yaw_velocity_scale")
@@ -256,15 +284,84 @@ def validate_launch_arguments(
         raise ValueError("start_rmf:=true requires slam_mode:=localization and a validated map bundle")
     if start_rmf and localization != "amcl":
         raise ValueError("RMF operation requires amcl with the immutable occupancy-map bundle")
-    if start_rmf and rmf_domain != 0:
-        raise ValueError(
-            "rmf_domain must be 0 until a tracked cross-domain bridge is configured"
-        )
     if start_rmf or localization == "amcl" or static_map:
         from lekiwi_rmf.map_bundle import validate_map_bundle
 
         return validate_map_bundle(map_bundle, require_approved=True)
     return None
+
+
+@dataclass(frozen=True)
+class Topology:
+    """Which parts of the stack one validated bringup starts."""
+
+    sim: bool
+    amcl: bool
+    visual_slam: bool
+    slam_mapping: bool
+    static_map: bool
+    camera_on: bool
+    # Front/wrist cameras read by v4l2 on this machine.
+    local_cameras: bool
+    astra_here: bool
+    # The cameras face different directions: never assign Astra depth to front
+    # RGB. Native RGB-D synchronization preserves each camera's measured view.
+    dual_rgbd: bool
+    remote_camera: bool
+    # Gazebo supplies /scan in sim; RTAB-Map subscribes to it there too.
+    lidar_on: bool
+    camera_laser: bool
+    ld06: bool
+    remote_ld06: bool
+    start_rmf: bool
+    start_moveit: bool
+    start_foxglove: bool
+    start_rosbridge: bool
+
+    @property
+    def real(self) -> bool:
+        return not self.sim
+
+
+def resolve_topology(arguments: Mapping[str, object], *, lidar_detected: bool) -> Topology:
+    """Derive the started components from validated launch arguments."""
+    real = str(arguments["mode"]) == "real"
+    flag = {name: _bool(arguments[name], name) for name in (
+        "publish_camera", "publish_astra", "static_map",
+        "start_rmf", "start_moveit", "start_foxglove", "start_rosbridge")}
+    camera_on = flag["publish_camera"]
+    camera_local = str(arguments["camera_source"]) == "local"
+    laser = str(arguments["laser_source"])
+    lidar_local = str(arguments["lidar_source"]) == "local"
+    visual_slam = str(arguments["localization"]) == "visual_slam"
+    # Whoever owns /scan owns what Nav2 dodges: a real LD06 on its RobotSkin
+    # base, the front camera's floor-geometry trick, or nobody at all.
+    auto_ld06 = laser == "auto" and lidar_detected
+    return Topology(
+        sim=not real,
+        amcl=not visual_slam,
+        visual_slam=visual_slam,
+        slam_mapping=str(arguments["slam_mode"]) == "mapping",
+        static_map=flag["static_map"],
+        camera_on=camera_on,
+        local_cameras=camera_on and camera_local and real,
+        astra_here=camera_on and camera_local and real and flag["publish_astra"],
+        dual_rgbd=camera_on and real and flag["publish_astra"],
+        remote_camera=camera_on and real and not camera_local,
+        lidar_on=laser != "none",
+        camera_laser=real and (laser == "camera" or (laser == "auto" and not lidar_detected)),
+        ld06=real and lidar_local and (laser == "ld06" or auto_ld06),
+        remote_ld06=real and not lidar_local and laser == "ld06",
+        start_rmf=flag["start_rmf"],
+        start_moveit=flag["start_moveit"],
+        start_foxglove=flag["start_foxglove"],
+        start_rosbridge=flag["start_rosbridge"],
+    )
+
+
+def launch_topology(context) -> Topology:
+    """The topology ``validate_context`` resolved once for this launch."""
+    return context.get_locals_as_dict()[_TOPOLOGY_KEY]
 
 
 def _tailscale_ipv4_addresses() -> frozenset[str]:
@@ -319,6 +416,10 @@ def validate_context(context, *_args, **_kwargs):
     astra_serial = astra_serial_from_hardware_config(
         str(values["hardware_config"]), required=astra_required
     )
+    # Resolve the topology once, from exactly the values just validated and
+    # one look at the serial bus; every bringup launch file reads this copy.
+    context.extend_globals({_TOPOLOGY_KEY: resolve_topology(
+        values, lidar_detected=lidar_serial_present())})
     from launch.actions import SetLaunchConfiguration
 
     selected = [SetLaunchConfiguration("astra_serial", astra_serial)]

@@ -40,6 +40,12 @@ CASES = {
     },
     "wired_remote_camera": {"profile": "wired", "camera_source": "remote", "laser_source": "camera"},
     "split": {"profile": "split"},
+    # An installed service from before profiles existed: explicit topology, no profile.
+    "service_without_profile": {
+        "mode": "real", "camera_source": "remote", "camera_device": "none", "wrist_camera_device": "none",
+        "camera_height": "0.101259", "camera_pitch": "0.056677", "remote_ip": "192.0.2.66",
+        "laser_source": "ld06", "lidar_source": "remote", "start_moveit": "true",
+    },
     "split_amcl_rmf": {
         "profile": "split", "localization": "amcl", "slam_mode": "localization",
         "publish_camera": "false", "start_rmf": "true", "map_bundle_approved": True,

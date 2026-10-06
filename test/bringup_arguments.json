@@ -141,10 +141,6 @@
   ],
   "default": "true"
  },
- "rmf_domain": {
-  "choices": null,
-  "default": "0"
- },
  "rosbridge_address": {
   "choices": null,
   "default": "127.0.0.1"

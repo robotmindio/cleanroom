@@ -469,10 +469,7 @@
   "start": [
    {
     "arguments": [],
-    "env": {
-     "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
-     "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
-    },
+    "env": {},
     "name": "wait_for_map",
     "namespace": "",
     "node": "lekiwi_rmf/readiness_gate",
@@ -500,8 +497,6 @@
    {
     "arguments": [],
     "env": {
-     "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
-     "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf",
      "OMP_NUM_THREADS": "1",
      "OPENBLAS_NUM_THREADS": "1"
     },
@@ -535,10 +530,7 @@
    },
    {
     "arguments": [],
-    "env": {
-     "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
-     "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
-    },
+    "env": {},
     "name": "rtabmap",
     "namespace": "",
     "node": "rtabmap_slam/rtabmap",
@@ -641,10 +633,7 @@
   "start": [
    {
     "arguments": [],
-    "env": {
-     "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
-     "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
-    },
+    "env": {},
     "name": "safety_supervisor",
     "namespace": "",
     "node": "lekiwi_rmf/safety_supervisor",
@@ -1155,8 +1144,6 @@
  {
   "arguments": [],
   "env": {
-   "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
-   "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf",
    "OPENBLAS_NUM_THREADS": "1"
   },
   "name": "slam_cloud",
@@ -1174,10 +1161,7 @@
  },
  {
   "arguments": [],
-  "env": {
-   "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
-   "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
-  },
+  "env": {},
   "name": "cmd_vel_mux",
   "namespace": "",
   "node": "lekiwi_rmf/cmd_vel_mux",
@@ -1192,10 +1176,7 @@
  },
  {
   "arguments": [],
-  "env": {
-   "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
-   "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
-  },
+  "env": {},
   "name": "ekf_filter_node",
   "namespace": "",
   "node": "robot_localization/ekf_node",
@@ -1248,10 +1229,7 @@
  },
  {
   "arguments": [],
-  "env": {
-   "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
-   "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
-  },
+  "env": {},
   "name": "foxglove_bridge",
   "namespace": "",
   "node": "foxglove_bridge/foxglove_bridge",
@@ -1273,10 +1251,7 @@
  },
  {
   "arguments": [],
-  "env": {
-   "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
-   "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
-  },
+  "env": {},
   "name": "ld06_lidar",
   "namespace": "",
   "node": "ldlidar_stl_ros2/ldlidar_stl_ros2_node",
@@ -1295,10 +1270,7 @@
  },
  {
   "arguments": [],
-  "env": {
-   "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
-   "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
-  },
+  "env": {},
   "name": "scan_self_filter",
   "namespace": "",
   "node": "lekiwi_rmf/scan_self_filter",
@@ -1334,10 +1306,7 @@
  },
  {
   "arguments": [],
-  "env": {
-   "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
-   "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
-  },
+  "env": {},
   "name": "slam_front_depth",
   "namespace": "",
   "node": "rtabmap_util/pointcloud_to_depthimage",
@@ -1376,10 +1345,7 @@
  },
  {
   "arguments": [],
-  "env": {
-   "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
-   "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
-  },
+  "env": {},
   "name": "wait_for_odom",
   "namespace": "",
   "node": "lekiwi_rmf/readiness_gate",
@@ -1396,10 +1362,7 @@
  },
  {
   "arguments": [],
-  "env": {
-   "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
-   "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
-  },
+  "env": {},
   "name": "wait_for_slam_sensor",
   "namespace": "",
   "node": "lekiwi_rmf/readiness_gate",
@@ -1416,10 +1379,7 @@
  },
  {
   "arguments": [],
-  "env": {
-   "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
-   "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
-  },
+  "env": {},
   "name": "wait_for_stable_joint_states",
   "namespace": "",
   "node": "lekiwi_rmf/readiness_gate",
@@ -1444,10 +1404,7 @@
  },
  {
   "arguments": [],
-  "env": {
-   "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
-   "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
-  },
+  "env": {},
   "name": null,
   "namespace": "",
   "node": "lekiwi_rmf/lekiwi_driver",
@@ -1498,10 +1455,7 @@
   "ros_arguments": []
  },
  {
-  "env": {
-   "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
-   "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
-  },
+  "env": {},
   "name": null,
   "output": "screen",
   "process": [
@@ -1527,10 +1481,7 @@
   "respawn_delay": null
  },
  {
-  "env": {
-   "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
-   "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
-  },
+  "env": {},
   "name": null,
   "output": "screen",
   "process": [

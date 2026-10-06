@@ -1,5 +1,22 @@
 [
  {
+  "after": "wait_for_arm_controller",
+  "on_failure": [
+   {
+    "log": "ERROR: arm controller readiness gate exited with 1; dependents remain stopped"
+   }
+  ],
+  "start": [
+   {
+    "arguments": {
+     "arm_calibration_file": "$(env HOME)/.ros/lekiwi_arm_calibration.json",
+     "sim": "false"
+    },
+    "include": "$(share lekiwi_rmf)/launch/moveit.launch.py"
+   }
+  ]
+ },
+ {
   "after": "wait_for_map",
   "on_failure": [
    {
@@ -276,6 +293,35 @@
  {
   "arguments": [],
   "env": {},
+  "name": "arm_workspace_monitor",
+  "namespace": "",
+  "node": "lekiwi_rmf/arm_workspace_monitor",
+  "output": "screen",
+  "parameters": {
+   "check_frequency": 30.0,
+   "group_name": "arm",
+   "joint_names": [
+    "arm_shoulder_pan",
+    "arm_shoulder_lift",
+    "arm_elbow_flex",
+    "arm_wrist_flex",
+    "arm_wrist_roll",
+    "arm_gripper"
+   ],
+   "joint_timeout": 0.45,
+   "perception_timeout": 0.5,
+   "service_timeout": 0.25,
+   "use_sim_time": false,
+   "validity_timeout": 0.35
+  },
+  "remappings": [],
+  "respawn": false,
+  "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {},
   "name": "camera_relay",
   "namespace": "",
   "node": "lekiwi_rmf/camera_relay",
@@ -379,32 +425,50 @@
  {
   "arguments": [],
   "env": {},
-  "name": "free_space",
+  "name": "moveit_cloud_gate",
   "namespace": "",
-  "node": "lekiwi_rmf/free_space.py",
+  "node": "lekiwi_rmf/moveit_cloud_gate",
   "output": "screen",
   "parameters": {
-   "camera_height": 0.093,
-   "camera_offset_x": 0.03,
-   "camera_offset_y": 0.0,
-   "camera_pitch": 0.031,
-   "camera_roll": 0.0,
-   "camera_yaw": 0.0
+   "use_sim_time": false
   },
-  "remappings": [
-   [
-    "image",
-    "/camera/front/image_raw"
+  "remappings": [],
+  "respawn": false,
+  "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {},
+  "name": "scan_self_filter",
+  "namespace": "",
+  "node": "lekiwi_rmf/scan_self_filter",
+  "output": "screen",
+  "parameters": {
+   "body_end_deg": [
+    234.0,
+    284.0,
+    315.0,
+    342.0,
+    350.0
    ],
-   [
-    "camera_info",
-    "/camera/front/camera_info"
+   "body_max_range_m": [
+    0.24,
+    0.228,
+    0.26,
+    0.226,
+    0.218
    ],
-   [
-    "scan",
-    "/scan"
-   ]
-  ],
+   "body_start_deg": [
+    210.0,
+    254.0,
+    299.0,
+    315.0,
+    342.0
+   ],
+   "input_topic": "/pi/lidar/scan"
+  },
+  "remappings": [],
   "respawn": false,
   "respawn_delay": null,
   "ros_arguments": []
@@ -563,6 +627,22 @@
  {
   "arguments": [],
   "env": {},
+  "name": "wait_for_arm_controller",
+  "namespace": "",
+  "node": "lekiwi_rmf/readiness_gate",
+  "output": "screen",
+  "parameters": {
+   "action": "/arm_controller/follow_joint_trajectory",
+   "kind": "follow_joint_trajectory_action"
+  },
+  "remappings": [],
+  "respawn": false,
+  "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {},
   "name": "wait_for_odom",
   "namespace": "",
   "node": "lekiwi_rmf/readiness_gate",
@@ -641,7 +721,7 @@
    "odom_topic": "/wheel/odometry",
    "permission_timeout": 0.5,
    "publish_odom_tf": false,
-   "remote_ip": "127.0.0.1",
+   "remote_ip": "192.0.2.66",
    "xy_velocity_scale": 1.0,
    "yaw_velocity_scale": 0.976
   },
@@ -680,7 +760,7 @@
    "-c",
    "$(share lekiwi_rmf)/config/zenoh_compute.json5",
    "-e",
-   "tls/127.0.0.1:7447"
+   "tls/192.0.2.66:7447"
   ],
   "respawn": true,
   "respawn_delay": 5.0
