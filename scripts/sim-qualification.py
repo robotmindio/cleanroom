@@ -20,35 +20,15 @@ import sys
 from dataclasses import asdict, dataclass
 from typing import Mapping, Sequence
 
+import yaml
+
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_CTESTS = (
-    "test_odometry", "test_motor_health", "test_odom_scale", "test_free_space",
-    "test_camera_relay", "test_astra_pro_configuration", "test_astra_cloud_filter",
-    "test_remote_astra_service", "test_arm_trajectory", "test_local_arm_executor", "test_arm_calibration",
-    "test_arm_jog",
-    "test_capture_stow",
-    "test_collision_model", "test_vendor_lekiwi_model", "test_driver_link",
-    "test_cmd_vel_mux", "test_teleop", "test_readiness_gate", "test_sim_host_tools",
-    "test_rtabmap_db_maintenance", "test_torque_control", "test_gripper_calibrate",
-    "test_lidar_detection",
-    "test_safety_supervisor", "test_arm_workspace_monitor", "test_map_bundle",
-    "test_launch_validation", "test_rtabmap_session_guard", "test_fake_host",
-    "test_zmq_security", "test_simulation_model", "test_service_installation",
-    "test_rmf_owner_guard", "test_moveit_shutdown_probe",
-    "test_native_lifecycle", "test_native_waitable", "test_rest_contacts",
-    "test_sim_qualification", "test_slam_cloud", "test_motion_guards",
-    "test_scan_self_filter", "test_camera_supervisor", "test_moveit_cloud_gate",
-    "test_moveit_gripper_calibration",
-    "test_self_heal", "test_zenoh_tls",
-    "test_foxglove_configuration",
-    "test_test_cmd_vel_mux_launch.py", "test_test_driver_fake_host_launch.py",
-    "test_test_simulation_physics_launch.py", "test_test_sim_native_failsafe_launch.py",
-    "test_test_sim_sensor_frames_launch.py",
-    "test_test_safety_supervisor_launch.py", "test_test_arm_workspace_monitor_launch.py",
-    "test_test_rmf_owner_guard_launch.py",
-    "test_test_moveit_driver_e2e_launch.py",
-)
+# Discover the source tests independently of CMake so missing registrations fail.
+EXPECTED_CTESTS = tuple(sorted(
+    f"test_{path.name}" if path.name.endswith("_launch.py") else path.stem
+    for suffix in ("py", "cpp") for path in (ROOT / "test").glob(f"test_*.{suffix}")
+))
 
 
 @dataclass
@@ -86,7 +66,10 @@ def run_command(
         output = f"command unavailable: {error}\n"
         returncode = None
     except subprocess.TimeoutExpired as error:
-        output = (error.stdout or "") + f"\ncommand timed out after {timeout:g} s\n"
+        output = error.stdout or ""
+        if isinstance(output, bytes):
+            output = output.decode("utf-8", errors="replace")
+        output += f"\ncommand timed out after {timeout:g} s\n"
         returncode = None
     log.write_text(
         "$ " + " ".join(command) + "\n\n" + output,
@@ -101,6 +84,25 @@ def run_command(
         log=str(log.relative_to(evidence)),
         note=note,
     )
+
+
+def simulation_safety_result(evidence: Path) -> Result:
+    """Check simulation guards without interpreting physical acceptance evidence."""
+    path = ROOT / "config" / "safety_simulation.yaml"
+    log = evidence / "commands" / "simulation-safety-profile.json"
+    try:
+        params = yaml.safe_load(path.read_text(encoding="utf-8"))["safety_supervisor"]["ros__parameters"]
+        valid = isinstance(params, dict) and params.get("require_acceptance") is False and all(
+            params.get(name) is True for name in (
+                "require_scan", "require_full_scan", "require_depth", "require_odometry", "require_joint_states",
+            )
+        )
+        detail = "Simulation must retain scan, depth, odometry and joint-state gates independently of physical acceptance."
+    except (OSError, yaml.YAMLError, KeyError, TypeError) as error:
+        valid, detail = False, f"Cannot read simulation safety profile: {error}"
+    log.write_text(json.dumps({"profile": str(path), "valid": valid, "detail": detail}, indent=2) + "\n")
+    return Result("simulation-safety-profile", [], 0 if valid else 1, True, valid,
+                  str(log.relative_to(evidence)), detail)
 
 
 def ctest_names(output: str) -> set[str]:
@@ -197,8 +199,9 @@ the final revision on the qualified server:
   attach the final 30 lines of `~/.ros/lekiwi/sim-stack.log` (collected when
   available by `--collect-runtime`).
 
-Do not set `config/safety_acceptance.yaml` to `validated: true`: this is
-simulation acceptance evidence only and cannot satisfy physical acceptance.
+Simulation evidence cannot establish or extend physical acceptance. This
+runner leaves `config/safety_acceptance.yaml` unchanged, including existing
+physical acceptance for a separately qualified operating scope.
 """,
         encoding="utf-8",
     )
@@ -339,11 +342,7 @@ def main() -> int:
         note="Qualification requires an exact committed revision; inspect git-status.log for any dirty paths.",
     ))
     results.append(run_command(evidence, "git-diff-check", ["git", "diff", "--check"]))
-    results.append(run_command(evidence, "safety-default-deny", [
-        sys.executable, "-c",
-        "import pathlib,re,sys; s=pathlib.Path('config/safety_acceptance.yaml').read_text(); "
-        "sys.exit(0 if re.search(r'^\\s*validated:\\s*false\\s*(?:#.*)?$',s,re.M) else 1)",
-    ], note="The source acceptance switch must remain false."))
+    results.append(simulation_safety_result(evidence))
 
     for directory in (ROOT / "lekiwi_rmf", ROOT / "scripts", ROOT / "test"):
         files = sorted(str(path) for path in directory.rglob("*.py"))

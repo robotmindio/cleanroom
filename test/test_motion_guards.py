@@ -72,7 +72,8 @@ def test_marker_resampling_keeps_original_pixel_coordinates(monkeypatch):
     camera.parameters = types.SimpleNamespace(aprilTagQuadDecimate=1.5)
     square = np.float32([[100,100],[180,100],[180,180],[100,180]])
     def detect(image,*args,**kwargs):
-        if image.shape==(200,400):return [],None,[]
+        if image.shape==(200,400):
+            return [],None,[]
         assert image.shape==(300,600)
         return [((square+.5)*1.5-.5).reshape(1,4,2),((square+[100,0]+.5)*1.5-.5).reshape(1,4,2)],np.array([[69],[59]]),[]
     monkeypatch.setattr(cv2.aruco,'detectMarkers',detect)
@@ -153,7 +154,8 @@ def test_floor_tracking_recovers_ground_motion_of_a_raised_tilted_marker(tilt):
     functions = runpy.run_path(str(Path(__file__).parents[1]/'scripts/test-braking.py'))
     eye = np.array([-.2,-.3,.8])
     z = -eye/np.linalg.norm(eye)
-    x = np.cross(z,[0,0,1]); x /= np.linalg.norm(x)
+    x = np.cross(z,[0,0,1])
+    x /= np.linalg.norm(x)
     view = np.array([x,np.cross(z,x),z])
     intrinsic = np.array([[1000,0,640],[0,1000,480],[0,0,1]])
     def project(points):
@@ -167,13 +169,15 @@ def test_floor_tracking_recovers_ground_motion_of_a_raised_tilted_marker(tilt):
     reference = functions['floor_reference']({33:project(floor),**{k:project(p) for k,p in boards.items()}},33,.044,[53,69,59],.035)
     yaw = .12
     rotation = np.array([[math.cos(yaw),-math.sin(yaw)],[math.sin(yaw),math.cos(yaw)]])
-    moved = body.copy(); moved[:,:2] = body[:,:2]@rotation.T+[.02,-.015]
+    moved = body.copy()
+    moved[:,:2] = body[:,:2]@rotation.T+[.02,-.015]
     pose = functions['floor_pose']({53:project(moved)},reference)
     expected = center[:2]@rotation.T+[.02,-.015]-center[:2]
     assert pose == pytest.approx([*expected,yaw],abs=2e-6)
     moved_boards = {}
     for key,points in boards.items():
-        points = points.copy(); points[:,:2] = points[:,:2]@rotation.T+[.02,-.015]
+        points = points.copy()
+        points[:,:2] = points[:,:2]@rotation.T+[.02,-.015]
         moved_boards[key] = project(points)
     assert functions['floor_pose'](moved_boards,reference) == pytest.approx([*expected,yaw],abs=2e-6)
     visible = {k:v for k,v in moved_boards.items() if k!=53}
@@ -213,7 +217,8 @@ def test_braking_observes_terminal_speed_despite_stationary_startup(tmp_path,mon
     from pathlib import Path
     BrakingTest = runpy.run_path(str(Path(__file__).parents[1]/'scripts/test-braking.py'))['BrakingTest']
     stamp = time.monotonic()
-    frames = [{'time':stamp+i*.04,'pts_ns':int((i+1)*4e7),'pose':[i*.002,0,0]} for i in range(10)]
+    frames = [{'time':stamp+i*.04,'pts_ns':int((i+1)*4e7),'pose':[i*.002,0,0],
+               'marker_pose':[i*.002,0,0]} for i in range(10)]
     def tick(command):
         node.optical_samples.extend(frames)
         node.camera.last_pose = [.03,0,0]

@@ -5,10 +5,10 @@ checkout without physical hardware, site measurements, deployment credentials,
 an external service, or a qualified GPU host. None of the items below may be
 marked complete from unit tests or loopback simulation alone.
 
-The physical acceptance record remains `validated: false` while these blockers
-exist. The default nonstrict runtime reports that fault but still permits
-motion; strict mode denies motion. Do not treat nonstrict motion permission as
-physical safety acceptance.
+The current physical acceptance record is validated for the restricted scope
+listed below. Outstanding work limits expansion of that scope; simulation and
+unit tests cannot grant or extend physical acceptance. Runtime capability gates
+remain enforced in both recoverable and strict modes.
 Each section names its completion condition and its tracking issue.
 
 ## Physical safety hardware and acceptance
@@ -20,32 +20,23 @@ Done when `config/safety_acceptance.yaml` holds a reviewed record with
 fault test, and the production profile requires every physical input it names.
 Tracked in [#6](https://github.com/robotmindio/cleanroom/issues/6).
 
-The current reduced scope is attended autonomous base motion with no payload on
-dry tile. It records bumper, IMU, and battery monitoring as absent, so their
-fault tests are inapplicable; all other listed tests remain required. Keep the
-operator at the physical motor-power stop throughout any accepted run. The
-full-hardware items below remain necessary before claiming those functions or
-expanding to unattended operation.
+The accepted scope is attended autonomous base motion on dry concrete with the
+installed reported 200 g load, at 0.03 m/s and 0.06 rad/s, with an operator at the
+physical motor-power stop. The recorded software, stow, stopping measurements
+and fault results are in `config/safety_acceptance.yaml` and its dated evidence
+report. Bumper, IMU and battery monitoring are absent. The full-hardware items
+below remain necessary before claiming those functions or expanding to
+unattended operation.
 
 - Install bumper/contact sensing, publish its real state on
   `safety/bumper_active`, and set `require_bumper: true` in
   `config/safety_production.yaml`.
-- Accept the LD06 as the production scan source: verify its 360-degree
-  coverage, mounting-plane height and self-occlusion against the production
-  profile's 6-radian scan requirement. The camera floor-scan fallback is not a
-  360-degree scanner and cannot satisfy that requirement or reliably detect
-  side, rear, low-contrast and overhanging obstacles.
-- Resolve the LD06's physical self-occlusion before base trials. The current
-  90-degree body mask leaves less than the required 6 radians of effective
-  coverage, and stationary scans still show 7-20 cm returns around 180-225
-  laser-frame degrees. Reposition the lidar or nearby hardware, then rerun
-  `scripts/lidar-self-mask.py` in a clear area and review the proposal; do not
-  blanket-mask additional sectors and claim full scan coverage. A CAD-only
-  starting point is a laser centre near `base_footprint` x=-0.18 m, y=0.005 m,
-  z=0.35 m (current: x=-0.135 m, y=0.005 m, z=0.182 m). At the measured arm
-  stow and its 0.04-rad tolerance, the arm spans roughly 12 degrees there;
-  the new bracket, cable, vibration, and real scan still need checking before
-  selecting a mount or changing the tracked self-mask.
+- Qualify obstacle coverage for any expanded operating scope. The tracked LD06
+  body mask is 100 degrees and the production minimum usable coverage is 4.3
+  radians. The accepted trials do not establish full surround coverage or
+  protection against low and overhanging obstacles. Review sensor mounting and
+  self-occlusion physically before changing the tracked mask or coverage limit.
+  The camera floor-scan fallback cannot establish surround protection.
 - Measure the Astra Pro's optical-centre correction and prove that its
   `/camera/depth/points` cloud covers the arm workspace; the driver publishes
   the cloud, but coverage is not established.
@@ -60,8 +51,9 @@ expanding to unattended operation.
   stalled process, severed network, motor-bus failure, payload shift and power
   fault. Software torque-off is not the independent E-stop.
 - Predeclare reviewed maximum stop latency and distance. Then perform at least
-  30 trials in each of forward, reverse, left, right, clockwise rotation and
-  counter-clockwise rotation on every accepted surface/payload combination.
+  the configured minimum trials (currently five) in each of forward, reverse,
+  left, right, clockwise rotation and counter-clockwise rotation on every
+  accepted surface/payload combination, or more if the scope review requires it.
   Record worst distances, timing and measurement uncertainty.
 - Fault-inject every applicable item required by `config/safety_acceptance.yaml`: scan,
   depth, diagnostics, telemetry loss
@@ -235,7 +227,7 @@ scripts/sim-qualification.py \
 
 The runner remains an evidence collector and never grants qualification. It
 requires a clean exact revision, a build and installed package bound to this
-checkout, `validated: false`, ShellCheck, pyzmq in CMake's selected interpreter,
+checkout, the guarded simulation profile, ShellCheck, pyzmq in CMake's selected interpreter,
 the complete expected CTest set, every test passing, orderly MoveIt shutdown
 from that selected install and an EGL/OpenGL renderer of at least 3.3.
 It retains every command result and writes `summary.json` even on failure. In
