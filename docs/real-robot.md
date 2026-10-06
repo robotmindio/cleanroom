@@ -190,6 +190,11 @@ Reinstalling a stale compute configuration also needs full sudo; the deployer
 checks `sudo -n true` before it touches the robot and stops with the command to
 run instead of waiting for a password.
 
+For the initial migration, run the new deployer from a separate persistent Git
+worktree tracking the intended pushed branch. The bootstrap service still imports
+its original checkout; updating that checkout first would change live source.
+Connect as each host's service account so it can read the private release files.
+
 The local checkout must be clean and exactly match its pushed upstream revision.
 The device anchor checkout also stays clean; neither checkout is advanced during
 deployment. The deployer builds detached worktrees under each bootstrap

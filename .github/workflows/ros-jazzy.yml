@@ -92,7 +92,7 @@ jobs:
       - name: Python coverage report
         env:
           # Cyclone DDS derives UDP ports from the domain ID, so it must stay
-          # at or below 232. 221 is outside the CTest domains (180-220).
+          # at or below 232. 221 is outside the CTest domains (40-84).
           ROS_DOMAIN_ID: 221
         run: |
           . /opt/ros/jazzy/setup.sh

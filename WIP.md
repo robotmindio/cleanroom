@@ -9,8 +9,9 @@ re-arm behavior. No live deployment has been performed.
   limits and uploaded trajectories must match the host calibration.
 - Completed: staged split releases with full pre-cutover qualification, artifact
   manifests, retained previous installations, and stable service paths.
-- Next: exercise a real staged build, then remove this checkpoint note and open
-  the draft review.
+- Next: complete the real staged build, then remove this checkpoint note and
+  finalize draft PR #23. The staged vendor tooling, class loader, and rclcpp
+  builds passed; live installed binary checksums are unchanged.
 - Verified: 56 qualification/braking/reload tests and 70 arm/motor-host tests
   passed; changed Python files pass Ruff.
 - Verified: fresh package build, all 61 CTest targets (nine launch tests), full

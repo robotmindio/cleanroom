@@ -55,6 +55,10 @@ remote_home=$("${ssh_command[@]}" 'printf %s "$HOME"') || die "cannot reach $dev
 for path in "$workspace" "$remote_home" "$remote_repo" "$remote_workspace"; do
   [[ $path =~ ^/[A-Za-z0-9._/-]+$ ]] || die "deployment paths must be absolute and contain no whitespace: $path"
 done
+workspace=$(realpath -e "$workspace") || die "local workspace not found"
+remote_workspace=$("${ssh_command[@]}" realpath -e "$remote_workspace") || die "device workspace not found"
+[[ $workspace =~ ^/[A-Za-z0-9._/-]+$ && $remote_workspace =~ ^/[A-Za-z0-9._/-]+$ ]] || \
+  die "resolved workspace paths must contain no whitespace"
 
 require_clean() { # require_clean <repository> [description]
   local repository=$1 description=${2:-$1}
@@ -123,7 +127,18 @@ has_nopasswd_systemctl() { # has_nopasswd_systemctl <sudo -l output> <action> <u
 }
 refresh_compute_service() {
   log "Refreshing stale compute service configuration"
-  local installer_args=(--no-start)
+  local setting curve_directory
+  local installer_args=(--no-start) stack_arguments=()
+  read -r -a stack_arguments <<<"$(sed -n 's/^LEKIWI_STACK_ARGS=//p' /etc/default/lekiwi-stack)"
+  for setting in "${stack_arguments[@]}"; do
+    if [[ $setting == curve_client_secret_key_file:=* ]]; then
+      curve_directory=${setting#*=}
+      [[ $curve_directory == */clients/driver.key_secret ]] || die "unexpected compute CURVE key path"
+      curve_directory=${curve_directory%/clients/driver.key_secret}
+      [[ $curve_directory =~ ^/[A-Za-z0-9._/-]+$ ]] || die "invalid compute CURVE directory"
+      installer_args+=(--curve-dir "$curve_directory")
+    fi
+  done
   if grep -Fq 'start_rosbridge:=true' /etc/default/lekiwi-stack &&
      grep -Fq 'rosbridge_address:=' /etc/default/lekiwi-stack; then
     installer_args+=(--rosbridge-tailnet)

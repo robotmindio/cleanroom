@@ -659,7 +659,7 @@ def test_deploy_order_fails_closed_around_the_device_restart():
     device_installer = (ROOT / "scripts" / "install-device-services.sh").read_text(encoding="utf-8")
     assert 'as_root systemctl enable "${units[@]}" lekiwi-ros-logrotate.timer' in device_installer
     assert '"$compute_current/source/scripts/reinstall-compute.sh" "${installer_args[@]}"' in deploy
-    assert 'local installer_args=(--no-start)' in deploy
+    assert 'local installer_args=(--no-start) stack_arguments=()' in deploy
     assert deploy.index("sudo -n true") < disarm
     assert disarm < deploy.index('sudo -n /usr/bin/systemctl reboot') < stop_host
     assert 'vcgencmd get_config usb_max_current_enable' in deploy
