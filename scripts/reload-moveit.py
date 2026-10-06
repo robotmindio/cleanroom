@@ -126,8 +126,7 @@ def main():
         parameters["robot_description_semantic"] = refresh_collision_pairs(
             parameters["robot_description_semantic"], source.read_text()
         )
-        # Launch's temporary file may have been removed while its child stayed
-        # alive. Recreate it from live parameters so respawn remains repeatable.
+        # Render initialized live values into the planner's startup overrides.
         write_parameters(parameter_path, parameters)
         os.kill(pid, signal.SIGINT)
         deadline = time.monotonic() + 30
