@@ -232,7 +232,15 @@ class OnboardBraking(FAULT['FaultTest']):
         observed=BRAKE['terminal_observed_speed'](terminal,direction.startswith('rotation'),window_s=1.2)
         until=time.monotonic()+2.5
         while time.monotonic()<until:self.tick(Twist())
-        result=self.observe_stop(cut)
+        try:
+            result=self.observe_stop(cut)
+        except ValueError as error:
+            # Keep completed measurements when a later observation window has
+            # a gap. This attempt is recorded and excluded, never approved.
+            self.trials.append({'direction':direction,'requested_speed':speed,
+                'fault_cut_time':cut,'qualification_eligible':False,'measurement_error':str(error)})
+            self.save();print('UNQUALIFIED STOP',direction,str(error),flush=True)
+            return False
         result.update(direction=direction,requested_speed=speed,terminal_observed_speed=observed,
                       requested_speed_covered=covered and observed>=(.015 if self.angular_test else .005),
                       speed_coverage_basis='maximum production guarded command, with fresh wheel feedback and independent ground motion',
