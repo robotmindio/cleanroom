@@ -95,15 +95,11 @@ def fake_client(**attributes):
 
 
 def grant_fresh_arm_permission(node, permitted=True):
-    node.arm_motion_permitted = permitted
-    node._arm_permission_received_at_ns = time.monotonic_ns()
-    node.permission_timeout_ns = 10_000_000_000
+    node.arm_permission = driver.Lease(10_000_000_000, permitted, time.monotonic_ns())
 
 
 def grant_fresh_base_permission(node, permitted=True):
-    node.base_motion_permitted = permitted
-    node._base_permission_received_at_ns = time.monotonic_ns()
-    node.permission_timeout_ns = 10_000_000_000
+    node.base_permission = driver.Lease(10_000_000_000, permitted, time.monotonic_ns())
 
 
 def test_only_a_newly_accepted_packet_is_fresh():
@@ -131,16 +127,22 @@ def test_permission_lease_uses_receive_monotonic_time_and_expires():
     assert not lease_is_fresh(None, 100, 1_000)
 
 
+def test_a_lease_grants_only_its_current_value_until_it_expires():
+    lease = driver.Lease(100)
+    assert not lease.current(0)
+    lease.grant(True, 1_000)
+    assert lease.current(1_100) and not lease.current(1_101) and not lease.current(999)
+    lease.grant(False, 1_050)
+    assert not lease.current(1_060)
+
+
 def test_arm_permission_lease_expiry_disarms_and_base_expiry_zeros_command():
     driver.Twist = object
     node = make_node()
-    node.permission_timeout_ns = 100
     node.state_lock = threading.Lock()
     node.armed = True
-    node.arm_motion_permitted = True
-    node.base_motion_permitted = True
-    node._arm_permission_received_at_ns = 1_000
-    node._base_permission_received_at_ns = 1_000
+    node.arm_permission = driver.Lease(100, True, 1_000)
+    node.base_permission = driver.Lease(100, True, 1_000)
     node._arm_permission_expired = False
     node.command = object()
     node.get_clock = lambda: types.SimpleNamespace(now=lambda: object())
@@ -151,8 +153,8 @@ def test_arm_permission_lease_expiry_disarms_and_base_expiry_zeros_command():
 
     assert node.enforce_permission_leases(now_monotonic_ns=1_101)
 
-    assert node.arm_motion_permitted is False
-    assert node.base_motion_permitted is False
+    assert node.arm_permission.value is False
+    assert node.base_permission.value is False
     assert node.command is not None
     assert disarms == ["DISARMED"]
 
@@ -170,8 +172,6 @@ def test_explicit_arm_rejects_base_permission_without_arm_workspace_clear():
     node.link_lost = False
     node.last_observation = {"complete": True}
     grant_fresh_base_permission(node)
-    node.arm_motion_permitted = False
-    node._arm_permission_received_at_ns = None
     node.state_lock = threading.Lock()
     node.action_lock = threading.Lock()
     node.torque_fault = False
@@ -193,10 +193,9 @@ def test_explicit_arm_rejects_base_permission_without_arm_workspace_clear():
 def test_arm_permission_withdrawal_keeps_torque_when_base_lease_is_current():
     driver.Twist = object
     node = make_node()
-    node.permission_timeout_ns = 10_000_000_000
     node.state_lock = threading.Lock()
     node.armed = True
-    node.arm_motion_permitted = True
+    node.arm_permission.value = True
     node._arm_permission_expired = False
     grant_fresh_base_permission(node)
     node.get_clock = lambda: types.SimpleNamespace(now=lambda: object())
@@ -219,13 +218,10 @@ def test_arm_permission_withdrawal_keeps_torque_when_base_lease_is_current():
 def test_base_permission_lease_expiry_does_not_require_arm_disarm():
     driver.Twist = object
     node = make_node()
-    node.permission_timeout_ns = 100
     node.state_lock = threading.Lock()
     node.armed = True
-    node.arm_motion_permitted = True
-    node.base_motion_permitted = True
-    node._arm_permission_received_at_ns = 1_050
-    node._base_permission_received_at_ns = 1_000
+    node.arm_permission = driver.Lease(100, True, 1_050)
+    node.base_permission = driver.Lease(100, True, 1_000)
     node._arm_permission_expired = False
     node.command = object()
     node.get_clock = lambda: types.SimpleNamespace(now=lambda: object())
@@ -234,8 +230,8 @@ def test_base_permission_lease_expiry_does_not_require_arm_disarm():
 
     assert not node.enforce_permission_leases(now_monotonic_ns=1_101)
 
-    assert node.base_motion_permitted is False
-    assert node.arm_motion_permitted is True
+    assert node.base_permission.value is False
+    assert node.arm_permission.value is True
     assert disarms == []
 
 
@@ -612,7 +608,7 @@ def test_unconfirmed_cut_latches_torque_fault_until_explicit_confirmed_disarm():
     node.armed = True
     node.torque_fault = False
     node.auto_arm_pending = True
-    node.arm_motion_permitted = True
+    node.arm_permission.value = True
     node.link_lost = False
     node.last_observation = {"complete": True}
     node.last_fresh = object()
@@ -1307,7 +1303,8 @@ def test_local_goal_survives_telemetry_silence_beyond_link_timeout(monkeypatch):
 
 
 def test_local_goal_waits_for_collision_check_after_motor_feedback_recovers(monkeypatch):
-    node = make_node(armed=True, disarm_on_failure=False, arm_motion_permitted=True)
+    node = make_node(armed=True, disarm_on_failure=False)
+    node.arm_permission.value = True
     node.trajectory = {"done": threading.Event()}
     node.get_logger = lambda: types.SimpleNamespace(warning=lambda *_: None, error=lambda *_: None)
     canceled, disarmed = [], []

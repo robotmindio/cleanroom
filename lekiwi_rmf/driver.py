@@ -33,7 +33,7 @@ from lekiwi_rmf.arm_trajectory import (
 )
 from lekiwi_rmf.host_protocol import STATE_KEYS, TorqueCommand
 from lekiwi_rmf.motion_guards import (
-    bounded_test_speed_limits, inside_base_test_boundary, lease_is_fresh, load_base_speed_limits, twist_is_finite,
+    Lease, bounded_test_speed_limits, inside_base_test_boundary, load_base_speed_limits, twist_is_finite,
 )
 from lekiwi_rmf.odometry import BASE_XY_SCALE, BASE_YAW_SCALE, HostPoseTracker
 from lekiwi_rmf.torque_control import TorqueControlClient
@@ -275,7 +275,6 @@ class LeKiwiDriver(Node):
         """Set the plain runtime state: no ROS entities, so tests reuse it unchanged."""
         for field in dataclasses.fields(settings):
             setattr(self, field.name, getattr(settings, field.name))
-        self.permission_timeout_ns = int(settings.permission_timeout * 1_000_000_000)
         self.robot = robot
         self.torque = torque
         self.torque_lock = threading.Lock()
@@ -299,10 +298,9 @@ class LeKiwiDriver(Node):
         self._healthy_telemetry_at = None
         self.armed = False
         self.torque_fault = False
-        self.base_motion_permitted = False
-        self.arm_motion_permitted = False
-        self._base_permission_received_at_ns = None
-        self._arm_permission_received_at_ns = None
+        permission_timeout_ns = int(settings.permission_timeout * 1_000_000_000)
+        self.base_permission = Lease(permission_timeout_ns)
+        self.arm_permission = Lease(permission_timeout_ns)
         self._arm_permission_expired = False
         # Arming waits for a complete, fresh observation and current supervisor
         # permission. By default the robot arms at startup whatever auto_arm_on_startup
@@ -336,17 +334,11 @@ class LeKiwiDriver(Node):
         permitted = bool(message.data)
         received_at_ns = time.monotonic_ns()
         with self.state_lock:
-            self.base_motion_permitted = permitted
-            self._base_permission_received_at_ns = received_at_ns
+            self.base_permission.grant(permitted, received_at_ns)
             if not permitted:
-                self.command = Twist()
-                self.command_stamp = self.get_clock().now()
+                self._zero_command()
             armed = self.armed
-            arm_current = self._permission_is_current(
-                self.arm_motion_permitted,
-                self._arm_permission_received_at_ns,
-                received_at_ns,
-            )
+            arm_current = self.arm_permission.current(received_at_ns)
         if not permitted and armed and not arm_current and not self._hold_feedback_gap():
             self.get_logger().error(
                 "All motion capability permissions withdrawn; disarming"
@@ -357,17 +349,12 @@ class LeKiwiDriver(Node):
         received_at_ns = time.monotonic_ns()
         with self.state_lock:
             permitted = bool(message.data) and not self.arm_workspace_collision
-            was_permitted = bool(self.arm_motion_permitted)
+            was_permitted = self.arm_permission.value
             was_expired = bool(self._arm_permission_expired)
-            self.arm_motion_permitted = permitted
-            self._arm_permission_received_at_ns = received_at_ns
+            self.arm_permission.grant(permitted, received_at_ns)
             self._arm_permission_expired = not permitted
             armed = self.armed
-            base_current = self._permission_is_current(
-                self.base_motion_permitted,
-                self._base_permission_received_at_ns,
-                received_at_ns,
-            )
+            base_current = self.base_permission.current(received_at_ns)
         newly_withdrawn = not permitted and (was_permitted or not was_expired)
         if newly_withdrawn and armed:
             if self._hold_feedback_gap():
@@ -389,21 +376,10 @@ class LeKiwiDriver(Node):
         if message.data:
             self.on_arm_permission(Bool(data=False))
 
-    def _permission_is_current(self, permitted, received_at_ns, now_ns=None):
-        return bool(permitted) and lease_is_fresh(
-            received_at_ns, self.permission_timeout_ns, now_ns
-        )
-
-    def _capability_permission_is_current(self, now_ns=None):
-        return self._permission_is_current(
-            self.base_motion_permitted,
-            self._base_permission_received_at_ns,
-            now_ns,
-        ) or self._permission_is_current(
-            self.arm_motion_permitted,
-            self._arm_permission_received_at_ns,
-            now_ns,
-        )
+    def _zero_command(self):
+        """Drop the pending base command; the caller holds state_lock."""
+        self.command = Twist()
+        self.command_stamp = self.get_clock().now()
 
     def _hold_feedback_gap(self):
         """Retain an arm goal while feedback or collision checking is unavailable.
@@ -420,26 +396,16 @@ class LeKiwiDriver(Node):
         current = time.monotonic_ns() if now_monotonic_ns is None else now_monotonic_ns
         arm_expired = False
         with self.state_lock:
-            base_current = self._permission_is_current(
-                self.base_motion_permitted,
-                self._base_permission_received_at_ns,
-                current,
-            )
-            if not base_current:
-                if self.base_motion_permitted:
-                    self.base_motion_permitted = False
-                    self.command = Twist()
-                    self.command_stamp = self.get_clock().now()
+            base_current = self.base_permission.current(current)
+            if not base_current and self.base_permission.value:
+                self.base_permission.value = False
+                self._zero_command()
 
-            arm_current = self._permission_is_current(
-                self.arm_motion_permitted,
-                self._arm_permission_received_at_ns,
-                current,
-            )
+            arm_current = self.arm_permission.current(current)
             if not arm_current:
                 if not self._arm_permission_expired:
                     arm_expired = True
-                self.arm_motion_permitted = False
+                self.arm_permission.value = False
                 self._arm_permission_expired = True
             else:
                 self._arm_permission_expired = False
@@ -462,9 +428,7 @@ class LeKiwiDriver(Node):
             self.set_disarmed("DISARMED", defer_cut=True)
             return
         with self.state_lock:
-            if not self.armed or not self._permission_is_current(
-                self.base_motion_permitted, self._base_permission_received_at_ns
-            ):
+            if not self.armed or not self.base_permission.current():
                 return
             self.command = message
             self.command_stamp = self.get_clock().now()
@@ -538,8 +502,7 @@ class LeKiwiDriver(Node):
             if deliberate:
                 self.operator_disarmed = True
             self.auto_arm_pending = not self.operator_disarmed and not self.disarm_on_failure
-            self.command = Twist()
-            self.command_stamp = self.get_clock().now()
+            self._zero_command()
             self.stop_pending = True
             self.arm_hold_action = None
             if defer_cut:
@@ -620,9 +583,7 @@ class LeKiwiDriver(Node):
         return True
 
     def _arm_permission_is_current(self):
-        return self._permission_is_current(
-            self.arm_motion_permitted, self._arm_permission_received_at_ns
-        )
+        return self.arm_permission.current()
 
     def _enable_torque_and_arm(self, permission_is_current, operator, disarm_epoch):
         """Enable servo torque, then commit ARMED only if it is still safe.
@@ -645,8 +606,7 @@ class LeKiwiDriver(Node):
                     self.armed = True
                     if operator:
                         self.operator_disarmed = False
-                    self.command = Twist()
-                    self.command_stamp = self.get_clock().now()
+                    self._zero_command()
             if still_safe:
                 self.publish_safety("ARMED", disarm_epoch=disarm_epoch)
                 return "armed", True
@@ -885,8 +845,7 @@ class LeKiwiDriver(Node):
                 trajectory["names"] = tuple(names)
                 trajectory["points"] = points
                 self.trajectory = trajectory
-            self.command = Twist()
-            self.command_stamp = self.get_clock().now()
+            self._zero_command()
 
         try:
             # Serialize uploads with torque transitions. A preempted callback
@@ -1245,10 +1204,7 @@ class LeKiwiDriver(Node):
             if not self.armed:
                 return
             stale = (now - self.command_stamp).nanoseconds / 1e9 > self.command_timeout
-            cmd = Twist() if stale or not self._permission_is_current(
-                self.base_motion_permitted,
-                self._base_permission_received_at_ns,
-            ) else self.command
+            cmd = Twist() if stale or not self.base_permission.current() else self.command
             # Latch the first measured pose after torque is enabled. Reusing each
             # new observation as the goal lets gravity walk an idle arm down.
             if self.arm_hold_action is None:
@@ -1287,10 +1243,7 @@ class LeKiwiDriver(Node):
                 if not self.armed:
                     return
                 arm_permitted = self._arm_permission_is_current()
-                base_permitted = self._permission_is_current(
-                    self.base_motion_permitted,
-                    self._base_permission_received_at_ns,
-                )
+                base_permitted = self.base_permission.current()
             if not arm_permitted:
                 if not self._hold_feedback_gap():
                     self.cancel_trajectory("arm safety permission withdrawn")
