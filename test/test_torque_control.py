@@ -169,50 +169,44 @@ def test_torque_confirmation_requires_every_expected_motor():
     assert not torque_readback_matches({"left": 1, "right": 1, "arm": 0}, True, expected)
 
 
-def test_safety_steps_do_not_short_circuit_after_persistence_failure():
+def test_safety_steps_do_not_short_circuit_after_a_failure():
     called = []
 
-    def fail_persistence():
-        called.append("persist")
-        raise OSError("read-only filesystem")
+    def fail_stop():
+        called.append("stop")
+        raise OSError("bus timeout")
 
     failures = run_all_safety_steps((
-        ("persist", fail_persistence),
-        ("stop", lambda: called.append("stop")),
+        ("stop", fail_stop),
         ("disable", lambda: called.append("disable")),
         ("verify", lambda: called.append("verify")),
     ))
 
-    assert called == ["persist", "stop", "disable", "verify"]
+    assert called == ["stop", "disable", "verify"]
     assert len(failures) == 1
-    assert failures[0][0] == "persist"
+    assert failures[0][0] == "stop"
 
 
-def test_enable_persistence_failure_rolls_physical_torque_back_off():
+def test_failed_enable_step_rolls_physical_torque_back_off():
     called = []
 
-    def persist_enabled():
-        called.append("persist enabled")
-        raise OSError("disk full")
+    def verify_enabled():
+        called.append("verify enabled")
+        raise RuntimeError("servo 3 still reads 0")
 
     with pytest.raises(RuntimeError, match="enable transaction failed"):
         enable_with_rollback(
             (
                 ("enable", lambda: called.append("enable")),
-                ("verify enabled", lambda: called.append("verify enabled")),
-                ("persist enabled", persist_enabled),
+                ("verify enabled", verify_enabled),
             ),
             (
                 ("disable", lambda: called.append("disable")),
                 ("verify disabled", lambda: called.append("verify disabled")),
-                ("persist disabled", lambda: called.append("persist disabled")),
             ),
         )
 
-    assert called == [
-        "enable", "verify enabled", "persist enabled",
-        "disable", "verify disabled", "persist disabled",
-    ]
+    assert called == ["enable", "verify enabled", "disable", "verify disabled"]
 
 
 def test_control_listener_allows_the_all_interfaces_bind():
@@ -489,30 +483,17 @@ def _control(host, tmp_path, bus=None):
     socket = _RepSocket()
     context = types.SimpleNamespace(socket=lambda _kind: socket)
     security = types.SimpleNamespace(configure_socket=lambda _socket: None)
-    latch = host.TorqueLatch(str(tmp_path / "lekiwi" / "servo_torque_state"))
     control = host.TorqueControlServer(
-        context, host.TorqueSafetyConfig(bind_address="127.0.0.1"), latch, security,
+        context, host.TorqueSafetyConfig(bind_address="127.0.0.1"), security,
     )
     robot = _Robot(bus or _Bus())
-    return control, socket, robot, latch
+    return control, socket, robot
 
 
 def _request(control, socket, robot, request):
     socket.requests.append(request)
     command = control.process_one(robot)
     return command, socket.replies[-1]
-
-
-def test_torque_latch_is_written_atomically_and_privately(monkeypatch, tmp_path):
-    host = _host_module(monkeypatch)
-    latch = host.TorqueLatch(str(tmp_path / "state" / "servo_torque_state"))
-
-    latch.save(True)
-    assert latch.path.read_text() == "enabled\n"
-    assert latch.path.stat().st_mode & 0o777 == 0o600
-    latch.save(False)
-    assert latch.path.read_text() == "disabled\n"
-    assert [path.name for path in latch.path.parent.iterdir()] == ["servo_torque_state"]
 
 
 def test_configure_never_energizes_the_servos(monkeypatch):
@@ -570,7 +551,7 @@ def test_shutdown_signal_waits_for_the_serial_operation_to_finish(monkeypatch):
 
 def test_enable_holds_the_measured_arm_pose_before_confirming_torque(monkeypatch, tmp_path):
     host = _host_module(monkeypatch)
-    control, socket, robot, latch = _control(host, tmp_path)
+    control, socket, robot = _control(host, tmp_path)
 
     command, reply = _request(control, socket, robot, {"command": "enable"})
 
@@ -579,7 +560,6 @@ def test_enable_holds_the_measured_arm_pose_before_confirming_torque(monkeypatch
     assert calls[:4] == ["read Present_Position", "write Goal_Position", "stop_base", "enable_torque"]
     assert calls[4] == "read Torque_Enable"
     assert robot.bus.written == ("Goal_Position", dict.fromkeys(ARM, 12.5))
-    assert latch.path.read_text() == "enabled\n"
     # A second enable verifies the hardware rather than trusting the host flag.
     robot.bus.calls.clear()
     assert _request(control, socket, robot, {"command": "enable"})[1]["torque_enabled"] is True
@@ -590,7 +570,7 @@ def test_enable_rolls_torque_back_off_when_a_servo_does_not_confirm(monkeypatch,
     host = _host_module(monkeypatch)
     bus = _Bus()
     bus.enable_skips = ("arm_gripper",)
-    control, socket, robot, latch = _control(host, tmp_path, bus)
+    control, socket, robot = _control(host, tmp_path, bus)
 
     command, reply = _request(control, socket, robot, {"command": "enable"})
 
@@ -599,30 +579,14 @@ def test_enable_rolls_torque_back_off_when_a_servo_does_not_confirm(monkeypatch,
     assert "enable transaction failed" in reply["error"]
     assert bus.torque == dict.fromkeys(MOTORS, 0)
     assert "write Torque_Enable" in bus.calls
-    assert latch.path.read_text() == "disabled\n"
     assert control.torque_enabled is False
-
-
-def test_disable_cuts_torque_even_when_the_latch_cannot_be_written(monkeypatch, tmp_path):
-    host = _host_module(monkeypatch)
-    control, socket, robot, latch = _control(host, tmp_path)
-    _request(control, socket, robot, {"command": "enable"})
-    latch.path.unlink()
-    latch.path.mkdir()  # os.replace onto a directory fails like a read-only filesystem
-
-    command, reply = _request(control, socket, robot, {"command": "disable"})
-
-    assert command is None
-    assert reply["ok"] is False and "persist disabled latch" in reply["error"]
-    assert robot.bus.torque == dict.fromkeys(MOTORS, 0)
-    assert reply["torque_enabled"] is False and control.torque_enabled is False
 
 
 def test_disable_broadcast_reaches_every_motor_past_an_overloaded_gripper(monkeypatch, tmp_path):
     host = _host_module(monkeypatch)
     bus = _Bus()
     bus.faults["disable_torque"] = RuntimeError("gripper overload aborts per-servo write")
-    control, socket, robot, _latch = _control(host, tmp_path, bus)
+    control, socket, robot = _control(host, tmp_path, bus)
     _request(control, socket, robot, {"command": "enable"})
 
     command, reply = _request(control, socket, robot, {"command": "disable"})
@@ -649,13 +613,12 @@ def test_shutdown_fallback_attempts_every_motor_after_an_overload(monkeypatch):
 
 def test_disable_reports_torque_on_until_the_bus_confirms_the_cut(monkeypatch, tmp_path):
     host = _host_module(monkeypatch)
-    control, socket, robot, latch = _control(host, tmp_path)
+    control, socket, robot = _control(host, tmp_path)
     _request(control, socket, robot, {"command": "enable"})
     robot.bus.torque_off_skips = ("arm_gripper",)
 
     reply = _request(control, socket, robot, {"command": "disable"})[1]
     assert reply["ok"] is False and reply["torque_enabled"] is True
-    assert latch.path.read_text() == "enabled\n"
 
     # The failed cut left only the gripper energized; re-arm cannot succeed
     # using the host's old torque_enabled flag.
@@ -668,7 +631,7 @@ def test_disable_reports_torque_on_until_the_bus_confirms_the_cut(monkeypatch, t
 
 def test_torque_requests_answer_every_malformed_request(monkeypatch, tmp_path):
     host = _host_module(monkeypatch)
-    control, socket, robot, _latch = _control(host, tmp_path)
+    control, socket, robot = _control(host, tmp_path)
 
     assert control.process_one(robot) is None and socket.replies == []  # nothing pending
     assert _request(control, socket, robot, {"command": "state"}) == (
@@ -712,7 +675,7 @@ class _ObservationSocket:
 
 
 def _loop(host, tmp_path, *, disarm_on_failure=False):
-    control, socket, robot, _latch = _control(host, tmp_path)
+    control, socket, robot = _control(host, tmp_path)
     control.config.arm_calibration_file = str(tmp_path / "arm_calibration.json")
     bound = types.SimpleNamespace(
         zmq_cmd_socket=_CommandSocket(), zmq_observation_socket=_ObservationSocket(),

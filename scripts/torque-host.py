@@ -90,7 +90,6 @@ def disable_torque_per_motor(bus):
 @dataclass
 class TorqueSafetyConfig:
     port_zmq: int = 5557
-    state_file: str = "~/.ros/lekiwi/servo_torque_state"
     bind_address: str = "0.0.0.0"
     arm_calibration_file: str = "~/.ros/lekiwi_arm_calibration.json"
     nav2_params_file: str = str(
@@ -166,26 +165,6 @@ class BoundLeKiwiHost:
         self.zmq_context.term()
 
 
-class TorqueLatch:
-    """Record the last confirmed torque state in a file an operator can inspect.
-
-    The host never reads it back: a process or machine restart is never
-    permission to restore actuator energy, so the host always starts
-    torque-off and the ROS driver arms it explicitly once it has complete,
-    fresh telemetry.
-    """
-
-    def __init__(self, path: str):
-        self.path = Path(path).expanduser()
-
-    def save(self, enabled: bool) -> None:
-        self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        temporary = self.path.with_name(f".{self.path.name}.tmp")
-        temporary.write_text("enabled\n" if enabled else "disabled\n", encoding="ascii")
-        os.chmod(temporary, 0o600)
-        os.replace(temporary, self.path)
-
-
 class SafetyLeKiwi(LeKiwi):
     """Configure the vendor robot but leave torque off until an explicit arm request."""
 
@@ -217,8 +196,7 @@ class SafetyLeKiwi(LeKiwi):
 
 class TorqueControlServer:
     def __init__(
-        self, context, config: TorqueSafetyConfig, latch: TorqueLatch,
-        security: CurveServerSecurity,
+        self, context, config: TorqueSafetyConfig, security: CurveServerSecurity,
     ):
         if not 1 <= config.port_zmq <= 65535:
             raise ValueError("safety.port_zmq must be between 1 and 65535")
@@ -227,7 +205,6 @@ class TorqueControlServer:
         self.socket.setsockopt(zmq.MAXMSGSIZE, 2 * 1024 * 1024)
         security.configure_socket(self.socket)
         self.socket.bind(f"tcp://{validated_bind_address(config.bind_address)}:{config.port_zmq}")
-        self.latch = latch
         self.config = config
         self.torque_enabled = False
 
@@ -265,7 +242,6 @@ class TorqueControlServer:
             (
                 ("enable motor torque", lambda: robot.bus.enable_torque(num_retry=TORQUE_RETRIES)),
                 ("verify motor torque enabled", lambda: self._verify_torque(robot, True)),
-                ("persist enabled latch", lambda: self.latch.save(True)),
             ),
             (("disable motor torque", lambda: self._disable(robot)),),
         )
@@ -281,9 +257,6 @@ class TorqueControlServer:
         ))
         if not any(name == "verify motor torque disabled" for name, _error in failures):
             self.torque_enabled = False
-            failures.extend(run_all_safety_steps((
-                ("persist disabled latch", lambda: self.latch.save(False)),
-            )))
         if failures:
             raise RuntimeError("; ".join(f"{name}: {error}" for name, error in failures))
 
@@ -705,7 +678,6 @@ def connect_when_servos_powered(robot: SafetyLeKiwi) -> None:
 def main(cfg: TorqueHostConfig):
     global _shutdown_requested
     _shutdown_requested = False
-    latch = TorqueLatch(cfg.safety.state_file)
     robot = SafetyLeKiwi(cfg.robot)
     host = None
     control = None
@@ -721,11 +693,10 @@ def main(cfg: TorqueHostConfig):
         # before opening any network control endpoint.
         broadcast_torque_off(robot.bus)
         TorqueControlServer._verify_torque(robot, False)
-        latch.save(False)
         if _shutdown_requested:
             raise KeyboardInterrupt
         host = BoundLeKiwiHost(cfg.host, cfg.safety.bind_address, cfg.curve)
-        control = TorqueControlServer(host.zmq_context, cfg.safety, latch, host.security)
+        control = TorqueControlServer(host.zmq_context, cfg.safety, host.security)
         loop = HostLoop(robot, host, control, MotorHealthCollector(robot), cfg.safety.disarm_on_failure)
         while not _shutdown_requested:
             loop_start = time.monotonic()
