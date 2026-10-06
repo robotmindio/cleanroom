@@ -1,0 +1,13 @@
+# Finite load revalidation using onboard cameras and independent raw-LiDAR ICP.
+# Production services and torque remain on; no physical acceptance is automatic.
+trials_per_direction: 5
+measurement_uncertainty_m: 0.020
+maximum_stopping_distance_m: 0.050
+maximum_stop_time_s: 1.5
+maximum_frame_gap_s: 0.50
+maximum_center_radius_m: 0.12
+maximum_runtime_s: 1200
+# Local two-axis marker/LiDAR cross-check found <9% metric disagreement.
+# Reserve 15%, plus measured covariance/jitter and 1 mm dimensional error.
+scale_reserve_fraction: 0.15
+body_radius_m: 0.33

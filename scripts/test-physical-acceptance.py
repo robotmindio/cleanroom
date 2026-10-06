@@ -13,7 +13,10 @@ import shlex
 import subprocess
 import time
 
+import cv2
+from cv_bridge import CvBridge
 from geometry_msgs.msg import Twist
+from sensor_msgs.msg import Image
 from lekiwi_rmf.motion_guards import load_base_speed_limits
 
 navigation = runpy.run_path(str(Path(__file__).with_name('test-navigation.py')))
@@ -33,6 +36,11 @@ class FaultTest(navigation['Test']):
         self.phase = None
         self.safe_speed = None
         self.measured_speed = math.inf
+        self.views = {}
+        self.bridge = CvBridge()
+        for camera in ('front','wrist','astra/color'):
+            self.create_subscription(Image,'/camera/'+camera+'/image_raw',
+                lambda m,c=camera:self.views.update({c:m}),navigation['qos_profile_sensor_data'])
         self.create_subscription(Twist,'/cmd_vel_safe',lambda m:setattr(self,'safe_speed',
             math.hypot(m.linear.x,m.linear.y)+abs(m.angular.z)),10)
         arguments = navigation['installed_stack_arguments']()
@@ -146,15 +154,10 @@ class FaultTest(navigation['Test']):
             # check the first recovered reading before sending another command.
             if not no_feedback and self.safe_speed!=0:
                 raise RuntimeError(name+' left a nonzero guarded command')
-            for frame in range(2):
-                image = self.output/f'{name}-{frame}.jpg'
-                self.action(['timeout','12','gst-launch-1.0','-q','pipewiresrc',
-                    'target-object=v4l2_input.pci-0000_04_00.3-usb-0_2.1.2_1.0','num-buffers=1','!',
-                    'image/jpeg,width=1280,height=960,framerate=30/1','!',
-                    'filesink',f'location={image}'],command)
-                end = time.monotonic()+0.7
-                while time.monotonic()<end:
-                    self.tick(command)
+            for camera,message in self.views.items():
+                image = self.output/f'{name}-{camera.replace("/","-")}.jpg'
+                if not cv2.imwrite(str(image),self.bridge.imgmsg_to_cv2(message,'bgr8')):
+                    raise RuntimeError('could not save robot camera view: '+str(image))
         finally:
             self.stop()
             restore()

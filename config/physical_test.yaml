@@ -1,5 +1,7 @@
 # Finite attended characterization; this never grants physical acceptance.
 camera: v4l2_input.pci-0000_04_00.3-usb-0_2.1.2_1.0
+# Maximum capture size; accept an existing PipeWire stream's negotiated size.
+# Marker geometry sets scale and the uncertainty check qualifies resolution.
 image_size: [1280, 960]
 # These two squares remain decodable in the current external-camera view.
 marker_ids: [69, 59]

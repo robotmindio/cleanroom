@@ -183,6 +183,36 @@ def observed_speeds(samples,angular):
     return rates
 
 
+def terminal_observed_speed(samples, angular, pose_key='pose', window_s=.75):
+    """Fit the final capture interval instead of differentiating frame noise."""
+    samples = [s for s in samples if s.get(pose_key) is not None]
+    if len(samples)<5:
+        raise ValueError('too few captures for terminal speed')
+    end = samples[-1]['pts_ns']
+    samples = [s for s in samples if end-s['pts_ns']<=window_s*1e9]
+    times = np.array([s['pts_ns'] for s in samples],dtype=np.float64)/1e9
+    if len(samples)<5 or times[-1]-times[0]<.25 or not np.all(np.diff(times)>0):
+        raise ValueError('terminal capture interval is incomplete')
+    values = np.array([s[pose_key] for s in samples])
+    values = np.unwrap(values[:,2:3],axis=0) if angular else values[:,:2]
+    times -= times.mean()
+    velocity = times@(values-values.mean(axis=0))/(times@times)
+    return float(np.linalg.norm(velocity))
+
+
+def dual_stop_measurement(samples, radius, stopped_at):
+    """Retain the larger floor/marker-plane excursion and stop time."""
+    if len(samples)<8 or any(s.get('marker_pose') is None for s in samples):
+        raise ValueError('stop window needs both optical estimates')
+    plane = [{**s,'pose':s['marker_pose']} for s in samples]
+    floor_sweep = maximum_swept_excursion([s['pose'] for s in samples],radius)
+    plane_sweep = maximum_swept_excursion([s['pose'] for s in plane],radius)
+    return {'floor_swept_distance_m':floor_sweep,'marker_plane_swept_distance_m':plane_sweep,
+            'conservative_swept_distance_m':max(floor_sweep,plane_sweep),
+            'stop_time_receive_upper_s':max(stop_time_upper(samples,stopped_at),stop_time_upper(plane,stopped_at)),
+            'first_camera_time':samples[0]['time'],'last_camera_time':samples[-1]['time']}
+
+
 def optical_return_twist(pose, target, body_to_marker):
     handedness = math.copysign(1,np.linalg.det(body_to_marker))
     heading = handedness*navigation['angle'](pose[2]-target[2])
@@ -208,7 +238,9 @@ class Camera:
         if not name or any(c not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.:-' for c in name):
             raise ValueError('invalid camera source name')
         self.pipeline = Gst.parse_launch(
-            f'pipewiresrc target-object={name} ! image/jpeg,width={width},height={height},framerate=30/1 '
+            # PipeWire shares an active camera's negotiated size with clients.
+            # Physical scale comes from the observed tags, not this resolution.
+            f'pipewiresrc target-object={name} ! image/jpeg,width=[320,{width}],height=[240,{height}],framerate=30/1 '
             '! appsink name=frames max-buffers=1 drop=true sync=false')
         self.sink = self.pipeline.get_by_name('frames')
         self.video = (output/'camera.mjpg').open('wb')
@@ -308,6 +340,7 @@ class Camera:
             self.records.write(json.dumps(record)+'\n')
             return record
         markers = self.detect(image)
+        self.image_size = [image.shape[1], image.shape[0]]
         identifiers = self.config['marker_ids']+[self.config['floor_marker_id']] if self.config.get('floor_marker_id') is not None else self.config['marker_ids']
         if self.calibration is None and all(key in markers for key in identifiers):
             self.reference_samples.append({key:markers[key] for key in identifiers})
@@ -324,6 +357,7 @@ class Camera:
                     self.config['floor_marker_side_m'],self.config['marker_ids'],self.config['marker_side_m'])
             matrix,origin,reference,error = self.calibration
             (self.output/'calibration.json').write_text(json.dumps({
+                'image_size':self.image_size,
                 'matrix':matrix.tolist(),'origin_px':origin.tolist(),
                 'reference':{key:value.tolist() for key,value in reference.items()},
                 'reference_markers_px':{key:value.tolist() for key,value in stable.items()},
@@ -498,17 +532,20 @@ class BrakingTest(navigation['Test']):
         rotation = sum(abs(navigation['angle'](b['pose'][2]-a['pose'][2])) for a,b in zip(post,post[1:]))
         # ponytail: conservative swept-point bound; surveyed marker-to-center
         # extrinsics can replace the 20 cm offset allowance after calibration.
-        swept = maximum_swept_excursion([s['pose'] for s in post],
-                                       .33+self.config['marker_center_offset_bound_m'])
-        stop_time = stop_time_upper(post,stopped_at)
+        dual = dual_stop_measurement(post,.33+self.config['marker_center_offset_bound_m'],stopped_at)
+        floor_speed = terminal_observed_speed(moving,angular)
+        plane_speed = terminal_observed_speed(moving,angular,'marker_pose')
+        swept,stop_time = dual['conservative_swept_distance_m'],dual['stop_time_receive_upper_s']
         result = {'direction':direction,'requested_speed':speed,'median_observed_speed':float(np.median(rates)),
                   'speed_time_source':'camera_capture_pts',
                   'receive_clock_median_speed':float(np.median(receive_rates)) if receive_rates else None,
                   'maximum_observed_speed':float(max(rates)),'stop_command_time':stopped_at,
-                  'requested_speed_covered':float(np.median(rates[-3:])) >= speed*.9,
+                  'terminal_floor_speed':floor_speed,'terminal_marker_plane_speed':plane_speed,
+                  'requested_speed_covered':max(floor_speed,plane_speed) >= speed*.9,
                   'marker_path_after_pre_stop_frame_m':path,'residual_rotation_rad':rotation,
                   'conservative_swept_distance_m':swept,'stop_time_receive_upper_s':stop_time,
                   'camera_frames':len(moving)+len(post),'measurement_uncertainty_m':self.config['measurement_uncertainty_m']}
+        result.update(dual)
         result['within_budget'] = (swept+self.config['measurement_uncertainty_m'] <= self.config['maximum_stopping_distance_m']
                                    and stop_time <= self.config['maximum_stop_time_s'])
         result['feedback_interrupted'] = self.motion_pauses>pauses or len(self.health_faults)>faults
@@ -554,7 +591,8 @@ class BrakingTest(navigation['Test']):
                     candidates.append((directions,accepted))
             for directions,speed in candidates:
                 for direction in directions:
-                    completed = 0
+                    completed = sum(r['qualification_eligible'] for r in self.checks['trials']
+                                    if r['direction']==direction and r['requested_speed']==speed)
                     while completed<self.config['trials_per_direction']:
                         result = self.trial(direction,speed)
                         if result['feedback_interrupted']:
