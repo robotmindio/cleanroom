@@ -82,6 +82,12 @@ def test_sensor_bridge_caps_previews_and_drops_stale_sensor_samples_on_congestio
 def test_main_installers_provision_the_identities():
     compute = (ROOT / "scripts" / "install-compute-services.sh").read_text()
     assert 'setup-zenoh-tls.sh" --user "$LEKIWI_SERVICE_USER" "${REMOTE:-local}"' in compute
-    # A change to the provisioning script makes deploy-split refresh the compute service.
-    revision = (ROOT / "scripts" / "lib" / "service-install-revision.sh").read_text()
-    assert "scripts/setup-zenoh-tls.sh" in revision.split("device)")[0]
+    # test_service_installation checks that a change to setup-zenoh-tls.sh changes the
+    # compute service fingerprint, so deploy-split refreshes the compute service.
+
+
+def test_missing_options_and_unknown_flags_are_rejected():
+    for args in (["--user"], ["--bogus"], ["one", "two"]):
+        result = subprocess.run([str(ROOT / "scripts" / "setup-zenoh-tls.sh"), *args],
+                                capture_output=True, text=True)
+        assert result.returncode != 0 and result.stderr, args

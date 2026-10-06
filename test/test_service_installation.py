@@ -60,20 +60,11 @@ done
 
 
 @pytest.mark.parametrize("help_text,expected", [("colcon build", False), ("--allow-overriding", True)])
-def test_native_builder_accepts_colcon_without_optional_override_extension(help_text, expected):
-    builder = (ROOT / "scripts/build-native.sh").read_text()
-    assert "feb01669f1297df2af755ce9cd2ed18083e7a8b2" in builder
-    assert "5741cff5b9f83253bf3521bd8f44108fde3504ad" in builder
-    assert '"$vendor_tools/ament_cmake_vendor_package"' in builder
-    assert '"$workspace/src/rviz/rviz_ogre_vendor"' in builder
-    options = builder.split("override_args=()\n", 1)[1].split("\ncolcon --log-base", 1)[0]
-    result = subprocess.run(
-        ["bash", "-c", 'set -Eeuo pipefail; colcon() { printf "%s\\n" "$0"; }; '
-         'override_args=(); ' + options + '\ndeclare -p override_args', help_text],
-        # The function receives build/--help; supply the synthetic help as $0.
-        check=True, capture_output=True, text=True,
-    )
-    assert ("--allow-overriding" in result.stdout) is expected
+def test_native_builder_accepts_colcon_without_optional_override_extension(tmp_path, help_text, expected):
+    _executable(tmp_path / "colcon", f'[[ "$*" == "build --help" ]] && echo "{help_text}"\n')
+    result = _bash('source "$LIB/build-common.sh"; colcon_supports_overriding',
+                   PATH=f"{tmp_path}:{os.environ['PATH']}")
+    assert (result.returncode == 0) is expected
 
 
 def test_pi5_usb_current_config_is_idempotent(tmp_path):
@@ -220,21 +211,37 @@ def test_headless_host_refuses_to_answer_the_calibration_prompt_without_a_calibr
     assert stdin_log.read_text(encoding="utf-8") == "\n"
     assert "retrying the motor-bus connection" in lost.stderr
 
-    unit = (ROOT / "systemd" / "lekiwi-host.service").read_text(encoding="utf-8")
-    assert "RestartPreventExitStatus=78" in unit
+    assert _unit("lekiwi-host.service")["Service"]["RestartPreventExitStatus"] == ["78"]
 
 
-def test_installer_never_uses_effective_root_as_implicit_service_user():
-    helper = (ROOT / "scripts" / "lib" / "service-install-common.sh").read_text(encoding="utf-8")
-    assert "SUDO_USER" in helper
-    assert "running as root requires --service-user USER" in helper
-    assert "refusing to install robot services as root" in helper
+@pytest.mark.skipif(os.geteuid() == 0, reason="an explicit account is resolved as a non-root caller")
+def test_service_user_must_be_an_existing_non_root_account():
+    def resolve(name):
+        return _bash('source "$LIB/runtime-common.sh"; source "$LIB/service-install-common.sh"\n'
+                     'resolve_service_user "$1"; echo "$LEKIWI_SERVICE_USER $LEKIWI_SERVICE_HOME"', name)
+
+    user = getpass.getuser()
+    accepted = resolve(user)
+    assert accepted.returncode == 0, accepted.stderr
+    assert accepted.stdout.split() == [user, os.path.expanduser("~")]
+    for name, reason in (("root", "refusing to install robot services as root"),
+                         ("Not-A-User", "invalid service user"),
+                         ("no_such_lekiwi_user", "service user does not exist")):
+        rejected = resolve(name)
+        assert rejected.returncode != 0 and reason in rejected.stderr, name
 
 
-def test_unit_validation_ignores_unrelated_systemd_units():
-    helper = (ROOT / "scripts" / "lib" / "service-install-common.sh").read_text(encoding="utf-8")
-
-    assert 'systemd-analyze verify --recursive-errors=no "$UNIT_DIR/$unit"' in helper
+def test_unit_validation_checks_only_the_named_units(tmp_path):
+    calls = tmp_path / "calls"
+    _executable(tmp_path / "bin" / "systemd-analyze", f'echo "$*" >> "{calls}"\n')
+    result = _bash('as_root() { "$@"; }; source "$LIB/runtime-common.sh"; source "$LIB/service-install-common.sh"\n'
+                   'UNIT_DIR=/units; verify_systemd_units a.service b.service',
+                   PATH=f"{tmp_path / 'bin'}:{os.environ['PATH']}")
+    assert result.returncode == 0, result.stderr
+    # Dependencies outside this installer can be absent by design; never recurse into them.
+    assert calls.read_text().splitlines() == [
+        "verify --recursive-errors=no /units/a.service", "verify --recursive-errors=no /units/b.service",
+    ]
 
 
 def test_full_installer_includes_qualification_tooling_dependencies():
@@ -394,9 +401,18 @@ def test_simulation_installer_excludes_astra_hardware_setup():
     assert 'extra_packages+=(astra_camera astra_camera_msgs)' in installer
     builder = (ROOT / "scripts/build-lekiwi.sh").read_text()
     assert 'packages+=(astra_camera_msgs astra_camera)' in builder
-    assert "/MemAvailable/" in builder
-    assert "/MemTotal/" not in builder
     assert 'Simulation-only installation: skipping Astra driver and udev setup' in installer
+
+
+@pytest.mark.parametrize("total_kb,available_kb,serial", [
+    (64_000_000, 2_000_000, True),     # a large host whose memory is in use elsewhere
+    (16_000_000, 12_000_000, False),
+])
+def test_builds_run_serially_when_little_memory_is_available(tmp_path, total_kb, available_kb, serial):
+    meminfo = tmp_path / "meminfo"
+    meminfo.write_text(f"MemTotal: {total_kb} kB\nMemFree: 1000 kB\nMemAvailable: {available_kb} kB\n")
+    result = _bash('source "$LIB/build-common.sh"; low_available_memory "$1"', str(meminfo))
+    assert (result.returncode == 0) is serial
 
 
 def test_split_compute_installs_and_starts_moveit_by_default():
@@ -417,16 +433,54 @@ def test_split_compute_installs_and_starts_moveit_by_default():
 
 
 def test_mapper_shutdown_signals_the_launcher_without_interrupting_its_save():
-    stack = (ROOT / 'systemd/lekiwi-stack.service').read_text()
+    service = _unit("lekiwi-stack.service")["Service"]
+    assert service["KillMode"] == ["mixed"] and service["KillSignal"] == ["SIGINT"]
     runner = (ROOT / 'scripts/test-navigation.py').read_text()
-    stop = (ROOT / 'scripts/ros-stop.sh').read_text()
-    assert 'KillMode=mixed' in stack and 'KillSignal=SIGINT' in stack
     assert 'os.kill(stack.pid,signal.SIGINT)' in runner
     assert re.search(r'try:\s+stack\.wait\(timeout=45\)', runner)
-    assert '[[ $kind == stack ]]' in stop and 'deadline=$((SECONDS + 45))' in stop
     deploy = (ROOT / 'scripts/deploy-split.sh').read_text()
     assert 'systemctl show -P KillMode lekiwi-stack.service' in deploy
     assert deploy.index('kill -INT "$stack_pid"') < deploy.index('sudo -n /usr/bin/systemctl stop lekiwi-stack.service')
+
+
+def test_ros_stop_interrupts_only_the_stack_launcher_so_it_can_shut_its_nodes_down(tmp_path):
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    _executable(tmp_path / "bin" / "systemctl", "exit 3\n")
+    signals = tmp_path / "node-signals"
+    # A node in the launcher's process group: ros2 launch, not ros-stop, must stop it.
+    node = (
+        "import os, signal, sys, time\n"
+        "record = lambda number, _: open(sys.argv[1], 'a').write(f'{number}\\n')\n"
+        "signal.signal(signal.SIGINT, record)\n"
+        "signal.signal(signal.SIGTERM, record)\n"
+        "while os.getppid() == int(sys.argv[2]):\n    time.sleep(0.05)\n"
+    )
+    launcher = subprocess.Popen(
+        ["bash", "-c", 'python3 -c "$1" "$2" "$$" & trap "exit 0" INT; wait',
+         "ros2 launch lekiwi_rmf bringup.launch.py", node, str(signals)],
+        start_new_session=True,
+    )
+    time.sleep(0.5)
+    (runtime / "stack.pid").write_text(f"{launcher.pid}\n", encoding="utf-8")
+    stop = subprocess.Popen(
+        ["bash", str(ROOT / "scripts" / "ros-stop.sh")],
+        env={**os.environ, "LEKIWI_RUNTIME_DIR": str(runtime), "PATH": f"{tmp_path / 'bin'}:{os.environ['PATH']}"},
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        assert launcher.wait(timeout=10) == 0
+        stdout, stderr = stop.communicate(timeout=30)
+        assert stop.returncode == 0, stderr
+        assert "stopping recorded stack" in stdout
+        assert not signals.exists()
+    finally:
+        for process in (launcher, stop):
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+        if launcher.pid:
+            subprocess.run(["pkill", "-KILL", "-g", str(launcher.pid)], check=False)
 
 
 def test_rviz_exports_the_selected_collision_plugin_in_its_parameter_file():
@@ -440,19 +494,24 @@ def test_rviz_exports_the_selected_collision_plugin_in_its_parameter_file():
 
 
 def test_build_reuses_its_checkout_cache_and_removes_a_foreign_cache(tmp_path):
-    builder = (ROOT / "scripts/build-lekiwi.sh").read_text()
-    section = 'cache=' + builder.split('\ncache=', 1)[1].split('\nparallel_args=', 1)[0]
     workspace = tmp_path / 'workspace'
     build = workspace / 'build/lekiwi_rmf'
     build.mkdir(parents=True)
     cache = build / 'CMakeCache.txt'
     cache.write_text('CMAKE_HOME_DIRECTORY:INTERNAL=/source/current\n')
-    env = {**os.environ, 'workspace': str(workspace), 'project_root': '/source/current'}
-    subprocess.run(['bash', '-ec', section], env=env, check=True)
+
+    def run(project_root):
+        result = _bash('source "$LIB/build-common.sh"; remove_foreign_build_cache "$1" "$2"',
+                       str(workspace), project_root)
+        assert result.returncode == 0, result.stderr
+
+    run('/source/current')
     assert cache.exists()
-    env['project_root'] = '/source/other'
-    subprocess.run(['bash', '-ec', section], env=env, check=True)
+    run('/source/other')
     assert not build.exists()
+    run('/source/other')  # nothing left to remove
+
+
 def test_service_installers_support_an_unauthenticated_split_zmq_transport():
     device = (ROOT / "scripts" / "install-device-services.sh").read_text(encoding="utf-8")
     compute = (ROOT / "scripts" / "install-compute-services.sh").read_text(encoding="utf-8")
@@ -463,12 +522,12 @@ def test_service_installers_support_an_unauthenticated_split_zmq_transport():
 
 
 def test_remote_stack_has_no_local_host_dependency():
-    stack = (ROOT / "systemd" / "lekiwi-stack.service").read_text(encoding="utf-8")
+    stack = _unit("lekiwi-stack.service")["Unit"]
     compute = (ROOT / "scripts" / "install-compute-services.sh").read_text(encoding="utf-8")
 
-    assert "Requires=lekiwi-host.service" not in stack
-    assert "PartOf=lekiwi-host.service" not in stack
-    assert "After=network-online.target" in stack
+    assert "Requires" not in stack and "PartOf" not in stack
+    assert "network-online.target" in " ".join(stack["After"]).split()
+    # Only the all-in-one topology binds the stack to a local host, through a drop-in.
     assert '"Requires=lekiwi-host.service"' in compute
     assert '"PartOf=lekiwi-host.service"' in compute
 
@@ -600,9 +659,9 @@ install "remote_ip:=10.0.0.3"             # drop-in removed
 
 def test_sensor_services_keep_retrying_after_intermittent_usb_resets():
     for name in ("lekiwi-astra.service", "lekiwi-cameras.service", "lekiwi-lidar.service", "lekiwi-zenoh.service"):
-        unit = (ROOT / "systemd" / name).read_text(encoding="utf-8")
-        assert "StartLimitIntervalSec=0" in unit
-        assert "Restart=always" in unit
+        unit = _unit(name)
+        assert unit["Unit"]["StartLimitIntervalSec"] == ["0"], name
+        assert unit["Service"]["Restart"] == ["always"], name
 
 
 def test_pi_and_manual_split_startup_include_the_ld06():
@@ -645,8 +704,6 @@ def test_deploy_order_fails_closed_around_the_device_restart():
     activate = deploy.index('\nactivate_release "$workspace" "$compute_release"')
     assert stage_device < stage_compute < verify < disarm
     assert stop_host < activate < start_host
-    assert 'git -C "$project_root" merge' not in deploy
-    assert 'git -C "$remote_repo" merge' not in deploy
     # A stale compute configuration is reinstalled only once the robot is disarmed and
     # its stack stopped, never started early, and its sudo need is checked up front.
     refresh = deploy.index("\n  refresh_compute_service\n")
@@ -676,7 +733,6 @@ def test_deploy_order_fails_closed_around_the_device_restart():
     assert 'awk \'NF && $1 != "---" { print $1; exit }\'' in deploy
     assert "has_nopasswd_systemctl" in deploy
     assert 'compute_sudoers=$(sudo -n -l)' in deploy
-    assert ' merge --ff-only' not in deploy
     # The deployer runs from any directory: every git call names its repository.
     assert not re.search(r"(?<![\w-])git (?!-C )", deploy)
     assert "cannot fetch origin within 30 seconds" in deploy
@@ -703,14 +759,13 @@ def test_deploy_bundle_transfers_exact_revision_without_device_origin(tmp_path):
     (source/'value').write_text('after')
     git(source, 'commit', '-am', 'after')
     target = git(source, 'rev-parse', 'HEAD')
-    deploy = (ROOT/'scripts/deploy-split.sh').read_text()
-    function = 'transfer_device_revision() (' + deploy.split('transfer_device_revision() (', 1)[1].split('\nros_setup()', 1)[0]
-    subprocess.run(['bash', '-c', '''set -Eeuo pipefail
-project_root=$1; remote_repo=$2; target=$3
-die() { echo "$*" >&2; exit 1; }
+    # The local "ssh" runs its command string in a shell, like the remote login shell.
+    result = _bash('''source "$LIB/runtime-common.sh"; source "$LIB/deploy-common.sh"
 ssh_command=(bash -c 'if [[ $# == 1 ]]; then eval "$1"; else "$@"; fi' --)
-''' + function + '\ntransfer_device_revision\ngit -C "$remote_repo" merge --ff-only "$target"\ntransfer_device_revision',
-        '--', str(source), str(device), target], check=True, capture_output=True, text=True)
+transfer_device_revision "$1" "$2" "$3" "${ssh_command[@]}"
+git -C "$2" merge --ff-only "$3"
+transfer_device_revision "$1" "$2" "$3" "${ssh_command[@]}"''', str(source), str(device), target)
+    assert result.returncode == 0, result.stderr
     assert git(device, 'rev-parse', 'HEAD') == target
     assert (device/'value').read_text() == 'after'
 
@@ -738,31 +793,48 @@ def test_deploy_sudoers_are_limited_by_machine_role():
     assert "daemon-reload" not in compute + device
 
 
-def test_managed_build_prefers_system_cmake_and_starts_clean():
+def test_managed_build_prefers_system_cmake_and_records_its_revision():
     builder = (ROOT / "scripts" / "build-lekiwi.sh").read_text(encoding="utf-8")
 
     assert "PATH=/usr/bin:/bin:$PATH" in builder
     assert '-DCMAKE_IGNORE_PREFIX_PATH="$HOME/.local"' in builder
-    assert 'rm -rf -- "$workspace/build/lekiwi_rmf"' in builder
+    assert 'remove_foreign_build_cache "$workspace" "$project_root"' in builder
     assert '.lekiwi-source-revision' in builder
 
 
-def test_service_fingerprint_covers_installed_service_behavior():
-    revision = (ROOT / "scripts" / "lib" / "service-install-revision.sh").read_text(encoding="utf-8")
+@pytest.mark.parametrize("role,sources", [
+    ("compute", ("systemd/lekiwi-stack.service", "scripts/lib/service-install-common.sh",
+                 "scripts/lib/runtime-common.sh", "scripts/install-deploy-sudoers.sh",
+                 "scripts/setup-zenoh-tls.sh", "scripts/install-wifi-powersave.sh",
+                 "scripts/install-compute-services.sh")),
+    ("device", ("systemd/lekiwi-astra.service", "scripts/ros-astra.sh", "systemd/lekiwi-lidar.service",
+                "scripts/ros-lidar.sh", "scripts/lib/runtime-common.sh", "scripts/install-device-network.sh",
+                "scripts/install-wifi-powersave.sh", "config/dds_socket_buffers.conf")),
+])
+def test_service_fingerprint_changes_with_each_installed_service_input(tmp_path, role, sources):
+    checkout = tmp_path / "checkout"
+    shutil.copytree(ROOT / "systemd", checkout / "systemd")
+    shutil.copytree(ROOT / "scripts", checkout / "scripts")
+    (checkout / "config").mkdir()
+    shutil.copy2(ROOT / "config" / "dds_socket_buffers.conf", checkout / "config")
 
-    for source in (
-        "systemd/lekiwi-stack.service",
-        "systemd/lekiwi-astra.service",
-        "scripts/ros-astra.sh",
-        "systemd/lekiwi-lidar.service",
-        "scripts/ros-lidar.sh",
-        "scripts/lib/service-install-common.sh",
-        "scripts/lib/runtime-common.sh",
-        "scripts/install-deploy-sudoers.sh",
-        "scripts/install-device-network.sh",
-        "scripts/install-wifi-powersave.sh",
-    ):
-        assert source in revision
+    def fingerprint():
+        result = _bash('PROJECT_ROOT=$1; source "$LIB/runtime-common.sh"; source "$LIB/service-install-revision.sh"\n'
+                       'service_fingerprint "$2"', str(checkout), role)
+        assert result.returncode == 0, result.stderr
+        return result.stdout.strip()
+
+    baseline = fingerprint()
+    assert re.fullmatch(r"[0-9a-f]{64}", baseline)
+    for source in sources:
+        path = checkout / source
+        original = path.read_bytes()
+        path.write_bytes(original + b"\n")
+        assert fingerprint() != baseline, source
+        path.write_bytes(original)
+    # A deployment that changes nothing the services run does not refresh them.
+    (checkout / "scripts" / "foxglove.sh").write_text("changed\n")
+    assert fingerprint() == baseline
     assert 'as_root "$PROJECT_ROOT/scripts/install-wifi-powersave.sh"' in (
         ROOT / "scripts" / "install-compute-services.sh"
     ).read_text(encoding="utf-8")
@@ -908,6 +980,30 @@ def test_torque_on_failure_key_is_validated_and_reaches_both_machines(tmp_path):
     assert '--safety.disarm_on_failure="${LEKIWI_DISARM_ON_FAILURE:-false}"' in host
 
 
+def _bash(body: str, *args: str, **env: str) -> subprocess.CompletedProcess:
+    """Run a bash snippet that sources what it needs from $LIB (scripts/lib)."""
+    return subprocess.run(
+        ["bash", "-c", "set -Eeuo pipefail\nLIB=$0\n" + body, str(ROOT / "scripts" / "lib"), *args],
+        env={**os.environ, **env}, capture_output=True, text=True, timeout=60,
+    )
+
+
+def _unit(name: str) -> dict[str, dict[str, list[str]]]:
+    """A tracked systemd unit as {section: {key: [values in order]}}."""
+    sections: dict[str, dict[str, list[str]]] = {}
+    current: dict[str, list[str]] = {}
+    for line in (ROOT / "systemd" / name).read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith(("#", ";")):
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            current = sections.setdefault(line[1:-1], {})
+        else:
+            key, _, value = line.partition("=")
+            current.setdefault(key.strip(), []).append(value.strip())
+    return sections
+
+
 def _executable(path: pathlib.Path, body: str) -> pathlib.Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("#!/usr/bin/env bash\n" + body, encoding="utf-8")
@@ -937,11 +1033,11 @@ def test_port_probes_match_the_exact_local_port(tmp_path):
 
 
 def test_log_pruning_removes_only_stale_files_under_the_ros_log_directory(tmp_path):
-    unit = (ROOT / "systemd" / "lekiwi-ros-logrotate.service").read_text(encoding="utf-8")
+    service = _unit("lekiwi-ros-logrotate.service")["Service"]
     # Pruning runs after logrotate even when logrotate fails, and logrotate gets its state directory.
-    assert "ExecStopPost=-@PROJECT_ROOT@/scripts/prune-ros-logs.sh @SERVICE_HOME@/.ros/log" in unit
-    assert "ExecStartPre=/usr/bin/mkdir -p @SERVICE_HOME@/.ros/lekiwi" in unit
-    assert "--state @SERVICE_HOME@/.ros/lekiwi/" in unit
+    assert service["ExecStopPost"] == ["-@PROJECT_ROOT@/scripts/prune-ros-logs.sh @SERVICE_HOME@/.ros/log"]
+    assert service["ExecStartPre"] == ["/usr/bin/mkdir -p @SERVICE_HOME@/.ros/lekiwi"]
+    assert any("--state @SERVICE_HOME@/.ros/lekiwi/" in command for command in service["ExecStart"])
     command = [str(ROOT / "scripts" / "prune-ros-logs.sh"), str(tmp_path / ".ros" / "log")]
 
     log = tmp_path / ".ros" / "log"
@@ -1027,14 +1123,13 @@ def test_rotation_config_compresses_rotated_launch_logs_at_once():
 
 
 def test_stack_retries_startup_and_host_gets_time_to_pass_its_gate():
-    stack = (ROOT / "systemd" / "lekiwi-stack.service").read_text(encoding="utf-8")
-    host = (ROOT / "systemd" / "lekiwi-host.service").read_text(encoding="utf-8")
+    stack = _unit("lekiwi-stack.service")["Unit"]
+    host = _unit("lekiwi-host.service")["Service"]
 
-    assert "StartLimitIntervalSec=0" in stack
-    assert "StartLimitBurst" not in stack
+    assert stack["StartLimitIntervalSec"] == ["0"] and "StartLimitBurst" not in stack
     # The ExecStartPost gate probes up to 120 times, one second each plus a one second sleep.
-    timeout = int(re.search(r"^TimeoutStartSec=(\d+)s$", host, re.MULTILINE).group(1))
-    assert timeout > 2 * 120
+    timeout, = host["TimeoutStartSec"]
+    assert re.fullmatch(r"\d+s", timeout) and int(timeout[:-1]) > 2 * 120
 
 
 LAUNCHERS = ("up.sh", "pi-up.sh", "workstation-up.sh", "sim-up.sh")

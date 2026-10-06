@@ -103,7 +103,9 @@ before using them; the robot runtime does not require it.
 
 Source-only shell helpers, not commands: `runtime-common.sh` (`log`/`die`, `.env`,
 waits, port probes), `launcher.sh` (startup lock, recorded process groups and
-their signatures, shared by the launchers and `ros-stop.sh`), `self-heal.sh`
+their signatures, shared by the launchers and `ros-stop.sh`), `build-common.sh`
+(build cache, memory and colcon checks of the two builders), `deploy-common.sh`
+(revision transfer for `deploy-split.sh`), `self-heal.sh`
 (service self-heal watcher), `service-install-common.sh`
 (unit rendering, restart tracking) and `service-install-revision.sh` (service
 configuration fingerprints).
