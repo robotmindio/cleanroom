@@ -1245,5 +1245,46 @@
         "bytes": 98
       }
     }
+  },
+  "installation_verification": {
+    "verified_at": "2026-10-06T10:35:11.672458+00:00",
+    "record_source_revision": "f7e6506",
+    "method": "Fast-forward deployment source checkouts; install acceptance metadata without restarting services; validate each installed record against its installed Nav2 and safety profiles.",
+    "hosts": {
+      "compute": {
+        "valid": true,
+        "detail": "physical safety acceptance validated",
+        "payload_kg": 0.2,
+        "sha256": "61511a7ecf4ddbb954dec1da6565f9d7f0649400400c8127ddd5b55223801795",
+        "trials": {
+          "forward": 5,
+          "reverse": 5,
+          "left": 5,
+          "right": 5,
+          "rotation_cw": 5,
+          "rotation_ccw": 5
+        }
+      },
+      "pi": {
+        "valid": true,
+        "detail": "physical safety acceptance validated",
+        "payload_kg": 0.2,
+        "sha256": "61511a7ecf4ddbb954dec1da6565f9d7f0649400400c8127ddd5b55223801795",
+        "trials": {
+          "forward": 5,
+          "reverse": 5,
+          "left": 5,
+          "right": 5,
+          "rotation_cw": 5,
+          "rotation_ccw": 5
+        }
+      }
+    },
+    "compute_stack_pid": 3125216,
+    "motor_host_pid": 631571,
+    "motor_host_restarted": false,
+    "temporary_fault_tables_remaining": false,
+    "temporary_fault_timers_remaining": false,
+    "finite_test_clients_remaining": false
   }
 }

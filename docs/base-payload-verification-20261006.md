@@ -6,6 +6,10 @@ in `config/safety_acceptance.yaml`.** This covers attended operation on dry
 concrete, the unchanged travel_stow and the tested installed load. Holder mass
 and attachment location remain unconfirmed; this is not a maximum payload rating.
 
+The record is installed and validates against the installed production profiles
+on both compute and Pi. Matching file hashes and unchanged service PIDs are
+recorded in the evidence report; installation did not restart the motor host.
+
 ## Completed checks
 
 | Check | Result |
