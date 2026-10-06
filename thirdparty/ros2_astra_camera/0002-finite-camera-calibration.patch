@@ -1,0 +1,86 @@
+diff --git a/astra_camera/src/ob_camera_info.cpp b/astra_camera/src/ob_camera_info.cpp
+--- a/astra_camera/src/ob_camera_info.cpp
++++ b/astra_camera/src/ob_camera_info.cpp
+@@ -25,9 +25,16 @@
+   }
+   auto pid = device_info_.getUsbProductId();
+   if (pid != DABAI_DCW_DEPTH_PID && pid != DABAI_DW_PID) {
+-    OBCameraParams params;
++    OBCameraParams params{};
+     int data_size = sizeof(OBCameraParams);
+-    device_->getProperty(openni::OBEXTENSION_ID_CAM_PARAMS, (uint8_t*)&params, &data_size);
++    const auto status = device_->getProperty(
++        openni::OBEXTENSION_ID_CAM_PARAMS, (uint8_t*)&params, &data_size);
++    if (status != openni::STATUS_OK) {
++      RCLCPP_WARN(logger_, "Factory camera calibration unavailable: %s", openni::OpenNI::getExtendedError());
++      params = OBCameraParams{};
++    } else if (!isValidCameraParams(params)) {
++      RCLCPP_WARN(logger_, "Factory camera calibration invalid; using uncalibrated field-of-view defaults");
++    }
+     camera_params_ = params;
+     return params;
+   } else {
+@@ -210,7 +217,7 @@
+   double scaling = (double)width / 640;
+   auto camera_info = getIRCameraInfo(width, height, f);
+   auto camera_params = getCameraParams();
+-  if (!isValidCameraParams(camera_params)) {
++  if (isValidCameraParams(camera_params)) {
+     if (depth_registration_ || enable_colored_point_cloud_) {
+       camera_info.k[0] = camera_params.r_intr_p[0];
+       camera_info.k[2] = camera_params.r_intr_p[2];
+@@ -227,8 +234,8 @@
+   }
+   camera_info.k[2] -= depth_ir_x_offset_ * scaling;
+   camera_info.k[5] -= depth_ir_y_offset_ * scaling;
+-  camera_info.k[2] -= depth_ir_x_offset_ * scaling;
+-  camera_info.k[6] -= depth_ir_y_offset_ * scaling;
++  camera_info.p[2] -= depth_ir_x_offset_ * scaling;
++  camera_info.p[6] -= depth_ir_y_offset_ * scaling;
+ 
+   // TODO: Could put this in projector frame so as to encode the baseline in P[3]
+   return camera_info;
+@@ -255,7 +262,7 @@
+   if (isValidCameraParams(camera_params)) {
+     auto default_camera_info = OBCameraParamsToCameraInfo(camera_params);
+     CameraInfo camera_info;
+-    camera_info.d.resize(5, 0.0);
++    camera_info.d = default_camera_info.d;
+     camera_info.k.fill(0.0);
+     camera_info.r.fill(0.0);
+     camera_info.p.fill(0.0);
+diff --git a/astra_camera/src/utils.cpp b/astra_camera/src/utils.cpp
+--- a/astra_camera/src/utils.cpp
++++ b/astra_camera/src/utils.cpp
+@@ -93,11 +93,13 @@
+ }
+ 
+ bool isValidCameraParams(const OBCameraParams& params) {
+-  if (std::isnan(params.l_intr_p[0]) || std::isnan(params.l_intr_p[1]) ||
+-      std::isnan(params.l_intr_p[2]) || std::isnan(params.l_intr_p[3])) {
+-    return false;
++  for (int i = 0; i < 4; ++i) {
++    if (!std::isfinite(params.l_intr_p[i]) || !std::isfinite(params.r_intr_p[i])) {
++      return false;
++    }
+   }
+-  return true;
++  return params.l_intr_p[0] > 0 && params.l_intr_p[1] > 0 &&
++         params.r_intr_p[0] > 0 && params.r_intr_p[1] > 0;
+ }
+ 
+ std::vector<std::string> split(const std::string& str, char delim) {
+diff --git a/astra_camera/src/ros_service.cpp b/astra_camera/src/ros_service.cpp
+--- a/astra_camera/src/ros_service.cpp
++++ b/astra_camera/src/ros_service.cpp
+@@ -419,6 +419,10 @@
+                                            std::shared_ptr<GetCameraParams::Response>& response) {
+   (void)request;
+   auto camera_params = getCameraParams();
++  if (!isValidCameraParams(camera_params)) {
++    response->message = "Factory calibration unavailable or invalid; CameraInfo uses uncalibrated defaults";
++    return false;
++  }
+   for (int i = 0; i < 9; i++) {
+     response->r2l_r[i] = camera_params.r2l_r[i];
+     if (i < 4) {

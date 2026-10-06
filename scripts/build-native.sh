@@ -8,11 +8,12 @@ die() { echo "$0: $*" >&2; exit 1; }
 # shellcheck disable=SC1091 # Resolve the helper from this checkout at runtime.
 source "$project_root/scripts/thirdparty-common.sh"
 
-for dependency in class_loader rclcpp navigation2; do
+for dependency in class_loader rclcpp navigation2 rviz; do
   case $dependency in
     class_loader) revision=c404b82f04e6b0cce5c6205626b2d35fdf4dc882; repository=https://github.com/ros/class_loader.git ;;
     rclcpp) revision=3aa906a2c7ad13d1623b31a55731993f56538e72; repository=https://github.com/ros2/rclcpp.git ;;
     navigation2) revision=f4108e5b1c2bce804a1aa0c7be6673a8eb4a1501; repository=https://github.com/ros-navigation/navigation2.git ;;
+    rviz) revision=feb01669f1297df2af755ce9cd2ed18083e7a8b2; repository=https://github.com/ros2/rviz.git ;;
   esac
   source_dir=$workspace/src/$dependency
   patches=("$project_root/thirdparty/$dependency/"*.patch)
@@ -35,13 +36,13 @@ export MAKEFLAGS=-j1
 export PATH=/usr/bin:/bin:$PATH
 override_args=()
 if [[ $(colcon build --help) == *--allow-overriding* ]]; then
-  override_args=(--allow-overriding class_loader rclcpp nav2_util nav2_lifecycle_manager nav2_bringup)
+  override_args=(--allow-overriding class_loader rclcpp nav2_util nav2_lifecycle_manager nav2_bringup rviz_ogre_vendor)
 fi
 colcon --log-base "$workspace/log" build \
   --base-paths "$workspace/src/class_loader" "$workspace/src/rclcpp/rclcpp" \
     "$workspace/src/navigation2/nav2_util" "$workspace/src/navigation2/nav2_lifecycle_manager" \
-    "$workspace/src/navigation2/nav2_bringup" \
-  --packages-select class_loader rclcpp nav2_util nav2_lifecycle_manager nav2_bringup \
+    "$workspace/src/navigation2/nav2_bringup" "$workspace/src/rviz/rviz_ogre_vendor" \
+  --packages-select class_loader rclcpp nav2_util nav2_lifecycle_manager nav2_bringup rviz_ogre_vendor \
   --executor sequential "${override_args[@]}" \
   --build-base "$workspace/build" --install-base "$workspace/install" \
   --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
@@ -49,6 +50,7 @@ colcon --log-base "$workspace/log" build \
 
 [[ -s $workspace/install/rclcpp/lib/librclcpp.so &&
    -s $workspace/install/class_loader/lib/libclass_loader.so &&
-   -x $workspace/install/nav2_lifecycle_manager/lib/nav2_lifecycle_manager/lifecycle_manager ]] || \
+   -x $workspace/install/nav2_lifecycle_manager/lib/nav2_lifecycle_manager/lifecycle_manager &&
+   -s $workspace/install/rviz_ogre_vendor/opt/rviz_ogre_vendor/lib/OGRE/RenderSystem_GL.so ]] || \
   die "native build did not install the required library and manager"
 git -C "$project_root" rev-parse HEAD > "$workspace/install/.lekiwi-native-revision"

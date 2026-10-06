@@ -62,6 +62,8 @@ done
 @pytest.mark.parametrize("help_text,expected", [("colcon build", False), ("--allow-overriding", True)])
 def test_native_builder_accepts_colcon_without_optional_override_extension(help_text, expected):
     builder = (ROOT / "scripts/build-native.sh").read_text()
+    assert "feb01669f1297df2af755ce9cd2ed18083e7a8b2" in builder
+    assert '"$workspace/src/rviz/rviz_ogre_vendor"' in builder
     options = builder.split("override_args=()\n", 1)[1].split("\ncolcon --log-base", 1)[0]
     result = subprocess.run(
         ["bash", "-c", 'set -Eeuo pipefail; colcon() { printf "%s\\n" "$0"; }; '
@@ -348,6 +350,10 @@ def test_simulation_installer_excludes_astra_hardware_setup():
     assert 'if [[ $install_mode == full ]]; then\n  log "Fetching the pinned Orbbec Astra Pro ROS 2 driver"' in installer
     assert 'extra_source_paths+=("$astra_source")' in installer
     assert 'extra_packages+=(astra_camera astra_camera_msgs)' in installer
+    assert "0002-finite-camera-calibration.patch" in installer
+    builder = (ROOT / "scripts/build-lekiwi.sh").read_text()
+    assert '"$project_root/thirdparty/ros2_astra_camera/"*.patch' in builder
+    assert 'packages+=(astra_camera)' in builder
     assert 'Simulation-only installation: skipping Astra driver and udev setup' in installer
 
 

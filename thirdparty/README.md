@@ -25,6 +25,14 @@ split deployer and CI invoke the same builder.
   LeKiwi config selects ten seconds. Tests cover delayed responses, deadline
   expiry, refused transitions and a disappearing service.
 
+- **RViz Ogre vendor 14.1.23**, commit
+  `feb01669f1297df2af755ce9cd2ed18083e7a8b2`, Ogre 1.12.10:
+  reading a shader link log must not call `glValidateProgram` before Ogre
+  assigns sampler units. Validation at that point sees both different sampler
+  types on default unit zero and logs a false error. The patch removes that
+  premature validation; actual link status and OpenGL error reporting remain.
+  Shader code, palette textures and map rendering are unchanged.
+
 The changes preserve the packaged ABI. Review these patches against new native
 versions before changing their pins. Shutdown evidence records the selected
 native package prefixes as well as the system package versions.

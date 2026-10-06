@@ -197,9 +197,11 @@ if [[ $install_mode == full ]]; then
   log "Fetching the pinned Orbbec Astra Pro ROS 2 driver"
   astra_source="$WORKSPACE/src/ros2_astra_camera"
   astra_patch="$PROJECT_ROOT/thirdparty/ros2_astra_camera/0001-jazzy-image-geometry-and-parameter-callback.patch"
+  astra_calibration_patch="$PROJECT_ROOT/thirdparty/ros2_astra_camera/0002-finite-camera-calibration.patch"
   checkout_pinned https://github.com/orbbec/ros2_astra_camera.git \
-    "$astra_source" "$ASTRA_CAMERA_REV" "$astra_patch"
+    "$astra_source" "$ASTRA_CAMERA_REV" "$astra_patch" "$astra_calibration_patch"
   apply_pinned_patch "$astra_source" "$astra_patch" "the Astra ROS 2 Jazzy compatibility fixes"
+  apply_pinned_patch "$astra_source" "$astra_calibration_patch" "the Astra finite calibration fix"
   # The OpenNI driver opens the Astra Pro's depth interface directly; without
   # this tracked udev rule a normal service user sees the colour UVC device but
   # cannot read depth after a reboot.

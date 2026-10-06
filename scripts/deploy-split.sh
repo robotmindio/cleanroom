@@ -295,7 +295,8 @@ if [[ $refresh_compute == false && $refresh_device == false && \
       $(cat "$workspace/install/.lekiwi-native-revision" 2>/dev/null || true) == "$target" && \
       -s $workspace/install/rclcpp/lib/librclcpp.so && \
       -s $workspace/install/class_loader/lib/libclass_loader.so && \
-      -x $workspace/install/nav2_lifecycle_manager/lib/nav2_lifecycle_manager/lifecycle_manager && \
+      -x $workspace/install/nav2_lifecycle_manager/lib/nav2_lifecycle_manager/lifecycle_manager &&
+      -s $workspace/install/rviz_ogre_vendor/opt/rviz_ogre_vendor/lib/OGRE/RenderSystem_GL.so && \
       $(remote_workspace_revision) == "$target" ]] && \
     /usr/bin/systemctl is-active --quiet lekiwi-stack.service && \
     remote_unit_active_all "${device_units[@]}"; then
