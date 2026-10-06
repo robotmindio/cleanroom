@@ -22,6 +22,8 @@ TELEMETRY_KEYS = (
     TELEMETRY_MONOTONIC_NS_KEY,
     TELEMETRY_TORQUE_ENABLED_KEY,
 )
+# LeRobot's LeKiwiClient rejects an observation without this camera manifest.
+# The motor host serves no cameras, so it is always empty.
 CAMERAS_KEY = "_cams"
 HOST_ODOMETRY_KEY = "_lekiwi_odometry"
 MOTOR_HEALTH_KEY = "_lekiwi_motor_health"
@@ -52,16 +54,17 @@ def valid_goal_id(value) -> bool:
 
 
 def observation_payload(
-    observation, camera_keys, *, session, sequence, sample_monotonic_ns,
+    observation, *, session, sequence, sample_monotonic_ns,
     torque_enabled, motor_health, odometry, arm_status,
 ) -> dict:
-    """Assemble one telemetry header; ``observation`` excludes camera frames.
+    """Assemble one telemetry message from the motor-bus ``observation``.
 
-    The key order is part of the deployed encoding: the header is serialized
-    with plain ``json.dumps`` and camera JPEGs follow as further frames.
+    The key order is part of the deployed encoding: the message is serialized
+    with plain ``json.dumps`` and sent as the only frame. The host carries no
+    camera images.
     """
     return {
-        CAMERAS_KEY: list(camera_keys),
+        CAMERAS_KEY: [],
         **observation,
         TELEMETRY_PROTOCOL_KEY: TELEMETRY_PROTOCOL_VERSION,
         TELEMETRY_SESSION_KEY: session,

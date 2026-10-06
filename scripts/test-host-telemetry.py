@@ -39,7 +39,7 @@ class FaultSocket:
             payload = json.loads(frames[0])
             for status in payload['_lekiwi_motor_health']['statuses'].values():
                 status.update(level=2, message='explicit qualification fault injection')
-            outgoing = [json.dumps(payload).encode(), *frames[1:]]
+            outgoing = [json.dumps(payload).encode()]
         self.socket.send_multipart(outgoing, **kwargs)
         if self.mode is None:
             self.last = [bytes(frame) for frame in frames]

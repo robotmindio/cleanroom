@@ -23,10 +23,9 @@ trusted robot network or behind a firewall; see the README's
 [Network security](README.md#network-security). ROS 2 DDS is not secured by
 either and remains a separate exposure unless the deployment isolates it.
 
-In ROS operation the motor host is started camera-less (`--no-cameras`). A
-separate `v4l2_camera` service owns each USB camera and publishes the front and
-wrist streams; camera frames do not pass through the motor host. This isolates
-camera stalls from actuator control.
+The motor host serves no cameras. A separate `v4l2_camera` service owns each
+USB camera and publishes the front and wrist streams; camera frames never pass
+through the motor host. This isolates camera stalls from actuator control.
 
 The Pi normally runs the LeRobot host. The full stack belongs on the workstation. A Pi 5
 can also run `scripts/install.sh` for occasional self-contained debugging, but Nav2 and
@@ -206,9 +205,8 @@ no separate `lekiwi_so101` type.
 
 Only the arms need calibration; the wheels do not.
 
-Run `scripts/robot-host.sh` with no arguments. On its first run for an ID it
-automatically starts calibration, then starts the complete host when calibration
-finishes. To force calibration again, run:
+Calibrate before the first host start; the host refuses to start without a
+calibration file for its ID. To calibrate, or to calibrate again, run:
 
 ```bash
 scripts/robot-host.sh calibrate
@@ -232,31 +230,23 @@ lerobot-calibrate --teleop.type=so101_leader \
 
 ## 4. Check the cameras
 
-```bash
-lerobot-find-cameras
-```
-
-`LeKiwiConfig` defaults to `front=/dev/video0` and `wrist=/dev/video2`. If you
-have only one camera, or different indices, the host fails to open the missing
-device — override the whole dict rather than fighting the default:
+The ROS camera nodes, not the motor host, read the front and wrist cameras.
+`/dev/videoN` is renumbered by every USB re-enumeration, and on a laptop
+`/dev/video0` is almost always the built-in webcam, so the camera scripts
+select each camera by its stable `/dev/v4l/by-id/` name. List those names and
+identify each device by model:
 
 ```bash
---robot.cameras="{front: {type: opencv, index_or_path: /dev/video0, width: 640, height: 480, fps: 30}}"
-```
-
-Note that `/dev/video1` is usually the metadata node of the same UVC device as
-`/dev/video0`, not a second camera.
-
-On a laptop, `/dev/video0` is almost always the built-in webcam, so the stock
-defaults point `front` at your screen and shift both robot cameras up by one.
-Identify each device by model before trusting the numbering:
-
-```bash
+ls /dev/v4l/by-id/
 udevadm info -q property -n /dev/video2 | grep ID_MODEL=
 ```
 
-`scripts/robot-host.sh` carries the resulting paths; set `LEKIWI_FRONT` and
-`LEKIWI_WRIST` if yours differ from `/dev/video2` and `/dev/video4`.
+Note that `/dev/video1` is usually the metadata node of the same UVC device as
+`/dev/video0`, not a second camera. `scripts/ros-cameras.sh` and
+`scripts/ros-start.sh` find the known front and wrist cameras automatically;
+set `LEKIWI_FRONT` and `LEKIWI_WRIST` to `/dev/v4l/by-id/...-video-index0`
+paths for other hardware, or `LEKIWI_WRIST=none` to run without the wrist
+camera.
 
 ## 5. Run the host
 
@@ -275,24 +265,17 @@ The repository host starts torque-off and changes servo torque through the separ
 safety endpoint; only in the strict mode (`LEKIWI_DISARM_ON_FAILURE=true`) does the
 watchdog also cut torque.
 
-By default the direct host auto-detects both known cameras; set `LEKIWI_WRIST=none`
-to leave the wrist feed out when USB bandwidth is tight. Its ZMQ clients can use
-images for teleoperation and dataset recording. Under ROS this mode is an
-exclusive alternative: ROS reads cameras through its own nodes on whichever
-machine they are plugged into, one reader per device, and a stalled frame must
-not be able to abort the motor host. So when ROS runs against this machine,
-start the host without cameras (`scripts/robot-host.sh --no-cameras`, or just
-use the boot services) and let ROS own the USB devices. The ROS camera
-publisher on a remote device machine:
+The host serves no camera images: ROS reads the cameras through its own nodes
+on whichever machine they are plugged into, one reader per device, so a stalled
+frame cannot abort the motor host. The ROS camera publisher on a remote device
+machine:
 
 ```bash
 scripts/ros-cameras.sh
 ```
 
-It finds the front camera by name; for other hardware set `LEKIWI_FRONT` to the
-camera's `/dev/v4l/by-id/usb-YOUR_CAMERA-video-index0` path. Find that path with
-`ls /dev/v4l/by-id/`. Use it rather than `/dev/video0`, which is reassigned
-whenever USB re-enumerates.
+It finds the cameras by name, as described in
+[Check the cameras](#4-check-the-cameras).
 
 For the normal two-computer setup, use the device launcher instead. It starts
 the camera-less motor host, ROS camera publisher, LD06 publisher, Astra
@@ -349,7 +332,9 @@ python ~/lerobot-src/examples/lekiwi/record.py
 ```
 
 Adapt `remote_ip`, `repo_id`, `port`, and `task` inside the script. Datasets land
-in `~/.cache/huggingface/lerobot/{repo-id}`.
+in `~/.cache/huggingface/lerobot/{repo-id}`. The repository motor host sends
+no camera images, so datasets recorded against it contain motor state only;
+image recording is outside this repository's supported setup.
 
 ## 8. Mount the LD06 lidar
 
@@ -394,7 +379,7 @@ restarting the stack so RViz, MoveIt, and robot_state_publisher use it together.
 
 ## Troubleshooting
 
-Motor-port, status-packet, camera-key and host-endpoint symptoms are in
+Motor-port, status-packet and host-endpoint symptoms are in
 [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
 ## Moving on to ROS

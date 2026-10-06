@@ -222,9 +222,8 @@ The Astra faces left/rear, pitched 8 degrees down; forward (+X) remains
 the arm/fixed-camera side. Its optical-centre correction still needs measurement.
 Verify the depth cloud overlay in RViz before enabling arm motion.
 
-The repository host is started camera-less for ROS, so a delayed camera frame
-cannot take the motor bus down. Direct LeRobot dataset/teleoperation mode may
-still be camera-sensitive and should not be used as the ROS motor service.
+The repository motor host serves no cameras, so a delayed camera frame cannot
+take the motor bus down.
 
 The front/wrist V4L2 cameras are also the supported remote-camera topology:
 frames are read by `v4l2_camera` on the machine where they are plugged in, then

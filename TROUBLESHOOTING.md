@@ -110,12 +110,6 @@ Feetech buses corrupt status packets when several joints move at once.
 `--robot.num_read_retries=5`. Persistent failures usually mean a daisy-chain
 cable or under-supplied bus voltage.
 
-## LeRobot client connects but no images arrive
-
-Host and client must agree on camera keys. The host publishes whatever is in its
-`cameras` dict; a client expecting `wrist` when the host only serves `front` sees
-no wrist frames. Pass the same `--robot.cameras` override to both.
-
 ## Host reachable but nothing moves
 
 Check all three host endpoints, not just 5555:

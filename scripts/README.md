@@ -53,9 +53,9 @@ before using them; the robot runtime does not require it.
 - `sim-up.sh [launch args]` checks the renderer and starts a managed headless simulation.
 - `ros-start.sh [launch args]` runs `bringup.launch.py` against the real robot; `up.sh`, `workstation-up.sh` and `lekiwi-stack.service` execute it.
 - `ros-stop.sh` stops the process groups the launchers recorded and leaves systemd units alone.
-- `robot-host.sh [calibrate|--no-cameras]` runs the LeRobot motor host or its motor calibration; `lekiwi-host.service` executes it.
+- `robot-host.sh [calibrate]` runs the camera-less LeRobot motor host or its motor calibration; `lekiwi-host.service` executes it.
 - `torque-host.py` is the LeRobot motor host with the torque-safety endpoint that `robot-host.sh` runs.
-- `robot-host.sh --telemetry-fault-test` runs the same host with a qualification-only observation wrapper: SIGUSR1 injects motor diagnostic ERROR and SIGUSR2 repeats the last valid frame; each expires after eight seconds to cover the camera stop observation. Stop the normal host first, use a finite systemd test unit, and restore the normal service afterward. It never writes diagnostic faults to servos.
+- `robot-host.sh --telemetry-fault-test` runs the same host with a qualification-only observation wrapper: SIGUSR1 injects motor diagnostic ERROR and SIGUSR2 repeats the last valid frame; each expires after eight seconds to cover the stop observation. Stop the normal host first, use a finite systemd test unit, and restore the normal service afterward. It never writes diagnostic faults to servos.
 - `test-acceptance-gates.py obstacle|workspace` checks a real lidar obstacle or a temporary MoveIt collision object and rejects arm movement during the collision; it restores production and does not approve acceptance.
 - `ros-astra.sh`, `ros-cameras.sh`, `ros-lidar.sh`, `ros-zenoh.sh` publish the Astra, the V4L2 cameras, the LD06 and the zenoh bridge on the device.
 - `camera-supervisor.sh` keeps one `v4l2_camera` node alive across USB resets.

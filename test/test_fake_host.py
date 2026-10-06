@@ -95,7 +95,6 @@ def test_fake_host_speaks_action_and_versioned_observation_protocol(host, contex
     command.setsockopt(zmq.LINGER, 0)
     command.connect(host.endpoints.command)
     observation = _pull(context, host.endpoints.observation)
-    host.set_camera_frames({"front": b"jpeg-front"})
     host.set_state(**{"x.vel": 0.12, "arm_shoulder_pan.pos": 1.5})
 
     host.publish_observation()
@@ -122,8 +121,7 @@ def test_fake_host_speaks_action_and_versioned_observation_protocol(host, contex
     time.sleep(0.05)
     frames = _latest(observation)
     payload = json.loads(frames[0])
-    assert payload["_cams"] == ["front"]
-    assert frames[1] == b"jpeg-front"
+    assert len(frames) == 1 and payload["_cams"] == []
     assert payload["y.vel"] == -0.02
     assert payload["arm_shoulder_pan.pos"] == 2.0
     assert payload[TELEMETRY_MONOTONIC_NS_KEY] > 0

@@ -65,7 +65,7 @@ def test_secret_key_permissions_are_enforced(tmp_path):
 
 def _payload(sequence=0, value=1.25, torque_enabled=False, sample_ns=None):
     return observation_payload(
-        {"joint.pos": value}, [], session="test-session", sequence=sequence,
+        {"joint.pos": value}, session="test-session", sequence=sequence,
         sample_monotonic_ns=100 + sequence if sample_ns is None else sample_ns,
         torque_enabled=torque_enabled,
         motor_health=healthy_snapshot(("joint",), torque_enabled),
@@ -130,11 +130,22 @@ def test_repository_client_exposes_missing_state_without_zero_filling():
 def test_repository_client_requires_protocol_metadata():
     client = LeKiwiZmqClient("127.0.0.1", 5555, 5556, ("joint.pos",))
     client.connected = True
-    client._poll_latest = lambda: [
-        json.dumps({"_cams": [], "joint.pos": 1.0}).encode("utf-8")
-    ]
+    client._poll_latest = lambda: [json.dumps({"_cams": [], "joint.pos": 1.0}).encode("utf-8")]
     assert client.get_observation() == {}
     assert client.observation_token is None
+
+
+def test_repository_client_rejects_camera_frames():
+    client = LeKiwiZmqClient("127.0.0.1", 5555, 5556, ("joint.pos",))
+    client.connected = True
+    with_image = {**_payload(), "_cams": ["front"]}
+    for frames in ([*_state_frames(), b"jpeg"], [json.dumps(with_image).encode("utf-8"), b"jpeg"],
+                   [json.dumps(with_image).encode("utf-8")]):
+        client._poll_latest = lambda frames=frames: frames
+        assert client.get_observation() == {}
+        assert client.observation_token is None
+    client._poll_latest = lambda: _state_frames()
+    assert client.get_observation() == {"joint.pos": 1.25}
 
 
 def test_repository_client_command_send_is_nonblocking_and_reports_backpressure():
