@@ -7,7 +7,8 @@ import sys
 import unittest
 
 import launch
-from launch.actions import ExecuteProcess, TimerAction
+from launch.actions import ExecuteProcess, RegisterEventHandler
+from launch.event_handlers import OnProcessIO
 import launch_ros.actions
 import launch_testing.actions
 import launch_testing.asserts
@@ -37,16 +38,25 @@ def generate_test_description():
         }],
         output="screen",
     )
+    started = []
+
+    def start_guard(event):
+        # A loaded runner can take seconds to import rclpy in the peer.
+        if not started and b"peer ready" in event.text:
+            started.append(True)
+            return [guard]
+        return None
+
     return launch.LaunchDescription([
         peer,
-        TimerAction(period=1.0, actions=[guard]),
+        RegisterEventHandler(OnProcessIO(target_action=peer, on_stdout=start_guard)),
         launch_testing.actions.ReadyToTest(),
     ]), {"guard": guard}
 
 
 class TestRMFOwnerGuardGraph(unittest.TestCase):
     def test_detected_peer_returns_the_dedicated_conflict_code(self, proc_info, guard):
-        proc_info.assertWaitForShutdown(process=guard, timeout=8)
+        proc_info.assertWaitForShutdown(process=guard, timeout=15)
         launch_testing.asserts.assertExitCodes(
             proc_info, process=guard, allowable_exit_codes=[CONFLICT_EXIT]
         )

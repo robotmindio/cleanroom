@@ -10,6 +10,8 @@ from rclpy.executors import ExternalShutdownException
 def main() -> None:
     rclpy.init()
     node = rclpy.create_node("lekiwi_fleet_adapter")
+    # The launch test starts the guard on this line, not after a fixed delay.
+    print("peer ready", flush=True)
     try:
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):
