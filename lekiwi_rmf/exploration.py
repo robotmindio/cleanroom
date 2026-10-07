@@ -5,6 +5,57 @@ import math
 
 import cv2
 import numpy as np
+import yaml
+
+
+# Accepted stopping bound; separate from the folded body's map clearance.
+STOPPING_MARGIN_M = 0.05
+
+
+def load_navigation_footprint(path):
+    """Use the same unpadded convex body as both Nav2 costmaps."""
+    params = yaml.safe_load(path.read_text())
+    footprints = []
+    for name in ("local_costmap", "global_costmap"):
+        config = params[name][name]["ros__parameters"]
+        vertices = np.asarray(yaml.safe_load(config["footprint"]), dtype=np.float64)
+        if (vertices.ndim != 2 or vertices.shape[1] != 2 or len(vertices) < 3
+                or not np.all(np.isfinite(vertices)) or config.get("footprint_padding", 0.0) != 0.0
+                or not cv2.isContourConvex(vertices.astype(np.float32))):
+            raise ValueError(f"{name} needs a finite convex footprint with zero padding")
+        footprints.append(vertices)
+    if not np.array_equal(*footprints):
+        raise ValueError("exploration requires matching local/global Nav2 footprints")
+    footprint = footprints[0]
+    inscribed = cv2.pointPolygonTest(footprint.astype(np.float32), (0, 0), True)
+    if inscribed <= 0:
+        raise ValueError("Nav2 footprint must enclose the robot origin")
+    boundary_margin = math.ceil(float(np.linalg.norm(footprint, axis=1).max()) * 100) / 100 + STOPPING_MARGIN_M
+    return footprint, inscribed, boundary_margin
+
+
+def footprint_is_free(grid, resolution, origin, position, yaw, footprint, free_threshold):
+    """Check the whole oriented body against occupied/unknown cell areas."""
+    if not all(math.isfinite(v) for v in (*position, yaw)):
+        return False
+    dx, dy = position[0] - origin[0], position[1] - origin[1]
+    c, s = math.cos(origin[2]), math.sin(origin[2])
+    center = np.array((c * dx + s * dy, -s * dx + c * dy))
+    c, s = math.cos(yaw - origin[2]), math.sin(yaw - origin[2])
+    body = (footprint @ np.array(((c, s), (-s, c)))).astype(np.float32)
+    low = np.floor((body.min(axis=0) + center) / resolution).astype(int)
+    high = np.floor((body.max(axis=0) + center) / resolution).astype(int)
+    if np.any(low < 0) or high[0] >= grid.shape[1] or high[1] >= grid.shape[0]:
+        return False
+    cells = grid[low[1]:high[1] + 1, low[0]:high[0] + 1]
+    ys, xs = np.nonzero((cells < 0) | (cells > free_threshold))
+    square = np.array(((0, 0), (resolution, 0), (resolution, resolution), (0, resolution)), dtype=np.float32)
+    for x, y in zip(xs + low[0], ys + low[1], strict=True):
+        cell = (square + np.array((x * resolution, y * resolution)) - center).astype(np.float32)
+        area, _ = cv2.intersectConvexConvex(body, cell)
+        if area > 0:
+            return False
+    return True
 
 
 def database_size(database: Path) -> int:
@@ -72,7 +123,7 @@ def known_safe_cells(grid, resolution, clearance, free_threshold):
 
 
 def select_target(grid, resolution, origin, position, center, radius, visited, blocked,
-                  *, clearance, observation_distance, spacing, revisit_spacing,
+                  *, clearance, footprint, region_margin, observation_distance, spacing, revisit_spacing,
                   free_threshold, revisit):
     """Choose a reachable view, staying clear of unknown cells and obstacles.
 
@@ -81,7 +132,7 @@ def select_target(grid, resolution, origin, position, center, radius, visited, b
     """
     yy, xx = np.indices(grid.shape)
     wx, wy = cell_to_world(xx, yy, resolution, origin)
-    region = (wx - center[0]) ** 2 + (wy - center[1]) ** 2 <= (radius - clearance) ** 2
+    region = (wx - center[0]) ** 2 + (wy - center[1]) ** 2 <= (radius - region_margin) ** 2
     free = ((grid >= 0) & (grid <= free_threshold)).astype(np.uint8)
     safe = known_safe_cells(grid, resolution, clearance, free_threshold)
     safe &= region.astype(np.uint8)
@@ -101,14 +152,16 @@ def select_target(grid, resolution, origin, position, center, radius, visited, b
     for vx, vy in (*visited, *blocked):
         available &= (wx - vx) ** 2 + (wy - vy) ** 2 >= spacing ** 2
     candidates &= available
-    stage = "exploring_frontiers"
-    if not np.any(candidates) and revisit:
+    stages = [("exploring_frontiers", candidates)]
+    if revisit:
         step = max(1, math.ceil(revisit_spacing / resolution))
-        candidates = available & (xx % step == 0) & (yy % step == 0)
-        stage = "revisiting_known_space"
+        stages.append(("revisiting_known_space", available & (xx % step == 0) & (yy % step == 0)))
     mapped_area = float(np.count_nonzero(region & (grid >= 0))) * resolution ** 2
-    ys, xs = np.nonzero(candidates)
-    if not len(xs):
-        return None, stage, mapped_area
-    closest = np.argmin((wx[ys, xs] - position[0]) ** 2 + (wy[ys, xs] - position[1]) ** 2)
-    return (float(wx[ys[closest], xs[closest]]), float(wy[ys[closest], xs[closest]])), stage, mapped_area
+    for stage, candidates in stages:
+        ys, xs = np.nonzero(candidates)
+        for closest in np.argsort((wx[ys, xs] - position[0]) ** 2 + (wy[ys, xs] - position[1]) ** 2):
+            target = (float(wx[ys[closest], xs[closest]]), float(wy[ys[closest], xs[closest]]))
+            yaw = math.atan2(target[1] - position[1], target[0] - position[0])
+            if footprint_is_free(grid, resolution, origin, target, yaw, footprint, free_threshold):
+                return target, stage, mapped_area
+    return None, stage, mapped_area

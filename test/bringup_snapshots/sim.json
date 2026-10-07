@@ -68,7 +68,7 @@
     "output": "screen",
     "parameters": {
      "allow_exploration": true,
-     "clearance_m": 0.38,
+     "clearance_m": 0.22,
      "data_timeout_sec": 1.0,
      "database_path": "$(env HOME)/.ros/lekiwi_rtabmap_sim.db",
      "free_threshold": 20,
@@ -77,11 +77,13 @@
      "max_duration_sec": 900.0,
      "max_map_cells": 250000,
      "max_radius_m": 5.0,
+     "navigation_params_file": "$(share lekiwi_rmf)/config/nav2_params.yaml",
      "navigation_timeout_sec": 180.0,
      "observation_distance_m": 0.8,
      "revisit_spacing_m": 1.0,
      "service_timeout_sec": 3.0,
      "settle_sec": 1.0,
+     "slam_timeout_sec": 4.0,
      "target_spacing_m": 0.5,
      "use_sim_time": true
     },

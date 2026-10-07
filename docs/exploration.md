@@ -23,9 +23,19 @@ and failed target counts, and known map area in the bounded region.
 
 `max_duration_sec` and `max_radius_m` equal to zero select the tracked defaults
 in `config/exploration.yaml` (900 seconds and 5 metres). Positive goal values
-can only reduce these maxima. The radius includes a 0.38 m stopping/footprint
-margin; targets and preflight paths stay inside that margin, and the active
-task cancels navigation if the live pose approaches it. It rejects malformed
+can only reduce these maxima. The centre reachability prefilter is 0.22 m,
+the body's inscribed radius (conservatively 0.25 m on a 5 cm grid). The former
+0.33 m circle rounded to 0.35 m and unnecessarily blocked close side clearance.
+Goals, preflight waypoints and the live robot pose now check the whole oriented
+46 x 44 cm footprint against occupied and unknown cell areas, including the
+interior and corners during turns. That footprint comes from the same selected
+Nav2 parameter file as navigation, with zero additional padding. Nav2 retains
+its stop polygon with 5 cm on every side. Costmap inflation is a soft cost field,
+not extra footprint padding; local inflation still encloses the corners so
+MPPI's native footprint-check optimization remains valid. The exploration
+region retains a 0.38 m body/stopping inset; targets and preflight paths stay
+inside it, and the active task cancels navigation if the live pose approaches
+the boundary or its body intersects occupied/unknown space. It rejects malformed
 maps, unavailable services, stale SLAM/TF, missing motion permission or an
 unfolded arm. Hardware operation remains within the existing attended physical
 acceptance; room-scale coverage has not been physically qualified by the tests.
@@ -36,6 +46,17 @@ retains its existing behavior. Failed approaches are excluded for the task;
 exhausting them produces an incomplete result. A canceled/replaced Nav2 goal
 ends exploration instead of fighting another navigation client. Cancel an
 exploration before sending an unrelated navigation task.
+
+The physical Nav2 pose progress checker counts either 0.10 m of translation or
+0.05 rad of turning within 15 seconds. This permits slow turns toward an
+observation without mistaking them for a stationary robot.
+
+SLAM freshness uses RTAB-Map's canonical `/info` topic, matching normal bringup.
+The mode-switching services remain private to the node at `/rtabmap/set_mode_*`.
+SLAM's camera-acquisition stamps have a separate tracked four-second age/liveness
+budget to cover processing, transport and inter-update gaps (the latest observation
+exceeded 2.5 seconds in a live timing sample). TF and motion-permission inputs retain
+the one-second task budget; the independent production motion guards are unchanged.
 
 To cancel the sole active exploration through standard ROS action services:
 

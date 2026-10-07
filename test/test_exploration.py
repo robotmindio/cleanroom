@@ -2,18 +2,24 @@
 
 from types import SimpleNamespace
 import math
+from pathlib import Path
 
 import numpy as np
 import pytest
 
 from lekiwi_rmf.exploration import (
-    cell_to_world, map_geometry, select_target, task_limits, world_to_cell,
+    cell_to_world, footprint_is_free, known_safe_cells, load_navigation_footprint,
+    map_geometry, select_target, task_limits, world_to_cell,
 )
+
+FOOTPRINT, INSCRIBED_RADIUS, REGION_MARGIN = load_navigation_footprint(
+    Path(__file__).parents[1] / "config/nav2_params.yaml")
 
 
 def choose(grid, *, revisit=False, visited=(), blocked=(), position=(0, 0), origin=(-2, -2, 0)):
     return select_target(grid, 0.05, origin, position, (0, 0), 1.8, visited, blocked,
-                         clearance=0.38, observation_distance=0.8, spacing=0.5,
+                         clearance=0.22, footprint=FOOTPRINT, region_margin=REGION_MARGIN,
+                         observation_distance=0.8, spacing=0.5,
                          revisit_spacing=1.0, free_threshold=20, revisit=revisit)
 
 
@@ -22,7 +28,7 @@ def test_frontier_approach_is_known_clear_and_connected():
     grid[:, 60:] = -1
     target, stage, area = choose(grid)
     assert target is not None and stage == "exploring_frontiers" and area > 0
-    assert 0.2 < target[0] < 0.65  # Remains a full footprint away from unknown.
+    assert 0.2 < target[0] < 0.8  # The actual body remains outside unknown cells.
     assert math.hypot(*target) < 1.8 - 0.38
     # A separating wall makes those frontiers unreachable.
     grid[:, 45] = 100
@@ -37,6 +43,40 @@ def test_known_map_can_be_revisited_without_frontiers():
     following = choose(grid, revisit=True, visited=[target])[0]
     assert following != target
     assert math.dist(target, following) >= 0.5
+
+
+def test_close_wall_uses_actual_footprint_and_blocks_corner_turns():
+    grid = np.zeros((80, 80), dtype=np.int16)
+    grid[[34, 46], :] = 100  # 55 cm corridor: ~5.5 cm beside the 44 cm body.
+    position = (0.025, 0.025)
+    assert INSCRIBED_RADIUS == pytest.approx(0.22)
+    assert REGION_MARGIN == pytest.approx(0.38)
+    assert not known_safe_cells(grid, 0.05, 0.33, 20)[40, 40]
+    assert known_safe_cells(grid, 0.05, 0.22, 20)[40, 40]
+    assert footprint_is_free(grid, 0.05, (-2, -2, 0), position, 0, FOOTPRINT, 20)
+    assert not footprint_is_free(grid, 0.05, (-2, -2, 0), position, math.pi / 4, FOOTPRINT, 20)
+    # Map rotation changes the world heading, not collision geometry.
+    rotated_origin = (-2, -2, math.pi / 2)
+    rotated_position = cell_to_world(40, 40, 0.05, rotated_origin)
+    assert footprint_is_free(grid, 0.05, rotated_origin, rotated_position, math.pi / 2, FOOTPRINT, 20)
+    assert not footprint_is_free(grid, 0.05, rotated_origin, rotated_position, 3 * math.pi / 4, FOOTPRINT, 20)
+    target, _, area = choose(grid, revisit=True, position=position)
+    assert target is not None
+    assert math.hypot(*target) < 1.8 - REGION_MARGIN
+    assert area > 0
+    grid[40, 40] = -1  # Unknown under the body is blocked, including its interior.
+    assert not footprint_is_free(grid, 0.05, (-2, -2, 0), position, 0, FOOTPRINT, 20)
+    grid[40, 40] = 100
+    assert not footprint_is_free(grid, 0.05, (-2, -2, 0), position, 0, FOOTPRINT, 20)
+    assert not footprint_is_free(grid, 0.05, (-2, -2, 0), (-1.9, 0), 0, FOOTPRINT, 20)
+    # These frontier centres pass the coarse disk, but their bodies hit unknown.
+    grid[:] = 0
+    grid[[33, 47], :] = 100
+    grid[40, 55] = -1
+    assert known_safe_cells(grid, 0.05, 0.22, 20)[39, 50]
+    assert choose(grid, position=position)[0] is None
+    target, stage, _ = choose(grid, position=position, revisit=True)
+    assert target is not None and stage == "revisiting_known_space"
 
 
 def test_unknown_or_unsafe_start_and_blocked_regions_are_not_traversed():

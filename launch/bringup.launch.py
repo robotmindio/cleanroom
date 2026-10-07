@@ -272,7 +272,7 @@ def _stack(context):
             ),
         ])
     actions.extend([
-        *_include(launch_file("slam.launch.py"), topology.visual_slam),
+        *_include(launch_file("slam.launch.py"), topology.visual_slam, navigation_params_file=params_file),
         *gated(
             _readiness_gate("wait_for_stable_joint_states", kind="joint_states", topic="/joint_states",
                             joint_names=list(ARM_JOINTS), minimum_joint_samples=20),

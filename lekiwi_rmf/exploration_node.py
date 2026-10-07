@@ -30,7 +30,7 @@ from tf2_ros import Buffer, TransformException, TransformListener
 
 from lekiwi_rmf.action import Explore
 from lekiwi_rmf.exploration import (
-    database_size, known_safe_cells, map_geometry, select_target, task_limits, world_to_cell,
+    database_size, footprint_is_free, load_navigation_footprint, map_geometry, select_target, task_limits,
 )
 
 
@@ -44,16 +44,21 @@ class RobotExplorer(Node):
             "allow_exploration": True, "database_path": str(Path.home() / ".ros/lekiwi_rtabmap.db"),
             **yaml.safe_load((config / "exploration.yaml").read_text())["robot_explorer"]["ros__parameters"],
             "navigation_tree": str(config / "explore_nav_to_pose.xml"),
+            "navigation_params_file": str(config / "nav2_params.yaml"),
         }
         for name, value in defaults.items():
             self.declare_parameter(name, value)
         self.config = {name: self.get_parameter(name).value for name in defaults}
+        self._footprint, inscribed, self._region_margin = None, 0.0, 0.0
+        if self.config["allow_exploration"]:
+            self._footprint, inscribed, self._region_margin = load_navigation_footprint(
+                Path(self.config["navigation_params_file"]).expanduser())
         for name, value in self.config.items():
             if type(value) in (float, int) and (not math.isfinite(value) or value <= 0):
                 raise ValueError(f"{name} must be finite and positive")
         if (not 0 < self.config["free_threshold"] < 100
-                or self.config["clearance_m"] < 0.38
-                or self.config["max_radius_m"] <= 2 * self.config["clearance_m"]
+                or self.config["clearance_m"] < inscribed - 1e-6
+                or self.config["max_radius_m"] <= 2 * self._region_margin
                 or self.config["observation_distance_m"] <= self.config["clearance_m"]):
             raise ValueError("invalid exploration clearance, observation distance or region")
         self.database = Path(self.config["database_path"]).expanduser()
@@ -80,8 +85,8 @@ class RobotExplorer(Node):
         for topic in ("base_motion_permitted", "arm_stowed"):
             self.create_subscription(Bool, f"/safety/{topic}",
                                      lambda msg, name=topic: self._record(name, msg.data), latched)
-        self.create_subscription(Info, "/rtabmap/info", lambda msg: self._record("slam", msg.header), 1)
-        self._parameters = AsyncParameterClient(self, "/rtabmap", callback_group=self._group)
+        self.create_subscription(Info, "/info", lambda msg: self._record("slam", msg.header), 1)
+        self._mapping_parameters = AsyncParameterClient(self, "/rtabmap", callback_group=self._group)
         self._mapping_client = self.create_client(Empty, "/rtabmap/set_mode_mapping", callback_group=self._group)
         self._localization_client = self.create_client(Empty, "/rtabmap/set_mode_localization", callback_group=self._group)
         self._navigation = ActionClient(self, NavigateToPose, "/navigate_to_pose", callback_group=self._group)
@@ -104,56 +109,59 @@ class RobotExplorer(Node):
             self.get_logger().error(str(error), throttle_duration_sec=5)
 
     def _mode_response(self, future, requested_at):
-        if requested_at < self._mode_query_at:
-            return  # A delayed older query cannot overwrite a verified mode change.
-        self._mode_query_at = requested_at
-        try:
-            value = future.result().values[0]
-            if value.type == 1:
-                mapping = value.bool_value
-            elif value.type == 4 and value.string_value.lower() in {"true", "false"}:
-                mapping = value.string_value.lower() == "true"
-            else:
-                raise ValueError("RTAB-Map did not return Mem/IncrementalMemory")
-            now = time.monotonic()
-            if mapping and self._mapping_started is None:
-                self._mapping_started = now
-                self._quota_reason = ""
-            if not mapping:
-                self._mapping_started = None
-            self._mapping, self._mode_at = mapping, now
-        except Exception as error:
-            self._mapping = None
-            self.get_logger().error(f"cannot read mapping mode: {error}", throttle_duration_sec=5)
+        with self._lock:
+            if requested_at < self._mode_query_at:
+                return  # A delayed older query cannot overwrite a verified mode change.
+            self._mode_query_at = requested_at
+            try:
+                value = future.result().values[0]
+                if value.type == 1:
+                    mapping = value.bool_value
+                elif value.type == 4 and value.string_value.lower() in {"true", "false"}:
+                    mapping = value.string_value.lower() == "true"
+                else:
+                    raise ValueError("RTAB-Map did not return Mem/IncrementalMemory")
+                now = time.monotonic()
+                if mapping and self._mapping_started is None:
+                    self._mapping_started = now
+                    self._quota_reason = ""
+                if not mapping:
+                    self._mapping_started = None
+                self._mapping, self._mode_at = mapping, now
+            except Exception as error:
+                self._mapping = None
+                self.get_logger().error(f"cannot read mapping mode: {error}", throttle_duration_sec=5)
 
     def _monitor(self):
         now = time.monotonic()
-        if self._parameters.services_are_ready():
+        if self._mapping_parameters.services_are_ready():
             if self._mode_future is not None and not self._mode_future.done():
                 if now - self._mode_requested_at > self.config["service_timeout_sec"]:
                     self._mode_future.cancel()
                     self._mapping = None
             if self._mode_future is None or self._mode_future.done():
                 self._mode_requested_at = now
-                self._mode_future = self._parameters.get_parameters(["Mem/IncrementalMemory"])
+                self._mode_future = self._mapping_parameters.get_parameters(["Mem/IncrementalMemory"])
                 self._mode_future.add_done_callback(lambda future, sent=now: self._mode_response(future, sent))
-        if self._mapping_started is None:
-            return
-        try:
-            reason = self._quota_limit(now)
-        except OSError as error:
-            reason = f"cannot measure mapping storage: {error}"
-        if reason:
-            self._quota_reason = reason
-            if (self._freeze_future is not None and not self._freeze_future.done()
-                    and now - self._freeze_requested_at > self.config["service_timeout_sec"]):
-                self._freeze_future.cancel()
-            if self._localization_client.service_is_ready() and (
-                    self._freeze_future is None or self._freeze_future.done()):
-                self.get_logger().warning(f"freezing RTAB-Map: {reason}", throttle_duration_sec=5)
-                self._freeze_future = self._localization_client.call_async(Empty.Request())
-                self._freeze_requested_at = now
-                self._freeze_future.add_done_callback(self._check_freeze)
+        # Mode replies cannot restart a session midway through an old freeze decision.
+        with self._lock:
+            if self._mapping_started is None:
+                return
+            try:
+                reason = self._quota_limit(now)
+            except OSError as error:
+                reason = f"cannot measure mapping storage: {error}"
+            if reason:
+                self._quota_reason = reason
+                if (self._freeze_future is not None and not self._freeze_future.done()
+                        and now - self._freeze_requested_at > self.config["service_timeout_sec"]):
+                    self._freeze_future.cancel()
+                if self._localization_client.service_is_ready() and (
+                        self._freeze_future is None or self._freeze_future.done()):
+                    self.get_logger().warning(f"freezing RTAB-Map: {reason}", throttle_duration_sec=5)
+                    self._freeze_future = self._localization_client.call_async(Empty.Request())
+                    self._freeze_requested_at = now
+                    self._freeze_future.add_done_callback(self._check_freeze)
 
     def _check_freeze(self, future):
         try:
@@ -162,10 +170,10 @@ class RobotExplorer(Node):
             self.get_logger().error(f"cannot freeze RTAB-Map: {error}")
 
     def _quota_limit(self, now):
+        started = self._mapping_started
         if database_size(self.database) >= self.config["mapping_max_bytes"]:
             return "mapping database quota reached"
-        if (self._mapping_started is not None
-                and now - self._mapping_started >= self.config["mapping_max_seconds"]):
+        if (started is not None and now - started >= self.config["mapping_max_seconds"]):
             return "mapping session duration reached"
         return ""
 
@@ -188,27 +196,40 @@ class RobotExplorer(Node):
             raise RuntimeError("no valid occupancy map")
         for name in ("base_motion_permitted", "arm_stowed", "slam"):
             value, received = self._inputs.get(name, (None, 0))
-            if not value or now - received > self.config["data_timeout_sec"]:
+            timeout = self.config["slam_timeout_sec"] if name == "slam" else self.config["data_timeout_sec"]
+            if not value or now - received > timeout:
                 raise RuntimeError(f"missing, stale or denied {name}")
             if name == "slam":
                 age = (self.get_clock().now() - rclpy.time.Time.from_msg(value.stamp)).nanoseconds / 1e9
-                if not -0.3 <= age <= self.config["data_timeout_sec"]:
+                if not -0.3 <= age <= timeout:
                     raise RuntimeError("SLAM observations are stale")
         if self._mapping is None or now - self._mode_at > self.config["service_timeout_sec"]:
             raise RuntimeError("mapping mode is unknown or stale")
+
+    def _footprint_clear(self, pose):
+        q, p = pose.pose.orientation, pose.pose.position
+        grid = self._map
+        if (grid is None or self._footprint is None
+                or not all(math.isfinite(v) for v in (p.x, p.y, q.x, q.y, q.z, q.w))
+                or abs(q.x) > 1e-6 or abs(q.y) > 1e-6
+                or abs(q.z * q.z + q.w * q.w - 1) > 1e-3):
+            return False
+        return footprint_is_free(*grid, (p.x, p.y), 2 * math.atan2(q.z, q.w),
+                                 self._footprint, self.config["free_threshold"])
 
     def _accept(self, request):
         try:
             if self._shutdown_requested.is_set():
                 raise RuntimeError("exploration server is shutting down")
-            _, radius = task_limits(request.max_duration_sec, request.max_radius_m,
-                                    self.config["max_duration_sec"], self.config["max_radius_m"])
-            if radius <= 2 * self.config["clearance_m"]:
-                raise ValueError("exploration radius is too small for the footprint")
             if not self.config["allow_exploration"]:
                 raise RuntimeError("exploration is disabled for fixed-map/RMF operation")
+            _, radius = task_limits(request.max_duration_sec, request.max_radius_m,
+                                    self.config["max_duration_sec"], self.config["max_radius_m"])
+            if radius <= 2 * self._region_margin:
+                raise ValueError("exploration radius is too small for the footprint")
             self._healthy()
-            self._pose()
+            if not self._footprint_clear(self._pose()):
+                raise RuntimeError("robot footprint overlaps occupied or unknown space")
             if (not self._navigation.server_is_ready() or not self._planner.server_is_ready()
                     or not self._mapping_client.service_is_ready()
                     or not self._localization_client.service_is_ready()):
@@ -237,8 +258,10 @@ class RobotExplorer(Node):
             raise RuntimeError(reason)
         pose = self._pose()
         xy = pose.pose.position
-        if math.hypot(xy.x - center[0], xy.y - center[1]) >= radius - self.config["clearance_m"]:
+        if math.hypot(xy.x - center[0], xy.y - center[1]) >= radius - self._region_margin:
             raise RuntimeError("exploration region stopping margin reached")
+        if not self._footprint_clear(pose):
+            raise RuntimeError("robot footprint overlaps occupied or unknown space")
         return pose
 
     def _wait(self, future, timeout, check=None):
@@ -261,7 +284,7 @@ class RobotExplorer(Node):
             raise RuntimeError("mapping mode service is unavailable")
         self._wait(client.call_async(Empty.Request()), self.config["service_timeout_sec"])
         requested_at = time.monotonic()
-        response = self._parameters.get_parameters(["Mem/IncrementalMemory"])
+        response = self._mapping_parameters.get_parameters(["Mem/IncrementalMemory"])
         self._wait(response, self.config["service_timeout_sec"])
         self._mode_response(response, requested_at)
         if self._mapping is not mapping:
@@ -331,7 +354,8 @@ class RobotExplorer(Node):
                 pose = check()
                 target, stage, result.mapped_area_m2 = select_target(
                     *self._map, (pose.pose.position.x, pose.pose.position.y), center, radius, visited, blocked,
-                    clearance=self.config["clearance_m"], observation_distance=self.config["observation_distance_m"],
+                    clearance=self.config["clearance_m"], footprint=self._footprint, region_margin=self._region_margin,
+                    observation_distance=self.config["observation_distance_m"],
                     spacing=self.config["target_spacing_m"], revisit_spacing=self.config["revisit_spacing_m"],
                     free_threshold=self.config["free_threshold"], revisit=goal.request.revisit_known,
                 )
@@ -361,15 +385,11 @@ class RobotExplorer(Node):
                         or route.result.path.header.frame_id != "map" or not route.result.path.poses):
                     blocked.append(target)
                     continue
-                grid, resolution, origin = self._map
-                safe = known_safe_cells(grid, resolution, self.config["clearance_m"], self.config["free_threshold"])
                 valid = True
                 for waypoint in route.result.path.poses:
                     p = waypoint.pose.position
-                    x, y = world_to_cell((p.x, p.y), resolution, origin)
-                    if (math.hypot(p.x - center[0], p.y - center[1]) >= radius - self.config["clearance_m"]
-                            or not 0 <= y < grid.shape[0] or not 0 <= x < grid.shape[1]
-                            or not safe[y, x]):
+                    if (math.hypot(p.x - center[0], p.y - center[1]) >= radius - self._region_margin
+                            or not self._footprint_clear(waypoint)):
                         valid = False
                         break
                 if not valid:

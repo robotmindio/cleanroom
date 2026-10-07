@@ -104,6 +104,8 @@ def _slam(context):
         parameters=[PathJoinSubstitution([package, "config", "exploration.yaml"]), {
             "use_sim_time": topology.sim,
             "database_path": database,
+            "navigation_params_file": LaunchConfiguration(
+                "navigation_params_file", default=PathJoinSubstitution([package, "config", "nav2_params.yaml"])),
             "mapping_max_bytes": ParameterValue(LaunchConfiguration("rtabmap_mapping_max_bytes"), value_type=int),
             "mapping_max_seconds": ParameterValue(LaunchConfiguration("rtabmap_mapping_max_seconds"), value_type=float),
             "allow_exploration": not (topology.static_map or topology.start_rmf),
