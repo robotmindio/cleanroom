@@ -120,7 +120,7 @@ class AstraCloudFilter(Node):
             return
         cloud = compact_cloud(deserialize_message(serialized, PointCloud2), self._stride)
         if cloud is None:
-            self.get_logger().warning("discarding Astra cloud without finite XYZ data")
+            self.get_logger().warning("discarding Astra cloud without finite XYZ data", throttle_duration_sec=5)
             return
         self._last_publish = now
         self._publisher.publish(cloud)

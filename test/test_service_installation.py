@@ -743,6 +743,28 @@ def test_deploy_order_fails_closed_around_the_device_restart():
     assert "reset --hard" not in deploy
 
 
+@pytest.mark.parametrize("needs_reload", ["yes", "no"])
+def test_deploy_refreshes_a_service_that_systemd_has_not_reloaded(needs_reload):
+    deploy = (ROOT / "scripts/deploy-split.sh").read_text()
+    body = deploy.split("compute_configuration_current() {\n", 1)[1].split("\n}", 1)[0]
+    result = _bash('''
+device_address=192.0.2.66
+workspace=/srv/robot
+service_marker=/unused/fingerprint
+expected_service_fingerprint=current
+grep() { return 0; }
+cat() { echo current; }
+systemctl() {
+  if [[ $3 == NeedDaemonReload ]]; then echo "$LEKIWI_TEST_RELOAD";
+  else echo "$workspace/current/source"; fi
+}
+compute_configuration_current() {
+''' + body + '\n}\nif compute_configuration_current; then echo current; else echo stale; fi\n',
+                   LEKIWI_TEST_RELOAD=needs_reload)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == ("stale" if needs_reload == "yes" else "current")
+
+
 def test_deploy_bundle_transfers_exact_revision_without_device_origin(tmp_path):
     source, device = tmp_path/'source', tmp_path/'device'
     def git(repository, *args):
