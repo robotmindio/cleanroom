@@ -81,7 +81,7 @@ class RobotExplorer(Node):
         for topic in ("base_motion_permitted", "arm_stowed"):
             self.create_subscription(Bool, f"/safety/{topic}",
                                      lambda msg, name=topic: self._record(name, msg.data), latched)
-        self.create_subscription(Info, "/rtabmap/info", lambda msg: self._record("slam", msg.header), 1)
+        self.create_subscription(Info, "/info", lambda msg: self._record("slam", msg.header), 1)
         self._parameters = AsyncParameterClient(self, "/rtabmap", callback_group=self._group)
         self._mapping_client = self.create_client(Empty, "/rtabmap/set_mode_mapping", callback_group=self._group)
         self._localization_client = self.create_client(Empty, "/rtabmap/set_mode_localization", callback_group=self._group)

@@ -37,6 +37,9 @@ exhausting them produces an incomplete result. A canceled/replaced Nav2 goal
 ends exploration instead of fighting another navigation client. Cancel an
 exploration before sending an unrelated navigation task.
 
+SLAM freshness uses RTAB-Map's canonical `/info` topic, matching normal bringup.
+The mode-switching services remain private to the node at `/rtabmap/set_mode_*`.
+
 To cancel the sole active exploration through standard ROS action services:
 
 ```bash

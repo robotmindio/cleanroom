@@ -70,7 +70,7 @@ class RobotPeers(Node):
         self.map_pub = self.create_publisher(OccupancyGrid, "/map", latched)
         self.base_pub = self.create_publisher(Bool, "/safety/base_motion_permitted", latched)
         self.stow_pub = self.create_publisher(Bool, "/safety/arm_stowed", latched)
-        self.info_pub = self.create_publisher(Info, "/rtabmap/info", 1)
+        self.info_pub = self.create_publisher(Info, "/info", 1)
         self.tf_pub = TransformBroadcaster(self)
         self.grid = OccupancyGrid()
         self.grid.header.frame_id = "map"
