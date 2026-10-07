@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from launch_snapshot import find_node, find_nodes, resolve_bringup
+
 
 ROOT = Path(__file__).parents[1]
 
@@ -37,16 +39,16 @@ def test_dashboard_has_the_operator_views_and_live_robot_model():
 
 
 def test_foxglove_bridge_and_desktop_are_installed_with_the_stack():
-    launcher = (ROOT / "launch" / "bringup.launch.py").read_text()
     package = (ROOT / "package.xml").read_text()
     installer = (ROOT / "scripts" / "install.sh").read_text()
     desktop_launcher = (ROOT / "scripts" / "foxglove.sh").read_text()
 
-    assert 'package="foxglove_bridge"' in launcher
-    assert 'DeclareLaunchArgument("start_foxglove", default_value="true")' in launcher
-    assert 'condition=IfCondition(start_foxglove)' in launcher
-    assert '"capabilities": ["connectionGraph", "assets"]' in launcher
-    assert "clientPublish" not in launcher
+    for profile in ("sim", "wired", "split"):
+        bridge = find_node(resolve_bringup(profile=profile), node="foxglove_bridge/foxglove_bridge")
+        # Clients may inspect but never publish into the robot graph.
+        assert bridge["parameters"]["capabilities"] == ["connectionGraph", "assets"]
+    assert not find_nodes(resolve_bringup(profile="sim", start_foxglove="false"),
+                          node="foxglove_bridge/foxglove_bridge")
     assert "<exec_depend>foxglove_bridge</exec_depend>" in package
     assert '"ros-$ROS_DISTRO-foxglove-bridge"' in installer
     assert "FOXGLOVE_ARCH=amd64" in installer

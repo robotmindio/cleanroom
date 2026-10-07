@@ -1,4 +1,4 @@
-"""Active acceptance client for the renderer-free Gazebo physics test."""
+"""Active acceptance client for test_simulation_physics_launch (renderer-free Gazebo)."""
 
 from __future__ import annotations
 

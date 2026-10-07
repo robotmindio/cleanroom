@@ -5,6 +5,8 @@ import ssl
 import subprocess
 from pathlib import Path
 
+from launch_snapshot import resolve_bringup
+
 ROOT = Path(__file__).resolve().parents[1]
 TLS_DIR = "/etc/lekiwi/zenoh-tls"
 
@@ -45,7 +47,6 @@ def test_setup_generates_role_limited_identities_and_is_idempotent(tmp_path):
 def test_bridge_configs_require_the_same_private_ca_and_never_use_plaintext():
     device = (ROOT / "config" / "zenoh_device.json5").read_text()
     compute = (ROOT / "config" / "zenoh_compute.json5").read_text()
-    launch = (ROOT / "launch" / "bringup.launch.py").read_text()
 
     assert 'endpoints: ["tls/0.0.0.0:7447"]' in device and "tcp/" not in re.sub(r"//.*", "", device)
     assert "enable_mtls: true" in device and "enable_mtls: true" in compute
@@ -53,7 +54,12 @@ def test_bridge_configs_require_the_same_private_ca_and_never_use_plaintext():
         assert f'root_ca_certificate: "{TLS_DIR}/ca.crt"' in config
     assert f'"{TLS_DIR}/device.key"' in device and f'"{TLS_DIR}/device.crt"' in device
     assert f'"{TLS_DIR}/compute.key"' in compute and f'"{TLS_DIR}/compute.crt"' in compute
-    assert '["tls/", remote_ip, ":7447"]' in launch and '["tcp/"' not in launch
+    for arguments in ({"profile": "split"}, {"profile": "wired", "camera_source": "remote",
+                                             "laser_source": "camera", "remote_ip": "192.0.2.4"}):
+        (bridge,) = [record["process"] for record in resolve_bringup(**arguments)
+                     if "process" in record and record["process"][0] == "zenoh-bridge-ros2dds"]
+        endpoint = bridge[bridge.index("-e") + 1]
+        assert endpoint.startswith("tls/") and endpoint.endswith(":7447")
 
 
 def test_sensor_bridge_caps_previews_and_drops_stale_sensor_samples_on_congestion():

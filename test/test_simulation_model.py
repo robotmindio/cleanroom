@@ -12,6 +12,7 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
+from launch_snapshot import find_node, resolve_bringup
 from lekiwi_rmf.arm_trajectory import duration_seconds, stamp_nanoseconds
 from lekiwi_rmf.sim_arm_controller import SimArmController, permission_is_fresh
 from lekiwi_rmf.sim_omni_controller import (
@@ -161,13 +162,13 @@ def test_native_failsafe_owns_the_actual_actuator_topics():
 
 
 def test_simulation_bridge_pins_ros_sensor_frames():
-    source = (ROOT / "launch" / "bringup.launch.py").read_text()
-    assert 'name="sim_lidar_bridge"' in source
-    assert 'remappings=[("/scan", "/sim/scan_raw")]' in source
-    assert 'name="scan_self_filter"' in source
-    assert 'parameters=[{"override_frame_id": "laser"}]' in source
-    assert 'name="sim_camera_bridge"' in source
-    assert 'parameters=[{"override_frame_id": "front_camera_optical_frame"}]' in source
+    records = resolve_bringup(profile="sim")
+    lidar = find_node(records, name="sim_lidar_bridge")
+    assert lidar["remappings"] == [["/scan", "/sim/scan_raw"]]
+    assert lidar["parameters"] == {"override_frame_id": "laser"}
+    assert find_node(records, name="scan_self_filter")["parameters"]["input_topic"] == "/sim/scan_raw"
+    camera = find_node(records, name="sim_camera_bridge")
+    assert camera["parameters"] == {"override_frame_id": "front_camera_optical_frame"}
 
 
 def test_simulation_urdf_converts_to_valid_sdf():

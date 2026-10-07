@@ -1,6 +1,7 @@
 """Renderer-free end-to-end Gazebo base/odometry/arm acceptance."""
 
 import uuid
+from pathlib import Path
 
 import unittest
 
@@ -13,6 +14,8 @@ from launch.event_handlers import OnProcessExit
 from launch.substitutions import Command, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
+
+from lekiwi_rmf.launch_validation import permission_timeout
 
 
 @pytest.mark.launch_test
@@ -61,11 +64,13 @@ def generate_test_description():
         output="screen",
     )
     arm = ExecuteProcess(
-        cmd=["python3", "-m", "lekiwi_rmf.sim_arm_controller", "--ros-args", "-p", "use_sim_time:=true"],
+        cmd=["python3", "-m", "lekiwi_rmf.sim_arm_controller", "--ros-args", "-p", "use_sim_time:=true",
+             "-p", f"permission_timeout:={permission_timeout(Path(__file__).parents[1] / 'config')}"],
         output="screen",
     )
     smoke = ExecuteProcess(
-        cmd=["python3", "-m", "lekiwi_rmf.sim_physics_smoke", "--ros-args", "-p", "use_sim_time:=true"],
+        cmd=["python3", str(Path(__file__).with_name("sim_physics_smoke.py")),
+             "--ros-args", "-p", "use_sim_time:=true"],
         output="screen",
     )
     description = launch.LaunchDescription([

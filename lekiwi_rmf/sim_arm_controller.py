@@ -17,6 +17,7 @@ from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from rclpy.parameter import Parameter
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool
@@ -51,7 +52,8 @@ class SimArmController(Node):
     def __init__(self) -> None:
         super().__init__("sim_arm_controller")
         self.declare_parameter("state_timeout", 0.25)
-        self.declare_parameter("permission_timeout", 0.5)
+        # No default: bringup passes the supervisor's tracked lease.
+        self.declare_parameter("permission_timeout", Parameter.Type.DOUBLE)
         self.declare_parameter("default_goal_tolerance", 0.05)
         self.declare_parameter("default_goal_time_tolerance", 1.0)
         self.state_timeout = float(self.get_parameter("state_timeout").value)

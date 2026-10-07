@@ -1,0 +1,694 @@
+[
+ {
+  "after": "wait_for_map",
+  "on_failure": [
+   {
+    "log": "ERROR: map readiness gate exited with 1; dependents remain stopped"
+   }
+  ],
+  "start": [
+   {
+    "arguments": {
+     "params_file": "$(share lekiwi_rmf)/config/nav2_params.yaml",
+     "use_sim_time": "False"
+    },
+    "include": "$(share nav2_bringup)/launch/navigation_launch.py"
+   }
+  ]
+ },
+ {
+  "after": "wait_for_odom",
+  "on_failure": [
+   {
+    "log": "ERROR: odometry readiness gate exited with 1; dependents remain stopped"
+   }
+  ],
+  "start": [
+   {
+    "arguments": [],
+    "env": {},
+    "name": "wait_for_map",
+    "namespace": "",
+    "node": "lekiwi_rmf/readiness_gate",
+    "output": "screen",
+    "parameters": {
+     "kind": "topic",
+     "topic": "/map",
+     "topic_type": "map"
+    },
+    "remappings": [],
+    "respawn": false,
+    "respawn_delay": null,
+    "ros_arguments": []
+   }
+  ]
+ },
+ {
+  "after": "wait_for_slam_sensor",
+  "on_failure": [
+   {
+    "log": "ERROR: SLAM sensor readiness gate exited with 1; dependents remain stopped"
+   }
+  ],
+  "start": [
+   {
+    "arguments": [],
+    "env": {
+     "OMP_NUM_THREADS": "1",
+     "OPENBLAS_NUM_THREADS": "1"
+    },
+    "name": "robot_explorer",
+    "namespace": "",
+    "node": "lekiwi_rmf/robot_explorer",
+    "output": "screen",
+    "parameters": {
+     "allow_exploration": true,
+     "clearance_m": 0.38,
+     "data_timeout_sec": 1.0,
+     "database_path": "$(env HOME)/.ros/lekiwi_rtabmap.db",
+     "free_threshold": 20,
+     "mapping_max_bytes": 536870912,
+     "mapping_max_seconds": 14400.0,
+     "max_duration_sec": 900.0,
+     "max_map_cells": 250000,
+     "max_radius_m": 5.0,
+     "navigation_timeout_sec": 180.0,
+     "observation_distance_m": 0.8,
+     "revisit_spacing_m": 1.0,
+     "service_timeout_sec": 3.0,
+     "settle_sec": 1.0,
+     "target_spacing_m": 0.5,
+     "use_sim_time": false
+    },
+    "remappings": [],
+    "respawn": false,
+    "respawn_delay": null,
+    "ros_arguments": []
+   },
+   {
+    "arguments": [],
+    "env": {},
+    "name": "rtabmap",
+    "namespace": "",
+    "node": "rtabmap_slam/rtabmap",
+    "output": "screen",
+    "parameters": {
+     "Grid/3D": "false",
+     "Grid/CellSize": "0.05",
+     "Grid/MaxGroundHeight": "0.05",
+     "Grid/MaxObstacleHeight": "1.0",
+     "Grid/NormalsSegmentation": "false",
+     "Grid/RangeMax": "3.0",
+     "Grid/RayTracing": "true",
+     "Grid/Sensor": "0",
+     "Icp/MaxCorrespondenceDistance": "0.1",
+     "Icp/PointToPlane": "false",
+     "Icp/VoxelSize": "0.05",
+     "Kp/MaxFeatures": "500",
+     "Mem/IncrementalMemory": "True",
+     "Mem/InitWMWithAllNodes": "True",
+     "Mem/NotLinkedNodesKept": "false",
+     "RGBD/LinearUpdate": "0.04",
+     "RGBD/LoopCovLimited": "true",
+     "RGBD/NeighborLinkRefining": "false",
+     "RGBD/ProximityBySpace": "true",
+     "RGBD/ProximityMaxGraphDepth": "0",
+     "RGBD/ProximityOdomGuess": "true",
+     "RGBD/ProximityPathMaxNeighbors": "10",
+     "Reg/Force3DoF": "true",
+     "Reg/Strategy": "2",
+     "Rtabmap/DetectionRate": "2",
+     "Rtabmap/ImagesAlreadyRectified": "false",
+     "Rtabmap/MemoryThr": "300",
+     "Rtabmap/StartNewMapOnLoopClosure": "false",
+     "Vis/EstimationType": "0",
+     "approx_sync": true,
+     "database_path": "$(env HOME)/.ros/lekiwi_rtabmap.db",
+     "frame_id": "base_footprint",
+     "map_frame_id": "map",
+     "odom_frame_id": "odom",
+     "odom_sensor_sync": true,
+     "publish_tf": true,
+     "qos_camera_info": 1,
+     "qos_image": 1,
+     "qos_odom": 1,
+     "qos_scan": 1,
+     "rgbd_cameras": 0,
+     "subscribe_depth": false,
+     "subscribe_odom_info": false,
+     "subscribe_rgb": false,
+     "subscribe_rgbd": true,
+     "subscribe_scan": false,
+     "subscribe_scan_cloud": true,
+     "sync_queue_size": 5,
+     "topic_queue_size": 5,
+     "use_sim_time": false
+    },
+    "remappings": [
+     [
+      "rgb/image",
+      "/camera/front/image_raw"
+     ],
+     [
+      "rgb/camera_info",
+      "/camera/front/camera_info"
+     ],
+     [
+      "depth/image",
+      "/slam/front_depth/image_raw"
+     ],
+     [
+      "rgbd_images",
+      "/slam/rgbd_images"
+     ],
+     [
+      "odom",
+      "/odom"
+     ],
+     [
+      "scan_cloud",
+      "/slam/cloud"
+     ],
+     [
+      "map",
+      "/map"
+     ]
+    ],
+    "respawn": true,
+    "respawn_delay": 2.0,
+    "ros_arguments": []
+   }
+  ]
+ },
+ {
+  "after": "wait_for_stable_joint_states",
+  "on_failure": [
+   {
+    "log": "ERROR: joint states readiness gate exited with 1; dependents remain stopped"
+   }
+  ],
+  "start": [
+   {
+    "arguments": [],
+    "env": {},
+    "name": "safety_supervisor",
+    "namespace": "",
+    "node": "lekiwi_rmf/safety_supervisor",
+    "output": "screen",
+    "parameters": {
+     "acceptance_file": "$(share lekiwi_rmf)/config/safety_acceptance.yaml",
+     "arm_workspace_topic": "/safety/arm_workspace_clear",
+     "battery_timeout": 2.0,
+     "bounded_base_test": false,
+     "depth_timeout": 0.5,
+     "maximum_depth_range": 10.0,
+     "minimum_battery_percentage": 0.15,
+     "minimum_battery_voltage": 10.5,
+     "minimum_depth_range": 0.05,
+     "minimum_depth_valid_fraction": 0.01,
+     "minimum_depth_valid_points": 16,
+     "minimum_scan_coverage": 4.3,
+     "minimum_scan_valid_fraction": 0.05,
+     "nav2_params_file": "$(share lekiwi_rmf)/config/nav2_params.yaml",
+     "permission_timeout": 0.5,
+     "publish_frequency": 20.0,
+     "require_acceptance": true,
+     "require_arm_workspace": true,
+     "require_battery": false,
+     "require_bumper": false,
+     "require_depth": true,
+     "require_driver_state": true,
+     "require_estop": false,
+     "require_full_scan": true,
+     "require_imu": false,
+     "require_joint_states": true,
+     "require_motor_health": true,
+     "require_odometry": true,
+     "require_scan": true,
+     "scan_self_mask_file": "$(share lekiwi_rmf)/config/lidar_self_mask.yaml",
+     "sensor_timeout": 0.5,
+     "state_timeout": 0.75,
+     "stow_joint_names": [
+      "arm_shoulder_pan",
+      "arm_shoulder_lift",
+      "arm_elbow_flex",
+      "arm_wrist_flex",
+      "arm_wrist_roll",
+      "arm_gripper"
+     ],
+     "stow_joint_positions": [
+      0.0,
+      -1.8167,
+      1.6295,
+      1.2367,
+      -0.0169,
+      0.2095
+     ],
+     "stow_tolerance": 0.02,
+     "strict": false,
+     "use_sim_time": false
+    },
+    "remappings": [],
+    "respawn": true,
+    "respawn_delay": 2.0,
+    "ros_arguments": []
+   }
+  ]
+ },
+ {
+  "arguments": [],
+  "env": {
+   "OPENBLAS_NUM_THREADS": "1"
+  },
+  "name": "slam_cloud",
+  "namespace": "",
+  "node": "lekiwi_rmf/slam_cloud",
+  "output": "screen",
+  "parameters": {
+   "require_arm_stowed": true,
+   "use_sim_time": false
+  },
+  "remappings": [],
+  "respawn": false,
+  "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {},
+  "name": "camera_relay",
+  "namespace": "",
+  "node": "lekiwi_rmf/camera_relay",
+  "output": "screen",
+  "parameters": {},
+  "remappings": [],
+  "respawn": false,
+  "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {},
+  "name": "cmd_vel_mux",
+  "namespace": "",
+  "node": "lekiwi_rmf/cmd_vel_mux",
+  "output": "screen",
+  "parameters": {
+   "permission_timeout": 0.5
+  },
+  "remappings": [],
+  "respawn": false,
+  "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {},
+  "name": "ekf_filter_node",
+  "namespace": "",
+  "node": "robot_localization/ekf_node",
+  "output": "screen",
+  "parameters": {
+   "base_link_frame": "base_footprint",
+   "frequency": 30.0,
+   "map_frame": "map",
+   "odom0": "/wheel/odometry",
+   "odom0_config": [
+    true,
+    true,
+    false,
+    false,
+    false,
+    true,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false
+   ],
+   "odom0_differential": false,
+   "odom0_queue_size": 5,
+   "odom0_relative": false,
+   "odom_frame": "odom",
+   "predict_to_current_time": true,
+   "print_diagnostics": true,
+   "publish_acceleration": false,
+   "publish_tf": true,
+   "sensor_timeout": 0.2,
+   "transform_time_offset": 0.0,
+   "transform_timeout": 0.1,
+   "two_d_mode": true,
+   "world_frame": "odom"
+  },
+  "remappings": [
+   [
+    "odometry/filtered",
+    "/odom"
+   ]
+  ],
+  "respawn": true,
+  "respawn_delay": 2.0,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {},
+  "name": "foxglove_bridge",
+  "namespace": "",
+  "node": "foxglove_bridge/foxglove_bridge",
+  "output": "screen",
+  "parameters": {
+   "address": "127.0.0.1",
+   "capabilities": [
+    "connectionGraph",
+    "assets"
+   ],
+   "port": 8765,
+   "publish_client_count": true,
+   "use_sim_time": false
+  },
+  "remappings": [],
+  "respawn": false,
+  "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {},
+  "name": "scan_self_filter",
+  "namespace": "",
+  "node": "lekiwi_rmf/scan_self_filter",
+  "output": "screen",
+  "parameters": {
+   "body_end_deg": [
+    234.0,
+    284.0,
+    315.0,
+    342.0,
+    350.0
+   ],
+   "body_max_range_m": [
+    0.24,
+    0.228,
+    0.26,
+    0.226,
+    0.218
+   ],
+   "body_start_deg": [
+    210.0,
+    254.0,
+    299.0,
+    315.0,
+    342.0
+   ],
+   "input_topic": "/pi/lidar/scan"
+  },
+  "remappings": [],
+  "respawn": false,
+  "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {},
+  "name": "slam_astra_rgbd",
+  "namespace": "",
+  "node": "rtabmap_sync/rgbd_sync",
+  "output": "screen",
+  "parameters": {
+   "approx_sync": true,
+   "approx_sync_max_interval": 0.35,
+   "decimation": 2,
+   "qos": 1,
+   "qos_camera_info": 2,
+   "sync_queue_size": 30,
+   "topic_queue_size": 5,
+   "use_sim_time": false
+  },
+  "remappings": [
+   [
+    "rgb/image",
+    "/camera/astra/color/image_raw"
+   ],
+   [
+    "rgb/camera_info",
+    "/camera/astra/color/camera_info"
+   ],
+   [
+    "depth/image",
+    "/camera/astra/depth/image_raw"
+   ],
+   [
+    "rgbd_image",
+    "/slam/astra/rgbd_image"
+   ]
+  ],
+  "respawn": false,
+  "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {},
+  "name": "slam_front_depth",
+  "namespace": "",
+  "node": "rtabmap_util/pointcloud_to_depthimage",
+  "output": "screen",
+  "parameters": {
+   "approx": true,
+   "decimation": 2,
+   "fill_holes_error": 0.05,
+   "fill_holes_size": 2,
+   "fill_iterations": 1,
+   "fixed_frame_id": "odom",
+   "qos": 1,
+   "qos_camera_info": 1,
+   "sync_queue_size": 30,
+   "topic_queue_size": 5,
+   "use_sim_time": false,
+   "wait_for_transform": 0.1
+  },
+  "remappings": [
+   [
+    "cloud",
+    "/slam/cloud"
+   ],
+   [
+    "camera_info",
+    "/camera/front/camera_info"
+   ],
+   [
+    "image_raw",
+    "/slam/front_depth/image_raw"
+   ]
+  ],
+  "respawn": false,
+  "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {},
+  "name": "slam_front_rgbd",
+  "namespace": "",
+  "node": "rtabmap_sync/rgbd_sync",
+  "output": "screen",
+  "parameters": {
+   "approx_sync": true,
+   "approx_sync_max_interval": 0.35,
+   "decimation": 1,
+   "qos": 1,
+   "qos_camera_info": 1,
+   "sync_queue_size": 30,
+   "topic_queue_size": 5,
+   "use_sim_time": false
+  },
+  "remappings": [
+   [
+    "rgb/image",
+    "/camera/front/image_raw"
+   ],
+   [
+    "rgb/camera_info",
+    "/camera/front/camera_info"
+   ],
+   [
+    "depth/image",
+    "/slam/front_depth/image_raw"
+   ],
+   [
+    "rgbd_image",
+    "/slam/front/rgbd_image"
+   ]
+  ],
+  "respawn": false,
+  "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {},
+  "name": "slam_rgbd_views",
+  "namespace": "",
+  "node": "rtabmap_sync/rgbdx_sync",
+  "output": "screen",
+  "parameters": {
+   "approx_sync": true,
+   "approx_sync_max_interval": 0.35,
+   "qos": 1,
+   "rgbd_cameras": 2,
+   "sync_queue_size": 5,
+   "topic_queue_size": 5,
+   "use_sim_time": false
+  },
+  "remappings": [
+   [
+    "rgbd_image0",
+    "/slam/astra/rgbd_image"
+   ],
+   [
+    "rgbd_image1",
+    "/slam/front/rgbd_image"
+   ],
+   [
+    "rgbd_images",
+    "/slam/rgbd_images"
+   ]
+  ],
+  "respawn": false,
+  "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {},
+  "name": "wait_for_odom",
+  "namespace": "",
+  "node": "lekiwi_rmf/readiness_gate",
+  "output": "screen",
+  "parameters": {
+   "kind": "topic",
+   "topic": "/odom",
+   "topic_type": "odom"
+  },
+  "remappings": [],
+  "respawn": false,
+  "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {},
+  "name": "wait_for_slam_sensor",
+  "namespace": "",
+  "node": "lekiwi_rmf/readiness_gate",
+  "output": "screen",
+  "parameters": {
+   "kind": "topic",
+   "topic": "/slam/front_depth/image_raw",
+   "topic_type": "image"
+  },
+  "remappings": [],
+  "respawn": false,
+  "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {},
+  "name": "wait_for_stable_joint_states",
+  "namespace": "",
+  "node": "lekiwi_rmf/readiness_gate",
+  "output": "screen",
+  "parameters": {
+   "joint_names": [
+    "arm_shoulder_pan",
+    "arm_shoulder_lift",
+    "arm_elbow_flex",
+    "arm_wrist_flex",
+    "arm_wrist_roll",
+    "arm_gripper"
+   ],
+   "kind": "joint_states",
+   "minimum_joint_samples": 20,
+   "topic": "/joint_states"
+  },
+  "remappings": [],
+  "respawn": false,
+  "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {},
+  "name": null,
+  "namespace": "",
+  "node": "lekiwi_rmf/lekiwi_driver",
+  "output": "screen",
+  "parameters": {
+   "arm_calibration_file": "$(env HOME)/.ros/lekiwi_arm_calibration.json",
+   "auto_arm_on_startup": false,
+   "base_test_angular_limit": 0.06,
+   "base_test_linear_limit": 0.03,
+   "bounded_base_test": false,
+   "curve_client_secret_key_file": "",
+   "curve_server_public_key_file": "",
+   "disarm_on_failure": false,
+   "initial_x": 0.0,
+   "initial_y": 0.0,
+   "nav2_params_file": "$(share lekiwi_rmf)/config/nav2_params.yaml",
+   "odom_topic": "/wheel/odometry",
+   "permission_timeout": 0.5,
+   "publish_odom_tf": false,
+   "remote_ip": "127.0.0.1",
+   "xy_velocity_scale": 1.0,
+   "yaw_velocity_scale": 0.976
+  },
+  "remappings": [
+   [
+    "safety/state",
+    "safety/driver_state"
+   ]
+  ],
+  "respawn": true,
+  "respawn_delay": 60.0,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {},
+  "name": null,
+  "namespace": "",
+  "node": "robot_state_publisher/robot_state_publisher",
+  "output": "log",
+  "parameters": {
+   "robot_description": "$(command xacro $(share lekiwi_rmf)/urdf/lekiwi.urdf.xacro sim:=False)",
+   "use_sim_time": false
+  },
+  "remappings": [],
+  "respawn": false,
+  "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "env": {},
+  "name": null,
+  "output": "screen",
+  "process": [
+   "zenoh-bridge-ros2dds",
+   "-c",
+   "$(share lekiwi_rmf)/config/zenoh_compute.json5",
+   "-e",
+   "tls/127.0.0.1:7447"
+  ],
+  "respawn": true,
+  "respawn_delay": 5.0
+ },
+ {
+  "log": "RTAB-Map empty/one-node seed: allow observations in the same database; relocalization still requires verified registration"
+ }
+]

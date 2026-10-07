@@ -44,6 +44,12 @@ def release_fixture(tmp_path):
     (repo / "test").mkdir()
     (repo / "config").mkdir()
     (repo / "config/device_tests.txt").write_text("test_example\n")
+    # check-release validates the tracked safety acceptance with the source's own modules.
+    (repo / "lekiwi_rmf").mkdir()
+    for name in ("lekiwi_rmf/__init__.py", "lekiwi_rmf/geometry.py", "lekiwi_rmf/motion_guards.py",
+                 "lekiwi_rmf/safety_acceptance.py", "config/safety_production.yaml",
+                 "config/safety_acceptance.yaml", "config/nav2_params.yaml"):
+        (repo / name).write_text((ROOT / name).read_text())
     (repo / ".gitignore").write_text(".env\n__pycache__/\n")
     (repo / "test/test_example.py").write_text("def test_example(): pass\n")
     (repo / ".env").write_text("LEKIWI_WRIST=none\n")
@@ -245,3 +251,21 @@ def test_deployment_failure_trap_preserves_the_original_failure_status():
     result = subprocess.run(["bash", "-c", trap + "\nexit 42"], capture_output=True, text=True)
     assert result.returncode == 42
     assert "previous releases and bootstrap installation are retained" in result.stderr
+
+
+def test_release_check_rejects_a_stale_safety_acceptance(tmp_path):
+    spec = importlib.util.spec_from_file_location("check_release", ROOT / "scripts/check-release.py")
+    checker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(checker)
+    source = tmp_path / "source"
+    (source / "config").mkdir(parents=True)
+    (source / "lekiwi_rmf").mkdir()
+    for name in ("lekiwi_rmf/__init__.py", "lekiwi_rmf/geometry.py", "lekiwi_rmf/motion_guards.py",
+                 "lekiwi_rmf/safety_acceptance.py", "config/safety_production.yaml",
+                 "config/safety_acceptance.yaml", "config/nav2_params.yaml"):
+        (source / name).write_text((ROOT / name).read_text())
+    checker.check_safety_acceptance(source)
+    production = source / "config/safety_production.yaml"
+    production.write_text(production.read_text().replace("stow_joint_positions: [0.0,", "stow_joint_positions: [0.1,"))
+    with pytest.raises(ValueError, match="accepted arm stow differs"):
+        checker.check_safety_acceptance(source)

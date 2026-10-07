@@ -47,7 +47,8 @@ jobs:
             --skip-keys "free_fleet_adapter astra_camera ldlidar_stl_ros2"
       - name: Build and test
         env:
-          # Each DDS test sets its own domain in CMakeLists.txt; this covers the rest.
+          # CTest gives each DDS test its own free domain (ament_cmake_ros
+          # isolation, domains 1-100); this covers the build's other processes.
           ROS_DOMAIN_ID: 221
         run: |
           . /opt/ros/jazzy/setup.sh
@@ -107,7 +108,7 @@ jobs:
       - name: Python coverage report
         env:
           # Cyclone DDS derives UDP ports from the domain ID, so it must stay
-          # at or below 232. 221 is outside the CTest domains (40-84).
+          # at or below 232. 221 is outside the isolated CTest domains (1-100).
           ROS_DOMAIN_ID: 221
         run: |
           . /opt/ros/jazzy/setup.sh
