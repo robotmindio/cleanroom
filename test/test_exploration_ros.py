@@ -18,6 +18,7 @@ from rclpy.duration import Duration
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.parameter import Parameter
+from rclpy.parameter_client import AsyncParameterClient
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from rtabmap_msgs.msg import Info
 from std_msgs.msg import Bool
@@ -194,6 +195,10 @@ def start(graph, duration=8, revisit=False):
 def test_cancel_stops_navigation_restores_mode_and_rejects_concurrent_goal(graph):
     peers, explorer, client = graph
     handle = start(graph)
+    parameters = AsyncParameterClient(peers, "/robot_explorer", callback_group=peers.group)
+    wait(parameters.services_are_ready)
+    values = response(parameters.get_parameters(["slam_timeout_sec"]))
+    assert values.values[0].double_value == 2.0
     assert peers.mapping_requests == [True]
     other = response(client.send_goal_async(Explore.Goal()))
     assert not other.accepted

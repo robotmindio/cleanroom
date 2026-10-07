@@ -82,7 +82,7 @@ class RobotExplorer(Node):
             self.create_subscription(Bool, f"/safety/{topic}",
                                      lambda msg, name=topic: self._record(name, msg.data), latched)
         self.create_subscription(Info, "/info", lambda msg: self._record("slam", msg.header), 1)
-        self._parameters = AsyncParameterClient(self, "/rtabmap", callback_group=self._group)
+        self._mapping_parameters = AsyncParameterClient(self, "/rtabmap", callback_group=self._group)
         self._mapping_client = self.create_client(Empty, "/rtabmap/set_mode_mapping", callback_group=self._group)
         self._localization_client = self.create_client(Empty, "/rtabmap/set_mode_localization", callback_group=self._group)
         self._navigation = ActionClient(self, NavigateToPose, "/navigate_to_pose", callback_group=self._group)
@@ -129,14 +129,14 @@ class RobotExplorer(Node):
 
     def _monitor(self):
         now = time.monotonic()
-        if self._parameters.services_are_ready():
+        if self._mapping_parameters.services_are_ready():
             if self._mode_future is not None and not self._mode_future.done():
                 if now - self._mode_requested_at > self.config["service_timeout_sec"]:
                     self._mode_future.cancel()
                     self._mapping = None
             if self._mode_future is None or self._mode_future.done():
                 self._mode_requested_at = now
-                self._mode_future = self._parameters.get_parameters(["Mem/IncrementalMemory"])
+                self._mode_future = self._mapping_parameters.get_parameters(["Mem/IncrementalMemory"])
                 self._mode_future.add_done_callback(lambda future, sent=now: self._mode_response(future, sent))
         if self._mapping_started is None:
             return
@@ -263,7 +263,7 @@ class RobotExplorer(Node):
             raise RuntimeError("mapping mode service is unavailable")
         self._wait(client.call_async(Empty.Request()), self.config["service_timeout_sec"])
         requested_at = time.monotonic()
-        response = self._parameters.get_parameters(["Mem/IncrementalMemory"])
+        response = self._mapping_parameters.get_parameters(["Mem/IncrementalMemory"])
         self._wait(response, self.config["service_timeout_sec"])
         self._mode_response(response, requested_at)
         if self._mapping is not mapping:
