@@ -41,7 +41,10 @@ source /opt/ros/jazzy/setup.bash
 source "$workspace/install/setup.bash"
 set -u
 # One compiler at a time keeps the running robot stack responsive during deploy.
-export MAKEFLAGS=-j1
+# CI, which has no robot stack to protect, sets LEKIWI_NATIVE_JOBS to its cores.
+native_jobs=${LEKIWI_NATIVE_JOBS:-1}
+[[ $native_jobs =~ ^[1-9][0-9]*$ ]] || die "LEKIWI_NATIVE_JOBS must be a positive integer"
+export MAKEFLAGS=-j$native_jobs
 export PATH=/usr/bin:/bin:$PATH
 override_args=()
 if [[ $(colcon build --help) == *--allow-overriding* ]]; then

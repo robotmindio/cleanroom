@@ -45,6 +45,40 @@ jobs:
           # compile this package.
           rosdep install --from-paths . --ignore-src --rosdistro jazzy -y \
             --skip-keys "free_fleet_adapter astra_camera ldlidar_stl_ros2"
+      # The patched native overlay takes ~11 minutes to build and changes only
+      # with its pinned inputs or the ROS packages it links against.
+      - name: Key the native overlay
+        id: native-key
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          {
+            dpkg-query -W 'ros-jazzy-*'
+            # ls-files skips helpers this revision does not have.
+            git ls-files -z scripts/build-native.sh scripts/thirdparty-common.sh \
+              scripts/lib/runtime-common.sh scripts/lib/build-common.sh \
+              thirdparty/class_loader thirdparty/rclcpp thirdparty/navigation2 thirdparty/rviz |
+              xargs -0 cat
+          } | sha256sum | awk '{print "key=native-overlay-" substr($1, 1, 32)}' >> "$GITHUB_OUTPUT"
+      - name: Restore the native overlay
+        id: native-cache
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: install
+          key: ${{ steps.native-key.outputs.key }}
+      - name: Build the native overlay
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        run: |
+          . /opt/ros/jazzy/setup.sh
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          mkdir -p install
+          printf 'source /opt/ros/jazzy/setup.bash\n' > install/setup.bash
+          LEKIWI_WS="$GITHUB_WORKSPACE" LEKIWI_NATIVE_JOBS="$(nproc)" scripts/build-native.sh
+      - name: Save the native overlay
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: install
+          key: ${{ steps.native-key.outputs.key }}
       - name: Build and test
         env:
           # CTest gives each DDS test its own free domain (ament_cmake_ros
@@ -54,15 +88,14 @@ jobs:
           . /opt/ros/jazzy/setup.sh
           # The container runs as root while checkout files belong to the runner.
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          # CTest freezes build-time package/library paths. Build the patched
-          # overlay before configuring this package so tests use those binaries.
-          mkdir -p install
-          printf 'source /opt/ros/jazzy/setup.bash\n' > install/setup.bash
-          LEKIWI_WS="$GITHUB_WORKSPACE" scripts/build-native.sh
+          # CTest freezes build-time package/library paths, so this package is
+          # configured on top of the patched overlay restored or built above.
           . install/setup.sh
           colcon build --packages-select lekiwi_rmf --symlink-install --event-handlers console_cohesion+
           . install/setup.sh
-          colcon test --packages-select lekiwi_rmf --event-handlers console_cohesion+
+          # Isolated DDS domains let the tests run in parallel.
+          colcon test --packages-select lekiwi_rmf --event-handlers console_cohesion+ \
+            --ctest-args -j"$(nproc)"
           colcon test-result --verbose
       - name: Device-only package build and tests
         run: |
@@ -73,7 +106,7 @@ jobs:
             --build-base "$device_workspace/build" --install-base "$device_workspace/install" \
             --cmake-args -DLEKIWI_BUILD_COMPUTE=OFF -DBUILD_TESTING=ON
           . "$device_workspace/install/setup.sh"
-          ctest --test-dir "$device_workspace/build/lekiwi_rmf" --output-on-failure
+          ctest --test-dir "$device_workspace/build/lekiwi_rmf" --output-on-failure -j"$(nproc)"
       - name: Static repository validation
         run: |
           . /opt/ros/jazzy/setup.sh
