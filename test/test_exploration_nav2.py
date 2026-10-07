@@ -55,6 +55,9 @@ def test_real_nav2_tree_uses_known_space_planner_and_cancels_controller(tmp_path
     explorer = RobotExplorer(context=context, parameter_overrides=[
         Parameter("database_path", value=str(tmp_path / "map.db")),
         Parameter("max_duration_sec", value=10.0),
+        # This test covers the native tree against instrumented Python peers.
+        # Production one-second input leases are exercised by the ROS fault tests.
+        Parameter("data_timeout_sec", value=3.0),
         Parameter("settle_sec", value=0.2),
     ])
     client_node = Node("native_exploration_test", context=context)
@@ -71,6 +74,9 @@ def test_real_nav2_tree_uses_known_space_planner_and_cancels_controller(tmp_path
         process = subprocess.Popen([
             str(executable), "--ros-args", "--params-file", str(ROOT / "config/nav2_params.yaml"),
             "-p", "navigators:=[navigate_to_pose]",
+            # Python peers under coverage need longer than the production 20 ms
+            # goal-response budget; task RPC/cleanup deadlines remain bounded.
+            "-p", "default_server_timeout:=1000",
             "-p", f"default_nav_to_pose_bt_xml:={ROOT / 'config/explore_nav_to_pose.xml'}",
         ], stdout=log, stderr=subprocess.STDOUT)
         try:
@@ -92,7 +98,7 @@ def test_real_nav2_tree_uses_known_space_planner_and_cancels_controller(tmp_path
             expected = GoalStatus.STATUS_CANCELED if cancel else GoalStatus.STATUS_SUCCEEDED
             assert result.status == expected, (result.result.message, log_path.read_text())
             assert len(peers.planner_ids) >= 2 and set(peers.planner_ids) == {"ExploreKnown"}
-            assert not peers.nav_active
+            wait(lambda: not peers.nav_active)
             assert peers.nav_canceled == int(cancel)
         finally:
             peers.nav_mode = "fail"

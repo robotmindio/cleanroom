@@ -41,6 +41,10 @@ exhausting them produces an incomplete result. A canceled/replaced Nav2 goal
 ends exploration instead of fighting another navigation client. Cancel an
 exploration before sending an unrelated navigation task.
 
+The physical Nav2 pose progress checker counts either 0.10 m of translation or
+0.05 rad of turning within 15 seconds. This permits slow turns toward an
+observation without mistaking them for a stationary robot.
+
 SLAM freshness uses RTAB-Map's canonical `/info` topic, matching normal bringup.
 The mode-switching services remain private to the node at `/rtabmap/set_mode_*`.
 SLAM's camera-acquisition stamps have a separate tracked four-second age/liveness
