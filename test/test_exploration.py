@@ -7,13 +7,13 @@ import numpy as np
 import pytest
 
 from lekiwi_rmf.exploration import (
-    cell_to_world, map_geometry, select_target, task_limits, world_to_cell,
+    STOPPING_MARGIN_M, cell_to_world, known_safe_cells, map_geometry, select_target, task_limits, world_to_cell,
 )
 
 
 def choose(grid, *, revisit=False, visited=(), blocked=(), position=(0, 0), origin=(-2, -2, 0)):
     return select_target(grid, 0.05, origin, position, (0, 0), 1.8, visited, blocked,
-                         clearance=0.38, observation_distance=0.8, spacing=0.5,
+                         clearance=0.33, observation_distance=0.8, spacing=0.5,
                          revisit_spacing=1.0, free_threshold=20, revisit=revisit)
 
 
@@ -37,6 +37,23 @@ def test_known_map_can_be_revisited_without_frontiers():
     following = choose(grid, revisit=True, visited=[target])[0]
     assert following != target
     assert math.dist(target, following) >= 0.5
+
+
+def test_folded_body_clearance_retains_the_region_stopping_margin():
+    grid = np.zeros((80, 80), dtype=np.int16)
+    grid[40, 48] = 100  # 40 cm from the pose cell's centre.
+    assert not known_safe_cells(grid, 0.05, 0.38, 20)[40, 40]
+    assert known_safe_cells(grid, 0.05, 0.33, 20)[40, 40]
+    target, _, area = choose(grid, revisit=True)
+    assert target is not None
+    assert math.hypot(*target) < 1.8 - 0.33 - STOPPING_MARGIN_M
+    region_cells = sum(((-2 + (x + 0.5) * 0.05) ** 2
+                        + (-2 + (y + 0.5) * 0.05) ** 2 <= (1.8 - 0.38) ** 2)
+                       for y in range(80) for x in range(80))
+    assert area == pytest.approx(region_cells * 0.05 ** 2)
+    grid[40, 46] = 100  # A cell inside the body's envelope still blocks it.
+    with pytest.raises(ValueError, match="clearance"):
+        choose(grid, revisit=True)
 
 
 def test_unknown_or_unsafe_start_and_blocked_regions_are_not_traversed():

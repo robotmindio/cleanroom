@@ -7,6 +7,10 @@ import cv2
 import numpy as np
 
 
+# Accepted stopping bound; separate from the folded body's map clearance.
+STOPPING_MARGIN_M = 0.05
+
+
 def database_size(database: Path) -> int:
     """Count the active SQLite database and its transient sidecars."""
     total = 0
@@ -81,7 +85,7 @@ def select_target(grid, resolution, origin, position, center, radius, visited, b
     """
     yy, xx = np.indices(grid.shape)
     wx, wy = cell_to_world(xx, yy, resolution, origin)
-    region = (wx - center[0]) ** 2 + (wy - center[1]) ** 2 <= (radius - clearance) ** 2
+    region = (wx - center[0]) ** 2 + (wy - center[1]) ** 2 <= (radius - clearance - STOPPING_MARGIN_M) ** 2
     free = ((grid >= 0) & (grid <= free_threshold)).astype(np.uint8)
     safe = known_safe_cells(grid, resolution, clearance, free_threshold)
     safe &= region.astype(np.uint8)

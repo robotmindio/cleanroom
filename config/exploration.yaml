@@ -3,8 +3,9 @@ robot_explorer:
     # Idle until an explicit /robot/explore goal arrives.
     max_duration_sec: 900.0
     max_radius_m: 5.0
-    # Folded footprint corner radius (0.326 m) plus accepted 0.05 m stop bound.
-    clearance_m: 0.38
+    # Encloses the folded footprint (0.326 m corner radius), matching Nav2/RMF.
+    # Nav2's stop polygon covers stopping travel; the region keeps its 5 cm margin.
+    clearance_m: 0.33
     observation_distance_m: 0.8
     target_spacing_m: 0.5
     revisit_spacing_m: 1.0

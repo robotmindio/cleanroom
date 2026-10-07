@@ -23,8 +23,12 @@ and failed target counts, and known map area in the bounded region.
 
 `max_duration_sec` and `max_radius_m` equal to zero select the tracked defaults
 in `config/exploration.yaml` (900 seconds and 5 metres). Positive goal values
-can only reduce these maxima. The radius includes a 0.38 m stopping/footprint
-margin; targets and preflight paths stay inside that margin, and the active
+can only reduce these maxima. Map clearance is 0.33 m, enclosing the folded
+robot's 0.326 m corner radius and matching the tracked Nav2/RMF envelope. It
+rounds to a conservative 0.35 m disk on the 5 cm grid; the former 0.38 m setting
+rounded to 0.40 m. Nav2 retains its exact rectangular footprint and its stop
+polygon with 5 cm on every side. The exploration radius retains a 0.38 m
+body/stopping margin (0.33 m plus 0.05 m); targets and preflight paths stay inside that margin, and the active
 task cancels navigation if the live pose approaches it. It rejects malformed
 maps, unavailable services, stale SLAM/TF, missing motion permission or an
 unfolded arm. Hardware operation remains within the existing attended physical
