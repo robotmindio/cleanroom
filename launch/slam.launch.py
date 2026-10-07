@@ -62,6 +62,7 @@ def _slam(context):
         ))
     rtabmap = Node(
         package="rtabmap_slam", executable="rtabmap", name="rtabmap",
+        ros_arguments=["--log-level", "warn"],
         parameters=[PathJoinSubstitution([package, "config", "rtabmap.yaml"]), {
             "use_sim_time": topology.sim,
             # Keep appearance-based retrieval enabled alongside LiDAR ICP.
