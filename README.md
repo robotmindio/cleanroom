@@ -142,6 +142,15 @@ SDF used by bringup, drives through `/cmd_vel_safe`, checks encoder odometry,
 and completes an arm/gripper `FollowJointTrajectory` goal. Camera, depth, and
 lidar rendering remain in the GPU-qualified acceptance below.
 
+Gazebo drives three wheel joints at the CAD-derived 120-degree layout with
+anisotropic `fdir1` contact friction, and encoder joint positions (not model
+ground truth) produce `/odom`. Commands have velocity, acceleration, jerk,
+wheel-rate and ROS watchdog limits. A Gazebo-native 250 ms failsafe owns the
+final actuator topics: stale wheel traffic is forced to zero, and loss of the
+arm adapter heartbeat replaces an active trajectory with a measured-position
+hold. All six arm/gripper joints are actuated, and the depth cloud passes
+through a seeded Gaussian-noise, latency and dropout stage.
+
 It refuses a host that cannot create a headless OpenGL 3.3 context, records
 only its own process group, and writes `~/.ros/lekiwi/sim-stack.log`. Stop it
 with `scripts/ros-stop.sh`; that script escalates only within the recorded
@@ -360,70 +369,35 @@ Symptoms and fixes are collected in [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
 ## Safety and current limits
 
-- Real mode evaluates its safety inputs continuously; a one-shot readiness
-  message is not a motion permit. Missing, stale or unhealthy required inputs
-  deny the affected capability. Normal hold mode recovers when inputs recover.
-  With `LEKIWI_DISARM_ON_FAILURE=true` (strict mode), a runtime fault also
-  latches until the driver is disarmed and `/safety/reset_fault` is called.
+[Safety inputs and motor health](docs/safety.md) owns the safety profile,
+the physical acceptance record and its revalidation procedure. In short:
+
+- Real mode evaluates its safety inputs continuously. Missing, stale or
+  unhealthy required inputs deny the affected capability. By default the robot
+  stays armed and recovers permission when inputs recover; with
+  `LEKIWI_DISARM_ON_FAILURE=true` (launch argument `safety_policy:=strict`) faults disarm, cut torque and
+  latch until an operator re-arms. See
+  [Arming and recovery](docs/launch-options.md#arming-and-recovery).
+- `config/safety_acceptance.yaml` is validated (2026-10-06) for attended
+  autonomous base operation on dry concrete with the installed 200 g load,
+  folded `travel_stow`, 0.03 m/s and 0.06 rad/s, with an operator at the
+  physical motor-power stop. It grants no unattended scope, other payload or
+  higher speed.
 - Keep a hardwired physical E-stop reachable and supervise every hardware run.
-  The ROS E-stop topic and software torque cut are status/control interfaces,
-  not substitutes for removing actuator energy independently of ROS.
-- The production profile requires `/scan`, `/camera/depth/points`, `/odom`,
-  `/joint_states`, `/hardware/diagnostics`, and `safety/driver_state`. It does
-  not require `/imu/data`, `/battery_state`, `safety/bumper_active`, or
-  `safety/estop_active`, because the shipped robot has no source for them. The supplied
-  `config/safety_acceptance.yaml` records the completed 2026-10-04 physical
-  acceptance: attended operation on dry concrete, no added payload, folded
-  `travel_stow`, 0.03 m/s and 0.06 rad/s. See
-  [the verification report](docs/physical-verification-20261003.md).
-- The acceptance record is schema version 4. It remains invalid until it has
-  reviewed limits, at least 5 trials in every translation/rotation direction,
-  worst-case distances plus uncertainty, stop latency, traceable
-  software/sensor/payload/surface details, and every applicable fault test marked true.
-  This includes independent E-stop behavior, unauthorized ZMQ rejection, and
-  DDS/rosbridge isolation or authentication. At startup, the supervisor also
-  requires the accepted footprint and padding to match both tracked Nav2
-  costmaps and proves the enabled StopZone leaves at least the measured worst
-  stopping distance plus uncertainty around that footprint.
-- The driver arms only after receiving fresh healthy telemetry and supervisor
-  permission. By default it re-arms after a host session change or link loss
-  once those inputs recover. Feedback-gap holding preserves arm torque; host
-  shutdown cuts torque before its fresh gated restart. In strict mode it disarms, cuts torque,
-  and `/safety/arm` is an explicit operator action after inspection. An
-  operator's `/safety/disarm` cuts torque through the motor host, aborts arm
-  motion, and holds until `/safety/arm`.
-- Network exposure (the ZMQ motor endpoints, the zenoh sensor bridge,
-  rosbridge and DDS) and its protection are described in
+  ROS topics and software torque control are not substitutes for removing
+  actuator energy independently of ROS.
+- The robot has no bumper, IMU or battery monitor, and the LD06 body mask
+  leaves 100 degrees without obstacle sensing. Open hardware and acceptance
+  work is in [DEFERRED.md](DEFERRED.md#physical-safety-hardware-and-acceptance).
+- Gazebo's native 250 ms actuator failsafe is simulation fault containment,
+  not a physical safety mechanism. The simulator does not model the E-stop,
+  bumpers, battery, motor thermal/current behaviour, omni rollers or measured
+  braking.
+- Battery drain is disabled until a real battery source and charging workflow
+  pass acceptance. RMF schedules mobile-base patrol and delivery, not arm
+  trajectories.
+- Network exposure and its protection are described in
   [Network security](#network-security).
-- When commands cease, the motor-host watchdog stops the base and freezes the
-  arm with torque on by default; in strict mode it cuts and verifies all servo
-  torque and the ROS driver observes that cut and requires an explicit re-arm.
-  This software mechanism is not a substitute for an E-stop. The camera floor
-  scan fallback is supplemental and cannot see all side/rear, floor-coloured,
-  low, or overhanging obstacles.
-- Production MoveIt has an execution-time arm-workspace gate. It requires
-  fresh complete joint state, a fresh `/moveit/filtered_cloud` (the MoveIt
-  octomap updater's output, the perception-liveness evidence) and repeated
-  successful `/check_state_validity` responses; collision, timeout or perception failure
-  withdraws the arm lease. Its discrete check and software stop still require
-  measured physical latency/intrusion acceptance, and the CAD collision matrix
-  needs a measured collision-free calibration pose.
-- Gazebo drives three wheel joints at the CAD-derived 120-degree layout. The
-  launch-time `sim_sdf` conversion adds anisotropic `fdir1` contact friction,
-  and encoder joint positions—not model ground truth—produce `/odom`.
-  Commands have velocity, acceleration, jerk, wheel-rate, and ROS watchdog
-  limits. A Gazebo-native 250 ms failsafe owns the final actuator topics:
-  stale wheel traffic is forced to zero, and loss of the arm adapter heartbeat
-  interrupts an active native trajectory with a measured-position hold. This
-  is simulation fault containment, not a physical safety mechanism or E-stop.
-- The simulator actuates all six arm/gripper joints and publishes a Gaussian-
-  noisy depth cloud through a seeded latency/dropout stage. It still does not
-  model the physical E-stop, bumpers, battery, motor thermal/current behavior,
-  detailed omni rollers, or measured hardware braking. Physical and full
-  rendered simulation acceptance remain separate test activities.
-- Battery drain is disabled until a real battery state source and charging
-  workflow have passed acceptance. RMF schedules mobile-base patrol and
-  delivery; it does not schedule arm trajectories in this package.
 
 ## Network security
 

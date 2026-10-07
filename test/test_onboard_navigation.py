@@ -71,7 +71,7 @@ def test_onboard_visual_boundary_and_capture_age(monkeypatch):
     node.center, node.pose, node.visual, node.visual_info = (0.,0.,0.), (0.,0.,0.), [], []
     node.active, node.flags, node.health = True, {'driver':'ARMED','arm_stowed':True}, {}
     node.odom_at, node.deadline = time.monotonic(), time.monotonic()+20
-    node.motion_pauses, node.paused_seconds, node.monitor_action = 0, 0., None
+    node.motion_pauses, node.monitor_action = 0, None
     node.lease = SimpleNamespace(publish=lambda m:None)
     node.command = SimpleNamespace(publish=published.append)
     def receive(*a, **k):

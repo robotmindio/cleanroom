@@ -1,4 +1,4 @@
-"""Renderer-free fault-injection acceptance for the native Gazebo watchdog."""
+"""Renderer-free fault-injection client for test_sim_native_failsafe_launch."""
 
 from __future__ import annotations
 
@@ -10,12 +10,9 @@ from std_msgs.msg import Float64
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from rclpy.node import Node
 
+from lekiwi_rmf.sim_topics import WHEEL_COMMAND_TOPICS, WHEEL_JOINTS
 
-WHEEL_TOPICS = (
-    "/sim/sim_base_left_wheel/cmd_vel",
-    "/sim/sim_base_back_wheel/cmd_vel",
-    "/sim/sim_base_right_wheel/cmd_vel",
-)
+LEFT_WHEEL = WHEEL_JOINTS[0]
 
 
 class NativeFailsafeSmoke(Node):
@@ -23,7 +20,7 @@ class NativeFailsafeSmoke(Node):
         super().__init__("sim_native_failsafe_smoke")
         self.joints: dict[str, float] = {}
         self.create_subscription(JointState, "/joint_states", self._joints, 20)
-        self.wheels = [self.create_publisher(Float64, topic, 10) for topic in WHEEL_TOPICS]
+        self.wheels = [self.create_publisher(Float64, topic, 10) for topic in WHEEL_COMMAND_TOPICS]
         self.arm = self.create_publisher(
             JointTrajectory, "/sim/arm/joint_positions", 10
         )
@@ -53,7 +50,7 @@ class NativeFailsafeSmoke(Node):
 
     def wait_ready(self) -> None:
         deadline = time.monotonic() + 15.0
-        required = {"sim_base_left_wheel_joint", "arm_shoulder_pan"}
+        required = {LEFT_WHEEL, "arm_shoulder_pan"}
         while time.monotonic() < deadline:
             rclpy.spin_once(self, timeout_sec=0.05)
             if required <= self.joints.keys():
@@ -68,11 +65,11 @@ class NativeFailsafeSmoke(Node):
         for publisher, value in zip(self.wheels, (3.0, 0.0, -3.0)):
             publisher.publish(Float64(data=value))
         self.pump(0.45)
-        wheel_after_command = self.joints["sim_base_left_wheel_joint"]
+        wheel_after_command = self.joints[LEFT_WHEEL]
         self.pump(0.70)
-        wheel_after_timeout = self.joints["sim_base_left_wheel_joint"]
+        wheel_after_timeout = self.joints[LEFT_WHEEL]
         self.pump(0.50)
-        wheel_settled = self.joints["sim_base_left_wheel_joint"]
+        wheel_settled = self.joints[LEFT_WHEEL]
         if abs(wheel_settled - wheel_after_timeout) > 0.10:
             raise RuntimeError(
                 "native wheel controller continued after public command loss: "

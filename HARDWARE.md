@@ -23,10 +23,9 @@ trusted robot network or behind a firewall; see the README's
 [Network security](README.md#network-security). ROS 2 DDS is not secured by
 either and remains a separate exposure unless the deployment isolates it.
 
-In ROS operation the motor host is started camera-less (`--no-cameras`). A
-separate `v4l2_camera` service owns each USB camera and publishes the front and
-wrist streams; camera frames do not pass through the motor host. This isolates
-camera stalls from actuator control.
+The motor host serves no cameras. A separate `v4l2_camera` service owns each
+USB camera and publishes the front and wrist streams; camera frames never pass
+through the motor host. This isolates camera stalls from actuator control.
 
 The Pi normally runs the LeRobot host. The full stack belongs on the workstation. A Pi 5
 can also run `scripts/install.sh` for occasional self-contained debugging, but Nav2 and
@@ -206,9 +205,8 @@ no separate `lekiwi_so101` type.
 
 Only the arms need calibration; the wheels do not.
 
-Run `scripts/robot-host.sh` with no arguments. On its first run for an ID it
-automatically starts calibration, then starts the complete host when calibration
-finishes. To force calibration again, run:
+Calibrate before the first host start; the host refuses to start without a
+calibration file for its ID. To calibrate, or to calibrate again, run:
 
 ```bash
 scripts/robot-host.sh calibrate
@@ -232,31 +230,23 @@ lerobot-calibrate --teleop.type=so101_leader \
 
 ## 4. Check the cameras
 
-```bash
-lerobot-find-cameras
-```
-
-`LeKiwiConfig` defaults to `front=/dev/video0` and `wrist=/dev/video2`. If you
-have only one camera, or different indices, the host fails to open the missing
-device — override the whole dict rather than fighting the default:
+The ROS camera nodes, not the motor host, read the front and wrist cameras.
+`/dev/videoN` is renumbered by every USB re-enumeration, and on a laptop
+`/dev/video0` is almost always the built-in webcam, so the camera scripts
+select each camera by its stable `/dev/v4l/by-id/` name. List those names and
+identify each device by model:
 
 ```bash
---robot.cameras="{front: {type: opencv, index_or_path: /dev/video0, width: 640, height: 480, fps: 30}}"
-```
-
-Note that `/dev/video1` is usually the metadata node of the same UVC device as
-`/dev/video0`, not a second camera.
-
-On a laptop, `/dev/video0` is almost always the built-in webcam, so the stock
-defaults point `front` at your screen and shift both robot cameras up by one.
-Identify each device by model before trusting the numbering:
-
-```bash
+ls /dev/v4l/by-id/
 udevadm info -q property -n /dev/video2 | grep ID_MODEL=
 ```
 
-`scripts/robot-host.sh` carries the resulting paths; set `LEKIWI_FRONT` and
-`LEKIWI_WRIST` if yours differ from `/dev/video2` and `/dev/video4`.
+Note that `/dev/video1` is usually the metadata node of the same UVC device as
+`/dev/video0`, not a second camera. `scripts/ros-cameras.sh` and
+`scripts/ros-start.sh` find the known front and wrist cameras automatically;
+set `LEKIWI_FRONT` and `LEKIWI_WRIST` to `/dev/v4l/by-id/...-video-index0`
+paths for other hardware, or `LEKIWI_WRIST=none` to run without the wrist
+camera.
 
 ## 5. Run the host
 
@@ -275,24 +265,17 @@ The repository host starts torque-off and changes servo torque through the separ
 safety endpoint; only in the strict mode (`LEKIWI_DISARM_ON_FAILURE=true`) does the
 watchdog also cut torque.
 
-By default the direct host auto-detects both known cameras; set `LEKIWI_WRIST=none`
-to leave the wrist feed out when USB bandwidth is tight. Its ZMQ clients can use
-images for teleoperation and dataset recording. Under ROS this mode is an
-exclusive alternative: ROS reads cameras through its own nodes on whichever
-machine they are plugged into, one reader per device, and a stalled frame must
-not be able to abort the motor host. So when ROS runs against this machine,
-start the host without cameras (`scripts/robot-host.sh --no-cameras`, or just
-use the boot services) and let ROS own the USB devices. The ROS camera
-publisher on a remote device machine:
+The host serves no camera images: ROS reads the cameras through its own nodes
+on whichever machine they are plugged into, one reader per device, so a stalled
+frame cannot abort the motor host. The ROS camera publisher on a remote device
+machine:
 
 ```bash
 scripts/ros-cameras.sh
 ```
 
-It finds the front camera by name; for other hardware set `LEKIWI_FRONT` to the
-camera's `/dev/v4l/by-id/usb-YOUR_CAMERA-video-index0` path. Find that path with
-`ls /dev/v4l/by-id/`. Use it rather than `/dev/video0`, which is reassigned
-whenever USB re-enumerates.
+It finds the cameras by name, as described in
+[Check the cameras](#4-check-the-cameras).
 
 For the normal two-computer setup, use the device launcher instead. It starts
 the camera-less motor host, ROS camera publisher, LD06 publisher, Astra
@@ -303,32 +286,16 @@ rate-limited compressed previews and sensor clouds cross to the workstation:
 scripts/pi-up.sh
 ```
 
-### Optional boot services
-
-For unattended startup, install the device services on the machine that owns
-the serial adapter and USB cameras (`sudo scripts/install-device-services.sh`)
-and the compute service where the ROS workspace runs
-(`sudo scripts/install-compute-services.sh --remote DEVICE_IP`). For the units,
-their options, CURVE keys, and the split-deployment workflow, see
-[Boot services](docs/real-robot.md#boot-services); the installers render, verify, reload
-and enable the units. Inspect them with:
-
-```bash
-systemctl status lekiwi-host.service lekiwi-cameras.service lekiwi-astra.service \
-  lekiwi-lidar.service lekiwi-zenoh.service lekiwi-stack.service
-journalctl -u lekiwi-host.service -f
-```
-
-The host service runs camera-less and continuously; a clean stop or restart
-disconnects it and cuts servo torque, and each new host session starts with
-torque off. The ROS driver energizes the servos only when it arms: by default
-automatically once telemetry and safety permission are healthy, and with
-`LEKIWI_DISARM_ON_FAILURE=true` only on an explicit `/safety/arm` request.
-
 At the default `jpeg_quality:=50` a 640x480 frame measures about 14 KB, so
 30 Hz costs roughly 3 Mbit/s; the same frame at the library default of 95
 costs 70–90 KB, or 18 Mbit/s. Raise it if RTAB-Map starts losing loop
 closures, lower it if the link is saturated.
+
+### Optional boot services
+
+For unattended startup, install the device and compute systemd services; see
+[Boot services](docs/real-robot.md#boot-services) for the units, their options,
+CURVE keys and the split-deployment workflow.
 
 ## 6. Teleoperate
 
@@ -365,7 +332,9 @@ python ~/lerobot-src/examples/lekiwi/record.py
 ```
 
 Adapt `remote_ip`, `repo_id`, `port`, and `task` inside the script. Datasets land
-in `~/.cache/huggingface/lerobot/{repo-id}`.
+in `~/.cache/huggingface/lerobot/{repo-id}`. The repository motor host sends
+no camera images, so datasets recorded against it contain motor state only;
+image recording is outside this repository's supported setup.
 
 ## 8. Mount the LD06 lidar
 
@@ -410,46 +379,8 @@ restarting the stack so RViz, MoveIt, and robot_state_publisher use it together.
 
 ## Troubleshooting
 
-### `/dev/ttyACM0` does not appear
-
-```bash
-dmesg | tail -20
-udevadm info -q property -n /dev/ttyACM0 | grep ID_VENDOR
-```
-
-Expect `1a86` (QinHeng). If `brltty` grabs the port — a known Ubuntu conflict
-with CH34x adapters — remove it: `sudo apt-get remove brltty`.
-
-### Permission denied on the port
-
-`id -nG` must list `dialout`. Group changes need a fresh login, not just a new
-terminal.
-
-### `Incorrect status packet!` during motor reads
-
-Feetech buses corrupt status packets when several joints move at once.
-`LeKiwiConfig.num_read_retries` defaults to 2; raise it with
-`--robot.num_read_retries=5`. Persistent failures usually mean a daisy-chain
-cable or under-supplied bus voltage.
-
-### Client connects but no images arrive
-
-Host and client must agree on camera keys. The host publishes whatever is in its
-`cameras` dict; a client expecting `wrist` when the host only serves `front` sees
-no wrist frames. Pass the same `--robot.cameras` override to both.
-
-### Host reachable but nothing moves
-
-Check all three host endpoints, not just 5555:
-
-```bash
-ss -ltn | grep -E '5555|5556|5557'
-"$HOME/lekiwi_ws/.venv-lerobot/bin/python" scripts/host-health-check.py --host 127.0.0.1
-```
-
-The health check performs a read-only TCP/5555 connection and a `state`
-request on the torque endpoint. It is a better service check than matching a
-listening port owned by an unrelated process.
+Motor-port, status-packet and host-endpoint symptoms are in
+[TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
 ## Moving on to ROS
 
@@ -472,50 +403,8 @@ relays both feeds; navigation and RTAB-Map use only the front camera.
 
 ## Safety
 
-The ROS production profile is default-deny in strict mode
-(`LEKIWI_DISARM_ON_FAILURE=true`); by default it reports the same conditions
-without withholding motion. It requires current, stamped feedback for the motor
-host, full scan, depth point cloud, odometry, joint states and motor diagnostics
-before granting base or arm permission. The arm must also be inside the configured stow pose
-for base motion. This robot has no IMU, bumper or battery monitor, and its E-stop
-cuts motor power outside the electronics, so the IMU, battery, bumper and E-stop
-inputs are not required until hardware publishes them. The interfaces are:
-
-```text
-safety/driver_state             motor-link and torque state
-/scan                           obstacle coverage
-/camera/depth/points            arm-workspace obstacles
-/odom                           base state
-/imu/data                       base dynamics (not required: no IMU)
-/joint_states                   arm feedback and stow interlock
-/battery_state                  voltage and charge limits (not required)
-/hardware/diagnostics           servo and bus health
-safety/arm_workspace_clear      live MoveIt scene/state validity
-safety/bumper_active            contact stop (not required: no bumper)
-safety/estop_active             E-stop state (not required: hardware cut)
-```
-
-`config/safety_acceptance.yaml` is a schema-version-2 template shipped with
-`validated: false`; it is not a claim that the robot has passed physical
-stopping tests. A qualified hardware procedure must record reviewed acceptance
-limits, at least 30 trials in every translation/rotation direction, independent
-E-stop and fault-response tests, the software revision, sensor configuration,
-payload, surface, stop latency, and measured worst-case stopping distances plus
-measurement uncertainty before enabling it. Required fault tests include
-unauthorised ZMQ rejection and DDS/rosbridge isolation or authentication; do
-not mark them true merely because a local software launch succeeded. The
-accepted footprint and padding must match both tracked Nav2 costmaps, the
-collision-monitor obstacle-stop trial must pass, and its StopZone must leave at
-least the measured worst stopping distance plus uncertainty around that exact
-footprint; the supervisor checks those relationships at every startup.
-
-By default the robot stays armed: a failure stops the base and freezes the arm
-with torque on, the driver re-arms itself every 2 s, and a driver restart
-auto-arms. An operator's `/safety/disarm` cuts torque and holds until
-`/safety/arm`. With `LEKIWI_DISARM_ON_FAILURE=true` (larger robots) every
-failure disarms, cuts torque, latches, and waits for an operator to inspect the
-robot and call `/safety/arm`; after a fault, call `/safety/reset_fault` only
-once the driver is disarmed and every required input is healthy. See
-[Arming and recovery](docs/launch-options.md#arming-and-recovery). Keep a
-hardwired physical E-stop reachable: ROS topics and software torque control
-cannot remove energy after a process, electrical, or mechanical failure.
+The production safety profile, its required inputs, the physical acceptance
+record and the arming policy are described in
+[Safety inputs and motor health](docs/safety.md). Keep a hardwired physical
+E-stop reachable: ROS topics and software torque control cannot remove energy
+after a process, electrical or mechanical failure.

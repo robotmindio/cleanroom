@@ -58,8 +58,9 @@ def test_gripper_calibration_keeps_goals_clear_of_measured_stops():
 
 def test_sim_up_records_one_launch_session_and_passes_arguments_through(tmp_path):
     checkout = tmp_path / "checkout"
-    (checkout / "scripts").mkdir(parents=True)
-    shutil.copy2(ROOT / "scripts" / "sim-up.sh", checkout / "scripts" / "sim-up.sh")
+    (checkout / "scripts" / "lib").mkdir(parents=True)
+    for name in ("sim-up.sh", "lib/launcher.sh"):
+        shutil.copy2(ROOT / "scripts" / name, checkout / "scripts" / name)
     (checkout / "scripts" / "setup.bash").write_text("export FROM_SETUP=1\n")
     check = checkout / "scripts" / "sim-renderer-check.py"
     check.write_text("#!/bin/sh\nexit 0\n")

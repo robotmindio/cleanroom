@@ -10,9 +10,12 @@ import json
 import math
 import time
 
+from lekiwi_rmf.host_protocol import (
+    ARM_LEASE_KEYS, ARM_TRAJECTORY_STATUS_KEY, CAMERAS_KEY, MOTOR_HEALTH_KEY, valid_goal_id,
+)
 from lekiwi_rmf.odometry import TelemetrySequenceTracker, accept_validated_telemetry, parse_host_odometry
-from lekiwi_rmf.motor_health import MOTOR_HEALTH_KEY, parse_motor_health
-from lekiwi_rmf.local_arm_executor import STATUS_KEY, LEASE_KEYS, validate_status
+from lekiwi_rmf.motor_health import parse_motor_health
+from lekiwi_rmf.local_arm_executor import validate_status
 from lekiwi_rmf.zmq_security import (
     CurveClientCredentials,
     configure_link_liveness,
@@ -53,7 +56,6 @@ class LeKiwiZmqClient:
         self.missing_state_keys = self.state_keys
         self.observation_sequence = 0
         self.observation_token = None
-        self.observation_sample_monotonic_ns = None
         self.observation_session_changed = False
         self.observation_torque_enabled = None
         self.observation_motor_health = None
@@ -147,19 +149,16 @@ class LeKiwiZmqClient:
                 return latest
 
     def _decode(self, frames):
-        if not frames:
-            raise ValueError("empty observation multipart message")
+        if len(frames) != 1:
+            raise ValueError("observation must be exactly one frame")
         try:
             payload = json.loads(frames[0])
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
             raise ValueError("malformed observation JSON") from error
         if not isinstance(payload, dict):
-            raise ValueError("observation header must be a JSON object")
-        cameras = payload.pop("_cams", None)
-        if not isinstance(cameras, list) or any(not isinstance(name, str) for name in cameras):
-            raise ValueError("observation camera manifest is malformed")
-        if len(cameras) != len(frames) - 1:
-            raise ValueError("observation camera manifest does not match multipart frames")
+            raise ValueError("observation must be a JSON object")
+        if payload.pop(CAMERAS_KEY, None) != []:
+            raise ValueError("observation must carry an empty camera manifest")
         return payload
 
     def get_observation(self):
@@ -174,7 +173,7 @@ class LeKiwiZmqClient:
                 key for key in self.state_keys if key not in payload
             )
             motor_health = parse_motor_health(payload.get(MOTOR_HEALTH_KEY))
-            arm_status = validate_status(payload.get(STATUS_KEY))
+            arm_status = validate_status(payload.get(ARM_TRAJECTORY_STATUS_KEY))
             odometry = parse_host_odometry(payload)
             accepted = accept_validated_telemetry(
                 self.telemetry_sequences, payload, self.state_keys
@@ -184,7 +183,6 @@ class LeKiwiZmqClient:
             return self.last_remote_state
         self.observation_sequence += 1
         self.observation_token = accepted.token
-        self.observation_sample_monotonic_ns = accepted.sample_monotonic_ns
         self.observation_session_changed = accepted.session_changed
         self.observation_torque_enabled = accepted.torque_enabled
         self.observation_motor_health = motor_health
@@ -207,10 +205,10 @@ class LeKiwiZmqClient:
                 raise ValueError(f"action {key!r} is not finite")
             encoded[str(key)] = number
         if arm_goal_id is not None:
-            if type(arm_goal_id) is not int or not 0 < arm_goal_id < 2**48 or type(arm_permitted) is not bool:
+            if not valid_goal_id(arm_goal_id) or type(arm_permitted) is not bool:
                 raise ValueError("invalid arm trajectory lease")
-            encoded[LEASE_KEYS[0]] = arm_goal_id
-            encoded[LEASE_KEYS[1]] = int(arm_permitted)
+            encoded[ARM_LEASE_KEYS[0]] = arm_goal_id
+            encoded[ARM_LEASE_KEYS[1]] = int(arm_permitted)
         try:
             self.zmq_cmd_socket.send_string(
                 json.dumps(encoded, allow_nan=False), flags=self._zmq.NOBLOCK

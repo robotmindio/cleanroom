@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+import stat
+import subprocess
+import xml.etree.ElementTree as ElementTree
+
+from launch_snapshot import find_node, find_nodes, resolve_bringup
 
 
 ROOT = Path(__file__).parents[1]
@@ -37,21 +43,37 @@ def test_dashboard_has_the_operator_views_and_live_robot_model():
 
 
 def test_foxglove_bridge_and_desktop_are_installed_with_the_stack():
-    launcher = (ROOT / "launch" / "bringup.launch.py").read_text()
-    package = (ROOT / "package.xml").read_text()
+    package = ElementTree.parse(ROOT / "package.xml").getroot()
     installer = (ROOT / "scripts" / "install.sh").read_text()
-    desktop_launcher = (ROOT / "scripts" / "foxglove.sh").read_text()
 
-    assert 'package="foxglove_bridge"' in launcher
-    assert 'DeclareLaunchArgument("start_foxglove", default_value="true")' in launcher
-    assert 'condition=IfCondition(start_foxglove)' in launcher
-    assert '"capabilities": ["connectionGraph", "assets"]' in launcher
-    assert "clientPublish" not in launcher
-    assert "<exec_depend>foxglove_bridge</exec_depend>" in package
+    for profile in ("sim", "wired", "split"):
+        bridge = find_node(resolve_bringup(profile=profile), node="foxglove_bridge/foxglove_bridge")
+        # Clients may inspect but never publish into the robot graph.
+        assert bridge["parameters"]["capabilities"] == ["connectionGraph", "assets"]
+    assert not find_nodes(resolve_bringup(profile="sim", start_foxglove="false"),
+                          node="foxglove_bridge/foxglove_bridge")
+    assert "foxglove_bridge" in [depend.text for depend in package.iter("exec_depend")]
     assert '"ros-$ROS_DISTRO-foxglove-bridge"' in installer
     assert "FOXGLOVE_ARCH=amd64" in installer
     assert "FOXGLOVE_ARCH=arm64" in installer
     assert "foxglove-studio-${FOXGLOVE_VERSION}-linux-${FOXGLOVE_ARCH}.deb" in installer
     assert '"$FOXGLOVE_SHA256"' in installer
-    assert "foxglove-studio" in desktop_launcher
-    assert "ds.url=ws://127.0.0.1:8765/" in desktop_launcher
+
+
+def test_desktop_launcher_opens_the_local_bridge(tmp_path):
+    calls = tmp_path / "calls"
+    studio = tmp_path / "bin" / "foxglove-studio"
+    studio.parent.mkdir()
+    studio.write_text(f'#!/usr/bin/env bash\nprintf "%s\\n" "$@" > "{calls}"\n')
+    studio.chmod(studio.stat().st_mode | stat.S_IXUSR)
+
+    def run(path):
+        return subprocess.run(["bash", str(ROOT / "scripts" / "foxglove.sh")],
+                              env={**os.environ, "PATH": path}, capture_output=True, text=True)
+
+    assert run(f"{studio.parent}:/usr/bin:/bin").returncode == 0
+    assert calls.read_text().splitlines() == [
+        "foxglove://open?ds=foxglove-websocket&ds.url=ws://127.0.0.1:8765/",
+    ]
+    missing = run("/usr/bin:/bin")
+    assert missing.returncode == 1 and "not installed" in missing.stderr

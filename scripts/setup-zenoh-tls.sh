@@ -19,8 +19,8 @@
 #        scripts/setup-zenoh-tls.sh --ca-dir DIR --generate-only
 set -Eeuo pipefail
 
-die() { printf 'error: %s\n' "$*" >&2; exit 1; }
-log() { printf '\n==> %s\n' "$*"; }
+# shellcheck source=/dev/null
+source "$(dirname -- "${BASH_SOURCE[0]}")/lib/runtime-common.sh"
 
 INSTALL_DIR=/etc/lekiwi/zenoh-tls
 service_user=${SUDO_USER:-$(id -un)}

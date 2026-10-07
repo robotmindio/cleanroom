@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Protocol
 
@@ -75,6 +76,22 @@ def lease_is_fresh(
     current = time.monotonic_ns() if now_ns is None else now_ns
     age = current - received_at_ns
     return 0 <= age <= timeout_ns
+
+
+@dataclass
+class Lease:
+    """A supervisor permission whose authority lasts ``timeout_ns`` from its receipt."""
+
+    timeout_ns: int
+    value: bool = False
+    received_at_ns: Optional[int] = None
+
+    def grant(self, value, received_at_ns: int) -> None:
+        self.value = bool(value)
+        self.received_at_ns = received_at_ns
+
+    def current(self, now_ns: Optional[int] = None) -> bool:
+        return self.value and lease_is_fresh(self.received_at_ns, self.timeout_ns, now_ns)
 
 
 def twist_is_finite(message: _Twist) -> bool:

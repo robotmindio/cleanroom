@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Motor calibration and ZMQ robot host for a LeKiwi, with this machine's camera paths.
-# Usage: scripts/robot-host.sh [calibrate|--no-cameras|--telemetry-fault-test]
-# Override per machine: LEKIWI_PORT, LEKIWI_FRONT, LEKIWI_WRIST, LEKIWI_ID
+# Motor calibration and ZMQ motor host for a LeKiwi. The host serves no cameras:
+# ROS camera nodes own the USB cameras (scripts/ros-cameras.sh).
+# Usage: scripts/robot-host.sh [calibrate|--telemetry-fault-test]
+# Override per machine: LEKIWI_PORT, LEKIWI_ID
 set -Eeuo pipefail
 
 cd "$(dirname "$0")/.."
@@ -55,12 +56,10 @@ LEROBOT_HOME="${HF_LEROBOT_HOME:-$HF_CACHE/lerobot}"
 CALIBRATION_DIR="${HF_LEROBOT_CALIBRATION:-$LEROBOT_HOME/calibration}"
 CALIBRATION_FILE="$CALIBRATION_DIR/robots/lekiwi/$ID.json"
 
-# /dev/ttyACM0 and /dev/videoN are renumbered by every USB re-enumeration -- a bumped
-# cable moves the motor bus to ttyACM1 and shifts both cameras. by-id names follow the
-# device. Adjust the globs for your own hardware, or set LEKIWI_PORT/FRONT/WRIST.
+# /dev/ttyACM0 is renumbered by every USB re-enumeration -- a bumped cable moves the
+# motor bus to ttyACM1. The by-id name follows the device. Adjust the glob for your own
+# hardware, or set LEKIWI_PORT.
 PORT="${LEKIWI_PORT:-$(first_match '/dev/serial/by-id/*USB_Single_Serial*')}"
-FRONT="${LEKIWI_FRONT:-$(first_match '/dev/v4l/by-id/*WEBCAM*-video-index0')}"
-WRIST="${LEKIWI_WRIST:-$(first_match '/dev/v4l/by-id/*JYU2C*-video-index0')}"
 
 require() {
   for var in "$@"; do
@@ -78,25 +77,6 @@ require_port_access() {
   fi
 }
 
-# LeRobot's stock lekiwi config hardcodes /dev/video0 and /dev/video2, which on a
-# laptop grabs the built-in webcam. Name the devices explicitly instead.
-# fourcc: without it OpenCV negotiates uncompressed YUYV, and two 640x480@30 YUYV
-# streams do not fit in USB 2.0 bandwidth -- the second camera opens but never
-# delivers a frame. warmup_s: the front webcam needs ~1.1 s for its first frame,
-# more than LeRobot's 1 s default. Later frames arrive at 40 ms.
-# rotation 0: LeRobot's stock lekiwi config rotates the front camera 180, which assumes
-# their mounting. This mast holds the camera upright -- frames read straight off the
-# device come out right way up, so rotating them puts the optical frame 180 out of step
-# with the URDF and RTAB-Map corrects poses in the wrong direction.
-# LEKIWI_WRIST=none (or LEKIWI_FRONT=none) drops that camera: the wrist cable runs along
-# the arm and falls off the bus under movement, and one dead read thread takes the whole
-# host down with it.
-entries=""
-[ "$FRONT" = none ] || entries="front: {type: opencv, index_or_path: $FRONT, width: 640, height: 480, fps: 30, fourcc: MJPG, rotation: 0, warmup_s: 3}"
-[ "$WRIST" = none ] || entries="${entries:+$entries,
-          }wrist: {type: opencv, index_or_path: $WRIST, width: 480, height: 640, fps: 30, fourcc: MJPG, rotation: 90, warmup_s: 3}"
-CAMERAS="{$entries}"
-
 run_host_once() {
   # The servos lose their calibration registers on every power cycle, so connect() stops
   # to ask whether to reuse ~/.cache/.../lekiwi_1.json. Empty answer = reuse it. Without
@@ -109,7 +89,7 @@ run_host_once() {
     exit 78
   }
   printf '\n' | "$BIN/python" "$HOST_PROGRAM" \
-    --robot.id="$ID" --robot.port="$PORT" --robot.cameras="$1" \
+    --robot.id="$ID" --robot.port="$PORT" \
     --robot.num_read_retries="$READ_RETRIES" \
     --safety.bind_address="$BIND_ADDRESS" \
     --safety.disarm_on_failure="${LEKIWI_DISARM_ON_FAILURE:-false}" \
@@ -131,7 +111,7 @@ run_host() {
   # the strict mode (LEKIWI_DISARM_ON_FAILURE=true) waits for an explicit safety/arm.
   trap 'exit 0' INT TERM HUP
   while true; do
-    if run_host_once "$1"; then
+    if run_host_once; then
       status=0
     else
       status=$?
@@ -151,34 +131,16 @@ case "${1:-}" in
   calibrate)
     require PORT
     require_port_access
-    exec "$BIN/lerobot-calibrate" --robot.type=lekiwi --robot.id="$ID" \
-      --robot.port="$PORT" --robot.cameras='{}'
+    run_calibration
     ;;
-  --no-cameras|--telemetry-fault-test)
-    [[ $1 != --telemetry-fault-test ]] || HOST_PROGRAM=scripts/test-host-telemetry.py
+  ''|--telemetry-fault-test)
+    [[ ${1:-} != --telemetry-fault-test ]] || HOST_PROGRAM=scripts/test-host-telemetry.py
     require PORT
     require_port_access
-    run_host '{}'
-    ;;
-  '')
-    require PORT
-    require_port_access
-    if [ ! -f "$CALIBRATION_FILE" ]; then
-      echo "No calibration found for $ID; starting calibration first."
-      run_calibration
-      [ -f "$CALIBRATION_FILE" ] || {
-        echo "$0: calibration completed but did not create $CALIBRATION_FILE" >&2
-        exit 1
-      }
-    fi
-    # The known wrist camera is auto-detected. Set LEKIWI_WRIST=none to leave it
-    # out of a direct LeRobot host (e.g. when conserving USB bandwidth).
-    require FRONT
-    [ "$WRIST" = none ] || require WRIST
-    run_host "$CAMERAS"
+    run_host
     ;;
   *)
-    echo "usage: $0 [calibrate|--no-cameras|--telemetry-fault-test]" >&2
+    echo "usage: $0 [calibrate|--telemetry-fault-test]" >&2
     exit 2
     ;;
 esac

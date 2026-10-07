@@ -79,6 +79,7 @@ def test_real_nav2_tree_uses_known_space_planner_and_cancels_controller(tmp_path
             # Python peers under coverage need longer than the production 20 ms
             # goal-response budget; task RPC/cleanup deadlines remain bounded.
             "-p", "default_server_timeout:=1000",
+
             "-p", f"default_nav_to_pose_bt_xml:={ROOT / 'config/explore_nav_to_pose.xml'}",
         ], stdout=log, stderr=subprocess.STDOUT)
         try:

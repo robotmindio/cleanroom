@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import dataclasses
 import math
 import os
 import signal
@@ -15,6 +16,7 @@ from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallb
 from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
+from rclpy.parameter import Parameter
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from rclpy.task import Future
 from sensor_msgs.msg import JointState
@@ -29,12 +31,11 @@ from lekiwi_rmf.arm_trajectory import (
     duration_seconds, position_tolerances, prepare_trajectory, sample_trajectory,
     stamp_nanoseconds, trajectory_rows,
 )
+from lekiwi_rmf.host_protocol import STATE_KEYS, TorqueCommand
 from lekiwi_rmf.motion_guards import (
-    bounded_test_speed_limits, inside_base_test_boundary, lease_is_fresh, load_base_speed_limits, twist_is_finite,
+    Lease, bounded_test_speed_limits, inside_base_test_boundary, load_base_speed_limits, twist_is_finite,
 )
-from lekiwi_rmf.odometry import (
-    BASE_XY_SCALE, BASE_YAW_SCALE, HostPoseTracker, OdometrySampleClock, integrate_pose,
-)
+from lekiwi_rmf.odometry import BASE_XY_SCALE, BASE_YAW_SCALE, HostPoseTracker
 from lekiwi_rmf.torque_control import TorqueControlClient
 from lekiwi_rmf.zmq_client import LeKiwiZmqClient
 from lekiwi_rmf.zmq_security import CurveClientCredentials
@@ -42,6 +43,437 @@ from lekiwi_rmf.zmq_security import CurveClientCredentials
 # MoveIt stamps zero (start now). Anything scheduled further ahead than this is
 # a clock mismatch or a mistake, not a plan to wait.
 MAX_TRAJECTORY_START_DELAY_NS = 2_000_000_000
+
+
+@dataclasses.dataclass(frozen=True)
+class DriverSettings:
+    """Validated driver parameters; each default is the ROS parameter default."""
+
+    # Base speed caps from the tracked Nav2 controller limits.
+    max_linear: float
+    max_angular: float
+    # Bool permissions have no source timestamp.  The receive-time lease
+    # makes a transient-local sample a restart convenience, not an
+    # unbounded authorization.
+    permission_timeout: float
+    xy_scale: float = BASE_XY_SCALE
+    yaw_scale: float = BASE_YAW_SCALE
+    bounded_base_test: bool = False
+    command_timeout: float = 0.4
+    link_timeout: float = 1.0
+    trajectory_path_tolerance: float = 0.20
+    # Match the production travel-stow gate: a successful MoveIt action
+    # must not leave the arm outside its base-motion stow tolerance.
+    trajectory_tolerance: float = 0.02
+    gripper_trajectory_tolerance: float = 0.005
+    trajectory_timeout: float = 5.0
+    # This is velocity-integrated odometry, not an encoder/SLAM pose
+    # measurement. Never publish the ROS all-zero covariance (perfect
+    # certainty); these conservative values let consumers fuse it honestly.
+    odom_xy_stddev: float = 0.05
+    odom_yaw_stddev: float = 0.10
+    twist_xy_stddev: float = 0.10
+    twist_yaw_stddev: float = 0.20
+    cmd_vel_topic: str = "/cmd_vel_safe"
+    publish_odom_tf: bool = False
+    auto_arm_on_startup: bool = True
+    # By default the robot stays armed: a failure (link loss, stale telemetry, host
+    # restart, withdrawn permission) stops the base and freezes the arm with torque on,
+    # and the driver re-arms itself once telemetry and permission are healthy again.
+    # Only an operator's safety/disarm stays disarmed. Setting this restores the strict
+    # behaviour for larger robots: every failure disarms, cuts torque, latches
+    # TORQUE_FAULT if the cut is unconfirmed, and waits for an explicit safety/arm.
+    disarm_on_failure: bool = False
+    publish_motor_health_enabled: bool = True
+
+    def __post_init__(self):
+        """Reject values that would make a command unsafe or undefined."""
+        positive = {
+            "max_linear": self.max_linear,
+            "max_angular": self.max_angular,
+            "xy_velocity_scale": self.xy_scale,
+            "yaw_velocity_scale": self.yaw_scale,
+            "command_timeout": self.command_timeout,
+            "link_timeout": self.link_timeout,
+            "permission_timeout": self.permission_timeout,
+            "trajectory_path_tolerance": self.trajectory_path_tolerance,
+            "trajectory_tolerance": self.trajectory_tolerance,
+            "gripper_trajectory_tolerance": self.gripper_trajectory_tolerance,
+            "trajectory_timeout": self.trajectory_timeout,
+            "odom_xy_stddev": self.odom_xy_stddev,
+            "odom_yaw_stddev": self.odom_yaw_stddev,
+            "twist_xy_stddev": self.twist_xy_stddev,
+            "twist_yaw_stddev": self.twist_yaw_stddev,
+        }
+        for name, value in positive.items():
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError(f"{name} must be finite and greater than zero")
+        if not isinstance(self.cmd_vel_topic, str) or not self.cmd_vel_topic.strip():
+            raise ValueError("cmd_vel_topic must be a non-empty topic name")
+
+
+# ROS parameter name -> DriverSettings field.
+SETTING_PARAMETERS = {
+    "xy_velocity_scale": "xy_scale",
+    "yaw_velocity_scale": "yaw_scale",
+    "bounded_base_test": "bounded_base_test",
+    "command_timeout": "command_timeout",
+    "link_timeout": "link_timeout",
+    "trajectory_path_tolerance": "trajectory_path_tolerance",
+    "trajectory_tolerance": "trajectory_tolerance",
+    "gripper_trajectory_tolerance": "gripper_trajectory_tolerance",
+    "trajectory_timeout": "trajectory_timeout",
+    "odom_xy_stddev": "odom_xy_stddev",
+    "odom_yaw_stddev": "odom_yaw_stddev",
+    "twist_xy_stddev": "twist_xy_stddev",
+    "twist_yaw_stddev": "twist_yaw_stddev",
+    "cmd_vel_topic": "cmd_vel_topic",
+    "publish_odom_tf": "publish_odom_tf",
+    "auto_arm_on_startup": "auto_arm_on_startup",
+    "disarm_on_failure": "disarm_on_failure",
+    "publish_motor_health": "publish_motor_health_enabled",
+}
+
+
+def odometry_message(stamp, pose, velocity, pose_stddev, twist_stddev):
+    """Planar odom->base_footprint odometry; each stddev pair is (xy, yaw)."""
+    x, y, yaw = pose
+    odom = Odometry()
+    odom.header.stamp = stamp
+    odom.header.frame_id = "odom"
+    odom.child_frame_id = "base_footprint"
+    odom.pose.pose.position.x = x
+    odom.pose.pose.position.y = y
+    odom.pose.pose.orientation.z = math.sin(yaw / 2)
+    odom.pose.pose.orientation.w = math.cos(yaw / 2)
+    odom.twist.twist.linear.x, odom.twist.twist.linear.y, odom.twist.twist.angular.z = velocity
+    # Indices follow ROS's row-major [x, y, z, roll, pitch, yaw] convention.
+    # z/roll/pitch are unobserved by this planar driver, so their deliberately
+    # large variance prevents a 3D estimator mistaking them for measurements.
+    for covariance, (xy_stddev, yaw_stddev) in (
+        ("pose", pose_stddev), ("twist", twist_stddev),
+    ):
+        values = [0.0] * 36
+        values[0] = values[7] = xy_stddev ** 2
+        values[14] = values[21] = values[28] = 1e6
+        values[35] = yaw_stddev ** 2
+        getattr(odom, covariance).covariance = values
+    return odom
+
+
+def odometry_transform(odom):
+    """The odom->base_footprint transform matching an odometry message."""
+    transform = TransformStamped()
+    transform.header = odom.header
+    transform.child_frame_id = odom.child_frame_id
+    transform.transform.translation.x = odom.pose.pose.position.x
+    transform.transform.translation.y = odom.pose.pose.position.y
+    transform.transform.rotation.z = odom.pose.pose.orientation.z
+    transform.transform.rotation.w = odom.pose.pose.orientation.w
+    return transform
+
+
+def arm_joint_state(stamp, positions):
+    joints = JointState()
+    joints.header.stamp = stamp
+    joints.name = list(ARM_JOINTS)
+    joints.position = [positions[name] for name in ARM_JOINTS]
+    return joints
+
+
+def diagnostics_message(stamp, statuses):
+    """Republish validated motor-health statuses as ROS diagnostics."""
+    message = DiagnosticArray()
+    message.header.stamp = stamp
+    message.status = []
+    for source in statuses:
+        status = DiagnosticStatus()
+        status.name = source.name
+        status.level = bytes((source.level,))
+        status.message = source.message
+        status.hardware_id = "lekiwi_servo_bus"
+        status.values = []
+        for key, value in source.values:
+            item = KeyValue()
+            item.key, item.value = key, value
+            status.values.append(item)
+        message.status.append(status)
+    return message
+
+
+@dataclasses.dataclass
+class ArmGoal:
+    """One FollowJointTrajectory goal, executed by the motor host's local executor."""
+
+    host_id: int
+    host_session: str
+    # Monotonic time at which the host starts the first segment.
+    start: float
+    names: tuple = ()
+    start_positions: dict = dataclasses.field(default_factory=dict)
+    points: list = dataclasses.field(default_factory=list)
+    host_elapsed: float = 0.0
+    outcome: str | None = None
+    result_code: int | None = None
+    done: threading.Event = dataclasses.field(default_factory=threading.Event)
+
+    def finish(self, outcome, result_code=None):
+        self.outcome = outcome
+        self.result_code = result_code
+        self.done.set()
+
+
+class ArmTrajectoryBridge:
+    """The arm_controller action: validate goals, upload them to the motor host and
+    report its progress. Arming and permission state stay with the driver, which
+    holds the current goal in ``driver.trajectory`` under ``driver.trajectory_lock``.
+    """
+
+    def __init__(self, driver):
+        self.driver = driver
+
+    def accept(self, goal):
+        node = self.driver
+        if not node.armed or (
+            not node._arm_permission_is_current() and not node._hold_feedback_gap()
+        ):
+            # MoveIt surfaces this only as an unexplained "goal was rejected"; say why here.
+            node.get_logger().warn(
+                "Rejecting arm trajectory: driver is disarmed or arm safety permission is absent"
+            )
+            return GoalResponse.REJECT
+        if not node.arm_calibrated:
+            node.get_logger().warn(
+                "Rejecting arm trajectory: no valid arm calibration is installed"
+            )
+            return GoalResponse.REJECT
+        try:
+            points = trajectory_rows(goal.trajectory)
+            with node.trajectory_lock:
+                start_positions = node.arm_positions.copy()
+            prepare_trajectory(
+                goal.trajectory.joint_names, points, start_positions,
+                node.arm_zero_positions, node.arm_directions,
+            )
+            self.requested_tolerances(goal, goal.trajectory.joint_names)
+            stamp_nanoseconds(goal.trajectory.header.stamp)
+            if goal.multi_dof_trajectory.joint_names or goal.multi_dof_trajectory.points:
+                raise ValueError("multi-DOF trajectories are unsupported")
+        except (IndexError, ValueError) as error:
+            node.get_logger().warn(f"Rejecting arm trajectory: {error}")
+            return GoalResponse.REJECT
+        return GoalResponse.ACCEPT
+
+    async def execute(self, goal_handle):
+        node = self.driver
+        names = goal_handle.request.trajectory.joint_names
+        requested_points = trajectory_rows(goal_handle.request.trajectory)
+        path_tolerances, goal_tolerances, goal_time_tolerance = self.requested_tolerances(
+            goal_handle.request, names
+        )
+        scheduled_ns = stamp_nanoseconds(goal_handle.request.trajectory.header.stamp)
+        # The header is ROS time, but execution is timed on the monotonic clock so a
+        # wall-clock step cannot stretch or skip a trajectory. Read both together and
+        # convert the offset once.
+        now_ns = node.get_clock().now().nanoseconds
+        now_monotonic = time.monotonic()
+        start_delay_ns = scheduled_ns - now_ns if scheduled_ns else 0
+        if start_delay_ns < -100_000_000:
+            goal_handle.abort()
+            return FollowJointTrajectory.Result(
+                error_code=FollowJointTrajectory.Result.OLD_HEADER_TIMESTAMP,
+                error_string="trajectory header timestamp is in the past",
+            )
+        if start_delay_ns > MAX_TRAJECTORY_START_DELAY_NS:
+            # A far-future stamp would hold the arm and block this goal for as long.
+            goal_handle.abort()
+            return FollowJointTrajectory.Result(
+                error_code=FollowJointTrajectory.Result.INVALID_GOAL,
+                error_string=(
+                    "trajectory header timestamp is more than "
+                    f"{MAX_TRAJECTORY_START_DELAY_NS / 1e9:.0f}s in the future"
+                ),
+            )
+        goal = ArmGoal(
+            host_id=(uuid.uuid4().int % (2**48 - 1)) + 1,
+            host_session=node.last_observation_token[1],
+            start=now_monotonic + max(0, start_delay_ns) / 1e9,
+        )
+        waiting_since = time.monotonic()
+        while node.armed and not node._arm_permission_is_current() and node._hold_feedback_gap():
+            # The plan has not started. Wait for measured joints and the full
+            # supervisor permission instead of failing a goal queued in the gap.
+            if goal_handle.is_cancel_requested:
+                goal_handle.canceled()
+                return FollowJointTrajectory.Result(
+                    error_code=FollowJointTrajectory.Result.SUCCESSFUL
+                )
+            await self._yield_for_control(0.05)
+        goal.start += time.monotonic() - waiting_since
+        with node.state_lock:
+            if not node.armed or not node._arm_permission_is_current():
+                goal_handle.abort()
+                return FollowJointTrajectory.Result(
+                    error_code=FollowJointTrajectory.Result.INVALID_GOAL,
+                    error_string="driver was disarmed before trajectory execution",
+                )
+            with node.trajectory_lock:
+                start_positions = {name: node.arm_positions[name] for name in names}
+                try:
+                    # Feedback can change between goal acceptance and this callback.
+                    # Recheck the first segment against its actual execution start.
+                    points = prepare_trajectory(
+                        names, requested_points, start_positions,
+                        node.arm_zero_positions, node.arm_directions,
+                    )
+                except ValueError as error:
+                    goal_handle.abort()
+                    return FollowJointTrajectory.Result(
+                        error_code=FollowJointTrajectory.Result.INVALID_GOAL,
+                        error_string=str(error),
+                    )
+                if node.trajectory:
+                    node.trajectory.finish("preempted", FollowJointTrajectory.Result.INVALID_GOAL)
+                goal.start_positions = start_positions
+                goal.names = tuple(names)
+                goal.points = points
+                node.trajectory = goal
+            node._zero_command()
+
+        try:
+            # Serialize uploads with torque transitions. A preempted callback
+            # must never upload its older goal after the replacement's upload.
+            with node.torque_lock:
+                with node.trajectory_lock:
+                    current = node.trajectory is goal
+                if current:
+                    response = node.torque.trajectory_request(
+                        TorqueCommand.TRAJECTORY_START, session=goal.host_session, trajectory={
+                            "id": goal.host_id, "names": list(names), "points": requested_points,
+                            "zeros": node.arm_zero_positions, "directions": node.arm_directions,
+                            "path": path_tolerances, "goal": goal_tolerances,
+                            "settling": goal_time_tolerance, "delay": max(0.0, goal.start - time.monotonic()),
+                        },
+                    )
+                    if response.get("trajectory", {}).get("id") != goal.host_id:
+                        raise RuntimeError("motor host did not acknowledge this arm goal")
+        except Exception as error:
+            with node.trajectory_lock:
+                if node.trajectory is goal:
+                    goal.finish(f"local arm upload failed: {error}", FollowJointTrajectory.Result.INVALID_GOAL)
+                    node.trajectory = None
+
+        while not goal.done.is_set():
+            if goal_handle.is_cancel_requested:
+                with node.trajectory_lock:
+                    if node.trajectory is goal:
+                        node.trajectory = None
+                    goal.finish("canceled")
+                goal_handle.canceled()
+                self._cancel_on_host(goal)
+                return FollowJointTrajectory.Result(error_code=FollowJointTrajectory.Result.SUCCESSFUL)
+            status = node.robot.arm_trajectory_status
+            if status is not None and status["id"] == goal.host_id:
+                goal.host_elapsed = status["elapsed"]
+                if status["state"] in {"succeeded", "aborted", "canceled"}:
+                    with node.trajectory_lock:
+                        if node.trajectory is goal and not goal.done.is_set():
+                            goal.finish(
+                                "succeeded" if status["state"] == "succeeded" else status["detail"],
+                                status["code"],
+                            )
+                            node.trajectory = None
+            self.publish_feedback(goal_handle, goal)
+            # Keep control-loop timers, safety updates, and action cancellation
+            # serviceable while this goal waits for measured servo feedback.
+            await self._yield_for_control(0.05)
+
+        if goal.outcome == "succeeded":
+            final = goal.points[-1].positions
+            with node.state_lock:
+                if node.arm_hold_action is not None:
+                    node.arm_hold_action.update({f"{name}.pos": value for name, value in action_positions(
+                        final.keys(), final.values(), node.arm_zero_positions, node.arm_directions,
+                    ).items()})
+            goal_handle.succeed()
+            return FollowJointTrajectory.Result(error_code=FollowJointTrajectory.Result.SUCCESSFUL)
+        self._cancel_on_host(goal)
+        goal_handle.abort()
+        return FollowJointTrajectory.Result(
+            error_code=(
+                FollowJointTrajectory.Result.GOAL_TOLERANCE_VIOLATED
+                if goal.result_code is None else goal.result_code
+            ),
+            error_string="trajectory preempted" if goal.outcome is None else goal.outcome,
+        )
+
+    def _cancel_on_host(self, goal):
+        try:
+            self.driver.torque.trajectory_request(
+                TorqueCommand.TRAJECTORY_CANCEL, id=goal.host_id, session=goal.host_session,
+            )
+        except Exception as error:
+            # The bounded Pi lease has already stopped advancement; report the
+            # failed cancellation rather than assuming its retained goal is gone.
+            self.driver.get_logger().error(f"Local arm cancellation was not confirmed: {error}")
+
+    def requested_tolerances(self, goal, names):
+        node = self.driver
+        if goal.component_path_tolerance or goal.component_goal_tolerance:
+            raise ValueError("component tolerances are unsupported for revolute arm joints")
+        default_path = dict.fromkeys(names, node.trajectory_path_tolerance)
+        path = position_tolerances(names, goal.path_tolerance, default_path)
+        default_goal = {
+            name: node.gripper_trajectory_tolerance if name == "arm_gripper"
+            else node.trajectory_tolerance
+            for name in names
+        }
+        goal_tolerances = position_tolerances(names, goal.goal_tolerance, default_goal)
+        goal_time = duration_seconds(goal.goal_time_tolerance)
+        return path, goal_tolerances, goal_time or node.trajectory_timeout
+
+    def publish_feedback(self, goal_handle, goal):
+        with self.driver.trajectory_lock:
+            actual = {name: self.driver.arm_positions[name] for name in goal.names}
+        goal_handle.publish_feedback(trajectory_feedback(goal, actual))
+
+    async def _yield_for_control(self, delay):
+        node = self.driver
+        future = Future(executor=node.executor)
+        timer = None
+
+        def resume():
+            timer.cancel()
+            future.set_result(None)
+
+        timer = node.create_timer(delay, resume)
+        try:
+            await future
+        finally:
+            timer.cancel()
+            node.destroy_timer(timer)
+
+
+def trajectory_feedback(goal, actual):
+    """FollowJointTrajectory feedback at the host's reported elapsed time."""
+    elapsed = goal.host_elapsed
+    desired, velocities, accelerations = sample_trajectory(
+        goal.names, goal.start_positions, goal.points, elapsed,
+    )
+    feedback = FollowJointTrajectory.Feedback()
+    feedback.joint_names = list(goal.names)
+    feedback.desired.positions = [desired[name] for name in goal.names]
+    feedback.desired.velocities = [velocities[name] for name in goal.names]
+    feedback.desired.accelerations = [accelerations[name] for name in goal.names]
+    feedback.actual.positions = [actual[name] for name in goal.names]
+    feedback.error.positions = [desired[name] - actual[name] for name in goal.names]
+    seconds = int(elapsed)
+    nanoseconds = int((elapsed - seconds) * 1e9)
+    for point in (feedback.desired, feedback.actual, feedback.error):
+        point.time_from_start.sec = seconds
+        point.time_from_start.nanosec = nanoseconds
+    return feedback
+
 
 class LeKiwiDriver(Node):
     def __init__(self):
@@ -55,68 +487,35 @@ class LeKiwiDriver(Node):
         torque_control_timeout_ms = self.declare_parameter("torque_control_timeout_ms", 4000).value
         curve_client_secret = self.declare_parameter("curve_client_secret_key_file", "").value
         curve_server_public = self.declare_parameter("curve_server_public_key_file", "").value
-        self.xy_scale = self.declare_parameter("xy_velocity_scale", BASE_XY_SCALE).value
-        self.yaw_scale = self.declare_parameter("yaw_velocity_scale", BASE_YAW_SCALE).value
-        nav2_file = self.declare_parameter("nav2_params_file", "").value
-        speed_limits = load_base_speed_limits(nav2_file) if nav2_file else (0.3, math.pi / 2)
-        self.max_linear = min(
-            self.declare_parameter("max_linear_speed", speed_limits[0]).value, speed_limits[0]
-        )
-        self.max_angular = min(
-            self.declare_parameter("max_angular_speed", speed_limits[1]).value, speed_limits[1]
-        )
-        self.bounded_base_test = bool(self.declare_parameter("bounded_base_test", False).value)
-        if self.bounded_base_test:
+        defaults = {field.name: field.default for field in dataclasses.fields(DriverSettings)}
+        values = {
+            field: self.declare_parameter(name, defaults[field]).value
+            for name, field in SETTING_PARAMETERS.items()
+        }
+        # Both have no code default: every launcher passes the tracked value.
+        nav2_file = self.declare_parameter("nav2_params_file", Parameter.Type.STRING).value
+        permission_timeout = self.declare_parameter("permission_timeout", Parameter.Type.DOUBLE).value
+        if not nav2_file or permission_timeout is None:
+            raise ValueError("nav2_params_file and permission_timeout parameters are required")
+        speed_limits = load_base_speed_limits(nav2_file)
+        max_linear, max_angular = speed_limits
+        if values["bounded_base_test"]:
             linear, angular = bounded_test_speed_limits(
                 self.declare_parameter("base_test_linear_limit", 0.03).value,
                 self.declare_parameter("base_test_angular_limit", 0.20).value,
                 speed_limits,
             )
-            self.max_linear = min(self.max_linear, linear)
-            self.max_angular = min(self.max_angular, angular)
-        self.command_timeout = self.declare_parameter("command_timeout", 0.4).value
-        self.link_timeout = self.declare_parameter("link_timeout", 1.0).value
-        # Bool permissions have no source timestamp.  The receive-time lease
-        # makes a transient-local sample a restart convenience, not an
-        # unbounded authorization.
-        self.permission_timeout = self.declare_parameter("permission_timeout", 0.5).value
-        self.trajectory_path_tolerance = self.declare_parameter(
-            "trajectory_path_tolerance", 0.20
-        ).value
-        # Match the production travel-stow gate: a successful MoveIt action
-        # must not leave the arm outside its base-motion stow tolerance.
-        self.trajectory_tolerance = self.declare_parameter("trajectory_tolerance", 0.02).value
-        self.gripper_trajectory_tolerance = self.declare_parameter(
-            "gripper_trajectory_tolerance", 0.005
-        ).value
-        self.trajectory_timeout = self.declare_parameter("trajectory_timeout", 5.0).value
-        # This is velocity-integrated odometry, not an encoder/SLAM pose
-        # measurement. Never publish the ROS all-zero covariance (perfect
-        # certainty); these conservative values let consumers fuse it honestly.
-        self.odom_xy_stddev = self.declare_parameter("odom_xy_stddev", 0.05).value
-        self.odom_yaw_stddev = self.declare_parameter("odom_yaw_stddev", 0.10).value
-        self.twist_xy_stddev = self.declare_parameter("twist_xy_stddev", 0.10).value
-        self.twist_yaw_stddev = self.declare_parameter("twist_yaw_stddev", 0.20).value
-        self.cmd_vel_topic = self.declare_parameter("cmd_vel_topic", "/cmd_vel_safe").value
-        self.odom_topic = self.declare_parameter("odom_topic", "/wheel/odometry").value
-        self.publish_odom_tf = self.declare_parameter("publish_odom_tf", False).value
-        self.auto_arm_on_startup = self.declare_parameter("auto_arm_on_startup", True).value
-        # By default the robot stays armed: a failure (link loss, stale telemetry, host
-        # restart, withdrawn permission) stops the base and freezes the arm with torque on,
-        # and the driver re-arms itself once telemetry and permission are healthy again.
-        # Only an operator's safety/disarm stays disarmed. Setting this restores the strict
-        # behaviour for larger robots: every failure disarms, cuts torque, latches
-        # TORQUE_FAULT if the cut is unconfirmed, and waits for an explicit safety/arm.
-        self.disarm_on_failure = bool(
-            self.declare_parameter("disarm_on_failure", False).value
+            max_linear = min(max_linear, linear)
+            max_angular = min(max_angular, angular)
+        settings = DriverSettings(
+            max_linear=max_linear, max_angular=max_angular,
+            permission_timeout=permission_timeout, **values,
         )
-        self.publish_motor_health_enabled = self.declare_parameter(
-            "publish_motor_health", True
-        ).value
-        self.base_permission_topic = self.declare_parameter(
+        odom_topic = self.declare_parameter("odom_topic", "/wheel/odometry").value
+        base_permission_topic = self.declare_parameter(
             "base_motion_permission_topic", "/safety/base_motion_permitted"
         ).value
-        self.arm_permission_topic = self.declare_parameter(
+        arm_permission_topic = self.declare_parameter(
             "arm_motion_permission_topic", "/safety/arm_motion_permitted"
         ).value
         calibration_file = self.declare_parameter(
@@ -124,9 +523,11 @@ class LeKiwiDriver(Node):
         ).value
         # Raw odometry is a continuous local frame. Localization owns the
         # global map->odom placement and must never be baked into wheel odom.
-        initial_x = self.declare_parameter("initial_x", 0.0).value
-        initial_y = self.declare_parameter("initial_y", 0.0).value
-        initial_yaw = self.declare_parameter("initial_yaw", 0.0).value
+        initial_pose = (
+            self.declare_parameter("initial_x", 0.0).value,
+            self.declare_parameter("initial_y", 0.0).value,
+            self.declare_parameter("initial_yaw", 0.0).value,
+        )
 
         for name, port in (
             ("remote_command_port", command_port),
@@ -139,84 +540,26 @@ class LeKiwiDriver(Node):
         curve_credentials = CurveClientCredentials(
             curve_client_secret, curve_server_public
         ).validate()
-        state_keys = tuple(f"{joint}.pos" for joint in ARM_JOINTS) + (
-            "x.vel", "y.vel", "theta.vel",
-        )
-        self.robot = LeKiwiZmqClient(
-            remote_ip, command_port, observation_port, state_keys,
+        robot = LeKiwiZmqClient(
+            remote_ip, command_port, observation_port, STATE_KEYS,
             curve_credentials=curve_credentials,
         )
-        self.robot.connect()
-        self.torque = TorqueControlClient(
+        robot.connect()
+        torque = TorqueControlClient(
             remote_ip, torque_control_port, torque_control_timeout_ms,
             client_secret_key_file=curve_client_secret,
             server_public_key_file=curve_server_public,
         )
-        self.torque_lock = threading.Lock()
-        # Serializes physical actuator transitions and command submission. Local
-        # state uses a separate lock so callbacks remain responsive while ZeroMQ
-        # or the torque service is delayed.
-        self.action_lock = threading.Lock()
-        self.command = Twist()
-        self.command_stamp = self.get_clock().now()
-        self.pose = (initial_x, initial_y, initial_yaw)
-        self._base_test_center = self.pose[:2]
-        now = self.get_clock().now()
-        self.odom_samples = OdometrySampleClock()
-        self.host_pose = HostPoseTracker()
-        self.observation_stamp = None
-        self.last_observation = None
-        self.last_observation_token = None
-        self.last_fresh = now
-        self._last_fresh_monotonic = None
-        self.arm_workspace_collision = False
-        self.link_lost = False
-        # When update() last accepted telemetry that passed the host-session and
-        # torque-readback checks; the automatic arm acts only on such telemetry.
-        self._healthy_telemetry_at = None
-        self.armed = False
-        self.torque_fault = False
-        self.base_motion_permitted = False
-        self.arm_motion_permitted = False
-        self._base_permission_received_at_ns = None
-        self._arm_permission_received_at_ns = None
-        self._arm_permission_expired = False
-        # Arming waits for a complete, fresh observation and current supervisor
-        # permission. By default the robot arms at startup whatever auto_arm_on_startup
-        # says, and the flag is set again after every failure so it re-arms itself.
-        # Only with disarm_on_failure does auto_arm_on_startup decide the startup arm,
-        # and then a link loss or an explicit disarm clears this one-shot flag, so
-        # recovery never resumes movement without an operator arming again.
-        self.auto_arm_pending = bool(self.auto_arm_on_startup) or not self.disarm_on_failure
-        # Set by an operator's safety/disarm and cleared only by a successful safety/arm,
-        # so no later failure or telemetry recovery can re-arm a robot the operator disarmed.
-        self.operator_disarmed = False
-        # A failed automatic arm is retried no earlier than this monotonic time.
-        self._next_rearm_at = 0.0
-        calibration_path = os.path.expanduser(calibration_file)
-        self.arm_calibrated = os.path.isfile(calibration_path)
-        self.stop_pending = True
-        # Bumped by every disarm. An arm commits only if no disarm happened since
-        # it checked its preconditions, so a disarm never waits behind its RPC.
-        self._disarm_epoch = 0
-        # Strict mode: a torque cut the control loop handed to the transition group.
-        self._deferred_cut = False
-        self.state_lock = threading.Lock()
-        self.arm_zero_positions, self.arm_directions = load_calibration(calibration_file)
+        self._init_state(
+            settings, robot=robot, torque=torque, arm_calibration_file=calibration_file,
+            initial_pose=initial_pose, now=self.get_clock().now(),
+        )
         if not self.arm_calibrated:
             self.get_logger().warn(
                 f"No URDF arm calibration at {calibration_file}; arm trajectories are disabled"
             )
-        self.arm_positions = {name: 0.0 for name in ARM_JOINTS}
-        self.arm_hold_action = None
-        self.trajectory = None
-        self.trajectory_lock = threading.Lock()
-        self.safety_publish_lock = threading.Lock()
-        self.safety_state = "DISARMED"
-        self.validate_motion_parameters()
-        self.permission_timeout_ns = int(self.permission_timeout * 1_000_000_000)
 
-        self.odom_pub = self.create_publisher(Odometry, self.odom_topic, 10)
+        self.odom_pub = self.create_publisher(Odometry, odom_topic, 10)
         self.joint_pub = self.create_publisher(JointState, "joint_states", 10)
         self.raw_joint_pub = self.create_publisher(JointState, "arm/raw_joint_states", 10)
         self.motor_health_pub = self.create_publisher(DiagnosticArray, "/hardware/diagnostics", 10)
@@ -230,11 +573,11 @@ class LeKiwiDriver(Node):
         # before waiting for action_lock, so an in-flight enable rolls back.
         self.safety_callback_group = ReentrantCallbackGroup()
         self.create_subscription(
-            Bool, self.base_permission_topic, self.on_base_permission, safety_qos,
+            Bool, base_permission_topic, self.on_base_permission, safety_qos,
             callback_group=self.safety_callback_group,
         )
         self.create_subscription(
-            Bool, self.arm_permission_topic, self.on_arm_permission, safety_qos,
+            Bool, arm_permission_topic, self.on_arm_permission, safety_qos,
             callback_group=self.safety_callback_group,
         )
         self.create_subscription(
@@ -259,7 +602,7 @@ class LeKiwiDriver(Node):
         )
         self.trajectory_server = ActionServer(
             self, FollowJointTrajectory, "arm_controller/follow_joint_trajectory",
-            execute_callback=self.execute_trajectory, goal_callback=self.accept_trajectory,
+            execute_callback=self.arm_trajectories.execute, goal_callback=self.arm_trajectories.accept,
             cancel_callback=lambda _: CancelResponse.ACCEPT,
             callback_group=ReentrantCallbackGroup(),
         )
@@ -268,21 +611,76 @@ class LeKiwiDriver(Node):
         self.get_logger().info(f"Accepting guarded base commands from {self.cmd_vel_topic}")
         self.publish_safety("DISARMED")
 
+    def _init_state(self, settings, *, robot, torque, arm_calibration_file, initial_pose, now):
+        """Set the plain runtime state: no ROS entities, so tests reuse it unchanged."""
+        for field in dataclasses.fields(settings):
+            setattr(self, field.name, getattr(settings, field.name))
+        self.robot = robot
+        self.torque = torque
+        self.torque_lock = threading.Lock()
+        # Serializes physical actuator transitions and command submission. Local
+        # state uses a separate lock so callbacks remain responsive while ZeroMQ
+        # or the torque service is delayed.
+        self.action_lock = threading.Lock()
+        self.command = Twist()
+        self.command_stamp = now
+        self.pose = initial_pose
+        self._base_test_center = self.pose[:2]
+        self.host_pose = HostPoseTracker()
+        self.observation_stamp = None
+        self.last_observation = None
+        self.last_observation_token = None
+        self.last_fresh = now
+        self.arm_workspace_collision = False
+        self.link_lost = False
+        # When update() last accepted telemetry that passed the host-session and
+        # torque-readback checks; the automatic arm acts only on such telemetry.
+        self._healthy_telemetry_at = None
+        self.armed = False
+        self.torque_fault = False
+        permission_timeout_ns = int(settings.permission_timeout * 1_000_000_000)
+        self.base_permission = Lease(permission_timeout_ns)
+        self.arm_permission = Lease(permission_timeout_ns)
+        self._arm_permission_expired = False
+        # Arming waits for a complete, fresh observation and current supervisor
+        # permission. By default the robot arms at startup whatever auto_arm_on_startup
+        # says, and the flag is set again after every failure so it re-arms itself.
+        # Only with disarm_on_failure does auto_arm_on_startup decide the startup arm,
+        # and then a link loss or an explicit disarm clears this one-shot flag, so
+        # recovery never resumes movement without an operator arming again.
+        self.auto_arm_pending = bool(self.auto_arm_on_startup) or not self.disarm_on_failure
+        # Set by an operator's safety/disarm and cleared only by a successful safety/arm,
+        # so no later failure or telemetry recovery can re-arm a robot the operator disarmed.
+        self.operator_disarmed = False
+        # A failed automatic arm is retried no earlier than this monotonic time.
+        self._next_rearm_at = 0.0
+        self.arm_calibrated = os.path.isfile(os.path.expanduser(arm_calibration_file))
+        self.stop_pending = True
+        # Bumped by every disarm. An arm commits only if no disarm happened since
+        # it checked its preconditions, so a disarm never waits behind its RPC.
+        self._disarm_epoch = 0
+        # Strict mode: a torque cut the control loop handed to the transition group.
+        self._deferred_cut = False
+        self.state_lock = threading.Lock()
+        self.arm_zero_positions, self.arm_directions = load_calibration(arm_calibration_file)
+        self.arm_positions = {name: 0.0 for name in ARM_JOINTS}
+        self.arm_hold_action = None
+        # The current arm goal (ArmGoal or None), guarded by trajectory_lock.
+        self.trajectory = None
+        self.trajectory_lock = threading.Lock()
+        self.arm_trajectories = ArmTrajectoryBridge(self)
+        self.safety_publish_lock = threading.Lock()
+        self.safety_state = "DISARMED"
+
     def on_base_permission(self, message):
         permitted = bool(message.data)
         received_at_ns = time.monotonic_ns()
         with self.state_lock:
-            self.base_motion_permitted = permitted
-            self._base_permission_received_at_ns = received_at_ns
+            self.base_permission.grant(permitted, received_at_ns)
             if not permitted:
-                self.command = Twist()
-                self.command_stamp = self.get_clock().now()
+                self._zero_command()
             armed = self.armed
-            arm_current = self._permission_is_current(
-                self.arm_motion_permitted,
-                self._arm_permission_received_at_ns,
-                received_at_ns,
-            )
+            arm_current = self.arm_permission.current(received_at_ns)
         if not permitted and armed and not arm_current and not self._hold_feedback_gap():
             self.get_logger().error(
                 "All motion capability permissions withdrawn; disarming"
@@ -293,17 +691,12 @@ class LeKiwiDriver(Node):
         received_at_ns = time.monotonic_ns()
         with self.state_lock:
             permitted = bool(message.data) and not self.arm_workspace_collision
-            was_permitted = bool(self.arm_motion_permitted)
+            was_permitted = self.arm_permission.value
             was_expired = bool(self._arm_permission_expired)
-            self.arm_motion_permitted = permitted
-            self._arm_permission_received_at_ns = received_at_ns
+            self.arm_permission.grant(permitted, received_at_ns)
             self._arm_permission_expired = not permitted
             armed = self.armed
-            base_current = self._permission_is_current(
-                self.base_motion_permitted,
-                self._base_permission_received_at_ns,
-                received_at_ns,
-            )
+            base_current = self.base_permission.current(received_at_ns)
         newly_withdrawn = not permitted and (was_permitted or not was_expired)
         if newly_withdrawn and armed:
             if self._hold_feedback_gap():
@@ -325,21 +718,10 @@ class LeKiwiDriver(Node):
         if message.data:
             self.on_arm_permission(Bool(data=False))
 
-    def _permission_is_current(self, permitted, received_at_ns, now_ns=None):
-        return bool(permitted) and lease_is_fresh(
-            received_at_ns, self.permission_timeout_ns, now_ns
-        )
-
-    def _capability_permission_is_current(self, now_ns=None):
-        return self._permission_is_current(
-            self.base_motion_permitted,
-            self._base_permission_received_at_ns,
-            now_ns,
-        ) or self._permission_is_current(
-            self.arm_motion_permitted,
-            self._arm_permission_received_at_ns,
-            now_ns,
-        )
+    def _zero_command(self):
+        """Drop the pending base command; the caller holds state_lock."""
+        self.command = Twist()
+        self.command_stamp = self.get_clock().now()
 
     def _hold_feedback_gap(self):
         """Retain an arm goal while feedback or collision checking is unavailable.
@@ -356,26 +738,16 @@ class LeKiwiDriver(Node):
         current = time.monotonic_ns() if now_monotonic_ns is None else now_monotonic_ns
         arm_expired = False
         with self.state_lock:
-            base_current = self._permission_is_current(
-                self.base_motion_permitted,
-                self._base_permission_received_at_ns,
-                current,
-            )
-            if not base_current:
-                if self.base_motion_permitted:
-                    self.base_motion_permitted = False
-                    self.command = Twist()
-                    self.command_stamp = self.get_clock().now()
+            base_current = self.base_permission.current(current)
+            if not base_current and self.base_permission.value:
+                self.base_permission.value = False
+                self._zero_command()
 
-            arm_current = self._permission_is_current(
-                self.arm_motion_permitted,
-                self._arm_permission_received_at_ns,
-                current,
-            )
+            arm_current = self.arm_permission.current(current)
             if not arm_current:
                 if not self._arm_permission_expired:
                     arm_expired = True
-                self.arm_motion_permitted = False
+                self.arm_permission.value = False
                 self._arm_permission_expired = True
             else:
                 self._arm_permission_expired = False
@@ -398,9 +770,7 @@ class LeKiwiDriver(Node):
             self.set_disarmed("DISARMED", defer_cut=True)
             return
         with self.state_lock:
-            if not self.armed or not self._permission_is_current(
-                self.base_motion_permitted, self._base_permission_received_at_ns
-            ):
+            if not self.armed or not self.base_permission.current():
                 return
             self.command = message
             self.command_stamp = self.get_clock().now()
@@ -446,12 +816,10 @@ class LeKiwiDriver(Node):
     def cancel_trajectory(self, outcome, result_code=None):
         with self.trajectory_lock:
             if self.trajectory:
-                self.trajectory["outcome"] = outcome
-                self.trajectory["result_code"] = (
-                    FollowJointTrajectory.Result.INVALID_GOAL
-                    if result_code is None else result_code
+                self.trajectory.finish(
+                    outcome,
+                    FollowJointTrajectory.Result.INVALID_GOAL if result_code is None else result_code,
                 )
-                self.trajectory["done"].set()
                 self.trajectory = None
 
     def set_disarmed(
@@ -474,8 +842,7 @@ class LeKiwiDriver(Node):
             if deliberate:
                 self.operator_disarmed = True
             self.auto_arm_pending = not self.operator_disarmed and not self.disarm_on_failure
-            self.command = Twist()
-            self.command_stamp = self.get_clock().now()
+            self._zero_command()
             self.stop_pending = True
             self.arm_hold_action = None
             if defer_cut:
@@ -556,9 +923,7 @@ class LeKiwiDriver(Node):
         return True
 
     def _arm_permission_is_current(self):
-        return self._permission_is_current(
-            self.arm_motion_permitted, self._arm_permission_received_at_ns
-        )
+        return self.arm_permission.current()
 
     def _enable_torque_and_arm(self, permission_is_current, operator, disarm_epoch):
         """Enable servo torque, then commit ARMED only if it is still safe.
@@ -581,8 +946,7 @@ class LeKiwiDriver(Node):
                     self.armed = True
                     if operator:
                         self.operator_disarmed = False
-                    self.command = Twist()
-                    self.command_stamp = self.get_clock().now()
+                    self._zero_command()
             if still_safe:
                 self.publish_safety("ARMED", disarm_epoch=disarm_epoch)
                 return "armed", True
@@ -713,250 +1077,6 @@ class LeKiwiDriver(Node):
         )
         return response
 
-    def accept_trajectory(self, goal):
-        if not self.armed or (
-            not self._arm_permission_is_current() and not self._hold_feedback_gap()
-        ):
-            # MoveIt surfaces this only as an unexplained "goal was rejected"; say why here.
-            self.get_logger().warn(
-                "Rejecting arm trajectory: driver is disarmed or arm safety permission is absent"
-            )
-            return GoalResponse.REJECT
-        if not self.arm_calibrated:
-            self.get_logger().warn(
-                "Rejecting arm trajectory: no valid arm calibration is installed"
-            )
-            return GoalResponse.REJECT
-        try:
-            points = trajectory_rows(goal.trajectory)
-            with self.trajectory_lock:
-                start_positions = self.arm_positions.copy()
-            prepare_trajectory(
-                goal.trajectory.joint_names, points, start_positions,
-                self.arm_zero_positions, self.arm_directions,
-            )
-            self.requested_tolerances(goal, goal.trajectory.joint_names)
-            stamp_nanoseconds(goal.trajectory.header.stamp)
-            if goal.multi_dof_trajectory.joint_names or goal.multi_dof_trajectory.points:
-                raise ValueError("multi-DOF trajectories are unsupported")
-        except (IndexError, ValueError) as error:
-            self.get_logger().warn(f"Rejecting arm trajectory: {error}")
-            return GoalResponse.REJECT
-        return GoalResponse.ACCEPT
-
-    async def execute_trajectory(self, goal_handle):
-        names = goal_handle.request.trajectory.joint_names
-        requested_points = trajectory_rows(goal_handle.request.trajectory)
-        path_tolerances, goal_tolerances, goal_time_tolerance = self.requested_tolerances(
-            goal_handle.request, names
-        )
-        scheduled_ns = stamp_nanoseconds(goal_handle.request.trajectory.header.stamp)
-        # The header is ROS time, but execution is timed on the monotonic clock so a
-        # wall-clock step cannot stretch or skip a trajectory. Read both together and
-        # convert the offset once.
-        now_ns = self.get_clock().now().nanoseconds
-        now_monotonic = time.monotonic()
-        start_delay_ns = scheduled_ns - now_ns if scheduled_ns else 0
-        if start_delay_ns < -100_000_000:
-            goal_handle.abort()
-            return FollowJointTrajectory.Result(
-                error_code=FollowJointTrajectory.Result.OLD_HEADER_TIMESTAMP,
-                error_string="trajectory header timestamp is in the past",
-            )
-        if start_delay_ns > MAX_TRAJECTORY_START_DELAY_NS:
-            # A far-future stamp would hold the arm and block this goal for as long.
-            goal_handle.abort()
-            return FollowJointTrajectory.Result(
-                error_code=FollowJointTrajectory.Result.INVALID_GOAL,
-                error_string=(
-                    "trajectory header timestamp is more than "
-                    f"{MAX_TRAJECTORY_START_DELAY_NS / 1e9:.0f}s in the future"
-                ),
-            )
-        trajectory = {
-            "start": now_monotonic + max(0, start_delay_ns) / 1e9,
-            "done": threading.Event(),
-            "host_id": (uuid.uuid4().int % (2**48 - 1)) + 1,
-            "host_session": self.last_observation_token[1],
-            "host_elapsed": 0.0,
-        }
-        waiting_since = time.monotonic()
-        while self.armed and not self._arm_permission_is_current() and self._hold_feedback_gap():
-            # The plan has not started. Wait for measured joints and the full
-            # supervisor permission instead of failing a goal queued in the gap.
-            if goal_handle.is_cancel_requested:
-                goal_handle.canceled()
-                return FollowJointTrajectory.Result(
-                    error_code=FollowJointTrajectory.Result.SUCCESSFUL
-                )
-            await self._yield_for_control(0.05)
-        trajectory["start"] += time.monotonic() - waiting_since
-        with self.state_lock:
-            if not self.armed or not self._arm_permission_is_current():
-                goal_handle.abort()
-                return FollowJointTrajectory.Result(
-                    error_code=FollowJointTrajectory.Result.INVALID_GOAL,
-                    error_string="driver was disarmed before trajectory execution",
-                )
-            with self.trajectory_lock:
-                start_positions = {name: self.arm_positions[name] for name in names}
-                try:
-                    # Feedback can change between goal acceptance and this callback.
-                    # Recheck the first segment against its actual execution start.
-                    points = prepare_trajectory(
-                        names, requested_points, start_positions,
-                        self.arm_zero_positions, self.arm_directions,
-                    )
-                except ValueError as error:
-                    goal_handle.abort()
-                    return FollowJointTrajectory.Result(
-                        error_code=FollowJointTrajectory.Result.INVALID_GOAL,
-                        error_string=str(error),
-                    )
-                if self.trajectory:
-                    self.trajectory["outcome"] = "preempted"
-                    self.trajectory["result_code"] = FollowJointTrajectory.Result.INVALID_GOAL
-                    self.trajectory["done"].set()
-                trajectory["start_positions"] = start_positions
-                trajectory["names"] = tuple(names)
-                trajectory["points"] = points
-                self.trajectory = trajectory
-            self.command = Twist()
-            self.command_stamp = self.get_clock().now()
-
-        try:
-            # Serialize uploads with torque transitions. A preempted callback
-            # must never upload its older goal after the replacement's upload.
-            with self.torque_lock:
-                with self.trajectory_lock:
-                    current = self.trajectory is trajectory
-                if current:
-                    response = self.torque.trajectory_request(
-                        "trajectory_start", session=trajectory["host_session"], trajectory={
-                            "id": trajectory["host_id"], "names": list(names), "points": requested_points,
-                            "zeros": self.arm_zero_positions, "directions": self.arm_directions,
-                            "path": path_tolerances, "goal": goal_tolerances,
-                            "settling": goal_time_tolerance, "delay": max(0.0, trajectory["start"] - time.monotonic()),
-                        },
-                    )
-                    if response.get("trajectory", {}).get("id") != trajectory["host_id"]:
-                        raise RuntimeError("motor host did not acknowledge this arm goal")
-        except Exception as error:
-            with self.trajectory_lock:
-                if self.trajectory is trajectory:
-                    trajectory["outcome"] = f"local arm upload failed: {error}"
-                    trajectory["result_code"] = FollowJointTrajectory.Result.INVALID_GOAL
-                    trajectory["done"].set()
-                    self.trajectory = None
-
-        while not trajectory["done"].is_set():
-            if goal_handle.is_cancel_requested:
-                with self.trajectory_lock:
-                    if self.trajectory is trajectory:
-                        self.trajectory = None
-                    trajectory["outcome"] = "canceled"
-                    trajectory["done"].set()
-                goal_handle.canceled()
-                self._cancel_host_trajectory(trajectory)
-                return FollowJointTrajectory.Result(error_code=FollowJointTrajectory.Result.SUCCESSFUL)
-            status = getattr(self.robot, "arm_trajectory_status", None)
-            if status is not None and status["id"] == trajectory["host_id"]:
-                trajectory["host_elapsed"] = status["elapsed"]
-                if status["state"] in {"succeeded", "aborted", "canceled"}:
-                    with self.trajectory_lock:
-                        if self.trajectory is trajectory and not trajectory["done"].is_set():
-                            trajectory["outcome"] = "succeeded" if status["state"] == "succeeded" else status["detail"]
-                            trajectory["result_code"] = status["code"]
-                            trajectory["done"].set()
-                            self.trajectory = None
-            self.publish_trajectory_feedback(goal_handle, trajectory)
-            # Keep control-loop timers, safety updates, and action cancellation
-            # serviceable while this goal waits for measured servo feedback.
-            await self._yield_for_control(0.05)
-
-        if trajectory.get("outcome") == "succeeded":
-            final = trajectory["points"][-1].positions
-            with self.state_lock:
-                if self.arm_hold_action is not None:
-                    self.arm_hold_action.update({f"{name}.pos": value for name, value in action_positions(
-                        final.keys(), final.values(), self.arm_zero_positions, self.arm_directions,
-                    ).items()})
-            goal_handle.succeed()
-            return FollowJointTrajectory.Result(error_code=FollowJointTrajectory.Result.SUCCESSFUL)
-        self._cancel_host_trajectory(trajectory)
-        goal_handle.abort()
-        return FollowJointTrajectory.Result(
-            error_code=trajectory.get(
-                "result_code", FollowJointTrajectory.Result.GOAL_TOLERANCE_VIOLATED
-            ),
-            error_string=trajectory.get("outcome", "trajectory preempted"),
-        )
-
-    def _cancel_host_trajectory(self, trajectory):
-        try:
-            self.torque.trajectory_request(
-                "trajectory_cancel", id=trajectory["host_id"], session=trajectory["host_session"],
-            )
-        except Exception as error:
-            # The bounded Pi lease has already stopped advancement; report the
-            # failed cancellation rather than assuming its retained goal is gone.
-            self.get_logger().error(f"Local arm cancellation was not confirmed: {error}")
-
-    def requested_tolerances(self, goal, names):
-        if goal.component_path_tolerance or goal.component_goal_tolerance:
-            raise ValueError("component tolerances are unsupported for revolute arm joints")
-        default_path = dict.fromkeys(names, self.trajectory_path_tolerance)
-        path = position_tolerances(names, goal.path_tolerance, default_path)
-        default_goal = {
-            name: self.gripper_trajectory_tolerance if name == "arm_gripper"
-            else self.trajectory_tolerance
-            for name in names
-        }
-        goal_tolerances = position_tolerances(names, goal.goal_tolerance, default_goal)
-        goal_time = duration_seconds(goal.goal_time_tolerance)
-        return path, goal_tolerances, goal_time or self.trajectory_timeout
-
-    def publish_trajectory_feedback(self, goal_handle, trajectory):
-        elapsed = trajectory["host_elapsed"]
-        with self.trajectory_lock:
-            actual = {
-                name: self.arm_positions[name] for name in trajectory["names"]
-            }
-        desired, velocities, accelerations = sample_trajectory(
-            trajectory["names"], trajectory["start_positions"],
-            trajectory["points"], elapsed,
-        )
-        feedback = FollowJointTrajectory.Feedback()
-        feedback.joint_names = list(trajectory["names"])
-        feedback.desired.positions = [desired[name] for name in trajectory["names"]]
-        feedback.desired.velocities = [velocities[name] for name in trajectory["names"]]
-        feedback.desired.accelerations = [accelerations[name] for name in trajectory["names"]]
-        feedback.actual.positions = [actual[name] for name in trajectory["names"]]
-        feedback.error.positions = [
-            desired[name] - actual[name] for name in trajectory["names"]
-        ]
-        seconds = int(elapsed)
-        nanoseconds = int((elapsed - seconds) * 1e9)
-        for point in (feedback.desired, feedback.actual, feedback.error):
-            point.time_from_start.sec = seconds
-            point.time_from_start.nanosec = nanoseconds
-        goal_handle.publish_feedback(feedback)
-
-    async def _yield_for_control(self, delay):
-        future = Future(executor=self.executor)
-        timer = None
-
-        def resume():
-            timer.cancel()
-            future.set_result(None)
-
-        timer = self.create_timer(delay, resume)
-        try:
-            await future
-        finally:
-            timer.cancel()
-            self.destroy_timer(timer)
-
     @staticmethod
     def clamp(value, limit):
         return max(-limit, min(limit, value))
@@ -969,72 +1089,27 @@ class LeKiwiDriver(Node):
         scale = limit / magnitude
         return x * scale, y * scale
 
-    def validate_motion_parameters(self):
-        """Reject values that would make a command unsafe or undefined."""
-        positive = {
-            "xy_velocity_scale": self.xy_scale,
-            "yaw_velocity_scale": self.yaw_scale,
-            "command_timeout": self.command_timeout,
-            "link_timeout": self.link_timeout,
-            "permission_timeout": self.permission_timeout,
-            "trajectory_path_tolerance": self.trajectory_path_tolerance,
-            "trajectory_tolerance": self.trajectory_tolerance,
-            "gripper_trajectory_tolerance": self.gripper_trajectory_tolerance,
-            "trajectory_timeout": self.trajectory_timeout,
-            "odom_xy_stddev": self.odom_xy_stddev,
-            "odom_yaw_stddev": self.odom_yaw_stddev,
-            "twist_xy_stddev": self.twist_xy_stddev,
-            "twist_yaw_stddev": self.twist_yaw_stddev,
-        }
-        nonnegative = {
-            "max_linear_speed": self.max_linear,
-            "max_angular_speed": self.max_angular,
-        }
-        for name, value in positive.items():
-            if not math.isfinite(value) or value <= 0:
-                raise ValueError(f"{name} must be finite and greater than zero")
-        for name, value in nonnegative.items():
-            if not math.isfinite(value) or value < 0:
-                raise ValueError(f"{name} must be finite and non-negative")
-        if not isinstance(self.cmd_vel_topic, str) or not self.cmd_vel_topic.strip():
-            raise ValueError("cmd_vel_topic must be a non-empty topic name")
-
     def observation_is_fresh(self, observation):
-        # A stationary robot with cameras intentionally disabled reports identical
-        # numeric values in every packet. Comparing those values mistakes healthy,
-        # fresh telemetry for a dropout. The client sequence advances only when its ZMQ
-        # socket consumed a new multipart observation; cached observations leave it
-        # unchanged, which is the signal the driver actually needs for link safety.
-        robot = self.robot
-        token_marker = object()
-        token = getattr(robot, "observation_token", token_marker)
+        # A stationary robot reports identical numeric values in every packet.
+        # Comparing those values mistakes healthy, fresh telemetry for a dropout.
+        # The client sequence advances only when its ZMQ socket consumed a new
+        # observation; cached observations leave it unchanged, which is the
+        # signal the driver actually needs for link safety.
+        token = self.robot.observation_token
         if token is None:
-            # The repository client exposes this attribute before receiving its
-            # first valid packet. Its initialized/cached zero state is not data.
+            # The client has not accepted a packet yet; its initial zero state is not data.
             return False
-        if token is token_marker:
-            sequence = getattr(robot, "observation_sequence", None)
-            token = ("zmq", sequence) if sequence is not None else None
-        if token is None:
-            # Keep the function useful for lightweight tests and alternate clients that
-            # have not implemented the transport sequence yet.
-            token = tuple(sorted(
-                (name, float(value))
-                for name, value in observation.items()
-                if name.endswith((".pos", ".vel"))
-            ))
         fresh = token != self.last_observation_token
         self.last_observation_token = token
         self.last_observation = observation
         return fresh
 
     def handle_host_session_change(self):
-        if not getattr(self.robot, "observation_session_changed", False):
+        if not self.robot.observation_session_changed:
             return False
         # A new host process always starts torque-off. Keep logical state aligned
         # even if downtime was shorter than the telemetry watchdog threshold; the
         # robot then re-arms itself, or waits for an operator in the strict mode.
-        self.odom_samples.reset()
         self.set_disarmed("DISARMED", defer_cut=True)
         self.get_logger().error(
             "LeKiwi host session changed; "
@@ -1048,10 +1123,7 @@ class LeKiwiDriver(Node):
 
     def enforce_reported_torque_state(self):
         """Keep logical arming synchronized with authenticated host readback."""
-        reported = getattr(self.robot, "observation_torque_enabled", None)
-        if reported is None:
-            # No accepted telemetry has reported physical state yet.
-            return False
+        reported = self.robot.observation_torque_enabled
         if self.action_lock.locked():
             # An arm or disarm transaction is changing torque right now and
             # settles the logical state itself once the host confirms.
@@ -1090,13 +1162,11 @@ class LeKiwiDriver(Node):
             return
         self.get_logger().error(reason)
         self.link_lost = True
-        self.odom_samples.reset()
         if (not self.disarm_on_failure
                 and reason.startswith("No fresh LeKiwi telemetry")):
-            # The Pi's lease expires and freezes motion independently. Preserve
-            # its goal through transport silence; invalid telemetry, motor faults,
-            # explicit disarm, and host-session changes still cancel normally.
-            self._hold_feedback_gap()
+            # The Pi's lease expires and freezes motion independently. Stay armed
+            # and keep its goal through transport silence; invalid telemetry, motor
+            # faults, explicit disarm, and host-session changes still cancel normally.
             self.publish_safety("LINK_LOST")
             return
         self.set_disarmed("LINK_LOST", defer_cut=True)
@@ -1125,7 +1195,7 @@ class LeKiwiDriver(Node):
             self.record_link_loss(f"LeKiwi telemetry failed: {error}")
             return None
 
-        missing_state_keys = getattr(self.robot, "missing_state_keys", ())
+        missing_state_keys = self.robot.missing_state_keys
         if not self.observation_is_valid(observation, missing_state_keys):
             reason = "LeKiwi telemetry is incomplete or non-finite"
             if missing_state_keys:
@@ -1135,29 +1205,24 @@ class LeKiwiDriver(Node):
 
         if not self.observation_is_fresh(observation):
             quiet = (now - self.last_fresh).nanoseconds / 1e9
-            self._hold_feedback_gap()
             if quiet > self.link_timeout:
                 self.record_link_loss(
                     f"No fresh LeKiwi telemetry for {quiet:.1f}s; waiting for recovery"
                 )
             return None
 
-        odometry = getattr(self.robot, "observation_odometry", None)
-        self.observation_stamp = None
-        if odometry is not None:
-            if any(not math.isclose(a, b, rel_tol=1e-6) for a, b in zip(
-                    odometry["scales"], (self.xy_scale, self.yaw_scale))):
-                self.record_link_loss("Pi and compute wheel calibration differ; sync calibration before motion")
-                return None
-            stamp_ns = odometry["stamp_ns"]
-            age = (self.get_clock().now().nanoseconds - stamp_ns) / 1e9
-            if age > self.link_timeout or age < -0.1:
-                self.record_link_loss(f"Host odometry capture timestamp is stale or unsynchronized ({age:.3f}s)")
-                return None
-            self.observation_stamp = rclpy.time.Time(nanoseconds=stamp_ns).to_msg()
+        odometry = self.robot.observation_odometry
+        if any(not math.isclose(a, b, rel_tol=1e-6) for a, b in zip(
+                odometry["scales"], (self.xy_scale, self.yaw_scale))):
+            self.record_link_loss("Pi and compute wheel calibration differ; sync calibration before motion")
+            return None
+        stamp_ns = odometry["stamp_ns"]
+        age = (self.get_clock().now().nanoseconds - stamp_ns) / 1e9
+        if age > self.link_timeout or age < -0.1:
+            self.record_link_loss(f"Host odometry capture timestamp is stale or unsynchronized ({age:.3f}s)")
+            return None
+        self.observation_stamp = rclpy.time.Time(nanoseconds=stamp_ns).to_msg()
         self.last_fresh = now
-        with self.state_lock:
-            self._last_fresh_monotonic = time.monotonic()
         self.publish_motor_health(now.to_msg())
         arm_positions = joint_positions(
             observation, self.arm_zero_positions, self.arm_directions
@@ -1169,9 +1234,6 @@ class LeKiwiDriver(Node):
         with self.state_lock:
             self._healthy_telemetry_at = now
         if self.link_lost:
-            # The recovered sample establishes a new origin. Never integrate
-            # a reported velocity across an interval with no telemetry.
-            self.odom_samples.reset()
             self.link_lost = False
             with self.state_lock:
                 recovered_state = "TORQUE_FAULT" if self.torque_fault else "ARMED" if self.armed else "DISARMED"
@@ -1187,20 +1249,9 @@ class LeKiwiDriver(Node):
             float(observation["y.vel"]) * self.xy_scale,
             math.radians(float(observation["theta.vel"])) * self.yaw_scale,
         )
-        if odometry is not None:
-            self.pose = self.host_pose.update(self.last_observation_token[1], odometry["pose"], self.pose)
-            return observation, velocity
-        sample_dt = self.odom_samples.accept(
-            self.last_observation_token,
-            now.nanoseconds,
-            getattr(self.robot, "observation_sample_monotonic_ns", None),
-        )
-        if sample_dt is not None:
-            self.pose = integrate_pose(self.pose, velocity, sample_dt)
-        elif self.odom_samples.discontinuity:
-            self.get_logger().warn(
-                f"Odometry discontinuity: {self.odom_samples.discontinuity}; not integrating this sample"
-            )
+        # The host integrates its own measured velocity, so samples dropped in
+        # transport lose no motion; only its pose is aligned to the local frame.
+        self.pose = self.host_pose.update(self.last_observation_token[1], odometry["pose"], self.pose)
         return observation, velocity
 
     @staticmethod
@@ -1242,7 +1293,7 @@ class LeKiwiDriver(Node):
             return
         # Torque state is not motion state: retain measured odometry if the
         # robot is pushed or coasts while commands are inhibited.
-        self.publish_state(now.to_msg(), observation, velocity)
+        self.publish_state(self.observation_stamp, observation, velocity)
         self.publish_safety()
 
     def _send_armed_command(self, now, observation, velocity):
@@ -1250,10 +1301,7 @@ class LeKiwiDriver(Node):
             if not self.armed:
                 return
             stale = (now - self.command_stamp).nanoseconds / 1e9 > self.command_timeout
-            cmd = Twist() if stale or not self._permission_is_current(
-                self.base_motion_permitted,
-                self._base_permission_received_at_ns,
-            ) else self.command
+            cmd = Twist() if stale or not self.base_permission.current() else self.command
             # Latch the first measured pose after torque is enabled. Reusing each
             # new observation as the goal lets gravity walk an idle arm down.
             if self.arm_hold_action is None:
@@ -1283,7 +1331,7 @@ class LeKiwiDriver(Node):
         # other holder is an arm or disarm transaction: skip this cycle's send
         # rather than stall the loop behind its torque RPC (a disarm queues a stop).
         if not self.action_lock.acquire(blocking=False):
-            self.publish_state(now.to_msg(), observation, velocity)
+            self.publish_state(self.observation_stamp, observation, velocity)
             self.publish_safety()
             return
         send_error = None
@@ -1292,10 +1340,7 @@ class LeKiwiDriver(Node):
                 if not self.armed:
                     return
                 arm_permitted = self._arm_permission_is_current()
-                base_permitted = self._permission_is_current(
-                    self.base_motion_permitted,
-                    self._base_permission_received_at_ns,
-                )
+                base_permitted = self.base_permission.current()
             if not arm_permitted:
                 if not self._hold_feedback_gap():
                     self.cancel_trajectory("arm safety permission withdrawn")
@@ -1306,7 +1351,7 @@ class LeKiwiDriver(Node):
             if self.bounded_base_test and not inside_base_test_boundary(self.pose, self._base_test_center):
                 action["x.vel"] = action["y.vel"] = action["theta.vel"] = 0.0
             with self.trajectory_lock:
-                remote_goal = self.trajectory.get("host_id") if self.trajectory else None
+                remote_goal = self.trajectory.host_id if self.trajectory else None
             if remote_goal is not None:
                 self.robot.send_action(action, arm_goal_id=remote_goal, arm_permitted=arm_permitted)
             else:
@@ -1325,83 +1370,28 @@ class LeKiwiDriver(Node):
             self.record_link_loss(f"LeKiwi command failed: {send_error}")
             return
 
-        self.publish_state(now.to_msg(), observation, velocity)
+        self.publish_state(self.observation_stamp, observation, velocity)
         self.publish_safety()
 
     def publish_state(self, stamp, observation, velocity):
-        stamp = getattr(self, "observation_stamp", None) or stamp
-        x, y, yaw = self.pose
-        qz, qw = math.sin(yaw / 2), math.cos(yaw / 2)
-
-        odom = Odometry()
-        odom.header.stamp = stamp
-        odom.header.frame_id = "odom"
-        odom.child_frame_id = "base_footprint"
-        odom.pose.pose.position.x = x
-        odom.pose.pose.position.y = y
-        odom.pose.pose.orientation.z = qz
-        odom.pose.pose.orientation.w = qw
-        odom.twist.twist.linear.x, odom.twist.twist.linear.y, odom.twist.twist.angular.z = velocity
-        # Indices follow ROS's row-major [x, y, z, roll, pitch, yaw] convention.
-        # z/roll/pitch are unobserved by this planar driver, so their deliberately
-        # large variance prevents a 3D estimator mistaking them for measurements.
-        odom.pose.covariance = [0.0] * 36
-        odom.pose.covariance[0] = odom.pose.covariance[7] = self.odom_xy_stddev ** 2
-        odom.pose.covariance[14] = odom.pose.covariance[21] = odom.pose.covariance[28] = 1e6
-        odom.pose.covariance[35] = self.odom_yaw_stddev ** 2
-        odom.twist.covariance = [0.0] * 36
-        odom.twist.covariance[0] = odom.twist.covariance[7] = self.twist_xy_stddev ** 2
-        odom.twist.covariance[14] = odom.twist.covariance[21] = odom.twist.covariance[28] = 1e6
-        odom.twist.covariance[35] = self.twist_yaw_stddev ** 2
+        odom = odometry_message(
+            stamp, self.pose, velocity,
+            (self.odom_xy_stddev, self.odom_yaw_stddev),
+            (self.twist_xy_stddev, self.twist_yaw_stddev),
+        )
         self.odom_pub.publish(odom)
-
-        transform = TransformStamped()
-        transform.header = odom.header
-        transform.child_frame_id = odom.child_frame_id
-        transform.transform.translation.x = x
-        transform.transform.translation.y = y
-        transform.transform.rotation.z = qz
-        transform.transform.rotation.w = qw
         if self.publish_odom_tf:
-            self.tf.sendTransform(transform)
-
-        joints = JointState()
-        joints.header.stamp = stamp
-        joints.name = list(ARM_JOINTS)
-        joints.position = [self.arm_positions[name] for name in ARM_JOINTS]
-        self.joint_pub.publish(joints)
-        raw = JointState()
-        raw.header.stamp = stamp
-        raw.name = list(ARM_JOINTS)
-        positions = raw_joint_positions(observation)
-        raw.position = [positions[name] for name in ARM_JOINTS]
-        self.raw_joint_pub.publish(raw)
+            self.tf.sendTransform(odometry_transform(odom))
+        self.joint_pub.publish(arm_joint_state(stamp, self.arm_positions))
+        self.raw_joint_pub.publish(arm_joint_state(stamp, raw_joint_positions(observation)))
 
     def publish_motor_health(self, stamp):
         """Publish only the snapshot validated with this fresh host observation."""
         if not self.publish_motor_health_enabled:
             return
-        statuses = getattr(self.robot, "observation_motor_health", None)
-        if not statuses:
-            # This path is defensive: the ZeroMQ client rejects absent or
-            # malformed health telemetry before a sample reaches ``update``.
-            return
-        message = DiagnosticArray()
-        message.header.stamp = stamp
-        message.status = []
-        for source in statuses:
-            status = DiagnosticStatus()
-            status.name = source.name
-            status.level = bytes((source.level,))
-            status.message = source.message
-            status.hardware_id = "lekiwi_servo_bus"
-            status.values = []
-            for key, value in source.values:
-                item = KeyValue()
-                item.key, item.value = key, value
-                status.values.append(item)
-            message.status.append(status)
-        self.motor_health_pub.publish(message)
+        # The client rejects absent or malformed health telemetry before a
+        # sample reaches update(), so a fresh sample always carries a snapshot.
+        self.motor_health_pub.publish(diagnostics_message(stamp, self.robot.observation_motor_health))
 
     def destroy_node(self):
         try:

@@ -11,6 +11,8 @@ from typing import Any
 
 import yaml
 
+from lekiwi_rmf.geometry import point_segment_distance
+
 
 class MapBundleError(ValueError):
     """A bundle is incomplete, inconsistent, or not deployment-approved."""
@@ -212,14 +214,7 @@ def _segment_rectangle_distance(ax: float, ay: float, bx: float, by: float,
                                 left: float, bottom: float, right: float, top: float) -> float:
     if _segment_intersects_rectangle(ax, ay, bx, by, left, bottom, right, top):
         return 0.0
-    dx, dy = bx - ax, by - ay
-    length_squared = dx * dx + dy * dy
-    def point_segment_distance(px: float, py: float) -> float:
-        if length_squared <= 1e-20:
-            return math.hypot(px - ax, py - ay)
-        parameter = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / length_squared))
-        return math.hypot(px - (ax + parameter * dx), py - (ay + parameter * dy))
-    return min(point_segment_distance(px, py) for px, py in (
+    return min(point_segment_distance(corner, (ax, ay), (bx, by)) for corner in (
         (left, bottom), (left, top), (right, bottom), (right, top)
     ))
 

@@ -1,5 +1,6 @@
 """Native Gazebo watchdog must stop actuators without either ROS adapter."""
 
+from pathlib import Path
 import uuid
 
 import unittest
@@ -50,7 +51,7 @@ def generate_test_description():
         output="screen",
     )
     smoke = ExecuteProcess(
-        cmd=["python3", "-m", "lekiwi_rmf.sim_native_failsafe_smoke",
+        cmd=["python3", str(Path(__file__).with_name("sim_native_failsafe_smoke.py")),
              "--ros-args", "-p", "use_sim_time:=true"], output="screen",
     )
     return launch.LaunchDescription([

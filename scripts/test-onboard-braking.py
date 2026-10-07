@@ -26,8 +26,36 @@ from lekiwi_rmf.scan_self_filter import blank_body_sectors, parse_sectors
 ROOT = Path(__file__).resolve().parents[1]
 FAULT = import_module('test-physical-acceptance')
 NAV = FAULT.navigation
-BRAKE = import_module('test-braking')
-DIRECTIONS = BRAKE.DIRECTIONS
+DIRECTIONS = {'forward':(1,0,0), 'reverse':(-1,0,0), 'left':(0,1,0), 'right':(0,-1,0),
+              'rotation_cw':(0,0,-1), 'rotation_ccw':(0,0,1)}
+
+
+def maximum_swept_excursion(poses, radius):
+    """Bound any body's point displacement from the pre-stop pose.
+
+    The farthest excursion consumes obstacle clearance. Summing frame-to-frame
+    travel instead accumulates stationary sensor jitter as braking distance.
+    """
+    start = poses[0]
+    return max(math.dist(start[:2], pose[:2]) +
+               2*radius*abs(math.sin(NAV.angle(pose[2]-start[2])/2))
+               for pose in poses)
+
+
+def terminal_observed_speed(samples, angular, window_s=.75):
+    """Fit the final capture interval instead of differentiating sensor noise."""
+    if len(samples)<5:
+        raise ValueError('too few captures for terminal speed')
+    end = samples[-1]['pts_ns']
+    samples = [s for s in samples if end-s['pts_ns']<=window_s*1e9]
+    times = np.array([s['pts_ns'] for s in samples],dtype=np.float64)/1e9
+    if len(samples)<5 or times[-1]-times[0]<.25 or not np.all(np.diff(times)>0):
+        raise ValueError('terminal capture interval is incomplete')
+    values = np.array([s['pose'] for s in samples])
+    values = np.unwrap(values[:,2:3],axis=0) if angular else values[:,:2]
+    times -= times.mean()
+    velocity = times@(values-values.mean(axis=0))/(times@times)
+    return float(np.linalg.norm(velocity))
 
 
 def register_scan(reference, points, guess, radius):
@@ -93,7 +121,7 @@ def stopping_measurement(samples, cut, config, stationary_jitter):
         raise ValueError('independent capture timestamps are discontinuous')
     radius = config['body_radius_m']
     poses = [s['pose'] for s in samples]
-    sweep = BRAKE.maximum_swept_excursion(poses,radius)
+    sweep = maximum_swept_excursion(poses,radius)
     # A hidden excursion between bounded-speed endpoints needs travel out and
     # back. Lipschitz continuity bounds it by speed * capture gap / 2.
     blind = config['point_speed_bound_m_s']*float(gaps.max())/2
@@ -259,7 +287,7 @@ class OnboardBraking(FAULT.FaultTest):
         covered=self.safe_speed is not None and self.safe_speed>=speed*.9 and self.measured_speed>=(.015 if self.angular_test else .005) and time.monotonic()-self.odom_at<.3
         wheel_speed,guarded_speed=self.measured_speed,self.safe_speed
         terminal=[{**r,'pts_ns':int(r['stamp']*1e9)} for r in self.ranges[begin:]]
-        observed=BRAKE.terminal_observed_speed(terminal,direction.startswith('rotation'),window_s=1.2)
+        observed=terminal_observed_speed(terminal,direction.startswith('rotation'),window_s=1.2)
         until=time.monotonic()+2.5
         while time.monotonic()<until:
             self.tick(Twist())
@@ -318,7 +346,7 @@ class OnboardBraking(FAULT.FaultTest):
         self.origin_range=self.ranges[-1]['pose']
         self.active=True
         poses=[r['pose'] for r in self.ranges[-15:]]
-        self.stationary_jitter=max(BRAKE.maximum_swept_excursion(poses[i:],self.config['body_radius_m']) for i in range(len(poses)))
+        self.stationary_jitter=max(maximum_swept_excursion(poses[i:],self.config['body_radius_m']) for i in range(len(poses)))
         for direction in DIRECTIONS:
             completed=sum(t['direction']==direction and t['qualification_eligible'] for t in self.trials)
             attempts=0

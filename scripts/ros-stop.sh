@@ -2,26 +2,21 @@
 # Stop only processes recorded by this repository's launchers.
 #
 # A process-name sweep can kill a different robot's Nav2/RViz instance on a
-# shared workstation. up.sh, pi-up.sh and ros-start.sh record their own
+# shared workstation. The launchers (scripts/lib/launcher.sh) and ros-start.sh record their own
 # process-group leaders, so cleanup remains complete for this stack without that
 # collateral damage. Usage: scripts/ros-stop.sh
 set -Eeuo pipefail
 
-runtime_dir="${LEKIWI_RUNTIME_DIR:-${LEKIWI_LOGS:-$HOME/.ros/lekiwi}/runtime}"
+# shellcheck source=/dev/null
+source "$(dirname -- "$0")/lib/launcher.sh"
+launcher_dirs
 
-pid_matches() { # pid_matches <pid> <stack|host|rviz|astra|cameras|lidar|zenoh>
-  local pid=$1 kind=$2 command
-  [ -r "/proc/$pid/cmdline" ] || return 1
-  command=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)
-  case "$kind" in
-    stack) [[ $command == *"ros2 launch lekiwi_rmf"* || $command == *"bringup.launch.py"* ]] ;;
-    host) [[ $command == *"robot-host.sh"* || $command == *"torque-host.py"* || $command == *"lerobot.robots.lekiwi.lekiwi_host"* ]] ;;
-    rviz) [[ $command == *"rviz2"* ]] ;;
-    astra) [[ $command == *"ros-astra.sh"* || $command == *"pi_astra.launch.py"* ]] ;;
-    cameras) [[ $command == *"ros-cameras.sh"* || $command == *"pi_cameras.launch.py"* ]] ;;
-    lidar) [[ $command == *"ros-lidar.sh"* || $command == *"ldlidar_stl_ros2"* ]] ;;
-    zenoh) [[ $command == *"ros-zenoh.sh"* || $command == *"zenoh-bridge-ros2dds"* ]] ;;
-  esac
+# Zombies cannot run: a container whose PID 1 never reaps orphans keeps them in
+# the group, which kill -0 would still report as alive.
+alive() { # alive <pid> <grouped>
+  local selector=pid
+  (( $2 )) && selector=pgid
+  ps -e -o "$selector=,stat=" | awk -v id="$1" '$1 == id && $2 !~ /^Z/ {found = 1} END {exit !found}'
 }
 
 stop_recorded() { # stop_recorded <file> <kind> [owning-unit]
@@ -57,27 +52,15 @@ stop_recorded() { # stop_recorded <file> <kind> [owning-unit]
   deadline=$((SECONDS + 15))
   [[ $kind != stack ]] || deadline=$((SECONDS + 45))
   while (( SECONDS < deadline )); do
-    if (( grouped )); then kill -0 -- "-$pid" 2>/dev/null || break; else kill -0 "$pid" 2>/dev/null || break; fi
+    alive "$pid" "$grouped" || break
     sleep 1
   done
-  if (( grouped )); then
-    if kill -0 -- "-$pid" 2>/dev/null; then
-      kill -TERM -- "-$pid" 2>/dev/null || true
-    fi
-  else
-    if kill -0 "$pid" 2>/dev/null; then
-      kill -TERM "$pid" 2>/dev/null || true
-    fi
+  if alive "$pid" "$grouped"; then
+    if (( grouped )); then kill -TERM -- "-$pid" 2>/dev/null || true; else kill -TERM "$pid" 2>/dev/null || true; fi
   fi
   sleep 3
-  if (( grouped )); then
-    if kill -0 -- "-$pid" 2>/dev/null; then
-      kill -KILL -- "-$pid" 2>/dev/null || true
-    fi
-  else
-    if kill -0 "$pid" 2>/dev/null; then
-      kill -KILL "$pid" 2>/dev/null || true
-    fi
+  if alive "$pid" "$grouped"; then
+    if (( grouped )); then kill -KILL -- "-$pid" 2>/dev/null || true; else kill -KILL "$pid" 2>/dev/null || true; fi
   fi
   rm -f -- "$file"
   return 0
@@ -104,7 +87,7 @@ unit_owns_pid() { # 0: unit owns pid, 1: it does not, 2: ownership cannot be che
 stopped=0
 stop_kind() { # stop_kind <kind> [owning-unit]
   local kind=$1 unit=${2:-}
-  if stop_recorded "$runtime_dir/$kind.pid" "$kind" "$unit"; then
+  if stop_recorded "$RUNTIME_DIR/$kind.pid" "$kind" "$unit"; then
     stopped=1
   fi
 }

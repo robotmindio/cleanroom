@@ -1,0 +1,694 @@
+[
+ {
+  "after": "wait_for_map",
+  "on_failure": [
+   {
+    "log": "ERROR: map readiness gate exited with 1; dependents remain stopped"
+   }
+  ],
+  "start": [
+   {
+    "arguments": {
+     "params_file": "$(share lekiwi_rmf)/config/nav2_params.yaml",
+     "use_sim_time": "True"
+    },
+    "include": "$(share nav2_bringup)/launch/navigation_launch.py"
+   }
+  ]
+ },
+ {
+  "after": "wait_for_odom",
+  "on_failure": [
+   {
+    "log": "ERROR: odometry readiness gate exited with 1; dependents remain stopped"
+   }
+  ],
+  "start": [
+   {
+    "arguments": [],
+    "env": {
+     "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
+     "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
+    },
+    "name": "wait_for_map",
+    "namespace": "",
+    "node": "lekiwi_rmf/readiness_gate",
+    "output": "screen",
+    "parameters": {
+     "kind": "topic",
+     "topic": "/map",
+     "topic_type": "map"
+    },
+    "remappings": [],
+    "respawn": false,
+    "respawn_delay": null,
+    "ros_arguments": []
+   }
+  ]
+ },
+ {
+  "after": "wait_for_slam_sensor",
+  "on_failure": [
+   {
+    "log": "ERROR: SLAM sensor readiness gate exited with 1; dependents remain stopped"
+   }
+  ],
+  "start": [
+   {
+    "arguments": [],
+    "env": {
+     "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
+     "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf",
+     "OMP_NUM_THREADS": "1",
+     "OPENBLAS_NUM_THREADS": "1"
+    },
+    "name": "robot_explorer",
+    "namespace": "",
+    "node": "lekiwi_rmf/robot_explorer",
+    "output": "screen",
+    "parameters": {
+     "allow_exploration": true,
+     "clearance_m": 0.22,
+     "data_timeout_sec": 1.0,
+     "database_path": "$(env HOME)/.ros/lekiwi_rtabmap_sim.db",
+     "free_threshold": 20,
+     "mapping_max_bytes": 536870912,
+     "mapping_max_seconds": 14400.0,
+     "max_duration_sec": 900.0,
+     "max_map_cells": 250000,
+     "max_radius_m": 5.0,
+     "navigation_params_file": "$(share lekiwi_rmf)/config/nav2_params.yaml",
+     "navigation_timeout_sec": 180.0,
+     "observation_distance_m": 0.8,
+     "revisit_spacing_m": 1.0,
+     "service_timeout_sec": 3.0,
+     "settle_sec": 1.0,
+     "slam_timeout_sec": 4.0,
+     "target_spacing_m": 0.5,
+     "use_sim_time": true
+    },
+    "remappings": [],
+    "respawn": false,
+    "respawn_delay": null,
+    "ros_arguments": []
+   },
+   {
+    "arguments": [],
+    "env": {
+     "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
+     "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
+    },
+    "name": "rtabmap",
+    "namespace": "",
+    "node": "rtabmap_slam/rtabmap",
+    "output": "screen",
+    "parameters": {
+     "Grid/3D": "false",
+     "Grid/CellSize": "0.05",
+     "Grid/MaxGroundHeight": "0.05",
+     "Grid/MaxObstacleHeight": "1.0",
+     "Grid/NormalsSegmentation": "false",
+     "Grid/RangeMax": "3.0",
+     "Grid/RayTracing": "true",
+     "Grid/Sensor": "0",
+     "Icp/MaxCorrespondenceDistance": "0.1",
+     "Icp/PointToPlane": "false",
+     "Icp/VoxelSize": "0.05",
+     "Kp/MaxFeatures": "500",
+     "Mem/IncrementalMemory": "True",
+     "Mem/InitWMWithAllNodes": "True",
+     "Mem/NotLinkedNodesKept": "false",
+     "RGBD/LinearUpdate": "0.04",
+     "RGBD/LoopCovLimited": "true",
+     "RGBD/NeighborLinkRefining": "false",
+     "RGBD/ProximityBySpace": "true",
+     "RGBD/ProximityMaxGraphDepth": "0",
+     "RGBD/ProximityOdomGuess": "true",
+     "RGBD/ProximityPathMaxNeighbors": "10",
+     "Reg/Force3DoF": "true",
+     "Reg/Strategy": "2",
+     "Rtabmap/DetectionRate": "2",
+     "Rtabmap/ImagesAlreadyRectified": "false",
+     "Rtabmap/MemoryThr": "300",
+     "Rtabmap/StartNewMapOnLoopClosure": "false",
+     "Vis/EstimationType": "1",
+     "approx_sync": true,
+     "database_path": "$(env HOME)/.ros/lekiwi_rtabmap_sim.db",
+     "frame_id": "base_footprint",
+     "map_frame_id": "map",
+     "odom_frame_id": "odom",
+     "odom_sensor_sync": true,
+     "publish_tf": true,
+     "qos_camera_info": 1,
+     "qos_image": 1,
+     "qos_odom": 1,
+     "qos_scan": 1,
+     "rgbd_cameras": 1,
+     "subscribe_depth": true,
+     "subscribe_odom_info": false,
+     "subscribe_rgb": true,
+     "subscribe_rgbd": false,
+     "subscribe_scan": false,
+     "subscribe_scan_cloud": true,
+     "sync_queue_size": 5,
+     "topic_queue_size": 5,
+     "use_sim_time": true
+    },
+    "remappings": [
+     [
+      "rgb/image",
+      "/camera/front/image_raw"
+     ],
+     [
+      "rgb/camera_info",
+      "/camera/front/camera_info"
+     ],
+     [
+      "depth/image",
+      "/slam/front_depth/image_raw"
+     ],
+     [
+      "rgbd_images",
+      "/slam/rgbd_images"
+     ],
+     [
+      "odom",
+      "/odom"
+     ],
+     [
+      "scan_cloud",
+      "/slam/cloud"
+     ],
+     [
+      "map",
+      "/map"
+     ]
+    ],
+    "respawn": true,
+    "respawn_delay": 2.0,
+    "ros_arguments": []
+   }
+  ]
+ },
+ {
+  "after": "wait_for_stable_joint_states",
+  "on_failure": [
+   {
+    "log": "ERROR: joint states readiness gate exited with 1; dependents remain stopped"
+   }
+  ],
+  "start": [
+   {
+    "arguments": [],
+    "env": {
+     "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
+     "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
+    },
+    "name": "safety_supervisor",
+    "namespace": "",
+    "node": "lekiwi_rmf/safety_supervisor",
+    "output": "screen",
+    "parameters": {
+     "acceptance_file": "$(share lekiwi_rmf)/config/safety_acceptance.yaml",
+     "arm_workspace_topic": "/safety/arm_workspace_clear",
+     "battery_timeout": 2.0,
+     "bounded_base_test": false,
+     "depth_timeout": 0.75,
+     "maximum_depth_range": 20.0,
+     "minimum_battery_percentage": 0.1,
+     "minimum_battery_voltage": 10.5,
+     "minimum_depth_range": 0.05,
+     "minimum_depth_valid_fraction": 0.001,
+     "minimum_depth_valid_points": 4,
+     "minimum_scan_coverage": 4.8,
+     "minimum_scan_valid_fraction": 0.01,
+     "nav2_params_file": "$(share lekiwi_rmf)/config/nav2_params.yaml",
+     "permission_timeout": 0.5,
+     "publish_frequency": 20.0,
+     "require_acceptance": false,
+     "require_arm_workspace": false,
+     "require_battery": false,
+     "require_bumper": false,
+     "require_depth": true,
+     "require_driver_state": false,
+     "require_estop": false,
+     "require_full_scan": true,
+     "require_imu": false,
+     "require_joint_states": true,
+     "require_motor_health": false,
+     "require_odometry": true,
+     "require_scan": true,
+     "scan_self_mask_file": "$(share lekiwi_rmf)/config/lidar_self_mask_simulation.yaml",
+     "sensor_timeout": 0.75,
+     "state_timeout": 1.0,
+     "stow_joint_names": [
+      "arm_shoulder_pan",
+      "arm_shoulder_lift",
+      "arm_elbow_flex",
+      "arm_wrist_flex",
+      "arm_wrist_roll",
+      "arm_gripper"
+     ],
+     "stow_joint_positions": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+     ],
+     "stow_tolerance": 0.08,
+     "strict": true,
+     "use_sim_time": true
+    },
+    "remappings": [],
+    "respawn": true,
+    "respawn_delay": 2.0,
+    "ros_arguments": []
+   }
+  ]
+ },
+ {
+  "arguments": [
+   "-name",
+   "lekiwi_1",
+   "-string",
+   "$(command python3 -m lekiwi_rmf.sim_sdf)",
+   "-x",
+   "-4",
+   "-y",
+   "-2.5"
+  ],
+  "env": {
+   "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
+   "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
+  },
+  "name": null,
+  "namespace": "",
+  "node": "ros_gz_sim/create",
+  "output": "screen",
+  "parameters": {},
+  "remappings": [],
+  "respawn": false,
+  "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [
+   "/camera/front@sensor_msgs/msg/Image[gz.msgs.Image",
+   "/camera/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo",
+   "/camera/depth/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked"
+  ],
+  "env": {
+   "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
+   "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
+  },
+  "name": "sim_camera_bridge",
+  "namespace": "",
+  "node": "ros_gz_bridge/parameter_bridge",
+  "output": "screen",
+  "parameters": {
+   "override_frame_id": "front_camera_optical_frame"
+  },
+  "remappings": [
+   [
+    "/camera/front",
+    "/camera/front/image_raw"
+   ],
+   [
+    "/camera/camera_info",
+    "/camera/front/camera_info"
+   ],
+   [
+    "/camera/depth/points",
+    "/camera/depth/points_raw"
+   ]
+  ],
+  "respawn": false,
+  "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [
+   "/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock",
+   "/sim/joint_states@sensor_msgs/msg/JointState[gz.msgs.Model",
+   "/sim/sim_base_left_wheel/cmd_vel@std_msgs/msg/Float64]gz.msgs.Double",
+   "/sim/sim_base_back_wheel/cmd_vel@std_msgs/msg/Float64]gz.msgs.Double",
+   "/sim/sim_base_right_wheel/cmd_vel@std_msgs/msg/Float64]gz.msgs.Double"
+  ],
+  "env": {
+   "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
+   "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
+  },
+  "name": null,
+  "namespace": "",
+  "node": "ros_gz_bridge/parameter_bridge",
+  "output": "screen",
+  "parameters": {},
+  "remappings": [
+   [
+    "/sim/joint_states",
+    "/joint_states"
+   ]
+  ],
+  "respawn": false,
+  "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [
+   "/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan"
+  ],
+  "env": {
+   "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
+   "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
+  },
+  "name": "sim_lidar_bridge",
+  "namespace": "",
+  "node": "ros_gz_bridge/parameter_bridge",
+  "output": "screen",
+  "parameters": {
+   "override_frame_id": "laser"
+  },
+  "remappings": [
+   [
+    "/scan",
+    "/sim/scan_raw"
+   ]
+  ],
+  "respawn": false,
+  "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [
+   "/sim/arm/joint_positions@trajectory_msgs/msg/JointTrajectory]gz.msgs.JointTrajectory"
+  ],
+  "env": {
+   "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
+   "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
+  },
+  "name": "sim_arm_position_bridge",
+  "namespace": "",
+  "node": "ros_gz_bridge/parameter_bridge",
+  "output": "screen",
+  "parameters": {},
+  "remappings": [],
+  "respawn": false,
+  "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {
+   "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
+   "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf",
+   "OPENBLAS_NUM_THREADS": "1"
+  },
+  "name": "slam_cloud",
+  "namespace": "",
+  "node": "lekiwi_rmf/slam_cloud",
+  "output": "screen",
+  "parameters": {
+   "require_arm_stowed": false,
+   "use_sim_time": true
+  },
+  "remappings": [],
+  "respawn": false,
+  "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {
+   "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
+   "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
+  },
+  "name": "cmd_vel_mux",
+  "namespace": "",
+  "node": "lekiwi_rmf/cmd_vel_mux",
+  "output": "screen",
+  "parameters": {
+   "permission_timeout": 0.5
+  },
+  "remappings": [],
+  "respawn": false,
+  "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {
+   "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
+   "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
+  },
+  "name": "foxglove_bridge",
+  "namespace": "",
+  "node": "foxglove_bridge/foxglove_bridge",
+  "output": "screen",
+  "parameters": {
+   "address": "127.0.0.1",
+   "capabilities": [
+    "connectionGraph",
+    "assets"
+   ],
+   "port": 8765,
+   "publish_client_count": true,
+   "use_sim_time": true
+  },
+  "remappings": [],
+  "respawn": false,
+  "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {
+   "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
+   "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
+  },
+  "name": "scan_self_filter",
+  "namespace": "",
+  "node": "lekiwi_rmf/scan_self_filter",
+  "output": "screen",
+  "parameters": {
+   "body_end_deg": [
+    99.0,
+    127.0,
+    148.0,
+    192.0,
+    221.0
+   ],
+   "body_max_range_m": [
+    0.104,
+    0.225,
+    0.161,
+    0.162,
+    0.218
+   ],
+   "body_start_deg": [
+    87.0,
+    119.0,
+    139.0,
+    163.0,
+    208.0
+   ],
+   "input_topic": "/sim/scan_raw"
+  },
+  "remappings": [],
+  "respawn": false,
+  "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {
+   "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
+   "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
+  },
+  "name": "slam_front_depth",
+  "namespace": "",
+  "node": "rtabmap_util/pointcloud_to_depthimage",
+  "output": "screen",
+  "parameters": {
+   "approx": true,
+   "decimation": 2,
+   "fill_holes_error": 0.05,
+   "fill_holes_size": 2,
+   "fill_iterations": 1,
+   "fixed_frame_id": "odom",
+   "qos": 1,
+   "qos_camera_info": 1,
+   "sync_queue_size": 30,
+   "topic_queue_size": 5,
+   "use_sim_time": true,
+   "wait_for_transform": 0.1
+  },
+  "remappings": [
+   [
+    "cloud",
+    "/slam/cloud"
+   ],
+   [
+    "camera_info",
+    "/camera/front/camera_info"
+   ],
+   [
+    "image_raw",
+    "/slam/front_depth/image_raw"
+   ]
+  ],
+  "respawn": false,
+  "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {
+   "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
+   "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
+  },
+  "name": "wait_for_odom",
+  "namespace": "",
+  "node": "lekiwi_rmf/readiness_gate",
+  "output": "screen",
+  "parameters": {
+   "kind": "topic",
+   "topic": "/odom",
+   "topic_type": "odom"
+  },
+  "remappings": [],
+  "respawn": false,
+  "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {
+   "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
+   "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
+  },
+  "name": "wait_for_slam_sensor",
+  "namespace": "",
+  "node": "lekiwi_rmf/readiness_gate",
+  "output": "screen",
+  "parameters": {
+   "kind": "topic",
+   "topic": "/slam/front_depth/image_raw",
+   "topic_type": "image"
+  },
+  "remappings": [],
+  "respawn": false,
+  "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {
+   "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
+   "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
+  },
+  "name": "wait_for_stable_joint_states",
+  "namespace": "",
+  "node": "lekiwi_rmf/readiness_gate",
+  "output": "screen",
+  "parameters": {
+   "joint_names": [
+    "arm_shoulder_pan",
+    "arm_shoulder_lift",
+    "arm_elbow_flex",
+    "arm_wrist_flex",
+    "arm_wrist_roll",
+    "arm_gripper"
+   ],
+   "kind": "joint_states",
+   "minimum_joint_samples": 20,
+   "topic": "/joint_states"
+  },
+  "remappings": [],
+  "respawn": false,
+  "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {},
+  "name": null,
+  "namespace": "",
+  "node": "robot_state_publisher/robot_state_publisher",
+  "output": "log",
+  "parameters": {
+   "robot_description": "$(command xacro $(share lekiwi_rmf)/urdf/lekiwi.urdf.xacro sim:=True)",
+   "use_sim_time": true
+  },
+  "remappings": [],
+  "respawn": false,
+  "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": {
+   "gz_args": "-r -s --headless-rendering $(share lekiwi_rmf)/worlds/cleanroom.sdf"
+  },
+  "include": "$(share ros_gz_sim)/launch/gz_sim.launch.py"
+ },
+ {
+  "env": {
+   "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
+   "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
+  },
+  "name": null,
+  "output": "screen",
+  "process": [
+   "python3",
+   "-m",
+   "lekiwi_rmf.sim_arm_controller",
+   "--ros-args",
+   "-p",
+   "use_sim_time:=true",
+   "-p",
+   "permission_timeout:=0.5"
+  ],
+  "respawn": false,
+  "respawn_delay": null
+ },
+ {
+  "env": {
+   "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
+   "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
+  },
+  "name": null,
+  "output": "screen",
+  "process": [
+   "python3",
+   "-m",
+   "lekiwi_rmf.sim_omni_controller",
+   "--ros-args",
+   "-p",
+   "use_sim_time:=true"
+  ],
+  "respawn": false,
+  "respawn_delay": null
+ },
+ {
+  "env": {
+   "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
+   "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
+  },
+  "name": null,
+  "output": "screen",
+  "process": [
+   "python3",
+   "-m",
+   "lekiwi_rmf.sim_sensor_delay",
+   "--ros-args",
+   "-p",
+   "use_sim_time:=true"
+  ],
+  "respawn": false,
+  "respawn_delay": null
+ },
+ {
+  "log": "RTAB-Map empty/one-node seed: allow observations in the same database; relocalization still requires verified registration"
+ }
+]

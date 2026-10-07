@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 
-# Source-only runtime helpers; this is not a user command.
+# Source-only runtime helpers; this is not a user command. Scripts piped to a
+# remote shell (stage-release.sh) cannot source it and keep their own die().
+
+log() { printf '\n==> %s\n' "$*"; }
+die() { echo "$0: $*" >&2; exit 1; }
 
 load_lekiwi_env() {
   local file=${1:-.env} line value

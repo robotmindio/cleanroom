@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import stat
 import subprocess
+import sys
 import xml.etree.ElementTree as ET
 
 
@@ -15,11 +16,24 @@ def digest(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
+def check_safety_acceptance(source):
+    """The release's tracked acceptance record must still fit its Nav2 and stow configuration."""
+    sys.path.insert(0, str(source))
+    try:
+        from lekiwi_rmf.safety_acceptance import validate_tracked_acceptance
+    finally:
+        sys.path.remove(str(source))
+    valid, detail = validate_tracked_acceptance(source / "config")
+    if not valid:
+        raise ValueError(f"tracked safety acceptance does not match the release configuration: {detail}")
+
+
 def inventory(release, role):
     source = release / "source"
     revision = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
     if subprocess.check_output(["git", "-C", str(source), "status", "--porcelain"], text=True).strip():
         raise ValueError("release source is dirty")
+    check_safety_acceptance(source)
     tracked = subprocess.check_output(["git", "-C", str(source), "ls-files", "-z"]).decode().split("\0")
     sources = {name: digest(source / name) for name in tracked if name}
     installed = {str(path.relative_to(release)): {"sha256": digest(path), "mode": stat.S_IMODE(path.stat().st_mode)}

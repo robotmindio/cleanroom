@@ -7,6 +7,8 @@ import signal
 import threading
 import time
 
+import yaml
+
 from action_msgs.msg import GoalStatus
 from ament_index_python.packages import get_package_share_directory
 from geometry_msgs.msg import PoseStamped
@@ -35,18 +37,14 @@ from lekiwi_rmf.exploration import (
 class RobotExplorer(Node):
     def __init__(self, **kwargs):
         super().__init__("robot_explorer", **kwargs)
+        config = Path(get_package_share_directory("lekiwi_rmf")) / "config"
+        # The tracked exploration profile is the single source of the limits
+        # and mapping quota; only machine-local paths are computed here.
         defaults = {
             "allow_exploration": True, "database_path": str(Path.home() / ".ros/lekiwi_rtabmap.db"),
-            "mapping_max_bytes": 536870912, "mapping_max_seconds": 14400.0,
-            "max_duration_sec": 900.0, "max_radius_m": 5.0, "clearance_m": 0.22,
-            "observation_distance_m": 0.8, "target_spacing_m": 0.5,
-            "revisit_spacing_m": 1.0, "free_threshold": 20, "max_map_cells": 250000,
-            "data_timeout_sec": 1.0, "slam_timeout_sec": 4.0, "service_timeout_sec": 3.0,
-            "navigation_timeout_sec": 180.0, "settle_sec": 1.0,
-            "navigation_tree": str(Path(get_package_share_directory("lekiwi_rmf"))
-                                   / "config/explore_nav_to_pose.xml"),
-            "navigation_params_file": str(Path(get_package_share_directory("lekiwi_rmf"))
-                                          / "config/nav2_params.yaml"),
+            **yaml.safe_load((config / "exploration.yaml").read_text())["robot_explorer"]["ros__parameters"],
+            "navigation_tree": str(config / "explore_nav_to_pose.xml"),
+            "navigation_params_file": str(config / "nav2_params.yaml"),
         }
         for name, value in defaults.items():
             self.declare_parameter(name, value)

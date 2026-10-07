@@ -4,8 +4,8 @@ This document records which requested safety functions can be provided by the
 current robot hardware and which require an additional physical signal source.
 The repository safety supervisor denies the affected capability when a required input is
 absent, stale, or unhealthy. Normal hold mode restores permission when inputs
-recover, while strict mode (`LEKIWI_DISARM_ON_FAILURE=true`, and always in
-simulation) also latches faults. A ROS topic alone is not evidence of a real
+recover, while strict mode (`LEKIWI_DISARM_ON_FAILURE=true`, which launches
+`safety_policy:=strict`, and always in simulation) also latches faults. A ROS topic alone is not evidence of a real
 safety function.
 
 | Function | Software support exists? | What is required for a real implementation |
@@ -22,71 +22,142 @@ physical sensor or safety component before they can provide a meaningful safety
 measurement. Dummy publishers may be useful for testing, but must never be
 treated as safety functionality or used to validate the production profile.
 
-## Reduced hardware base acceptance
+## Production safety profile
 
-For an explicitly authorized, attended test inside a 30 cm radius, source
-`scripts/setup.bash` and run `python3 scripts/test-navigation.py`. The script
-temporarily replaces the production compute stack with `bounded_base_test:=true`,
-performs a finite route, and restores the service on exit. The driver caps speed
-from the tracked production MPPI limits and stops at a 20 cm wheel-odometry radius; the runner
-cancels at 18 cm. This leaves stopping margin, but wheel slip still requires
-independent observation of physical position. All measured arm/base inputs and
-a test-client lease renewed within 250 ms are required. Production startup keeps
-this mode disabled; its validated acceptance record governs base permission.
-The folded `travel_stow` in SRDF and `safety_production.yaml` is the required
-navigation posture; starting a base goal does not automatically move the arm.
+The production profile (`config/safety_production.yaml`) requires current,
+stamped feedback on these inputs before it grants base or arm permission. Base
+motion also requires the arm inside the accepted stow pose.
 
-`config/safety_acceptance.yaml` records an **attended autonomous base** scope:
-the installed reported 200 g load, dry concrete, and an operator continuously next to the physical
-motor-power stop. The installed hardware record marks the bumper, IMU, and
-battery monitor absent. Their fault tests are `null` (not applicable), and the
-validator checks that this record agrees with the production profile's
-`require_bumper`, `require_imu`, and `require_battery` settings. All other fault
-tests and six-direction stopping trials remain mandatory. The operating
-condition is a site procedure; software cannot verify that the operator is
-present. The 2026-10-06 loaded stopping evidence is reviewed and the record is
-`validated: true`, at 0.03 m/s and 0.06 rad/s with 20 mm measurement uncertainty
-inside the unchanged 50 mm stopping budget. See
-[the loaded stopping evidence](physical-acceptance-evidence-200g-20261006.json).
-It grants no unattended scope or other load placement or payload.
+| Input | Topic | Purpose |
+| --- | --- | --- |
+| Driver state | `safety/driver_state` | Motor-link and torque state |
+| Full scan | `/scan` | Obstacle coverage and freshness |
+| Depth | `/camera/depth/points` | Arm-workspace obstacles |
+| Odometry | `/odom` | Base state |
+| Joint state | `/joint_states` | Arm feedback and stow interlock |
+| Motor health | `/hardware/diagnostics` | Servo and bus faults |
+| Arm collision gate | `/safety/arm_workspace_clear` | Live MoveIt scene/state validity |
 
-`payload_kg` identifies the load in those stopping measurements. The supervisor
-validates its format; it has no measured-payload input and does not compare the
-current load with that field. The installed reported 200 g passed the arm cycle
-and bounded production navigation and stopping tests on 2026-10-06. See
-[the loaded verification record](base-payload-verification-20261006.md) and
-the acceptance evidence above; the older 0 kg record remains historical.
+`/imu/data`, `/battery_state`, `safety/bumper_active` and `safety/estop_active`
+are not required, because the robot has no source for them (see the table
+above). Production MoveIt's execution-time workspace gate needs fresh complete
+joint state, a fresh `/moveit/filtered_cloud` and repeated successful
+`/check_state_validity` responses; collision, timeout or perception failure
+withdraws the arm lease. The camera floor-scan fallback is supplemental and
+cannot see all side, rear, floor-coloured, low or overhanging obstacles.
 
-The configured hold mode automatically re-arms after a fault or restart only
-when telemetry and arm permission recover. The acceptance tests for host and
-ROS restarts must show immediate command stop, then re-arm only after those
-inputs are healthy. A new captured arm stow invalidates the old acceptance.
-Tested linear and angular speeds must cover the tracked MPPI limits. The manual
-driver uses those same limits, so slow commissioning trials cannot approve a
-faster production or manual command.
+Keep the hardwired motor-power stop reachable and supervise every hardware
+run. The ROS E-stop topic, `/safety/disarm` and software torque cut are
+status/control interfaces; they cannot remove actuator energy after a process,
+electrical or mechanical failure. Arming and recovery behaviour is described in
+[Arming and recovery](launch-options.md#arming-and-recovery) and
+[Current motor-health behavior](#current-motor-health-behavior).
 
-Before base trials, physically verify a compact arm stow, record its measured
-joints with `scripts/capture_stow.py`, and check that the full arm and cable
-envelope fits the accepted footprint. Predeclare stopping limits, measure at
-least 5 trials per direction on the recorded surface and payload, and update the tracked Nav2
-StopZone to cover the worst distance plus measurement uncertainty. A software
-pass alone cannot establish obstacle coverage or stopping performance.
+## Physical acceptance
 
-Future validations use five repetitions per direction. The completed 186-stop
-record and its measured bounds remain intact. Existing qualified evidence can
-be reused for unchanged operating conditions; repeat the fault cases affected
-by the change. All applicable fault results and stopping/error limits remain
-required by the acceptance validator.
+`config/safety_acceptance.yaml` is a schema-version-4 record with
+`validated: true`, validated on 2026-10-06. Its scope is **attended autonomous
+base** operation:
 
-The current LD06 produces a 360-degree scan. Its measured body mask covers
-100 degrees, leaving 260 degrees (4.54 rad) of effective coverage. The
-production supervisor requires 4.3 rad (about 246 degrees), leaving roughly
-14 degrees for scan-span variation. This is a reduced, attended operating
-scope: masked directions provide no obstacle sensing, and an operator must
-remain at the physical motor-power stop. Remeasure the mask after the arm is
-stowed and before acceptance trials because nearby hardware can change the
-self-returns. Full surrounding coverage requires moving the lidar or adding a
-second sensor.
+| Condition | Accepted value |
+| --- | --- |
+| Operation | Attended, operator continuously at the physical motor-power stop |
+| Surface | Dry concrete |
+| Payload | `payload_kg: 0.2`, the installed operator-reported 200 g load |
+| Arm posture | Folded `travel_stow`, as recorded in `accepted_stow_joint_positions` |
+| Maximum speeds | 0.03 m/s linear, 0.06 rad/s angular (the production command limits) |
+| Stopping trials | 5 per direction (forward, reverse, left, right, both rotations) |
+| Worst stop + 20 mm measurement uncertainty | 49.752 mm, against the 50 mm budget |
+| Worst command-stop latency | 1.198 s, against 1.5 s |
+| Absent hardware | Bumper, IMU and battery monitor; their fault tests are `null` |
+
+The evidence is
+[physical-acceptance-evidence-200g-20261006.json](physical-acceptance-evidence-200g-20261006.json):
+loaded stopping windows, moving-fault results, exclusions and raw-artifact
+hashes. Hardware and authentication fault tests whose mechanisms did not change
+with the load (independent E-stop, unauthorized ZMQ, DDS and rosbridge policy,
+restarts, replay, collision-monitor and arm-workspace stops) are carried over
+explicitly from the unloaded
+[physical-acceptance-evidence-20261004.json](physical-acceptance-evidence-20261004.json);
+they are not relabelled as loaded trials. Functional loaded navigation
+observations are in
+[base-payload-evidence-20261006.json](base-payload-evidence-20261006.json).
+
+The record grants no unattended scope, other load placement, larger payload or
+higher speed. `payload_kg` identifies the load in the stopping measurements:
+the supervisor validates its format but has no payload input and does not
+compare the current load with it. The holder mass and attachment location are
+unconfirmed, so 200 g is not a maximum payload rating. The arm completed a
+controlled HOME cycle with this load at 0.10 velocity/acceleration scaling;
+higher arm speeds, other masses, repeated cycles and thermal endurance are
+untested. The operating conditions are a site procedure; software cannot
+verify that the operator is present.
+
+The record is invalid until it has reviewed limits, at least
+`minimum_trials_per_direction` trials in every direction, worst-case distances
+plus uncertainty, stop latency, traceable software/sensor/payload/surface
+details, and every applicable fault test marked true. Its hardware record must
+agree with the production profile's `require_bumper`, `require_imu` and
+`require_battery` settings. At startup the supervisor also requires the
+accepted footprint and padding to match both tracked Nav2 costmaps and proves
+the enabled StopZone leaves at least the worst stopping distance plus
+uncertainty around that footprint. A newly captured arm stow invalidates the
+record. Tested speeds must cover the tracked MPPI limits; the manual driver
+uses the same limits, so slow trials cannot approve a faster command.
+
+### Revalidating
+
+A change to the accepted conditions (payload, surface, speed, stow, sensors or
+hardware) needs new physical evidence; software tests cannot establish stopping
+performance or obstacle coverage. Before base trials, physically verify a
+compact arm stow, record it with `scripts/capture_stow.py`, and check that the
+full arm and cable envelope fits the accepted footprint. Predeclare stopping
+limits, measure at least five stops per direction on the recorded surface and
+payload, and update the tracked Nav2 StopZone to cover the worst distance plus
+measurement uncertainty. Reuse qualified evidence only for unchanged
+conditions, and repeat the fault cases affected by the change. Host and ROS
+restart tests must show an immediate command stop, then re-arm only once
+telemetry and arm permission are healthy.
+
+Each runner below is finite, preserves production services and the SLAM
+database, and records observations without granting acceptance. Run them only
+with the arm in `travel_stow`, the 30 cm test area clear, and an operator at
+the motor-power stop:
+
+```bash
+source scripts/setup.bash
+# Loaded stopping trials and affected moving faults.
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 PYTHONNOUSERSITE=1 \
+  /usr/bin/python3 scripts/test-onboard-braking.py --payload-g 200
+# Short production Nav2 goals and rotations observed by the onboard cameras.
+PYTHONNOUSERSITE=1 /usr/bin/python3 scripts/test-onboard-navigation.py
+```
+
+For a bounded base test inside a 30 cm radius, `python3
+scripts/test-navigation.py` temporarily replaces the production compute stack
+with `bounded_base_test:=true`, performs a finite route, and restores the
+service on exit. The driver caps speed from the tracked production MPPI limits
+and stops at a 20 cm wheel-odometry radius; the runner cancels at 18 cm. Wheel
+slip still requires independent observation of physical position. All
+measured arm/base inputs and a test-client lease renewed within 250 ms are
+required. Production startup keeps this mode disabled. Starting a base goal
+does not move the arm into `travel_stow`.
+
+### Obstacle coverage
+
+The LD06 produces a 360-degree scan. Its measured body mask covers 100 degrees,
+leaving 260 degrees (4.54 rad) of effective coverage. The production
+supervisor requires 4.3 rad (about 246 degrees), leaving roughly 14 degrees
+for scan-span variation. Masked directions provide no obstacle sensing, which
+is why the operator must remain at the motor-power stop. Remeasure the mask
+with the arm stowed and before acceptance trials: chassis self-returns that
+reach the StopZone cause intermittent false stops, and nearby hardware changes
+them. Full surrounding coverage needs a moved lidar or a second sensor.
+
+The Astra depth cloud is not a collision-monitor source: it faces
+sideways/rearward and its minimum depth (~0.55 m) lies beyond both zones, so it
+cannot see an obstacle inside them. `require_depth` gates base motion on its
+freshness only; obstacles below the LD06 plane are not detected.
 
 ## Motor-host motion limits
 

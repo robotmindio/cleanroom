@@ -80,6 +80,49 @@ cable. Stop moving the arm, reseat the wrist-camera cable and strain relief, the
 wait for the device to return. Repeated resets at one arm position are a hardware
 fault (cable flex, connector, hub, or power), not a ROS calibration problem.
 
+The wrist camera also drops off the bus with the arm stationary: the kernel logs a
+USB disconnect and re-enumeration, capture reports ENODEV, and the supervisor
+restarts it about five seconds later. This is an open hardware fault (see
+[DEFERRED.md](DEFERRED.md#arm-calibration-collision-model-and-physical-execution));
+tightening the connector did not fix it. Check `journalctl -k` on the device for
+the disconnect and `vcgencmd get_throttled` for power events, then substitute the
+cable on the same port before changing the port or camera.
+
+## `/dev/ttyACM0` does not appear
+
+```bash
+dmesg | tail -20
+udevadm info -q property -n /dev/ttyACM0 | grep ID_VENDOR
+```
+
+Expect `1a86` (QinHeng). If `brltty` grabs the port — a known Ubuntu conflict
+with CH34x adapters — remove it: `sudo apt-get remove brltty`.
+
+## Permission denied on the motor port
+
+`id -nG` must list `dialout`. Group changes need a fresh login, not just a new
+terminal.
+
+## `Incorrect status packet!` during motor reads
+
+Feetech buses corrupt status packets when several joints move at once.
+`LeKiwiConfig.num_read_retries` defaults to 2; raise it with
+`--robot.num_read_retries=5`. Persistent failures usually mean a daisy-chain
+cable or under-supplied bus voltage.
+
+## Host reachable but nothing moves
+
+Check all three host endpoints, not just 5555:
+
+```bash
+ss -ltn | grep -E '5555|5556|5557'
+"$HOME/lekiwi_ws/.venv-lerobot/bin/python" scripts/host-health-check.py --host 127.0.0.1
+```
+
+The health check performs a read-only TCP/5555 connection and a `state`
+request on the torque endpoint. It is a better service check than matching a
+listening port owned by an unrelated process.
+
 ## Host reports every motor as model `777`
 
 `777` is LeRobot's no-response sentinel. If every ID from 1 through 9 is
@@ -226,6 +269,24 @@ ss -ltn | grep ':9090'
 Remote clients require an explicitly permitted firewall rule for TCP 9090 and
 an authenticated proxy; a raw unauthenticated WebSocket is not supported for
 robot control.
+
+## The base stops intermittently with nothing nearby
+
+Chassis self-returns in the LD06 scan that fall outside the body mask reach
+CollisionMonitor's StopZone and stop the base. Record stationary raw scans with
+the arm in `travel_stow`, find returns that lie inside the footprint, and widen
+the tracked mask sector only within the footprint; the masked sectors must stay
+inside it so exterior obstacles are still seen. See
+[Obstacle coverage](docs/safety.md#obstacle-coverage).
+
+## Localization does not recover in a dark room
+
+Visual relocalization needs image features. In a dark room the front and Astra
+images have mean brightness near zero and no ORB features, so RTAB-Map cannot
+accept a global closure and Nav2 checks wait for localization, although depth
+and lidar are still live. Restore lighting; do not lower the matching
+thresholds. A small orientation search toward a previously mapped view then
+recovers the saved map.
 
 ## Localization jumps or closes false loops
 

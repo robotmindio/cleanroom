@@ -10,10 +10,10 @@ import yaml
 from sensor_msgs.msg import BatteryState, LaserScan, PointCloud2, PointField
 from diagnostic_msgs.msg import DiagnosticStatus
 
+from lekiwi_rmf.safety_acceptance import validate_acceptance_file
 from lekiwi_rmf.safety_supervisor import (
     Requirement, SafetyState, SafetyStateMachine, SafetySupervisor, _valid_battery,
     _scan_masked_angle, _valid_depth_points, _valid_scan_ranges,
-    validate_acceptance_file,
 )
 
 
@@ -38,10 +38,13 @@ def _healthy(machine: SafetyStateMachine, now: int = SECOND) -> None:
 
 def test_tracked_permission_lease_is_shorter_than_supervisor_state_deadline():
     root = Path(__file__).parents[1]
-    for name in ("safety_simulation.yaml", "safety_production.yaml"):
-        parameters = yaml.safe_load(
-            (root / "config" / name).read_text(encoding="utf-8")
-        )["safety_supervisor"]["ros__parameters"]
+    # Simulation layers safety_simulation.yaml over the production profile.
+    for names in (("safety_production.yaml",), ("safety_production.yaml", "safety_simulation.yaml")):
+        parameters = {}
+        for name in names:
+            parameters.update(yaml.safe_load(
+                (root / "config" / name).read_text(encoding="utf-8")
+            )["safety_supervisor"]["ros__parameters"])
         assert 0.0 < parameters["permission_timeout"] < parameters["state_timeout"]
 
 
