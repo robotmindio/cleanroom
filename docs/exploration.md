@@ -6,12 +6,12 @@ type is `lekiwi_rmf/action/Explore`. AMCL has no exploration server; fixed-map
 and RMF configurations refuse exploration. There is no startup movement or
 change to arming, disarming, stow, payload acceptance or production speeds.
 
-After building and sourcing `scripts/setup.bash`, request exploration within a
-two-metre radius of the starting robot pose, for at most five minutes:
+After building and sourcing `scripts/setup.bash`, request exploration with the
+default ten-metre radius from the starting robot pose, for at most 15 minutes:
 
 ```bash
 ros2 action send_goal /robot/explore lekiwi_rmf/action/Explore \
-  '{revisit_known: true, max_duration_sec: 300.0, max_radius_m: 2.0}' --feedback
+  '{revisit_known: true, max_duration_sec: 0.0, max_radius_m: 0.0}' --feedback
 ```
 
 `revisit_known: false` searches frontiers only. `true` first searches reachable
@@ -22,7 +22,7 @@ doors, walls or occlusions. Feedback reports the stage, current pose, successful
 and failed target counts, and known map area in the bounded region.
 
 `max_duration_sec` and `max_radius_m` equal to zero select the tracked defaults
-in `config/exploration.yaml` (900 seconds and 5 metres). Positive goal values
+in `config/exploration.yaml` (900 seconds and 10 metres). Positive goal values
 can only reduce these maxima. The centre reachability prefilter is 0.22 m,
 the body's inscribed radius (conservatively 0.25 m on a 5 cm grid). The former
 0.33 m circle rounded to 0.35 m and unnecessarily blocked close side clearance.
@@ -52,6 +52,8 @@ The physical Nav2 pose progress checker counts either 0.10 m of translation or
 observation without mistaking them for a stationary robot.
 
 SLAM freshness uses RTAB-Map's canonical `/info` topic, matching normal bringup.
+RTAB-Map starts with `--ros-args --log-level warn` to suppress routine ROS
+informational logs while retaining warnings and errors.
 The mode-switching services remain private to the node at `/rtabmap/set_mode_*`.
 SLAM's camera-acquisition stamps have a separate tracked four-second age/liveness
 budget to cover processing, transport and inter-update gaps (the latest observation
@@ -107,7 +109,7 @@ frame for `rosbridge.exchange` is:
   "action": "/robot/explore",
   "action_type": "lekiwi_rmf/action/Explore",
   "feedback": true,
-  "args": {"revisit_known": true, "max_duration_sec": 300.0, "max_radius_m": 2.0}
+  "args": {"revisit_known": true, "max_duration_sec": 0.0, "max_radius_m": 0.0}
 }
 ```
 

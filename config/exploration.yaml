@@ -2,7 +2,7 @@ robot_explorer:
   ros__parameters:
     # Idle until an explicit /robot/explore goal arrives.
     max_duration_sec: 900.0
-    max_radius_m: 5.0
+    max_radius_m: 10.0
     # Inscribed centre prefilter; goals, paths and live poses use the oriented
     # Nav2 footprint rather than a circumscribed obstacle-clearance circle.
     clearance_m: 0.22

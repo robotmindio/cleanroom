@@ -515,7 +515,7 @@
      "mapping_max_seconds": 14400.0,
      "max_duration_sec": 900.0,
      "max_map_cells": 250000,
-     "max_radius_m": 5.0,
+     "max_radius_m": 10.0,
      "navigation_params_file": {
       "generated_yaml": {
        "amcl": {
@@ -1066,7 +1066,10 @@
     ],
     "respawn": true,
     "respawn_delay": 2.0,
-    "ros_arguments": []
+    "ros_arguments": [
+     "--log-level",
+     "warn"
+    ]
    }
   ]
  },
