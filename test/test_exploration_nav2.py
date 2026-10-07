@@ -4,6 +4,7 @@ from pathlib import Path
 import signal
 import subprocess
 import threading
+from concurrent.futures import Future
 import time
 
 from action_msgs.msg import GoalStatus
@@ -66,7 +67,8 @@ def test_real_nav2_tree_uses_known_space_planner_and_cancels_controller(tmp_path
     executor = MultiThreadedExecutor(num_threads=6, context=context)
     for node in (peers, explorer, client_node):
         executor.add_node(node)
-    thread = threading.Thread(target=executor.spin, daemon=True)
+    finished = Future()
+    thread = threading.Thread(target=executor.spin_until_future_complete, args=(finished,), daemon=True)
     thread.start()
     executable = Path(get_package_prefix("nav2_bt_navigator")) / "lib/nav2_bt_navigator/bt_navigator"
     log_path = tmp_path / "bt-navigator.log"
@@ -111,9 +113,11 @@ def test_real_nav2_tree_uses_known_space_planner_and_cancels_controller(tmp_path
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait(timeout=5)
-            controller.destroy()
-            executor.shutdown(timeout_sec=5)
+            finished.set_result(True)
             thread.join(timeout=5)
+            assert not thread.is_alive()
+            assert executor.shutdown(timeout_sec=5)
+            controller.destroy()
             for node in (client_node, explorer, peers):
                 node.destroy_node()
             context.shutdown()

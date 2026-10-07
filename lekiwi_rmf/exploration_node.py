@@ -28,7 +28,7 @@ from tf2_ros import Buffer, TransformException, TransformListener
 
 from lekiwi_rmf.action import Explore
 from lekiwi_rmf.exploration import (
-    STOPPING_MARGIN_M, database_size, known_safe_cells, map_geometry, select_target, task_limits, world_to_cell,
+    database_size, footprint_is_free, load_navigation_footprint, map_geometry, select_target, task_limits,
 )
 
 
@@ -38,23 +38,29 @@ class RobotExplorer(Node):
         defaults = {
             "allow_exploration": True, "database_path": str(Path.home() / ".ros/lekiwi_rtabmap.db"),
             "mapping_max_bytes": 536870912, "mapping_max_seconds": 14400.0,
-            "max_duration_sec": 900.0, "max_radius_m": 5.0, "clearance_m": 0.33,
+            "max_duration_sec": 900.0, "max_radius_m": 5.0, "clearance_m": 0.22,
             "observation_distance_m": 0.8, "target_spacing_m": 0.5,
             "revisit_spacing_m": 1.0, "free_threshold": 20, "max_map_cells": 250000,
             "data_timeout_sec": 1.0, "slam_timeout_sec": 4.0, "service_timeout_sec": 3.0,
             "navigation_timeout_sec": 180.0, "settle_sec": 1.0,
             "navigation_tree": str(Path(get_package_share_directory("lekiwi_rmf"))
                                    / "config/explore_nav_to_pose.xml"),
+            "navigation_params_file": str(Path(get_package_share_directory("lekiwi_rmf"))
+                                          / "config/nav2_params.yaml"),
         }
         for name, value in defaults.items():
             self.declare_parameter(name, value)
         self.config = {name: self.get_parameter(name).value for name in defaults}
+        self._footprint, inscribed, self._region_margin = None, 0.0, 0.0
+        if self.config["allow_exploration"]:
+            self._footprint, inscribed, self._region_margin = load_navigation_footprint(
+                Path(self.config["navigation_params_file"]).expanduser())
         for name, value in self.config.items():
             if type(value) in (float, int) and (not math.isfinite(value) or value <= 0):
                 raise ValueError(f"{name} must be finite and positive")
         if (not 0 < self.config["free_threshold"] < 100
-                or self.config["clearance_m"] < 0.33
-                or self.config["max_radius_m"] <= 2 * (self.config["clearance_m"] + STOPPING_MARGIN_M)
+                or self.config["clearance_m"] < inscribed - 1e-6
+                or self.config["max_radius_m"] <= 2 * self._region_margin
                 or self.config["observation_distance_m"] <= self.config["clearance_m"]):
             raise ValueError("invalid exploration clearance, observation distance or region")
         self.database = Path(self.config["database_path"]).expanduser()
@@ -199,18 +205,30 @@ class RobotExplorer(Node):
         if self._mapping is None or now - self._mode_at > self.config["service_timeout_sec"]:
             raise RuntimeError("mapping mode is unknown or stale")
 
+    def _footprint_clear(self, pose):
+        q, p = pose.pose.orientation, pose.pose.position
+        grid = self._map
+        if (grid is None or self._footprint is None
+                or not all(math.isfinite(v) for v in (p.x, p.y, q.x, q.y, q.z, q.w))
+                or abs(q.x) > 1e-6 or abs(q.y) > 1e-6
+                or abs(q.z * q.z + q.w * q.w - 1) > 1e-3):
+            return False
+        return footprint_is_free(*grid, (p.x, p.y), 2 * math.atan2(q.z, q.w),
+                                 self._footprint, self.config["free_threshold"])
+
     def _accept(self, request):
         try:
             if self._shutdown_requested.is_set():
                 raise RuntimeError("exploration server is shutting down")
-            _, radius = task_limits(request.max_duration_sec, request.max_radius_m,
-                                    self.config["max_duration_sec"], self.config["max_radius_m"])
-            if radius <= 2 * (self.config["clearance_m"] + STOPPING_MARGIN_M):
-                raise ValueError("exploration radius is too small for the footprint")
             if not self.config["allow_exploration"]:
                 raise RuntimeError("exploration is disabled for fixed-map/RMF operation")
+            _, radius = task_limits(request.max_duration_sec, request.max_radius_m,
+                                    self.config["max_duration_sec"], self.config["max_radius_m"])
+            if radius <= 2 * self._region_margin:
+                raise ValueError("exploration radius is too small for the footprint")
             self._healthy()
-            self._pose()
+            if not self._footprint_clear(self._pose()):
+                raise RuntimeError("robot footprint overlaps occupied or unknown space")
             if (not self._navigation.server_is_ready() or not self._planner.server_is_ready()
                     or not self._mapping_client.service_is_ready()
                     or not self._localization_client.service_is_ready()):
@@ -239,8 +257,10 @@ class RobotExplorer(Node):
             raise RuntimeError(reason)
         pose = self._pose()
         xy = pose.pose.position
-        if math.hypot(xy.x - center[0], xy.y - center[1]) >= radius - self.config["clearance_m"] - STOPPING_MARGIN_M:
+        if math.hypot(xy.x - center[0], xy.y - center[1]) >= radius - self._region_margin:
             raise RuntimeError("exploration region stopping margin reached")
+        if not self._footprint_clear(pose):
+            raise RuntimeError("robot footprint overlaps occupied or unknown space")
         return pose
 
     def _wait(self, future, timeout, check=None):
@@ -333,7 +353,8 @@ class RobotExplorer(Node):
                 pose = check()
                 target, stage, result.mapped_area_m2 = select_target(
                     *self._map, (pose.pose.position.x, pose.pose.position.y), center, radius, visited, blocked,
-                    clearance=self.config["clearance_m"], observation_distance=self.config["observation_distance_m"],
+                    clearance=self.config["clearance_m"], footprint=self._footprint, region_margin=self._region_margin,
+                    observation_distance=self.config["observation_distance_m"],
                     spacing=self.config["target_spacing_m"], revisit_spacing=self.config["revisit_spacing_m"],
                     free_threshold=self.config["free_threshold"], revisit=goal.request.revisit_known,
                 )
@@ -363,15 +384,11 @@ class RobotExplorer(Node):
                         or route.result.path.header.frame_id != "map" or not route.result.path.poses):
                     blocked.append(target)
                     continue
-                grid, resolution, origin = self._map
-                safe = known_safe_cells(grid, resolution, self.config["clearance_m"], self.config["free_threshold"])
                 valid = True
                 for waypoint in route.result.path.poses:
                     p = waypoint.pose.position
-                    x, y = world_to_cell((p.x, p.y), resolution, origin)
-                    if (math.hypot(p.x - center[0], p.y - center[1]) >= radius - self.config["clearance_m"] - STOPPING_MARGIN_M
-                            or not 0 <= y < grid.shape[0] or not 0 <= x < grid.shape[1]
-                            or not safe[y, x]):
+                    if (math.hypot(p.x - center[0], p.y - center[1]) >= radius - self._region_margin
+                            or not self._footprint_clear(waypoint)):
                         valid = False
                         break
                 if not valid:

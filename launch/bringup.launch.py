@@ -337,6 +337,7 @@ def generate_launch_description():
         parameters=[PathJoinSubstitution([package, "config", "exploration.yaml"]), {
             "use_sim_time": ParameterValue(sim, value_type=bool),
             "database_path": rtabmap_database,
+            "navigation_params_file": params_file,
             "mapping_max_bytes": ParameterValue(LaunchConfiguration("rtabmap_mapping_max_bytes"), value_type=int),
             "mapping_max_seconds": ParameterValue(LaunchConfiguration("rtabmap_mapping_max_seconds"), value_type=float),
             "allow_exploration": ParameterValue(IfElseSubstitution(

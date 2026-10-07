@@ -23,13 +23,19 @@ and failed target counts, and known map area in the bounded region.
 
 `max_duration_sec` and `max_radius_m` equal to zero select the tracked defaults
 in `config/exploration.yaml` (900 seconds and 5 metres). Positive goal values
-can only reduce these maxima. Map clearance is 0.33 m, enclosing the folded
-robot's 0.326 m corner radius and matching the tracked Nav2/RMF envelope. It
-rounds to a conservative 0.35 m disk on the 5 cm grid; the former 0.38 m setting
-rounded to 0.40 m. Nav2 retains its exact rectangular footprint and its stop
-polygon with 5 cm on every side. The exploration radius retains a 0.38 m
-body/stopping margin (0.33 m plus 0.05 m); targets and preflight paths stay inside that margin, and the active
-task cancels navigation if the live pose approaches it. It rejects malformed
+can only reduce these maxima. The centre reachability prefilter is 0.22 m,
+the body's inscribed radius (conservatively 0.25 m on a 5 cm grid). The former
+0.33 m circle rounded to 0.35 m and unnecessarily blocked close side clearance.
+Goals, preflight waypoints and the live robot pose now check the whole oriented
+46 x 44 cm footprint against occupied and unknown cell areas, including the
+interior and corners during turns. That footprint comes from the same selected
+Nav2 parameter file as navigation, with zero additional padding. Nav2 retains
+its stop polygon with 5 cm on every side. Costmap inflation is a soft cost field,
+not extra footprint padding; local inflation still encloses the corners so
+MPPI's native footprint-check optimization remains valid. The exploration
+region retains a 0.38 m body/stopping inset; targets and preflight paths stay
+inside it, and the active task cancels navigation if the live pose approaches
+the boundary or its body intersects occupied/unknown space. It rejects malformed
 maps, unavailable services, stale SLAM/TF, missing motion permission or an
 unfolded arm. Hardware operation remains within the existing attended physical
 acceptance; room-scale coverage has not been physically qualified by the tests.

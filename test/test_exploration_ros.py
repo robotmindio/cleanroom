@@ -1,6 +1,7 @@
 """Real ROS action/service exchanges on an isolated DDS domain, without motors."""
 
 from concurrent.futures import Future
+from itertools import groupby
 import threading
 import time
 from types import SimpleNamespace
@@ -164,7 +165,8 @@ def graph(tmp_path):
     executor = MultiThreadedExecutor(num_threads=6, context=context)
     for node in (peers, explorer, client_node):
         executor.add_node(node)
-    thread = threading.Thread(target=executor.spin, daemon=True)
+    finished = Future()
+    thread = threading.Thread(target=executor.spin_until_future_complete, args=(finished,), daemon=True)
     thread.start()
     wait(lambda: client.server_is_ready() and explorer._mapping is False and explorer._map is not None)
     wait(lambda: "slam" in explorer._inputs and explorer._navigation.server_is_ready()
@@ -176,8 +178,10 @@ def graph(tmp_path):
         peers.permitted = False
         wait(lambda: not explorer._busy, timeout=6)
         wait(lambda: not peers.nav_active)
-        executor.shutdown(timeout_sec=5)
+        finished.set_result(True)
         thread.join(timeout=5)
+        assert not thread.is_alive()
+        assert executor.shutdown(timeout_sec=5)
         for node in (client_node, explorer, peers):
             node.destroy_node()
         context.shutdown()
@@ -224,7 +228,7 @@ def test_success_confirms_visited_target_and_retains_database(graph):
     assert peers.mapping_requests == [True, False]
 
 
-@pytest.mark.parametrize("fault", ["permission", "slam", "database", "duration", "mode"])
+@pytest.mark.parametrize("fault", ["permission", "slam", "database", "duration", "mode", "footprint"])
 def test_running_fault_or_quota_cancels_the_owned_navigation_goal(graph, fault):
     peers, explorer, _ = graph
     handle = start(graph, duration=2 if fault == "duration" else 8)
@@ -236,22 +240,41 @@ def test_running_fault_or_quota_cancels_the_owned_navigation_goal(graph, fault):
         explorer.database.write_bytes(b"x" * 4096)
     elif fault == "mode":
         peers.set_mode(False, Empty.Response())
+    elif fault == "footprint":
+        peers.grid.data[40 * 80 + 44] = 100  # Newly mapped obstacle under a front corner.
     result = response(handle.get_result_async(), timeout=6)
     assert result.status == GoalStatus.STATUS_ABORTED and not result.result.complete
     assert peers.nav_canceled == 1 and not peers.nav_active
     assert explorer._mapping is False
 
 
+def test_close_wall_exploration_uses_the_actual_body_instead_of_a_corner_circle(graph):
+    peers, explorer, client = graph
+    peers.position = (0.025, 0.025)
+    peers.grid.data = [100 if index // 80 in (34, 46) else (-1 if index % 80 >= 60 else 0)
+                       for index in range(6400)]
+    peers.nav_mode = "success"
+    wait(lambda: explorer._map[0][34, 40] == 100
+         and abs(explorer._pose().pose.position.y - 0.025) < 1e-6)
+    handle = response(client.send_goal_async(Explore.Goal(max_radius_m=1.8)))
+    assert handle.accepted
+    result = response(handle.get_result_async())
+    assert result.status == GoalStatus.STATUS_SUCCEEDED and result.result.complete
+    assert result.result.visited_targets == peers.nav_count == 1 and not peers.nav_active
+
+
 def test_idle_guard_catches_direct_mapping_service_and_fresh_sessions(graph):
     peers, explorer, _ = graph
     explorer.config["mapping_max_seconds"] = 0.6
     peers.set_mode(True, Empty.Response())
-    wait(lambda: True in peers.mapping_requests and peers.mapping_requests[-1] is False)
+    wait(lambda: True in peers.mapping_requests and peers.mapping_requests[-1] is False
+         and explorer._mapping is False)
     assert not peers.nav_active and peers.nav_count == 0
     peers.set_mode(True, Empty.Response())
     wait(lambda: explorer._mapping is True)
-    wait(lambda: peers.mapping_requests[-1] is False)
-    assert peers.mapping_requests == [True, False, True, False]
+    wait(lambda: peers.mapping_requests[-1] is False and explorer._mapping is False)
+    # Quota enforcement may repeat the idempotent freeze before its mode query replies.
+    assert [mode for mode, _ in groupby(peers.mapping_requests)] == [True, False, True, False]
 
 
 def test_mode_rpc_failures_and_old_replies_do_not_reset_the_session_budget(graph):
@@ -288,6 +311,23 @@ def test_invalid_or_denied_requests_have_no_mapping_or_navigation_side_effects(g
     wait(lambda: not explorer._inputs["base_motion_permitted"][0])
     assert not response(client.send_goal_async(Explore.Goal())).accepted
     assert peers.mapping_requests == [] and peers.nav_count == 0
+
+
+def test_disabled_exploration_keeps_the_mapping_monitor_without_navigation_geometry(tmp_path):
+    context = Context()
+    rclpy.init(context=context)
+    explorer = RobotExplorer(context=context, parameter_overrides=[
+        Parameter("allow_exploration", value=False),
+        Parameter("database_path", value=str(tmp_path / "map.db")),
+        Parameter("navigation_params_file", value=str(tmp_path / "unused-nav2.yaml")),
+    ])
+    try:
+        explorer._monitor()
+        assert explorer._timer is not None
+        assert explorer._accept(Explore.Goal()) == GoalResponse.REJECT
+    finally:
+        explorer.destroy_node()
+        context.shutdown()
 
 
 @pytest.mark.parametrize("delay,accepted", [(2.5, True), (4.5, False)])
