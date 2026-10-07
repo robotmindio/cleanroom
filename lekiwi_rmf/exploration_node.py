@@ -41,7 +41,7 @@ class RobotExplorer(Node):
             "max_duration_sec": 900.0, "max_radius_m": 5.0, "clearance_m": 0.38,
             "observation_distance_m": 0.8, "target_spacing_m": 0.5,
             "revisit_spacing_m": 1.0, "free_threshold": 20, "max_map_cells": 250000,
-            "data_timeout_sec": 1.0, "slam_timeout_sec": 2.0, "service_timeout_sec": 3.0,
+            "data_timeout_sec": 1.0, "slam_timeout_sec": 4.0, "service_timeout_sec": 3.0,
             "navigation_timeout_sec": 180.0, "settle_sec": 1.0,
             "navigation_tree": str(Path(get_package_share_directory("lekiwi_rmf"))
                                    / "config/explore_nav_to_pose.xml"),

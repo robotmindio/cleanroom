@@ -198,7 +198,7 @@ def test_cancel_stops_navigation_restores_mode_and_rejects_concurrent_goal(graph
     parameters = AsyncParameterClient(peers, "/robot_explorer", callback_group=peers.group)
     wait(parameters.services_are_ready)
     values = response(parameters.get_parameters(["slam_timeout_sec"]))
-    assert values.values[0].double_value == 2.0
+    assert values.values[0].double_value == 4.0
     assert peers.mapping_requests == [True]
     other = response(client.send_goal_async(Explore.Goal()))
     assert not other.accepted
@@ -290,7 +290,7 @@ def test_invalid_or_denied_requests_have_no_mapping_or_navigation_side_effects(g
     assert peers.mapping_requests == [] and peers.nav_count == 0
 
 
-@pytest.mark.parametrize("delay,accepted", [(1.3, True), (2.5, False)])
+@pytest.mark.parametrize("delay,accepted", [(2.5, True), (4.5, False)])
 def test_camera_stamped_slam_has_a_separate_bounded_freshness_budget(graph, delay, accepted):
     peers, explorer, client = graph
     peers.slam_delay = delay

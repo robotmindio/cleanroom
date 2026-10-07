@@ -11,8 +11,8 @@ robot_explorer:
     free_threshold: 20
     max_map_cells: 250000
     data_timeout_sec: 1.0
-    # SLAM timestamps camera acquisition, with measured ~1.1 s processing/transport lag.
-    slam_timeout_sec: 2.0
+    # Camera acquisition/transport plus gaps between status updates exceeded 2.5 s live.
+    slam_timeout_sec: 4.0
     service_timeout_sec: 3.0
     navigation_timeout_sec: 180.0
     settle_sec: 1.0

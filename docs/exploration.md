@@ -39,8 +39,9 @@ exploration before sending an unrelated navigation task.
 
 SLAM freshness uses RTAB-Map's canonical `/info` topic, matching normal bringup.
 The mode-switching services remain private to the node at `/rtabmap/set_mode_*`.
-SLAM's camera-acquisition stamps have a separate tracked two-second age/liveness
-budget to cover processing and transport. TF and motion-permission inputs retain
+SLAM's camera-acquisition stamps have a separate tracked four-second age/liveness
+budget to cover processing, transport and inter-update gaps (the latest observation
+exceeded 2.5 seconds in a live timing sample). TF and motion-permission inputs retain
 the one-second task budget; the independent production motion guards are unchanged.
 
 To cancel the sole active exploration through standard ROS action services:
