@@ -97,10 +97,8 @@ elif lekiwi_motion_port_listening; then
   echo "restart it from this repository (or restart lekiwi-host.service) before launching ROS." >&2
   exit 1
 else
-  # ROS reads the local cameras directly. Keeping them out of the LeRobot host avoids
-  # two V4L2 clients fighting over the same USB camera, which otherwise leaves ROS with
-  # no images while the motor host can also die on a delayed camera read.
-  start_recorded host scripts/robot-host.sh --no-cameras
+  # ROS reads the local cameras directly; the motor host serves none.
+  start_recorded host scripts/robot-host.sh
   host_launcher_pid=$(<"$RUNTIME_DIR/host.pid")
   host_started_here=1
   wait_for 90 host_up || {

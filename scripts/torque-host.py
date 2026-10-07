@@ -5,17 +5,17 @@ The stock LeRobot host owns the serial bus but only exposes motion commands.
 This process keeps its command/observation protocol intact and adds a separate
 ZMQ REP endpoint for the ROS driver's explicit arm/disarm transactions. The
 command, torque, watchdog and telemetry rules live in lekiwi_rmf.motor_host;
-this script wires them to LeRobot's LeKiwi, its cameras and its serial bus.
+this script wires them to LeRobot's LeKiwi and its serial bus. The host opens
+no cameras; ROS camera nodes own them.
 """
 
 import logging
 import os
 import signal
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-import cv2
 import draccus
 import zmq
 
@@ -156,11 +156,6 @@ class SafetyLeKiwi(LeKiwi):
             self.bus.write("Operating_Mode", name, OperatingMode.VELOCITY.value)
 
 
-def encode_jpeg(image):
-    valid, jpeg = cv2.imencode(".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
-    return jpeg if valid else b""
-
-
 _shutdown_requested = False
 
 
@@ -188,7 +183,9 @@ def connect_when_servos_powered(robot: SafetyLeKiwi) -> None:
 def main(cfg: TorqueHostConfig):
     global _shutdown_requested
     _shutdown_requested = False
-    robot = SafetyLeKiwi(cfg.robot)
+    # LeRobot's LeKiwiConfig defaults to two cameras, and draccus rebuilds that
+    # default. The motor host serves none; ROS camera nodes own the devices.
+    robot = SafetyLeKiwi(replace(cfg.robot, cameras={}))
     host = None
     signal.signal(signal.SIGTERM, _shutdown_signal)
     signal.signal(signal.SIGHUP, _shutdown_signal)
@@ -212,7 +209,6 @@ def main(cfg: TorqueHostConfig):
             base_limits=load_base_speed_limits(cfg.safety.nav2_params_file),
             base_scales=load_base_scales(os.environ.get(
                 "LEKIWI_LAUNCH_CALIBRATION", "~/.ros/lekiwi_launch_calibration.conf")),
-            encode_camera=encode_jpeg,
         )
         while not _shutdown_requested:
             loop_start = time.monotonic()
@@ -232,11 +228,7 @@ def main(cfg: TorqueHostConfig):
                 if robot.is_connected:
                     # LeRobot.disconnect() writes zero wheel goals, which
                     # re-enables Feetech torque after our verified cut.
-                    try:
-                        robot.bus.disconnect(disable_torque=not torque_cut)
-                    finally:
-                        for camera in robot.cameras.values():
-                            camera.disconnect()
+                    robot.bus.disconnect(disable_torque=not torque_cut)
             finally:
                 if host is not None:
                     host.disconnect()

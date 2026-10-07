@@ -77,7 +77,9 @@ def _stack(context):
     nav2_launch = lambda name: PathJoinSubstitution([FindPackageShare("nav2_bringup"), "launch", name])  # noqa: E731
     flag = lambda name: LaunchConfiguration(name).perform(context) == "true"  # noqa: E731
     bounded_base_test = flag("bounded_base_test")
-    disarm_on_failure = flag("disarm_on_failure")
+    # hold (domestic robot) stays armed through failures; strict disarms on every
+    # failure and waits for an operator safety/arm.
+    strict_policy = LaunchConfiguration("safety_policy").perform(context) == "strict"
     arm_calibration_file = LaunchConfiguration("arm_calibration_file")
     selected_map = LaunchConfiguration(
         "selected_map", default=PathJoinSubstitution([package, "maps", "cleanroom.yaml"]))
@@ -107,8 +109,8 @@ def _stack(context):
             "use_sim_time": sim,
             "bounded_base_test": bounded_base_test,
             # Simulation keeps its qualified enforcement; real mode is strict only
-            # for larger robots that opt in with disarm_on_failure.
-            "strict": sim or disarm_on_failure,
+            # for larger robots that opt in with safety_policy:=strict.
+            "strict": sim or strict_policy,
             "acceptance_file": config("safety_acceptance.yaml"),
             "scan_self_mask_file": ParameterValue(
                 config("lidar_self_mask_simulation.yaml" if sim else "lidar_self_mask.yaml"), value_type=str),
@@ -189,12 +191,10 @@ def _stack(context):
                 "xy_velocity_scale": ParameterValue(LaunchConfiguration("xy_velocity_scale"), value_type=float),
                 "yaw_velocity_scale": ParameterValue(LaunchConfiguration("yaw_velocity_scale"), value_type=float),
                 "permission_timeout": lease,
-                # The driver still requires current supervisor permission
-                # and fresh host telemetry before energizing servos. Without
-                # disarm_on_failure it arms at startup regardless; with it,
-                # this removes the manual arm RPC at startup.
-                "auto_arm_on_startup": flag("auto_arm_on_startup"),
-                "disarm_on_failure": disarm_on_failure,
+                # hold arms itself after the first healthy telemetry and current
+                # supervisor permission; strict leaves the startup arm to the operator.
+                "auto_arm_on_startup": False,
+                "disarm_on_failure": strict_policy,
                 "odom_topic": "/wheel/odometry",
                 "publish_odom_tf": False,
             }],
@@ -376,17 +376,13 @@ def generate_launch_description():
                 choices=list(CHOICES["slam_mode"]),
             ),
             DeclareLaunchArgument("publish_camera", default_value="true"),
-            # Only consulted with disarm_on_failure:=true. By default the driver arms
-            # itself after the first healthy telemetry whatever this is set to.
-            DeclareLaunchArgument(
-                "auto_arm_on_startup", default_value="false", choices=["true", "false"]
-            ),
-            # false: the robot stays armed; a failure stops the base, freezes the arm with
-            # torque on, and the driver re-arms itself. true (larger robots): every failure
+            # hold: the robot stays armed; a failure stops the base, freezes the arm with
+            # torque on, and the driver re-arms itself. strict (larger robots): every failure
             # disarms, cuts torque, latches TORQUE_FAULT if the cut is unconfirmed, and waits
-            # for an explicit safety/arm.
+            # for an explicit safety/arm, including at startup; the supervisor denies motion
+            # until the production profile is satisfied.
             DeclareLaunchArgument(
-                "disarm_on_failure", default_value="false", choices=["true", "false"]
+                "safety_policy", default_value="hold", choices=list(CHOICES["safety_policy"])
             ),
             # The Astra Pro is an additional third camera. Existing front and
             # wrist V4L2 cameras continue to publish unchanged.

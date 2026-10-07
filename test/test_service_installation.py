@@ -162,7 +162,7 @@ def test_missing_lerobot_environment_fails_once_as_configuration_error(tmp_path)
         "LEKIWI_LEROBOT_VENV": str(tmp_path / "missing-venv"),
     }
     result = subprocess.run(
-        ["bash", str(ROOT / "scripts" / "robot-host.sh"), "--no-cameras"],
+        ["bash", str(ROOT / "scripts" / "robot-host.sh")],
         cwd=ROOT,
         env=environment,
         text=True,
@@ -195,7 +195,7 @@ def test_headless_host_refuses_to_answer_the_calibration_prompt_without_a_calibr
 
     def run():
         return subprocess.run(
-            ["bash", str(ROOT / "scripts" / "robot-host.sh"), "--no-cameras"],
+            ["bash", str(ROOT / "scripts" / "robot-host.sh")],
             cwd=ROOT, env=environment, text=True, capture_output=True, timeout=10,
         )
 
@@ -976,7 +976,7 @@ def test_torque_on_failure_key_is_validated_and_reaches_both_machines(tmp_path):
     # Both sides must pass the same opt-in on, and default to holding torque.
     stack = (ROOT / "scripts" / "ros-start.sh").read_text(encoding="utf-8")
     host = (ROOT / "scripts" / "robot-host.sh").read_text(encoding="utf-8")
-    assert "disarm_on_failure:=true" in stack
+    assert "safety_policy:=strict" in stack
     assert '--safety.disarm_on_failure="${LEKIWI_DISARM_ON_FAILURE:-false}"' in host
 
 
@@ -1192,7 +1192,7 @@ def test_launchers_start_long_running_children_only_through_start_recorded():
 @pytest.mark.parametrize("kind,name", [
     ("stack", "ros2 launch lekiwi_rmf bringup.launch.py profile:=split"),
     ("stack", "bash scripts/ros-start.sh profile:=split"),
-    ("host", "bash scripts/robot-host.sh --no-cameras"),
+    ("host", "bash scripts/robot-host.sh"),
     ("host", "python3 -m lerobot.robots.lekiwi.lekiwi_host"),
     ("rviz", "bash scripts/rviz.sh"),
     ("rviz", "rviz2 -d lekiwi.rviz"),

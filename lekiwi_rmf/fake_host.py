@@ -2,10 +2,10 @@
 
 This is the real host core (:mod:`lekiwi_rmf.motor_host`) on an in-memory
 motor bus. It binds the same three endpoints as the Pi host -- a PULL socket
-for JSON actions, a PUSH socket for multipart observations, and a REP socket
+for JSON actions, a PUSH socket for JSON observations, and a REP socket
 for the torque interlock -- and enforces the same torque-off, motion-envelope,
 arm-lease and command-watchdog rules, including host odometry in every
-observation. It imports no LeRobot, ROS, camera or serial library.
+observation. It imports no LeRobot, ROS or serial library.
 
 The host is manual by default: a test calls :meth:`step` or
 :meth:`publish_observation` at a known time. ``start()`` is provided for
@@ -113,10 +113,9 @@ class FakeLeKiwiRobot:
         self.actions = actions
         self.bus = FakeMotorBus(state)
         self.arm_motors = list(ARM_JOINTS)
-        self.cameras: dict[str, bytes] = {}
 
     def get_observation(self) -> dict:
-        return {**self.state, **self.cameras}
+        return dict(self.state)
 
     def send_action(self, action: Mapping[str, float]) -> dict[str, float]:
         action = dict(action)
@@ -164,7 +163,7 @@ class FaultInjectingSocket:
             outgoing = list(self._last_valid)
         elif fault is ObservationFault.STALE and self._last_sample_ns is not None:
             header[TELEMETRY_MONOTONIC_NS_KEY] = self._last_sample_ns
-            outgoing = [json.dumps(header).encode(), *frames[1:]]
+            outgoing = [json.dumps(header).encode()]
         else:
             outgoing = frames
             self._last_valid = list(frames)
@@ -211,8 +210,7 @@ class FakeLeKiwiHost:
             arm_calibration=load_calibration(arm_calibration_file or "/nonexistent/arm-calibration.json"),
             base_limits=load_base_speed_limits(nav2_params_file or _default_nav2_params()),
             base_scales=base_scales,
-            # Tests set already-encoded JPEG bytes, and observe at every step.
-            encode_camera=bytes,
+            # Tests observe at every step.
             observation_period_s=0.0,
         )
         self._owns_context = context is None
@@ -319,18 +317,6 @@ class FakeLeKiwiHost:
             checked[key] = value
         with self._lock:
             self.state.update(checked)
-
-    def set_camera_frames(self, frames: Mapping[str, bytes]) -> None:
-        """Set already-JPEG-encoded camera frames for multipart observations."""
-        copied: dict[str, bytes] = {}
-        for name, frame in frames.items():
-            if not isinstance(name, str) or not name:
-                raise ValueError("camera names must be non-empty strings")
-            if not isinstance(frame, bytes):
-                raise TypeError("camera frames must be JPEG bytes")
-            copied[name] = frame
-        with self._lock:
-            self.robot.cameras = copied
 
     def set_motor_health(self, snapshot: Mapping) -> None:
         """Set an arbitrary diagnostic snapshot for wire/fault-injection tests."""

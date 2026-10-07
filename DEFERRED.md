@@ -37,6 +37,12 @@ unattended operation.
   protection against low and overhanging obstacles. Review sensor mounting and
   self-occlusion physically before changing the tracked mask or coverage limit.
   The camera floor-scan fallback cannot establish surround protection.
+  The Astra depth cloud cannot serve as a collision-monitor source either:
+  it faces sideways/rearward and its nearest valid depth (~0.55 m) is beyond
+  every StopZone and SlowdownZone point in its field of view, so a live capture
+  put zero points in either zone. Low-obstacle stopping needs a near-field
+  sensor or a camera remount; done when that sensor feeds `collision_monitor`
+  and the attended braking acceptance passes with an obstacle below the LD06 plane.
 - Measure the Astra Pro's optical-centre correction and prove that its
   `/camera/depth/points` cloud covers the arm workspace; the driver publishes
   the cloud, but coverage is not established.

@@ -43,16 +43,18 @@ def test_independent_stop_bounds_hidden_motion_and_rejects_bad_windows():
             measure(invalid,.1,config,.001)
 
 
-def test_terminal_capture_fit_and_dual_envelope():
-    module=import_module('test-braking')
-    samples=[{'time':i*.05,'pts_ns':int(i*50_000_000),
-              'pose':[.02*i*.05,0.,0.],'marker_pose':[.03*i*.05,0.,0.]} for i in range(25)]
+def test_terminal_capture_fit_uses_the_final_capture_interval():
+    module=import_module('test-onboard-braking')
+    samples=[{'time':i*.05,'pts_ns':int(i*50_000_000),'pose':[.02*i*.05,0.,.1*i*.05]} for i in range(25)]
     assert module.terminal_observed_speed(samples,False)==pytest.approx(.02)
-    assert module.terminal_observed_speed(samples,False,'marker_pose')==pytest.approx(.03)
-    result=module.dual_stop_measurement(samples,.53,.01)
-    assert result['conservative_swept_distance_m']==pytest.approx(.036)
-    assert result['conservative_swept_distance_m']>=result['floor_swept_distance_m']
+    assert module.terminal_observed_speed(samples,True)==pytest.approx(.1)
     with pytest.raises(ValueError):
         module.terminal_observed_speed(samples[:3],False)
-    with pytest.raises(ValueError):
-        module.dual_stop_measurement([{**s,'marker_pose':None} for s in samples],.53,.01)
+    with pytest.raises(ValueError,match='incomplete'):
+        module.terminal_observed_speed(samples[:5],False)
+
+
+def test_stopping_clearance_uses_farthest_point_excursion_without_summing_jitter():
+    excursion=import_module('test-onboard-braking').maximum_swept_excursion
+    assert excursion([[0,0,0],*[p for _ in range(100) for p in [[.001,0,0],[0,0,0]]]],.53)==.001
+    assert excursion([[0,0,0],[.01,0,.2],[0,0,0]],.53)==pytest.approx(.01+1.06*np.sin(.1))

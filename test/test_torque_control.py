@@ -20,12 +20,12 @@ def test_qualification_socket_changes_only_wire_data_and_expires():
     socket = cls(types.SimpleNamespace(send_multipart=lambda f, **k: sent.append(f)),
                  lambda: now[0])
     frames = [json.dumps({'sequence': 1, '_lekiwi_motor_health': {
-        'statuses': {'motor_bus': {'level': 0, 'message': 'healthy'}}}}).encode(), b'jpeg']
+        'statuses': {'motor_bus': {'level': 0, 'message': 'healthy'}}}}).encode()]
     with pytest.raises(RuntimeError, match='before'):
         socket.inject('duplicate')
     socket.send_multipart(frames)
     socket.inject('duplicate')
-    new = [frames[0].replace(b'1', b'2', 1), b'new jpeg']
+    new = [frames[0].replace(b'1', b'2', 1)]
     socket.send_multipart(new)
     assert sent[-1] == frames
     now[0] = 8.0
@@ -35,7 +35,7 @@ def test_qualification_socket_changes_only_wire_data_and_expires():
     socket.send_multipart(new)
     assert json.loads(sent[-1][0])['_lekiwi_motor_health']['statuses']['motor_bus']['level'] == 2
     assert json.loads(new[0])['_lekiwi_motor_health']['statuses']['motor_bus']['level'] == 0
-    assert sent[-1][1] == b'new jpeg'
+    assert len(sent[-1]) == 1
     now[0] = 16.0
     socket.send_multipart(new)
     assert sent[-1] == new
@@ -56,13 +56,14 @@ def test_wire_contract_matches_the_deployed_motor_host():
     from lekiwi_rmf import host_protocol as protocol
 
     payload = protocol.observation_payload(
-        {"arm_shoulder_pan.pos": 1.5, "x.vel": 0.0}, ["front"], session="s", sequence=3,
+        {"arm_shoulder_pan.pos": 1.5, "x.vel": 0.0}, session="s", sequence=3,
         sample_monotonic_ns=7, torque_enabled=True, motor_health={"version": 1},
         odometry={"pose": [0, 0, 0]}, arm_status=None,
     )
-    # Byte-for-byte the header the Pi host already in service sends (protocol 2).
+    # Byte-for-byte the camera-less message the Pi host already in service
+    # sends (protocol 2); LeRobot's own client requires the empty "_cams".
     assert json.dumps(payload) == (
-        '{"_cams": ["front"], "arm_shoulder_pan.pos": 1.5, "x.vel": 0.0, '
+        '{"_cams": [], "arm_shoulder_pan.pos": 1.5, "x.vel": 0.0, '
         '"_lekiwi_protocol": 2, "_lekiwi_session": "s", "_lekiwi_sequence": 3, '
         '"_lekiwi_sample_monotonic_ns": 7, "_lekiwi_torque_enabled": true, '
         '"_lekiwi_motor_health": {"version": 1}, "_lekiwi_odometry": {"pose": [0, 0, 0]}, '
@@ -316,6 +317,8 @@ def _torque_host_script(monkeypatch, filename=None):
     @dataclasses.dataclass
     class LeKiwiConfig:
         port: str = ""
+        # LeRobot's own default opens the front and wrist cameras.
+        cameras: dict = dataclasses.field(default_factory=lambda: {"front": object(), "wrist": object()})
 
     @dataclasses.dataclass
     class LeKiwiHostConfig:
@@ -329,7 +332,6 @@ def _torque_host_script(monkeypatch, filename=None):
             self.config = config
 
     modules = {
-        "cv2": types.SimpleNamespace(IMWRITE_JPEG_QUALITY=1, imencode=lambda *_args: (True, b"jpeg")),
         "draccus": types.SimpleNamespace(wrap=lambda: (lambda function: function)),
         "lerobot": types.ModuleType("lerobot"),
         "lerobot.motors": types.ModuleType("lerobot.motors"),
@@ -451,7 +453,6 @@ class _Robot:
         self.bus = bus
         self.arm_motors = list(ARM)
         self.base_motors = list(BASE)
-        self.cameras = {}
         self.actions = []
 
     def stop_base(self):
@@ -549,6 +550,22 @@ def test_configure_rejects_unconfirmed_arm_gains(monkeypatch):
     with pytest.raises(RuntimeError, match="I_Coefficient readback differs"):
         robot.configure()
     assert "enable_torque" not in robot.bus.calls
+
+
+def test_motor_host_configures_the_robot_without_cameras(monkeypatch):
+    host = _torque_host_script(monkeypatch)
+    config = host.TorqueHostConfig()
+    assert config.robot.cameras  # LeRobot's default, which draccus rebuilds
+    configured = []
+
+    def robot(robot_config):
+        configured.append(robot_config)
+        raise RuntimeError("stop before the serial bus")
+
+    monkeypatch.setattr(host, "SafetyLeKiwi", robot)
+    with pytest.raises(RuntimeError, match="serial bus"):
+        host.main(config)
+    assert configured[0].cameras == {} and configured[0].port == config.robot.port
 
 
 def test_shutdown_signal_waits_for_the_serial_operation_to_finish(monkeypatch):
@@ -690,7 +707,7 @@ def _loop(host, tmp_path, *, disarm_on_failure=False):
         robot, bound, health, disarm_on_failure=disarm_on_failure,
         arm_calibration=load_calibration(tmp_path / "arm_calibration.json"),
         base_limits=load_base_speed_limits(ROOT / "config/nav2_params.yaml"),
-        base_scales=(BASE_XY_SCALE, BASE_YAW_SCALE), encode_camera=bytes, clock=clock,
+        base_scales=(BASE_XY_SCALE, BASE_YAW_SCALE), clock=clock,
     )
     return loop, clock, bound.torque_socket, robot
 
@@ -927,6 +944,7 @@ def test_telemetry_reports_torque_state_health_and_a_gapless_sequence(host, tmp_
     loop.handle_control_request()
     loop.publish_observation()
 
+    assert all(len(frames) == 1 for frames in observations.sent)
     first, second = (json.loads(frames[0]) for frames in observations.sent)
     assert first["arm_gripper.pos"] == 1.0 and first["_cams"] == []
     assert first["_lekiwi_motor_health"] == {"torque": False}

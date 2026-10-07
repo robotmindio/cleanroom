@@ -149,19 +149,16 @@ class LeKiwiZmqClient:
                 return latest
 
     def _decode(self, frames):
-        if not frames:
-            raise ValueError("empty observation multipart message")
+        if len(frames) != 1:
+            raise ValueError("observation must be exactly one frame")
         try:
             payload = json.loads(frames[0])
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
             raise ValueError("malformed observation JSON") from error
         if not isinstance(payload, dict):
-            raise ValueError("observation header must be a JSON object")
-        cameras = payload.pop(CAMERAS_KEY, None)
-        if not isinstance(cameras, list) or any(not isinstance(name, str) for name in cameras):
-            raise ValueError("observation camera manifest is malformed")
-        if len(cameras) != len(frames) - 1:
-            raise ValueError("observation camera manifest does not match multipart frames")
+            raise ValueError("observation must be a JSON object")
+        if payload.pop(CAMERAS_KEY, None) != []:
+            raise ValueError("observation must carry an empty camera manifest")
         return payload
 
     def get_observation(self):

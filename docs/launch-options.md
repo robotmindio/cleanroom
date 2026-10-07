@@ -23,7 +23,7 @@ shared saved calibration, including negative pitch.
 | `slam_mode` | `mapping`, `localization` | `mapping` | Extend or reuse the RTAB-Map database; the session quota switches mapping to localization |
 | `remote_ip` | IPv4/hostname | `127.0.0.1` | Address of the LeKiwi ZMQ host and of the device zenoh bridge (`scripts/ros-start.sh` takes it from `LEKIWI_ROBOT_HOST`) |
 | `curve_client_secret_key_file`, `curve_server_public_key_file` | file paths | empty | Optional CURVE identity for the ZMQ link; set both or neither |
-| `disarm_on_failure` | `true`, `false` | `false` | Strict failure policy for larger robots: every failure disarms, cuts torque and waits for `/safety/arm`; also makes the safety supervisor deny motion. See [Arming and recovery](#arming-and-recovery). Scripts set it from `LEKIWI_DISARM_ON_FAILURE` |
+| `safety_policy` | `hold`, `strict` | `hold` | `hold` (domestic robot) stays armed through failures and re-arms itself. `strict` (larger robots): every failure disarms, cuts torque and waits for `/safety/arm`, startup included, and the safety supervisor denies motion. See [Arming and recovery](#arming-and-recovery). `scripts/ros-start.sh` passes `strict` when `LEKIWI_DISARM_ON_FAILURE=true` |
 | `rtabmap_database` | file path | sim: `~/.ros/lekiwi_rtabmap_sim.db`; real: `~/.ros/lekiwi_rtabmap.db` | RTAB-Map map database |
 | `rtabmap_wm_nodes` | integer | `300` | Nodes kept in RTAB-Map working memory before older ones move to the database |
 | `rtabmap_mapping_max_bytes`, `rtabmap_mapping_max_seconds` | integers | `536870912`, `14400` | Mapping-session quota; reaching either switches RTAB-Map to localization |
@@ -109,7 +109,7 @@ continuous safety supervisor. The motor host runs continuously; a clean service
 stop or restart disconnects it and cuts servo torque, and a restarted driver
 arms itself again once telemetry and permission are healthy.
 
-By default (`disarm_on_failure` off, the domestic robot) the robot stays armed:
+By default (`safety_policy:=hold`, the domestic robot) the robot stays armed:
 a host session change, stale or failed telemetry, or withdrawn permission
 cancels the interrupted trajectory, stops the base and freezes the arm at its
 present position with servo torque on, and the driver re-arms itself every 2 s
@@ -122,10 +122,11 @@ observation and torque sockets use heartbeat and TCP keepalive, so a half-open
 link is detected and reconnected instead of hanging.
 
 For larger robots, set `LEKIWI_DISARM_ON_FAILURE=true` in `.env` on both the
-workstation and the robot computer (launch argument `disarm_on_failure:=true`, host
+workstation and the robot computer (launch argument `safety_policy:=strict`, host
 option `--safety.disarm_on_failure=true`). This strict mode disarms on every
 failure, cuts all servo torque, latches `TORQUE_FAULT` if the cut is unconfirmed,
-never re-arms by itself, and stays disarmed until you inspect the robot and:
+never arms by itself, at startup or after a failure, and stays disarmed until
+you inspect the robot and:
 
 ```bash
 ros2 service call /safety/arm std_srvs/srv/Trigger '{}'
@@ -222,9 +223,8 @@ The Astra faces left/rear, pitched 8 degrees down; forward (+X) remains
 the arm/fixed-camera side. Its optical-centre correction still needs measurement.
 Verify the depth cloud overlay in RViz before enabling arm motion.
 
-The repository host is started camera-less for ROS, so a delayed camera frame
-cannot take the motor bus down. Direct LeRobot dataset/teleoperation mode may
-still be camera-sensitive and should not be used as the ROS motor service.
+The repository motor host serves no cameras, so a delayed camera frame cannot
+take the motor bus down.
 
 The front/wrist V4L2 cameras are also the supported remote-camera topology:
 frames are read by `v4l2_camera` on the machine where they are plugged in, then

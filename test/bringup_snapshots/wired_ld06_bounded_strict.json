@@ -1411,7 +1411,7 @@
   "output": "screen",
   "parameters": {
    "arm_calibration_file": "$(env HOME)/.ros/lekiwi_arm_calibration.json",
-   "auto_arm_on_startup": true,
+   "auto_arm_on_startup": false,
    "base_test_angular_limit": 0.06,
    "base_test_linear_limit": 0.03,
    "bounded_base_test": true,

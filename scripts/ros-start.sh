@@ -16,7 +16,7 @@ source scripts/lib/runtime-common.sh
 source scripts/lib/self-heal.sh
 load_lekiwi_env
 # By default the robot stays armed after a failure; only the strict opt-in is passed on.
-[[ ${LEKIWI_DISARM_ON_FAILURE:-false} != true ]] || set -- disarm_on_failure:=true "$@"
+[[ ${LEKIWI_DISARM_ON_FAILURE:-false} != true ]] || set -- safety_policy:=strict "$@"
 if [[ -n ${LEKIWI_ROBOT_HOST:-} ]]; then
   use_env_host=true
   for arg in "$@"; do
@@ -43,7 +43,7 @@ set -u
 scripts/rtabmap-db-maintenance.py "$@"
 
 # /dev/videoN shifts on every USB re-enumeration and on a laptop video0 is the built-in
-# webcam, so resolve the front camera by its device name -- same glob as robot-host.sh.
+# webcam, so resolve the front camera by its device name -- same glob as ros-cameras.sh.
 # A workstation using a remote LeKiwi host has no local camera at all.
 camera_source=""
 for arg in "$@"; do

@@ -6,7 +6,7 @@ enforce the same torque, motion-envelope, lease and watchdog rules.
 
 The robot is the subset of LeRobot's ``LeKiwi`` the host needs: ``bus``
 (``motors``, ``sync_read``, ``sync_write``, ``enable_torque``,
-``disable_torque``), ``arm_motors``, ``cameras``, ``get_observation()``,
+``disable_torque``), ``arm_motors``, ``get_observation()``,
 ``send_action()`` and ``stop_base()``. The transport (``host``) provides the
 bound ``zmq_cmd_socket`` (PULL), ``zmq_observation_socket`` (PUSH),
 ``torque_socket`` (REP) and ``watchdog_timeout_ms``.
@@ -372,7 +372,7 @@ class HostLoop:
 
     def __init__(
         self, robot, host, health, *, disarm_on_failure: bool, arm_calibration,
-        base_limits, base_scales, encode_camera, observation_period_s=OBSERVATION_PERIOD_S,
+        base_limits, base_scales, observation_period_s=OBSERVATION_PERIOD_S,
         clock=time.monotonic,
     ):
         self.robot = robot
@@ -381,7 +381,6 @@ class HostLoop:
         self.disarm_on_failure = disarm_on_failure
         self.arm_calibration = arm_calibration
         self.base_limits = base_limits
-        self.encode_camera = encode_camera
         self.observation_period_s = observation_period_s
         self.clock = clock
         self.last_cmd_time = clock()
@@ -529,10 +528,8 @@ class HostLoop:
             math.radians(float(observation["theta.vel"])),
         ), sample_monotonic_ns, time.time_ns())
         motor_health = self.health.collect(self.robot, self.control.torque_enabled)
-        camera_keys = list(self.robot.cameras.keys())
-        jpeg_frames = [self.encode_camera(observation.pop(camera_key)) for camera_key in camera_keys]
         payload = observation_payload(
-            observation, camera_keys,
+            observation,
             session=self.telemetry_session,
             sequence=self.telemetry_sequence,
             sample_monotonic_ns=sample_monotonic_ns,
@@ -543,7 +540,7 @@ class HostLoop:
         )
         try:
             self.host.zmq_observation_socket.send_multipart(
-                [json.dumps(payload).encode()] + jpeg_frames, flags=zmq.NOBLOCK,
+                [json.dumps(payload).encode()], flags=zmq.NOBLOCK,
             )
         except zmq.Again:
             logging.info("Dropping observation, no client connected")

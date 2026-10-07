@@ -1090,11 +1090,11 @@ class LeKiwiDriver(Node):
         return x * scale, y * scale
 
     def observation_is_fresh(self, observation):
-        # A stationary robot with cameras intentionally disabled reports identical
-        # numeric values in every packet. Comparing those values mistakes healthy,
-        # fresh telemetry for a dropout. The client sequence advances only when its ZMQ
-        # socket consumed a new multipart observation; cached observations leave it
-        # unchanged, which is the signal the driver actually needs for link safety.
+        # A stationary robot reports identical numeric values in every packet.
+        # Comparing those values mistakes healthy, fresh telemetry for a dropout.
+        # The client sequence advances only when its ZMQ socket consumed a new
+        # observation; cached observations leave it unchanged, which is the
+        # signal the driver actually needs for link safety.
         token = self.robot.observation_token
         if token is None:
             # The client has not accepted a packet yet; its initial zero state is not data.

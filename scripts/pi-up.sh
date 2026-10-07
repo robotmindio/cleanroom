@@ -33,7 +33,7 @@ elif lekiwi_motion_port_listening; then
   echo "host on TCP 5555 lacks torque safety on TCP 5557; restart it from this repository first" >&2
   exit 1
 else
-  start_recorded host scripts/robot-host.sh --no-cameras
+  start_recorded host scripts/robot-host.sh
   wait_for 90 lekiwi_safety_ports_listening || {
     echo "host did not come up -- see $LOGS/host.log" >&2
     tail -5 "$LOGS/host.log" >&2

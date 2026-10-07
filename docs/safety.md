@@ -4,8 +4,8 @@ This document records which requested safety functions can be provided by the
 current robot hardware and which require an additional physical signal source.
 The repository safety supervisor denies the affected capability when a required input is
 absent, stale, or unhealthy. Normal hold mode restores permission when inputs
-recover, while strict mode (`LEKIWI_DISARM_ON_FAILURE=true`, and always in
-simulation) also latches faults. A ROS topic alone is not evidence of a real
+recover, while strict mode (`LEKIWI_DISARM_ON_FAILURE=true`, which launches
+`safety_policy:=strict`, and always in simulation) also latches faults. A ROS topic alone is not evidence of a real
 safety function.
 
 | Function | Software support exists? | What is required for a real implementation |
@@ -153,6 +153,11 @@ is why the operator must remain at the motor-power stop. Remeasure the mask
 with the arm stowed and before acceptance trials: chassis self-returns that
 reach the StopZone cause intermittent false stops, and nearby hardware changes
 them. Full surrounding coverage needs a moved lidar or a second sensor.
+
+The Astra depth cloud is not a collision-monitor source: it faces
+sideways/rearward and its minimum depth (~0.55 m) lies beyond both zones, so it
+cannot see an obstacle inside them. `require_depth` gates base motion on its
+freshness only; obstacles below the LD06 plane are not detected.
 
 ## Motor-host motion limits
 
