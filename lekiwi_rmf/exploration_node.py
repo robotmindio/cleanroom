@@ -41,7 +41,7 @@ class RobotExplorer(Node):
             "max_duration_sec": 900.0, "max_radius_m": 5.0, "clearance_m": 0.38,
             "observation_distance_m": 0.8, "target_spacing_m": 0.5,
             "revisit_spacing_m": 1.0, "free_threshold": 20, "max_map_cells": 250000,
-            "data_timeout_sec": 1.0, "service_timeout_sec": 3.0,
+            "data_timeout_sec": 1.0, "slam_timeout_sec": 2.0, "service_timeout_sec": 3.0,
             "navigation_timeout_sec": 180.0, "settle_sec": 1.0,
             "navigation_tree": str(Path(get_package_share_directory("lekiwi_rmf"))
                                    / "config/explore_nav_to_pose.xml"),
@@ -189,11 +189,12 @@ class RobotExplorer(Node):
             raise RuntimeError("no valid occupancy map")
         for name in ("base_motion_permitted", "arm_stowed", "slam"):
             value, received = self._inputs.get(name, (None, 0))
-            if not value or now - received > self.config["data_timeout_sec"]:
+            timeout = self.config["slam_timeout_sec"] if name == "slam" else self.config["data_timeout_sec"]
+            if not value or now - received > timeout:
                 raise RuntimeError(f"missing, stale or denied {name}")
             if name == "slam":
                 age = (self.get_clock().now() - rclpy.time.Time.from_msg(value.stamp)).nanoseconds / 1e9
-                if not -0.3 <= age <= self.config["data_timeout_sec"]:
+                if not -0.3 <= age <= timeout:
                     raise RuntimeError("SLAM observations are stale")
         if self._mapping is None or now - self._mode_at > self.config["service_timeout_sec"]:
             raise RuntimeError("mapping mode is unknown or stale")

@@ -14,6 +14,7 @@ import rclpy
 from rclpy.action import ActionClient, ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.context import Context
+from rclpy.duration import Duration
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.parameter import Parameter
@@ -48,6 +49,7 @@ class RobotPeers(Node):
         self.mapping_requests = []
         self.permitted = True
         self.publish_slam = True
+        self.slam_delay = 0.0
         self.nav_mode = "hold"
         self.nav_active = False
         self.nav_canceled = 0
@@ -94,7 +96,7 @@ class RobotPeers(Node):
         self.stow_pub.publish(Bool(data=True))
         if self.publish_slam:
             message = Info()
-            message.header.stamp = stamp
+            message.header.stamp = (self.get_clock().now() - Duration(seconds=self.slam_delay)).to_msg()
             self.info_pub.publish(message)
         transform = TransformStamped()
         transform.header.frame_id, transform.child_frame_id = "map", "base_footprint"
@@ -281,6 +283,23 @@ def test_invalid_or_denied_requests_have_no_mapping_or_navigation_side_effects(g
     wait(lambda: not explorer._inputs["base_motion_permitted"][0])
     assert not response(client.send_goal_async(Explore.Goal())).accepted
     assert peers.mapping_requests == [] and peers.nav_count == 0
+
+
+@pytest.mark.parametrize("delay,accepted", [(1.3, True), (2.5, False)])
+def test_camera_stamped_slam_has_a_separate_bounded_freshness_budget(graph, delay, accepted):
+    peers, explorer, client = graph
+    peers.slam_delay = delay
+    wait(lambda: (explorer.get_clock().now() - rclpy.time.Time.from_msg(
+        explorer._inputs["slam"][0].stamp)).nanoseconds / 1e9 >= delay)
+    assert explorer.config["data_timeout_sec"] == 1.0
+    handle = response(client.send_goal_async(Explore.Goal(max_radius_m=1.8)))
+    assert handle.accepted is accepted
+    if accepted:
+        wait(lambda: peers.nav_active)
+        response(handle.cancel_goal_async())
+        assert response(handle.get_result_async()).status == GoalStatus.STATUS_CANCELED
+    else:
+        assert peers.nav_count == 0 and peers.mapping_requests == []
 
 
 def test_late_nav2_acceptance_is_canceled_and_ownership_is_retained(graph):
