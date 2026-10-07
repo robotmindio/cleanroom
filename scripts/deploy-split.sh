@@ -132,7 +132,8 @@ refresh_compute_service() {
     "$compute_current/source/scripts/reinstall-compute.sh" "${installer_args[@]}"
 }
 compute_configuration_current() {
-  grep -Fq "remote_ip:=$device_address" /etc/default/lekiwi-stack &&
+  [[ $(systemctl show -P NeedDaemonReload lekiwi-stack.service) == no ]] &&
+    grep -Fq "remote_ip:=$device_address" /etc/default/lekiwi-stack &&
     { grep -Fq 'profile:=split' /etc/default/lekiwi-stack ||
       grep -Fq 'laser_source:=ld06 lidar_source:=remote' /etc/default/lekiwi-stack; } &&
     [[ $(cat "$service_marker" 2>/dev/null || true) == "$expected_service_fingerprint" &&
@@ -440,7 +441,7 @@ else
 fi
 if has_device_unit lekiwi-astra.service; then
   timeout 30 ros2 topic echo --once /camera/depth/points >/dev/null || \
-    die "device Astra point cloud did not reach compute"
+    die "device Astra point cloud did not reach compute; check lekiwi-astra.service for invalid depth"
 else
   log "lekiwi-astra.service is not installed on the device; skipping the point-cloud check"
 fi

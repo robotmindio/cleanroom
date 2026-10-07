@@ -24,7 +24,8 @@
     color_depth_synchronization: true
     enable_point_cloud: true
     enable_colored_point_cloud: false
-    color_qos: SENSOR_DATA
+    # Match the reliable UVC publisher and its raw-frame filter subscriber.
+    color_qos: DEFAULT
     color_camera_info_qos: SENSOR_DATA
     depth_qos: SENSOR_DATA
     depth_camera_info_qos: SENSOR_DATA
