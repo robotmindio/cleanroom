@@ -57,7 +57,9 @@ def _identity_calibration() -> tuple[str, tempfile.TemporaryDirectory]:
 
 @pytest.mark.rostest
 def generate_test_description():
-    fake_host = FakeLeKiwiHost()
+    calibration, calibration_directory = _identity_calibration()
+    # The fake host, like the Pi, refuses goals uploaded with another calibration.
+    fake_host = FakeLeKiwiHost(arm_calibration_file=calibration)
     # Start outside the production keep-out so planning can test a valid transition.
     fake_host.set_state(
         **{
@@ -69,7 +71,6 @@ def generate_test_description():
         }
     )
     fake_host.start(period_s=0.02)
-    calibration, calibration_directory = _identity_calibration()
 
     # This is the repository MoveIt configuration, except that perception is
     # omitted solely for this isolated test.  The local test image intentionally
@@ -107,6 +108,7 @@ def generate_test_description():
             "remote_observation_port": fake_host.observation_endpoint_port,
             "torque_control_port": fake_host.torque_endpoint_port,
             "torque_control_timeout_ms": 500,
+            "nav2_params_file": str(Path(__file__).parents[1] / "config" / "nav2_params.yaml"),
             "link_timeout": 1.0,
             "command_timeout": 2.0,
             "permission_timeout": 0.30,

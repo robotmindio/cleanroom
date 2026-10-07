@@ -7,9 +7,7 @@ from lekiwi_rmf.arm_trajectory import (
     ARM_JOINTS, JOINT_LIMITS, action_positions, joint_positions,
     prepare_trajectory, sample_trajectory,
 )
-
-STATUS_KEY = "_lekiwi_arm_trajectory"
-LEASE_KEYS = ("_lekiwi_arm_goal", "_lekiwi_arm_permission")
+from lekiwi_rmf.host_protocol import valid_goal_id
 
 
 def validate_status(value):
@@ -17,7 +15,7 @@ def validate_status(value):
         return None
     if not isinstance(value, dict) or set(value) != {"id", "state", "elapsed", "code", "detail"}:
         raise ValueError("invalid local arm status")
-    if (type(value["id"]) is not int or not 0 < value["id"] < 2**48
+    if (not valid_goal_id(value["id"])
             or value["state"] not in {"waiting", "running", "paused", "succeeded", "aborted", "canceled"}
             or type(value["elapsed"]) not in (int, float)
             or not math.isfinite(value["elapsed"]) or value["elapsed"] < 0
@@ -48,7 +46,7 @@ class LocalArmExecutor:
             raise ValueError("arm trajectory must be an object")
         request = deepcopy(request)
         goal_id = request.get("id")
-        if type(goal_id) is not int or not 0 < goal_id < 2**48:
+        if not valid_goal_id(goal_id):
             raise ValueError("invalid arm goal id")
         if self.status is not None and self.status["id"] == goal_id:
             if request != self.goal["request"]:

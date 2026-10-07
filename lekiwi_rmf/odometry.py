@@ -3,35 +3,25 @@
 from dataclasses import dataclass
 from math import cos, isfinite, sin
 
+from lekiwi_rmf.host_protocol import (
+    HOST_ODOMETRY_KEY, TELEMETRY_KEYS, TELEMETRY_MONOTONIC_NS_KEY, TELEMETRY_PROTOCOL_KEY,
+    TELEMETRY_PROTOCOL_VERSION, TELEMETRY_SEQUENCE_KEY, TELEMETRY_SESSION_KEY,
+    TELEMETRY_TORQUE_ENABLED_KEY,
+)
 from lekiwi_rmf.launch_calibration import load_launch_calibration
 
 
-TELEMETRY_PROTOCOL_VERSION = 2
-TELEMETRY_PROTOCOL_KEY = "_lekiwi_protocol"
-TELEMETRY_SESSION_KEY = "_lekiwi_session"
-TELEMETRY_SEQUENCE_KEY = "_lekiwi_sequence"
-TELEMETRY_MONOTONIC_NS_KEY = "_lekiwi_sample_monotonic_ns"
-TELEMETRY_TORQUE_ENABLED_KEY = "_lekiwi_torque_enabled"
-HOST_ODOMETRY_KEY = "_lekiwi_odometry"
 BASE_XY_SCALE = 1.0
 # 2026-10-05: source-time-aligned native lidar measured 1.08453 times the
 # wheel yaw at the former 0.90 scale; independent RGB-D agreed on the turn.
 BASE_YAW_SCALE = 0.976
-TELEMETRY_KEYS = (
-    TELEMETRY_PROTOCOL_KEY,
-    TELEMETRY_SESSION_KEY,
-    TELEMETRY_SEQUENCE_KEY,
-    TELEMETRY_MONOTONIC_NS_KEY,
-    TELEMETRY_TORQUE_ENABLED_KEY,
-)
 
 
 @dataclass(frozen=True)
 class AcceptedTelemetry:
-    """Identity and source timestamp of one validated observation packet."""
+    """Identity of one validated observation packet."""
 
     token: tuple
-    sample_monotonic_ns: int | None
     session_changed: bool = False
     torque_enabled: bool | None = None
 
@@ -93,9 +83,7 @@ class TelemetrySequenceTracker:
         self._session = session
         self._sequence = sequence
         self._sample_ns = sample_ns
-        return AcceptedTelemetry(
-            ("host", session, sequence), sample_ns, session_changed, torque_enabled
-        )
+        return AcceptedTelemetry(("host", session, sequence), session_changed, torque_enabled)
 
 
 def accept_validated_telemetry(tracker, observation, required_state_keys):
@@ -110,57 +98,6 @@ def accept_validated_telemetry(tracker, observation, required_state_keys):
     except (TypeError, ValueError, OverflowError) as error:
         raise ValueError("invalid LeKiwi state") from error
     return tracker.accept(observation)
-
-
-class OdometrySampleClock:
-    """Calculate intervals between accepted samples, never between timer ticks."""
-
-    def __init__(self, max_interval=0.2):
-        if max_interval <= 0:
-            raise ValueError("maximum odometry interval must be positive")
-        self.max_interval = float(max_interval)
-        self.reset()
-
-    def reset(self):
-        self._token = None
-        self._local_ns = None
-        self._sample_ns = None
-        self.discontinuity = None
-
-    @staticmethod
-    def _stream(token):
-        return token[:2]
-
-    def accept(self, token, local_monotonic_ns, sample_monotonic_ns=None):
-        self.discontinuity = None
-        previous_token = self._token
-        previous_local_ns = self._local_ns
-        previous_sample_ns = self._sample_ns
-        self._token = token
-        self._local_ns = int(local_monotonic_ns)
-        self._sample_ns = sample_monotonic_ns
-
-        if previous_token is None:
-            return None
-        if self._stream(token) != self._stream(previous_token):
-            self.discontinuity = "telemetry source session changed"
-            return None
-        if sample_monotonic_ns is not None and previous_sample_ns is not None:
-            elapsed_ns = sample_monotonic_ns - previous_sample_ns
-        else:
-            elapsed_ns = self._local_ns - previous_local_ns
-        elapsed = elapsed_ns / 1e9
-        if elapsed <= 0.0:
-            self.discontinuity = "telemetry sample interval was not positive"
-            return None
-        if elapsed > self.max_interval:
-            # The current sample becomes the new origin. Do not invent motion
-            # across an implausible or unknown interval.
-            self.discontinuity = (
-                f"telemetry sample gap {elapsed:.3f}s exceeds {self.max_interval:.3f}s"
-            )
-            return None
-        return elapsed
 
 
 def integrate_pose(pose, velocity, dt):
@@ -182,9 +119,7 @@ def load_base_scales(path):
 
 
 def parse_host_odometry(payload):
-    if HOST_ODOMETRY_KEY not in payload:
-        return None  # Older/simulated hosts still use timestamped velocities.
-    value = payload[HOST_ODOMETRY_KEY]
+    value = payload.get(HOST_ODOMETRY_KEY)
     if not isinstance(value, dict):
         raise ValueError("invalid host odometry")
     pose, scales, stamp = value.get("pose"), value.get("scales"), value.get("stamp_ns")

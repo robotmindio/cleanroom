@@ -12,7 +12,6 @@ from dataclasses import dataclass
 from typing import Mapping
 
 
-MOTOR_HEALTH_KEY = "_lekiwi_motor_health"
 MOTOR_HEALTH_VERSION = 1
 OK, WARN, ERROR, STALE = range(4)
 

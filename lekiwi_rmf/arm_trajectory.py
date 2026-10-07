@@ -157,35 +157,6 @@ def action_positions(names, positions, zero_positions=None, directions=None):
     return actions
 
 
-def validate_motion_action(action, base_limits, base_scales, calibration, held_positions=None):
-    """Enforce the tracked envelope in calibrated units at the motor boundary.
-
-    A previously measured hold may lie outside a joint limit after torque-off
-    sag. Retaining that exact target is permitted; a new target outside is not.
-    """
-    required = tuple(f"{name}.pos" for name in ARM_JOINTS) + ("x.vel", "y.vel", "theta.vel")
-    if any(key not in action or type(action[key]) not in (int, float)
-           or not math.isfinite(action[key]) for key in required):
-        raise ValueError("motion action must contain every finite motor command")
-    linear, angular = base_limits
-    xy_scale, yaw_scale = base_scales
-    if (math.hypot(action["x.vel"], action["y.vel"]) * xy_scale > linear + 1e-9
-            or abs(math.radians(action["theta.vel"]) * yaw_scale) > angular + 1e-9):
-        raise ValueError("motion action exceeds the configured base speed limits")
-    if not 0 <= action["arm_gripper.pos"] <= 100:
-        raise ValueError("motion action exceeds the gripper's 0-100 range")
-    positions = joint_positions(action, *calibration)
-    for name, value in positions.items():
-        if name == "arm_gripper":
-            continue  # Its calibrated reachable range is the normalized servo range above.
-        lower, upper = JOINT_LIMITS[name]
-        key = f"{name}.pos"
-        if not lower - 1e-9 <= value <= upper + 1e-9 and (
-            held_positions is None or action[key] != held_positions.get(key)
-        ):
-            raise ValueError(f"motion action exceeds {name} position limits")
-
-
 def _power_to_bernstein(coefficients):
     """Return Bernstein coefficients for a polynomial on the unit interval."""
     degree = len(coefficients) - 1
