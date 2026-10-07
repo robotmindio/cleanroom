@@ -285,14 +285,17 @@ def test_invalid_or_denied_requests_have_no_mapping_or_navigation_side_effects(g
 
 def test_late_nav2_acceptance_is_canceled_and_ownership_is_retained(graph):
     peers, explorer, client = graph
-    peers.acceptance_delay = 5.0
+    # Cleanup gives up after two 2 s service deadlines; accepting well after
+    # that keeps the retained-ownership window open on a slow runner.
+    peers.acceptance_delay = 8.0
     handle = response(client.send_goal_async(Explore.Goal(max_radius_m=1.8)))
     assert handle.accepted
-    result = response(handle.get_result_async(), timeout=7)
+    result = response(handle.get_result_async(), timeout=10)
     assert result.status == GoalStatus.STATUS_ABORTED
+    assert "navigation stop unconfirmed" in result.result.message
     assert explorer._nav_uncertain
     assert not response(client.send_goal_async(Explore.Goal())).accepted
-    wait(lambda: peers.nav_canceled == 1 and not explorer._nav_uncertain, timeout=5)
+    wait(lambda: peers.nav_canceled == 1 and not explorer._nav_uncertain, timeout=10)
     assert not peers.nav_active
 
 

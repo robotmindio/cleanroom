@@ -26,8 +26,6 @@ UNIT_DIR=/etc/systemd/system
 source "$PROJECT_ROOT/scripts/lib/runtime-common.sh"
 load_lekiwi_env "$PROJECT_ROOT/.env"
 
-log() { printf '\n==> %s\n' "$*"; }
-die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 trap 'printf "error: installer failed at line %s\n" "$LINENO" >&2' ERR
 
 REMOTE=${LEKIWI_ROBOT_HOST:-}

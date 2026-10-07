@@ -95,6 +95,20 @@ intrusion stop are in the acceptance record. Tracked in
   telemetry loss and restart. Finish every trial with explicit disarm.
 - Recheck the newly launched RViz MotionPlanning panel as well as `move_group`
   after any RViz, MoveIt, desktop image or configuration revision.
+- Qualify arm payload beyond the tested case. The installed reported 200 g
+  completed one HOME cycle at 0.10 velocity/acceleration scaling; its holder
+  mass and attachment location are unconfirmed, and higher speeds, other
+  masses or placements, repeated cycles, retention and thermal endurance are
+  untested.
+- Isolate the intermittent joint-feedback gaps. Arm execution holds and
+  resumes through them, but their origin (host serial polling, transport or
+  compute scheduling) needs simultaneous source-boundary timing.
+- Resolve the wrist camera's intermittent USB disconnects. The kernel drops and
+  re-enumerates the device with the arm stationary; the capture supervisor
+  recovers the stream in about five seconds. No undervoltage, overcurrent or
+  throttling is logged, and tightening the connector did not help. Substitute
+  the cable on the same port first, then the port and camera. Vision-dependent
+  manipulation with the wrist stream is unverified until then.
 
 ## Physical calibration, mapping and RMF
 
@@ -107,6 +121,13 @@ the calibration and RTAB-Map shutdown trials are recorded. Tracked in
 
 - Revalidate front/wrist camera intrinsics, camera height/pitch, wheel scale,
   yaw scale and odometry against physical measurements.
+- Calibrate the Astra Pro optically. Its factory calibration query returns NaN,
+  so the driver publishes finite, explicitly uncalibrated default intrinsics.
+  Measured RGB/depth intrinsics, registration and scale are needed before
+  claiming accurate visual translation. Standalone RGB-D odometry drifts
+  centimetres during small turns that lidar measures in millimetres; the
+  production EKF uses wheel odometry only, but SLAM uses visual registration,
+  so room-scale localization accuracy and precision placement are unverified.
 - Run a controlled RTAB-Map session and verify quota-triggered orderly
   shutdown, SQLite/WAL closure, archive rotation and successful reopen.
 - Survey the real cleanroom and produce a map no coarser than 0.05 m, an RMF
@@ -202,100 +223,9 @@ Owner: simulation-server administrator.
 
 Done when `scripts/sim-qualification.py` writes a passing `summary.json` for an
 exact revision on a qualified GPU host and its runtime checklist, with the
-manual observations below attached, has been reviewed. Tracked in
-[#11](https://github.com/robotmindio/cleanroom/issues/11).
-
-Requirements:
-
-- Ubuntu 24.04 with this exact repository revision.
-- A GPU exposed to the service account, including render-device permissions
-  for a VM/container.
-- A headless EGL OpenGL context version 3.3 or newer. The current Raspberry Pi
-  exposes OpenGL 3.1 and cannot qualify Ogre2. The installed Ogre Vulkan path
-  also has an unresolved `glslang::InitializeProcess` symbol and is not an
-  accepted substitute.
-
-Provision and test:
-
-```bash
-./scripts/install.sh --simulation
-source scripts/setup.bash
-scripts/sim-qualification.py \
-  --build-dir build/lekiwi_rmf \
-  --output-dir /absolute/path/outside/checkout/to/qualification-evidence
-```
-
-The runner remains an evidence collector and never grants qualification. It
-requires a clean exact revision, a build and installed package bound to this
-checkout, the guarded simulation profile, ShellCheck, pyzmq in CMake's selected interpreter,
-the complete expected CTest set, every test passing, orderly MoveIt shutdown
-from that selected install and an EGL/OpenGL renderer of at least 3.3.
-It retains every command result and writes `summary.json` even on failure. In
-particular, retain its results for the renderer-free physics test and the
-native actuator-failsafe fault-injection test. The native failsafe must zero
-stale wheel targets and interrupt an arm trajectory on heartbeat loss. Those
-tests launch Gazebo as a launch-managed process, use a fresh transport
-partition per invocation, and hold a shared CTest resource lock so a stale or
-parallel server cannot supply their evidence. See `QUALIFICATION.md` for the
-evidence layout and review boundary.
-
-Start the managed simulation with no external bridge:
-
-```bash
-scripts/sim-up.sh start_rosbridge:=false
-```
-
-In another sourced terminal, before issuing motion:
-
-```bash
-scripts/sim-scan-check.py --timeout 30
-ros2 lifecycle get /collision_monitor
-ros2 topic info -v /cmd_vel_safe
-ros2 topic hz /camera/depth/points
-```
-
-Pass only if `/scan` has at least 180 ranges with usable values beyond
-`range_min`, collision monitor is active, `/cmd_vel_safe` has the intended
-publisher/subscriber topology, and the delayed/noisy depth cloud remains live.
-An absent or all-minimum scan is a correct fail-closed stop, not permission to
-bypass collision monitoring. Rerun the evidence collector with
-`--collect-runtime` to retain bounded scan, lifecycle, topology, depth,
-MoveIt-parameter and log-tail observations, then complete its generated
-`runtime-checklist.md`; command success alone is not administrator review.
-
-With a clear simulated room, check mux priority and stale-command stopping:
-
-```bash
-ros2 topic pub -r 5 --times 10 /cmd_vel_smoothed geometry_msgs/msg/Twist \
-  '{linear: {x: 0.10}}'
-ros2 topic pub -r 5 --times 10 /cmd_vel_manual geometry_msgs/msg/Twist \
-  '{linear: {y: 0.07}}'
-ros2 topic echo /cmd_vel_muxed
-ros2 topic echo /cmd_vel_safe
-```
-
-Manual input must preempt Nav2, guarded output must remain zero for an occupied
-path, and both outputs must return to zero after publishers stop. Then launch
-with `start_moveit:=true`, place an obstacle in the arm workspace, and verify
-it appears in both `move_group` and a newly launched RViz MotionPlanning panel.
-Confirm the arm-workspace gate withdraws permission and interrupts execution.
-
-Fault-inject loss of the ROS omni controller/bridge and arm adapter heartbeat.
-The Gazebo-native 250 ms failsafe must stop wheel demand and replace an active
-arm trajectory with a measured-position hold. This supplements, but does not
-represent, physical E-stop or braking acceptance.
-
-Stop only the recorded process group:
-
-```bash
-scripts/ros-stop.sh
-```
-
-Retain the renderer output, test results, scan/depth evidence, collision-monitor
-state, fault-injection result, RViz/move_group values and final 30 lines of
-`~/.ros/lekiwi/sim-stack.log`. Store these beside the runner's `summary.json`;
-the generated checklist remains incomplete until the manual mux, obstacle,
-RViz and heartbeat-loss observations above are attached and reviewed.
+manual observations attached, has been reviewed. Tracked in
+[#11](https://github.com/robotmindio/cleanroom/issues/11). The host
+requirements and procedure are in [QUALIFICATION.md](QUALIFICATION.md).
 
 ## Evidence to collect on the deployed revision
 

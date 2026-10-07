@@ -44,7 +44,6 @@ shared saved calibration, including negative pitch.
 | `xy_velocity_scale` | float | `1.0` | Correction for reported and commanded translation |
 | `yaw_velocity_scale` | float | `0.90` | Correction for reported and commanded rotation |
 | `start_rmf` | `true`, `false` | `false` | Start Zenoh, RMF schedule, dispatcher, and fleet adapter; requires `localization:=amcl`, `slam_mode:=localization` and an approved `map_bundle` |
-| `rmf_domain` | integer | `0` | DDS domain used by RMF processes; validation currently requires `0` because no tracked cross-domain bridge is configured |
 | `start_foxglove` | `true`, `false` | `true` | Start the read-only Foxglove WebSocket bridge |
 | `foxglove_address` | bind address | `127.0.0.1` | Interface exposed by Foxglove; loopback by default |
 | `foxglove_port` | TCP port | `8765` | Foxglove WebSocket listening port |
@@ -190,13 +189,13 @@ until hardware publishes them:
 | Motor health | `/hardware/diagnostics` | Servo/bus faults |
 | Arm collision gate | `/safety/arm_workspace_clear` | Live MoveIt scene/state validity |
 
-The repository records completed 2026-10-04 physical acceptance in
-`config/safety_acceptance.yaml`: attended operation, dry concrete, 0 kg added
-payload, unchanged folded stow, 0.03 m/s and 0.06 rad/s. Its 50 mm stopping
-budget includes 20 mm measurement uncertainty. See
-[the measured evidence](physical-verification-20261003.md). A change to the
-accepted conditions requires new physical evidence; software tests alone do
-not establish physical stopping or obstacle coverage.
+`config/safety_acceptance.yaml` records the validated physical acceptance
+scope: attended operation, dry concrete, the installed 200 g load, folded
+`travel_stow`, 0.03 m/s and 0.06 rad/s, within a 50 mm stopping budget that
+includes 20 mm measurement uncertainty. See
+[Physical acceptance](safety.md#physical-acceptance). A change to the accepted
+conditions requires new physical evidence; software tests alone do not
+establish physical stopping or obstacle coverage.
 
 ## Where the camera comes from
 

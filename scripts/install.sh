@@ -12,13 +12,11 @@ FOXGLOVE_VERSION=3.2.1
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 WORKSPACE=${LEKIWI_WS:-"$HOME/lekiwi_ws"}
 
-log() { printf '\n==> %s\n' "$*"; }
-die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+# shellcheck source=/dev/null
+source "$PROJECT_ROOT/scripts/lib/runtime-common.sh"
 trap 'printf "error: installer failed at line %s\n" "$LINENO" >&2' ERR
 # shellcheck source=/dev/null
 source "$PROJECT_ROOT/scripts/thirdparty-common.sh"
-# shellcheck source=/dev/null
-source "$PROJECT_ROOT/scripts/lib/runtime-common.sh"
 load_lekiwi_env "$PROJECT_ROOT/.env"
 
 if [[ ${1:-} == --help ]]; then
@@ -171,36 +169,21 @@ done
 mkdir -p "$WORKSPACE/src" "$HOME/.local/bin"
 
 log "Fetching pinned Free Fleet and RMF task tools"
-free_fleet_source="$WORKSPACE/src/free_fleet"
-free_fleet_patch="$PROJECT_ROOT/thirdparty/free_fleet/0001-retry-nav2-goal-during-activation.patch"
-checkout_pinned https://github.com/open-rmf/free_fleet.git "$free_fleet_source" "$FREE_FLEET_REV" "$free_fleet_patch"
-apply_pinned_patch "$free_fleet_source" "$free_fleet_patch" "the Free Fleet Nav2 activation retry patch"
+checkout_with_patches free_fleet https://github.com/open-rmf/free_fleet.git \
+  "$WORKSPACE/src/free_fleet" "$FREE_FLEET_REV"
 checkout_pinned https://github.com/open-rmf/rmf_demos.git "$WORKSPACE/src/rmf_demos" "$RMF_DEMOS_REV"
 
 log "Fetching the pinned LDROBOT LD06 driver"
 ldlidar_source="$WORKSPACE/src/ldlidar_stl_ros2"
-ldlidar_patch="$PROJECT_ROOT/thirdparty/ldlidar_stl_ros2/0001-linux-build-fixes.patch"
-ldlidar_qos_patch="$PROJECT_ROOT/thirdparty/ldlidar_stl_ros2/0002-latest-scan-qos.patch"
-ldlidar_baud_patch="$PROJECT_ROOT/thirdparty/ldlidar_stl_ros2/0003-initialize-ld06-baudrate.patch"
-ldlidar_timing_patch="$PROJECT_ROOT/thirdparty/ldlidar_stl_ros2/0004-acquisition-timestamps.patch"
-checkout_pinned "$LDLIDAR_STL_REPOSITORY" "$ldlidar_source" "$LDLIDAR_STL_REV" \
-  "$ldlidar_patch" "$ldlidar_qos_patch" "$ldlidar_baud_patch" "$ldlidar_timing_patch"
-apply_pinned_patch "$ldlidar_source" "$ldlidar_patch" "the LDROBOT Linux build fixes"
-apply_pinned_patch "$ldlidar_source" "$ldlidar_qos_patch" "the LD06 latest-scan QoS fix"
-apply_pinned_patch "$ldlidar_source" "$ldlidar_baud_patch" "the LD06 baud-rate default fix"
-apply_pinned_patch "$ldlidar_source" "$ldlidar_timing_patch" "the LD06 acquisition timestamp fix"
+checkout_with_patches ldlidar_stl_ros2 "$LDLIDAR_STL_REPOSITORY" "$ldlidar_source" "$LDLIDAR_STL_REV"
 
 extra_source_paths=()
 extra_packages=()
 if [[ $install_mode == full ]]; then
   log "Fetching the pinned Orbbec Astra Pro ROS 2 driver"
   astra_source="$WORKSPACE/src/ros2_astra_camera"
-  astra_patch="$PROJECT_ROOT/thirdparty/ros2_astra_camera/0001-jazzy-image-geometry-and-parameter-callback.patch"
-  astra_calibration_patch="$PROJECT_ROOT/thirdparty/ros2_astra_camera/0002-finite-camera-calibration.patch"
-  checkout_pinned https://github.com/orbbec/ros2_astra_camera.git \
-    "$astra_source" "$ASTRA_CAMERA_REV" "$astra_patch" "$astra_calibration_patch"
-  apply_pinned_patch "$astra_source" "$astra_patch" "the Astra ROS 2 Jazzy compatibility fixes"
-  apply_pinned_patch "$astra_source" "$astra_calibration_patch" "the Astra finite calibration fix"
+  checkout_with_patches ros2_astra_camera https://github.com/orbbec/ros2_astra_camera.git \
+    "$astra_source" "$ASTRA_CAMERA_REV"
   # The OpenNI driver opens the Astra Pro's depth interface directly; without
   # this tracked udev rule a normal service user sees the colour UVC device but
   # cannot read depth after a reboot.

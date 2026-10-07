@@ -43,13 +43,13 @@ before using them; the robot runtime does not require it.
 - `reload-moveit.py` reloads installed collision rules through the managed planner's respawn while the driver is already DISARMED. It preserves live poses and calibration and leaves motor services and torque alone. Source `scripts/setup.bash` first.
 - `build-native.sh` builds pinned class_loader 2.7.1, rclcpp 28.1.22 and Nav2 1.3.13 reliability patches into the compute workspace. `/opt/ros` remains a dependency underlay.
 - `rebuild-all.sh` verifies and vendors the LeKiwi model, renders it, rebuilds and runs the CTest suite.
-- `thirdparty-common.sh` (sourced) holds the pinned third-party sources and download helpers.
+- `thirdparty-common.sh` (sourced) holds the pinned third-party sources and download helpers; `checkout_with_patches <dependency> <url> <dest> <revision>` checks out a pinned revision and applies every `thirdparty/<dependency>/*.patch`.
 
 ## Launchers
 
 - `up.sh` starts the LeRobot host and ROS stack on a wired robot.
 - `pi-up.sh` starts the device half of a split robot: motor host, cameras, LD06, Astra and zenoh bridge.
-- `workstation-up.sh [DEVICE] [launch args]` starts the ROS stack (remote sensors, MoveIt) and RViz.
+- `workstation-up.sh [DEVICE] [launch args]` starts the ROS stack (remote sensors, MoveIt) and RViz, refusing while a recorded stack or `lekiwi-stack.service` runs.
 - `sim-up.sh [launch args]` checks the renderer and starts a managed headless simulation.
 - `ros-start.sh [launch args]` runs `bringup.launch.py` against the real robot; `up.sh`, `workstation-up.sh` and `lekiwi-stack.service` execute it.
 - `ros-stop.sh` stops the process groups the launchers recorded and leaves systemd units alone.
@@ -101,8 +101,12 @@ before using them; the robot runtime does not require it.
 
 ## lib/
 
-Source-only shell helpers, not commands: `runtime-common.sh` (`.env`, waits, port
-probes), `self-heal.sh` (service self-heal watcher), `service-install-common.sh`
+Source-only shell helpers, not commands: `runtime-common.sh` (`log`/`die`, `.env`,
+waits, port probes), `launcher.sh` (startup lock, recorded process groups and
+their signatures, shared by the launchers and `ros-stop.sh`), `build-common.sh`
+(build cache, memory and colcon checks of the two builders), `deploy-common.sh`
+(revision transfer for `deploy-split.sh`), `self-heal.sh`
+(service self-heal watcher), `service-install-common.sh`
 (unit rendering, restart tracking) and `service-install-revision.sh` (service
 configuration fingerprints).
 

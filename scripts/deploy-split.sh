@@ -9,8 +9,6 @@ usage() {
   echo "usage: $0 [[USER@]DEVICE] [--remote-repo PATH] [--workspace PATH] [--remote-workspace PATH]" >&2
   exit 2
 }
-die() { echo "$0: $*" >&2; exit 1; }
-log() { printf '\n==> %s\n' "$*"; }
 
 original_args=("$@")
 project_root=$(cd -- "$(dirname -- "$0")/.." && pwd)
@@ -42,6 +40,8 @@ done
 
 # shellcheck disable=SC1091 # PROJECT_ROOT is resolved above, not a fixed source path.
 source "$PROJECT_ROOT/scripts/lib/service-install-revision.sh"
+# shellcheck disable=SC1091 # PROJECT_ROOT is resolved above, not a fixed source path.
+source "$PROJECT_ROOT/scripts/lib/deploy-common.sh"
 logs=${LEKIWI_LOGS:-$HOME/.ros/lekiwi}
 mkdir -p "$logs"
 if [[ ${LEKIWI_DEPLOY_LOCKED:-} != 1 ]]; then
@@ -67,25 +67,6 @@ require_clean() { # require_clean <repository> [description]
   local repository=$1 description=${2:-$1}
   [[ -z $(git -C "$repository" status --porcelain) ]] || die "$description has uncommitted or untracked files"
 }
-transfer_device_revision() (
-  # The compute revision is already verified against origin. The device can
-  # receive those same Git objects over SSH when its DNS/Internet is unavailable.
-  local previous bundle remote_bundle
-  local exclusions=()
-  previous=$("${ssh_command[@]}" git -C "$remote_repo" rev-parse HEAD)
-  [[ $previous =~ ^[0-9a-f]{40}$ ]] || die "invalid device revision"
-  [[ $previous != "$target" ]] || return 0
-  if git -C "$project_root" cat-file -e "$previous^{commit}" 2>/dev/null; then
-    exclusions=("^$previous")
-  fi
-  bundle=$(mktemp)
-  remote_bundle=$("${ssh_command[@]}" mktemp /tmp/lekiwi-source.XXXXXXXX.bundle)
-  [[ $remote_bundle =~ ^/tmp/lekiwi-source\.[A-Za-z0-9]+\.bundle$ ]] || die "invalid device bundle path"
-  trap 'rm -f -- "$bundle"; "${ssh_command[@]}" rm -f -- "$remote_bundle"' EXIT
-  git -C "$project_root" bundle create "$bundle" HEAD "${exclusions[@]}"
-  "${ssh_command[@]}" "cat > '$remote_bundle'" < "$bundle"
-  "${ssh_command[@]}" git -C "$remote_repo" fetch "$remote_bundle" HEAD
-)
 ros_setup() {
   export LEKIWI_WS=$workspace
   [[ ! -L $workspace/current ]] || export LEKIWI_WS=$workspace/current
@@ -188,7 +169,7 @@ target=$(git -C "$project_root" rev-parse HEAD)
   die "remote repository has uncommitted or untracked files"
 if ! "${ssh_command[@]}" timeout 30 git -C "$remote_repo" fetch --quiet origin; then
   log "Device origin fetch failed; transferring the pushed revision over SSH"
-  transfer_device_revision
+  transfer_device_revision "$project_root" "$remote_repo" "$target" "${ssh_command[@]}"
 fi
 "${ssh_command[@]}" git -C "$remote_repo" cat-file -e "$target^{commit}" || \
   die "device does not have revision $target"

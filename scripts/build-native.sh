@@ -3,7 +3,10 @@
 set -Eeuo pipefail
 project_root=$(cd -- "$(dirname -- "$0")/.." && pwd)
 workspace=${LEKIWI_WS:-$HOME/lekiwi_ws}
-die() { echo "$0: $*" >&2; exit 1; }
+# shellcheck disable=SC1091 # Resolve the helpers from this checkout at runtime.
+source "$project_root/scripts/lib/runtime-common.sh"
+# shellcheck disable=SC1091
+source "$project_root/scripts/lib/build-common.sh"
 [[ $workspace == /* && -d $workspace/install ]] || die "installed workspace not found: $workspace"
 [[ ! -L $workspace/current && ! -f $workspace/release.json ]] || die "stage a release instead of rebuilding a live or sealed workspace"
 # shellcheck disable=SC1091 # Resolve the helper from this checkout at runtime.
@@ -25,13 +28,11 @@ for dependency in class_loader rclcpp navigation2 rviz; do
     rviz) revision=feb01669f1297df2af755ce9cd2ed18083e7a8b2; repository=https://github.com/ros2/rviz.git ;;
   esac
   source_dir=$workspace/src/$dependency
-  patches=("$project_root/thirdparty/$dependency/"*.patch)
   if [[ ! -d $source_dir/.git || $(git -C "$source_dir" rev-parse HEAD) != "$revision" ]]; then
-    checkout_pinned "$repository" "$source_dir" "$revision" "${patches[@]}"
+    checkout_with_patches "$dependency" "$repository" "$source_dir" "$revision"
+  else
+    apply_thirdparty_patches "$dependency" "$source_dir"
   fi
-  for patch in "${patches[@]}"; do
-    apply_pinned_patch "$source_dir" "$patch" "$dependency native reliability fix"
-  done
 done
 
 set +u
@@ -44,7 +45,7 @@ set -u
 export MAKEFLAGS=-j1
 export PATH=/usr/bin:/bin:$PATH
 override_args=()
-if [[ $(colcon build --help) == *--allow-overriding* ]]; then
+if colcon_supports_overriding; then
   override_args=(--allow-overriding class_loader rclcpp nav2_util nav2_lifecycle_manager nav2_bringup rviz_ogre_vendor ament_cmake_vendor_package)
 fi
 colcon --log-base "$workspace/log" build \

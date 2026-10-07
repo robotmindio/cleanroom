@@ -151,8 +151,7 @@ case "${1:-}" in
   calibrate)
     require PORT
     require_port_access
-    exec "$BIN/lerobot-calibrate" --robot.type=lekiwi --robot.id="$ID" \
-      --robot.port="$PORT" --robot.cameras='{}'
+    run_calibration
     ;;
   --no-cameras|--telemetry-fault-test)
     [[ $1 != --telemetry-fault-test ]] || HOST_PROGRAM=scripts/test-host-telemetry.py

@@ -30,7 +30,6 @@ set -Eeuo pipefail
 cd "$(dirname "$0")/.."
 # shellcheck source=/dev/null
 source scripts/lib/runtime-common.sh
-die() { echo "$0: $*" >&2; exit 1; }
 # shellcheck source=/dev/null
 source scripts/lib/service-install-common.sh
 
