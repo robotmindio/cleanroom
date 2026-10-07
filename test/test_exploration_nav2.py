@@ -71,6 +71,9 @@ def test_real_nav2_tree_uses_known_space_planner_and_cancels_controller(tmp_path
         process = subprocess.Popen([
             str(executable), "--ros-args", "--params-file", str(ROOT / "config/nav2_params.yaml"),
             "-p", "navigators:=[navigate_to_pose]",
+            # The tracked 20 ms reply budget suits Nav2's C++ servers; these
+            # Python fakes share a busy executor on loaded CI runners.
+            "-p", "default_server_timeout:=500",
             "-p", f"default_nav_to_pose_bt_xml:={ROOT / 'config/explore_nav_to_pose.xml'}",
         ], stdout=log, stderr=subprocess.STDOUT)
         try:
