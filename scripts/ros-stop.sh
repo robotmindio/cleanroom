@@ -11,6 +11,14 @@ set -Eeuo pipefail
 source "$(dirname -- "$0")/lib/launcher.sh"
 launcher_dirs
 
+# Zombies cannot run: a container whose PID 1 never reaps orphans keeps them in
+# the group, which kill -0 would still report as alive.
+alive() { # alive <pid> <grouped>
+  local selector=pid
+  (( $2 )) && selector=pgid
+  ps -e -o "$selector=,stat=" | awk -v id="$1" '$1 == id && $2 !~ /^Z/ {found = 1} END {exit !found}'
+}
+
 stop_recorded() { # stop_recorded <file> <kind> [owning-unit]
   local file=$1 kind=$2 unit=${3:-} pid pgid deadline grouped=0 ownership_status
   [ -r "$file" ] || return 1
@@ -44,27 +52,15 @@ stop_recorded() { # stop_recorded <file> <kind> [owning-unit]
   deadline=$((SECONDS + 15))
   [[ $kind != stack ]] || deadline=$((SECONDS + 45))
   while (( SECONDS < deadline )); do
-    if (( grouped )); then kill -0 -- "-$pid" 2>/dev/null || break; else kill -0 "$pid" 2>/dev/null || break; fi
+    alive "$pid" "$grouped" || break
     sleep 1
   done
-  if (( grouped )); then
-    if kill -0 -- "-$pid" 2>/dev/null; then
-      kill -TERM -- "-$pid" 2>/dev/null || true
-    fi
-  else
-    if kill -0 "$pid" 2>/dev/null; then
-      kill -TERM "$pid" 2>/dev/null || true
-    fi
+  if alive "$pid" "$grouped"; then
+    if (( grouped )); then kill -TERM -- "-$pid" 2>/dev/null || true; else kill -TERM "$pid" 2>/dev/null || true; fi
   fi
   sleep 3
-  if (( grouped )); then
-    if kill -0 -- "-$pid" 2>/dev/null; then
-      kill -KILL -- "-$pid" 2>/dev/null || true
-    fi
-  else
-    if kill -0 "$pid" 2>/dev/null; then
-      kill -KILL "$pid" 2>/dev/null || true
-    fi
+  if alive "$pid" "$grouped"; then
+    if (( grouped )); then kill -KILL -- "-$pid" 2>/dev/null || true; else kill -KILL "$pid" 2>/dev/null || true; fi
   fi
   rm -f -- "$file"
   return 0
