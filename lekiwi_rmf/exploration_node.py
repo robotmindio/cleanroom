@@ -109,27 +109,28 @@ class RobotExplorer(Node):
             self.get_logger().error(str(error), throttle_duration_sec=5)
 
     def _mode_response(self, future, requested_at):
-        if requested_at < self._mode_query_at:
-            return  # A delayed older query cannot overwrite a verified mode change.
-        self._mode_query_at = requested_at
-        try:
-            value = future.result().values[0]
-            if value.type == 1:
-                mapping = value.bool_value
-            elif value.type == 4 and value.string_value.lower() in {"true", "false"}:
-                mapping = value.string_value.lower() == "true"
-            else:
-                raise ValueError("RTAB-Map did not return Mem/IncrementalMemory")
-            now = time.monotonic()
-            if mapping and self._mapping_started is None:
-                self._mapping_started = now
-                self._quota_reason = ""
-            if not mapping:
-                self._mapping_started = None
-            self._mapping, self._mode_at = mapping, now
-        except Exception as error:
-            self._mapping = None
-            self.get_logger().error(f"cannot read mapping mode: {error}", throttle_duration_sec=5)
+        with self._lock:
+            if requested_at < self._mode_query_at:
+                return  # A delayed older query cannot overwrite a verified mode change.
+            self._mode_query_at = requested_at
+            try:
+                value = future.result().values[0]
+                if value.type == 1:
+                    mapping = value.bool_value
+                elif value.type == 4 and value.string_value.lower() in {"true", "false"}:
+                    mapping = value.string_value.lower() == "true"
+                else:
+                    raise ValueError("RTAB-Map did not return Mem/IncrementalMemory")
+                now = time.monotonic()
+                if mapping and self._mapping_started is None:
+                    self._mapping_started = now
+                    self._quota_reason = ""
+                if not mapping:
+                    self._mapping_started = None
+                self._mapping, self._mode_at = mapping, now
+            except Exception as error:
+                self._mapping = None
+                self.get_logger().error(f"cannot read mapping mode: {error}", throttle_duration_sec=5)
 
     def _monitor(self):
         now = time.monotonic()
@@ -142,23 +143,25 @@ class RobotExplorer(Node):
                 self._mode_requested_at = now
                 self._mode_future = self._mapping_parameters.get_parameters(["Mem/IncrementalMemory"])
                 self._mode_future.add_done_callback(lambda future, sent=now: self._mode_response(future, sent))
-        if self._mapping_started is None:
-            return
-        try:
-            reason = self._quota_limit(now)
-        except OSError as error:
-            reason = f"cannot measure mapping storage: {error}"
-        if reason:
-            self._quota_reason = reason
-            if (self._freeze_future is not None and not self._freeze_future.done()
-                    and now - self._freeze_requested_at > self.config["service_timeout_sec"]):
-                self._freeze_future.cancel()
-            if self._localization_client.service_is_ready() and (
-                    self._freeze_future is None or self._freeze_future.done()):
-                self.get_logger().warning(f"freezing RTAB-Map: {reason}", throttle_duration_sec=5)
-                self._freeze_future = self._localization_client.call_async(Empty.Request())
-                self._freeze_requested_at = now
-                self._freeze_future.add_done_callback(self._check_freeze)
+        # Mode replies cannot restart a session midway through an old freeze decision.
+        with self._lock:
+            if self._mapping_started is None:
+                return
+            try:
+                reason = self._quota_limit(now)
+            except OSError as error:
+                reason = f"cannot measure mapping storage: {error}"
+            if reason:
+                self._quota_reason = reason
+                if (self._freeze_future is not None and not self._freeze_future.done()
+                        and now - self._freeze_requested_at > self.config["service_timeout_sec"]):
+                    self._freeze_future.cancel()
+                if self._localization_client.service_is_ready() and (
+                        self._freeze_future is None or self._freeze_future.done()):
+                    self.get_logger().warning(f"freezing RTAB-Map: {reason}", throttle_duration_sec=5)
+                    self._freeze_future = self._localization_client.call_async(Empty.Request())
+                    self._freeze_requested_at = now
+                    self._freeze_future.add_done_callback(self._check_freeze)
 
     def _check_freeze(self, future):
         try:
@@ -167,10 +170,10 @@ class RobotExplorer(Node):
             self.get_logger().error(f"cannot freeze RTAB-Map: {error}")
 
     def _quota_limit(self, now):
+        started = self._mapping_started
         if database_size(self.database) >= self.config["mapping_max_bytes"]:
             return "mapping database quota reached"
-        if (self._mapping_started is not None
-                and now - self._mapping_started >= self.config["mapping_max_seconds"]):
+        if (started is not None and now - started >= self.config["mapping_max_seconds"]):
             return "mapping session duration reached"
         return ""
 

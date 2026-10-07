@@ -267,8 +267,9 @@ def test_idle_guard_catches_direct_mapping_service_and_fresh_sessions(graph):
     peers, explorer, _ = graph
     explorer.config["mapping_max_seconds"] = 0.6
     peers.set_mode(True, Empty.Response())
+    # A fresh session begins only after the previous freeze response completes.
     wait(lambda: True in peers.mapping_requests and peers.mapping_requests[-1] is False
-         and explorer._mapping is False)
+         and explorer._mapping is False and explorer._freeze_future.done())
     assert not peers.nav_active and peers.nav_count == 0
     peers.set_mode(True, Empty.Response())
     wait(lambda: explorer._mapping is True)
