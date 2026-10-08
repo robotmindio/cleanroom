@@ -9,7 +9,7 @@ import pytest
 
 from lekiwi_rmf.exploration import (
     cell_to_world, footprint_is_free, known_safe_cells, load_navigation_footprint,
-    map_geometry, select_target, task_limits, world_to_cell,
+    map_geometry, select_target, task_limits, with_body_free, world_to_cell,
 )
 
 FOOTPRINT, INSCRIBED_RADIUS, REGION_MARGIN = load_navigation_footprint(
@@ -77,6 +77,18 @@ def test_close_wall_uses_actual_footprint_and_blocks_corner_turns():
     assert choose(grid, position=position)[0] is None
     target, stage, _ = choose(grid, position=position, revisit=True)
     assert target is not None and stage == "revisiting_known_space"
+
+
+def test_cells_under_the_current_body_count_as_free_and_nothing_beyond_it():
+    grid = np.zeros((80, 80), dtype=np.int16)
+    grid[44, 44] = 100  # A stale obstacle under the body's front-left corner.
+    grid[45, 49] = 100  # A real obstacle beyond the front edge.
+    position = (0.025, 0.025)
+    assert not footprint_is_free(grid, 0.05, (-2, -2, 0), position, 0, FOOTPRINT, 20)
+    cleared = with_body_free(grid, 0.05, (-2, -2, 0), position, 0, FOOTPRINT)
+    assert footprint_is_free(cleared, 0.05, (-2, -2, 0), position, 0, FOOTPRINT, 20)
+    assert cleared[44, 44] == 0 and cleared[45, 49] == 100 and grid[44, 44] == 100
+    assert choose(cleared, revisit=True, position=position)[0] is not None
 
 
 def test_unknown_or_unsafe_start_and_blocked_regions_are_not_traversed():

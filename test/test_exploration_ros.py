@@ -242,7 +242,7 @@ def test_quota_duration_or_mode_change_ends_and_cancels_the_owned_navigation_goa
     assert explorer._mapping is False
 
 
-@pytest.mark.parametrize("fault", ["permission", "slam", "footprint"])
+@pytest.mark.parametrize("fault", ["permission", "slam"])
 def test_recoverable_fault_stops_the_robot_then_resumes_instead_of_aborting(graph, fault):
     peers, explorer, client = graph
     # The tracked 4 s SLAM budget would consume most of the task's duration on a slow runner.
@@ -255,25 +255,37 @@ def test_recoverable_fault_stops_the_robot_then_resumes_instead_of_aborting(grap
     wait(lambda: peers.nav_active)
     if fault == "permission":
         peers.permitted = False
-    elif fault == "slam":
-        peers.publish_slam = False
     else:
-        peers.grid.data[40 * 80 + 44] = 100  # Newly mapped obstacle under a front corner.
+        peers.publish_slam = False
     wait(lambda: peers.nav_canceled == 1 and not peers.nav_active)
     wait(lambda: any(stage.startswith("paused: ") for stage in feedback))
     time.sleep(0.5)
     assert explorer._busy and not peers.nav_active and peers.nav_count == 1
     if fault == "permission":
         peers.permitted = True
-    elif fault == "slam":
-        peers.publish_slam = True
     else:
-        peers.grid.data[40 * 80 + 44] = 0
+        peers.publish_slam = True
     wait(lambda: peers.nav_active and peers.nav_count == 2)
     response(handle.cancel_goal_async())
     result = response(handle.get_result_async())
     assert result.status == GoalStatus.STATUS_CANCELED
     assert not peers.nav_active and explorer._mapping is False
+
+
+def test_a_mapped_cell_under_the_robot_neither_blocks_a_goal_nor_pauses_it(graph):
+    peers, explorer, client = graph
+    peers.grid.data[40 * 80 + 44] = 100  # Stale obstacle under the front corner, before the goal.
+    feedback = []
+    handle = response(client.send_goal_async(
+        Explore.Goal(max_duration_sec=8.0, max_radius_m=1.8),
+        feedback_callback=lambda message: feedback.append(message.feedback.stage)))
+    assert handle.accepted
+    wait(lambda: peers.nav_active)
+    time.sleep(0.5)
+    assert peers.nav_active and peers.nav_canceled == 0
+    assert not any(stage.startswith("paused: ") for stage in feedback)
+    response(handle.cancel_goal_async())
+    assert response(handle.get_result_async()).status == GoalStatus.STATUS_CANCELED
 
 
 def test_a_timed_out_mode_query_keeps_the_last_reading_until_it_ages_out():

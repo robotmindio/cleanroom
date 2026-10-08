@@ -31,6 +31,7 @@ from tf2_ros import Buffer, TransformException, TransformListener
 from lekiwi_rmf.action import Explore
 from lekiwi_rmf.exploration import (
     database_size, footprint_is_free, load_navigation_footprint, map_geometry, select_target, task_limits,
+    with_body_free,
 )
 
 
@@ -219,9 +220,9 @@ class RobotExplorer(Node):
         if self._mapping is None or now - self._mode_at > self.config["service_timeout_sec"]:
             raise Paused("mapping mode is unknown or stale")
 
-    def _footprint_clear(self, pose):
+    def _footprint_clear(self, pose, grid=None):
         q, p = pose.pose.orientation, pose.pose.position
-        grid = self._map
+        grid = self._map if grid is None else grid
         if (grid is None or self._footprint is None
                 or not all(math.isfinite(v) for v in (p.x, p.y, q.x, q.y, q.z, q.w))
                 or abs(q.x) > 1e-6 or abs(q.y) > 1e-6
@@ -241,8 +242,7 @@ class RobotExplorer(Node):
             if radius <= 2 * self._region_margin:
                 raise ValueError("exploration radius is too small for the footprint")
             self._healthy()
-            if not self._footprint_clear(self._pose()):
-                raise RuntimeError("robot footprint overlaps occupied or unknown space")
+            self._pose()
             if (not self._navigation.server_is_ready() or not self._planner.server_is_ready()
                     or not self._mapping_client.service_is_ready()
                     or not self._localization_client.service_is_ready()):
@@ -273,8 +273,6 @@ class RobotExplorer(Node):
         xy = pose.pose.position
         if math.hypot(xy.x - center[0], xy.y - center[1]) >= radius - self._region_margin:
             raise RuntimeError("exploration region stopping margin reached")
-        if not self._footprint_clear(pose):
-            raise Paused("robot footprint overlaps occupied or unknown space")
         return pose
 
     def _wait(self, future, timeout, check=None):
@@ -424,8 +422,13 @@ class RobotExplorer(Node):
     def _explore_step(self, goal, check, center, radius, visited, blocked, result):
         """Plan and drive to one target; return False when no target remains."""
         pose = check()
+        q = pose.pose.orientation
+        grid, resolution, origin = self._map
+        # Cells under the robot's own body are free: it is standing there.
+        grid = (with_body_free(grid, resolution, origin, (pose.pose.position.x, pose.pose.position.y),
+                               2 * math.atan2(q.z, q.w), self._footprint), resolution, origin)
         target, stage, result.mapped_area_m2 = select_target(
-            *self._map, (pose.pose.position.x, pose.pose.position.y), center, radius, visited, blocked,
+            *grid, (pose.pose.position.x, pose.pose.position.y), center, radius, visited, blocked,
             clearance=self.config["clearance_m"], footprint=self._footprint, region_margin=self._region_margin,
             observation_distance=self.config["observation_distance_m"],
             spacing=self.config["target_spacing_m"], revisit_spacing=self.config["revisit_spacing_m"],
@@ -460,7 +463,7 @@ class RobotExplorer(Node):
         for waypoint in route.result.path.poses:
             p = waypoint.pose.position
             if (math.hypot(p.x - center[0], p.y - center[1]) >= radius - self._region_margin
-                    or not self._footprint_clear(waypoint)):
+                    or not self._footprint_clear(waypoint, grid)):
                 blocked.append(target)
                 return True
         self._nav_request = self._navigation.send_goal_async(NavigateToPose.Goal(
