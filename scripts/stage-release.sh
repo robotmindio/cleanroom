@@ -47,29 +47,41 @@ for venv in .venv .venv-lerobot; do
     ln -s "$workspace/$venv" "$release/$venv"
   fi
 done
-# Existing dependency binaries remain a stable underlay. New source, camera,
-# lidar and native fixes are built into this release's own install prefix.
-if [[ ! -f $release/install/setup.bash ]]; then
-  printf 'source %q\n' "$workspace/install/setup.bash" > "$release/install/setup.bash"
-fi
-dependencies=(ldlidar_stl_ros2 ros2_astra_camera)
-[[ $role != compute ]] || dependencies+=(class_loader rclcpp navigation2 rviz ament_cmake)
-for dependency in "${dependencies[@]}"; do
-  if [[ -d $workspace/src/$dependency/.git && ! -d $release/src/$dependency/.git ]]; then
-    # Installer caches are partial clones; copying their full history can ask
-    # for blobs they deliberately never downloaded. Only HEAD is materialized.
-    git clone --depth 1 "file://$workspace/src/$dependency" "$release/src/$dependency"
-    git -C "$release/src/$dependency" remote set-url origin \
-      "$(git -C "$workspace/src/$dependency" remote get-url origin)"
-  fi
-done
-export LEKIWI_WS=$release
+# Patched third-party dependencies (native ROS fixes, camera and lidar drivers)
+# change rarely. Each role builds them once into a fixed, content-keyed overlay
+# on the bootstrap workspace, and later releases build only this package on top.
+# Installed files keep valid absolute paths because an overlay never moves.
+key=$("$release/source/scripts/dependency-overlay-key.sh" "$role" "$release/source" "$workspace")
+overlay=$workspace/overlays/$role-$key
 build_args=()
-if [[ $role == compute ]]; then
-  "$release/source/scripts/build-native.sh"
-else
-  build_args+=(--device)
+[[ $role == compute ]] || build_args+=(--device)
+if [[ $(cat "$overlay/.complete" 2>/dev/null || true) != "$key" ]]; then
+  # An interrupted build leaves no marker; never reuse its partial install.
+  rm -rf -- "$overlay"
+  mkdir -p "$overlay/install" "$overlay/src"
+  printf 'source %q\n' "$workspace/install/setup.bash" > "$overlay/install/setup.bash"
+  dependencies=(ldlidar_stl_ros2 ros2_astra_camera)
+  [[ $role != compute ]] || dependencies+=(class_loader rclcpp navigation2 rviz ament_cmake)
+  for dependency in "${dependencies[@]}"; do
+    if [[ -d $workspace/src/$dependency/.git ]]; then
+      # Installer caches are partial clones; copying their full history can ask
+      # for blobs they deliberately never downloaded. Only HEAD is materialized.
+      git clone --depth 1 "file://$workspace/src/$dependency" "$overlay/src/$dependency"
+      git -C "$overlay/src/$dependency" remote set-url origin \
+        "$(git -C "$workspace/src/$dependency" remote get-url origin)"
+    fi
+  done
+  if [[ $role == compute ]]; then
+    LEKIWI_WS=$overlay "$release/source/scripts/build-native.sh"
+  fi
+  LEKIWI_WS=$overlay "$release/source/scripts/build-lekiwi.sh" --dependencies "${build_args[@]}"
+  printf '%s\n' "$key" > "$overlay/.complete"
 fi
+if [[ ! -f $release/install/setup.bash ]]; then
+  printf 'source %q\n' "$overlay/install/setup.bash" > "$release/install/setup.bash"
+fi
+printf '%s\n' "$overlay" > "$release/install/.lekiwi-overlay"
+export LEKIWI_WS=$release
 "$release/source/scripts/build-lekiwi.sh" "${build_args[@]}"
 set +u
 # shellcheck source=/dev/null

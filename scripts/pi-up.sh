@@ -14,7 +14,11 @@ source scripts/lib/launcher.sh
 launcher_init pi-up
 
 astra_built() {
-  [[ -x ${LEKIWI_WS:-$HOME/lekiwi_ws}/install/astra_camera/lib/astra_camera/astra_camera_node ]]
+  # A staged release keeps the driver in its shared dependency overlay.
+  local workspace=${LEKIWI_WS:-$HOME/lekiwi_ws} overlay
+  overlay=$(cat "$workspace/install/.lekiwi-overlay" 2>/dev/null || true)
+  [[ -x $workspace/install/astra_camera/lib/astra_camera/astra_camera_node ||
+     ( -n $overlay && -x $overlay/install/astra_camera/lib/astra_camera/astra_camera_node ) ]]
 }
 # This device is dedicated to one robot, so a process of the kind running under
 # systemd or another shell also counts as running; nothing here is signalled.

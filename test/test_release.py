@@ -53,12 +53,13 @@ def release_fixture(tmp_path):
     (repo / ".gitignore").write_text(".env\n__pycache__/\n")
     (repo / "test/test_example.py").write_text("def test_example(): pass\n")
     (repo / ".env").write_text("LEKIWI_WRIST=none\n")
-    for name in ("stage-release.sh", "check-release.py"):
+    for name in ("stage-release.sh", "check-release.py", "dependency-overlay-key.sh"):
         path = repo / "scripts" / name
         path.write_text((ROOT / "scripts" / name).read_text())
         path.chmod(0o755)
     write_executable(repo / "scripts/build-native.sh", '''
 [[ ${LEKIWI_TEST_BUILD_FAIL:-0} != 1 ]] || exit 42
+[[ -z ${LEKIWI_TEST_BUILD_LOG:-} ]] || echo native >> "$LEKIWI_TEST_BUILD_LOG"
 git -C "$(dirname "$0")/.." rev-parse HEAD > "$LEKIWI_WS/install/.lekiwi-native-revision"
 for file in rclcpp/lib/librclcpp.so class_loader/lib/libclass_loader.so nav2_lifecycle_manager/lib/nav2_lifecycle_manager/lifecycle_manager rviz_ogre_vendor/opt/rviz_ogre_vendor/lib/OGRE/RenderSystem_GL.so; do
   mkdir -p "$LEKIWI_WS/install/${file%/*}"
@@ -67,6 +68,10 @@ done
 ''')
     write_executable(repo / "scripts/build-lekiwi.sh", '''
 [[ ${LEKIWI_TEST_BUILD_FAIL:-0} != 1 ]] || exit 42
+if [[ " $* " == *" --dependencies "* ]]; then
+  [[ -z ${LEKIWI_TEST_BUILD_LOG:-} ]] || echo drivers >> "$LEKIWI_TEST_BUILD_LOG"
+  exit 0
+fi
 mkdir -p "$LEKIWI_WS/install/lekiwi_rmf/share/lekiwi_rmf" "$LEKIWI_WS/build/lekiwi_rmf"
 git -C "$(dirname "$0")/.." rev-parse HEAD > "$LEKIWI_WS/install/lekiwi_rmf/.lekiwi-source-revision"
 printf '<package/>' > "$LEKIWI_WS/install/lekiwi_rmf/share/lekiwi_rmf/package.xml"
@@ -109,7 +114,10 @@ def test_staging_keeps_live_source_artifacts_and_pointer_unchanged(tmp_path, fai
     release = workspace / "releases" / revision
     assert (release / "release.json").exists() is not fail
     if not fail:
-        assert (release / "install/.lekiwi-native-revision").is_file() is (role == "compute")
+        overlay = Path((release / "install/.lekiwi-overlay").read_text().strip())
+        assert overlay.parent == workspace / "overlays" and (overlay / ".complete").is_file()
+        assert (overlay / "install/.lekiwi-native-revision").is_file() is (role == "compute")
+        assert not (release / "install/.lekiwi-native-revision").exists()
         assert subprocess.run(command, env=environment, capture_output=True, timeout=30).returncode == 0
         cache = release / "install/lekiwi_rmf/__pycache__/runtime.cpython-312.pyc"
         cache.parent.mkdir()
@@ -148,6 +156,50 @@ def test_release_sealing_refuses_failed_or_missing_source_tests(tmp_path):
     individual.unlink()
     with pytest.raises(ValueError, match="missing Python test evidence"):
         checker.check_release(release, revision, "compute")
+
+
+def test_releases_reuse_a_dependency_overlay_until_its_inputs_change(tmp_path):
+    repo, workspace, first, environment = release_fixture(tmp_path)
+    log = tmp_path / "builds"
+    environment = {**environment, "LEKIWI_TEST_BUILD_LOG": str(log)}
+
+    def stage(revision):
+        result = subprocess.run(["bash", str(repo / "scripts/stage-release.sh"), "compute", str(workspace), revision],
+                                env=environment, capture_output=True, text=True, timeout=30)
+        assert result.returncode == 0, result.stdout + result.stderr
+        return workspace / "releases" / revision
+
+    def commit(name, message):
+        path = repo / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"# {message}\n")
+        for args in (("add", name), ("commit", "-m", message)):
+            subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+        return subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
+
+    def overlay_of(release):
+        return Path((release / "install/.lekiwi-overlay").read_text().strip())
+
+    first_release = stage(first)
+    second = commit("lekiwi_rmf/feature.py", "package-only change")
+    second_release = stage(second)
+    assert log.read_text().split() == ["native", "drivers"]
+    assert overlay_of(first_release) == overlay_of(second_release)
+    third_release = stage(commit("thirdparty/rclcpp/fix.patch", "dependency change"))
+    assert log.read_text().split() == ["native", "drivers"] * 2
+    assert overlay_of(third_release) != overlay_of(second_release)
+    # An interrupted overlay build is rebuilt, never reused.
+    (overlay_of(third_release) / ".complete").unlink()
+    stage(commit("lekiwi_rmf/other.py", "after an interrupted dependency build"))
+    assert log.read_text().split() == ["native", "drivers"] * 3
+
+    spec = importlib.util.spec_from_file_location("check_release", ROOT / "scripts/check-release.py")
+    checker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(checker)
+    checker.check_release(second_release, second, "compute")
+    (overlay_of(second_release) / "install/rclcpp/lib/librclcpp.so").write_text("changed")
+    with pytest.raises(ValueError, match="changed after qualification"):
+        checker.check_release(second_release, second, "compute")
 
 
 def test_staging_clones_only_the_materialized_vendor_revision(tmp_path):
