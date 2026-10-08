@@ -80,8 +80,12 @@ def test_native_lifecycle_response_deadline_and_refusal(tmp_path, delay, timeout
             if refuse:
                 assert state_requests == 0, "refused transition must not be treated as successful"
             elif not expected:
-                error = "response deadline exceeded" if delay >= 0 else "service unavailable"
-                assert error in output, output
+                # A service destroyed mid-transition fails either way, bounded: the
+                # manager's graph has or has not yet seen it disappear, a DDS
+                # discovery race that other participants in the domain can tip.
+                errors = ("response deadline exceeded",) if delay >= 0 else (
+                    "service unavailable", "response deadline exceeded")
+                assert any(error in output for error in errors), output
     finally:
         try:
             if process is not None and process.poll() is None:
