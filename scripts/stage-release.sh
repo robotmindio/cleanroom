@@ -77,9 +77,14 @@ if [[ $(cat "$overlay/.complete" 2>/dev/null || true) != "$key" ]]; then
   LEKIWI_WS=$overlay "$release/source/scripts/build-lekiwi.sh" --dependencies "${build_args[@]}"
   printf '%s\n' "$key" > "$overlay/.complete"
 fi
-if [[ ! -f $release/install/setup.bash ]]; then
-  printf 'source %q\n' "$overlay/install/setup.bash" > "$release/install/setup.bash"
+# A retried, unsealed release may have been configured against another overlay
+# (an earlier key, or an interrupted pre-overlay build). CMake caches and the
+# generated setup chain keep those absolute paths, so rebuild it from scratch.
+if [[ $(cat "$release/install/.lekiwi-overlay" 2>/dev/null || true) != "$overlay" ]]; then
+  rm -rf -- "$release/build" "$release/install"
+  mkdir -p "$release/install"
 fi
+printf 'source %q\n' "$overlay/install/setup.bash" > "$release/install/setup.bash"
 printf '%s\n' "$overlay" > "$release/install/.lekiwi-overlay"
 export LEKIWI_WS=$release
 "$release/source/scripts/build-lekiwi.sh" "${build_args[@]}"
