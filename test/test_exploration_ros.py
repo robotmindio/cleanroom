@@ -276,6 +276,16 @@ def test_recoverable_fault_stops_the_robot_then_resumes_instead_of_aborting(grap
     assert not peers.nav_active and explorer._mapping is False
 
 
+def test_a_timed_out_mode_query_keeps_the_last_reading_until_it_ages_out(graph):
+    from rclpy.task import Future
+    _, explorer, _ = graph
+    reading = explorer._mode_at
+    timed_out = Future()
+    timed_out.cancel()
+    explorer._mode_response(timed_out, time.monotonic())
+    assert explorer._mapping is False and explorer._mode_at == reading
+
+
 def test_close_wall_exploration_uses_the_actual_body_instead_of_a_corner_circle(graph):
     peers, explorer, client = graph
     peers.position = (0.025, 0.025)

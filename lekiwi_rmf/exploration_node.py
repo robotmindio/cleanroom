@@ -117,6 +117,8 @@ class RobotExplorer(Node):
             self.get_logger().error(str(error), throttle_duration_sec=5)
 
     def _mode_response(self, future, requested_at):
+        if future.cancelled():
+            return  # A slow reply proves nothing about the mode; it only lets the last reading age.
         with self._lock:
             if requested_at < self._mode_query_at:
                 return  # A delayed older query cannot overwrite a verified mode change.
@@ -145,8 +147,8 @@ class RobotExplorer(Node):
         if self._mapping_parameters.services_are_ready():
             if self._mode_future is not None and not self._mode_future.done():
                 if now - self._mode_requested_at > self.config["service_timeout_sec"]:
+                    # Ask again; the last confirmed reading ages out through _mode_at.
                     self._mode_future.cancel()
-                    self._mapping = None
             if self._mode_future is None or self._mode_future.done():
                 self._mode_requested_at = now
                 self._mode_future = self._mapping_parameters.get_parameters(["Mem/IncrementalMemory"])
