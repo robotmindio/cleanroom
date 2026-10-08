@@ -1,0 +1,86 @@
+{
+  "recorded_at": "2026-10-08T14:52:00.210136+00:00",
+  "scope": "0.20 m/s stage positioning attempt; the high-speed braking pulse did not start.",
+  "target_speed_qualified": false,
+  "production_acceptance_changed": false,
+  "deployed_revision": "1dda4248ba83aee928930b8814ba7b04b21fae34",
+  "payload_kg": 0.2,
+  "operating_conditions": {
+    "reported_clearance_beyond_footprint_m": 1.0,
+    "operator_at_motor_power_stop": true,
+    "arm_folded": true
+  },
+  "error": "manual motion did not reach target; collision monitor=('StopZone', 1)",
+  "completed_braking_trials": 0,
+  "maximum_measured_center_excursion_m": 0.005260428337190248,
+  "stationary_jitter_m": 0.007300714061546556,
+  "collision_monitor_action": [
+    "StopZone",
+    1
+  ],
+  "detected_left_cluster_distance_from_center_m": 0.565,
+  "detected_left_cluster_clearance_from_footprint_m": 0.345,
+  "detected_points_in_test_stop_zone": 71,
+  "reference_point_count": 247,
+  "test_stop_zone_margin_m": 0.65,
+  "system_slice": "lekiwi.slice",
+  "slice_swap_bytes_before_and_during": 0,
+  "production_restored": true,
+  "verified_production_limits": {
+    "linear_m_s": 0.03,
+    "angular_rad_s": 0.06
+  },
+  "qualification_profile": {
+    "trials_per_direction": 5,
+    "measurement_uncertainty_m": 0.02,
+    "maximum_stopping_distance_m": 0.65,
+    "maximum_stop_time_s": 1.5,
+    "maximum_frame_gap_s": 0.5,
+    "maximum_center_radius_m": 0.4,
+    "maximum_runtime_s": 1200,
+    "scale_reserve_fraction": 0.15,
+    "body_radius_m": 0.33,
+    "independent_center_radius_m": 0.42,
+    "driver_center_radius_m": 0.45,
+    "required_clearance_m": 1.0,
+    "nominal_command_duration_s": 1.2,
+    "return_linear_speed_m_s": 0.1,
+    "return_angular_speed_rad_s": 0.06,
+    "linear_speed_m_s": 0.2,
+    "angular_speed_rad_s": 0.4,
+    "point_speed_bound_m_s": 0.22999999999999998,
+    "payload_kg": 0.2,
+    "nominal_only": true,
+    "direction": "forward",
+    "selected_fault": null,
+    "angular_test": false,
+    "stage": "0.20",
+    "depth_filter_pid": "1286815"
+  },
+  "artifacts": {
+    "/home/nex/lekiwi_ws/releases/1dda4248ba83aee928930b8814ba7b04b21fae34/source/.benchmarks/onboard-braking/20261008-224311/profile.yaml": {
+      "sha256": "24f102c923af17577856c4bceb401a690a62b217b4ff940082fc95e0661af6fc",
+      "bytes": 652
+    },
+    "/home/nex/lekiwi_ws/releases/1dda4248ba83aee928930b8814ba7b04b21fae34/source/.benchmarks/onboard-braking/20261008-224311/measurements.json": {
+      "sha256": "b7f5ae62d09704d221e35d94c1a46fcd37ed64fac0eb467cef3764d28e34500a",
+      "bytes": 1454
+    },
+    "/home/nex/lekiwi_ws/releases/1dda4248ba83aee928930b8814ba7b04b21fae34/source/.benchmarks/onboard-braking/20261008-224311/result.json": {
+      "sha256": "1883bcd5b22755856426b7b1fd17d7d5245203ecd5c8abf415294bc59e1686fe",
+      "bytes": 305254
+    },
+    "/home/nex/lekiwi_ws/releases/1dda4248ba83aee928930b8814ba7b04b21fae34/source/.benchmarks/onboard-braking/20261008-224311/independent-poses.json": {
+      "sha256": "eaf2e58152eac161c8ec6ae9b34657c0e6d592cbeb594d095d5f65edb5faa4bf",
+      "bytes": 5708968
+    },
+    "/home/nex/roboto/cleanroom/.claude/worktrees/base-speed-qualification/.benchmarks/base-speed-qualification/stage-020-forward.log": {
+      "sha256": "dbd47944a19d4b2673025f6468c3f0800755286b1bf10612e9bb3f7c0b7464ed",
+      "bytes": 1990
+    },
+    "/home/nex/roboto/cleanroom/.claude/worktrees/base-speed-qualification/.benchmarks/base-speed-qualification/obstacle-map.png": {
+      "sha256": "7bca9876ebec46e73347ba9663eb832dee529dfd95475c4463ae75fc51951c3e",
+      "bytes": 43476
+    }
+  }
+}
