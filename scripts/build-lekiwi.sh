@@ -11,15 +11,27 @@ source scripts/lib/build-common.sh
 workspace=${LEKIWI_WS:-$HOME/lekiwi_ws}
 [[ $workspace == /* && -d $workspace/install ]] || die "installed workspace not found: $workspace"
 build_compute=ON
-if [[ ${1:-} == --device ]]; then build_compute=OFF; shift; fi
-[[ $# == 0 ]] || die "usage: $0 [--device]"
+# --dependencies builds only the patched drivers, for a shared dependency overlay.
+dependencies_only=false
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --device) build_compute=OFF ;;
+    --dependencies) dependencies_only=true ;;
+    *) die "usage: $0 [--device] [--dependencies]" ;;
+  esac
+  shift
+done
 [[ ! -L $workspace/current && ! -f $workspace/release.json ]] || die "stage a release instead of rebuilding a live or sealed workspace"
 
 # shellcheck source=scripts/thirdparty-common.sh
 source "$project_root/scripts/thirdparty-common.sh"
 
-base_paths=("$project_root")
-packages=(lekiwi_rmf)
+base_paths=()
+packages=()
+if ! $dependencies_only; then
+  base_paths=("$project_root")
+  packages=(lekiwi_rmf)
+fi
 lidar_source=$workspace/src/ldlidar_stl_ros2
 if [[ -d $lidar_source/.git ]]; then
   apply_thirdparty_patches ldlidar_stl_ros2 "$lidar_source"
@@ -33,6 +45,10 @@ if [[ -d $astra_source/.git ]]; then
   apply_thirdparty_patches ros2_astra_camera "$astra_source"
   base_paths+=("$astra_source")
   packages+=(astra_camera_msgs astra_camera)
+fi
+
+if (( ${#packages[@]} == 0 )); then
+  exit 0
 fi
 
 set +u
@@ -65,7 +81,7 @@ colcon --log-base "$workspace/log" build \
     -DPython3_EXECUTABLE=/usr/bin/python3
 
 installed_driver=$workspace/install/lekiwi_rmf/lib/lekiwi_rmf/lekiwi_driver
-if [[ ! -x $installed_driver ]] || ! cmp -s lekiwi_rmf/driver.py "$installed_driver"; then
+if ! $dependencies_only && { [[ ! -x $installed_driver ]] || ! cmp -s lekiwi_rmf/driver.py "$installed_driver"; }; then
   echo "$0: build completed without installing the current driver" >&2
   exit 1
 fi
@@ -77,4 +93,6 @@ fi
 
 # The split deployer can skip an otherwise disruptive rebuild when both
 # workspaces already contain this exact source revision.
-git -C "$project_root" rev-parse HEAD > "$workspace/install/lekiwi_rmf/.lekiwi-source-revision"
+if ! $dependencies_only; then
+  git -C "$project_root" rev-parse HEAD > "$workspace/install/lekiwi_rmf/.lekiwi-source-revision"
+fi

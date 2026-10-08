@@ -39,7 +39,8 @@ before using them; the robot runtime does not require it.
 - `stage-release.sh compute|device WORKSPACE REVISION` builds and tests a detached release before cutover, retaining the active workspace.
 - `check-release.py seal|verify RELEASE REVISION compute|device` checks source, installed artifacts, local settings, and complete passing CTest evidence.
 - `reinstall-compute.sh` reinstalls the compute service from `.env` (`LEKIWI_ROBOT_HOST`) with MoveIt enabled.
-- `build-lekiwi.sh [--device]` rebuilds this package; `--device` omits compute-only plugins and selects the tracked device tests.
+- `build-lekiwi.sh [--device] [--dependencies]` rebuilds this package; `--device` omits compute-only plugins and selects the tracked device tests, and `--dependencies` builds only the patched camera and lidar drivers for a dependency overlay.
+- `dependency-overlay-key.sh compute|device SOURCE WORKSPACE` prints the content key that decides when staging reuses a built dependency overlay.
 - `reload-moveit.py` reloads installed collision rules through the managed planner's respawn while the driver is already DISARMED. It preserves live poses and calibration and leaves motor services and torque alone. Source `scripts/setup.bash` first.
 - `build-native.sh` builds pinned class_loader 2.7.1, rclcpp 28.1.22 and Nav2 1.3.13 reliability patches into the compute workspace. `/opt/ros` remains a dependency underlay.
 - `rebuild-all.sh` verifies and vendors the LeKiwi model, renders it, rebuilds and runs the CTest suite.

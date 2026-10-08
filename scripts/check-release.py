@@ -28,6 +28,25 @@ def check_safety_acceptance(source):
         raise ValueError(f"tracked safety acceptance does not match the release configuration: {detail}")
 
 
+def files(root):
+    return {str(path.relative_to(root)): {"sha256": digest(path), "mode": stat.S_IMODE(path.stat().st_mode)}
+            for path in sorted(root.rglob("*"))
+            if path.is_file() and "__pycache__" not in path.parts and path.suffix not in (".pyc", ".pyo")}
+
+
+def dependency_overlay(release):
+    """The shared dependency overlay a release was built on, or None for a self-contained release."""
+    marker = release / "install/.lekiwi-overlay"
+    if not marker.is_file():
+        return None
+    overlay = Path(marker.read_text().strip())
+    if not overlay.is_absolute() or overlay.parent != release.parent.parent / "overlays":
+        raise ValueError("release names a dependency overlay outside its workspace")
+    if not (overlay / ".complete").is_file():
+        raise ValueError("release dependency overlay is incomplete")
+    return overlay
+
+
 def inventory(release, role):
     source = release / "source"
     revision = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"], text=True).strip()
@@ -36,14 +55,17 @@ def inventory(release, role):
     check_safety_acceptance(source)
     tracked = subprocess.check_output(["git", "-C", str(source), "ls-files", "-z"]).decode().split("\0")
     sources = {name: digest(source / name) for name in tracked if name}
-    installed = {str(path.relative_to(release)): {"sha256": digest(path), "mode": stat.S_IMODE(path.stat().st_mode)}
-                 for path in sorted((release / "install").rglob("*"))
-                 if path.is_file() and "__pycache__" not in path.parts and path.suffix not in (".pyc", ".pyo")}
+    installed = {f"install/{name}": value for name, value in files(release / "install").items()}
+    overlay = dependency_overlay(release)
+    # A reused overlay was built by an earlier revision; its exact files are part of this release.
+    overlay_files = files(overlay / "install") if overlay else None
+    native_root = (overlay or release) / "install"
     if not installed or not (release / "install/lekiwi_rmf/share/lekiwi_rmf/package.xml").is_file():
         raise ValueError("release package is not installed")
     if (release / "install/lekiwi_rmf/.lekiwi-source-revision").read_text().strip() != revision:
         raise ValueError("installed package revision does not match release source")
-    if role == "compute" and (release / "install/.lekiwi-native-revision").read_text().strip() != revision:
+    if role == "compute" and overlay is None and (
+            release / "install/.lekiwi-native-revision").read_text().strip() != revision:
         raise ValueError("native overlay revision does not match release source")
     native_artifacts = (
         "rclcpp/lib/librclcpp.so", "class_loader/lib/libclass_loader.so",
@@ -51,7 +73,7 @@ def inventory(release, role):
         "rviz_ogre_vendor/opt/rviz_ogre_vendor/lib/OGRE/RenderSystem_GL.so",
     ) if role == "compute" else ()
     for name in native_artifacts:
-        path = release / "install" / name
+        path = native_root / name
         if not path.is_file() or path.stat().st_size == 0:
             raise ValueError(f"native release artifact is missing: {name}")
     report = release / "build/lekiwi_rmf/release-ctest.xml"
@@ -85,6 +107,7 @@ def inventory(release, role):
     settings = source / ".env"
     return {"schema_version": 2, "revision": revision, "source": sources,
             "install": installed, "test_results": evidence,
+            **({"dependency_overlay": {"path": str(overlay), "files": overlay_files}} if overlay else {}),
             "settings": digest(settings) if settings.is_file() else None}
 
 

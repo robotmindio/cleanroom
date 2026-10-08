@@ -212,8 +212,18 @@ source files, installed artifacts, private `.env` snapshot, and passing results
 for every selected source test. Generated Python caches are excluded. The existing
 bootstrap install remains a dependency underlay, and its virtual environments
 are reused; OS packages, those environments, and local calibration files still
-need separate qualification. Cold native builds can take substantial time and
-disk space. Do not delete retained releases while a service uses them.
+need separate qualification.
+
+The patched third-party dependencies (the compute-native ROS fixes, the Astra
+camera and LD06 drivers) are built once per host into
+`overlays/<role>-<key>` and shared by later releases, which build only this
+package on top. `scripts/dependency-overlay-key.sh` derives the key from the
+pinned dependency scripts and patches, the bootstrap dependency sources and the
+installed `ros-jazzy-*` packages; changing any of them builds a new overlay. An
+overlay is reused only after its build completed, and each release manifest
+records the hashes of its overlay's installed files. A cold overlay build can
+take substantial time and disk space. Do not delete retained releases or the
+overlays they name while a service uses them.
 
 After qualification, the deployer confirms torque-off, stops both stacks, and
 atomically selects each host's `current` symlink. Services use `current/source`
