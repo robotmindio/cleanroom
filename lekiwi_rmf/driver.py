@@ -33,7 +33,7 @@ from lekiwi_rmf.arm_trajectory import (
 )
 from lekiwi_rmf.host_protocol import STATE_KEYS, TorqueCommand
 from lekiwi_rmf.motion_guards import (
-    Lease, bounded_test_speed_limits, inside_base_test_boundary, load_base_speed_limits, twist_is_finite,
+    Lease, bounded_test_speed_limits, inside_base_test_boundary, load_base_speed_limits, load_base_test_profile, twist_is_finite,
 )
 from lekiwi_rmf.odometry import BASE_XY_SCALE, BASE_YAW_SCALE, HostPoseTracker
 from lekiwi_rmf.torque_control import TorqueControlClient
@@ -499,14 +499,23 @@ class LeKiwiDriver(Node):
             raise ValueError("nav2_params_file and permission_timeout parameters are required")
         speed_limits = load_base_speed_limits(nav2_file)
         max_linear, max_angular = speed_limits
+        self._base_test_radius = .20
+        self._base_qualification = None
         if values["bounded_base_test"]:
-            linear, angular = bounded_test_speed_limits(
-                self.declare_parameter("base_test_linear_limit", 0.03).value,
-                self.declare_parameter("base_test_angular_limit", 0.20).value,
-                speed_limits,
-            )
-            max_linear = min(max_linear, linear)
-            max_angular = min(max_angular, angular)
+            stage = self.declare_parameter("base_test_stage", "").value
+            if stage:
+                profile = load_base_test_profile(nav2_file, stage)
+                max_linear, max_angular = profile['linear_speed_m_s'], profile['angular_speed_rad_s']
+                self._base_test_radius = profile['driver_center_radius_m']
+                self._base_qualification = profile
+            else:
+                linear, angular = bounded_test_speed_limits(
+                    self.declare_parameter("base_test_linear_limit", 0.03).value,
+                    self.declare_parameter("base_test_angular_limit", 0.20).value,
+                    speed_limits,
+                )
+                max_linear = min(max_linear, linear)
+                max_angular = min(max_angular, angular)
         settings = DriverSettings(
             max_linear=max_linear, max_angular=max_angular,
             permission_timeout=permission_timeout, **values,
@@ -1316,14 +1325,16 @@ class LeKiwiDriver(Node):
         # base_radius of 0.125 m, so a robot whose wheels sit elsewhere both under-turns
         # what it is asked for and over-reports what it did, by the same factor. Fixing
         # only the odometry would leave Nav2 asking for rotations it never gets.
-        linear_x, linear_y = self.clamp_planar(
-            cmd.linear.x, cmd.linear.y, self.max_linear
-        )
+        linear_limit, angular_limit = self.max_linear, self.max_angular
+        if self._base_qualification and (cmd.linear.x or cmd.linear.y) and cmd.angular.z:
+            linear_limit = min(linear_limit, self._base_qualification['return_linear_speed_m_s'])
+            angular_limit = min(angular_limit, self._base_qualification['return_angular_speed_rad_s'])
+        linear_x, linear_y = self.clamp_planar(cmd.linear.x, cmd.linear.y, linear_limit)
         action.update({
             "x.vel": linear_x / self.xy_scale,
             "y.vel": linear_y / self.xy_scale,
             "theta.vel": math.degrees(
-                self.clamp(cmd.angular.z, self.max_angular) / self.yaw_scale
+                self.clamp(cmd.angular.z, angular_limit) / self.yaw_scale
             ),
         })
         # Serialize the final armed check with disarm. Once disarm returns, no
@@ -1348,7 +1359,7 @@ class LeKiwiDriver(Node):
                 action.update(measured_hold)
             if not base_permitted:
                 action["x.vel"] = action["y.vel"] = action["theta.vel"] = 0.0
-            if self.bounded_base_test and not inside_base_test_boundary(self.pose, self._base_test_center):
+            if self.bounded_base_test and not inside_base_test_boundary(self.pose, self._base_test_center, self._base_test_radius):
                 action["x.vel"] = action["y.vel"] = action["theta.vel"] = 0.0
             with self.trajectory_lock:
                 remote_goal = self.trajectory.host_id if self.trajectory else None

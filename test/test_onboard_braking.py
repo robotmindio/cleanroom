@@ -4,6 +4,93 @@ import pytest
 import numpy as np
 
 
+def test_short_qualification_pulses_are_centered_in_the_fixture():
+    from types import SimpleNamespace
+    pulse=import_module('test-onboard-braking').OnboardBraking.pulse_start
+    node=SimpleNamespace(center=(0.,0.,np.pi/2),config={'stage':'0.30',
+        'nominal_command_duration_s':1.2,'linear_speed_m_s':.3,'angular_speed_rad_s':.6})
+    assert pulse(node,'forward')==pytest.approx((0.,-.18,np.pi/2))
+    assert pulse(node,'reverse')==pytest.approx((0.,.18,np.pi/2))
+    assert pulse(node,'left')==pytest.approx((.18,0.,np.pi/2))
+    assert pulse(node,'rotation_ccw')==pytest.approx((0.,0.,np.pi/2-.36))
+
+
+def test_velocity_seed_does_not_replace_the_independent_wall_measurement():
+    from types import SimpleNamespace
+    import time
+    from sensor_msgs.msg import LaserScan
+    module=import_module('test-onboard-braking')
+    angles=np.arange(720)*2*np.pi/720-np.pi
+    def wall_scan(position,stamp):
+        directions=np.column_stack((np.cos(angles),np.sin(angles)))
+        distances=np.minimum((2-np.sign(directions[:,0])*position)/abs(directions[:,0]),
+                             2/np.maximum(abs(directions[:,1]),1e-12))
+        scan=LaserScan(angle_min=-np.pi,angle_increment=2*np.pi/720,range_min=.05,range_max=10.,ranges=distances.astype(float).tolist())
+        scan.header.frame_id='lidar'
+        scan.header.stamp.nanosec=int(stamp*1e9)
+        return scan,distances[:,None]*directions
+    _,reference=wall_scan(0.,0.)
+    transform=SimpleNamespace(rotation=SimpleNamespace(x=0.,y=0.,z=0.,w=1.),
+                              translation=SimpleNamespace(x=0.,y=0.))
+    for actual,stamp in [(.04,.2),(0.,.5)]:
+        scan,_=wall_scan(actual,stamp)
+        node=SimpleNamespace(sectors=[],scans=[],reference_points=reference,
+            ranges=[{'pose':[0.,0.,0.],'stamp':0.}],wheel_velocity=(.3,0.,0.),odom_at=time.monotonic(),
+            config={'body_radius_m':.33},
+            buffer=SimpleNamespace(can_transform=lambda *args:True,
+                lookup_transform=lambda *args:SimpleNamespace(transform=transform)),
+            get_clock=lambda:SimpleNamespace(now=lambda:SimpleNamespace(nanoseconds=int(stamp*1e9))))
+        module.OnboardBraking.direct_scan(node,scan)
+        assert node.ranges[-1]['pose']==pytest.approx([actual,0.,0.],abs=.001)
+
+
+def test_resume_rejects_changed_speed_or_stopping_conditions():
+    resume=import_module('test-onboard-braking').resumable_evidence
+    config={'linear_speed_m_s':.03,'angular_speed_rad_s':.06,'payload_kg':.2,
+            'measurement_uncertainty_m':.02,'maximum_stopping_distance_m':.05,
+            'direction':'forward','depth_filter_pid':'123'}
+    previous={'profile':{**config,'direction':None,'depth_filter_pid':'456'},
+              'source_run':'earlier','trials':[{'qualification_eligible':True},
+                                            {'qualification_eligible':False}],
+              'faults':{'linear/scan_disconnect':{'passed':True,'independent':{'within_budget':True}},
+                        'angular/scan_disconnect':{'passed':False}}}
+    trials,faults=resume(previous,config)
+    assert trials==[{'qualification_eligible':True,'source_run':'earlier'}]
+    assert list(faults)==['linear/scan_disconnect']
+    for key in ('linear_speed_m_s','angular_speed_rad_s','payload_kg',
+                'measurement_uncertainty_m','maximum_stopping_distance_m'):
+        with pytest.raises(ValueError,match='profile differs'):
+            resume(previous,{**config,key:config[key]*2})
+
+
+@pytest.mark.parametrize('stage',[None,'0.30'])
+def test_selected_stop_does_not_retry_and_qualification_returns_to_fixed_center(stage):
+    from types import SimpleNamespace
+    run=import_module('test-onboard-braking').OnboardBraking.run
+    calls=[]
+    node=SimpleNamespace(config={'direction':'forward','body_radius_m':.33,'test_center':(0.,0.,0.),'stage':stage},
+        pose=(0.,0.,0.),ranges=[{'pose':[0.,0.,0.]}]*21,range_info=[{}],
+        camera_poses=[{}],views={'front':1,'wrist':1,'astra':1},
+        wait_ready=lambda:None,wait=lambda condition,timeout:condition(),save=lambda:None)
+    def move(target,**limits):
+        assert target==(0.,0.,0.)
+        assert limits=={'linear_limit':.02,'angular_limit':.06} or (stage and limits=={})
+        calls.append('center')
+        node.ranges.append({'pose':[-.06,0.,0.]})
+    def trial(direction):
+        assert node.origin_range==([0.,0.,0.] if stage else [-.06,0.,0.])
+        calls.append(direction)
+        return True
+    node.move,node.trial=move,trial
+    run(node)
+    completed=['center','forward']+(['center'] if stage else [])
+    assert calls==completed
+    node.trial=lambda direction:calls.append(direction) or False
+    with pytest.raises(RuntimeError,match='unqualified'):
+        run(node)
+    assert calls==completed+['center','forward']
+
+
 def test_scan_geometry_recovers_motion_and_rejects_a_single_wall():
     module=import_module('test-onboard-braking')
     fit=module.register_scan

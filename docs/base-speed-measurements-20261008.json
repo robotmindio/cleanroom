@@ -1,0 +1,108 @@
+{
+  "recorded_at": "2026-10-08T13:40:55.214251+00:00",
+  "scope": "One current-speed nominal forward braking trial; no fault tests or increased-speed qualification.",
+  "target_linear_speed_m_s": 0.3,
+  "target_speed_qualified": false,
+  "production_acceptance_changed": false,
+  "deployed_revision": "b979c91c9cff3d605e31b24590f1a5e2d5c81317",
+  "runner_revision": "fa0c0f105a70137da85285b148a0a0a1476f52e4",
+  "payload_kg": 0.2,
+  "operator_at_motor_power_stop_confirmed": true,
+  "dry_clear_floor_confirmed": true,
+  "profile": {
+    "trials_per_direction": 5,
+    "measurement_uncertainty_m": 0.02,
+    "maximum_stopping_distance_m": 0.05,
+    "maximum_stop_time_s": 1.5,
+    "maximum_frame_gap_s": 0.5,
+    "maximum_center_radius_m": 0.12,
+    "maximum_runtime_s": 1200,
+    "scale_reserve_fraction": 0.15,
+    "body_radius_m": 0.33,
+    "payload_kg": 0.2,
+    "linear_speed_m_s": 0.03,
+    "angular_speed_rad_s": 0.06,
+    "nominal_only": true,
+    "direction": "forward",
+    "point_speed_bound_m_s": 0.057269999999999995,
+    "depth_filter_pid": "1204637"
+  },
+  "trials": [
+    {
+      "observed_swept_distance_m": 0.013860515380083663,
+      "unobserved_excursion_bound_m": 0.00857294611930847,
+      "conservative_swept_distance_m": 0.022433461499392134,
+      "uncertainty_upper_m": 0.014855515608191872,
+      "maximum_capture_gap_s": 0.29938697814941406,
+      "stop_time_receive_upper_s": 0.7900303421483841,
+      "first_sample_time": 44209.328249775,
+      "last_sample_time": 44211.741893316,
+      "fault_cut_time": 44209.242716922,
+      "samples": 13,
+      "baseline_time_basis": "sensor_capture_stamp",
+      "within_budget": true,
+      "direction": "forward",
+      "requested_speed": 0.03,
+      "terminal_observed_speed": 0.02773243749566226,
+      "requested_speed_covered": true,
+      "speed_coverage_basis": "maximum production guarded command, with fresh wheel feedback and independent ground motion",
+      "terminal_wheel_speed": 0.030997547728612126,
+      "terminal_guarded_speed": 0.03,
+      "feedback_interrupted": false,
+      "qualification_eligible": true
+    }
+  ],
+  "faults": {},
+  "stationary_jitter_m": 0.005855810471040794,
+  "wheel_center": [
+    1.002089235276054,
+    0.6595714055727261,
+    1.6108633624903708
+  ],
+  "wheel_final_pose": [
+    0.9991367077013741,
+    0.7253435784412504,
+    1.6213901183568533
+  ],
+  "maximum_wheel_center_radius_m": 0.06617164217664283,
+  "final_flags": {
+    "arm_stowed": true,
+    "base_motion_permitted": true,
+    "arm_motion_permitted": true,
+    "driver": "ARMED"
+  },
+  "final_health": {
+    "base_motion_permitted": "true",
+    "arm_motion_permitted": "true",
+    "arm_stowed": "true",
+    "faults": "",
+    "latched_faults": "",
+    "bounded_base_test": "false"
+  },
+  "health_faults": [],
+  "artifacts": {
+    ".benchmarks/onboard-braking/20261008-214041/profile.yaml": {
+      "sha256": "47c4138718b0e7fd9cfc88bbb4d271964eaa42f4b765f279ccbc90bdcef8c4b8",
+      "bytes": 418
+    },
+    ".benchmarks/onboard-braking/20261008-214041/measurements.json": {
+      "sha256": "03488147cf0b41dcd0fd62ef72d4cc50267df8d6fb76c8dcf2d7b2298b31ec5e",
+      "bytes": 2025
+    },
+    ".benchmarks/onboard-braking/20261008-214041/result.json": {
+      "sha256": "c3dc1d00c36cbae842859bb0bb4f5613ffc91bf6763740f5b2e49762dc2c12cf",
+      "bytes": 134904
+    },
+    ".benchmarks/onboard-braking/20261008-214041/independent-poses.json": {
+      "sha256": "656edf94ef3ef12be6a7646b8458ca222c12e1c4232479b4c923febd1faa62f2",
+      "bytes": 1561885
+    },
+    ".benchmarks/base-speed-qualification/forward-20261008-2140.log": {
+      "sha256": "ae822235feff72f7ef57c78348e2f4c4cad5446db72d9ccb0d0b9f58e4766b40",
+      "bytes": 1523
+    }
+  },
+  "motor_host_pid_before_and_after": 1204476,
+  "compute_stack_pid_before_and_after": 2673600,
+  "maximum_directional_stopping_bound_including_allowance_m": 0.04243346149939213
+}

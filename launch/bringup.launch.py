@@ -23,7 +23,7 @@ from lekiwi_rmf.arm_trajectory import ARM_JOINTS
 from lekiwi_rmf.launch_gates import gated
 from lekiwi_rmf.launch_validation import (
     CHOICES, PROFILES, launch_topology, lidar_default_port, permission_timeout, validate_context)
-from lekiwi_rmf.motion_guards import load_base_speed_limits
+from lekiwi_rmf.motion_guards import load_base_speed_limits, load_base_test_profile
 from lekiwi_rmf.odometry import BASE_XY_SCALE, BASE_YAW_SCALE
 
 # The fleet adapter must read this robot's map->base_footprint TF and Nav2
@@ -39,9 +39,23 @@ def _profile_defaults(context):
             if key not in context.launch_configurations]
 
 
-def _navigation_params(source_file, bounded_test, linear_limit, angular_limit):
+def _navigation_params(source_file, bounded_test, linear_limit, angular_limit, qualification=None):
     if not bounded_test:
         return source_file
+    if qualification:
+        # Qualification uses manual commands; keep every production Nav2 speed.
+        source = Path(get_package_share_directory('lekiwi_rmf')) / 'config/nav2_params.yaml'
+        nav2 = yaml.safe_load(source.read_text())
+        footprint = yaml.safe_load(nav2['local_costmap']['local_costmap']['ros__parameters']['footprint'])
+        xmin, xmax = min(p[0] for p in footprint), max(p[0] for p in footprint)
+        ymin, ymax = min(p[1] for p in footprint), max(p[1] for p in footprint)
+        rewrites = {}
+        for zone, margin in [('StopZone', qualification['maximum_stopping_distance_m']),
+                             ('SlowdownZone', qualification['maximum_stopping_distance_m'] + .07)]:
+            rewrites[f'collision_monitor.ros__parameters.{zone}.points'] = str([
+                [xmax + margin, ymax + margin], [xmax + margin, ymin - margin],
+                [xmin - margin, ymin - margin], [xmin - margin, ymax + margin]])
+        return RewrittenYaml(source_file=source_file, param_rewrites=rewrites, convert_types=True)
     # Match the driver's attended-test limits so MPPI predicts actual movement.
     prefix = "controller_server.ros__parameters."
     return RewrittenYaml(source_file=source_file, param_rewrites={
@@ -77,6 +91,12 @@ def _stack(context):
     nav2_launch = lambda name: PathJoinSubstitution([FindPackageShare("nav2_bringup"), "launch", name])  # noqa: E731
     flag = lambda name: LaunchConfiguration(name).perform(context) == "true"  # noqa: E731
     bounded_base_test = flag("bounded_base_test")
+    test_stage = LaunchConfiguration('base_test_stage').perform(context)
+    if test_stage and not bounded_base_test:
+        raise ValueError('base_test_stage requires bounded_base_test:=true')
+    qualification = load_base_test_profile(
+        Path(get_package_share_directory('lekiwi_rmf')) / 'config/nav2_params.yaml', test_stage
+    ) if test_stage else None
     # hold (domestic robot) stays armed through failures; strict disarms on every
     # failure and waits for an operator safety/arm.
     strict_policy = LaunchConfiguration("safety_policy").perform(context) == "strict"
@@ -92,6 +112,7 @@ def _stack(context):
     params_file = _navigation_params(
         config("nav2_params.yaml"), bounded_base_test,
         LaunchConfiguration("base_test_linear_limit"), LaunchConfiguration("base_test_angular_limit"),
+        qualification,
     )
     # Simulation layers its few differences over the physical robot's profile.
     safety_params_files = [config("safety_production.yaml"), *([config("safety_simulation.yaml")] if sim else [])]
@@ -179,6 +200,7 @@ def _stack(context):
                 "remote_ip": LaunchConfiguration("remote_ip"),
                 "nav2_params_file": config("nav2_params.yaml"),
                 "bounded_base_test": bounded_base_test,
+                **({'base_test_stage': test_stage} if test_stage else {}),
                 "base_test_linear_limit": ParameterValue(LaunchConfiguration("base_test_linear_limit"), value_type=float),
                 "base_test_angular_limit": ParameterValue(LaunchConfiguration("base_test_angular_limit"), value_type=float),
                 "arm_calibration_file": arm_calibration_file,
@@ -340,6 +362,7 @@ def generate_launch_description():
             DeclareLaunchArgument("headless", default_value="true", choices=["true", "false"]),
             DeclareLaunchArgument("remote_ip", default_value="127.0.0.1"),
             DeclareLaunchArgument("bounded_base_test", default_value="false", choices=["true", "false"]),
+            DeclareLaunchArgument("base_test_stage", default_value=""),
             DeclareLaunchArgument("base_test_linear_limit", default_value=str(test_linear)),
             DeclareLaunchArgument("base_test_angular_limit", default_value=str(test_angular)),
             DeclareLaunchArgument("curve_client_secret_key_file", default_value=""),

@@ -1,0 +1,79 @@
+{
+  "read_only": true,
+  "nonzero_commands_sent": false,
+  "flags": {
+    "arm_stowed": true,
+    "base_motion_permitted": true,
+    "arm_motion_permitted": true,
+    "driver": "ARMED"
+  },
+  "health": {
+    "base_motion_permitted": "true",
+    "arm_motion_permitted": "true",
+    "arm_stowed": "true",
+    "faults": "",
+    "latched_faults": "",
+    "bounded_base_test": "false"
+  },
+  "health_faults": [],
+  "sensor_counts": {
+    "/camera/depth/points": 278,
+    "/scan": 150,
+    "/slam/cloud": 150,
+    "/camera/front/image_raw": 60
+  },
+  "camera_views": [
+    "front",
+    "wrist",
+    "astra/color"
+  ],
+  "independent_captures": 140,
+  "camera_poses": 53,
+  "latest_lidar_tracking": {
+    "time": 41423.972124804,
+    "lost": false,
+    "ratio": 0.5566343069076538
+  },
+  "maximum_lidar_capture_age_s": 0.1932520866394043,
+  "maximum_lidar_capture_gap_s": 0.2999286651611328,
+  "stationary_swept_excursion_m": 0.005871445120487725,
+  "recorded_at": "2026-10-08T12:54:26.080150+00:00",
+  "deployed_revision": "b979c91c9cff3d605e31b24590f1a5e2d5c81317",
+  "live_nav2_limits": {
+    "FollowPath.vx_max": 0.03,
+    "FollowPath.wz_max": 0.06
+  },
+  "compute_stack_resources": {
+    "slice": "lekiwi.slice",
+    "memory_min_bytes": 2147483648,
+    "memory_swap_current_bytes": 0
+  },
+  "exploration_cancel": {
+    "return_code": 0,
+    "goals_canceling": []
+  },
+  "physical_braking_qualified": false,
+  "artifacts": {
+    ".benchmarks/base-speed-qualification/preflight/summary.json": {
+      "sha256": "ce1ec3c4d224666ec66f2a42f3aac932eb913bdbffeefbc57b76068dc39058cf",
+      "bytes": 942
+    },
+    ".benchmarks/base-speed-qualification/preflight/independent-poses.json": {
+      "sha256": "1999e70ac2c4f499c6728c0fcaea39f6efd5da1b7288631ebf1c29e7c1077d50",
+      "bytes": 3710178
+    },
+    ".benchmarks/base-speed-qualification/preflight/measurements.json": {
+      "sha256": "f538c3ed69744a7c94e2bfbbb51946b90b050049c4c4e1685064d3867bcb8621",
+      "bytes": 809
+    },
+    ".benchmarks/base-speed-qualification/tests-v4.log": {
+      "sha256": "4d47356fc7cba9f57973a84530dfba1c680f47f4809741081c5c88c68ed0fbce",
+      "bytes": 179
+    }
+  },
+  "runner_sha256": {
+    "scripts/test-onboard-braking.py": "e9e719c46deca6f682c6598769d970f418afead330bda82d3b8c934f8f01721e",
+    "scripts/test-navigation.py": "9ae7bf1ed79cc6d381fd17e19e6a1184bcaebc11ede2f902f7d304925d958eab",
+    "scripts/test-physical-acceptance.py": "7ba76edbb218863b6d8a91d078419bc4b6bf3effb7816a8bd08ef1cf6002fbb8"
+  }
+}
