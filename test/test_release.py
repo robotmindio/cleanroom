@@ -72,6 +72,8 @@ if [[ " $* " == *" --dependencies "* ]]; then
   [[ -z ${LEKIWI_TEST_BUILD_LOG:-} ]] || echo drivers >> "$LEKIWI_TEST_BUILD_LOG"
   exit 0
 fi
+[[ -z ${LEKIWI_TEST_BUILD_LOG:-} ]] || echo "package on $(cat "$LEKIWI_WS/install/setup.bash")" >> "$LEKIWI_TEST_BUILD_LOG"
+[[ ${LEKIWI_TEST_PACKAGE_FAIL:-0} != 1 ]] || exit 43
 mkdir -p "$LEKIWI_WS/install/lekiwi_rmf/share/lekiwi_rmf" "$LEKIWI_WS/build/lekiwi_rmf"
 git -C "$(dirname "$0")/.." rev-parse HEAD > "$LEKIWI_WS/install/lekiwi_rmf/.lekiwi-source-revision"
 printf '<package/>' > "$LEKIWI_WS/install/lekiwi_rmf/share/lekiwi_rmf/package.xml"
@@ -183,15 +185,15 @@ def test_releases_reuse_a_dependency_overlay_until_its_inputs_change(tmp_path):
     first_release = stage(first)
     second = commit("lekiwi_rmf/feature.py", "package-only change")
     second_release = stage(second)
-    assert log.read_text().split() == ["native", "drivers"]
+    assert [line for line in log.read_text().splitlines() if line in ("native", "drivers")] == ["native", "drivers"]
     assert overlay_of(first_release) == overlay_of(second_release)
     third_release = stage(commit("thirdparty/rclcpp/fix.patch", "dependency change"))
-    assert log.read_text().split() == ["native", "drivers"] * 2
+    assert [line for line in log.read_text().splitlines() if line in ("native", "drivers")] == ["native", "drivers"] * 2
     assert overlay_of(third_release) != overlay_of(second_release)
     # An interrupted overlay build is rebuilt, never reused.
     (overlay_of(third_release) / ".complete").unlink()
     stage(commit("lekiwi_rmf/other.py", "after an interrupted dependency build"))
-    assert log.read_text().split() == ["native", "drivers"] * 3
+    assert [line for line in log.read_text().splitlines() if line in ("native", "drivers")] == ["native", "drivers"] * 3
 
     spec = importlib.util.spec_from_file_location("check_release", ROOT / "scripts/check-release.py")
     checker = importlib.util.module_from_spec(spec)
@@ -200,6 +202,32 @@ def test_releases_reuse_a_dependency_overlay_until_its_inputs_change(tmp_path):
     (overlay_of(second_release) / "install/rclcpp/lib/librclcpp.so").write_text("changed")
     with pytest.raises(ValueError, match="changed after qualification"):
         checker.check_release(second_release, second, "compute")
+
+
+def test_a_retried_release_rebuilds_against_a_changed_dependency_overlay(tmp_path):
+    repo, workspace, revision, environment = release_fixture(tmp_path)
+    log = tmp_path / "builds"
+    environment = {**environment, "LEKIWI_TEST_BUILD_LOG": str(log)}
+    dependency = workspace / "src/ldlidar_stl_ros2"
+    subprocess.run(["git", "clone", "-q", str(repo), str(dependency)], check=True)
+    command = ["bash", str(repo / "scripts/stage-release.sh"), "compute", str(workspace), revision]
+    failed = subprocess.run(command, env={**environment, "LEKIWI_TEST_PACKAGE_FAIL": "1"},
+                            capture_output=True, text=True, timeout=30)
+    assert failed.returncode == 43, failed.stdout + failed.stderr
+    release = workspace / "releases" / revision
+    first = Path((release / "install/.lekiwi-overlay").read_text().strip())
+    stale = release / "build/lekiwi_rmf/CMakeCache.txt"
+    stale.parent.mkdir(parents=True, exist_ok=True)
+    stale.write_text(f"rclcpp_DIR:PATH={first}/install/rclcpp\n")
+    # An installed-package upgrade or dependency source change between attempts changes the key.
+    for args in (("-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                  "commit", "-q", "--allow-empty", "-m", "upgrade"),):
+        subprocess.run(["git", "-C", str(dependency), *args], check=True)
+    result = subprocess.run(command, env=environment, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr
+    second = Path((release / "install/.lekiwi-overlay").read_text().strip())
+    assert second != first and not stale.exists()
+    assert log.read_text().splitlines()[-1] == f"package on source {second}/install/setup.bash"
 
 
 def test_staging_clones_only_the_materialized_vendor_revision(tmp_path):
