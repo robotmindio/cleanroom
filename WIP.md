@@ -11,7 +11,9 @@ Verified: 283 focused checks, Ruff, compilation and diff validation. The first
 Clean main `1dda4248ba83aee928930b8814ba7b04b21fae34` deployed and re-armed.
 Release checks passed 67/67 compute and 16/16 Pi. Live production limits are
 0.03 m/s and 0.06 rad/s; stow and base permission were true. New continuous
-sequence and motion-guard checks passed 32 tests, Ruff and compilation.
+sequence and motion-guard checks passed 33 tests, Ruff and compilation. Ordinary
+positioning retains the 3 s collision-block abort even when fault tests skip
+feedback checks; deliberate injected faults retain their expected stop behavior.
 
 The 0.20 stage stopped during reverse positioning, before its high-speed pulse:
 StopZone was occupied. Independent excursion stayed below 6 mm and production

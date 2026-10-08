@@ -61,7 +61,8 @@ def test_indoor_stop_zone_and_speed_profile_match_the_acceptance_budget():
     assert nav2['velocity_smoother']['ros__parameters']['max_velocity'] == [linear, linear, angular]
 
 
-def test_runner_drains_callbacks_and_reports_a_physical_stop(monkeypatch):
+@pytest.mark.parametrize('feedback_check',[True,False])
+def test_runner_drains_callbacks_and_reports_a_physical_stop(monkeypatch,feedback_check):
     import runpy
     import time
     from pathlib import Path
@@ -75,9 +76,13 @@ def test_runner_drains_callbacks_and_reports_a_physical_stop(monkeypatch):
     command = Twist()
     command.linear.x = .03
     with pytest.raises(RuntimeError,match='StopZone blocks motion'):
-        functions['Test'].tick(node,command)
+        functions['Test'].tick(node,command,check=feedback_check)
     assert len(calls) == 21
     assert commands[-1].linear.x == commands[-1].angular.z == 0
+    node.phase='scan_disconnect'
+    node.center=None
+    functions['Test'].tick(node,command,check=False)
+    assert commands[-1].linear.x==.03
 
 
 def test_base_speed_limits_reject_bad_configuration_and_include_reverse(tmp_path):

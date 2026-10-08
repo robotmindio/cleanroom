@@ -129,7 +129,9 @@ class Test(Node):
         # high-rate sensor topics cannot leave our pose/permissions queued.
         for _ in range(20):
             rclpy.spin_once(self,timeout_sec=0)
-        if check and requested and self.monitor_action == ('StopZone',CollisionMonitorState.STOP):
+        # Fault injection may deliberately trip StopZone; ordinary positioning
+        # still needs its collision guard when fault tests skip feedback checks.
+        if requested and (check or not getattr(self,'phase',None)) and self.monitor_action == ('StopZone',CollisionMonitorState.STOP):
             if self.blocked_at is None:
                 self.blocked_at = time.monotonic()
             elif time.monotonic()-self.blocked_at > 3:
