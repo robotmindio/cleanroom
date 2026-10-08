@@ -245,9 +245,11 @@ def test_quota_duration_or_mode_change_ends_and_cancels_the_owned_navigation_goa
 @pytest.mark.parametrize("fault", ["permission", "slam", "footprint"])
 def test_recoverable_fault_stops_the_robot_then_resumes_instead_of_aborting(graph, fault):
     peers, explorer, client = graph
+    # The tracked 4 s SLAM budget would consume most of the task's duration on a slow runner.
+    explorer.config["slam_timeout_sec"] = 1.0
     feedback = []
     handle = response(client.send_goal_async(
-        Explore.Goal(max_duration_sec=8.0, max_radius_m=1.8),
+        Explore.Goal(max_duration_sec=10.0, max_radius_m=1.8),
         feedback_callback=lambda message: feedback.append(message.feedback.stage)))
     assert handle.accepted
     wait(lambda: peers.nav_active)
