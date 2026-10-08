@@ -17,6 +17,33 @@ def test_attended_speed_trials_cannot_exceed_production_limits():
             bounded_test_speed_limits(*values, (.3,1.57))
 
 
+def test_qualification_profiles_fit_the_one_metre_fixture_and_reject_missing_reserves(tmp_path):
+    from pathlib import Path
+    import yaml
+    from lekiwi_rmf.motion_guards import load_base_test_profile
+    root=Path(__file__).parents[1]/'config'
+    for stage in ('0.20','0.30'):
+        profile=load_base_test_profile(root/'nav2_params.yaml',stage)
+        assert profile['linear_speed_m_s']==float(stage)
+        assert profile['required_clearance_m']==1.
+        assert profile['nominal_command_duration_s']==1.2
+        assert profile['point_speed_bound_m_s']==pytest.approx(float(stage)*1.15)
+    for stage in ('0.06','0.10','0.40',''):
+        with pytest.raises(ValueError):
+            load_base_test_profile(root/'nav2_params.yaml',stage)
+    (tmp_path/'onboard_braking.yaml').write_text((root/'onboard_braking.yaml').read_text())
+    data=yaml.safe_load((root/'base_speed_qualification.yaml').read_text())
+    for key,value in [('required_clearance_m',.8),('driver_center_radius_m',.99),
+                      ('nominal_command_duration_s',10.),('linear_speed_m_s',True),
+                      ('angular_speed_rad_s',2.)]:
+        changed=yaml.safe_load(yaml.safe_dump(data))
+        destination=changed['stages']['0.30'] if key.endswith('speed_m_s') or key=='angular_speed_rad_s' else changed['bounds']
+        destination[key]=value
+        (tmp_path/'base_speed_qualification.yaml').write_text(yaml.safe_dump(changed))
+        with pytest.raises(ValueError):
+            load_base_test_profile(tmp_path/'nav2_params.yaml','0.30')
+
+
 def test_indoor_stop_zone_and_speed_profile_match_the_acceptance_budget():
     from pathlib import Path
     import yaml
@@ -241,5 +268,3 @@ def test_navigation_probe_withdraws_lease_until_feedback_recovers(monkeypatch,un
     assert leases == [True,False] and node.active
     assert len(commands)==1 and commands[0].linear.x==commands[0].angular.z==0
     assert node.motion_pauses==1
-
-

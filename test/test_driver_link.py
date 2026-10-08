@@ -1001,6 +1001,8 @@ def control_loop_node(**overrides):
         **overrides,
     )
     node.sent = []
+    node._base_qualification = None
+    node._base_test_radius = .20
     node.heartbeats = []
     node.get_clock = lambda: types.SimpleNamespace(now=_Stamp)
     node.robot = fake_client(send_action=node.sent.append, observation_torque_enabled=node.armed)
@@ -1426,3 +1428,26 @@ def test_bounded_base_test_zeros_all_axes_at_boundary_without_cutting_torque():
     assert node.armed
     assert all(node.sent[-1][axis] == 0.0 for axis in ('x.vel', 'y.vel', 'theta.vel'))
     assert node.sent[-1]['joint.pos'] == 10.0
+
+
+def test_qualification_caps_coupled_motion_and_retains_the_folded_hold():
+    node=control_loop_node(armed=True,bounded_base_test=True,max_linear=.3,max_angular=.6)
+    grant_fresh_arm_permission(node)
+    grant_fresh_base_permission(node)
+    node._base_test_center=(0.,0.)
+    node._base_test_radius=.45
+    node._base_qualification={'return_linear_speed_m_s':.1,'return_angular_speed_rad_s':.06}
+    node.pose=(0.,0.,0.)
+    node.command.linear.x=.3
+    node.command.angular.z=.6
+    node._send_armed_command(_Stamp(),{'joint.pos':10.},(0.,0.,0.))
+    assert node.sent[-1]['x.vel']==.1
+    assert node.sent[-1]['theta.vel']==pytest.approx(math.degrees(.06))
+    assert node.sent[-1]['joint.pos']==10.
+    node.command.angular.z=0.
+    node._send_armed_command(_Stamp(),{'joint.pos':10.},(0.,0.,0.))
+    assert node.sent[-1]['x.vel']==.3
+    node.pose=(.451,0.,0.)
+    node._send_armed_command(_Stamp(),{'joint.pos':10.},(0.,0.,0.))
+    assert node.sent[-1]['x.vel']==node.sent[-1]['y.vel']==node.sent[-1]['theta.vel']==0.
+    assert node.armed and node.sent[-1]['joint.pos']==10.

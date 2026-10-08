@@ -93,6 +93,22 @@ def test_bounded_launch_defaults_follow_current_production_speed_limits():
         load_base_speed_limits(root / "config/nav2_params.yaml"))
 
 
+def test_qualification_changes_manual_caps_and_zones_without_raising_nav2_speed():
+    records=resolve_bringup(profile='split',bounded_base_test='true',base_test_stage='0.30')
+    driver=find_node(records,node='lekiwi_rmf/lekiwi_driver')['parameters']
+    assert driver['base_test_stage']=='0.30'
+    navigation=gate_stage(records,'wait_for_map')['start']
+    (include,)=[item for item in navigation if 'include' in item]
+    parameters=include['arguments']['params_file']['generated_yaml']
+    controller=parameters['controller_server']['ros__parameters']['FollowPath']
+    assert (controller['vx_max'],controller['wz_max'])==(.03,.06)
+    import yaml
+    points=yaml.safe_load(parameters['collision_monitor']['ros__parameters']['StopZone']['points'])
+    assert points[0]==pytest.approx([.89,.87])
+    with pytest.raises(ValueError,match='requires bounded_base_test'):
+        resolve_bringup(profile='split',base_test_stage='0.30')
+
+
 def test_nav2_bounded_profile_matches_the_driver_and_preserves_production():
     def navigation_parameters(bounded):
         stage = gate_stage(resolve_bringup(profile="wired", bounded_base_test=bounded), "wait_for_map")

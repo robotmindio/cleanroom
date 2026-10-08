@@ -11,6 +11,10 @@
   "choices": null,
   "default": "0.03"
  },
+ "base_test_stage": {
+  "choices": null,
+  "default": ""
+ },
  "bounded_base_test": {
   "choices": [
    "true",

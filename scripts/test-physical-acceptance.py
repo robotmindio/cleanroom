@@ -32,6 +32,7 @@ class FaultTest(navigation.Test):
         self.angular_test = angular_test
         self.telemetry_tests = telemetry_tests
         self.test_speed = load_base_speed_limits(navigation.ROOT/'config/nav2_params.yaml')[int(angular_test)]
+        self.maximum_center_radius_m = .12
         self.phase = None
         self.safe_speed = None
         self.measured_speed = math.inf
@@ -69,8 +70,8 @@ class FaultTest(navigation.Test):
         if check:
             if time.monotonic()>self.deadline:
                 raise RuntimeError('fault-test deadline expired')
-            if self.center and math.dist(self.pose[:2],self.center[:2])>=0.12:
-                raise RuntimeError('fault test reached its early 12 cm boundary')
+            if self.center and math.dist(self.pose[:2],self.center[:2])>=self.maximum_center_radius_m:
+                raise RuntimeError('fault test reached its early center boundary')
 
     def action(self, argv, twist=None, data=None):
         with subprocess.Popen(argv,stdin=subprocess.PIPE,stdout=subprocess.PIPE,

@@ -193,13 +193,13 @@ class Test(Node):
             while time.monotonic()<next_query:
                 self.tick(Twist())
 
-    def move(self, target, linear_limit=0.025, angular_limit=0.15):
+    def move(self, target, linear_limit=0.025, angular_limit=0.15, pose_source=None):
         print('manual target',target,flush=True)
         # Collision monitoring legitimately scales manual commands to 35% near
         # obstacles; a 0.6 rad reversal plus proportional settling exceeds 12 s.
         end = time.monotonic()+30
         while True:
-            x,y,a = self.pose
+            x,y,a = self.pose if pose_source is None else pose_source()
             dx,dy = target[0]-x,target[1]-y
             da = angle(target[2]-a)
             if math.hypot(dx,dy)<0.008 and abs(da)<0.03:
@@ -219,7 +219,7 @@ class Test(Node):
             command.angular.z = max(-angular_limit,min(angular_limit,2*da)) if abs(da)>=0.03 else 0.0
             self.tick(command)
         self.stop()
-        print('manual reached',self.pose,flush=True)
+        print('manual reached',self.pose if pose_source is None else pose_source(),flush=True)
 
     def navigate(self, goal_pose):
         goal = NavigateToPose.Goal()
@@ -343,6 +343,10 @@ def main(test_class=Test, output=OUTPUT, launch_arguments=(), production=False, 
                         'max_radius_m':max((math.dist(p[:2],node.center[:2]) for p in node.trace),default=0) if node.center else None,
                         'trace':node.trace,'slam':node.slam,'graph':graph,'health_faults':node.health_faults,
                         'fault_checks':getattr(node,'checks',None)}
+                    if getattr(node,'config',{}).get('stage'):
+                        report.update(origin_frame='raw_lidar_reference',final_pose=node.ranges[-1]['pose'],
+                            wheel_final_pose=node.pose,trace_frame='wheel_odometry',
+                            max_radius_m=max(math.dist(r['pose'][:2],node.center[:2]) for r in node.ranges))
                     (output/'result.json').write_text(json.dumps(report,indent=2)+'\n')
                     print('report',output/'result.json',flush=True)
                     if not production and node.lifecycle_client.wait_for_service(timeout_sec=1):

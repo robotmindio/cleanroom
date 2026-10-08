@@ -47,6 +47,39 @@ def bounded_test_speed_limits(linear, angular, production):
     return requested
 
 
+def load_base_test_profile(nav2_file, stage):
+    """Read an explicit attended stage; never change production speed limits."""
+    directory = Path(nav2_file).parent
+    try:
+        data = yaml.safe_load((directory / 'base_speed_qualification.yaml').read_text())
+        profile = {**data['bounds'], **data['stages'][stage]}
+        names = ('linear_speed_m_s', 'angular_speed_rad_s', 'maximum_stopping_distance_m',
+                 'maximum_center_radius_m', 'independent_center_radius_m',
+                 'driver_center_radius_m', 'required_clearance_m', 'nominal_command_duration_s',
+                 'return_linear_speed_m_s', 'return_angular_speed_rad_s')
+        if set(profile) != set(names) or not all(
+            isinstance(profile[k], (int, float)) and not isinstance(profile[k], bool)
+            and math.isfinite(profile[k]) and profile[k] > 0 for k in names
+        ):
+            raise ValueError('stage values must be finite and positive')
+        if profile['linear_speed_m_s'] > .4 or profile['angular_speed_rad_s'] > math.pi / 2:
+            raise ValueError('stage exceeds documented hardware speed limits')
+        runner, independent, driver, clearance = (profile[k] for k in names[3:7])
+        if not runner < independent < driver < clearance:
+            raise ValueError('stage boundaries must increase from runner to clear area')
+        braking = yaml.safe_load((directory / 'onboard_braking.yaml').read_text())
+        point_speed = 1.15 * max(profile['linear_speed_m_s'], braking['body_radius_m'] * profile['angular_speed_rad_s'],
+                                 profile['return_linear_speed_m_s'] + braking['body_radius_m'] * profile['return_angular_speed_rad_s'])
+        if clearance - driver < point_speed * braking['maximum_stop_time_s'] + braking['measurement_uncertainty_m']:
+            raise ValueError('stage clear area lacks the braking reserve')
+        if runner <= profile['nominal_command_duration_s'] * profile['linear_speed_m_s'] / 2 + braking['measurement_uncertainty_m']:
+            raise ValueError('stage cannot contain a nominal trial')
+        profile['point_speed_bound_m_s'] = point_speed
+        return profile
+    except (OSError, yaml.YAMLError, KeyError, TypeError, ValueError) as error:
+        raise ValueError(f'invalid base qualification stage {stage}: {error}') from error
+
+
 class _Vector(Protocol):
     x: float
     y: float
@@ -106,14 +139,14 @@ def twist_is_finite(message: _Twist) -> bool:
     ))
 
 
-def inside_base_test_boundary(pose, center) -> bool:
-    """Stop at 20 cm, reserving 10 cm of the authorized radius for stopping.
+def inside_base_test_boundary(pose, center, radius=0.20) -> bool:
+    """Stop at the configured radius (20 cm for ordinary bounded tests).
 
     Wheel odometry can slip; use short routes and independently check the
     physical position. This is a commissioning bound, not certified geofencing.
     """
-    return all(math.isfinite(v) for v in (*pose[:2], *center)) and (
-        math.hypot(pose[0] - center[0], pose[1] - center[1]) < 0.20
+    return math.isfinite(radius) and radius > 0 and all(math.isfinite(v) for v in (*pose[:2], *center)) and (
+        math.hypot(pose[0] - center[0], pose[1] - center[1]) < radius
     )
 
 

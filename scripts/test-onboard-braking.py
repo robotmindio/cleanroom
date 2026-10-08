@@ -22,6 +22,7 @@ from nav_msgs.msg import Odometry
 from rtabmap_msgs.msg import OdomInfo
 from sensor_msgs.msg import JointState, LaserScan, PointCloud2
 from lekiwi_rmf.scan_self_filter import blank_body_sectors, parse_sectors
+from lekiwi_rmf.motion_guards import load_base_test_profile
 
 ROOT = Path(__file__).resolve().parents[1]
 FAULT = import_module('test-physical-acceptance')
@@ -60,7 +61,7 @@ def terminal_observed_speed(samples, angular, window_s=.75):
 
 def resumable_evidence(previous, config):
     """Reuse measurements only under the same speed and stopping conditions."""
-    run_fields = {'nominal_only', 'direction', 'depth_filter_pid', 'test_center', 'maximum_runtime_s'}
+    run_fields = {'nominal_only', 'direction', 'selected_fault', 'angular_test', 'depth_filter_pid', 'test_center', 'maximum_runtime_s'}
     conditions = {k:v for k,v in config.items() if k not in run_fields}
     if {k:v for k,v in previous['profile'].items() if k not in run_fields} != conditions:
         raise ValueError('resumed speed/load/measurement profile differs')
@@ -159,14 +160,20 @@ def stopping_measurement(samples, cut, config, stationary_jitter):
 
 
 class OnboardBraking(FAULT.FaultTest):
-    def __init__(self, output, config):
+    def __init__(self, output, config, reference=None):
         super().__init__(output=output)
         self.config = config
+        self.maximum_center_radius_m = config['maximum_center_radius_m']
         self.deadline = time.monotonic()+config['maximum_runtime_s']
         self.ranges,self.range_info,self.camera_poses,self.sources = [],[],[],{}
         self.source_stamps={}
         self.native_poses,self.scans,self.reference_points = [],[],None
+        if reference is not None:
+            self.reference_points=np.asarray(reference,dtype=float)
+            if self.reference_points.ndim!=2 or self.reference_points.shape[1]!=2 or len(self.reference_points)<100 or not np.isfinite(self.reference_points).all():
+                raise ValueError('invalid fixed independent LiDAR reference')
         self.reference_scans=[]
+        self.wheel_velocity=(0.,0.,0.)
         mask=yaml.safe_load((ROOT/'config/lidar_self_mask.yaml').read_text())['scan_self_filter']['ros__parameters']
         self.sectors=parse_sectors(*(mask[k] for k in ('body_start_deg','body_end_deg','body_max_range_m')))
         self.create_subscription(LaserScan,'/pi/lidar/scan',self.direct_scan,NAV.qos_profile_sensor_data)
@@ -208,6 +215,11 @@ class OnboardBraking(FAULT.FaultTest):
             raise RuntimeError('invalid independent raw-LiDAR pose')
         self.native_poses.append(row)
 
+    def odometry(self,message):
+        super().odometry(message)
+        velocity=message.twist.twist
+        self.wheel_velocity=(velocity.linear.x,velocity.linear.y,velocity.angular.z)
+
     def direct_scan(self,message):
         scan=blank_body_sectors(message,self.sectors)
         ranges=np.array(scan.ranges)
@@ -233,7 +245,19 @@ class OnboardBraking(FAULT.FaultTest):
             cloud=np.concatenate(self.reference_scans)
             bins=(np.degrees(np.arctan2(cloud[:,1],cloud[:,0]))%360).astype(int)
             self.reference_points=np.array([np.median(cloud[bins==key],axis=0) for key in np.unique(bins) if (bins==key).sum()>=5])
-        pose,covariance,sensitivity=register_scan(self.reference_points,points,self.ranges[-1]['pose'] if self.ranges else [0.,0.,0.],self.config['body_radius_m'])
+        guess=self.ranges[-1]['pose'] if self.ranges else [0.,0.,0.]
+        predicted=list(guess)
+        if self.ranges and time.monotonic()-self.odom_at<.3:
+            dt=stamp-self.ranges[-1]['stamp']
+            vx,vy,w=self.wheel_velocity
+            c,s=math.cos(guess[2]),math.sin(guess[2])
+            predicted=[guess[0]+dt*(c*vx-s*vy),guess[1]+dt*(s*vx+c*vy),guess[2]+dt*w]
+        # Wheel velocity seeds the fit only. Wall residuals, covariance and
+        # sector observability still determine the independent measured pose.
+        try:
+            pose,covariance,sensitivity=register_scan(self.reference_points,points,predicted,self.config['body_radius_m'])
+        except ValueError:
+            pose,covariance,sensitivity=register_scan(self.reference_points,points,guess,self.config['body_radius_m'])
         received=time.monotonic()
         age=self.get_clock().now().nanoseconds/1e9-stamp
         self.ranges.append({'time':received,'stamp':stamp,'age':age,'capture_time':received-age,
@@ -254,9 +278,26 @@ class OnboardBraking(FAULT.FaultTest):
                     self.command.publish(Twist())
                     raise RuntimeError('independent raw-LiDAR tracking failed during the fault')
                 self.pause_until(fresh,'fresh independent raw-LiDAR capture')
-            if self.origin_range and math.dist(self.ranges[-1]['pose'][:2],self.origin_range[:2])>=.16:
+            if self.origin_range and math.dist(self.ranges[-1]['pose'][:2],self.origin_range[:2])>=self.config.get('independent_center_radius_m',.16):
                 self.command.publish(Twist())
-                raise RuntimeError('independent early 16 cm boundary reached')
+                raise RuntimeError('independent early center boundary reached')
+
+    def move(self,target,linear_limit=None,angular_limit=None):
+        super().move(target,
+            linear_limit=self.config.get('return_linear_speed_m_s',.02) if linear_limit is None else linear_limit,
+            angular_limit=self.config.get('return_angular_speed_rad_s',.06) if angular_limit is None else angular_limit,
+            pose_source=(lambda:tuple(self.ranges[-1]['pose'])) if self.config.get('stage') else None)
+
+    def pulse_start(self,direction):
+        if not self.config.get('stage'):
+            return self.center
+        x,y,a=self.center
+        ux,uy,uw=DIRECTIONS[direction]
+        half=self.config['nominal_command_duration_s']/2
+        distance=self.config['linear_speed_m_s']*half
+        return (x-distance*(math.cos(a)*ux-math.sin(a)*uy),
+                y-distance*(math.sin(a)*ux+math.cos(a)*uy),
+                a-self.config['angular_speed_rad_s']*half*uw)
 
     def observe_stop(self,cut,end=None,cut_stamp=None):
         rows=self.ranges if end is None else self.ranges[:end]
@@ -274,12 +315,13 @@ class OnboardBraking(FAULT.FaultTest):
         (self.output/'measurements.json').write_text(json.dumps({
             'trials':self.trials,'faults':self.checks,'profile':self.config,
             'stationary_jitter_m':self.stationary_jitter,'flags':self.flags,'health':self.health,
+            'independent_final_pose':self.ranges[-1]['pose'] if self.ranges else None,
             'physical_acceptance_granted':False},indent=2)+'\n')
 
     def trial(self,direction):
-        self.move(self.center,linear_limit=.02,angular_limit=.06)
+        self.move(self.pulse_start(direction))
         self.wait(lambda:self.flags.get('base_motion_permitted'),15)
-        linear,angular=NAV.load_base_speed_limits(ROOT/'config/nav2_params.yaml')
+        linear,angular=self.config['linear_speed_m_s'],self.config['angular_speed_rad_s']
         speed=angular if direction.startswith('rotation') else linear
         self.angular_test=direction.startswith('rotation')
         command=Twist()
@@ -288,16 +330,15 @@ class OnboardBraking(FAULT.FaultTest):
         begin=len(self.ranges)
         faults=len(self.health_faults)
         pauses=self.motion_pauses
-        while time.monotonic()-start<2.5:
+        while time.monotonic()-start<self.config.get('nominal_command_duration_s',2.5):
             if not self.flags.get('base_motion_permitted'):
                 self.command.publish(Twist())
                 raise RuntimeError('nominal permission withdrawn')
             self.tick(command)
         cut=time.monotonic()
         self.command.publish(Twist())
-        # Acceptance covers the configured production maximum. Servo speed
-        # quantization and ground slip can make physical motion slower; retain
-        # that measurement without demanding a command above the production cap.
+        # Retain commanded, wheel and independently observed speeds separately.
+        # A trial must cover 90% of its requested ground speed before qualifying.
         covered=self.safe_speed is not None and self.safe_speed>=speed*.9 and self.measured_speed>=(.015 if self.angular_test else .005) and time.monotonic()-self.odom_at<.3
         wheel_speed,guarded_speed=self.measured_speed,self.safe_speed
         terminal=[{**r,'pts_ns':int(r['stamp']*1e9)} for r in self.ranges[begin:]]
@@ -316,8 +357,8 @@ class OnboardBraking(FAULT.FaultTest):
             print('UNQUALIFIED STOP',direction,str(error),flush=True)
             return False
         result.update(direction=direction,requested_speed=speed,terminal_observed_speed=observed,
-                      requested_speed_covered=covered and observed>=(.015 if self.angular_test else .005),
-                      speed_coverage_basis='maximum production guarded command, with fresh wheel feedback and independent ground motion',
+                      requested_speed_covered=covered and observed>=speed*.9,
+                      speed_coverage_basis='maximum guarded command, fresh wheel feedback and independent terminal ground speed',
                       terminal_wheel_speed=wheel_speed,terminal_guarded_speed=guarded_speed,
                       feedback_interrupted=len(self.health_faults)>faults or self.motion_pauses>pauses)
         result['qualification_eligible']=result['within_budget'] and result['requested_speed_covered'] and not result['feedback_interrupted']
@@ -334,6 +375,16 @@ class OnboardBraking(FAULT.FaultTest):
         self.wait(lambda:self.ranges and time.monotonic()-self.ranges[-1]['capture_time']<.3,10)
         captured={}
         def inject(command):
+            first=len(self.ranges)
+            end=time.monotonic()+self.config.get('nominal_command_duration_s',1.2)
+            while time.monotonic()<end:
+                self.tick(command)
+            terminal=[{**r,'pts_ns':int(r['stamp']*1e9)} for r in self.ranges[first:]]
+            observed=terminal_observed_speed(terminal,self.angular_test,window_s=1.2)
+            if observed<self.test_speed*.9:
+                self.command.publish(Twist())
+                raise RuntimeError('fault trial did not attain independent ground speed')
+            self.checks[name]['terminal_observed_speed']=observed
             captured['cut']=time.monotonic()
             begin(command)
         def recover():
@@ -345,7 +396,8 @@ class OnboardBraking(FAULT.FaultTest):
                         captured['cut']=self.sources[topic]
                     captured['measurement']=self.observe_stop(captured['cut'],captured['end'],self.source_stamps[topic] if topic else None)
             finally:
-                restore()
+                if 'cut' in captured:
+                    restore()
         super().fault(name,inject,recover,expected)
         self.checks[name]['independent']=captured['measurement']
         self.save()
@@ -356,22 +408,27 @@ class OnboardBraking(FAULT.FaultTest):
     def run(self):
         self.wait_ready()
         self.wait(lambda:len(self.ranges)>20 and self.range_info and self.camera_poses and len(self.views)==3,25)
-        self.center=tuple(self.config['test_center']) if self.config.get('test_center') else self.pose
-        self.origin_range=self.ranges[-1]['pose']
+        self.center=tuple(self.config['test_center']) if self.config.get('test_center') else (
+            tuple(self.ranges[-1]['pose']) if self.config.get('stage') else self.pose)
+        self.origin_range=list(self.center) if self.config.get('stage') else self.ranges[-1]['pose']
         self.active=True
         poses=[r['pose'] for r in self.ranges[-15:]]
         self.stationary_jitter=max(maximum_swept_excursion(poses[i:],self.config['body_radius_m']) for i in range(len(poses)))
-        self.move(self.center,linear_limit=.02,angular_limit=.06)
+        self.move(self.center,linear_limit=self.config.get('return_linear_speed_m_s',.02),
+                  angular_limit=self.config.get('return_angular_speed_rad_s',.06))
         # A resumed run starts at the previous stop. Anchor its independent
         # boundary at the fixed test center once the return has stopped.
-        self.origin_range=self.ranges[-1]['pose']
+        self.origin_range=list(self.center) if self.config.get('stage') else self.ranges[-1]['pose']
         if self.config.get('direction'):
-            # One invocation is one attended trial. Leave the robot stopped;
-            # the next authorized trial includes its return to the fixed center.
+            # Qualification returns to the fixed reference after each trial.
+            # Current-speed runs leave the robot at the measured stop.
             if not self.trial(self.config['direction']):
                 raise RuntimeError('selected stopping trial is unqualified')
+            if self.config.get('stage'):
+                self.move(self.center)
+                self.save()
             return
-        for direction in DIRECTIONS:
+        for direction in (() if self.config.get('selected_fault') else DIRECTIONS):
             completed=sum(t['direction']==direction and t['qualification_eligible'] for t in self.trials)
             attempts=0
             while completed<self.config['trials_per_direction']:
@@ -379,19 +436,22 @@ class OnboardBraking(FAULT.FaultTest):
                 if attempts>10:
                     raise RuntimeError('too many unqualified stopping attempts: '+direction)
                 completed+=int(self.trial(direction))
-        self.move(self.center,linear_limit=.02,angular_limit=.06)
+        self.move(self.center)
         if self.config['nominal_only']:
             return
         driver=subprocess.check_output(['pgrep','-f','/lib/lekiwi_rmf/lekiwi_driver '],text=True).split()
         scan=subprocess.check_output(['pgrep','-f','/lib/lekiwi_rmf/scan_self_filter '],text=True).split()
         if len(driver)!=1 or len(scan)!=1:
             raise RuntimeError('expected exactly one managed driver and scan filter')
-        for angular in (False,True):
+        for angular in ((self.config['angular_test'],) if self.config.get('selected_fault') else (False,True)):
             self.angular_test=angular
             self.test_speed=self.config['angular_speed_rad_s' if angular else 'linear_speed_m_s']
             axis='angular' if angular else 'linear'
+            self.move(self.pulse_start('rotation_ccw' if angular else 'forward'))
             for label,pid,reason in [('scan_disconnect',scan[0],'scan:'),('compute_command_loss',driver[0],'driver:')]:
-                if axis+'/'+label in self.checks:
+                if self.config.get('selected_fault') and self.config['selected_fault']!=label:
+                    continue
+                if axis+'/'+label in self.checks and not self.config.get('selected_fault'):
                     continue
                 timer=f'lekiwi-loaded-{label}-{axis}'
                 def stop(command,pid=pid,timer=timer):
@@ -403,6 +463,8 @@ class OnboardBraking(FAULT.FaultTest):
                 self.fault(label,stop,resume,reason)
                 self.checks[axis+'/'+label]=self.checks.pop(label)
                 self.save()
+                if self.config.get('selected_fault'):
+                    return
             def pause_depth(command):
                 self.remote(['sudo','-n','systemd-run','--quiet','--collect','--unit=lekiwi-loaded-depth-restore',
                     '--on-active=8s','/usr/bin/kill','-CONT',self.config['depth_filter_pid']],command)
@@ -410,11 +472,13 @@ class OnboardBraking(FAULT.FaultTest):
             def resume_depth():
                 self.remote(['kill','-CONT',self.config['depth_filter_pid']],Twist())
                 self.remote(['sudo','-n','systemctl','stop','lekiwi-loaded-depth-restore.timer'],Twist())
-            if axis+'/depth_disconnect' not in self.checks:
+            if self.config.get('selected_fault') in (None,'depth_disconnect') and (axis+'/depth_disconnect' not in self.checks or self.config.get('selected_fault')):
                 self.fault('depth_disconnect',pause_depth,resume_depth,'depth:')
                 self.checks[axis+'/depth_disconnect']=self.checks.pop('depth_disconnect')
                 self.save()
-            if axis+'/telemetry_loss' in self.checks:
+                if self.config.get('selected_fault'):
+                    return
+            if axis+'/telemetry_loss' in self.checks and not self.config.get('selected_fault'):
                 continue
             table='lekiwi_loaded_acceptance'
             def block(command):
@@ -433,7 +497,8 @@ class OnboardBraking(FAULT.FaultTest):
     def destroy_node(self):
         try:
             self.save()
-            (self.output/'independent-poses.json').write_text(json.dumps({'ranges':self.ranges,'native_poses':self.native_poses,'scans':self.scans,'range_info':self.range_info,'camera_poses':self.camera_poses},indent=2)+'\n')
+            (self.output/'independent-poses.json').write_text(json.dumps({'ranges':self.ranges,'native_poses':self.native_poses,'scans':self.scans,'range_info':self.range_info,'camera_poses':self.camera_poses,
+                'reference_points':self.reference_points.tolist() if self.reference_points is not None else None},indent=2)+'\n')
         finally:
             for process,log in self.observers:
                 if process.poll() is None:
@@ -451,17 +516,34 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--payload-g',type=float,required=True)
     parser.add_argument('--nominal-only',action='store_true')
-    parser.add_argument('--direction',choices=DIRECTIONS,help='run exactly one nominal stop, without retries or a final return movement')
+    selection=parser.add_mutually_exclusive_group()
+    selection.add_argument('--direction',choices=DIRECTIONS,help='run one nominal stop without retries; qualification stages return to center')
+    selection.add_argument('--fault',choices=['scan_disconnect','depth_disconnect','telemetry_loss','compute_command_loss'],help='run one moving fault without nominal repeats')
+    parser.add_argument('--angular',action='store_true',help='use rotation for the selected fault')
+    parser.add_argument('--stage',choices=['0.20','0.30'],help='explicit attended manual qualification stage; production Nav2 speeds are retained')
+    parser.add_argument('--reference-run',type=Path,help='retain the fixed raw-LiDAR reference and center across qualification stages without reusing their trials')
     parser.add_argument('--resume',type=Path,help='retain qualified trials and the fixed center from this earlier loaded run')
     parser.add_argument('--center',type=float,nargs=3,metavar=('X','Y','YAW'),help='clear test center in wheel coordinates; the existing 12 cm relocation guard still applies')
     args=parser.parse_args()
     if not math.isfinite(args.payload_g) or args.payload_g<0:
         parser.error('payload must be finite and nonnegative')
+    if args.stage and not (args.direction or args.fault):
+        parser.error('qualification requires one selected nominal or fault trial')
+    if args.angular and not args.fault:
+        parser.error('--angular requires --fault')
+    if args.fault and args.nominal_only:
+        parser.error('--fault conflicts with --nominal-only')
+    if args.reference_run and not args.stage:
+        parser.error('--reference-run requires --stage')
     config=yaml.safe_load((ROOT/'config/onboard_braking.yaml').read_text())
     linear,angular=NAV.load_base_speed_limits(ROOT/'config/nav2_params.yaml')
+    if args.stage:
+        config.update(load_base_test_profile(ROOT/'config/nav2_params.yaml',args.stage))
+        linear,angular=config['linear_speed_m_s'],config['angular_speed_rad_s']
     config.update(payload_kg=args.payload_g/1000,linear_speed_m_s=linear,angular_speed_rad_s=angular,
                   nominal_only=args.nominal_only or args.direction is not None,direction=args.direction,
-                  point_speed_bound_m_s=1.15*(linear+config['body_radius_m']*angular))
+                  selected_fault=args.fault,angular_test=args.angular,stage=args.stage,
+                  point_speed_bound_m_s=config.get('point_speed_bound_m_s',1.15*(linear+config['body_radius_m']*angular)))
     device=next(a.partition(':=')[2] for a in NAV.installed_stack_arguments() if a.startswith('remote_ip:='))
     # The stream filter publishes required safety depth. Its raw camera remains
     # powered; pausing it exercises missing input without resetting the USB hub.
@@ -472,6 +554,7 @@ def main():
     config['depth_filter_pid']=candidates[0]
     resumed=[]
     resumed_faults={}
+    reference=None
     if args.resume:
         previous=json.loads((args.resume/'measurements.json').read_text())
         previous['source_run']=str(args.resume)
@@ -479,6 +562,12 @@ def main():
         config['test_center']=json.loads((args.resume/'result.json').read_text())['origin']
         if not config['test_center']:
             raise ValueError('resumed test center is missing')
+    reference_run=args.reference_run or (args.resume if args.stage else None)
+    if reference_run:
+        reference=json.loads((reference_run/'independent-poses.json').read_text())['reference_points']
+        if reference is None:
+            raise ValueError('fixed raw-LiDAR reference is missing')
+        config['test_center']=json.loads((reference_run/'result.json').read_text())['origin']
     if args.center:
         if not all(math.isfinite(v) for v in args.center):
             parser.error('test center must be finite')
@@ -487,11 +576,12 @@ def main():
     output.mkdir(parents=True)
     (output/'profile.yaml').write_text(yaml.safe_dump(config))
     def node():
-        instance=OnboardBraking(output,config)
+        instance=OnboardBraking(output,config,reference)
         instance.trials=resumed
         instance.checks=resumed_faults
         return instance
-    NAV.main(node,output,production=True,payload_kg=config['payload_kg'])
+    NAV.main(node,output,production=args.stage is None,payload_kg=config['payload_kg'],
+             launch_arguments=(f'base_test_stage:={args.stage}',) if args.stage else ())
 
 
 if __name__=='__main__':
