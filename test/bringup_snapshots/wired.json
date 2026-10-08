@@ -774,6 +774,6 @@
   "respawn_delay": null
  },
  {
-  "log": "RTAB-Map empty/one-node seed: allow observations in the same database; relocalization still requires verified registration"
+  "log": "RTAB-Map mapping starts a new session immediately; a verified loop closure merges it with earlier sessions"
  }
 ]

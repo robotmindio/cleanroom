@@ -5,10 +5,6 @@ maps with, the merged lidar/Astra cloud whenever there is a laser, so one
 sensor dropping off USB never holds the map (and Nav2) back.
 """
 
-from contextlib import closing
-from pathlib import Path
-import sqlite3
-
 from launch import LaunchDescription
 from launch.actions import LogInfo, OpaqueFunction
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
@@ -25,23 +21,14 @@ FRONT_DEPTH = "/slam/front_depth/image_raw"
 
 
 def rtabmap_waits_for_loop(context) -> bool:
-    """An empty or one-node RGB map cannot satisfy visual hypothesis testing.
+    """Localization waits for a verified closure; mapping never does.
 
-    Before starting the mapper, allow that seed to gain another observation;
-    ordinary maps still require a verified closure before appending a session.
-    Never erase the database or invent a map-to-odometry transform.
+    In mapping mode RTAB-Map starts a new session in the same database at once,
+    so an unknown environment is mapped from the first observation. A later
+    verified loop closure merges it with earlier sessions. Never erase the
+    database or invent a map-to-odometry transform.
     """
-    if LaunchConfiguration("slam_mode").perform(context) != "mapping":
-        return True
-    database = Path(LaunchConfiguration("rtabmap_database").perform(context)).expanduser().resolve()
-    count = 0
-    if database.is_file():
-        try:
-            with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True, timeout=1)) as connection:
-                count = connection.execute("SELECT count(*) FROM Node").fetchone()[0]
-        except sqlite3.Error as error:
-            raise RuntimeError(f"cannot inspect RTAB-Map database before startup: {database}: {error}") from error
-    return count > 1
+    return LaunchConfiguration("slam_mode").perform(context) != "mapping"
 
 
 def _slam(context):
@@ -51,8 +38,8 @@ def _slam(context):
     camera_on, lidar_on, dual_rgbd = topology.camera_on, topology.lidar_on, topology.dual_rgbd
     wait_for_loop = rtabmap_waits_for_loop(context)
     actions = [] if wait_for_loop else [LogInfo(
-        msg="RTAB-Map empty/one-node seed: allow observations in the same database; "
-            "relocalization still requires verified registration")]
+        msg="RTAB-Map mapping starts a new session immediately; "
+            "a verified loop closure merges it with earlier sessions")]
     if lidar_on:
         actions.append(Node(
             package="lekiwi_rmf", executable="slam_cloud", name="slam_cloud",
@@ -84,8 +71,7 @@ def _slam(context):
             # saved scans for lidar mapping so a restart can relocalize against
             # the existing graph.
             "Mem/InitWMWithAllNodes": str(not topology.slam_mapping or lidar_on),
-            # A one-node seed needs another observation before a visual closure
-            # is possible. Populated maps retain the normal relocalization gate.
+            # Mapping must not wait to recognise a known place first.
             "Rtabmap/StartNewMapOnLoopClosure": str(wait_for_loop).lower(),
         }],
         remappings=[

@@ -435,6 +435,8 @@ the hardwired E-stop.
 
 Drive slowly around the complete route and return to previously visited areas so RTAB-Map can close loops. RTAB-Map combines the two camera views with the merged LD06 scan and Astra cloud. Global relocalization needs visible features with measured depth; ICP refines the resulting pose. A camera outage pauses visual mapping, while the raw range safety topics remain independent. Long featureless corridors and repetitive walls remain weak cases for registration.
 
+In mapping mode every start begins a new RTAB-Map session in the same database, so an unknown environment is mapped immediately without first recognising a known place. The live map shows the current session; when a verified loop closure links it to an earlier session, RTAB-Map merges them into one graph.
+
 Stop with `scripts/ros-stop.sh`; RTAB-Map persists the database at the configured path.
 
 ## 5. Operate from the saved map
