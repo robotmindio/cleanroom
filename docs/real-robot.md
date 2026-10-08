@@ -128,7 +128,8 @@ Units installed:
 | Device | `lekiwi-astra.service` | The Astra Pro RGB-D publisher (installed when `astra_camera` is available) |
 | Device | `lekiwi-lidar.service` | The LD06 serial port; publishes the private `/pi/lidar/scan` |
 | Device | `lekiwi-zenoh.service` | Zenoh bridge exporting the sensor topics to the compute machine on `7447/tcp` |
-| Compute | `lekiwi-stack.service` | The ROS bringup (`scripts/ros-start.sh`) |
+| Compute | `lekiwi-stack.service` | The ROS bringup (`scripts/ros-start.sh`), in `lekiwi.slice` |
+| Compute | `lekiwi.slice` | Keeps 2 GB of the stack's memory resident (`MemoryMin=2G`) and gives it ten times the default CPU and disk weight, so other workloads on a shared compute host cannot swap it out or starve it |
 | Both | `lekiwi-ros-logrotate.timer` | ROS log rotation |
 
 The compute installer picks the topology:

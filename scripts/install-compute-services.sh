@@ -159,11 +159,15 @@ elif [[ $STACK_ARGS == *remote* ]]; then
 else
   log "Installing lekiwi-stack.service (local cameras)"
 fi
+# A changed resource slice applies to the stack only after it restarts.
+slice_before=$(as_root sha256sum "$UNIT_DIR/lekiwi.slice" 2>/dev/null || true)
+render_systemd_unit "$PROJECT_ROOT/systemd/lekiwi.slice" "$UNIT_DIR/lekiwi.slice"
+[[ $slice_before == "$(as_root sha256sum "$UNIT_DIR/lekiwi.slice")" ]] || queue_restart lekiwi-stack.service
 install_unit lekiwi-stack.service
 log "Installing ROS log rotation"
 install_log_rotation
 log "Validating rendered systemd unit"
-verify_systemd_units lekiwi-stack.service
+verify_systemd_units lekiwi.slice lekiwi-stack.service
 verify_systemd_units lekiwi-ros-logrotate.service lekiwi-ros-logrotate.timer
 
 stack_env=/etc/default/lekiwi-stack
