@@ -54,6 +54,10 @@ class Requirement:
     max_age_ns: int
     base: bool = True
     arm: bool = True
+    # An invalid frame counts as a dropped frame: the last healthy sample
+    # keeps its lease until max_age_ns, so isolated bad frames do not
+    # interrupt motion, while a sustained blind sensor still faults.
+    tolerate_invalid: bool = False
 
 
 @dataclass
@@ -105,11 +109,17 @@ class SafetyStateMachine:
     def update(self, name: str, healthy: bool, stamp_ns: int, detail: str = "") -> None:
         if name not in self.requirements:
             return
+        requirement = self.requirements[name]
+        previous = self.samples.get(name)
+        if (
+            not healthy and requirement.tolerate_invalid and previous is not None
+            and previous.healthy and 0 <= stamp_ns - previous.stamp_ns <= requirement.max_age_ns
+        ):
+            return
         self.samples[name] = InputSample(bool(healthy), int(stamp_ns), detail)
         if name == "estop" and not healthy:
             self.estop_latched = True
         elif not healthy:
-            requirement = self.requirements[name]
             if self.latch_faults and (
                 (requirement.base and self.base_ever_ready)
                 or (requirement.arm and self.arm_ever_ready)
@@ -428,7 +438,7 @@ class SafetySupervisor(Node):
         if self.get_parameter("require_scan").value:
             requirements["scan"] = Requirement(sensor_timeout, base=True, arm=False)
         if self.get_parameter("require_depth").value:
-            requirements["depth"] = Requirement(depth_timeout)
+            requirements["depth"] = Requirement(depth_timeout, tolerate_invalid=True)
         if self.get_parameter("require_bumper").value:
             requirements["bumper"] = Requirement(state_timeout)
         if self.get_parameter("require_estop").value:
@@ -603,6 +613,11 @@ class SafetySupervisor(Node):
             )
             and stamp_ns(message.header.stamp) > 0
         )
+        if not healthy:
+            self.get_logger().warning(
+                f"invalid depth cloud ({message.width * message.height} points)",
+                throttle_duration_sec=5.0,
+            )
         self._machine.update(
             "depth", healthy, stamp_ns(message.header.stamp) or self._now(),
             "invalid, blind, or stampless point cloud",
