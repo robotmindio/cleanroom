@@ -58,6 +58,20 @@ def terminal_observed_speed(samples, angular, window_s=.75):
     return float(np.linalg.norm(velocity))
 
 
+def resumable_evidence(previous, config):
+    """Reuse measurements only under the same speed and stopping conditions."""
+    run_fields = {'nominal_only', 'direction', 'depth_filter_pid', 'test_center', 'maximum_runtime_s'}
+    conditions = {k:v for k,v in config.items() if k not in run_fields}
+    if {k:v for k,v in previous['profile'].items() if k not in run_fields} != conditions:
+        raise ValueError('resumed speed/load/measurement profile differs')
+    trials = [{**t,'source_run':t.get('source_run',previous['source_run'])}
+              for t in previous['trials'] if t['qualification_eligible']]
+    faults = {key:{**case,'source_run':case.get('source_run',previous['source_run'])}
+              for key,case in previous['faults'].items()
+              if '/' in key and case.get('passed') and case.get('independent',{}).get('within_budget')}
+    return trials, faults
+
+
 def register_scan(reference, points, guess, radius):
     """Point-to-line SE(2) fit, with geometry covariance and sector jackknife.
 
@@ -347,6 +361,12 @@ class OnboardBraking(FAULT.FaultTest):
         self.active=True
         poses=[r['pose'] for r in self.ranges[-15:]]
         self.stationary_jitter=max(maximum_swept_excursion(poses[i:],self.config['body_radius_m']) for i in range(len(poses)))
+        if self.config.get('direction'):
+            # One invocation is one attended trial. Leave the robot stopped;
+            # the next authorized trial includes its return to the fixed center.
+            if not self.trial(self.config['direction']):
+                raise RuntimeError('selected stopping trial is unqualified')
+            return
         for direction in DIRECTIONS:
             completed=sum(t['direction']==direction and t['qualification_eligible'] for t in self.trials)
             attempts=0
@@ -427,6 +447,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--payload-g',type=float,required=True)
     parser.add_argument('--nominal-only',action='store_true')
+    parser.add_argument('--direction',choices=DIRECTIONS,help='run exactly one nominal stop, without retries or a final return movement')
     parser.add_argument('--resume',type=Path,help='retain qualified trials and the fixed center from this earlier loaded run')
     parser.add_argument('--center',type=float,nargs=3,metavar=('X','Y','YAW'),help='clear test center in wheel coordinates; the existing 12 cm relocation guard still applies')
     args=parser.parse_args()
@@ -435,7 +456,8 @@ def main():
     config=yaml.safe_load((ROOT/'config/onboard_braking.yaml').read_text())
     linear,angular=NAV.load_base_speed_limits(ROOT/'config/nav2_params.yaml')
     config.update(payload_kg=args.payload_g/1000,linear_speed_m_s=linear,angular_speed_rad_s=angular,
-                  nominal_only=args.nominal_only,point_speed_bound_m_s=1.15*(linear+config['body_radius_m']*angular))
+                  nominal_only=args.nominal_only or args.direction is not None,direction=args.direction,
+                  point_speed_bound_m_s=1.15*(linear+config['body_radius_m']*angular))
     device=next(a.partition(':=')[2] for a in NAV.installed_stack_arguments() if a.startswith('remote_ip:='))
     # The stream filter publishes required safety depth. Its raw camera remains
     # powered; pausing it exercises missing input without resetting the USB hub.
@@ -448,14 +470,11 @@ def main():
     resumed_faults={}
     if args.resume:
         previous=json.loads((args.resume/'measurements.json').read_text())
-        if previous['profile']['payload_kg']!=config['payload_kg'] or previous['profile']['measurement_uncertainty_m']!=config['measurement_uncertainty_m']:
-            raise ValueError('resumed load/measurement profile differs')
+        previous['source_run']=str(args.resume)
+        resumed,resumed_faults=resumable_evidence(previous,config)
         config['test_center']=json.loads((args.resume/'result.json').read_text())['origin']
         if not config['test_center']:
             raise ValueError('resumed test center is missing')
-        resumed=[{**t,'source_run':t.get('source_run',str(args.resume))} for t in previous['trials'] if t['qualification_eligible']]
-        resumed_faults={key:{**case,'source_run':case.get('source_run',str(args.resume))} for key,case in previous['faults'].items()
-            if '/' in key and case.get('passed') and case.get('independent',{}).get('within_budget')}
     if args.center:
         if not all(math.isfinite(v) for v in args.center):
             parser.error('test center must be finite')

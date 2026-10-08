@@ -4,6 +4,42 @@ import pytest
 import numpy as np
 
 
+def test_resume_rejects_changed_speed_or_stopping_conditions():
+    resume=import_module('test-onboard-braking').resumable_evidence
+    config={'linear_speed_m_s':.03,'angular_speed_rad_s':.06,'payload_kg':.2,
+            'measurement_uncertainty_m':.02,'maximum_stopping_distance_m':.05,
+            'direction':'forward','depth_filter_pid':'123'}
+    previous={'profile':{**config,'direction':None,'depth_filter_pid':'456'},
+              'source_run':'earlier','trials':[{'qualification_eligible':True},
+                                            {'qualification_eligible':False}],
+              'faults':{'linear/scan_disconnect':{'passed':True,'independent':{'within_budget':True}},
+                        'angular/scan_disconnect':{'passed':False}}}
+    trials,faults=resume(previous,config)
+    assert trials==[{'qualification_eligible':True,'source_run':'earlier'}]
+    assert list(faults)==['linear/scan_disconnect']
+    for key in ('linear_speed_m_s','angular_speed_rad_s','payload_kg',
+                'measurement_uncertainty_m','maximum_stopping_distance_m'):
+        with pytest.raises(ValueError,match='profile differs'):
+            resume(previous,{**config,key:config[key]*2})
+
+
+def test_selected_stop_does_not_retry_or_start_a_return_movement():
+    from types import SimpleNamespace
+    run=import_module('test-onboard-braking').OnboardBraking.run
+    calls=[]
+    node=SimpleNamespace(config={'direction':'forward','body_radius_m':.33},
+        pose=(0.,0.,0.),ranges=[{'pose':[0.,0.,0.]}]*21,range_info=[{}],
+        camera_poses=[{}],views={'front':1,'wrist':1,'astra':1},
+        wait_ready=lambda:None,wait=lambda condition,timeout:condition(),
+        trial=lambda direction:calls.append(direction) or True)
+    run(node)
+    assert calls==['forward']
+    node.trial=lambda direction:calls.append(direction) or False
+    with pytest.raises(RuntimeError,match='unqualified'):
+        run(node)
+    assert calls==['forward','forward']
+
+
 def test_scan_geometry_recovers_motion_and_rejects_a_single_wall():
     module=import_module('test-onboard-braking')
     fit=module.register_scan
