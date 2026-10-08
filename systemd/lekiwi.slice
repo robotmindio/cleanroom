@@ -1,0 +1,14 @@
+# Robot runtime resources on a compute host shared with other workloads.
+# Swapped-out stack memory stalled the Pi sensor link for up to 4 s while the
+# network stayed healthy, so the stack's working set (~1.5 GB) stays resident.
+# A top-level slice makes the reservation effective without one on system.slice;
+# memory_recursiveprot passes it to the services inside. Under contention the
+# weights give the stack roughly ten times the CPU and disk share of other slices.
+[Unit]
+Description=LeKiwi robot runtime resources
+Documentation=file://@PROJECT_ROOT@/docs/real-robot.md
+
+[Slice]
+MemoryMin=2G
+CPUWeight=1000
+IOWeight=1000

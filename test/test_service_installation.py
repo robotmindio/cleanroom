@@ -432,6 +432,17 @@ def test_split_compute_installs_and_starts_moveit_by_default():
     assert "start_moveit:=true" in workstation
 
 
+def test_robot_stack_runs_in_a_protected_top_level_slice():
+    assert _unit("lekiwi-stack.service")["Service"]["Slice"] == ["lekiwi.slice"]
+    resources = _unit("lekiwi.slice")["Slice"]
+    assert resources == {"MemoryMin": ["2G"], "CPUWeight": ["1000"], "IOWeight": ["1000"]}
+    compute = (ROOT / "scripts/install-compute-services.sh").read_text()
+    # The slice is installed and validated before the stack that uses it, and a change restarts the stack.
+    assert compute.index('"$UNIT_DIR/lekiwi.slice"') < compute.index("install_unit lekiwi-stack.service")
+    assert "queue_restart lekiwi-stack.service" in compute
+    assert "verify_systemd_units lekiwi.slice lekiwi-stack.service" in compute
+
+
 def test_mapper_shutdown_signals_the_launcher_without_interrupting_its_save():
     service = _unit("lekiwi-stack.service")["Service"]
     assert service["KillMode"] == ["mixed"] and service["KillSignal"] == ["SIGINT"]
@@ -825,7 +836,7 @@ def test_managed_build_prefers_system_cmake_and_records_its_revision():
 
 
 @pytest.mark.parametrize("role,sources", [
-    ("compute", ("systemd/lekiwi-stack.service", "scripts/lib/service-install-common.sh",
+    ("compute", ("systemd/lekiwi.slice", "systemd/lekiwi-stack.service", "scripts/lib/service-install-common.sh",
                  "scripts/lib/runtime-common.sh", "scripts/install-deploy-sudoers.sh",
                  "scripts/setup-zenoh-tls.sh", "scripts/install-wifi-powersave.sh",
                  "scripts/install-compute-services.sh")),

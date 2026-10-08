@@ -33,6 +33,8 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=simple
+# Memory, CPU and disk protection against other workloads: see lekiwi.slice.
+Slice=lekiwi.slice
 # Keep robot callbacks responsive when desktop/build workloads compete for CPU.
 Nice=-5
 User=@SERVICE_USER@
