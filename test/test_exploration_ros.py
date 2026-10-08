@@ -276,14 +276,14 @@ def test_recoverable_fault_stops_the_robot_then_resumes_instead_of_aborting(grap
     assert not peers.nav_active and explorer._mapping is False
 
 
-def test_a_timed_out_mode_query_keeps_the_last_reading_until_it_ages_out(graph):
+def test_a_timed_out_mode_query_keeps_the_last_reading_until_it_ages_out():
     from rclpy.task import Future
-    _, explorer, _ = graph
-    reading = explorer._mode_at
+    # The reply callback alone, without a ROS graph: a cancelled query must not erase the reading.
+    explorer = SimpleNamespace(_lock=threading.Lock(), _mode_query_at=0.0, _mapping=False, _mode_at=12.0)
     timed_out = Future()
     timed_out.cancel()
-    explorer._mode_response(timed_out, time.monotonic())
-    assert explorer._mapping is False and explorer._mode_at == reading
+    RobotExplorer._mode_response(explorer, timed_out, time.monotonic())
+    assert explorer._mapping is False and explorer._mode_at == 12.0
 
 
 def test_close_wall_exploration_uses_the_actual_body_instead_of_a_corner_circle(graph):
