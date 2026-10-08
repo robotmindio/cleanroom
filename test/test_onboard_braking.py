@@ -27,17 +27,26 @@ def test_selected_stop_does_not_retry_or_start_a_return_movement():
     from types import SimpleNamespace
     run=import_module('test-onboard-braking').OnboardBraking.run
     calls=[]
-    node=SimpleNamespace(config={'direction':'forward','body_radius_m':.33},
+    node=SimpleNamespace(config={'direction':'forward','body_radius_m':.33,'test_center':(0.,0.,0.)},
         pose=(0.,0.,0.),ranges=[{'pose':[0.,0.,0.]}]*21,range_info=[{}],
         camera_poses=[{}],views={'front':1,'wrist':1,'astra':1},
-        wait_ready=lambda:None,wait=lambda condition,timeout:condition(),
-        trial=lambda direction:calls.append(direction) or True)
+        wait_ready=lambda:None,wait=lambda condition,timeout:condition())
+    def move(target,**limits):
+        assert target==(0.,0.,0.)
+        assert limits=={'linear_limit':.02,'angular_limit':.06}
+        calls.append('center')
+        node.ranges.append({'pose':[-.06,0.,0.]})
+    def trial(direction):
+        assert node.origin_range==[-.06,0.,0.]
+        calls.append(direction)
+        return True
+    node.move,node.trial=move,trial
     run(node)
-    assert calls==['forward']
+    assert calls==['center','forward']
     node.trial=lambda direction:calls.append(direction) or False
     with pytest.raises(RuntimeError,match='unqualified'):
         run(node)
-    assert calls==['forward','forward']
+    assert calls==['center','forward','center','forward']
 
 
 def test_scan_geometry_recovers_motion_and_rejects_a_single_wall():

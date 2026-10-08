@@ -361,6 +361,10 @@ class OnboardBraking(FAULT.FaultTest):
         self.active=True
         poses=[r['pose'] for r in self.ranges[-15:]]
         self.stationary_jitter=max(maximum_swept_excursion(poses[i:],self.config['body_radius_m']) for i in range(len(poses)))
+        self.move(self.center,linear_limit=.02,angular_limit=.06)
+        # A resumed run starts at the previous stop. Anchor its independent
+        # boundary at the fixed test center once the return has stopped.
+        self.origin_range=self.ranges[-1]['pose']
         if self.config.get('direction'):
             # One invocation is one attended trial. Leave the robot stopped;
             # the next authorized trial includes its return to the fixed center.

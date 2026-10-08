@@ -11,9 +11,20 @@ metrology preflight had no supervisor faults, 140 independent captures and a
 raw artifacts are in this worktree's `.benchmarks/base-speed-qualification/`.
 Exploration cancellation succeeded with no active goals.
 
-Next: obtain operator-at-motor-power-stop confirmation, unchanged folded stow,
-dry clear floor and current payload grams. Run one forward trial at 0.03 m/s
-using `scripts/test-onboard-braking.py --payload-g <grams> --direction forward`
+One 200 g forward stop passed at the current 0.03 m/s command: ground speed
+0.02773 m/s, conservative stopping bound 22.433 mm plus 20 mm allowance,
+and conservative receive-time stopping bound 0.790 s. There were no feedback
+interruptions or supervisor faults. This is one nominal trial, not a new
+worst-case latency or increased-speed acceptance. See
+`docs/base-speed-measurements-20261008.json`; source run is
+`.benchmarks/onboard-braking/20261008-214041`. Services and torque were retained.
+Resumed runs now anchor their independent boundary at the stopped test center;
+the same 74 tests passed after this correction.
+
+Next: obtain fresh operator-at-motor-power-stop confirmation for one reverse
+trial, including a slow return to the original center. Run
+`scripts/test-onboard-braking.py --payload-g 200 --direction reverse
+--resume .benchmarks/onboard-braking/20261008-214041`
 as a detached user service, sourcing the current ROS installation and this
 worktree's Python modules. The shared systemd environment expands variable
 references in inline commands before Bash sources ROS; use a Bash script file
