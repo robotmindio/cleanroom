@@ -106,6 +106,20 @@ def test_missing_required_input_denies_all_motion():
     assert "scan: missing" in decision.faults
 
 
+def test_isolated_invalid_depth_frame_is_a_dropped_frame_but_sustained_blindness_faults():
+    machine = SafetyStateMachine({"depth": Requirement(SECOND // 2, tolerate_invalid=True)})
+    machine.driver_state = "ARMED"
+    machine.update("depth", True, SECOND)
+    machine.update("depth", False, SECOND + 100_000_000, "blind")
+    assert machine.decision(SECOND + 100_000_000).arm_permitted
+    machine.update("depth", True, SECOND + 200_000_000)
+    for step in range(1, 7):
+        machine.update("depth", False, SECOND + 200_000_000 + step * 100_000_000, "blind")
+    decision = machine.decision(SECOND + 800_000_000)
+    assert not decision.arm_permitted
+    assert "depth: blind" in decision.faults
+
+
 def test_small_future_sensor_clock_skew_is_tolerated_but_large_skew_is_rejected():
     machine = SafetyStateMachine({"scan": Requirement(500_000_000)})
     machine.update("scan", True, SECOND + 7_000_000)
@@ -514,7 +528,9 @@ def test_live_acceptance_requirement_is_base_only():
             2**62, base=True, arm=False
         )
         assert node._machine.requirements["scan"].max_age_ns == 500_000_000
-        assert node._machine.requirements["depth"] == Requirement(500_000_000)
+        assert node._machine.requirements["depth"] == Requirement(
+            500_000_000, tolerate_invalid=True
+        )
         node._machine.driver_state = "ARMED"
         node._machine.arm_stowed = True
         for name in node._machine.requirements:
@@ -523,7 +539,8 @@ def test_live_acceptance_requirement_is_base_only():
         node._base_pub = types.SimpleNamespace(publish=published.append)
         node._publish()
         assert published[-1].data
-        node._machine.update("depth", False, node._now(), "disconnected")
+        # A disconnected camera stops publishing; its last cloud ages out.
+        node._machine.samples["depth"].stamp_ns -= 600_000_000
         node._publish()
         assert not published[-1].data and not node._machine.fault_latched
         node._machine.update("depth", True, node._now())
@@ -866,7 +883,7 @@ def test_bounded_test_requires_lease_and_all_measured_inputs():
         node._publish()
         assert not published[-1].data
         node._machine.update('scan', True, node._now())
-        node._machine.update('depth', False, node._now())
+        node._machine.samples['depth'].stamp_ns -= 1_000_000_000
         node._publish()
         assert not published[-1].data
         node._machine.update('depth', True, node._now())
