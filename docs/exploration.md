@@ -34,10 +34,19 @@ its stop polygon with 5 cm on every side. Costmap inflation is a soft cost field
 not extra footprint padding; local inflation still encloses the corners so
 MPPI's native footprint-check optimization remains valid. The exploration
 region retains a 0.38 m body/stopping inset; targets and preflight paths stay
-inside it, and the active task cancels navigation if the live pose approaches
-the boundary or its body intersects occupied/unknown space. It rejects malformed
-maps, unavailable services, stale SLAM/TF, missing motion permission or an
-unfolded arm. Hardware operation remains within the existing attended physical
+inside it, and the active task ends if the live pose approaches the boundary.
+A new goal is rejected while the map, services, SLAM/TF, motion permission or
+arm stow are not healthy.
+
+During a task, those conditions are recoverable faults: a stale SLAM update or
+TF, withdrawn motion permission, an unfolded arm, a stale mapping-mode reading,
+a body that intersects newly mapped occupied/unknown space, or a ROS peer that
+answers late. The task cancels its Nav2 goal so the robot stops, reports a
+`paused: <reason>` feedback stage, and resumes target selection once every input
+is healthy again. Only cancellation, the duration limit, the storage/session
+quota, a mapping-mode change, the region boundary, another Nav2 client or an
+unconfirmed navigation stop end the task. A Nav2 goal that exceeds the
+navigation deadline marks that target unreachable. Hardware operation remains within the existing attended physical
 acceptance; room-scale coverage has not been physically qualified by the tests.
 
 The `ExploreKnown` Nav2 planner and the tracked `explore_nav_to_pose.xml` behavior

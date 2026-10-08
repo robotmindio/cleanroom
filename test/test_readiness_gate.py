@@ -330,42 +330,30 @@ def test_readiness_gate_exits_nonzero_when_ros_shuts_down_before_ready(monkeypat
     gate.main()  # a ready dependency is the only successful exit
 
 
-def test_one_node_mapping_seed_can_grow_without_erasing_database(tmp_path):
+def test_mapping_never_waits_for_a_known_place_and_never_touches_the_database(tmp_path):
     import runpy
     import sqlite3
     from launch import LaunchContext
 
     waits_for_loop = runpy.run_path(str(ROOT / "launch/slam.launch.py"))["rtabmap_waits_for_loop"]
     database = tmp_path / "map.db"
-    context = LaunchContext()
-    context.launch_configurations.update(slam_mode="mapping", rtabmap_database=str(database))
-
-    def configured():
-        return waits_for_loop(context)
-
-    assert configured() is False
     with sqlite3.connect(database) as connection:
         connection.execute("CREATE TABLE Node(id INTEGER PRIMARY KEY)")
-    assert configured() is False
-    with sqlite3.connect(database) as connection:
-        connection.execute("INSERT INTO Node VALUES(1)")
+        connection.executemany("INSERT INTO Node VALUES(?)", [(i,) for i in range(1, 101)])
     original = database.read_bytes()
-    assert configured() is False
-    assert database.read_bytes() == original
+    context = LaunchContext()
+    context.launch_configurations.update(slam_mode="mapping", rtabmap_database=str(database))
+    # A populated map from another place must not stop an unknown one being mapped.
+    assert waits_for_loop(context) is False
     context.launch_configurations["slam_mode"] = "localization"
-    assert configured() is True
-    context.launch_configurations["slam_mode"] = "mapping"
-    with sqlite3.connect(database) as connection:
-        connection.execute("INSERT INTO Node VALUES(2)")
-    assert configured() is True
-    with sqlite3.connect(database) as connection:
-        assert connection.execute("SELECT count(*) FROM Node").fetchone()[0] == 2
+    assert waits_for_loop(context) is True
+    assert database.read_bytes() == original
 
 
-def test_an_empty_mapping_seed_is_reported_and_reaches_the_mapper():
+def test_immediate_mapping_session_is_reported_and_reaches_the_mapper():
     records = resolve_bringup(profile="sim")
-    assert {"log": "RTAB-Map empty/one-node seed: allow observations in the same database; "
-                   "relocalization still requires verified registration"} in records
+    assert {"log": "RTAB-Map mapping starts a new session immediately; "
+                   "a verified loop closure merges it with earlier sessions"} in records
     mapper = find_node(records, name="rtabmap")
     assert mapper["parameters"]["Rtabmap/StartNewMapOnLoopClosure"] == "false"
     mapper = find_node(resolve_bringup(profile="sim", slam_mode="localization"), name="rtabmap")
