@@ -228,24 +228,50 @@ def test_success_confirms_visited_target_and_retains_database(graph):
     assert peers.mapping_requests == [True, False]
 
 
-@pytest.mark.parametrize("fault", ["permission", "slam", "database", "duration", "mode", "footprint"])
-def test_running_fault_or_quota_cancels_the_owned_navigation_goal(graph, fault):
+@pytest.mark.parametrize("fault", ["database", "duration", "mode"])
+def test_quota_duration_or_mode_change_ends_and_cancels_the_owned_navigation_goal(graph, fault):
     peers, explorer, _ = graph
     handle = start(graph, duration=2 if fault == "duration" else 8)
-    if fault == "permission":
-        peers.permitted = False
-    elif fault == "slam":
-        peers.publish_slam = False
-    elif fault == "database":
+    if fault == "database":
         explorer.database.write_bytes(b"x" * 4096)
     elif fault == "mode":
         peers.set_mode(False, Empty.Response())
-    elif fault == "footprint":
-        peers.grid.data[40 * 80 + 44] = 100  # Newly mapped obstacle under a front corner.
     result = response(handle.get_result_async(), timeout=6)
     assert result.status == GoalStatus.STATUS_ABORTED and not result.result.complete
     assert peers.nav_canceled == 1 and not peers.nav_active
     assert explorer._mapping is False
+
+
+@pytest.mark.parametrize("fault", ["permission", "slam", "footprint"])
+def test_recoverable_fault_stops_the_robot_then_resumes_instead_of_aborting(graph, fault):
+    peers, explorer, client = graph
+    feedback = []
+    handle = response(client.send_goal_async(
+        Explore.Goal(max_duration_sec=8.0, max_radius_m=1.8),
+        feedback_callback=lambda message: feedback.append(message.feedback.stage)))
+    assert handle.accepted
+    wait(lambda: peers.nav_active)
+    if fault == "permission":
+        peers.permitted = False
+    elif fault == "slam":
+        peers.publish_slam = False
+    else:
+        peers.grid.data[40 * 80 + 44] = 100  # Newly mapped obstacle under a front corner.
+    wait(lambda: peers.nav_canceled == 1 and not peers.nav_active)
+    wait(lambda: any(stage.startswith("paused: ") for stage in feedback))
+    time.sleep(0.5)
+    assert explorer._busy and not peers.nav_active and peers.nav_count == 1
+    if fault == "permission":
+        peers.permitted = True
+    elif fault == "slam":
+        peers.publish_slam = True
+    else:
+        peers.grid.data[40 * 80 + 44] = 0
+    wait(lambda: peers.nav_active and peers.nav_count == 2)
+    response(handle.cancel_goal_async())
+    result = response(handle.get_result_async())
+    assert result.status == GoalStatus.STATUS_CANCELED
+    assert not peers.nav_active and explorer._mapping is False
 
 
 def test_close_wall_exploration_uses_the_actual_body_instead_of_a_corner_circle(graph):

@@ -34,6 +34,14 @@ from lekiwi_rmf.exploration import (
 )
 
 
+class Paused(RuntimeError):
+    """A recoverable fault: stop navigation, wait for recovery, then resume."""
+
+
+class ResponseTimeout(Paused):
+    """A ROS peer did not answer before its deadline."""
+
+
 class RobotExplorer(Node):
     def __init__(self, **kwargs):
         super().__init__("robot_explorer", **kwargs)
@@ -178,13 +186,16 @@ class RobotExplorer(Node):
         return ""
 
     def _pose(self):
-        transform = self._tf.lookup_transform("map", "base_footprint", rclpy.time.Time())
+        try:
+            transform = self._tf.lookup_transform("map", "base_footprint", rclpy.time.Time())
+        except TransformException as error:
+            raise Paused(f"map-to-robot transform unavailable: {error}") from error
         stamp = rclpy.time.Time.from_msg(transform.header.stamp)
         age = (self.get_clock().now() - stamp).nanoseconds / 1e9
         t, q = transform.transform.translation, transform.transform.rotation
         if (not -0.3 <= age <= self.config["data_timeout_sec"]
                 or not all(math.isfinite(v) for v in (t.x, t.y, t.z, q.x, q.y, q.z, q.w))):
-            raise RuntimeError("map-to-robot transform is stale or non-finite")
+            raise Paused("map-to-robot transform is stale or non-finite")
         pose = PoseStamped(header=transform.header)
         pose.pose.position.x, pose.pose.position.y = t.x, t.y
         pose.pose.orientation = q
@@ -193,18 +204,18 @@ class RobotExplorer(Node):
     def _healthy(self):
         now = time.monotonic()
         if self._map is None:
-            raise RuntimeError("no valid occupancy map")
+            raise Paused("no valid occupancy map")
         for name in ("base_motion_permitted", "arm_stowed", "slam"):
             value, received = self._inputs.get(name, (None, 0))
             timeout = self.config["slam_timeout_sec"] if name == "slam" else self.config["data_timeout_sec"]
             if not value or now - received > timeout:
-                raise RuntimeError(f"missing, stale or denied {name}")
+                raise Paused(f"missing, stale or denied {name}")
             if name == "slam":
                 age = (self.get_clock().now() - rclpy.time.Time.from_msg(value.stamp)).nanoseconds / 1e9
                 if not -0.3 <= age <= timeout:
-                    raise RuntimeError("SLAM observations are stale")
+                    raise Paused("SLAM observations are stale")
         if self._mapping is None or now - self._mode_at > self.config["service_timeout_sec"]:
-            raise RuntimeError("mapping mode is unknown or stale")
+            raise Paused("mapping mode is unknown or stale")
 
     def _footprint_clear(self, pose):
         q, p = pose.pose.orientation, pose.pose.position
@@ -261,7 +272,7 @@ class RobotExplorer(Node):
         if math.hypot(xy.x - center[0], xy.y - center[1]) >= radius - self._region_margin:
             raise RuntimeError("exploration region stopping margin reached")
         if not self._footprint_clear(pose):
-            raise RuntimeError("robot footprint overlaps occupied or unknown space")
+            raise Paused("robot footprint overlaps occupied or unknown space")
         return pose
 
     def _wait(self, future, timeout, check=None):
@@ -270,7 +281,7 @@ class RobotExplorer(Node):
             if check:
                 check()
             if time.monotonic() >= deadline:
-                raise TimeoutError("ROS response deadline exceeded")
+                raise ResponseTimeout("ROS response deadline exceeded")
             if not rclpy.ok(context=self.context):
                 raise RuntimeError("ROS is shutting down")
             time.sleep(0.05)
@@ -324,12 +335,30 @@ class RobotExplorer(Node):
                                            GoalStatus.STATUS_ABORTED):
                     raise RuntimeError("Nav2 did not confirm a terminal status")
             self._nav_uncertain = False
-        except Exception:
+        except Exception as error:
             # Preserve ownership until a late acceptance/result is canceled.
+            # An unconfirmed stop always ends the task, never pauses it.
             self._nav_request.add_done_callback(self._cancel_late)
-            raise
+            raise RuntimeError(f"navigation stop unconfirmed: {error}") from error
         finally:
             self._nav_request = self._nav_handle = self._nav_result = None
+
+    def _pause(self, goal, check, reason, progress):
+        """Hold the robot still until every input recovers.
+
+        Only the task's own end conditions (cancel, duration, quota, region,
+        shutdown) or an unconfirmed navigation stop end it while paused.
+        """
+        self._stop_navigation()
+        self.get_logger().warning(f"exploration paused: {reason}")
+        goal.publish_feedback(Explore.Feedback(stage=f"paused: {reason}", **progress()))
+        while True:
+            try:
+                check()
+                break
+            except Paused:
+                time.sleep(0.2)
+        self.get_logger().info("exploration resumed")
 
     def _execute(self, goal):
         result = Explore.Result()
@@ -342,79 +371,28 @@ class RobotExplorer(Node):
             pose = self._pose()
             center = (pose.pose.position.x, pose.pose.position.y)
             deadline = time.monotonic() + duration
+            mapping_confirmed = False
+
             def check():
                 current = self._checkpoint(goal, deadline, center, radius)
-                if mapping_requested and self._mapping is not True:
+                if mapping_confirmed and self._mapping is not True:
                     raise RuntimeError("mapping mode changed during exploration")
                 return current
-            check()
-            mapping_requested = True
-            self._set_mapping(True)
+
+            def progress():
+                return {"visited_targets": len(visited), "unreachable_targets": len(blocked),
+                        "mapped_area_m2": result.mapped_area_m2}
             while True:
-                pose = check()
-                target, stage, result.mapped_area_m2 = select_target(
-                    *self._map, (pose.pose.position.x, pose.pose.position.y), center, radius, visited, blocked,
-                    clearance=self.config["clearance_m"], footprint=self._footprint, region_margin=self._region_margin,
-                    observation_distance=self.config["observation_distance_m"],
-                    spacing=self.config["target_spacing_m"], revisit_spacing=self.config["revisit_spacing_m"],
-                    free_threshold=self.config["free_threshold"], revisit=goal.request.revisit_known,
-                )
-                if target is None:
-                    result.complete = not blocked
-                    result.message = "no further reachable observation targets" if not blocked else "remaining targets failed navigation"
-                    break
-                destination = PoseStamped()
-                destination.header.frame_id = "map"
-                destination.header.stamp = self.get_clock().now().to_msg()
-                destination.pose.position.x, destination.pose.position.y = target
-                yaw = math.atan2(target[1] - pose.pose.position.y, target[0] - pose.pose.position.x)
-                destination.pose.orientation.z, destination.pose.orientation.w = math.sin(yaw / 2), math.cos(yaw / 2)
-                feedback = Explore.Feedback(stage=stage, current_pose=pose, visited_targets=len(visited),
-                                            unreachable_targets=len(blocked), mapped_area_m2=result.mapped_area_m2)
-                goal.publish_feedback(feedback)
-                plan = self._wait(self._planner.send_goal_async(ComputePathToPose.Goal(
-                    goal=destination, planner_id="ExploreKnown")), self.config["service_timeout_sec"], check)
-                if not plan.accepted:
-                    blocked.append(target)
-                    continue
                 try:
-                    route = self._wait(plan.get_result_async(), self.config["service_timeout_sec"], check)
-                finally:
-                    plan.cancel_goal_async()
-                if (route.status != GoalStatus.STATUS_SUCCEEDED or route.result.error_code
-                        or route.result.path.header.frame_id != "map" or not route.result.path.poses):
-                    blocked.append(target)
-                    continue
-                valid = True
-                for waypoint in route.result.path.poses:
-                    p = waypoint.pose.position
-                    if (math.hypot(p.x - center[0], p.y - center[1]) >= radius - self._region_margin
-                            or not self._footprint_clear(waypoint)):
-                        valid = False
+                    if not mapping_confirmed:
+                        check()
+                        mapping_requested = True
+                        self._set_mapping(True)
+                        mapping_confirmed = True
+                    if not self._explore_step(goal, check, center, radius, visited, blocked, result):
                         break
-                if not valid:
-                    blocked.append(target)
-                    continue
-                self._nav_request = self._navigation.send_goal_async(NavigateToPose.Goal(
-                    pose=destination, behavior_tree=self.config["navigation_tree"]),
-                    feedback_callback=lambda _msg: goal.publish_feedback(Explore.Feedback(
-                        stage=stage, current_pose=_msg.feedback.current_pose, visited_targets=len(visited),
-                        unreachable_targets=len(blocked), mapped_area_m2=result.mapped_area_m2)))
-                self._nav_handle = self._wait(self._nav_request, self.config["service_timeout_sec"], check)
-                if not self._nav_handle.accepted:
-                    blocked.append(target)
-                    self._stop_navigation()
-                    continue
-                self._nav_result = self._nav_handle.get_result_async()
-                navigation = self._wait(self._nav_result, self.config["navigation_timeout_sec"], check)
-                self._stop_navigation()
-                if navigation.status == GoalStatus.STATUS_CANCELED:
-                    raise RuntimeError("Nav2 goal canceled or replaced by another client")
-                (visited if navigation.status == GoalStatus.STATUS_SUCCEEDED else blocked).append(target)
-                until = time.monotonic() + self.config["settle_sec"]
-                while time.monotonic() < until:
-                    check()
-                    time.sleep(0.05)
+                except Paused as reason:
+                    self._pause(goal, check, reason, progress)
         except Exception as error:
             result.message = str(error)
             self.get_logger().warning(f"exploration ended: {error}")
@@ -440,6 +418,76 @@ class RobotExplorer(Node):
             with self._lock:
                 self._busy = False
         return result
+
+    def _explore_step(self, goal, check, center, radius, visited, blocked, result):
+        """Plan and drive to one target; return False when no target remains."""
+        pose = check()
+        target, stage, result.mapped_area_m2 = select_target(
+            *self._map, (pose.pose.position.x, pose.pose.position.y), center, radius, visited, blocked,
+            clearance=self.config["clearance_m"], footprint=self._footprint, region_margin=self._region_margin,
+            observation_distance=self.config["observation_distance_m"],
+            spacing=self.config["target_spacing_m"], revisit_spacing=self.config["revisit_spacing_m"],
+            free_threshold=self.config["free_threshold"], revisit=goal.request.revisit_known,
+        )
+        if target is None:
+            result.complete = not blocked
+            result.message = "no further reachable observation targets" if not blocked else "remaining targets failed navigation"
+            return False
+        destination = PoseStamped()
+        destination.header.frame_id = "map"
+        destination.header.stamp = self.get_clock().now().to_msg()
+        destination.pose.position.x, destination.pose.position.y = target
+        yaw = math.atan2(target[1] - pose.pose.position.y, target[0] - pose.pose.position.x)
+        destination.pose.orientation.z, destination.pose.orientation.w = math.sin(yaw / 2), math.cos(yaw / 2)
+        feedback = Explore.Feedback(stage=stage, current_pose=pose, visited_targets=len(visited),
+                                    unreachable_targets=len(blocked), mapped_area_m2=result.mapped_area_m2)
+        goal.publish_feedback(feedback)
+        plan = self._wait(self._planner.send_goal_async(ComputePathToPose.Goal(
+            goal=destination, planner_id="ExploreKnown")), self.config["service_timeout_sec"], check)
+        if not plan.accepted:
+            blocked.append(target)
+            return True
+        try:
+            route = self._wait(plan.get_result_async(), self.config["service_timeout_sec"], check)
+        finally:
+            plan.cancel_goal_async()
+        if (route.status != GoalStatus.STATUS_SUCCEEDED or route.result.error_code
+                or route.result.path.header.frame_id != "map" or not route.result.path.poses):
+            blocked.append(target)
+            return True
+        for waypoint in route.result.path.poses:
+            p = waypoint.pose.position
+            if (math.hypot(p.x - center[0], p.y - center[1]) >= radius - self._region_margin
+                    or not self._footprint_clear(waypoint)):
+                blocked.append(target)
+                return True
+        self._nav_request = self._navigation.send_goal_async(NavigateToPose.Goal(
+            pose=destination, behavior_tree=self.config["navigation_tree"]),
+            feedback_callback=lambda _msg: goal.publish_feedback(Explore.Feedback(
+                stage=stage, current_pose=_msg.feedback.current_pose, visited_targets=len(visited),
+                unreachable_targets=len(blocked), mapped_area_m2=result.mapped_area_m2)))
+        self._nav_handle = self._wait(self._nav_request, self.config["service_timeout_sec"], check)
+        if not self._nav_handle.accepted:
+            blocked.append(target)
+            self._stop_navigation()
+            return True
+        self._nav_result = self._nav_handle.get_result_async()
+        try:
+            navigation = self._wait(self._nav_result, self.config["navigation_timeout_sec"], check)
+        except ResponseTimeout:
+            # A target Nav2 cannot reach in time is unreachable, not a fault.
+            self._stop_navigation()
+            blocked.append(target)
+            return True
+        self._stop_navigation()
+        if navigation.status == GoalStatus.STATUS_CANCELED:
+            raise RuntimeError("Nav2 goal canceled or replaced by another client")
+        (visited if navigation.status == GoalStatus.STATUS_SUCCEEDED else blocked).append(target)
+        until = time.monotonic() + self.config["settle_sec"]
+        while time.monotonic() < until:
+            check()
+            time.sleep(0.05)
+        return True
 
 
 def main(args=None):
