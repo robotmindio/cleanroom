@@ -34,10 +34,11 @@ def load_navigation_footprint(path):
     return footprint, inscribed, boundary_margin
 
 
-def footprint_is_free(grid, resolution, origin, position, yaw, footprint, free_threshold):
-    """Check the whole oriented body against occupied/unknown cell areas."""
-    if not all(math.isfinite(v) for v in (*position, yaw)):
-        return False
+def _body_cells(grid, resolution, origin, position, yaw, footprint, selected):
+    """Yield grid cells (y, x) among ``selected`` whose area the oriented body overlaps.
+
+    Returns None when the body is not entirely inside the grid.
+    """
     dx, dy = position[0] - origin[0], position[1] - origin[1]
     c, s = math.cos(origin[2]), math.sin(origin[2])
     center = np.array((c * dx + s * dy, -s * dx + c * dy))
@@ -46,16 +47,40 @@ def footprint_is_free(grid, resolution, origin, position, yaw, footprint, free_t
     low = np.floor((body.min(axis=0) + center) / resolution).astype(int)
     high = np.floor((body.max(axis=0) + center) / resolution).astype(int)
     if np.any(low < 0) or high[0] >= grid.shape[1] or high[1] >= grid.shape[0]:
-        return False
-    cells = grid[low[1]:high[1] + 1, low[0]:high[0] + 1]
-    ys, xs = np.nonzero((cells < 0) | (cells > free_threshold))
+        return None
+    ys, xs = np.nonzero(selected(grid[low[1]:high[1] + 1, low[0]:high[0] + 1]))
     square = np.array(((0, 0), (resolution, 0), (resolution, resolution), (0, resolution)), dtype=np.float32)
+    overlapped = []
     for x, y in zip(xs + low[0], ys + low[1], strict=True):
         cell = (square + np.array((x * resolution, y * resolution)) - center).astype(np.float32)
         area, _ = cv2.intersectConvexConvex(body, cell)
         if area > 0:
-            return False
-    return True
+            overlapped.append((y, x))
+    return overlapped
+
+
+def footprint_is_free(grid, resolution, origin, position, yaw, footprint, free_threshold):
+    """Check the whole oriented body against occupied/unknown cell areas."""
+    if not all(math.isfinite(v) for v in (*position, yaw)):
+        return False
+    blocked = _body_cells(grid, resolution, origin, position, yaw, footprint,
+                          lambda cells: (cells < 0) | (cells > free_threshold))
+    return blocked == []
+
+
+def with_body_free(grid, resolution, origin, position, yaw, footprint):
+    """A copy of the grid with every cell under the robot's current body marked free.
+
+    The robot occupies its own footprint, so a mapped obstacle or unknown cell
+    there is stale or self-observed. A stationary robot adds no map node to
+    clear it. Nearby real obstacles remain the live collision monitor's job.
+    """
+    grid = grid.copy()
+    if all(math.isfinite(v) for v in (*position, yaw)):
+        for y, x in _body_cells(grid, resolution, origin, position, yaw, footprint,
+                                lambda cells: np.ones(cells.shape, dtype=bool)) or ():
+            grid[y, x] = 0
+    return grid
 
 
 def database_size(database: Path) -> int:

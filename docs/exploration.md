@@ -26,9 +26,13 @@ in `config/exploration.yaml` (900 seconds and 10 metres). Positive goal values
 can only reduce these maxima. The centre reachability prefilter is 0.22 m,
 the body's inscribed radius (conservatively 0.25 m on a 5 cm grid). The former
 0.33 m circle rounded to 0.35 m and unnecessarily blocked close side clearance.
-Goals, preflight waypoints and the live robot pose now check the whole oriented
-46 x 44 cm footprint against occupied and unknown cell areas, including the
-interior and corners during turns. That footprint comes from the same selected
+Goals and preflight waypoints check the whole oriented 46 x 44 cm footprint
+against occupied and unknown cell areas, including the interior and corners
+during turns. Cells under the robot's current body count as free: the robot
+occupies them, so a mapped obstacle or unknown cell there is stale or
+self-observed, and a stationary robot adds no map node that could clear it.
+Real nearby obstacles are handled live by the Nav2 collision monitor's stop
+zone and the local costmap. The footprint comes from the same selected
 Nav2 parameter file as navigation, with zero additional padding. Nav2 retains
 its stop polygon with 5 cm on every side. Costmap inflation is a soft cost field,
 not extra footprint padding; local inflation still encloses the corners so
@@ -40,8 +44,7 @@ arm stow are not healthy.
 
 During a task, those conditions are recoverable faults: a stale SLAM update or
 TF, withdrawn motion permission, an unfolded arm, a stale mapping-mode reading,
-a body that intersects newly mapped occupied/unknown space, or a ROS peer that
-answers late. The task cancels its Nav2 goal so the robot stops, reports a
+or a ROS peer that answers late. The task cancels its Nav2 goal so the robot stops, reports a
 `paused: <reason>` feedback stage, and resumes target selection once every input
 is healthy again. Only cancellation, the duration limit, the storage/session
 quota, a mapping-mode change, the region boundary, another Nav2 client or an
