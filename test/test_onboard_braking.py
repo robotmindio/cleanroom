@@ -424,18 +424,19 @@ def test_selected_stop_does_not_retry_and_qualification_returns_to_fixed_center(
 def test_attended_sequence_stops_on_the_first_unqualified_trial(qualified,direction_sequence,corridor):
     from types import SimpleNamespace
     module=import_module('test-onboard-braking')
-    calls=[]
+    calls,targets=[],[]
     node=SimpleNamespace(config={'stage':'0.20','body_radius_m':.33,
         'trials_per_direction':1,'nominal_only':True,'direction_sequence':direction_sequence,'corridor':corridor,
         'angular_speed_rad_s':.4},pose=(0.,0.,0.),
         ranges=[{'pose':[0.,0.,0.]}]*21,range_info=[{}],camera_poses=[{}],
         views={'front':1,'wrist':1,'astra':1},trials=[],
-        wait_ready=lambda:None,wait=lambda condition,timeout:condition(),move=lambda *a,**k:None)
+        wait_ready=lambda:None,wait=lambda condition,timeout:condition(),move=lambda target,**k:targets.append(target))
     def trial(direction):
         calls.append(direction)
         node.trials.append({'direction':direction,'qualification_eligible':qualified})
         return qualified
     node.trial=trial
+    node.pulse_start=lambda direction:(0.,0.,.9)
     node.refresh_corridor_reference=lambda:calls.append('reference')
     prefix=['reference'] if corridor else []
     if qualified:
@@ -445,6 +446,7 @@ def test_attended_sequence_stops_on_the_first_unqualified_trial(qualified,direct
         with pytest.raises(RuntimeError,match='sequence stopped'):
             module.OnboardBraking.run(node)
         assert calls==prefix+[direction_sequence or 'forward']
+    assert targets[0]==(0.,0.,.9 if corridor and direction_sequence else 0.)
 
 
 @pytest.mark.parametrize('selection,nominal_only',[(['--fault','scan_disconnect'],False),(['--attended-sequence'],False),(['--attended-sequence','--nominal-only'],True),(['--faults-only'],False),(['--direction-sequence','right'],True),(['--direction-sequence','right','--nominal-duration','2.0'],True),(['--direction-sequence','rotation_cw','--rotation-speed','0.3'],True)])

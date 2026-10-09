@@ -524,7 +524,11 @@ class OnboardBraking(FAULT.FaultTest):
         self.active=True
         poses=[r['pose'] for r in self.ranges[-15:]]
         self.stationary_jitter=max(maximum_swept_excursion(poses[i:],self.config['body_radius_m']) for i in range(len(poses)))
-        self.move(self.center,linear_limit=self.config.get('return_linear_speed_m_s',.02),
+        initial_target=self.center
+        selected_direction=self.config.get('direction_sequence') or self.config.get('direction')
+        if self.config.get('corridor') and selected_direction:
+            initial_target=(*self.center[:2],self.pulse_start(selected_direction)[2])
+        self.move(initial_target,linear_limit=self.config.get('return_linear_speed_m_s',.02),
                   angular_limit=self.config['angular_speed_rad_s'] if self.config.get('corridor')
                     else self.config.get('return_angular_speed_rad_s',.06))
         # A resumed run starts at the previous stop. Anchor its independent
