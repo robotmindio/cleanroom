@@ -272,6 +272,29 @@ def test_corridor_turns_in_place_at_the_stage_cap_and_stops_on_permission_loss(m
     assert calls[-1]=='stop'
 
 
+def test_corridor_positioning_corrects_the_drift_after_a_stopped_turn(monkeypatch):
+    module=import_module('test-onboard-braking')
+    node=object.__new__(module.OnboardBraking)
+    node.config={'corridor':True,'angular_speed_rad_s':.5}
+    node.flags={'base_motion_permitted':True}
+    node.ranges=[{'pose':[.2,0.,0.]}]
+    translations=[]
+    def translate(self,target,**kwargs):
+        translations.append(target)
+        self.ranges[-1]['pose'][:2]=target[:2]
+    monkeypatch.setattr(module.NAV.Test,'move',translate)
+    node.tick=lambda command:node.ranges[-1]['pose'].__setitem__(2,.5)
+    stops=[]
+    def stop():
+        stops.append(True)
+        if len(stops)==1:
+            node.ranges[-1]['pose']=[.24,.01,.56]
+    node.stop=stop
+    node.move((.2,0.,.5))
+    assert len(translations)==2
+    assert node.ranges[-1]['pose']==[.2,0.,.5]
+
+
 @pytest.mark.parametrize('ground_speed',[.20,.24])
 @pytest.mark.parametrize('corridor',[True,False])
 def test_shorter_fault_cruise_still_requires_independent_speed_coverage(monkeypatch,ground_speed,corridor):

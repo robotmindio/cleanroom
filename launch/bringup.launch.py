@@ -67,8 +67,10 @@ def _navigation_params(source_file, bounded_test, linear_limit, angular_limit, q
                     'forward', 'reverse', 'left', 'right', 'fallback'])
             limits = dict(linear_min=0.0, linear_max=sys.float_info.max,
                           theta_min=-sys.float_info.max, theta_max=sys.float_info.max)
+            swept_radius = (radius+extra)/math.cos(math.pi/16)
             settings['rotation'] = {**limits, 'linear_max': 0.0,
-                'points': rectangle(-radius-extra, radius+extra, -radius-extra, radius+extra)}
+                'points': str([[swept_radius*math.cos(i*math.pi/8), swept_radius*math.sin(i*math.pi/8)]
+                               for i in range(16)])}
             for prefix, cone, margin, side, back, velocities in [
                 ('return_', math.pi/4, qualification['return_stopping_margin_m']+extra,
                     max(padding,qualification['return_lateral_margin_m'])+extra,

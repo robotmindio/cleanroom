@@ -316,23 +316,30 @@ class OnboardBraking(FAULT.FaultTest):
 
     def move(self,target,linear_limit=None,angular_limit=None):
         if self.config.get('corridor'):
-            pose=tuple(self.ranges[-1]['pose'])
-            super().move((*target[:2],pose[2]),
-                linear_limit=self.config.get('return_linear_speed_m_s',.02) if linear_limit is None else linear_limit,
-                angular_limit=self.config.get('return_angular_speed_rad_s',.06),
-                pose_source=lambda:tuple(self.ranges[-1]['pose']))
             end=time.monotonic()+30
             try:
-                while abs(NAV.angle(target[2]-self.ranges[-1]['pose'][2]))>=.03:
+                while True:
                     if time.monotonic()>end:
-                        raise RuntimeError('corridor rotation did not reach target')
-                    if not self.flags.get('base_motion_permitted'):
-                        self.stop()
-                        self.wait(lambda:self.flags.get('base_motion_permitted'),3)
-                    command=Twist()
-                    limit=self.config['angular_speed_rad_s'] if angular_limit is None else angular_limit
-                    command.angular.z=max(-limit,min(limit,2*NAV.angle(target[2]-self.ranges[-1]['pose'][2])))
-                    self.tick(command)
+                        raise RuntimeError('corridor positioning did not reach target')
+                    pose=tuple(self.ranges[-1]['pose'])
+                    super().move((*target[:2],pose[2]),
+                        linear_limit=self.config.get('return_linear_speed_m_s',.02) if linear_limit is None else linear_limit,
+                        angular_limit=self.config.get('return_angular_speed_rad_s',.06),
+                        pose_source=lambda:tuple(self.ranges[-1]['pose']))
+                    while abs(NAV.angle(target[2]-self.ranges[-1]['pose'][2]))>=.03:
+                        if time.monotonic()>end:
+                            raise RuntimeError('corridor rotation did not reach target')
+                        if not self.flags.get('base_motion_permitted'):
+                            self.stop()
+                            self.wait(lambda:self.flags.get('base_motion_permitted'),3)
+                        command=Twist()
+                        limit=self.config['angular_speed_rad_s'] if angular_limit is None else angular_limit
+                        command.angular.z=max(-limit,min(limit,2*NAV.angle(target[2]-self.ranges[-1]['pose'][2])))
+                        self.tick(command)
+                    self.stop()
+                    pose=self.ranges[-1]['pose']
+                    if math.dist(pose[:2],target[:2])<.008 and abs(NAV.angle(target[2]-pose[2]))<.03:
+                        break
             finally:
                 self.stop()
             return
