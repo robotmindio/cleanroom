@@ -23,8 +23,8 @@ stages:
   '0.25':
     linear_speed_m_s: 0.25
     angular_speed_rad_s: 0.50
-    # Scan-loss trial modeled 0.045159 m uncertainty; include 5 cm in reserves.
-    measurement_uncertainty_m: 0.05
+    # Held-fold scan-loss trial modeled 0.050424 m uncertainty; reserve 6 cm.
+    measurement_uncertainty_m: 0.06
     # Held fold captured over 60 stationary samples; tolerance stays 0.02 rad.
     # CAD footprint at the full tolerance and live MoveIt validity both passed.
     stow_joint_positions:
