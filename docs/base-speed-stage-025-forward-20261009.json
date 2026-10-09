@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-09",
+  "source_revision": "a6e1c53610ed523103a82cecb972aa62de21a6b8",
+  "deployed_revision": "f3daa6fe52a5ffc8c3ce09fd13ed3536a9d0a178",
+  "scope": "One eligible 0.25 m/s forward nominal stop; full direction and moving-fault acceptance remains pending.",
+  "payload_kg": 0.2,
+  "stage": "0.25",
+  "qualified_trials": 1,
+  "trials": [
+    {
+      "observed_swept_distance_m": 0.09993073706908771,
+      "unobserved_excursion_bound_m": 0.028819306194782256,
+      "conservative_swept_distance_m": 0.12875004326386996,
+      "uncertainty_upper_m": 0.028229567051793965,
+      "maximum_capture_gap_s": 0.20048213005065918,
+      "stop_time_receive_upper_s": 0.7955557660607155,
+      "first_sample_time": 96667.140774753,
+      "last_sample_time": 96669.553419488,
+      "fault_cut_time": 96667.147823254,
+      "samples": 13,
+      "baseline_time_basis": "sensor_capture_stamp",
+      "within_budget": true,
+      "direction": "forward",
+      "requested_speed": 0.25,
+      "terminal_observed_speed": 0.2416051332985781,
+      "requested_speed_covered": true,
+      "speed_coverage_basis": "maximum guarded command, fresh wheel feedback and independent terminal ground speed",
+      "terminal_wheel_speed": 0.247980381828897,
+      "terminal_guarded_speed": 0.25,
+      "feedback_interrupted": false,
+      "qualification_eligible": true
+    }
+  ],
+  "stationary_jitter_m": 0.004991619058194321,
+  "artifacts": {
+    ".benchmarks/onboard-braking/20261009-121445/profile.yaml": {
+      "sha256": "b30a416cc57833fc6002567bec00407b39d34ce63213791df40fa05c653e3194",
+      "bytes": 856
+    },
+    ".benchmarks/onboard-braking/20261009-121445/measurements.json": {
+      "sha256": "1f6b1c0e7a6f146b3d3884656d4ab312ef4849d8e85f89216e3cba401528f511",
+      "bytes": 2710
+    },
+    ".benchmarks/onboard-braking/20261009-121445/result.json": {
+      "sha256": "ad254a7c2eecdcd6de9babbf36de508d7adbfb7292bbf58896b2b4ffbf40a342",
+      "bytes": 323601
+    },
+    ".benchmarks/onboard-braking/20261009-121445/independent-poses.json": {
+      "sha256": "f112058fbe21126a0f3bbc8eb58842c8dbb9ce1f420937b9068c3edae2e5e482",
+      "bytes": 3922673
+    },
+    ".benchmarks/onboard-braking/20261009-121445/stack.log": {
+      "sha256": "2c206ffb9a80401b599267ea1956b9d9279dfb9f0940d85e5cd6fa1970e53266",
+      "bytes": 151167
+    }
+  }
+}

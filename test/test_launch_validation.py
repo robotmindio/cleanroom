@@ -109,7 +109,8 @@ def test_qualification_changes_manual_caps_and_zones_without_raising_nav2_speed(
     assert stop['min_points']==1
     assert stop['velocity_polygons']==['rotation','return_forward','return_reverse','return_left','return_right',
         'forward','reverse','left','right','fallback']
-    margin=float(stage)*1.15*1.5+.04
+    uncertainty=.05 if stage=='0.25' else .04
+    margin=float(stage)*1.15*1.5+uncertainty
     for direction in ('forward','reverse','left','right'):
         points=yaml.safe_load(stop[direction]['points'])
         assert stop[direction]['theta_min']==stop[direction]['theta_max']==0.
@@ -129,7 +130,7 @@ def test_qualification_changes_manual_caps_and_zones_without_raising_nav2_speed(
     assert stop['return_reverse']['linear_max']==pytest.approx(.04)
     returning=yaml.safe_load(stop['return_reverse']['points'])
     assert max(p[1] for p in returning)<.44
-    assert min(p[0] for p in returning)==pytest.approx(-.22-(.04+.33*.06)*1.15*1.5-.04)
+    assert min(p[0] for p in returning)==pytest.approx(-.22-(.04+.33*.06)*1.15*1.5-uncertainty)
     points=yaml.safe_load(stop['fallback']['points'])
     assert points[0]==pytest.approx([.89,.87])
     with pytest.raises(ValueError,match='requires bounded_base_test'):

@@ -23,14 +23,15 @@ def test_qualification_profiles_fit_the_one_metre_fixture_and_reject_missing_res
     from lekiwi_rmf.motion_guards import load_base_test_profile
     root=Path(__file__).parents[1]/'config'
     for stage in ('0.20','0.25','0.30'):
+        uncertainty=.05 if stage=='0.25' else .04
         profile=load_base_test_profile(root/'nav2_params.yaml',stage)
         assert profile['linear_speed_m_s']==float(stage)
         assert profile['required_clearance_m']==1.
         assert profile['nominal_command_duration_s']==1.6
-        assert profile['measurement_uncertainty_m']==.04
+        assert profile['measurement_uncertainty_m']==uncertainty
         assert profile['point_speed_bound_m_s']==pytest.approx(float(stage)*1.15)
-        assert profile['translation_stopping_margin_m']==pytest.approx(float(stage)*1.15*1.5+.04)
-        assert profile['return_stopping_margin_m']==pytest.approx((.04+.33*.06)*1.15*1.5+.04)
+        assert profile['translation_stopping_margin_m']==pytest.approx(float(stage)*1.15*1.5+uncertainty)
+        assert profile['return_stopping_margin_m']==pytest.approx((.04+.33*.06)*1.15*1.5+uncertainty)
     for stage in ('0.06','0.10','0.40',''):
         with pytest.raises(ValueError):
             load_base_test_profile(root/'nav2_params.yaml',stage)
@@ -114,6 +115,25 @@ def test_lease_is_fresh_only_within_its_timeout_and_never_from_the_future():
     assert not lease_is_fresh(1_000, 100, 1_101)
     assert not lease_is_fresh(1_000, 100, 999)
     assert not lease_is_fresh(None, 100, 1_000)
+
+
+@pytest.mark.parametrize('runtime',[None,'/run/user/test-session'])
+def test_detached_fault_actions_find_the_user_service_bus(monkeypatch,runtime):
+    import os
+    from contextlib import nullcontext
+    from importlib import import_module
+    module=import_module('test-physical-acceptance')
+    if runtime is None:
+        monkeypatch.delenv('XDG_RUNTIME_DIR',raising=False)
+    else:
+        monkeypatch.setenv('XDG_RUNTIME_DIR',runtime)
+    process=types.SimpleNamespace(stdin=types.SimpleNamespace(close=lambda:None),
+        stdout=types.SimpleNamespace(read=lambda:''),returncode=0,poll=lambda:0)
+    def launch(argv,**kwargs):
+        assert kwargs['env']['XDG_RUNTIME_DIR']==(runtime or f'/run/user/{os.getuid()}')
+        return nullcontext(process)
+    monkeypatch.setattr(module.subprocess,'Popen',launch)
+    module.FaultTest.action(types.SimpleNamespace(),['systemctl','--user','stop','test.timer'])
 
 
 def test_every_twist_axis_must_be_finite():
