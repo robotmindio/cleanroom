@@ -1,0 +1,11 @@
+# Remaining 0.25 m/s physical qualification
+
+Five forward stops and three linear moving faults passed with 200 g payload, captured folded stow and unchanged 0.02 rad tolerance. Evidence: docs/base-speed-stage-025-corridor-forward-20261009.json and docs/base-speed-stage-025-corridor-faults-20261009.json. Worst measured fault stop 0.229842 m, modeled uncertainty 0.052499 m, stop-time upper bound 1.333522 s. Valid cumulative resume source: .benchmarks/onboard-braking/20261009-154824.
+
+PR #55 merged as a61ac06; all CI checks passed. The observer supports --corridor, independent 90% speed coverage with a 1.2 s fault cruise, and one guarded SSH connection per remote fault operation. Both deployed stacks remain 9e441b3 with the same test-only 0.25 profile. Production remains 0.03 m/s / 0.06 rad/s and old stow; no arm motion is authorized.
+
+Depth denial stopped the first corridor reverse-positioning turn at approximately -0.566 rad without a new qualifying stop. On 2026-10-09 at 18:48, read-only observation found 186/186 valid depth clouds (about 450 finite points) and 99 raw-LiDAR captures with no rejections. Current pose [-0.0092895, -0.0013641, -0.564510] matches the saved reference. Actual current reference seed: .benchmarks/base-speed-qualification/resume-read-only-20261009-184820. Its profile retains center [0.2, 0, 0].
+
+Next: after compute sudo cache refresh, run .benchmarks/base-speed-qualification/run-corridor-directions-and-faults.bash detached in lekiwi.slice. It resumes all 25 remaining nominal stops with --corridor from valid evidence and the current read-only reference, then four angular faults and linear depth loss last. Continuous attended authorization applies; keep the folded arm, dry forward corridor, 200 g payload and operator at motor-power stop. Stop the sequence at any failed bound. This script skips already passed trials.
+
+Only after all 30 nominal stops and eight moving faults pass: update production stow/SRDF, measured acceptance, Nav2 limits/zones, exploration stopping margin and affected tests together; choose rotation from measurements; review/merge/deploy clean main and verify live controller limits plus supervisor base permission. Never raise production limits ahead of that proof. Remove WIP before PR/final delivery.
