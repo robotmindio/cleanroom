@@ -512,12 +512,13 @@ class OnboardBraking(FAULT.FaultTest):
                 if self.config.get('selected_fault'):
                     return
             def pause_depth(command):
-                self.remote(['sudo','-n','systemd-run','--quiet','--collect','--unit=lekiwi-loaded-depth-restore',
-                    '--on-active=8s','/usr/bin/kill','-CONT',self.config['depth_filter_pid']],command)
-                self.remote(['kill','-STOP',self.config['depth_filter_pid']],command)
+                timer=['sudo','-n','systemd-run','--quiet','--collect','--unit=lekiwi-loaded-depth-restore',
+                    '--on-active=8s','/usr/bin/kill','-CONT',self.config['depth_filter_pid']]
+                # One SSH handshake; arm recovery before pausing the sensor.
+                self.remote(['bash','-c',shlex.join(timer)+' && '+shlex.join(['kill','-STOP',self.config['depth_filter_pid']])],command)
             def resume_depth():
-                self.remote(['kill','-CONT',self.config['depth_filter_pid']],Twist())
-                self.remote(['sudo','-n','systemctl','stop','lekiwi-loaded-depth-restore.timer'],Twist())
+                self.remote(['bash','-c',shlex.join(['kill','-CONT',self.config['depth_filter_pid']])+
+                    ' && '+shlex.join(['sudo','-n','systemctl','stop','lekiwi-loaded-depth-restore.timer'])],Twist())
             if self.config.get('selected_fault') in (None,'depth_disconnect') and (axis+'/depth_disconnect' not in self.checks or self.config.get('selected_fault')):
                 self.move(self.pulse_start('rotation_ccw' if angular else 'forward'))
                 self.fault('depth_disconnect',pause_depth,resume_depth,'depth:')
@@ -530,14 +531,12 @@ class OnboardBraking(FAULT.FaultTest):
             self.move(self.pulse_start('rotation_ccw' if angular else 'forward'))
             table='lekiwi_loaded_acceptance'
             def block(command):
-                self.remote(['sudo','-n','systemd-run','--quiet','--collect','--unit=lekiwi-loaded-telemetry-restore','--on-active=12s','/usr/sbin/nft','destroy','table','inet',table],command)
+                timer=['sudo','-n','systemd-run','--quiet','--collect','--unit=lekiwi-loaded-telemetry-restore','--on-active=12s','/usr/sbin/nft','destroy','table','inet',table]
                 rules=f'add table inet {table}\nadd chain inet {table} output {{ type filter hook output priority 0; policy accept; }}\nadd rule inet {table} output tcp sport 5556 drop\n'
-                self.remote(['sudo','-n','/usr/sbin/nft','-f','-'],command,rules)
+                self.remote(['bash','-c',shlex.join(timer)+' && '+shlex.join(['sudo','-n','/usr/sbin/nft','-f','-'])],command,rules)
             def unblock():
-                try:
-                    self.remote(['sudo','-n','/usr/sbin/nft','destroy','table','inet',table],Twist())
-                finally:
-                    self.remote(['sudo','-n','systemctl','stop','lekiwi-loaded-telemetry-restore.timer'],Twist())
+                self.remote(['bash','-c',shlex.join(['sudo','-n','/usr/sbin/nft','destroy','table','inet',table])+
+                    ' && '+shlex.join(['sudo','-n','systemctl','stop','lekiwi-loaded-telemetry-restore.timer'])],Twist())
             self.fault('telemetry_loss',block,unblock,'driver:')
             self.checks[axis+'/telemetry_loss']=self.checks.pop('telemetry_loss')
             self.save()

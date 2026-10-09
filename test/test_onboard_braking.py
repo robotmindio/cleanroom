@@ -371,6 +371,45 @@ def test_faults_only_batches_all_axes_without_running_nominals(monkeypatch):
     assert len(node.checks)==8
 
 
+@pytest.mark.parametrize('selected',['depth_disconnect','telemetry_loss'])
+def test_remote_fault_and_recovery_use_one_connection_each_with_safe_ordering(monkeypatch,selected):
+    import shlex
+    from types import SimpleNamespace
+    from geometry_msgs.msg import Twist
+    module=import_module('test-onboard-braking')
+    monkeypatch.setattr(module.subprocess,'check_output',lambda *a,**k:'123\n')
+    calls=[]
+    node=SimpleNamespace(config={'stage':'0.25','body_radius_m':.33,'selected_fault':selected,
+        'angular_test':False,'nominal_only':False,'linear_speed_m_s':.25,'angular_speed_rad_s':.5,'depth_filter_pid':'456'},
+        pose=(0.,0.,0.),ranges=[{'pose':[0.,0.,0.]}]*21,range_info=[{}],camera_poses=[{}],
+        views={'front':1,'wrist':1,'astra':1},trials=[],checks={},
+        wait_ready=lambda:None,wait=lambda condition,timeout:condition(),move=lambda *a,**k:None,
+        pulse_start=lambda direction:direction,save=lambda:None,
+        remote=lambda argv,command,data=None:calls.append((argv,data)))
+    def fault(name,begin,restore,reason):
+        assert name==selected and reason==('depth:' if selected=='depth_disconnect' else 'driver:')
+        begin(Twist())
+        restore()
+        node.checks[name]={'passed':True}
+    node.fault=fault
+    module.OnboardBraking.run(node)
+    assert len(calls)==2 and all(argv[:2]==['bash','-c'] for argv,_ in calls)
+    arm,pause=map(shlex.split,calls[0][0][2].split(' && '))
+    assert arm[:3]==['sudo','-n','systemd-run']
+    resume,clear=map(shlex.split,calls[1][0][2].split(' && '))
+    if selected=='depth_disconnect':
+        assert '--on-active=8s' in arm and arm[-3:]==['/usr/bin/kill','-CONT','456']
+        assert pause==['kill','-STOP','456'] and resume==['kill','-CONT','456']
+        assert clear==['sudo','-n','systemctl','stop','lekiwi-loaded-depth-restore.timer']
+    else:
+        assert '--on-active=12s' in arm
+        assert arm[-5:]==['/usr/sbin/nft','destroy','table','inet','lekiwi_loaded_acceptance']
+        assert pause==['sudo','-n','/usr/sbin/nft','-f','-']
+        assert 'tcp sport 5556 drop' in calls[0][1]
+        assert resume==['sudo','-n','/usr/sbin/nft','destroy','table','inet','lekiwi_loaded_acceptance']
+        assert clear==['sudo','-n','systemctl','stop','lekiwi-loaded-telemetry-restore.timer']
+
+
 def test_return_only_stops_after_the_fixed_center_recovery():
     from types import SimpleNamespace
     module=import_module('test-onboard-braking')
