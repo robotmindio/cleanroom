@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-09",
+  "source_revision": "fe75bfd1dbe2bbbb4429d748236cba3d165fa5e1",
+  "scope": "First 0.30 m/s request, limited by vendor wheel saturation; excluded from acceptance.",
+  "payload_kg": 0.2,
+  "stage": "0.30",
+  "qualified_trials": 0,
+  "trials": [
+    {
+      "observed_swept_distance_m": 0.12097180078561698,
+      "unobserved_excursion_bound_m": 0.034608213901519774,
+      "conservative_swept_distance_m": 0.15558001468713675,
+      "uncertainty_upper_m": 0.03536132409937635,
+      "maximum_capture_gap_s": 0.20062732696533203,
+      "stop_time_receive_upper_s": 0.9923119349696208,
+      "first_sample_time": 91162.040171863,
+      "last_sample_time": 91164.44983913,
+      "fault_cut_time": 91162.050392539,
+      "samples": 13,
+      "baseline_time_basis": "sensor_capture_stamp",
+      "within_budget": false,
+      "direction": "forward",
+      "requested_speed": 0.3,
+      "terminal_observed_speed": 0.2517893429050776,
+      "requested_speed_covered": false,
+      "speed_coverage_basis": "maximum guarded command, fresh wheel feedback and independent terminal ground speed",
+      "terminal_wheel_speed": 0.25905408857355083,
+      "terminal_guarded_speed": 0.3,
+      "feedback_interrupted": false,
+      "qualification_eligible": false
+    }
+  ],
+  "stationary_jitter_m": 0.008922582530532666,
+  "vendor_raw_limit_ticks_s": 3000,
+  "vendor_wheel_radius_m": 0.05,
+  "ticks_per_revolution": 4096,
+  "kinematic_forward_ceiling_m_s": 0.2656932662452467,
+  "required_raw_limit_for_all_030_translation_directions_ticks_s": 3912,
+  "production_restored": true,
+  "production_limits": {
+    "linear_m_s": 0.03,
+    "angular_rad_s": 0.06
+  },
+  "findings": [
+    "LeRobot 0.6.1 _body_to_wheel_raw defaults to max_raw=3000 and proportionally saturates wheel goals. The forward kinematic ceiling matches independently observed 0.252 m/s and wheel feedback 0.259 m/s.",
+    "The host conversion must cover the validated 0.30 m/s ceiling in every translation direction while retaining saturation and motor-boundary validation.",
+    "Measured 0.0353613 m uncertainty requires a 0.040 m test declaration. A 0.44 m driver radius leaves 0.56 m for 0.30*1.15*1.5+0.04 = 0.5575 m. New physical runs are required."
+  ],
+  "artifacts": {
+    ".benchmarks/onboard-braking/20261009-104255/profile.yaml": {
+      "sha256": "9e4faf6dbc60192fc65d71f20383d10376fe4258e3fb8147d881d392143c0a8d",
+      "bytes": 907
+    },
+    ".benchmarks/onboard-braking/20261009-104255/measurements.json": {
+      "sha256": "e956c0fd5926a115874c8fb84d5d404ca13f34b5a66aee5bd67cf73f0af6fbe4",
+      "bytes": 2780
+    },
+    ".benchmarks/onboard-braking/20261009-104255/result.json": {
+      "sha256": "9ae2ea1746721460d66b23aec3f3fd8538c02ee422f91765ba9527c8af3e454f",
+      "bytes": 249167
+    },
+    ".benchmarks/onboard-braking/20261009-104255/independent-poses.json": {
+      "sha256": "2da1ae786f38f91fea4331efaafb138461b808b01740284691eebb7a040c6f36",
+      "bytes": 3652867
+    },
+    ".benchmarks/onboard-braking/20261009-104255/stack.log": {
+      "sha256": "b8b0f22873e1bbcb8860d65ef74d93c7fc95161a88117c85ee3473dda94d84eb",
+      "bytes": 150706
+    }
+  }
+}

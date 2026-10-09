@@ -10,6 +10,7 @@ no cameras; ROS camera nodes own them.
 """
 
 import logging
+import math
 import os
 import signal
 import time
@@ -131,6 +132,14 @@ class BoundLeKiwiHost:
 class SafetyLeKiwi(LeKiwi):
     """Configure the vendor robot but leave torque off until an explicit arm request."""
 
+    maximum_base_linear_speed_m_s = 0.0
+
+    def _body_to_wheel_raw(self, x, y, theta, wheel_radius=.05, base_radius=.125, max_raw=None):
+        # Vendor's 3000 tick/s cap clips 0.30 m/s; cover the validated pure translation ceiling.
+        if max_raw is None:
+            max_raw = max(3000, math.ceil(self.maximum_base_linear_speed_m_s / wheel_radius * 4096 / (2 * math.pi)))
+        return super()._body_to_wheel_raw(x, y, theta, wheel_radius, base_radius, max_raw)
+
     def configure(self):
         # This is LeRobot 0.6.1's LeKiwi.configure() without its final
         # enable_torque(). Position gains are tuned for this robot's load.
@@ -184,9 +193,12 @@ def connect_when_servos_powered(robot: SafetyLeKiwi) -> None:
 def main(cfg: TorqueHostConfig):
     global _shutdown_requested
     _shutdown_requested = False
+    base_limits = load_base_speed_limits(cfg.safety.nav2_params_file)
+    base_test_profiles = {stage: load_base_test_profile(cfg.safety.nav2_params_file, f'{stage:.2f}') for stage in BASE_TEST_STAGES}
     # LeRobot's LeKiwiConfig defaults to two cameras, and draccus rebuilds that
     # default. The motor host serves none; ROS camera nodes own the devices.
     robot = SafetyLeKiwi(replace(cfg.robot, cameras={}))
+    robot.maximum_base_linear_speed_m_s = max(base_limits[0], *(p['linear_speed_m_s'] for p in base_test_profiles.values()))
     host = None
     signal.signal(signal.SIGTERM, _shutdown_signal)
     signal.signal(signal.SIGHUP, _shutdown_signal)
@@ -207,8 +219,8 @@ def main(cfg: TorqueHostConfig):
             robot, host, MotorHealthCollector(robot),
             disarm_on_failure=cfg.safety.disarm_on_failure,
             arm_calibration=load_calibration(cfg.safety.arm_calibration_file),
-            base_limits=load_base_speed_limits(cfg.safety.nav2_params_file),
-            base_test_profiles={stage: load_base_test_profile(cfg.safety.nav2_params_file, f'{stage:.2f}') for stage in BASE_TEST_STAGES},
+            base_limits=base_limits,
+            base_test_profiles=base_test_profiles,
             base_scales=load_base_scales(os.environ.get(
                 "LEKIWI_LAUNCH_CALIBRATION", "~/.ros/lekiwi_launch_calibration.conf")),
         )
