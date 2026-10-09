@@ -533,6 +533,9 @@ class OnboardBraking(FAULT.FaultTest):
         if self.config.get('return_only'):
             self.save()
             return
+        if self.config.get('corridor'):
+            self.refresh_corridor_reference()
+            self.reference_locked=False
         if self.config.get('direction'):
             # Qualification returns to the fixed reference after each trial.
             # Current-speed runs leave the robot at the measured stop.
