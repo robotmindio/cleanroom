@@ -1,0 +1,1086 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-09",
+  "source_revision": "23758a44acd5ab025451c78e0c581d62b862f089",
+  "deployed_revision": "f3daa6fe52a5ffc8c3ce09fd13ed3536a9d0a178",
+  "scope": "First moving 0.25 m/s scan-disconnect attempt, excluded because modeled uncertainty exceeded its 4 cm declaration. No higher-speed acceptance.",
+  "payload_kg": 0.2,
+  "stage": "0.25",
+  "faults": {
+    "scan_disconnect": {
+      "passed": false,
+      "samples": [
+        {
+          "time": 96922.257795514,
+          "wheel_speed": 0.3056668707863897,
+          "safe_command": 0.25,
+          "linear_speed": 0.2657424641470193,
+          "angular_speed": 0.039924406639370406,
+          "capture_age_s": 0.033753232,
+          "base_permitted": true,
+          "faults": ""
+        },
+        {
+          "time": 96922.357468855,
+          "wheel_speed": 0.2513225372990036,
+          "safe_command": 0.25,
+          "linear_speed": 0.24134143563916105,
+          "angular_speed": -0.009981101659842569,
+          "capture_age_s": 0.033407848,
+          "base_permitted": true,
+          "faults": ""
+        },
+        {
+          "time": 96922.457943415,
+          "wheel_speed": 0.27238375393550807,
+          "safe_command": 0.25,
+          "linear_speed": 0.2524215506158231,
+          "angular_speed": -0.01996220331968496,
+          "capture_age_s": 0.032682231,
+          "base_permitted": true,
+          "faults": ""
+        },
+        {
+          "time": 96922.557453608,
+          "wheel_speed": 0.2590998098989313,
+          "safe_command": 0.25,
+          "linear_speed": 0.23913760657924615,
+          "angular_speed": -0.019962203319685106,
+          "capture_age_s": 0.033387987,
+          "base_permitted": true,
+          "faults": ""
+        },
+        {
+          "time": 96922.658048783,
+          "wheel_speed": 0.27681175181484097,
+          "safe_command": 0.25,
+          "linear_speed": 0.2568495484951558,
+          "angular_speed": -0.01996220331968518,
+          "capture_age_s": 0.032889835,
+          "base_permitted": true,
+          "faults": ""
+        },
+        {
+          "time": 96922.758873107,
+          "wheel_speed": 0.27131182264039105,
+          "safe_command": 0.25,
+          "linear_speed": 0.24136851766086323,
+          "angular_speed": 0.0299433049795278,
+          "capture_age_s": 0.033723565,
+          "base_permitted": true,
+          "faults": ""
+        },
+        {
+          "time": 96922.857722183,
+          "wheel_speed": 0.29132818088955736,
+          "safe_command": 0.25,
+          "linear_speed": 0.2414226725903445,
+          "angular_speed": -0.04990550829921287,
+          "capture_age_s": 0.032515953,
+          "base_permitted": true,
+          "faults": ""
+        },
+        {
+          "time": 96922.957417246,
+          "wheel_speed": 0.2457961898686346,
+          "safe_command": 0.25,
+          "linear_speed": 0.24579618986863455,
+          "angular_speed": -6.659269013764614e-17,
+          "capture_age_s": 0.032256639,
+          "base_permitted": true,
+          "faults": ""
+        },
+        {
+          "time": 96923.057884053,
+          "wheel_speed": 0.26589132067078985,
+          "safe_command": 0.25,
+          "linear_speed": 0.2459291173511048,
+          "angular_speed": -0.019962203319685075,
+          "capture_age_s": 0.032730248,
+          "base_permitted": true,
+          "faults": ""
+        },
+        {
+          "time": 96923.157450608,
+          "wheel_speed": 0.3389785859621714,
+          "safe_command": 0.25,
+          "linear_speed": 0.2591297726834308,
+          "angular_speed": 0.07984881327874059,
+          "capture_age_s": 0.03128555,
+          "base_permitted": true,
+          "faults": ""
+        },
+        {
+          "time": 96923.257514013,
+          "wheel_speed": 0.3046084305477629,
+          "safe_command": 0.25,
+          "linear_speed": 0.2547029222485502,
+          "angular_speed": -0.04990550829921272,
+          "capture_age_s": 0.031344597,
+          "base_permitted": true,
+          "faults": ""
+        },
+        {
+          "time": 96923.358877023,
+          "wheel_speed": 0.30900531819814425,
+          "safe_command": 0.25,
+          "linear_speed": 0.23913760657924615,
+          "angular_speed": -0.06986771161889811,
+          "capture_age_s": 0.03274237,
+          "base_permitted": true,
+          "faults": ""
+        },
+        {
+          "time": 96923.457557992,
+          "wheel_speed": 0.25132253729900367,
+          "safe_command": 0.25,
+          "linear_speed": 0.24134143563916105,
+          "angular_speed": 0.009981101659842617,
+          "capture_age_s": 0.031411195,
+          "base_permitted": true,
+          "faults": ""
+        },
+        {
+          "time": 96923.557770927,
+          "wheel_speed": 0.2535466808668376,
+          "safe_command": 0.25,
+          "linear_speed": 0.24356557920699512,
+          "angular_speed": -0.009981101659842532,
+          "capture_age_s": 0.028598297,
+          "base_permitted": true,
+          "faults": ""
+        },
+        {
+          "time": 96923.657284333,
+          "wheel_speed": 0.285853523990475,
+          "safe_command": 0.25,
+          "linear_speed": 0.24592911735110476,
+          "angular_speed": 0.039924406639370226,
+          "capture_age_s": 0.030145236,
+          "base_permitted": true,
+          "faults": ""
+        },
+        {
+          "time": 96923.757646658,
+          "wheel_speed": 0.27466512556823525,
+          "safe_command": 0.25,
+          "linear_speed": 0.2547029222485502,
+          "angular_speed": -0.019962203319685075,
+          "capture_age_s": 0.028470622,
+          "base_permitted": true,
+          "faults": ""
+        },
+        {
+          "time": 96923.858736309,
+          "wheel_speed": 0.2491597044289804,
+          "safe_command": 0.25,
+          "linear_speed": 0.23917860276913777,
+          "angular_speed": 0.009981101659842617,
+          "capture_age_s": 0.030473358,
+          "base_permitted": true,
+          "faults": ""
+        },
+        {
+          "time": 96923.957575259,
+          "wheel_speed": 0.2746651255682352,
+          "safe_command": 0.25,
+          "linear_speed": 0.2547029222485502,
+          "angular_speed": 0.01996220331968501,
+          "capture_age_s": 0.028178516,
+          "base_permitted": true,
+          "faults": ""
+        },
+        {
+          "time": 96924.057438011,
+          "wheel_speed": 0.26017885966925286,
+          "safe_command": 0.25,
+          "linear_speed": 0.2501977580094104,
+          "angular_speed": 0.009981101659842433,
+          "capture_age_s": 0.028069554,
+          "base_permitted": true,
+          "faults": ""
+        },
+        {
+          "time": 96924.158100584,
+          "wheel_speed": 0.24798038182889703,
+          "safe_command": 0.25,
+          "linear_speed": 0.247980381828897,
+          "angular_speed": -3.102749684686846e-17,
+          "capture_age_s": 0.029796709,
+          "base_permitted": true,
+          "faults": ""
+        },
+        {
+          "time": 96924.25836164,
+          "wheel_speed": 0.25240860293298445,
+          "safe_command": 0.0,
+          "linear_speed": 0.2524086029329844,
+          "angular_speed": -3.158155929056253e-17,
+          "capture_age_s": 0.030146733,
+          "base_permitted": false,
+          "faults": "scan: stale"
+        },
+        {
+          "time": 96924.360205367,
+          "wheel_speed": 0.23803807119536308,
+          "safe_command": 0.0,
+          "linear_speed": 0.22805696953552054,
+          "angular_speed": -0.00998110165984253,
+          "capture_age_s": 0.032001197,
+          "base_permitted": false,
+          "faults": "scan: stale"
+        },
+        {
+          "time": 96924.457680249,
+          "wheel_speed": 0.08418413284161325,
+          "safe_command": 0.0,
+          "linear_speed": 0.06422192952192814,
+          "angular_speed": -0.019962203319685103,
+          "capture_age_s": 0.02843818,
+          "base_permitted": false,
+          "faults": "scan: stale"
+        },
+        {
+          "time": 96924.558526085,
+          "wheel_speed": 0.038799747187702606,
+          "safe_command": 0.0,
+          "linear_speed": 0.00885644220817489,
+          "angular_speed": -0.029943304979527716,
+          "capture_age_s": 0.029305535,
+          "base_permitted": false,
+          "faults": "scan: stale; depth: invalid, blind, or stampless point cloud"
+        },
+        {
+          "time": 96924.657562197,
+          "wheel_speed": 0.004428221104087448,
+          "safe_command": 0.0,
+          "linear_speed": 0.0044282211040874465,
+          "angular_speed": 1.651886403925197e-18,
+          "capture_age_s": 0.028318881,
+          "base_permitted": false,
+          "faults": "scan: stale; depth: invalid, blind, or stampless point cloud"
+        },
+        {
+          "time": 96924.757705361,
+          "wheel_speed": 0.012537736306318641,
+          "safe_command": 0.0,
+          "linear_speed": 0.0025566346464760683,
+          "angular_speed": -0.009981101659842572,
+          "capture_age_s": 0.028403081,
+          "base_permitted": false,
+          "faults": "scan: stale; depth: invalid, blind, or stampless point cloud"
+        },
+        {
+          "time": 96924.857608271,
+          "wheel_speed": 0.01253773630631864,
+          "safe_command": 0.0,
+          "linear_speed": 0.002556634646476069,
+          "angular_speed": 0.00998110165984257,
+          "capture_age_s": 0.02738351,
+          "base_permitted": false,
+          "faults": "scan: stale; depth: invalid, blind, or stampless point cloud"
+        },
+        {
+          "time": 96924.95798666,
+          "wheel_speed": 0.0,
+          "safe_command": 0.0,
+          "linear_speed": 0.0,
+          "angular_speed": 0.0,
+          "capture_age_s": 0.027643516,
+          "base_permitted": false,
+          "faults": "scan: stale; depth: invalid, blind, or stampless point cloud"
+        },
+        {
+          "time": 96925.057934409,
+          "wheel_speed": 0.0,
+          "safe_command": 0.0,
+          "linear_speed": 0.0,
+          "angular_speed": 0.0,
+          "capture_age_s": 0.027463283,
+          "base_permitted": false,
+          "faults": "scan: stale; depth: invalid, blind, or stampless point cloud"
+        },
+        {
+          "time": 96925.157637365,
+          "wheel_speed": 0.004428221104087448,
+          "safe_command": 0.0,
+          "linear_speed": 0.0044282211040874465,
+          "angular_speed": 1.651886403925197e-18,
+          "capture_age_s": 0.027129939,
+          "base_permitted": false,
+          "faults": "scan: stale; depth: invalid, blind, or stampless point cloud"
+        },
+        {
+          "time": 96925.257826415,
+          "wheel_speed": 0.004428221104087448,
+          "safe_command": 0.0,
+          "linear_speed": 0.0044282211040874465,
+          "angular_speed": -1.7033910397104054e-18,
+          "capture_age_s": 0.024397115,
+          "base_permitted": false,
+          "faults": "scan: stale; depth: invalid, blind, or stampless point cloud"
+        },
+        {
+          "time": 96925.358060583,
+          "wheel_speed": 0.01253773630631864,
+          "safe_command": 0.0,
+          "linear_speed": 0.002556634646476069,
+          "angular_speed": -0.00998110165984257,
+          "capture_age_s": 0.026755632,
+          "base_permitted": false,
+          "faults": "scan: stale; depth: invalid, blind, or stampless point cloud"
+        },
+        {
+          "time": 96925.458278757,
+          "wheel_speed": 0.022518837966161213,
+          "safe_command": 0.0,
+          "linear_speed": 0.0025566346464760683,
+          "angular_speed": -0.019962203319685144,
+          "capture_age_s": 0.024971784,
+          "base_permitted": false,
+          "faults": "scan: stale; depth: invalid, blind, or stampless point cloud"
+        },
+        {
+          "time": 96925.558051903,
+          "wheel_speed": 0.01253773630631864,
+          "safe_command": 0.0,
+          "linear_speed": 0.002556634646476069,
+          "angular_speed": 0.00998110165984257,
+          "capture_age_s": 0.026752598,
+          "base_permitted": false,
+          "faults": "scan: stale; depth: invalid, blind, or stampless point cloud"
+        },
+        {
+          "time": 96925.658099175,
+          "wheel_speed": 0.012537736306318641,
+          "safe_command": 0.0,
+          "linear_speed": 0.0025566346464760688,
+          "angular_speed": -0.009981101659842572,
+          "capture_age_s": 0.024760819,
+          "base_permitted": false,
+          "faults": "scan: stale; depth: invalid, blind, or stampless point cloud"
+        },
+        {
+          "time": 96925.75892804,
+          "wheel_speed": 0.012537736306318641,
+          "safe_command": 0.0,
+          "linear_speed": 0.0025566346464760688,
+          "angular_speed": -0.009981101659842572,
+          "capture_age_s": 0.026639536,
+          "base_permitted": false,
+          "faults": "scan: stale; depth: invalid, blind, or stampless point cloud"
+        },
+        {
+          "time": 96925.859625953,
+          "wheel_speed": 0.012537736306318641,
+          "safe_command": 0.0,
+          "linear_speed": 0.0025566346464760688,
+          "angular_speed": 0.009981101659842572,
+          "capture_age_s": 0.027322917,
+          "base_permitted": false,
+          "faults": "scan: stale; depth: invalid, blind, or stampless point cloud"
+        },
+        {
+          "time": 96925.958464904,
+          "wheel_speed": 0.01253773630631864,
+          "safe_command": 0.0,
+          "linear_speed": 0.002556634646476069,
+          "angular_speed": -0.00998110165984257,
+          "capture_age_s": 0.026119453,
+          "base_permitted": false,
+          "faults": "scan: stale; depth: invalid, blind, or stampless point cloud"
+        },
+        {
+          "time": 96926.058201384,
+          "wheel_speed": 0.01253773630631864,
+          "safe_command": 0.0,
+          "linear_speed": 0.002556634646476069,
+          "angular_speed": 0.00998110165984257,
+          "capture_age_s": 0.024717545,
+          "base_permitted": false,
+          "faults": "scan: stale"
+        },
+        {
+          "time": 96926.159643944,
+          "wheel_speed": 0.004428221104087446,
+          "safe_command": 0.0,
+          "linear_speed": 0.004428221104087446,
+          "angular_speed": -1.0300927157041653e-20,
+          "capture_age_s": 0.026173248,
+          "base_permitted": false,
+          "faults": "scan: stale"
+        },
+        {
+          "time": 96926.25892031,
+          "wheel_speed": 0.012537736306318641,
+          "safe_command": 0.0,
+          "linear_speed": 0.0025566346464760683,
+          "angular_speed": -0.009981101659842572,
+          "capture_age_s": 0.025468345,
+          "base_permitted": false,
+          "faults": "scan: stale"
+        },
+        {
+          "time": 96926.359693931,
+          "wheel_speed": 0.01253773630631864,
+          "safe_command": 0.0,
+          "linear_speed": 0.002556634646476069,
+          "angular_speed": 0.00998110165984257,
+          "capture_age_s": 0.026261667,
+          "base_permitted": false,
+          "faults": "scan: stale"
+        },
+        {
+          "time": 96926.457454324,
+          "wheel_speed": 0.012537736306318641,
+          "safe_command": 0.0,
+          "linear_speed": 0.0025566346464760688,
+          "angular_speed": 0.009981101659842572,
+          "capture_age_s": 0.024119848,
+          "base_permitted": false,
+          "faults": "scan: stale"
+        },
+        {
+          "time": 96926.558820967,
+          "wheel_speed": 0.012537736306318641,
+          "safe_command": 0.0,
+          "linear_speed": 0.0025566346464760688,
+          "angular_speed": 0.009981101659842572,
+          "capture_age_s": 0.025201949,
+          "base_permitted": false,
+          "faults": "scan: stale"
+        },
+        {
+          "time": 96926.658186101,
+          "wheel_speed": 0.0,
+          "safe_command": 0.0,
+          "linear_speed": 0.0,
+          "angular_speed": 0.0,
+          "capture_age_s": 0.023778622,
+          "base_permitted": false,
+          "faults": "scan: stale"
+        },
+        {
+          "time": 96926.758769335,
+          "wheel_speed": 0.012537736306318641,
+          "safe_command": 0.0,
+          "linear_speed": 0.0025566346464760688,
+          "angular_speed": -0.009981101659842572,
+          "capture_age_s": 0.024297932,
+          "base_permitted": false,
+          "faults": "scan: stale"
+        },
+        {
+          "time": 96926.857785124,
+          "wheel_speed": 0.022518837966161213,
+          "safe_command": 0.0,
+          "linear_speed": 0.0025566346464760688,
+          "angular_speed": 0.019962203319685144,
+          "capture_age_s": 0.023438412,
+          "base_permitted": false,
+          "faults": "scan: stale; depth: stale"
+        },
+        {
+          "time": 96926.962230506,
+          "wheel_speed": 0.004428221104087446,
+          "safe_command": 0.0,
+          "linear_speed": 0.004428221104087446,
+          "angular_speed": 1.0300927157041653e-20,
+          "capture_age_s": 0.024268706,
+          "base_permitted": false,
+          "faults": "scan: stale; depth: invalid, blind, or stampless point cloud"
+        },
+        {
+          "time": 96927.058456279,
+          "wheel_speed": 0.012537736306318641,
+          "safe_command": 0.0,
+          "linear_speed": 0.0025566346464760688,
+          "angular_speed": 0.009981101659842572,
+          "capture_age_s": 0.022114822,
+          "base_permitted": false,
+          "faults": "scan: stale; depth: invalid, blind, or stampless point cloud"
+        },
+        {
+          "time": 96927.158840467,
+          "wheel_speed": 0.022518837966161213,
+          "safe_command": 0.0,
+          "linear_speed": 0.0025566346464760688,
+          "angular_speed": 0.019962203319685144,
+          "capture_age_s": 0.015937046,
+          "base_permitted": false,
+          "faults": "scan: stale; depth: invalid, blind, or stampless point cloud"
+        },
+        {
+          "time": 96927.258113411,
+          "wheel_speed": 0.01253773630631864,
+          "safe_command": 0.0,
+          "linear_speed": 0.002556634646476069,
+          "angular_speed": -0.00998110165984257,
+          "capture_age_s": 0.017665632,
+          "base_permitted": false,
+          "faults": "scan: stale; depth: invalid, blind, or stampless point cloud"
+        },
+        {
+          "time": 96927.360032148,
+          "wheel_speed": 0.0,
+          "safe_command": 0.0,
+          "linear_speed": 0.0,
+          "angular_speed": 0.0,
+          "capture_age_s": 0.020460631,
+          "base_permitted": false,
+          "faults": "scan: stale; depth: invalid, blind, or stampless point cloud"
+        },
+        {
+          "time": 96927.457312175,
+          "wheel_speed": 0.012537736306318641,
+          "safe_command": 0.0,
+          "linear_speed": 0.0025566346464760688,
+          "angular_speed": -0.009981101659842572,
+          "capture_age_s": 0.016793583,
+          "base_permitted": false,
+          "faults": "scan: stale; depth: invalid, blind, or stampless point cloud"
+        },
+        {
+          "time": 96927.556943963,
+          "wheel_speed": 0.01509437095279471,
+          "safe_command": 0.0,
+          "linear_speed": 0.0051132692929521375,
+          "angular_speed": 0.009981101659842574,
+          "capture_age_s": 0.013374196,
+          "base_permitted": false,
+          "faults": "scan: stale; depth: invalid, blind, or stampless point cloud"
+        },
+        {
+          "time": 96927.657413985,
+          "wheel_speed": 0.012537736306318641,
+          "safe_command": 0.0,
+          "linear_speed": 0.0025566346464760683,
+          "angular_speed": -0.009981101659842572,
+          "capture_age_s": 0.01499257,
+          "base_permitted": false,
+          "faults": "scan: stale; depth: invalid, blind, or stampless point cloud"
+        },
+        {
+          "time": 96927.758411168,
+          "wheel_speed": 0.0,
+          "safe_command": 0.0,
+          "linear_speed": 0.0,
+          "angular_speed": 0.0,
+          "capture_age_s": 0.015920264,
+          "base_permitted": false,
+          "faults": "scan: stale; depth: invalid, blind, or stampless point cloud"
+        },
+        {
+          "time": 96927.857165752,
+          "wheel_speed": 0.012537736306318641,
+          "safe_command": 0.0,
+          "linear_speed": 0.0025566346464760688,
+          "angular_speed": -0.009981101659842572,
+          "capture_age_s": 0.014628511,
+          "base_permitted": false,
+          "faults": "scan: stale; depth: invalid, blind, or stampless point cloud"
+        },
+        {
+          "time": 96927.958782356,
+          "wheel_speed": 0.012537736306318641,
+          "safe_command": 0.0,
+          "linear_speed": 0.0025566346464760683,
+          "angular_speed": -0.009981101659842572,
+          "capture_age_s": 0.015251725,
+          "base_permitted": false,
+          "faults": "scan: stale; depth: invalid, blind, or stampless point cloud"
+        },
+        {
+          "time": 96928.107699665,
+          "wheel_speed": 0.012537736306318641,
+          "safe_command": 0.0,
+          "linear_speed": 0.0025566346464760688,
+          "angular_speed": 0.009981101659842572,
+          "capture_age_s": 0.031303449,
+          "base_permitted": false,
+          "faults": "scan: stale; depth: invalid, blind, or stampless point cloud"
+        },
+        {
+          "time": 96928.207750012,
+          "wheel_speed": 0.012537736306318641,
+          "safe_command": 0.0,
+          "linear_speed": 0.0025566346464760688,
+          "angular_speed": -0.009981101659842572,
+          "capture_age_s": 0.031000744,
+          "base_permitted": false,
+          "faults": "scan: stale; depth: invalid, blind, or stampless point cloud"
+        },
+        {
+          "time": 96928.309578934,
+          "wheel_speed": 0.0,
+          "safe_command": 0.0,
+          "linear_speed": 0.0,
+          "angular_speed": 0.0,
+          "capture_age_s": 0.032011939,
+          "base_permitted": false,
+          "faults": "scan: stale; depth: invalid, blind, or stampless point cloud"
+        },
+        {
+          "time": 96928.408554426,
+          "wheel_speed": 0.022518837966161213,
+          "safe_command": 0.0,
+          "linear_speed": 0.0025566346464760683,
+          "angular_speed": -0.019962203319685144,
+          "capture_age_s": 0.030898603,
+          "base_permitted": false,
+          "faults": "scan: stale; depth: invalid, blind, or stampless point cloud; base_test: bounded test lease withdrawn"
+        },
+        {
+          "time": 96928.507980951,
+          "wheel_speed": 0.012537736306318641,
+          "safe_command": 0.0,
+          "linear_speed": 0.0025566346464760688,
+          "angular_speed": 0.009981101659842572,
+          "capture_age_s": 0.029413349,
+          "base_permitted": false,
+          "faults": "scan: stale; base_test: bounded test lease withdrawn"
+        },
+        {
+          "time": 96928.607561337,
+          "wheel_speed": 0.022518837966161213,
+          "safe_command": 0.0,
+          "linear_speed": 0.0025566346464760688,
+          "angular_speed": -0.019962203319685144,
+          "capture_age_s": 0.029098898,
+          "base_permitted": false,
+          "faults": "base_test: bounded test lease withdrawn"
+        },
+        {
+          "time": 96928.707823931,
+          "wheel_speed": 0.012537736306318641,
+          "safe_command": 0.0,
+          "linear_speed": 0.0025566346464760688,
+          "angular_speed": -0.009981101659842572,
+          "capture_age_s": 0.028340048,
+          "base_permitted": false,
+          "faults": "base_test: bounded test lease withdrawn"
+        },
+        {
+          "time": 96928.807735643,
+          "wheel_speed": 0.012537736306318641,
+          "safe_command": 0.0,
+          "linear_speed": 0.0025566346464760683,
+          "angular_speed": -0.009981101659842572,
+          "capture_age_s": 0.028160596,
+          "base_permitted": false,
+          "faults": "base_test: bounded test lease withdrawn"
+        },
+        {
+          "time": 96928.907532257,
+          "wheel_speed": 0.02994330497952772,
+          "safe_command": 0.0,
+          "linear_speed": 1.305080558808284e-18,
+          "angular_speed": 0.02994330497952772,
+          "capture_age_s": 0.026894218,
+          "base_permitted": false,
+          "faults": "base_test: bounded test lease withdrawn"
+        },
+        {
+          "time": 96929.00889464,
+          "wheel_speed": 0.01253773630631864,
+          "safe_command": 0.0,
+          "linear_speed": 0.002556634646476069,
+          "angular_speed": -0.00998110165984257,
+          "capture_age_s": 0.027848947,
+          "base_permitted": false,
+          "faults": "base_test: bounded test lease withdrawn"
+        },
+        {
+          "time": 96929.107977757,
+          "wheel_speed": 0.022518837966161213,
+          "safe_command": 0.0,
+          "linear_speed": 0.0025566346464760688,
+          "angular_speed": -0.019962203319685144,
+          "capture_age_s": 0.026330839,
+          "base_permitted": false,
+          "faults": "base_test: bounded test lease withdrawn"
+        },
+        {
+          "time": 96929.207665279,
+          "wheel_speed": 0.012537736306318641,
+          "safe_command": 0.0,
+          "linear_speed": 0.0025566346464760688,
+          "angular_speed": 0.009981101659842572,
+          "capture_age_s": 0.027150326,
+          "base_permitted": false,
+          "faults": "base_test: bounded test lease withdrawn"
+        },
+        {
+          "time": 96929.945685011,
+          "wheel_speed": 0.0,
+          "safe_command": 0.0,
+          "linear_speed": 0.0,
+          "angular_speed": 0.0,
+          "capture_age_s": 0.664147866,
+          "base_permitted": false,
+          "faults": "base_test: bounded test lease withdrawn"
+        },
+        {
+          "time": 96930.004481853,
+          "wheel_speed": 0.004428221104087448,
+          "safe_command": 0.0,
+          "linear_speed": 0.0044282211040874465,
+          "angular_speed": 1.7033910397104054e-18,
+          "capture_age_s": 0.622986456,
+          "base_permitted": false,
+          "faults": "base_test: bounded test lease withdrawn"
+        },
+        {
+          "time": 96930.015445032,
+          "wheel_speed": 0.012537736306318641,
+          "safe_command": 0.0,
+          "linear_speed": 0.0025566346464760683,
+          "angular_speed": 0.009981101659842572,
+          "capture_age_s": 0.533736827,
+          "base_permitted": false,
+          "faults": "base_test: stale"
+        },
+        {
+          "time": 96930.023561973,
+          "wheel_speed": 0.022518837966161213,
+          "safe_command": 0.0,
+          "linear_speed": 0.0025566346464760683,
+          "angular_speed": 0.019962203319685144,
+          "capture_age_s": 0.441900054,
+          "base_permitted": false,
+          "faults": "base_test: stale"
+        },
+        {
+          "time": 96930.031849606,
+          "wheel_speed": 0.004428221104087448,
+          "safe_command": 0.0,
+          "linear_speed": 0.0044282211040874465,
+          "angular_speed": -1.651886403925197e-18,
+          "capture_age_s": 0.350159582,
+          "base_permitted": false,
+          "faults": "base_test: stale"
+        },
+        {
+          "time": 96930.034082219,
+          "wheel_speed": 0.012537736306318641,
+          "safe_command": 0.0,
+          "linear_speed": 0.0025566346464760683,
+          "angular_speed": -0.009981101659842572,
+          "capture_age_s": 0.251503299,
+          "base_permitted": false,
+          "faults": "base_test: stale"
+        },
+        {
+          "time": 96930.036420362,
+          "wheel_speed": 0.01253773630631864,
+          "safe_command": 0.0,
+          "linear_speed": 0.002556634646476069,
+          "angular_speed": -0.00998110165984257,
+          "capture_age_s": 0.152717126,
+          "base_permitted": false,
+          "faults": "base_test: stale"
+        },
+        {
+          "time": 96930.037984455,
+          "wheel_speed": 0.004428221104087446,
+          "safe_command": 0.0,
+          "linear_speed": 0.004428221104087446,
+          "angular_speed": 1.0300927157041653e-20,
+          "capture_age_s": 0.051918961,
+          "base_permitted": false,
+          "faults": "base_test: stale"
+        },
+        {
+          "time": 96930.108376259,
+          "wheel_speed": 0.012537736306318641,
+          "safe_command": 0.0,
+          "linear_speed": 0.0025566346464760688,
+          "angular_speed": -0.009981101659842572,
+          "capture_age_s": 0.024665908,
+          "base_permitted": false,
+          "faults": "base_test: bounded test lease withdrawn"
+        },
+        {
+          "time": 96930.208487159,
+          "wheel_speed": 0.004428221104087448,
+          "safe_command": 0.0,
+          "linear_speed": 0.0044282211040874465,
+          "angular_speed": 1.651886403925197e-18,
+          "capture_age_s": 0.024888149,
+          "base_permitted": false,
+          "faults": "base_test: bounded test lease withdrawn"
+        },
+        {
+          "time": 96930.308352497,
+          "wheel_speed": 0.004428221104087448,
+          "safe_command": 0.0,
+          "linear_speed": 0.0044282211040874465,
+          "angular_speed": 1.651886403925197e-18,
+          "capture_age_s": 0.024792573,
+          "base_permitted": false,
+          "faults": "base_test: bounded test lease withdrawn"
+        },
+        {
+          "time": 96930.408651479,
+          "wheel_speed": 0.012537736306318641,
+          "safe_command": 0.0,
+          "linear_speed": 0.0025566346464760683,
+          "angular_speed": 0.009981101659842572,
+          "capture_age_s": 0.024028618,
+          "base_permitted": false,
+          "faults": "base_test: bounded test lease withdrawn"
+        },
+        {
+          "time": 96930.508873986,
+          "wheel_speed": 0.012537736306318641,
+          "safe_command": 0.0,
+          "linear_speed": 0.0025566346464760683,
+          "angular_speed": -0.009981101659842572,
+          "capture_age_s": 0.02429501,
+          "base_permitted": false,
+          "faults": "base_test: bounded test lease withdrawn"
+        },
+        {
+          "time": 96930.608080093,
+          "wheel_speed": 0.022518837966161213,
+          "safe_command": 0.0,
+          "linear_speed": 0.0025566346464760688,
+          "angular_speed": -0.019962203319685144,
+          "capture_age_s": 0.022462585,
+          "base_permitted": false,
+          "faults": "base_test: bounded test lease withdrawn"
+        },
+        {
+          "time": 96930.707432797,
+          "wheel_speed": 0.01509437095279471,
+          "safe_command": 0.0,
+          "linear_speed": 0.0051132692929521375,
+          "angular_speed": 0.009981101659842574,
+          "capture_age_s": 0.022867064,
+          "base_permitted": false,
+          "faults": "base_test: bounded test lease withdrawn"
+        },
+        {
+          "time": 96930.808036217,
+          "wheel_speed": 0.012537736306318641,
+          "safe_command": 0.0,
+          "linear_speed": 0.0025566346464760688,
+          "angular_speed": 0.009981101659842572,
+          "capture_age_s": 0.022439657,
+          "base_permitted": false,
+          "faults": "base_test: bounded test lease withdrawn"
+        },
+        {
+          "time": 96930.907202515,
+          "wheel_speed": 0.0,
+          "safe_command": 0.0,
+          "linear_speed": 0.0,
+          "angular_speed": 0.0,
+          "capture_age_s": 0.020548958,
+          "base_permitted": false,
+          "faults": "base_test: bounded test lease withdrawn"
+        },
+        {
+          "time": 96931.007381161,
+          "wheel_speed": 0.012537736306318641,
+          "safe_command": 0.0,
+          "linear_speed": 0.0025566346464760683,
+          "angular_speed": -0.009981101659842572,
+          "capture_age_s": 0.021414115,
+          "base_permitted": false,
+          "faults": "base_test: bounded test lease withdrawn"
+        },
+        {
+          "time": 96931.107419497,
+          "wheel_speed": 0.012537736306318641,
+          "safe_command": 0.0,
+          "linear_speed": 0.0025566346464760688,
+          "angular_speed": 0.009981101659842572,
+          "capture_age_s": 0.021615379,
+          "base_permitted": false,
+          "faults": "base_test: bounded test lease withdrawn"
+        },
+        {
+          "time": 96931.208142485,
+          "wheel_speed": 0.022518837966161213,
+          "safe_command": 0.0,
+          "linear_speed": 0.0025566346464760688,
+          "angular_speed": -0.019962203319685144,
+          "capture_age_s": 0.022351038,
+          "base_permitted": false,
+          "faults": "base_test: bounded test lease withdrawn"
+        },
+        {
+          "time": 96931.308346903,
+          "wheel_speed": 0.0,
+          "safe_command": 0.0,
+          "linear_speed": 0.0,
+          "angular_speed": 0.0,
+          "capture_age_s": 0.021692301,
+          "base_permitted": false,
+          "faults": "base_test: bounded test lease withdrawn"
+        },
+        {
+          "time": 96931.408055239,
+          "wheel_speed": 0.01253773630631864,
+          "safe_command": 0.0,
+          "linear_speed": 0.002556634646476069,
+          "angular_speed": -0.00998110165984257,
+          "capture_age_s": 0.020814972,
+          "base_permitted": false,
+          "faults": "base_test: bounded test lease withdrawn"
+        },
+        {
+          "time": 96931.508194285,
+          "wheel_speed": 0.012537736306318641,
+          "safe_command": 0.0,
+          "linear_speed": 0.0025566346464760688,
+          "angular_speed": -0.009981101659842572,
+          "capture_age_s": 0.021502204,
+          "base_permitted": false,
+          "faults": "base_test: bounded test lease withdrawn"
+        },
+        {
+          "time": 96931.608635674,
+          "wheel_speed": 0.0,
+          "safe_command": 0.0,
+          "linear_speed": 0.0,
+          "angular_speed": 0.0,
+          "capture_age_s": 0.021960656,
+          "base_permitted": false,
+          "faults": "base_test: bounded test lease withdrawn"
+        },
+        {
+          "time": 96931.708293305,
+          "wheel_speed": 0.0,
+          "safe_command": 0.0,
+          "linear_speed": 0.0,
+          "angular_speed": 0.0,
+          "capture_age_s": 0.020590447,
+          "base_permitted": false,
+          "faults": "base_test: bounded test lease withdrawn"
+        },
+        {
+          "time": 96931.811028488,
+          "wheel_speed": 0.0,
+          "safe_command": 0.0,
+          "linear_speed": 0.0,
+          "angular_speed": 0.0,
+          "capture_age_s": 0.023350742,
+          "base_permitted": false,
+          "faults": "base_test: bounded test lease withdrawn"
+        },
+        {
+          "time": 96931.909649815,
+          "wheel_speed": 0.0,
+          "safe_command": 0.0,
+          "linear_speed": 0.0,
+          "angular_speed": 0.0,
+          "capture_age_s": 0.021909606,
+          "base_permitted": false,
+          "faults": "base_test: bounded test lease withdrawn"
+        },
+        {
+          "time": 96932.008717568,
+          "wheel_speed": 0.0,
+          "safe_command": 0.0,
+          "linear_speed": 0.0,
+          "angular_speed": 0.0,
+          "capture_age_s": 0.021042087,
+          "base_permitted": false,
+          "faults": "base_test: bounded test lease withdrawn"
+        },
+        {
+          "time": 96932.110258327,
+          "wheel_speed": 0.0,
+          "safe_command": 0.0,
+          "linear_speed": 0.0,
+          "angular_speed": 0.0,
+          "capture_age_s": 0.022432712,
+          "base_permitted": false,
+          "faults": "base_test: bounded test lease withdrawn"
+        },
+        {
+          "time": 96932.209155319,
+          "wheel_speed": 0.0,
+          "safe_command": 0.0,
+          "linear_speed": 0.0,
+          "angular_speed": 0.0,
+          "capture_age_s": 0.020414809,
+          "base_permitted": false,
+          "faults": "base_test: bounded test lease withdrawn"
+        },
+        {
+          "time": 96932.307718818,
+          "wheel_speed": 0.0,
+          "safe_command": 0.0,
+          "linear_speed": 0.0,
+          "angular_speed": 0.0,
+          "capture_age_s": 0.018943533,
+          "base_permitted": false,
+          "faults": "base_test: bounded test lease withdrawn"
+        },
+        {
+          "time": 96932.408101192,
+          "wheel_speed": 0.0,
+          "safe_command": 0.0,
+          "linear_speed": 0.0,
+          "angular_speed": 0.0,
+          "capture_age_s": 0.019417527,
+          "base_permitted": false,
+          "faults": "base_test: bounded test lease withdrawn"
+        }
+      ],
+      "angular_test": false,
+      "requested_speed": 0.25,
+      "injection_speed": 0.24803309314457975,
+      "terminal_observed_speed": 0.24200240263466666,
+      "denial": {
+        "base_motion_permitted": "false",
+        "arm_motion_permitted": "true",
+        "arm_stowed": "true",
+        "faults": "scan: stale",
+        "latched_faults": "",
+        "bounded_base_test": "true"
+      },
+      "independent": {
+        "observed_swept_distance_m": 0.19218681613383673,
+        "unobserved_excursion_bound_m": 0.028821259737014767,
+        "conservative_swept_distance_m": 0.2210080758708515,
+        "uncertainty_upper_m": 0.04515885136927848,
+        "maximum_capture_gap_s": 0.20049571990966797,
+        "stop_time_receive_upper_s": 1.2524670315906405,
+        "first_sample_time": 96923.70667203,
+        "last_sample_time": 96928.128246171,
+        "fault_cut_time": 96923.65842468532,
+        "samples": 23,
+        "baseline_time_basis": "sensor_capture_stamp",
+        "within_budget": false
+      }
+    }
+  },
+  "error": "loaded fault stopping/error bound exceeded",
+  "stationary_jitter_m": 0.006382714474726251,
+  "artifacts": {
+    ".benchmarks/onboard-braking/20261009-121900/profile.yaml": {
+      "sha256": "e6d4d977525bed15a495cc402266e1022e80d4f27ca2c7c62afd8f94c7a65b26",
+      "bytes": 1033
+    },
+    ".benchmarks/onboard-braking/20261009-121900/measurements.json": {
+      "sha256": "33a2efcff14b3e56df4211c5e77538bcf2c59868d7160cc1976941a47ef699fb",
+      "bytes": 40164
+    },
+    ".benchmarks/onboard-braking/20261009-121900/result.json": {
+      "sha256": "22526213f9725cd2c84feb0b5c0840eb5099ba9e50d1b8e50ec205025575a3fd",
+      "bytes": 305410
+    },
+    ".benchmarks/onboard-braking/20261009-121900/independent-poses.json": {
+      "sha256": "5f569c55591f0e85877ec9896fb76d5dcb060a78062574281859bbc6ccd59b6a",
+      "bytes": 3644525
+    },
+    ".benchmarks/onboard-braking/20261009-121900/stack.log": {
+      "sha256": "5a5eee1d455e710b295705bb6526f20176664bf2b548858919e756781d1e460c",
+      "bytes": 170057
+    }
+  }
+}

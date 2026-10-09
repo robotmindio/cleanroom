@@ -23,14 +23,15 @@ def test_qualification_profiles_fit_the_one_metre_fixture_and_reject_missing_res
     from lekiwi_rmf.motion_guards import load_base_test_profile
     root=Path(__file__).parents[1]/'config'
     for stage in ('0.20','0.25','0.30'):
+        uncertainty=.05 if stage=='0.25' else .04
         profile=load_base_test_profile(root/'nav2_params.yaml',stage)
         assert profile['linear_speed_m_s']==float(stage)
         assert profile['required_clearance_m']==1.
         assert profile['nominal_command_duration_s']==1.6
-        assert profile['measurement_uncertainty_m']==.04
+        assert profile['measurement_uncertainty_m']==uncertainty
         assert profile['point_speed_bound_m_s']==pytest.approx(float(stage)*1.15)
-        assert profile['translation_stopping_margin_m']==pytest.approx(float(stage)*1.15*1.5+.04)
-        assert profile['return_stopping_margin_m']==pytest.approx((.04+.33*.06)*1.15*1.5+.04)
+        assert profile['translation_stopping_margin_m']==pytest.approx(float(stage)*1.15*1.5+uncertainty)
+        assert profile['return_stopping_margin_m']==pytest.approx((.04+.33*.06)*1.15*1.5+uncertainty)
     for stage in ('0.06','0.10','0.40',''):
         with pytest.raises(ValueError):
             load_base_test_profile(root/'nav2_params.yaml',stage)

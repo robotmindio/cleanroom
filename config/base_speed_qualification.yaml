@@ -23,6 +23,8 @@ stages:
   '0.25':
     linear_speed_m_s: 0.25
     angular_speed_rad_s: 0.50
+    # Scan-loss trial modeled 0.045159 m uncertainty; include 5 cm in reserves.
+    measurement_uncertainty_m: 0.05
   '0.30':
     linear_speed_m_s: 0.30
     angular_speed_rad_s: 0.60
