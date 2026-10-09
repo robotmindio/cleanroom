@@ -109,7 +109,7 @@ def test_qualification_changes_manual_caps_and_zones_without_raising_nav2_speed(
     assert stop['min_points']==1
     assert stop['velocity_polygons']==['rotation','return_forward','return_reverse','return_left','return_right',
         'forward','reverse','left','right','fallback']
-    margin=float(stage)*1.15*1.5+.02
+    margin=float(stage)*1.15*1.5+.03
     for direction in ('forward','reverse','left','right'):
         points=yaml.safe_load(stop[direction]['points'])
         assert stop[direction]['theta_min']==stop[direction]['theta_max']==0.

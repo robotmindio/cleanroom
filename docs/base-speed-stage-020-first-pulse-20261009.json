@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-09",
+  "source_revision": "120cc966ae4320c8a6f8fbec7cc3249457d34309",
+  "scope": "First physical 0.20 m/s pulse; excluded from acceptance.",
+  "payload_kg": 0.2,
+  "stage": "0.20",
+  "high_speed_pulse_started": true,
+  "qualified_trials": 0,
+  "trials": [
+    {
+      "observed_swept_distance_m": 0.07163199393113596,
+      "unobserved_excursion_bound_m": 0.02305837869644165,
+      "conservative_swept_distance_m": 0.09469037262757761,
+      "uncertainty_upper_m": 0.024740498833762073,
+      "maximum_capture_gap_s": 0.20050764083862305,
+      "stop_time_receive_upper_s": 0.7816280298284255,
+      "first_sample_time": 90126.055978101,
+      "last_sample_time": 90128.467605427,
+      "fault_cut_time": 90126.074821664,
+      "samples": 13,
+      "baseline_time_basis": "sensor_capture_stamp",
+      "within_budget": false,
+      "direction": "forward",
+      "requested_speed": 0.2,
+      "terminal_observed_speed": 0.14807503152227738,
+      "requested_speed_covered": false,
+      "speed_coverage_basis": "maximum guarded command, fresh wheel feedback and independent terminal ground speed",
+      "terminal_wheel_speed": 0.19725890195309176,
+      "terminal_guarded_speed": 0.2,
+      "feedback_interrupted": false,
+      "qualification_eligible": false
+    }
+  ],
+  "stationary_jitter_m": 0.005066484336275568,
+  "production_restored": true,
+  "findings": [
+    "The 1.2 s terminal fit includes acceleration and reported 0.148075 m/s. The final four captures fit 0.190280 m/s, but four captures do not meet the existing five-capture requirement.",
+    "The measured 0.0247405 m uncertainty exceeds the previous 0.020 m declaration. Qualification now declares 0.030 m and includes that allowance in every clearance reserve.",
+    "A 1.6 s bounded pulse with the final 1.0 s capture fit retains the five-capture and 90% ground-speed requirements. This requires a new physical run; this attempt remains unqualified."
+  ],
+  "artifacts": {
+    ".benchmarks/onboard-braking/20261009-102543/profile.yaml": {
+      "sha256": "527f1867851ac2965a2ce5099536217fe47c1e48bdb2f406aef1ad78c4fea0fc",
+      "bytes": 834
+    },
+    ".benchmarks/onboard-braking/20261009-102543/measurements.json": {
+      "sha256": "d57399aa024d799a0ea2bedd81cb4493860ed68fdb8cbb72fb9aec9ae89d0e89",
+      "bytes": 2681
+    },
+    ".benchmarks/onboard-braking/20261009-102543/result.json": {
+      "sha256": "1def5d626d2b4a325c8a1d7a87a3f0bdcd758f3810f2c9213a65b8665ba6e036",
+      "bytes": 200397
+    },
+    ".benchmarks/onboard-braking/20261009-102543/independent-poses.json": {
+      "sha256": "405897de1875dc19185788a3c72c4a3b17e4e8c33eabe70e51ddeba2bce95204",
+      "bytes": 2880890
+    },
+    ".benchmarks/onboard-braking/20261009-102543/stack.log": {
+      "sha256": "c127525ac2765e8a17e969e5f6582ac571ac4ecd21fd650f01e792058c5eeda9",
+      "bytes": 149453
+    }
+  }
+}

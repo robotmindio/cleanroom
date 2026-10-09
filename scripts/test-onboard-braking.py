@@ -43,7 +43,7 @@ def maximum_swept_excursion(poses, radius):
                for pose in poses)
 
 
-def terminal_observed_speed(samples, angular, window_s=.75):
+def terminal_observed_speed(samples, angular, window_s=1.):
     """Fit the final capture interval instead of differentiating sensor noise."""
     if len(samples)<5:
         raise ValueError('too few captures for terminal speed')
@@ -61,7 +61,7 @@ def terminal_observed_speed(samples, angular, window_s=.75):
 
 def resumable_evidence(previous, config):
     """Reuse measurements only under the same speed and stopping conditions."""
-    run_fields = {'nominal_only', 'direction', 'selected_fault', 'angular_test', 'depth_filter_pid', 'test_center', 'maximum_runtime_s', 'trials_per_direction'}
+    run_fields = {'nominal_only', 'faults_only', 'direction', 'selected_fault', 'angular_test', 'depth_filter_pid', 'test_center', 'maximum_runtime_s', 'trials_per_direction'}
     conditions = {k:v for k,v in config.items() if k not in run_fields}
     if {k:v for k,v in previous['profile'].items() if k not in run_fields} != conditions:
         raise ValueError('resumed speed/load/measurement profile differs')
@@ -342,7 +342,7 @@ class OnboardBraking(FAULT.FaultTest):
         covered=self.safe_speed is not None and self.safe_speed>=speed*.9 and self.measured_speed>=(.015 if self.angular_test else .005) and time.monotonic()-self.odom_at<.3
         wheel_speed,guarded_speed=self.measured_speed,self.safe_speed
         terminal=[{**r,'pts_ns':int(r['stamp']*1e9)} for r in self.ranges[begin:]]
-        observed=terminal_observed_speed(terminal,direction.startswith('rotation'),window_s=1.2)
+        observed=terminal_observed_speed(terminal,direction.startswith('rotation'))
         until=time.monotonic()+2.5
         while time.monotonic()<until:
             self.tick(Twist())
@@ -380,7 +380,7 @@ class OnboardBraking(FAULT.FaultTest):
             while time.monotonic()<end:
                 self.tick(command)
             terminal=[{**r,'pts_ns':int(r['stamp']*1e9)} for r in self.ranges[first:]]
-            observed=terminal_observed_speed(terminal,self.angular_test,window_s=1.2)
+            observed=terminal_observed_speed(terminal,self.angular_test)
             if observed<self.test_speed*.9:
                 self.command.publish(Twist())
                 raise RuntimeError('fault trial did not attain independent ground speed')
@@ -430,7 +430,7 @@ class OnboardBraking(FAULT.FaultTest):
                 self.move(self.center)
                 self.save()
             return
-        for direction in (() if self.config.get('selected_fault') else DIRECTIONS):
+        for direction in (() if self.config.get('selected_fault') or self.config.get('faults_only') else DIRECTIONS):
             completed=sum(t['direction']==direction and t['qualification_eligible'] for t in self.trials)
             attempts=0
             while completed<self.config['trials_per_direction']:
@@ -527,6 +527,7 @@ def main():
     selection.add_argument('--direction',choices=DIRECTIONS,help='run one nominal stop without retries; qualification stages return to center')
     selection.add_argument('--fault',choices=['scan_disconnect','depth_disconnect','telemetry_loss','compute_command_loss'],help='run one moving fault without nominal repeats')
     selection.add_argument('--attended-sequence',action='store_true',help='run the operator-authorized stage sequence, stopping at the first unqualified trial')
+    selection.add_argument('--faults-only',action='store_true',help='run all eight attended moving faults without nominal repeats')
     parser.add_argument('--angular',action='store_true',help='use rotation for the selected fault')
     parser.add_argument('--stage',choices=['0.20','0.30'],help='explicit attended manual qualification stage; production Nav2 speeds are retained')
     parser.add_argument('--reference-run',type=Path,help='retain the fixed raw-LiDAR reference and center across qualification stages without reusing their trials')
@@ -535,10 +536,12 @@ def main():
     args=parser.parse_args()
     if not math.isfinite(args.payload_g) or args.payload_g<0:
         parser.error('payload must be finite and nonnegative')
-    if args.stage and not (args.direction or args.fault or args.attended_sequence):
+    if args.stage and not (args.direction or args.fault or args.attended_sequence or args.faults_only):
         parser.error('qualification requires a selected trial or --attended-sequence')
     if args.attended_sequence and not args.stage:
         parser.error('--attended-sequence requires --stage')
+    if args.faults_only and (not args.stage or args.nominal_only):
+        parser.error('--faults-only requires a stage and conflicts with --nominal-only')
     if args.angular and not args.fault:
         parser.error('--angular requires --fault')
     if args.fault and args.nominal_only:
@@ -553,7 +556,7 @@ def main():
         if args.stage=='0.20':
             config['trials_per_direction']=1
     config.update(payload_kg=args.payload_g/1000,linear_speed_m_s=linear,angular_speed_rad_s=angular,
-                  nominal_only=args.nominal_only or args.direction is not None,direction=args.direction,
+                  nominal_only=args.nominal_only or args.direction is not None,faults_only=args.faults_only,direction=args.direction,
                   selected_fault=args.fault,angular_test=args.angular,stage=args.stage,
                   point_speed_bound_m_s=config.get('point_speed_bound_m_s',1.15*(linear+config['body_radius_m']*angular)))
     device=next(a.partition(':=')[2] for a in NAV.installed_stack_arguments() if a.startswith('remote_ip:='))
