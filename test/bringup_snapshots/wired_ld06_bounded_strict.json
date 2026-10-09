@@ -81,13 +81,14 @@
        },
        "collision_monitor": {
         "ros__parameters": {
-         "SlowdownZone": {
-          "action_type": "slowdown",
+         "FootprintApproach": {
+          "action_type": "approach",
           "enabled": true,
           "min_points": 1,
-          "points": "[[1.08, 1.06], [1.08, -1.06], [-1.06, -1.06], [-1.06, 1.06]]",
-          "polygon_pub_topic": "collision_slowdown_zone",
-          "slowdown_ratio": 0.35,
+          "points": "[[-0.22, -0.22], [0.24, -0.22], [0.24, 0.22], [-0.22, 0.22]]",
+          "polygon_pub_topic": "collision_approach_footprint",
+          "simulation_time_step": 0.05,
+          "time_before_collision": 2.5,
           "type": "polygon",
           "visualize": true
          },
@@ -95,7 +96,7 @@
           "action_type": "stop",
           "enabled": true,
           "min_points": 1,
-          "points": "[[1.01, 0.99], [1.01, -0.99], [-0.99, -0.99], [-0.99, 0.99]]",
+          "points": "[[-0.22, -0.22], [0.24, -0.22], [0.24, 0.22], [-0.22, 0.22]]",
           "polygon_pub_topic": "collision_stop_zone",
           "type": "polygon",
           "visualize": true
@@ -110,7 +111,7 @@
          "odom_frame_id": "odom",
          "polygons": [
           "StopZone",
-          "SlowdownZone"
+          "FootprintApproach"
          ],
          "scan": {
           "enabled": true,
@@ -588,13 +589,14 @@
        },
        "collision_monitor": {
         "ros__parameters": {
-         "SlowdownZone": {
-          "action_type": "slowdown",
+         "FootprintApproach": {
+          "action_type": "approach",
           "enabled": true,
           "min_points": 1,
-          "points": "[[1.08, 1.06], [1.08, -1.06], [-1.06, -1.06], [-1.06, 1.06]]",
-          "polygon_pub_topic": "collision_slowdown_zone",
-          "slowdown_ratio": 0.35,
+          "points": "[[-0.22, -0.22], [0.24, -0.22], [0.24, 0.22], [-0.22, 0.22]]",
+          "polygon_pub_topic": "collision_approach_footprint",
+          "simulation_time_step": 0.05,
+          "time_before_collision": 2.5,
           "type": "polygon",
           "visualize": true
          },
@@ -602,7 +604,7 @@
           "action_type": "stop",
           "enabled": true,
           "min_points": 1,
-          "points": "[[1.01, 0.99], [1.01, -0.99], [-0.99, -0.99], [-0.99, 0.99]]",
+          "points": "[[-0.22, -0.22], [0.24, -0.22], [0.24, 0.22], [-0.22, 0.22]]",
           "polygon_pub_topic": "collision_stop_zone",
           "type": "polygon",
           "visualize": true
@@ -617,7 +619,7 @@
          "odom_frame_id": "odom",
          "polygons": [
           "StopZone",
-          "SlowdownZone"
+          "FootprintApproach"
          ],
          "scan": {
           "enabled": true,
@@ -1174,13 +1176,14 @@
        },
        "collision_monitor": {
         "ros__parameters": {
-         "SlowdownZone": {
-          "action_type": "slowdown",
+         "FootprintApproach": {
+          "action_type": "approach",
           "enabled": true,
           "min_points": 1,
-          "points": "[[1.08, 1.06], [1.08, -1.06], [-1.06, -1.06], [-1.06, 1.06]]",
-          "polygon_pub_topic": "collision_slowdown_zone",
-          "slowdown_ratio": 0.35,
+          "points": "[[-0.22, -0.22], [0.24, -0.22], [0.24, 0.22], [-0.22, 0.22]]",
+          "polygon_pub_topic": "collision_approach_footprint",
+          "simulation_time_step": 0.05,
+          "time_before_collision": 2.5,
           "type": "polygon",
           "visualize": true
          },
@@ -1188,7 +1191,7 @@
           "action_type": "stop",
           "enabled": true,
           "min_points": 1,
-          "points": "[[1.01, 0.99], [1.01, -0.99], [-0.99, -0.99], [-0.99, 0.99]]",
+          "points": "[[-0.22, -0.22], [0.24, -0.22], [0.24, 0.22], [-0.22, 0.22]]",
           "polygon_pub_topic": "collision_stop_zone",
           "type": "polygon",
           "visualize": true
@@ -1203,7 +1206,7 @@
          "odom_frame_id": "odom",
          "polygons": [
           "StopZone",
-          "SlowdownZone"
+          "FootprintApproach"
          ],
          "scan": {
           "enabled": true,

@@ -27,7 +27,7 @@ def finite_number(value: object) -> bool:
 
 
 def nav2_stop_zone_clearance(nav2_path: str | Path, acceptance: dict) -> tuple[bool, str]:
-    """Bind acceptance to Nav2's footprint and measured StopZone clearance."""
+    """Bind acceptance to the footprint and static or predictive braking guard."""
     try:
         limits = load_base_speed_limits(nav2_path)
     except ValueError as error:
@@ -70,6 +70,8 @@ def nav2_stop_zone_clearance(nav2_path: str | Path, acceptance: dict) -> tuple[b
                 return False, f"Nav2 {costmap_name} footprint padding differs from acceptance"
 
         monitor = nav2["collision_monitor"]["ros__parameters"]
+        if monitor.get("enabled", True) is not True:
+            return False, "Nav2 collision monitor is disabled"
         if "StopZone" not in monitor.get("polygons", []):
             return False, "Nav2 collision monitor does not enable StopZone"
         stop = monitor["StopZone"]
@@ -94,6 +96,50 @@ def nav2_stop_zone_clearance(nav2_path: str | Path, acceptance: dict) -> tuple[b
     )
     required_clearance = measured + float(acceptance["measurement_uncertainty_m"])
     actual_clearance = polygon_boundary_distance(expected, stop_polygon)
+    if "FootprintApproach" in monitor.get("polygons", []):
+        approach = monitor["FootprintApproach"]
+        if not isinstance(approach, dict):
+            return False, "invalid Nav2 predictive guard parameters"
+        try:
+            predicted_body = polygon(approach.get("points"), "Nav2 FootprintApproach")
+        except (TypeError, ValueError) as error:
+            return False, f"invalid Nav2 predictive safety geometry: {error}"
+        if not same_polygon(expected, stop_polygon) or not same_polygon(expected, predicted_body):
+            return False, "predictive braking requires the exact accepted body in both polygons"
+        if (approach.get("type") != "polygon" or approach.get("action_type") != "approach"
+                or approach.get("enabled") is not True or type(approach.get("min_points")) is not int
+                or approach["min_points"] != 1 or stop["min_points"] != 1
+                or "max_points" in approach or "max_points" in stop):
+            return False, "Nav2 FootprintApproach is not an enabled single-point predictive guard"
+        sources = monitor.get("observation_sources", [])
+        scan = monitor.get("scan")
+        source_groups = (sources, approach.get("sources_names", sources), stop.get("sources_names", sources))
+        if (any(not isinstance(group, list) or "scan" not in group for group in source_groups)
+                or not isinstance(scan, dict) or scan.get("enabled") is not True
+                or scan.get("type") != "scan" or scan.get("topic") != "/scan"):
+            return False, "Nav2 predictive guards must use the enabled accepted /scan source"
+        horizon = approach.get("time_before_collision")
+        step = approach.get("simulation_time_step")
+        if (not finite_number(horizon) or horizon <= 0 or not finite_number(step)
+                or not 0 < step <= 0.05):
+            return False, "Nav2 predictive braking needs a positive horizon and <=0.05 s step"
+        radius = max(math.hypot(x, y) for x, y in expected)
+        linear = float(acceptance["maximum_tested_linear_speed_m_s"])
+        angular = float(acceptance["maximum_tested_angular_speed_rad_s"])
+        stopping_times = [
+            (float(result["worst_stopping_distance_m"]) + float(acceptance["measurement_uncertainty_m"]))
+            / (radius * angular if direction.startswith("rotation_") else linear)
+            for direction, result in acceptance["directions"].items()
+        ]
+        required_horizon = max(
+            float(acceptance["maximum_allowed_command_stop_latency_s"]), *stopping_times,
+        ) + float(step)
+        if horizon + 1e-9 < required_horizon:
+            return False, (
+                f"Nav2 predictive horizon {horizon:.3f} s is below the measured braking "
+                f"and uncertainty bound {required_horizon:.3f} s"
+            )
+        return True, "Nav2 uses the accepted body and a predictive horizon covering measured braking"
     if actual_clearance + 1e-9 < required_clearance:
         return False, (
             f"Nav2 StopZone clearance {actual_clearance:.3f} m is smaller than "

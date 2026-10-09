@@ -56,7 +56,7 @@ electrical or mechanical failure. Arming and recovery behaviour is described in
 ## Physical acceptance
 
 `config/safety_acceptance.yaml` is a schema-version-4 record with
-`validated: true`, validated on 2026-10-06. Its scope is **attended autonomous
+`validated: true`, validated on 2026-10-09. Its scope is **attended autonomous
 base** operation:
 
 | Condition | Accepted value |
@@ -65,21 +65,25 @@ base** operation:
 | Surface | Dry concrete |
 | Payload | `payload_kg: 0.2`, the installed operator-reported 200 g load |
 | Arm posture | Folded `travel_stow`, as recorded in `accepted_stow_joint_positions` |
-| Maximum speeds | 0.03 m/s linear, 0.06 rad/s angular (the production command limits) |
+| Maximum speeds | 0.25 m/s linear, 0.40 rad/s angular (the production command limits) |
 | Stopping trials | 5 per direction (forward, reverse, left, right, both rotations) |
-| Worst stop + 20 mm measurement uncertainty | 49.752 mm, against the 50 mm budget |
-| Worst command-stop latency | 1.198 s, against 1.5 s |
+| Worst stop + 60 mm measurement uncertainty | 447.666 mm, against the 450 mm budget |
+| Worst command-stop latency | 1.525 s, against 1.6 s |
 | Absent hardware | Bumper, IMU and battery monitor; their fault tests are `null` |
 
 The evidence is
-[physical-acceptance-evidence-200g-20261006.json](physical-acceptance-evidence-200g-20261006.json):
+[physical-acceptance-evidence-025-200g-20261009.json](physical-acceptance-evidence-025-200g-20261009.json):
 loaded stopping windows, moving-fault results, exclusions and raw-artifact
 hashes. Hardware and authentication fault tests whose mechanisms did not change
 with the load (independent E-stop, unauthorized ZMQ, DDS and rosbridge policy,
 restarts, replay, collision-monitor and arm-workspace stops) are carried over
 explicitly from the unloaded
 [physical-acceptance-evidence-20261004.json](physical-acceptance-evidence-20261004.json);
-they are not relabelled as loaded trials. Functional loaded navigation
+they are not relabelled as loaded trials. This braking evidence is preserved;
+the new footprint-prediction collision model has software coverage on isolated
+DDS, and its physical obstacle-response check is still pending. The earlier
+static-zone obstacle test does not qualify the new predictive behavior.
+Functional loaded navigation
 observations are in
 [base-payload-evidence-20261006.json](base-payload-evidence-20261006.json).
 
@@ -99,10 +103,17 @@ plus uncertainty, stop latency, traceable software/sensor/payload/surface
 details, and every applicable fault test marked true. Its hardware record must
 agree with the production profile's `require_bumper`, `require_imu` and
 `require_battery` settings. At startup the supervisor also requires the
-accepted footprint and padding to match both tracked Nav2 costmaps and proves
-the enabled StopZone leaves at least the worst stopping distance plus
-uncertainty around that footprint. A newly captured arm stow invalidates the
-record. Tested speeds must cover the tracked MPPI limits; the manual driver
+accepted footprint and padding to match both tracked Nav2 costmaps. The current
+collision monitor uses that exact body for `StopZone` and `FootprintApproach`,
+with no static clearance beyond it. The predictive guard uses the commanded
+translation and rotation to project the body's motion, reducing speed if it
+would intersect a scan return within 2.5 seconds. Its horizon must cover the
+recorded stop latency and each direction's stopping distance plus uncertainty,
+with one simulation step reserved. Side walls outside the moving body do not
+stop parallel travel; a turn that sweeps a corner into them reduces speed.
+Legacy static guards must still enclose the measured stopping clearance.
+A newly captured arm stow invalidates the record. Tested speeds must cover the
+tracked MPPI limits; the manual driver
 uses the same limits, so slow trials cannot approve a faster command.
 
 ### Revalidating
@@ -113,9 +124,12 @@ performance or obstacle coverage. Before base trials, physically verify a
 compact arm stow, record it with `scripts/capture_stow.py`, and check that the
 full arm and cable envelope fits the accepted footprint. Predeclare stopping
 limits, measure at least five stops per direction on the recorded surface and
-payload, and update the tracked Nav2 StopZone to cover the worst distance plus
-measurement uncertainty. Reuse qualified evidence only for unchanged
-conditions, and repeat the fault cases affected by the change. Host and ROS
+payload, and check the tracked collision guard covers the worst distance plus
+measurement uncertainty. A changed collision model also needs an attended
+physical obstacle-response check; the native-monitor tests use isolated DDS
+and establish software behavior, not real stopping performance. Reuse qualified
+evidence only for unchanged conditions, and repeat the fault cases affected by
+the change. Host and ROS
 restart tests must show an immediate command stop, then re-arm only once
 telemetry and arm permission are healthy.
 

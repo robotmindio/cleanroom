@@ -79,19 +79,21 @@ def test_indoor_stop_zone_and_speed_profile_match_the_acceptance_budget():
     import yaml
     from lekiwi_rmf.geometry import (
         point_in_polygon as _point_in_polygon, polygon as _polygon,
-        polygon_boundary_distance as _polygon_boundary_distance)
+        same_polygon as _same_polygon)
+    from lekiwi_rmf.safety_acceptance import nav2_stop_zone_clearance
     root = Path(__file__).parents[1]
     nav2 = yaml.safe_load((root/'config/nav2_params.yaml').read_text())
     profile = yaml.safe_load((root/'config/onboard_braking.yaml').read_text())
     footprint = _polygon(nav2['local_costmap']['local_costmap']['ros__parameters']['footprint'],'footprint')
     stop = _polygon(nav2['collision_monitor']['ros__parameters']['StopZone']['points'],'stop')
     assert all(_point_in_polygon(point,stop) for point in footprint)
-    assert _polygon_boundary_distance(footprint,stop) == pytest.approx(profile['maximum_stopping_distance_m'])
+    assert _same_polygon(footprint, stop)
     linear, angular = load_base_speed_limits(root/'config/nav2_params.yaml')
     assert nav2['velocity_smoother']['ros__parameters']['max_velocity'] == [linear, linear, angular]
     point_speed=(linear+profile['body_radius_m']*angular)*(1+profile['scale_reserve_fraction'])
     assert profile['maximum_stopping_distance_m']>=point_speed*profile['maximum_stop_time_s']+profile['measurement_uncertainty_m']
     acceptance=yaml.safe_load((root/'config/safety_acceptance.yaml').read_text())
+    assert nav2_stop_zone_clearance(root/'config/nav2_params.yaml', acceptance)[0]
     assert profile['maximum_center_radius_m']>linear*profile['nominal_command_duration_s']+acceptance['maximum_allowed_stopping_distance_m']+profile['measurement_uncertainty_m']
 
 

@@ -56,13 +56,17 @@ def _navigation_params(source_file, bounded_test, linear_limit, angular_limit, q
         ymin, ymax = min(p[1] for p in footprint), max(p[1] for p in footprint)
         monitor = nav2['collision_monitor']['ros__parameters']
         # Keep the physically qualified test geometry independent of production clearance.
+        monitor['polygons'] = ['StopZone', 'SlowdownZone']
+        monitor.pop('FootprintApproach', None)
+        monitor['SlowdownZone'] = dict(action_type='slowdown', slowdown_ratio=.35,
+            min_points=1, enabled=True, visualize=True, polygon_pub_topic='collision_slowdown_zone')
         padding = .05
         radius = max(math.hypot(x, y) for x, y in footprint) + padding
         def rectangle(left, right, bottom, top):
             return str([[right, top], [right, bottom], [left, bottom], [left, top]])
         for zone, extra in [('StopZone', 0.0), ('SlowdownZone', .07)]:
             settings = monitor[zone]
-            settings.pop('points')
+            settings.pop('points', None)
             settings.update(type='velocity_polygon', holonomic=True,
                 velocity_polygons=['rotation', 'return_forward', 'return_reverse', 'return_left', 'return_right',
                     'forward', 'reverse', 'left', 'right', 'fallback'])
@@ -178,7 +182,7 @@ def _stack(context):
             "scan_self_mask_file": ParameterValue(
                 config("lidar_self_mask_simulation.yaml" if sim else "lidar_self_mask.yaml"), value_type=str),
             # A validated physical record is accepted only when its measured stopping
-            # distance still fits this exact tracked Nav2 footprint and StopZone.
+            # bounds still fit this tracked footprint and collision braking model.
             "nav2_params_file": params_file,
             **({"stow_joint_positions": [qualification['stow_joint_positions'][name] for name in ARM_JOINTS]}
                if qualification and qualification.get('stow_joint_positions') else {}),

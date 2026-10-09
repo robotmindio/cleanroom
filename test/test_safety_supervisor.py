@@ -10,7 +10,7 @@ import yaml
 from sensor_msgs.msg import BatteryState, LaserScan, PointCloud2, PointField
 from diagnostic_msgs.msg import DiagnosticStatus
 
-from lekiwi_rmf.safety_acceptance import validate_acceptance_file
+from lekiwi_rmf.safety_acceptance import nav2_stop_zone_clearance, validate_acceptance_file
 from lekiwi_rmf.safety_supervisor import (
     Requirement, SafetyState, SafetyStateMachine, SafetySupervisor, _valid_battery,
     _scan_masked_angle, _valid_depth_points, _valid_scan_ranges,
@@ -497,6 +497,59 @@ def test_physical_acceptance_requires_measured_all_direction_and_fault_results(t
     valid, detail = validate_acceptance_file(path, nav2_path, expected_stow)
     assert not valid
     assert "clearance" in detail
+
+
+@pytest.mark.parametrize("fault", [
+    None, "missing_approach", "disabled_monitor", "disabled_approach", "wrong_action",
+    "smaller_body", "padded_body", "multiple_points", "short_horizon", "coarse_step",
+    "nan_horizon", "missing_points", "invalid_parameters", "deprecated_points_override",
+    "disabled_scan", "ignored_scan", "stop_ignores_scan", "wrong_scan_topic",
+])
+def test_predictive_braking_is_bound_to_the_body_and_measured_stops(tmp_path, fault):
+    root = Path(__file__).parents[1]
+    acceptance = yaml.safe_load((root / "config/safety_acceptance.yaml").read_text())
+    nav2 = yaml.safe_load((root / "config/nav2_params.yaml").read_text())
+    monitor = nav2["collision_monitor"]["ros__parameters"]
+    approach = monitor["FootprintApproach"]
+    if fault == "missing_approach":
+        monitor["polygons"].remove("FootprintApproach")
+    elif fault == "disabled_monitor":
+        monitor["enabled"] = False
+    elif fault == "disabled_approach":
+        approach["enabled"] = False
+    elif fault == "wrong_action":
+        approach["action_type"] = "slowdown"
+    elif fault in ("smaller_body", "padded_body"):
+        extent = 0.20 if fault == "smaller_body" else 0.25
+        approach["points"] = str([
+            [-extent, -extent], [extent, -extent], [extent, extent], [-extent, extent],
+        ])
+    elif fault == "multiple_points":
+        approach["min_points"] = 2
+    elif fault == "short_horizon":
+        approach["time_before_collision"] = 2.0
+    elif fault == "coarse_step":
+        approach["simulation_time_step"] = 0.5
+    elif fault == "nan_horizon":
+        approach["time_before_collision"] = math.nan
+    elif fault == "missing_points":
+        del approach["points"]
+    elif fault == "invalid_parameters":
+        monitor["FootprintApproach"] = None
+    elif fault == "deprecated_points_override":
+        approach["max_points"] = 20
+    elif fault == "disabled_scan":
+        monitor["scan"]["enabled"] = False
+    elif fault == "ignored_scan":
+        approach["sources_names"] = []
+    elif fault == "stop_ignores_scan":
+        monitor["StopZone"]["sources_names"] = []
+    elif fault == "wrong_scan_topic":
+        monitor["scan"]["topic"] = "/unqualified_scan"
+    path = tmp_path / "nav2.yaml"
+    path.write_text(yaml.safe_dump(nav2))
+    valid, detail = nav2_stop_zone_clearance(path, acceptance)
+    assert valid == (fault is None), detail
 
 
 def test_physical_acceptance_rejects_self_selected_weak_limits(tmp_path):

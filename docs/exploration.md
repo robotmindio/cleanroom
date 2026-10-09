@@ -22,8 +22,8 @@ LEKIWI_WS=~/lekiwi_ws/current scripts/explore.sh
 ```
 
 The operator must remain at the motor-power stop with the accepted payload and
-folded arm. Clear the full production stop zone around the base before starting;
-an obstacle in that zone holds motion even when the goal is accepted.
+folded arm. The robot must fit through the planned route; braking protection
+reduces speed when the moving body would approach an obstacle.
 
 To set reduced limits or search frontiers only, source `scripts/setup.bash` and
 use the existing ROS action directly:
@@ -52,12 +52,20 @@ occupies them, so a mapped obstacle or unknown cell there is stale or
 self-observed, and a stationary robot adds no map node that could clear it.
 Real nearby obstacles are handled live by the Nav2 collision monitor's stop
 zone and the local costmap. The footprint comes from the same selected
-Nav2 parameter file as navigation, with zero additional padding. Nav2 retains
-its accepted stop polygon with 77 cm on every side. Costmap inflation is a soft cost field,
-not extra footprint padding; local inflation still encloses the corners so
+Nav2 parameter file as navigation, with zero additional padding. `StopZone` is
+exactly that body, with no fixed clearance beyond it. `FootprintApproach` uses
+the same body and Nav2's native holonomic collision prediction to reduce speed
+only when its projected motion would intersect scan returns. Parallel walls
+outside the body therefore permit straight travel; turning still checks the
+corners swept by the rotation. The 2.5-second horizon covers the measured
+linear/angular stopping bounds and uncertainty, checked against the acceptance
+record at startup. Costmap inflation is a soft cost field, not extra footprint
+padding; local inflation still encloses the corners so
 MPPI's native footprint-check optimization remains valid. The exploration
 region retains a 1.10 m body/stopping inset; targets and preflight paths stay
 inside it, and the active task ends if the live pose approaches the boundary.
+This inset is only the reserve at the task's maximum travel radius, not
+clearance from walls or furniture.
 A new goal is rejected while the map, services, SLAM/TF, motion permission or
 arm stow are not healthy.
 
