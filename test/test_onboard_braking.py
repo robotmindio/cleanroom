@@ -32,11 +32,11 @@ def test_velocity_seed_does_not_replace_the_independent_wall_measurement():
     _,reference=wall_scan(0.,0.)
     transform=SimpleNamespace(rotation=SimpleNamespace(x=0.,y=0.,z=0.,w=1.),
                               translation=SimpleNamespace(x=0.,y=0.))
-    for actual,stamp in [(.04,.2),(0.,.5)]:
+    for actual,stamp,seed in [(.04,.2,None),(0.,.5,None),(.15,.2,[.15,0.,0.])]:
         scan,_=wall_scan(actual,stamp)
         node=SimpleNamespace(sectors=[],scans=[],reference_points=reference,
-            ranges=[{'pose':[0.,0.,0.],'stamp':0.}],wheel_velocity=(.3,0.,0.),odom_at=time.monotonic(),
-            config={'body_radius_m':.33},
+            ranges=[] if seed else [{'pose':[0.,0.,0.],'stamp':0.}],wheel_velocity=(.3,0.,0.),odom_at=time.monotonic(),
+            config={'body_radius_m':.33,**({'reference_start_pose':seed} if seed else {})},
             buffer=SimpleNamespace(can_transform=lambda *args:True,
                 lookup_transform=lambda *args:SimpleNamespace(transform=transform)),
             get_clock=lambda:SimpleNamespace(now=lambda:SimpleNamespace(nanoseconds=int(stamp*1e9))))
@@ -58,6 +58,7 @@ def test_resume_rejects_changed_speed_or_stopping_conditions():
     assert trials==[{'qualification_eligible':True,'source_run':'earlier'}]
     assert list(faults)==['linear/scan_disconnect']
     assert resume(previous,{**config,'trials_per_direction':1})==(trials,faults)
+    assert resume(previous,{**config,'reference_start_pose':[.15,0.,0.]})==(trials,faults)
     for key in ('linear_speed_m_s','angular_speed_rad_s','payload_kg',
                 'measurement_uncertainty_m','maximum_stopping_distance_m'):
         with pytest.raises(ValueError,match='profile differs'):

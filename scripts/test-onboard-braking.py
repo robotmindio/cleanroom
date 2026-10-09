@@ -61,7 +61,7 @@ def terminal_observed_speed(samples, angular, window_s=1.):
 
 def resumable_evidence(previous, config):
     """Reuse measurements only under the same speed and stopping conditions."""
-    run_fields = {'nominal_only', 'faults_only', 'direction', 'selected_fault', 'angular_test', 'depth_filter_pid', 'test_center', 'maximum_runtime_s', 'trials_per_direction'}
+    run_fields = {'nominal_only', 'faults_only', 'direction', 'selected_fault', 'angular_test', 'depth_filter_pid', 'test_center', 'reference_start_pose', 'maximum_runtime_s', 'trials_per_direction'}
     conditions = {k:v for k,v in config.items() if k not in run_fields}
     if {k:v for k,v in previous['profile'].items() if k not in run_fields} != conditions:
         raise ValueError('resumed speed/load/measurement profile differs')
@@ -245,7 +245,7 @@ class OnboardBraking(FAULT.FaultTest):
             cloud=np.concatenate(self.reference_scans)
             bins=(np.degrees(np.arctan2(cloud[:,1],cloud[:,0]))%360).astype(int)
             self.reference_points=np.array([np.median(cloud[bins==key],axis=0) for key in np.unique(bins) if (bins==key).sum()>=5])
-        guess=self.ranges[-1]['pose'] if self.ranges else [0.,0.,0.]
+        guess=self.ranges[-1]['pose'] if self.ranges else self.config.get('reference_start_pose',[0.,0.,0.])
         predicted=list(guess)
         if self.ranges and time.monotonic()-self.odom_at<.3:
             dt=stamp-self.ranges[-1]['stamp']
@@ -579,9 +579,16 @@ def main():
             raise ValueError('resumed test center is missing')
     reference_run=args.reference_run or (args.resume if args.stage else None)
     if reference_run:
-        reference=json.loads((reference_run/'independent-poses.json').read_text())['reference_points']
+        saved=json.loads((reference_run/'independent-poses.json').read_text())
+        reference=saved['reference_points']
         if reference is None:
             raise ValueError('fixed raw-LiDAR reference is missing')
+        if not saved['ranges']:
+            raise ValueError('saved reference has no independent final pose')
+        seed=saved['ranges'][-1]['pose']
+        if len(seed)!=3 or not all(type(v) in (int,float) and math.isfinite(v) for v in seed):
+            raise ValueError('saved independent final pose must contain three finite numbers')
+        config['reference_start_pose']=seed
         config['test_center']=json.loads((reference_run/'result.json').read_text())['origin']
     if args.center:
         if not all(math.isfinite(v) for v in args.center):
