@@ -1,0 +1,724 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-09",
+  "deployed_revision": "9e441b32a2085c1ac76faae04dc47e1cb09e2248",
+  "payload_kg": 0.2,
+  "stage": "0.25",
+  "scope": "Eleven qualified nominal stops and all four linear moving faults. Nineteen nominal stops and four angular moving faults remain unqualified. Production acceptance and speed limits remain unchanged.",
+  "nominal_counts": {
+    "forward": 5,
+    "reverse": 5,
+    "left": 1
+  },
+  "passed_moving_faults": 4,
+  "worst_conservative_stopping_distance_m": 0.27296104296310336,
+  "maximum_modeled_uncertainty_m": 0.05249852950042584,
+  "maximum_stop_time_receive_upper_s": 1.5248287004069425,
+  "trials": [
+    {
+      "observed_swept_distance_m": 0.0916700712064473,
+      "unobserved_excursion_bound_m": 0.028879763185977934,
+      "conservative_swept_distance_m": 0.12054983439242523,
+      "uncertainty_upper_m": 0.030489261287556052,
+      "maximum_capture_gap_s": 0.20090270042419434,
+      "stop_time_receive_upper_s": 0.7910699514322914,
+      "first_sample_time": 106310.431606557,
+      "last_sample_time": 106312.845594432,
+      "fault_cut_time": 106310.447226864,
+      "samples": 13,
+      "baseline_time_basis": "sensor_capture_stamp",
+      "within_budget": true,
+      "direction": "forward",
+      "requested_speed": 0.25,
+      "terminal_observed_speed": 0.23545838037740802,
+      "requested_speed_covered": true,
+      "speed_coverage_basis": "maximum guarded command, fresh wheel feedback and independent terminal ground speed",
+      "terminal_wheel_speed": 0.24579618986863455,
+      "terminal_guarded_speed": 0.25,
+      "feedback_interrupted": false,
+      "qualification_eligible": true,
+      "source_run": ".benchmarks/onboard-braking/20261009-145518"
+    },
+    {
+      "observed_swept_distance_m": 0.1217402186485691,
+      "unobserved_excursion_bound_m": 0.02889350652694702,
+      "conservative_swept_distance_m": 0.15063372517551613,
+      "uncertainty_upper_m": 0.03612602571837155,
+      "maximum_capture_gap_s": 0.20099830627441406,
+      "stop_time_receive_upper_s": 0.9819269952713512,
+      "first_sample_time": 106450.707559271,
+      "last_sample_time": 106453.124296541,
+      "fault_cut_time": 106450.733382565,
+      "samples": 13,
+      "baseline_time_basis": "sensor_capture_stamp",
+      "within_budget": true,
+      "direction": "forward",
+      "requested_speed": 0.25,
+      "terminal_observed_speed": 0.2334491216274162,
+      "requested_speed_covered": true,
+      "speed_coverage_basis": "maximum guarded command, fresh wheel feedback and independent terminal ground speed",
+      "terminal_wheel_speed": 0.2414226725903445,
+      "terminal_guarded_speed": 0.25,
+      "feedback_interrupted": false,
+      "qualification_eligible": true,
+      "source_run": "/home/nex/roboto/cleanroom/.claude/worktrees/base-speed-qualification/.benchmarks/onboard-braking/20261009-145743"
+    },
+    {
+      "observed_swept_distance_m": 0.07896160862327688,
+      "unobserved_excursion_bound_m": 0.02877855598926544,
+      "conservative_swept_distance_m": 0.10774016461254232,
+      "uncertainty_upper_m": 0.029521159895747544,
+      "maximum_capture_gap_s": 0.20019865036010742,
+      "stop_time_receive_upper_s": 0.7721932503627613,
+      "first_sample_time": 106503.697247788,
+      "last_sample_time": 106506.116014729,
+      "fault_cut_time": 106503.728176836,
+      "samples": 13,
+      "baseline_time_basis": "sensor_capture_stamp",
+      "within_budget": true,
+      "direction": "forward",
+      "requested_speed": 0.25,
+      "terminal_observed_speed": 0.23665808459411375,
+      "requested_speed_covered": true,
+      "speed_coverage_basis": "maximum guarded command, fresh wheel feedback and independent terminal ground speed",
+      "terminal_wheel_speed": 0.23913760657924615,
+      "terminal_guarded_speed": 0.25,
+      "feedback_interrupted": false,
+      "qualification_eligible": true,
+      "source_run": "/home/nex/roboto/cleanroom/.claude/worktrees/base-speed-qualification/.benchmarks/onboard-braking/20261009-145840"
+    },
+    {
+      "observed_swept_distance_m": 0.10701134653956225,
+      "unobserved_excursion_bound_m": 0.028856149315834044,
+      "conservative_swept_distance_m": 0.1358674958553963,
+      "uncertainty_upper_m": 0.03314661975056936,
+      "maximum_capture_gap_s": 0.20073843002319336,
+      "stop_time_receive_upper_s": 0.9940507280261954,
+      "first_sample_time": 106557.403093164,
+      "last_sample_time": 106559.819281856,
+      "fault_cut_time": 106557.416431611,
+      "samples": 13,
+      "baseline_time_basis": "sensor_capture_stamp",
+      "within_budget": true,
+      "direction": "forward",
+      "requested_speed": 0.25,
+      "terminal_observed_speed": 0.2396060837347146,
+      "requested_speed_covered": true,
+      "speed_coverage_basis": "maximum guarded command, fresh wheel feedback and independent terminal ground speed",
+      "terminal_wheel_speed": 0.2414226725903445,
+      "terminal_guarded_speed": 0.25,
+      "feedback_interrupted": false,
+      "qualification_eligible": true,
+      "source_run": "/home/nex/roboto/cleanroom/.claude/worktrees/base-speed-qualification/.benchmarks/onboard-braking/20261009-145932"
+    },
+    {
+      "observed_swept_distance_m": 0.12213782582375315,
+      "unobserved_excursion_bound_m": 0.04303917437791824,
+      "conservative_swept_distance_m": 0.1651770002016714,
+      "uncertainty_upper_m": 0.036026505388608396,
+      "maximum_capture_gap_s": 0.29940295219421387,
+      "stop_time_receive_upper_s": 1.0884232411917765,
+      "first_sample_time": 106612.876714289,
+      "last_sample_time": 106615.290259806,
+      "fault_cut_time": 106612.89055482,
+      "samples": 13,
+      "baseline_time_basis": "sensor_capture_stamp",
+      "within_budget": true,
+      "direction": "forward",
+      "requested_speed": 0.25,
+      "terminal_observed_speed": 0.2300735473891204,
+      "requested_speed_covered": true,
+      "speed_coverage_basis": "maximum guarded command, fresh wheel feedback and independent terminal ground speed",
+      "terminal_wheel_speed": 0.23912393962072206,
+      "terminal_guarded_speed": 0.25,
+      "feedback_interrupted": false,
+      "qualification_eligible": true,
+      "source_run": ".benchmarks/onboard-braking/20261009-150027"
+    },
+    {
+      "observed_swept_distance_m": 0.1025947440959554,
+      "unobserved_excursion_bound_m": 0.02889398634433746,
+      "conservative_swept_distance_m": 0.13148873044029286,
+      "uncertainty_upper_m": 0.030169484773999673,
+      "maximum_capture_gap_s": 0.20100164413452148,
+      "stop_time_receive_upper_s": 0.797653501140303,
+      "first_sample_time": 121902.156865007,
+      "last_sample_time": 121904.570275427,
+      "fault_cut_time": 121902.16283511,
+      "samples": 13,
+      "baseline_time_basis": "sensor_capture_stamp",
+      "within_budget": true,
+      "direction": "reverse",
+      "requested_speed": 0.25,
+      "terminal_observed_speed": 0.24366814955717006,
+      "requested_speed_covered": true,
+      "speed_coverage_basis": "maximum guarded command, fresh wheel feedback and independent terminal ground speed",
+      "terminal_wheel_speed": 0.25252510817940665,
+      "terminal_guarded_speed": 0.25,
+      "feedback_interrupted": false,
+      "qualification_eligible": true,
+      "source_run": ".benchmarks/onboard-braking/20261009-191458"
+    },
+    {
+      "observed_swept_distance_m": 0.1162824074586146,
+      "unobserved_excursion_bound_m": 0.04285478740930557,
+      "conservative_swept_distance_m": 0.15913719486792016,
+      "uncertainty_upper_m": 0.03223841079924683,
+      "maximum_capture_gap_s": 0.29812026023864746,
+      "stop_time_receive_upper_s": 1.0933926392317517,
+      "first_sample_time": 121922.277363575,
+      "last_sample_time": 121924.688412486,
+      "fault_cut_time": 121922.284548009,
+      "samples": 13,
+      "baseline_time_basis": "sensor_capture_stamp",
+      "within_budget": true,
+      "direction": "reverse",
+      "requested_speed": 0.25,
+      "terminal_observed_speed": 0.24410335755629034,
+      "requested_speed_covered": true,
+      "speed_coverage_basis": "maximum guarded command, fresh wheel feedback and independent terminal ground speed",
+      "terminal_wheel_speed": 0.247980381828897,
+      "terminal_guarded_speed": 0.25,
+      "feedback_interrupted": false,
+      "qualification_eligible": true,
+      "source_run": ".benchmarks/onboard-braking/20261009-191458"
+    },
+    {
+      "observed_swept_distance_m": 0.08716589341822101,
+      "unobserved_excursion_bound_m": 0.043156215548515314,
+      "conservative_swept_distance_m": 0.13032210896673632,
+      "uncertainty_upper_m": 0.02845787958860148,
+      "maximum_capture_gap_s": 0.3002171516418457,
+      "stop_time_receive_upper_s": 0.8905003376421519,
+      "first_sample_time": 121941.786768008,
+      "last_sample_time": 121944.204190248,
+      "fault_cut_time": 121941.800490773,
+      "samples": 13,
+      "baseline_time_basis": "sensor_capture_stamp",
+      "within_budget": true,
+      "direction": "reverse",
+      "requested_speed": 0.25,
+      "terminal_observed_speed": 0.2422157636530898,
+      "requested_speed_covered": true,
+      "speed_coverage_basis": "maximum guarded command, fresh wheel feedback and independent terminal ground speed",
+      "terminal_wheel_speed": 0.2436058302187895,
+      "terminal_guarded_speed": 0.25,
+      "feedback_interrupted": false,
+      "qualification_eligible": true,
+      "source_run": ".benchmarks/onboard-braking/20261009-191458"
+    },
+    {
+      "observed_swept_distance_m": 0.12298741341510884,
+      "unobserved_excursion_bound_m": 0.028809641301631925,
+      "conservative_swept_distance_m": 0.15179705471674076,
+      "uncertainty_upper_m": 0.03470229639664886,
+      "maximum_capture_gap_s": 0.20041489601135254,
+      "stop_time_receive_upper_s": 1.059243242998491,
+      "first_sample_time": 122394.058392369,
+      "last_sample_time": 122396.466435768,
+      "fault_cut_time": 122394.060974891,
+      "samples": 13,
+      "baseline_time_basis": "sensor_capture_stamp",
+      "within_budget": true,
+      "direction": "reverse",
+      "requested_speed": 0.25,
+      "terminal_observed_speed": 0.2457989680086622,
+      "requested_speed_covered": true,
+      "speed_coverage_basis": "maximum guarded command, fresh wheel feedback and independent terminal ground speed",
+      "terminal_wheel_speed": 0.2436058302187895,
+      "terminal_guarded_speed": 0.25,
+      "feedback_interrupted": false,
+      "qualification_eligible": true,
+      "source_run": ".benchmarks/onboard-braking/20261009-192316"
+    },
+    {
+      "observed_swept_distance_m": 0.11093017938258083,
+      "unobserved_excursion_bound_m": 0.0427777424454689,
+      "conservative_swept_distance_m": 0.15370792182804974,
+      "uncertainty_upper_m": 0.03250186471068686,
+      "maximum_capture_gap_s": 0.29758429527282715,
+      "stop_time_receive_upper_s": 1.090458572274656,
+      "first_sample_time": 122414.579174343,
+      "last_sample_time": 122416.991693326,
+      "fault_cut_time": 122414.590513149,
+      "samples": 13,
+      "baseline_time_basis": "sensor_capture_stamp",
+      "within_budget": true,
+      "direction": "reverse",
+      "requested_speed": 0.25,
+      "terminal_observed_speed": 0.24851203417671128,
+      "requested_speed_covered": true,
+      "speed_coverage_basis": "maximum guarded command, fresh wheel feedback and independent terminal ground speed",
+      "terminal_wheel_speed": 0.23707875858692198,
+      "terminal_guarded_speed": 0.25,
+      "feedback_interrupted": false,
+      "qualification_eligible": true,
+      "source_run": ".benchmarks/onboard-braking/20261009-192316"
+    },
+    {
+      "observed_swept_distance_m": 0.10398041262180001,
+      "unobserved_excursion_bound_m": 0.029024942219257353,
+      "conservative_swept_distance_m": 0.13300535484105735,
+      "uncertainty_upper_m": 0.031086724852458773,
+      "maximum_capture_gap_s": 0.20191264152526855,
+      "stop_time_receive_upper_s": 1.0151599115197314,
+      "first_sample_time": 122440.754428255,
+      "last_sample_time": 122443.17391574,
+      "fault_cut_time": 122440.755574561,
+      "samples": 13,
+      "baseline_time_basis": "sensor_capture_stamp",
+      "within_budget": true,
+      "direction": "left",
+      "requested_speed": 0.25,
+      "terminal_observed_speed": 0.23872950332525833,
+      "requested_speed_covered": true,
+      "speed_coverage_basis": "maximum guarded command, fresh wheel feedback and independent terminal ground speed",
+      "terminal_wheel_speed": 0.23521038747579834,
+      "terminal_guarded_speed": 0.25,
+      "feedback_interrupted": false,
+      "qualification_eligible": true,
+      "source_run": ".benchmarks/onboard-braking/20261009-192316"
+    }
+  ],
+  "faults": {
+    "linear/scan_disconnect": {
+      "passed": true,
+      "angular_test": false,
+      "requested_speed": 0.25,
+      "injection_speed": 0.23707875858692198,
+      "terminal_observed_speed": 0.2320939265414444,
+      "denial": {
+        "base_motion_permitted": "false",
+        "arm_motion_permitted": "true",
+        "arm_stowed": "true",
+        "faults": "scan: stale",
+        "latched_faults": "",
+        "bounded_base_test": "true"
+      },
+      "independent": {
+        "observed_swept_distance_m": 0.20101614262387385,
+        "unobserved_excursion_bound_m": 0.02882595509290695,
+        "conservative_swept_distance_m": 0.2298420977167808,
+        "uncertainty_upper_m": 0.05249852950042584,
+        "maximum_capture_gap_s": 0.20052838325500488,
+        "stop_time_receive_upper_s": 1.3335223993344698,
+        "first_sample_time": 107570.270268381,
+        "last_sample_time": 107572.885231397,
+        "fault_cut_time": 107570.14134629192,
+        "samples": 14,
+        "baseline_time_basis": "sensor_capture_stamp",
+        "within_budget": true
+      },
+      "recovered_driver": "ARMED",
+      "stopped_wheel_speed": 0.0,
+      "observed_displacement_m": 0.5303227779500667,
+      "source_run": ".benchmarks/onboard-braking/20261009-151628",
+      "wheel_feedback_samples": 44
+    },
+    "linear/compute_command_loss": {
+      "passed": true,
+      "angular_test": false,
+      "requested_speed": 0.25,
+      "injection_speed": 0.22808562890975062,
+      "terminal_observed_speed": 0.23115010871759326,
+      "denial": {
+        "base_motion_permitted": "false",
+        "arm_motion_permitted": "false",
+        "arm_stowed": "false",
+        "faults": "driver: stale; joints: stale; arm_workspace: MoveIt reports collision or workspace monitor is unhealthy",
+        "latched_faults": "",
+        "bounded_base_test": "true"
+      },
+      "independent": {
+        "observed_swept_distance_m": 0.1413317523904662,
+        "unobserved_excursion_bound_m": 0.02880415767431259,
+        "conservative_swept_distance_m": 0.1701359100647788,
+        "uncertainty_upper_m": 0.041355816366396195,
+        "maximum_capture_gap_s": 0.2003767490386963,
+        "stop_time_receive_upper_s": 0.9594624290330103,
+        "first_sample_time": 108128.724615745,
+        "last_sample_time": 108131.141791367,
+        "fault_cut_time": 108128.767398147,
+        "samples": 13,
+        "baseline_time_basis": "sensor_capture_stamp",
+        "within_budget": true
+      },
+      "recovered_driver": "ARMED",
+      "stopped_wheel_speed": 0.0,
+      "observed_displacement_m": 0.4971932018701125,
+      "source_run": ".benchmarks/onboard-braking/20261009-152547",
+      "wheel_feedback_samples": 23
+    },
+    "linear/telemetry_loss": {
+      "passed": true,
+      "angular_test": false,
+      "requested_speed": 0.25,
+      "injection_speed": 0.2480989665404626,
+      "terminal_observed_speed": 0.23595016901987523,
+      "denial": {
+        "base_motion_permitted": "false",
+        "arm_motion_permitted": "false",
+        "arm_stowed": "false",
+        "faults": "driver: stale; joints: stale; arm_workspace: MoveIt reports collision or workspace monitor is unhealthy",
+        "latched_faults": "",
+        "bounded_base_test": "true"
+      },
+      "independent": {
+        "observed_swept_distance_m": 0.15590626745259953,
+        "unobserved_excursion_bound_m": 0.02881992310285568,
+        "conservative_swept_distance_m": 0.1847261905554552,
+        "uncertainty_upper_m": 0.045846528431182226,
+        "maximum_capture_gap_s": 0.200486421585083,
+        "stop_time_receive_upper_s": 1.169993554474786,
+        "first_sample_time": 109500.537829079,
+        "last_sample_time": 109502.948970755,
+        "fault_cut_time": 109500.57008367611,
+        "samples": 13,
+        "baseline_time_basis": "sensor_capture_stamp",
+        "within_budget": true
+      },
+      "recovered_driver": "ARMED",
+      "stopped_wheel_speed": 0.0,
+      "observed_displacement_m": 0.5018159054752193,
+      "source_run": ".benchmarks/onboard-braking/20261009-154824",
+      "wheel_feedback_samples": 18
+    },
+    "linear/depth_disconnect": {
+      "passed": true,
+      "angular_test": false,
+      "requested_speed": 0.25,
+      "injection_speed": 0.26373021668798824,
+      "terminal_observed_speed": 0.22893220849305426,
+      "denial": {
+        "base_motion_permitted": "false",
+        "arm_motion_permitted": "false",
+        "arm_stowed": "true",
+        "faults": "depth: stale",
+        "latched_faults": "",
+        "bounded_base_test": "true"
+      },
+      "independent": {
+        "observed_swept_distance_m": 0.2300560118184844,
+        "unobserved_excursion_bound_m": 0.04290503114461899,
+        "conservative_swept_distance_m": 0.27296104296310336,
+        "uncertainty_upper_m": 0.04973413920346727,
+        "maximum_capture_gap_s": 0.29846978187561035,
+        "stop_time_receive_upper_s": 1.5248287004069425,
+        "first_sample_time": 124266.27527268,
+        "last_sample_time": 124269.283298577,
+        "fault_cut_time": 124266.24539327247,
+        "samples": 16,
+        "baseline_time_basis": "sensor_capture_stamp",
+        "within_budget": true
+      },
+      "recovered_driver": "ARMED",
+      "stopped_wheel_speed": 0.0,
+      "observed_displacement_m": 0.5693943817206206,
+      "wheel_feedback_samples": 51
+    }
+  },
+  "exclusions": [
+    {
+      "run": "20261009-192316",
+      "reason": "Later left attempt: independent feedback interruption and insufficient ground speed; earlier eligible stops retained."
+    },
+    {
+      "run": "20261009-193111",
+      "reason": "Left attempt: slowdown and insufficient ground speed."
+    },
+    {
+      "run": "20261009-194037",
+      "reason": "Reversed-corridor left attempt: 0.214142 m/s, below the 0.225 m/s coverage requirement."
+    },
+    {
+      "run": "20261009-195426",
+      "reason": "Angular fault setup: square SlowdownZone blocked full speed before injection; completed linear depth fault retained."
+    },
+    {
+      "run": "20261009-195651",
+      "reason": "Right setup: stationary-reference check failed before speed pulse."
+    }
+  ],
+  "raw_artifacts": [
+    {
+      "path": ".benchmarks/onboard-braking/20261009-145518/profile.yaml",
+      "sha256": "7532bf5531f40b6d2547076a09a887995829707fdd3cccac61d3b89fedd4bc02",
+      "bytes": 1056
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-145518/measurements.json",
+      "sha256": "6b36d7dd931c9be0ce9f91f3f6a9bb3c987fda89c7990f0b64582d4fdbdd5192",
+      "bytes": 2999
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-145518/result.json",
+      "sha256": "3969fe85da788cdd0f370db8885cca14ca97003aec0b796eba2e2f9e0c6a1e49",
+      "bytes": 414599
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-145518/independent-poses.json",
+      "sha256": "fd31340c4c0abde075c22dc08bc21c4fcdaefc82d4afae893cda5c9b32f94544",
+      "bytes": 6020950
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-150027/profile.yaml",
+      "sha256": "5d4a7c04f20dc17bf54fb251f15faeb7db9093292dc9ee7f1ef384eb6eed2994",
+      "bytes": 1147
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-150027/measurements.json",
+      "sha256": "e82985f753f39acb6c911538af0f8f0dec4438b19dbc7ed912b1dc3ce18d9978",
+      "bytes": 7643
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-150027/result.json",
+      "sha256": "37ec026eb29c9f2a9ac8f08d308d1c0a55602fcf49e89c43c73bab3d9c3e5b43",
+      "bytes": 340582
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-150027/independent-poses.json",
+      "sha256": "33bfd58c24e94841ab992fb9b10e3f673e6f46341aa112f882445d13d0e430f9",
+      "bytes": 4829873
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-151628/profile.yaml",
+      "sha256": "13db8996bce4ed845d86d4530a394e6b836c35ac3c99a4c0ea1ab4e4956434bb",
+      "bytes": 1158
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-151628/measurements.json",
+      "sha256": "40dedef6aea71c57d390190eb206ca7e98ea23fb74e5b8c7ad8366b4546a5230",
+      "bytes": 22668
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-151628/result.json",
+      "sha256": "dee1200b65dc07f775cb2597b12f2120a70d542d478db6c9d4f912aa17e077fb",
+      "bytes": 445573
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-151628/independent-poses.json",
+      "sha256": "77f09fed3687c46a3243d32f174d867de5581c8e686e36fe51ec5470ed9bd51d",
+      "bytes": 5473469
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-152547/profile.yaml",
+      "sha256": "bd937faba6d8656f363095faa5ee2e5b6d821177013db497b4ad6ec941c3dd8f",
+      "bytes": 1162
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-152547/measurements.json",
+      "sha256": "bb718aac6e6a18268e37d0ff65f4c6e8e714a7b92e21fb606ab4c03601443a98",
+      "bytes": 32047
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-152547/result.json",
+      "sha256": "34059b6c82bb5affefb95963535d40adfed6dfb363dfa3b60ec2619b27023650",
+      "bytes": 431642
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-152547/independent-poses.json",
+      "sha256": "047a34283aa6bcb93dac4dec213a580feed77c8f51658941c4550051a939dca7",
+      "bytes": 5240688
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-154824/profile.yaml",
+      "sha256": "d03acd6dffd4274aa6ec99ea44331e88f6f63662ee6b96163771ae5ea08c6a1d",
+      "bytes": 1155
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-154824/measurements.json",
+      "sha256": "8e600e974ca5b468288164691da2d0f72a7636f9e1b7285f80fe45aad48c01e0",
+      "bytes": 39427
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-154824/result.json",
+      "sha256": "3447ca70ed13e4b8fc21aee0c727bdb8d07d2e83f20d11c792c4eba67932c1be",
+      "bytes": 672467
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-154824/independent-poses.json",
+      "sha256": "a7fc0b47eaf5228d291efdb355fca5c5cb423c3fc347f14aff7ae6fb9d423886",
+      "bytes": 7324336
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-191458/profile.yaml",
+      "sha256": "e8e99872175e0d83d4bfebd22a89c3ebda4bb349f9da1eef81ff02c4968f31ae",
+      "bytes": 1156
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-191458/measurements.json",
+      "sha256": "723aa326d0f87630763bf02c423ef98f8ea88e1f2035e3cc8f0456042769fe39",
+      "bytes": 42527
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-191458/result.json",
+      "sha256": "d469a1db7130ff012915dc625eee242009cc668622770cf3919bd68ee1e57121",
+      "bytes": 1362949
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-191458/independent-poses.json",
+      "sha256": "4621555a9e80ec6082c6335b1eb00f55e8056cd1b48ee5172ad7ba25686ab925",
+      "bytes": 15180575
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-192316/profile.yaml",
+      "sha256": "43ee4619dc0ec68e84e2fbbd98afc52495dd5c91d3da57175536accf82f71d83",
+      "bytes": 1157
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-192316/measurements.json",
+      "sha256": "79c1793906ce8edfa7b6fa40e68723c69778cc1bebdc029a659b7fb6b290d846",
+      "bytes": 46771
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-192316/result.json",
+      "sha256": "1f2c4504481860123489267dc67ca979effad1a6fb9d2e758339e23f4749761f",
+      "bytes": 1590525
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-192316/independent-poses.json",
+      "sha256": "ecad9a4f04b709eea4467b0e2988c8eb2e4c3dfe7c5ab34267ccc48b41e58917",
+      "bytes": 16283014
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-193111/profile.yaml",
+      "sha256": "ec26b97f1aeebf2d4a74cd1db9e9a24589bc4cf2b5d992dde3c00cb4e0b5102e",
+      "bytes": 1156
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-193111/measurements.json",
+      "sha256": "c4e7657acb4c52e3ad6a93c82561c7ed78b718735065c03a711f36646c43b575",
+      "bytes": 46973
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-193111/result.json",
+      "sha256": "409633f5d8e144d61b9bba9c55bc83c1e237c0a57072242d5d35fec74e7b39c6",
+      "bytes": 664395
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-193111/independent-poses.json",
+      "sha256": "f85023806bfd9e7a6cf62180346b9a3cc0632fc62ae6a0e78a06f4fe1c9520a4",
+      "bytes": 6374513
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-194037/profile.yaml",
+      "sha256": "3c9c6d9e0f7b31e825df70a58745672550f910547629111006c6df7262ecfc6c",
+      "bytes": 1171
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-194037/measurements.json",
+      "sha256": "0973f8377dabf39a6575ab8454f4cae7acbe100de0d3d1e08d431fd001ebdab5",
+      "bytes": 46989
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-194037/result.json",
+      "sha256": "85f21b7ce14bc5c04e6f89ce52cfc6a49958aa7eeeb96b1f130c92b1359994c1",
+      "bytes": 658010
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-194037/independent-poses.json",
+      "sha256": "b244fd6ac12e66cbcd1b2ca0d96cb197678ba97a3723a0e0761cd7cec987b866",
+      "bytes": 6278292
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-195426/profile.yaml",
+      "sha256": "07f8c4f6ce658d4ee5b2518b3b8b5723addbbe3467a765b613138a4cf71ebded",
+      "bytes": 1181
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-195426/measurements.json",
+      "sha256": "0714b474a1dcff9ddfb9f0d7638f86db6a22d5116cbd14a1af278b8de3376ed7",
+      "bytes": 65737
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-195426/result.json",
+      "sha256": "ed881976785cf3c5328a0da25d3b736eec80ba9c79dd7b4c9da909664ec20228",
+      "bytes": 1031632
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-195426/independent-poses.json",
+      "sha256": "012cc2b0461cdc69d6e9aa5ff95199650309a35f7ea60a3940b8d0bf30eac23f",
+      "bytes": 9936391
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-195651/profile.yaml",
+      "sha256": "ba3d3138fcf05f890f1d33fde4730a04d7fcde7f639c57c2c3e1ec2bb5fb02d7",
+      "bytes": 1184
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-195651/measurements.json",
+      "sha256": "6bb8863579565c296ed1761565fe33bb04c3eb5e62a9eb01abe1c7d904b69d4c",
+      "bytes": 65809
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-195651/result.json",
+      "sha256": "18583ec8f31d08088f6669b115c8fcfb74c15d82daa310eaad3715c1231425e1",
+      "bytes": 612389
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-195651/independent-poses.json",
+      "sha256": "c424040be74e2e3a906f5252ba4dc1c9d9a59484a62497a9ff8b2c286cbdec7a",
+      "bytes": 4916171
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-145743/profile.yaml",
+      "sha256": "48927c7b5daee128bb8ae010ea1b1abfc9900ebcd77426ae211ea49c67cbf3ee",
+      "bytes": 1149
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-145743/measurements.json",
+      "sha256": "4d3abbdc12d7711d0b93f0ab995a4f45b7a5adb059a6c6c173c8fb7f450cabbf",
+      "bytes": 4198
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-145743/result.json",
+      "sha256": "70d97a11f72a94c148d0d377b5bcb8ca10d07926dd37deef4fa9cc2160c758e6",
+      "bytes": 398661
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-145743/independent-poses.json",
+      "sha256": "55a0e3b2e7c3db260cf65b0f4d4429f29c6fb6a9f259b6edecd2e8d8f19800aa",
+      "bytes": 5622670
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-145840/profile.yaml",
+      "sha256": "4c7da4017b2d7ff5b6b489a95e7a68dcc204f2c953f2aa8d620f02a39487f759",
+      "bytes": 1149
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-145840/measurements.json",
+      "sha256": "b87b7af86f8a82ab1ab228a626e8ec7cde6252e8ff995c55262d3284a785f000",
+      "bytes": 5348
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-145840/result.json",
+      "sha256": "7db6e8b0fb46c10aaa5d1d79b2f01752805580b277c3bac94ab492b00740f530",
+      "bytes": 392368
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-145840/independent-poses.json",
+      "sha256": "7ebbe6cf354a622c6a910194012570135c787cb38a818374ee8e70c871bcb633",
+      "bytes": 5004471
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-145932/profile.yaml",
+      "sha256": "b7b6fa75ca773171450607ff0784163bc812b31bf53cfb18d55a479c5a55f315",
+      "bytes": 1148
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-145932/measurements.json",
+      "sha256": "ad989e93c870c074c64d6e8d60e82d0a45cdad468e8c9cd0f5e3a77ca7464e89",
+      "bytes": 6494
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-145932/result.json",
+      "sha256": "9b06e4b039f55014b6ee7158b0a3430d5b446d1a35d4abaad1ecf6eea0463b20",
+      "bytes": 385813
+    },
+    {
+      "path": ".benchmarks/onboard-braking/20261009-145932/independent-poses.json",
+      "sha256": "746dd192037679845a7adb298f6e3fb775a99a5fd28f49b33c8b03084c955081",
+      "bytes": 4912864
+    }
+  ]
+}

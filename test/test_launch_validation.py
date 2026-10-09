@@ -127,6 +127,15 @@ def test_qualification_changes_manual_caps_and_zones_without_raising_nav2_speed(
             assert min(p[1] for p in points)==pytest.approx(-.22-margin)
     rotation=yaml.safe_load(stop['rotation']['points'])
     assert max(p[0] for p in rotation)>.326+.049
+    import math
+    for zone,extra in [('StopZone',0.),('SlowdownZone',.07)]:
+        points=yaml.safe_load(parameters['collision_monitor']['ros__parameters'][zone]['rotation']['points'])
+        assert len(points)==16
+        expected=math.hypot(.24,.22)+.05+extra
+        for first,second in zip(points,points[1:]+points[:1]):
+            boundary=abs(first[0]*second[1]-first[1]*second[0])/math.dist(first,second)
+            assert boundary==pytest.approx(expected)
+        assert max(math.hypot(*point) for point in points)<expected+.01
     assert stop['rotation']['linear_max']==0.
     assert stop['return_reverse']['linear_max']==pytest.approx(.04)
     returning=yaml.safe_load(stop['return_reverse']['points'])
