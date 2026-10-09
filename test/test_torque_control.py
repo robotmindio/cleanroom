@@ -392,6 +392,14 @@ class _Bus:
             "P_Coefficient": dict.fromkeys(MOTORS, 16),
             "I_Coefficient": dict.fromkeys(MOTORS, 0),
             "D_Coefficient": dict.fromkeys(MOTORS, 32),
+            "Maximum_Velocity_Limit": dict.fromkeys(MOTORS, 80),
+            "Velocity_Unit_factor": dict.fromkeys(MOTORS, 1),
+            "Velocity_closed_loop_P_proportional_coefficient": dict.fromkeys(MOTORS, 20),
+            "Velocity_closed_loop_I_integral_coefficient": dict.fromkeys(MOTORS, 0),
+            "Max_Torque_Limit": dict.fromkeys(MOTORS, 1000),
+            "Torque_Limit": dict.fromkeys(MOTORS, 1000),
+            "Acceleration": dict.fromkeys(MOTORS, 0),
+            "Maximum_Acceleration": dict.fromkeys(MOTORS, 250),
         }
         self.calls = []
         self.writes = {}
@@ -560,6 +568,16 @@ def test_configure_rejects_unconfirmed_arm_gains(monkeypatch):
     with pytest.raises(RuntimeError, match="I_Coefficient readback differs"):
         robot.configure()
     assert "enable_torque" not in robot.bus.calls
+
+
+def test_velocity_readback_failure_reports_the_error_without_changing_torque(monkeypatch, caplog):
+    host = _torque_host_script(monkeypatch)
+    robot = host.SafetyLeKiwi(host.LeKiwiConfig())
+    robot.bus,robot.arm_motors,robot.base_motors = _Bus(),list(ARM),list(BASE)
+    robot.bus.faults['Maximum_Velocity_Limit'] = RuntimeError('readback failed')
+    robot.configure()
+    assert 'Base velocity settings readback unavailable: readback failed' in caplog.text
+    assert 'enable_torque' not in robot.bus.calls
 
 
 def test_motor_host_configures_the_robot_without_cameras(monkeypatch):

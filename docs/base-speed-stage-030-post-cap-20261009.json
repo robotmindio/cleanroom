@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-09",
+  "metrology_source_revision": "76c16549acf6e27de8f024041eaa7608d3c2a43d",
+  "runtime_revision": "b91facbfa62b32a32169bb4d4561a1db1ee7a7ee",
+  "scope": "0.30 forward request after the software wheel-cap correction; stopping budget passed, speed coverage failed.",
+  "payload_kg": 0.2,
+  "qualified_trials": 0,
+  "trials": [
+    {
+      "observed_swept_distance_m": 0.10729667276708713,
+      "unobserved_excursion_bound_m": 0.03458431899547577,
+      "conservative_swept_distance_m": 0.14188099176256289,
+      "uncertainty_upper_m": 0.031868111648426366,
+      "maximum_capture_gap_s": 0.20048880577087402,
+      "stop_time_receive_upper_s": 0.9847916667786194,
+      "first_sample_time": 92696.713977812,
+      "last_sample_time": 92699.127158442,
+      "fault_cut_time": 92696.728093502,
+      "samples": 13,
+      "baseline_time_basis": "sensor_capture_stamp",
+      "within_budget": true,
+      "direction": "forward",
+      "requested_speed": 0.3,
+      "terminal_observed_speed": 0.24210194727026146,
+      "requested_speed_covered": false,
+      "speed_coverage_basis": "maximum guarded command, fresh wheel feedback and independent terminal ground speed",
+      "terminal_wheel_speed": 0.2526156862232232,
+      "terminal_guarded_speed": 0.3,
+      "feedback_interrupted": false,
+      "qualification_eligible": false
+    }
+  ],
+  "production_restored": true,
+  "production_limits": {
+    "linear_m_s": 0.03,
+    "angular_rad_s": 0.06
+  },
+  "findings": [
+    "Installed and source host scripts match SHA-256 378a5577a452329b2039b00c4b6f2f2c4a7fcf4b6de1dea78f9d714aa255a1da. Their validated stage ceiling is 0.30 m/s; static installed conversion yields forward raw goals -3387,0,3387.",
+    "Independent ground speed is 0.242102 m/s and terminal wheel feedback 0.252616 m/s. Removing the vendor software cap did not establish target speed. A firmware limit or physical motor ceiling remains unresolved.",
+    "The nominal pulse ran from 2026-10-09T03:08:57.179960Z to 03:08:58.779963Z; no motor-host command-watchdog warning occurred during this interval.",
+    "Stationary ROS hardware diagnostics reported 10.6 V, temperatures 34-36 C and zero servo status errors. Wheel-servo gear variant is not yet verified."
+  ],
+  "artifacts": {
+    ".benchmarks/onboard-braking/20261009-110835/profile.yaml": {
+      "sha256": "40e1b2b5e56a7f509a641bd9c5ae63eaa7d89aa824ed0ca1bbcf2e6f0a75ebd3",
+      "bytes": 1019
+    },
+    ".benchmarks/onboard-braking/20261009-110835/measurements.json": {
+      "sha256": "e0b88296436aec704bb842d802acaa12b929daee272d4e3cdd188bcec1940d88",
+      "bytes": 2929
+    },
+    ".benchmarks/onboard-braking/20261009-110835/result.json": {
+      "sha256": "8b9de109f005173b74eff1ecbe63a080cabee97ba817827ad65faa3fd52056bc",
+      "bytes": 234988
+    },
+    ".benchmarks/onboard-braking/20261009-110835/independent-poses.json": {
+      "sha256": "ca87bac2ae6a91b9bdeba158741f00b796798b69c12ee805ecd42e1bbe504239",
+      "bytes": 2990661
+    },
+    ".benchmarks/onboard-braking/20261009-110835/stack.log": {
+      "sha256": "e70cb744d0ddf6454c4da830e768f6e9214dc9dc8ba730815b05c5ccf38ae20a",
+      "bytes": 165955
+    }
+  }
+}

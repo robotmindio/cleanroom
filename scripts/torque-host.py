@@ -42,6 +42,11 @@ ARM_P_COEFFICIENTS = {"arm_shoulder_lift": 32, "arm_elbow_flex": 64}
 # Proportional control alone leaves a load-dependent position error. Use the
 # smallest integral gain on gravity-loaded joints; keep jaw contact unchanged.
 ARM_I_COEFFICIENTS = {"arm_shoulder_lift": 1, "arm_elbow_flex": 1, "arm_wrist_flex": 1}
+BASE_VELOCITY_REGISTERS = (
+    'Maximum_Velocity_Limit', 'Velocity_Unit_factor',
+    'Velocity_closed_loop_P_proportional_coefficient', 'Velocity_closed_loop_I_integral_coefficient',
+    'Max_Torque_Limit', 'Torque_Limit', 'Acceleration', 'Maximum_Acceleration',
+)
 
 
 @dataclass
@@ -164,6 +169,12 @@ class SafetyLeKiwi(LeKiwi):
         logging.info("Arm position gains verified: %s", expected_gains)
         for name in self.base_motors:
             self.bus.write("Operating_Mode", name, OperatingMode.VELOCITY.value)
+        try:
+            settings = {register: self.bus.sync_read(register, self.base_motors, normalize=False,
+                        num_retry=TORQUE_RETRIES) for register in BASE_VELOCITY_REGISTERS}
+            logging.info("Base velocity settings (raw register units): %s", settings)
+        except Exception as error:
+            logging.warning("Base velocity settings readback unavailable: %s", error)
 
 
 _shutdown_requested = False
@@ -193,12 +204,18 @@ def connect_when_servos_powered(robot: SafetyLeKiwi) -> None:
 def main(cfg: TorqueHostConfig):
     global _shutdown_requested
     _shutdown_requested = False
+    logging.basicConfig(level=logging.INFO)
     base_limits = load_base_speed_limits(cfg.safety.nav2_params_file)
     base_test_profiles = {stage: load_base_test_profile(cfg.safety.nav2_params_file, f'{stage:.2f}') for stage in BASE_TEST_STAGES}
+    base_scales = load_base_scales(os.environ.get(
+        "LEKIWI_LAUNCH_CALIBRATION", "~/.ros/lekiwi_launch_calibration.conf"))
     # LeRobot's LeKiwiConfig defaults to two cameras, and draccus rebuilds that
     # default. The motor host serves none; ROS camera nodes own the devices.
     robot = SafetyLeKiwi(replace(cfg.robot, cameras={}))
-    robot.maximum_base_linear_speed_m_s = max(base_limits[0], *(p['linear_speed_m_s'] for p in base_test_profiles.values()))
+    robot.maximum_base_linear_speed_m_s = max(base_limits[0], *(p['linear_speed_m_s'] for p in base_test_profiles.values())) / base_scales[0]
+    logging.info("Base wheel ceiling: %.6f nominal m/s, %d ticks/s",
+        robot.maximum_base_linear_speed_m_s,
+        max(3000, math.ceil(robot.maximum_base_linear_speed_m_s / .05 * 4096 / (2 * math.pi))))
     host = None
     signal.signal(signal.SIGTERM, _shutdown_signal)
     signal.signal(signal.SIGHUP, _shutdown_signal)
@@ -221,8 +238,7 @@ def main(cfg: TorqueHostConfig):
             arm_calibration=load_calibration(cfg.safety.arm_calibration_file),
             base_limits=base_limits,
             base_test_profiles=base_test_profiles,
-            base_scales=load_base_scales(os.environ.get(
-                "LEKIWI_LAUNCH_CALIBRATION", "~/.ros/lekiwi_launch_calibration.conf")),
+            base_scales=base_scales,
         )
         while not _shutdown_requested:
             loop_start = time.monotonic()

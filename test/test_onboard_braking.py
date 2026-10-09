@@ -32,11 +32,11 @@ def test_velocity_seed_does_not_replace_the_independent_wall_measurement():
     _,reference=wall_scan(0.,0.)
     transform=SimpleNamespace(rotation=SimpleNamespace(x=0.,y=0.,z=0.,w=1.),
                               translation=SimpleNamespace(x=0.,y=0.))
-    for actual,stamp in [(.04,.2),(0.,.5)]:
+    for actual,stamp,seed in [(.04,.2,None),(0.,.5,None),(.15,.2,[.15,0.,0.])]:
         scan,_=wall_scan(actual,stamp)
         node=SimpleNamespace(sectors=[],scans=[],reference_points=reference,
-            ranges=[{'pose':[0.,0.,0.],'stamp':0.}],wheel_velocity=(.3,0.,0.),odom_at=time.monotonic(),
-            config={'body_radius_m':.33},
+            ranges=[] if seed else [{'pose':[0.,0.,0.],'stamp':0.}],wheel_velocity=(.3,0.,0.),odom_at=time.monotonic(),
+            config={'body_radius_m':.33,**({'reference_start_pose':seed} if seed else {})},
             buffer=SimpleNamespace(can_transform=lambda *args:True,
                 lookup_transform=lambda *args:SimpleNamespace(transform=transform)),
             get_clock=lambda:SimpleNamespace(now=lambda:SimpleNamespace(nanoseconds=int(stamp*1e9))))
@@ -58,6 +58,7 @@ def test_resume_rejects_changed_speed_or_stopping_conditions():
     assert trials==[{'qualification_eligible':True,'source_run':'earlier'}]
     assert list(faults)==['linear/scan_disconnect']
     assert resume(previous,{**config,'trials_per_direction':1})==(trials,faults)
+    assert resume(previous,{**config,'reference_start_pose':[.15,0.,0.]})==(trials,faults)
     for key in ('linear_speed_m_s','angular_speed_rad_s','payload_kg',
                 'measurement_uncertainty_m','maximum_stopping_distance_m'):
         with pytest.raises(ValueError,match='profile differs'):
@@ -161,6 +162,33 @@ def test_faults_only_batches_all_axes_without_running_nominals(monkeypatch):
     assert names==[(angular,name) for angular in (False,True) for name in
         ('scan_disconnect','compute_command_loss','depth_disconnect','telemetry_loss')]
     assert len(node.checks)==8
+
+
+def test_return_only_stops_after_the_fixed_center_recovery():
+    from types import SimpleNamespace
+    module=import_module('test-onboard-braking')
+    calls=[]
+    node=SimpleNamespace(config={'stage':'0.30','return_only':True,'body_radius_m':.33,
+        'test_center':(0.,0.,0.)},pose=(0.,0.,0.),ranges=[{'pose':[-.25,0.,0.]}]*21,
+        range_info=[{}],camera_poses=[{}],views={'front':1,'wrist':1,'astra':1},
+        wait_ready=lambda:None,wait=lambda condition,timeout:condition(),
+        move=lambda target,**limits:calls.append(target),save=lambda:calls.append('saved'))
+    module.OnboardBraking.run(node)
+    assert calls==[(0.,0.,0.),'saved']
+
+
+def test_fault_boundary_uses_the_same_pose_frame_as_the_center(monkeypatch):
+    import time
+    module=import_module('test-onboard-braking')
+    monkeypatch.setattr(module.NAV.Test,'tick',lambda *a,**k:None)
+    node=module.FAULT.FaultTest.__new__(module.FAULT.FaultTest)
+    node.deadline,node.center=time.monotonic()+10,(0.,0.,0.)
+    node.maximum_center_radius_m,node.pose=.4,(-.414,0.,0.)
+    with pytest.raises(RuntimeError,match='early center'):
+        module.FAULT.FaultTest.tick(node)
+    module.FAULT.FaultTest.tick(node,pose_source=lambda:(-.25,0.,0.))
+    with pytest.raises(RuntimeError,match='early center'):
+        module.FAULT.FaultTest.tick(node,pose_source=lambda:(-.41,0.,0.))
 
 
 def test_scan_geometry_recovers_motion_and_rejects_a_single_wall():
