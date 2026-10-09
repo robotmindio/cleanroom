@@ -651,6 +651,9 @@ def test_independent_stop_bounds_hidden_motion_and_rejects_bad_windows():
     assert result['within_budget']
     assert result['unobserved_excursion_bound_m']==pytest.approx(.005)
     assert result['conservative_swept_distance_m']==pytest.approx(.015)
+    hardware=measure(samples,.1,{**config,'hardware_point_speed_bound_m_s':.4},.001)
+    assert hardware['unobserved_excursion_bound_m']==pytest.approx(.04)
+    assert not hardware['within_budget']
     aligned=measure(samples,.1,{**config,'reference_alignment_error_m':.01},.001)
     assert aligned['uncertainty_upper_m']==pytest.approx(result['uncertainty_upper_m']+.01)
     assert not aligned['within_budget']

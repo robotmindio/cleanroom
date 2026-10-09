@@ -3,7 +3,7 @@
 # Pure translation/rotation pulses fit the confirmed 1 m fixture. Even a stop
 # at the driver boundary leaves 0.56 m: 0.30 * 1.15 * 1.5 + 0.04 = 0.5575 m.
 # Slower coupled return commands need less obstacle clearance for the same time reserve.
-# Production Nav2 speeds and physical acceptance remain unchanged.
+# These bounded test fixtures remain independent of production acceptance.
 bounds:
   maximum_stopping_distance_m: 0.65
   maximum_center_radius_m: 0.40
@@ -20,6 +20,7 @@ stages:
   '0.20':
     linear_speed_m_s: 0.20
     angular_speed_rad_s: 0.40
+    maximum_stop_time_s: 1.5
   '0.25':
     linear_speed_m_s: 0.25
     angular_speed_rad_s: 0.50
@@ -39,3 +40,4 @@ stages:
   '0.30':
     linear_speed_m_s: 0.30
     angular_speed_rad_s: 0.60
+    maximum_stop_time_s: 1.5

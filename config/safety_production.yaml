@@ -60,7 +60,7 @@ safety_supervisor:
       - arm_wrist_roll
       - arm_gripper
     # Captured compact fold: wrist camera downward, fixed mapping cameras clear.
-    stow_joint_positions: [0.0, -1.8167, 1.6295, 1.2367, -0.0169, 0.2095]
+    stow_joint_positions: [0.0092, -1.7967, 1.6249, 1.2306, -0.0077, 0.2161]
 
 arm_workspace_monitor:
   ros__parameters:

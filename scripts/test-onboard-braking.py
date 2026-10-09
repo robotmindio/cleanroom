@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Finite loaded stopping/fault tests; observe with robot cameras and raw LiDAR.
 
-Source setup.bash. Requires the authorized attended 30 cm area and travel_stow.
+Source setup.bash. Requires attended dry clearance and folded travel_stow:
+1.8 m beyond the footprint per direction for default production pulses;
+explicit --stage profiles use their separately bounded qualification fixture.
 Does not restart motor services, change torque or grant acceptance automatically.
 """
 import argparse
@@ -152,7 +154,8 @@ def stopping_measurement(samples, cut, config, stationary_jitter):
     sweep = maximum_swept_excursion(poses,radius)
     # A hidden excursion between bounded-speed endpoints needs travel out and
     # back. Lipschitz continuity bounds it by speed * capture gap / 2.
-    blind = config['point_speed_bound_m_s']*float(gaps.max())/2
+    point_bound=max(config['point_speed_bound_m_s'],config.get('hardware_point_speed_bound_m_s',0.))
+    blind = point_bound*float(gaps.max())/2
     sigma = max(3*(math.sqrt(max(s['covariance'][0],s['covariance'][1]))+
                    radius*math.sqrt(s['covariance'][2])) for s in samples)
     alignment_error = config.get('reference_alignment_error_m',0.)

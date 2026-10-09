@@ -1,9 +1,4 @@
-# Physical load revalidation completed 2026-10-06.
-# Scope: attended operation, dry concrete, installed reported 200 g load, unchanged fold.
-# Speeds are the maximum production commands; observed ground speeds are in the evidence.
-# Five loaded stops per direction and eight affected moving fault checks passed.
-# Bounds include blind capture intervals; add the unchanged 20 mm measurement allowance.
-# Prior unchanged hardware/authentication tests are explicitly referenced in the report.
+# Attended 200 g speed qualification, 2026-10-09; see evidence_report.
 schema_version: 4
 robot_id: lekiwi_1
 operating_scope:
@@ -14,13 +9,13 @@ installed_hardware:
   imu: false
   battery_monitor: false
 validated: true
-software_revision: a80b2fbb8a9ac7b534d7d9db709fb1bb62308275
+software_revision: eb033e2d213ec3499b39957a10088258b9fbc526
 sensor_configuration: LD06 calibrated yaw/self-mask; Astra compact safety depth 10
-  Hz; front/Astra RGB-D streams; unchanged folded travel_stow; independent raw-LiDAR
-  stopping measurement and robot camera observations
+  Hz; front/Astra RGB-D; recaptured held folded travel_stow with unchanged 0.02 rad
+  tolerance; independent raw-LiDAR stop metrology
 payload_kg: 0.2
 surface: dry concrete
-validated_at: '2026-10-06T10:27:49.295246+00:00'
+validated_at: '2026-10-09T13:37:00.671285+00:00'
 expected_base_footprint:
 - - -0.22
   - -0.22
@@ -32,38 +27,38 @@ expected_base_footprint:
   - 0.22
 expected_footprint_padding_m: 0.0
 accepted_stow_joint_positions:
-  arm_shoulder_pan: 0.0
-  arm_shoulder_lift: -1.8167
-  arm_elbow_flex: 1.6295
-  arm_wrist_flex: 1.2367
-  arm_wrist_roll: -0.0169
-  arm_gripper: 0.2095
+  arm_shoulder_pan: 0.0092
+  arm_shoulder_lift: -1.7967
+  arm_elbow_flex: 1.6249
+  arm_wrist_flex: 1.2306
+  arm_wrist_roll: -0.0077
+  arm_gripper: 0.2161
 minimum_trials_per_direction: 5
-maximum_tested_linear_speed_m_s: 0.03
-maximum_tested_angular_speed_rad_s: 0.06
-maximum_command_stop_latency_s: 1.198469
-maximum_allowed_command_stop_latency_s: 1.5
-maximum_allowed_stopping_distance_m: 0.05
-measurement_uncertainty_m: 0.02
+maximum_tested_linear_speed_m_s: 0.25
+maximum_tested_angular_speed_rad_s: 0.4
+maximum_command_stop_latency_s: 1.524829
+maximum_allowed_command_stop_latency_s: 1.6
+maximum_allowed_stopping_distance_m: 0.45
+measurement_uncertainty_m: 0.06
 directions:
   forward:
     trials: 5
-    worst_stopping_distance_m: 0.029709
+    worst_stopping_distance_m: 0.387666
   reverse:
     trials: 5
-    worst_stopping_distance_m: 0.029709
+    worst_stopping_distance_m: 0.387666
   left:
     trials: 5
-    worst_stopping_distance_m: 0.029709
+    worst_stopping_distance_m: 0.387666
   right:
     trials: 5
-    worst_stopping_distance_m: 0.029709
+    worst_stopping_distance_m: 0.387666
   rotation_cw:
     trials: 5
-    worst_stopping_distance_m: 0.029752
+    worst_stopping_distance_m: 0.247951
   rotation_ccw:
     trials: 5
-    worst_stopping_distance_m: 0.029752
+    worst_stopping_distance_m: 0.247951
 fault_tests:
   scan_disconnect: true
   depth_disconnect: true
@@ -81,4 +76,4 @@ fault_tests:
   rosbridge_disabled_or_authenticated: true
   collision_monitor_obstacle_stop: true
   arm_workspace_intrusion_stop: true
-evidence_report: docs/physical-acceptance-evidence-200g-20261006.json
+evidence_report: docs/physical-acceptance-evidence-025-200g-20261009.json

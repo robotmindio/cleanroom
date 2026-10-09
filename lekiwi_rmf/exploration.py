@@ -9,7 +9,7 @@ import yaml
 
 
 # Accepted stopping bound; separate from the folded body's map clearance.
-STOPPING_MARGIN_M = 0.05
+STOPPING_MARGIN_M = 0.77
 
 
 def load_navigation_footprint(path):
