@@ -130,6 +130,58 @@ def test_short_qualification_pulses_are_centered_in_the_fixture():
     assert pulse(node,'rotation_ccw')==pytest.approx((0.,0.,np.pi/2-.36))
 
 
+@pytest.mark.parametrize('direction',['forward','reverse','left','right'])
+def test_corridor_body_directions_all_travel_along_the_saved_forward_axis(direction):
+    import math
+    from types import SimpleNamespace
+    module=import_module('test-onboard-braking')
+    node=SimpleNamespace(center=(.2,0.,.3),config={'stage':'0.25','corridor':True,
+        'nominal_command_duration_s':1.6,'linear_speed_m_s':.25,'angular_speed_rad_s':.5})
+    x,y,heading=module.OnboardBraking.pulse_start(node,direction)
+    assert (x,y)==pytest.approx((.2-.2*math.cos(.3),-.2*math.sin(.3)))
+    ux,uy,_=module.DIRECTIONS[direction]
+    assert (math.cos(heading)*ux-math.sin(heading)*uy,
+            math.sin(heading)*ux+math.cos(heading)*uy)==pytest.approx((math.cos(.3),math.sin(.3)))
+
+
+@pytest.mark.parametrize('permitted',[True,False])
+def test_corridor_turns_in_place_at_the_stage_cap_and_stops_on_permission_loss(monkeypatch,permitted):
+    import math
+    module=import_module('test-onboard-braking')
+    calls,commands,clock=[],[],[0.]
+    monkeypatch.setattr(module.time,'monotonic',lambda:clock[0])
+    node=object.__new__(module.OnboardBraking)
+    node.config={'corridor':True,'angular_speed_rad_s':.5,'return_linear_speed_m_s':.04,'return_angular_speed_rad_s':.06}
+    node.ranges=[{'pose':[.2,0.,0.]}]
+    node.flags={'base_motion_permitted':permitted}
+    def translate(self,target,**kwargs):
+        calls.append(target)
+        assert target==(.2,0.,0.)
+    monkeypatch.setattr(module.NAV.Test,'move',translate)
+    def tick(command):
+        assert command.linear.x==command.linear.y==0.
+        assert abs(command.angular.z)<=.5
+        commands.append(command)
+        node.ranges[-1]['pose'][2]+=command.angular.z*.05
+        clock[0]+=.05
+    node.tick=tick
+    node.stop=lambda:calls.append('stop')
+    def wait(condition,timeout):
+        assert timeout==3
+        if not condition():
+            raise RuntimeError('permission did not recover')
+    node.wait=wait
+    if permitted:
+        node.move((.2,0.,math.pi))
+        assert abs(module.NAV.angle(math.pi-node.ranges[-1]['pose'][2]))<.03
+        assert max(abs(c.angular.z) for c in commands)==.5
+    else:
+        with pytest.raises(RuntimeError,match='permission did not recover'):
+            node.move((.2,0.,math.pi))
+        assert commands==[]
+    assert calls[-1]=='stop'
+
+
 def test_velocity_seed_does_not_replace_the_independent_wall_measurement():
     from types import SimpleNamespace
     import time
