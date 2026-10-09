@@ -31,7 +31,7 @@ ARM_TRAJECTORY_STATUS_KEY = "_lekiwi_arm_trajectory"
 # Optional action fields that renew the motor host's local arm-goal lease.
 ARM_LEASE_KEYS = ("_lekiwi_arm_goal", "_lekiwi_arm_permission")
 BASE_TEST_STAGE_KEY = "_lekiwi_base_test_stage"
-BASE_TEST_STAGES = (.20, .30)
+BASE_TEST_STAGES = (.20, .25, .30)
 
 BASE_VELOCITY_KEYS = ("x.vel", "y.vel", "theta.vel")
 # Every observation carries these, and every motion action contains exactly these.
