@@ -374,6 +374,9 @@ class OnboardBraking(FAULT.FaultTest):
             'physical_acceptance_granted':False},indent=2)+'\n')
 
     def refresh_corridor_reference(self):
+        def stopped():
+            return self.speed<=.001 and time.monotonic()-self.odom_at<.3
+        self.wait(stopped,5)
         first=len(self.scans)
         self.wait(lambda:len(self.scans)>=first+10,5)
         scans=self.scans[first:first+10]
@@ -386,7 +389,8 @@ class OnboardBraking(FAULT.FaultTest):
             if 3*(math.sqrt(max(covariance[:2]))+radius*math.sqrt(covariance[2]))+sensitivity>reserve:
                 raise RuntimeError('stationary reference anchor exceeds the center reserve')
             poses.append(pose)
-        if self.speed>.001 or maximum_swept_excursion(poses,radius)>.01:
+        self.wait(stopped,5)
+        if maximum_swept_excursion(poses,radius)>.01:
             raise RuntimeError('corridor reference capture was not stationary')
         anchor=np.median(poses,axis=0)
         points=stationary_reference([np.asarray(scan['points']) for scan in scans])

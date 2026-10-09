@@ -144,9 +144,10 @@ def test_corridor_body_directions_all_travel_along_the_saved_forward_axis(direct
             math.sin(heading)*ux+math.cos(heading)*uy)==pytest.approx((math.cos(.3),math.sin(.3)))
 
 
-@pytest.mark.parametrize('case',['stationary','moving','uncertain_anchor'])
+@pytest.mark.parametrize('case',['stationary','stale_feedback','moving','uncertain_anchor'])
 def test_stationary_corridor_reference_keeps_the_original_area_anchor(monkeypatch,case):
     import math
+    import time
     module=import_module('test-onboard-braking')
     node=object.__new__(module.OnboardBraking)
     node.config={'body_radius_m':.33,'maximum_center_radius_m':.4,'independent_center_radius_m':.42}
@@ -156,11 +157,19 @@ def test_stationary_corridor_reference_keeps_the_original_area_anchor(monkeypatc
     node.reference_history=[]
     node.reference_locked=False
     node.stationary_jitter=.001
-    node.speed=.01 if case=='moving' else 0.
+    node.speed=.01 if case in ('moving','stale_feedback') else 0.
+    node.odom_at=time.monotonic()-(1. if case=='stale_feedback' else 0.)
     angles=np.linspace(0,2*math.pi,360,endpoint=False)
     local=np.column_stack((np.cos(angles),np.sin(angles)))
     def wait(condition,timeout):
-        if not node.scans:
+        if condition():
+            return
+        if time.monotonic()-node.odom_at>=.3:
+            node.odom_at=time.monotonic()
+            node.speed=0.
+        elif node.speed>.001:
+            raise RuntimeError('not stationary')
+        elif not node.scans:
             node.scans.extend({'stamp':i,'points':local.tolist()} for i in range(10))
         else:
             assert node.reference_locked
@@ -171,7 +180,7 @@ def test_stationary_corridor_reference_keeps_the_original_area_anchor(monkeypatc
         assert reference is node.fixed_reference_points
         return [.01,.02,math.pi],[1e-8]*3,.03 if case=='uncertain_anchor' else 0.
     monkeypatch.setattr(module,'register_scan',fit)
-    if case=='stationary':
+    if case in ('stationary','stale_feedback'):
         node.refresh_corridor_reference()
         assert node.reference_locked and len(node.reference_history)==1
         assert node.reference_history[0]['anchor']==pytest.approx([.01,.02,math.pi])
