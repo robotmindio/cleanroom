@@ -329,7 +329,7 @@ class OnboardBraking(FAULT.FaultTest):
                     pose=tuple(self.ranges[-1]['pose'])
                     super().move((*target[:2],pose[2]),
                         linear_limit=self.config.get('return_linear_speed_m_s',.02) if linear_limit is None else linear_limit,
-                        angular_limit=self.config.get('return_angular_speed_rad_s',.06),
+                        angular_limit=0.,
                         pose_source=lambda:tuple(self.ranges[-1]['pose']))
                     while abs(NAV.angle(target[2]-self.ranges[-1]['pose'][2]))>=.03:
                         if time.monotonic()>end:

@@ -257,6 +257,7 @@ def test_corridor_turns_in_place_at_the_stage_cap_and_stops_on_permission_loss(m
     def translate(self,target,**kwargs):
         calls.append(target)
         assert target==(.2,0.,0.)
+        assert kwargs['angular_limit']==0.
     monkeypatch.setattr(module.NAV.Test,'move',translate)
     def tick(command):
         assert command.linear.x==command.linear.y==0.
@@ -514,7 +515,8 @@ def test_selected_rotation_speed_cannot_exceed_the_stage_cap(monkeypatch,speed):
     assert error.value.code==2
 
 
-def test_half_metre_slowed_return_can_exceed_thirty_seconds(monkeypatch):
+@pytest.mark.parametrize('translation_only',[False,True])
+def test_half_metre_slowed_return_can_exceed_thirty_seconds(monkeypatch,translation_only):
     from types import SimpleNamespace
     module=import_module('test-onboard-braking')
     clock=[0.]
@@ -524,8 +526,11 @@ def test_half_metre_slowed_return_can_exceed_thirty_seconds(monkeypatch):
     def tick(command):
         clock[0]+=.5
         node.pose[0]+=min(.007,.5-node.pose[0])
+        if translation_only:
+            assert command.angular.z==0.
+            node.pose[2]=.2
     node.tick=tick
-    module.NAV.Test.move(node,(.5,0.,0.),linear_limit=.04)
+    module.NAV.Test.move(node,(.5,0.,0.),linear_limit=.04,angular_limit=0. if translation_only else .15)
     assert clock[0]>30 and node.pose[0]>.492
 
 
