@@ -30,7 +30,7 @@ def test_qualification_profiles_fit_the_one_metre_fixture_and_reject_missing_res
         assert profile['measurement_uncertainty_m']==.04
         assert profile['point_speed_bound_m_s']==pytest.approx(float(stage)*1.15)
         assert profile['translation_stopping_margin_m']==pytest.approx(float(stage)*1.15*1.5+.04)
-        assert profile['return_stopping_margin_m']==pytest.approx((.10+.33*.06)*1.15*1.5+.04)
+        assert profile['return_stopping_margin_m']==pytest.approx((.04+.33*.06)*1.15*1.5+.04)
     for stage in ('0.06','0.10','0.40',''):
         with pytest.raises(ValueError):
             load_base_test_profile(root/'nav2_params.yaml',stage)

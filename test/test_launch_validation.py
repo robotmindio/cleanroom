@@ -126,10 +126,10 @@ def test_qualification_changes_manual_caps_and_zones_without_raising_nav2_speed(
     rotation=yaml.safe_load(stop['rotation']['points'])
     assert max(p[0] for p in rotation)>.326+.049
     assert stop['rotation']['linear_max']==0.
-    assert stop['return_reverse']['linear_max']==pytest.approx(.1)
+    assert stop['return_reverse']['linear_max']==pytest.approx(.04)
     returning=yaml.safe_load(stop['return_reverse']['points'])
     assert max(p[1] for p in returning)<.44
-    assert min(p[0] for p in returning)<-.22-(.1+.33*.06)*1.15*1.5-.019
+    assert min(p[0] for p in returning)==pytest.approx(-.22-(.04+.33*.06)*1.15*1.5-.04)
     points=yaml.safe_load(stop['fallback']['points'])
     assert points[0]==pytest.approx([.89,.87])
     with pytest.raises(ValueError,match='requires bounded_base_test'):
