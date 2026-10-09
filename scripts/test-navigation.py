@@ -346,9 +346,10 @@ def main(test_class=Test, output=OUTPUT, launch_arguments=(), production=False, 
                         'trace':node.trace,'slam':node.slam,'graph':graph,'health_faults':node.health_faults,
                         'fault_checks':getattr(node,'checks',None)}
                     if getattr(node,'config',{}).get('stage'):
-                        report.update(origin_frame='raw_lidar_reference',final_pose=node.ranges[-1]['pose'],
+                        report.update(origin_frame='raw_lidar_reference',final_pose=node.ranges[-1]['pose'] if node.ranges else None,
                             wheel_final_pose=node.pose,trace_frame='wheel_odometry',
-                            max_radius_m=max(math.dist(r['pose'][:2],node.center[:2]) for r in node.ranges))
+                            max_radius_m=max(math.dist(r['pose'][:2],node.center[:2]) for r in node.ranges)
+                                if node.ranges and node.center is not None else None)
                     (output/'result.json').write_text(json.dumps(report,indent=2)+'\n')
                     print('report',output/'result.json',flush=True)
                     if not production and node.lifecycle_client.wait_for_service(timeout_sec=1):
