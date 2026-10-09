@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-09",
+  "source_revision": "8de0fd4b80f9a52c58300957af655d24c7426f06",
+  "deployed_revision": "6fb97134964d0647d2bf20b3700c1d5a0b5003d8",
+  "payload_kg": 0.2,
+  "stage": "0.25",
+  "scope": "Excluded moving linear scan-loss attempt with the held-fold reference; uncertainty exceeded its 0.05 m declaration. No production speed acceptance.",
+  "qualification_eligible": false,
+  "error": "loaded fault stopping/error bound exceeded",
+  "fault": {
+    "passed": false,
+    "angular_test": false,
+    "requested_speed": 0.25,
+    "injection_speed": 0.24809896654046262,
+    "terminal_observed_speed": 0.2412638025179227,
+    "denial": {
+      "base_motion_permitted": "false",
+      "arm_motion_permitted": "true",
+      "arm_stowed": "true",
+      "faults": "scan: stale",
+      "latched_faults": "",
+      "bounded_base_test": "true"
+    },
+    "independent": {
+      "observed_swept_distance_m": 0.18726829127949213,
+      "unobserved_excursion_bound_m": 0.029008011519908904,
+      "conservative_swept_distance_m": 0.21627630279940102,
+      "uncertainty_upper_m": 0.05042431209381551,
+      "maximum_capture_gap_s": 0.20179486274719238,
+      "stop_time_receive_upper_s": 1.4537157420854783,
+      "first_sample_time": 100779.521052453,
+      "last_sample_time": 100782.548347916,
+      "fault_cut_time": 100779.47238662266,
+      "samples": 16,
+      "baseline_time_basis": "sensor_capture_stamp",
+      "within_budget": false
+    }
+  },
+  "stationary_jitter_m": 0.010111122047715724,
+  "maximum_center_radius_m": 0.3688968282422002,
+  "final_independent_pose": [
+    0.36537603614255176,
+    -0.002157702404491277,
+    -0.04510177518815529
+  ],
+  "declared_measurement_uncertainty_m": 0.05,
+  "artifacts": {
+    ".benchmarks/onboard-braking/20261009-132308/profile.yaml": {
+      "sha256": "e480a54cfa08caa533bf91a01a49c9b3f014e48c4c72a8f128666c769a686450",
+      "bytes": 1221
+    },
+    ".benchmarks/onboard-braking/20261009-132308/measurements.json": {
+      "sha256": "25e99820698a3ae2749f3afad118c2c9de0d8f7ea51178aa36321c2cc92e4a8d",
+      "bytes": 37742
+    },
+    ".benchmarks/onboard-braking/20261009-132308/result.json": {
+      "sha256": "789e54aa6f7902ad83558aee5bec588f889585403bbe89155ab0f9fe0a863c55",
+      "bytes": 320196
+    },
+    ".benchmarks/onboard-braking/20261009-132308/independent-poses.json": {
+      "sha256": "ab2b4f8052e3027a47dc715894cd534b7b39092e3a1b7bb31095dbb625c0577d",
+      "bytes": 4555740
+    },
+    ".benchmarks/onboard-braking/20261009-132308/stack.log": {
+      "sha256": "b677ac69be2dd615d174bf7a1632e10904ff9fd694b184b17aed2f570bd793e6",
+      "bytes": 164643
+    }
+  }
+}
