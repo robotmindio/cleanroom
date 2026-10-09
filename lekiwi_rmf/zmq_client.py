@@ -11,7 +11,8 @@ import math
 import time
 
 from lekiwi_rmf.host_protocol import (
-    ARM_LEASE_KEYS, ARM_TRAJECTORY_STATUS_KEY, CAMERAS_KEY, MOTOR_HEALTH_KEY, valid_goal_id,
+    ARM_LEASE_KEYS, ARM_TRAJECTORY_STATUS_KEY, BASE_TEST_STAGE_KEY, BASE_TEST_STAGES,
+    CAMERAS_KEY, MOTOR_HEALTH_KEY, valid_goal_id,
 )
 from lekiwi_rmf.odometry import TelemetrySequenceTracker, accept_validated_telemetry, parse_host_odometry
 from lekiwi_rmf.motor_health import parse_motor_health
@@ -191,7 +192,7 @@ class LeKiwiZmqClient:
         self.last_remote_state = state
         return state
 
-    def send_action(self, action, *, arm_goal_id=None, arm_permitted=False):
+    def send_action(self, action, *, arm_goal_id=None, arm_permitted=False, base_test_stage=None):
         if not self.connected:
             raise RuntimeError("LeKiwi client is not connected")
         if not isinstance(action, dict) or set(action) != set(self.state_keys):
@@ -204,6 +205,11 @@ class LeKiwiZmqClient:
             if not math.isfinite(number):
                 raise ValueError(f"action {key!r} is not finite")
             encoded[str(key)] = number
+        if base_test_stage is not None:
+            if (type(base_test_stage) not in (int, float) or base_test_stage not in BASE_TEST_STAGES
+                    or arm_goal_id is not None):
+                raise ValueError("invalid base qualification stage or arm lease")
+            encoded[BASE_TEST_STAGE_KEY] = base_test_stage
         if arm_goal_id is not None:
             if not valid_goal_id(arm_goal_id) or type(arm_permitted) is not bool:
                 raise ValueError("invalid arm trajectory lease")

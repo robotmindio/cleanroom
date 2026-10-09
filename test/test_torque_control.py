@@ -61,10 +61,10 @@ def test_wire_contract_matches_the_deployed_motor_host():
         odometry={"pose": [0, 0, 0]}, arm_status=None,
     )
     # Byte-for-byte the camera-less message the Pi host already in service
-    # sends (protocol 2); LeRobot's own client requires the empty "_cams".
+    # sends (protocol 3); LeRobot's own client requires the empty "_cams".
     assert json.dumps(payload) == (
         '{"_cams": [], "arm_shoulder_pan.pos": 1.5, "x.vel": 0.0, '
-        '"_lekiwi_protocol": 2, "_lekiwi_session": "s", "_lekiwi_sequence": 3, '
+        '"_lekiwi_protocol": 3, "_lekiwi_session": "s", "_lekiwi_sequence": 3, '
         '"_lekiwi_sample_monotonic_ns": 7, "_lekiwi_torque_enabled": true, '
         '"_lekiwi_motor_health": {"version": 1}, "_lekiwi_odometry": {"pose": [0, 0, 0]}, '
         '"_lekiwi_arm_trajectory": null}'
@@ -749,6 +749,47 @@ def test_out_of_envelope_commands_never_reach_motors_or_refresh_watchdog(host, t
         loop.receive_command()
     assert not robot.actions and loop.last_cmd_time == last_command
     assert loop.control.torque_enabled
+
+
+@pytest.mark.parametrize('stage',[.20,.30])
+def test_host_qualification_requires_stage_holds_arm_and_bounds_motion(host,tmp_path,stage):
+    from lekiwi_rmf.host_protocol import BASE_TEST_STAGE_KEY
+    from lekiwi_rmf.motion_guards import load_base_test_profile
+    loop,clock,_socket,robot=_loop(host,tmp_path)
+    loop.base_test_profiles={stage:load_base_test_profile(ROOT/'config/nav2_params.yaml',f'{stage:.2f}')}
+    loop.control.torque_enabled=True
+    robot.get_observation=lambda:json.loads(_action())
+    loop.publish_observation()
+    held={k:v for k,v in loop.local_observation.items() if k.endswith('.pos')}
+    def command(**changes):
+        loop.host.zmq_cmd_socket.messages.append(_action(**changes))
+        loop.receive_command()
+    command(**{'x.vel':stage/BASE_XY_SCALE})
+    assert not robot.actions
+    command(**{BASE_TEST_STAGE_KEY:stage,'x.vel':stage/BASE_XY_SCALE,'arm_shoulder_pan.pos':1.})
+    assert robot.actions[-1]['x.vel']==pytest.approx(stage/BASE_XY_SCALE)
+    assert {k:robot.actions[-1][k] for k in held}==held
+    assert BASE_TEST_STAGE_KEY not in robot.actions[-1]
+    count=len(robot.actions)
+    for changes in ({BASE_TEST_STAGE_KEY:.4},
+                    {BASE_TEST_STAGE_KEY:stage,'x.vel':(stage+.01)/BASE_XY_SCALE},
+                    {BASE_TEST_STAGE_KEY:stage,'x.vel':stage/BASE_XY_SCALE,'theta.vel':1.},
+                    {BASE_TEST_STAGE_KEY:stage,'_lekiwi_arm_goal':1.,'_lekiwi_arm_permission':1.}):
+        command(**changes)
+    assert len(robot.actions)==count
+    loop.odometry.pose=(.451,0.,0.)
+    command(**{BASE_TEST_STAGE_KEY:stage,'x.vel':stage/BASE_XY_SCALE})
+    assert robot.actions[-1]['x.vel']==0.
+    clock.now+=.251
+    command(**{BASE_TEST_STAGE_KEY:stage,'x.vel':stage/BASE_XY_SCALE})
+    assert len(robot.actions)==count+1
+    loop.enforce_watchdog()
+    assert loop.watchdog_active and 'stop_base' in robot.bus.calls and loop.control.torque_enabled
+    loop.publish_observation()
+    command(**{'x.vel':.01/BASE_XY_SCALE})
+    assert loop._base_test_stage is None and robot.actions[-1]['x.vel']==pytest.approx(.01/BASE_XY_SCALE)
+    command(**{'x.vel':stage/BASE_XY_SCALE})
+    assert robot.actions[-1]['x.vel']==pytest.approx(.01/BASE_XY_SCALE)
 
 
 def test_host_rejects_a_trajectory_that_changes_its_calibration(host, tmp_path):

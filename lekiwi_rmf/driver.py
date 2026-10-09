@@ -501,6 +501,7 @@ class LeKiwiDriver(Node):
         max_linear, max_angular = speed_limits
         self._base_test_radius = .20
         self._base_qualification = None
+        self._base_test_stage = None
         if values["bounded_base_test"]:
             stage = self.declare_parameter("base_test_stage", "").value
             if stage:
@@ -508,6 +509,7 @@ class LeKiwiDriver(Node):
                 max_linear, max_angular = profile['linear_speed_m_s'], profile['angular_speed_rad_s']
                 self._base_test_radius = profile['driver_center_radius_m']
                 self._base_qualification = profile
+                self._base_test_stage = float(stage)
             else:
                 linear, angular = bounded_test_speed_limits(
                     self.declare_parameter("base_test_linear_limit", 0.03).value,
@@ -1365,6 +1367,8 @@ class LeKiwiDriver(Node):
                 remote_goal = self.trajectory.host_id if self.trajectory else None
             if remote_goal is not None:
                 self.robot.send_action(action, arm_goal_id=remote_goal, arm_permitted=arm_permitted)
+            elif self._base_qualification is not None:
+                self.robot.send_action(action, base_test_stage=self._base_test_stage)
             else:
                 self.robot.send_action(action)
             if trajectory_ran or not arm_permitted:

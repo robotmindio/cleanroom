@@ -22,7 +22,7 @@ import zmq
 
 from lekiwi_rmf.arm_trajectory import ARM_JOINTS, JOINT_LIMITS, joint_positions
 from lekiwi_rmf.host_protocol import (
-    ARM_LEASE_KEYS, STATE_KEYS, TorqueCommand, observation_payload, valid_goal_id,
+    ARM_LEASE_KEYS, BASE_TEST_STAGE_KEY, STATE_KEYS, TorqueCommand, observation_payload, valid_goal_id,
 )
 from lekiwi_rmf.local_arm_executor import LocalArmExecutor
 from lekiwi_rmf.motor_health import fault_snapshot, healthy_snapshot
@@ -373,7 +373,7 @@ class HostLoop:
     def __init__(
         self, robot, host, health, *, disarm_on_failure: bool, arm_calibration,
         base_limits, base_scales, observation_period_s=OBSERVATION_PERIOD_S,
-        clock=time.monotonic,
+        clock=time.monotonic, base_test_profiles=None,
     ):
         self.robot = robot
         self.host = host
@@ -381,6 +381,10 @@ class HostLoop:
         self.disarm_on_failure = disarm_on_failure
         self.arm_calibration = arm_calibration
         self.base_limits = base_limits
+        self.base_test_profiles = base_test_profiles or {}
+        self._base_test_stage = None
+        self._base_test_center = None
+        self._base_test_hold = {}
         self.observation_period_s = observation_period_s
         self.clock = clock
         self.last_cmd_time = clock()
@@ -428,9 +432,9 @@ class HostLoop:
             )
             self._last_slow_log = started
 
-    def send_action(self, action) -> None:
+    def send_action(self, action, base_limits=None) -> None:
         validate_motion_action(
-            action, self.base_limits, self.odometry.scales, self.arm_calibration,
+            action, self.base_limits if base_limits is None else base_limits, self.odometry.scales, self.arm_calibration,
             self.arm_executor.hold or self.local_observation,
         )
         self.robot.send_action(action)
@@ -438,24 +442,45 @@ class HostLoop:
     def receive_command(self) -> None:
         try:
             message = self.host.zmq_cmd_socket.recv_string(zmq.NOBLOCK)
-            action = validate_action_payload(message, STATE_KEYS, ARM_LEASE_KEYS)
+            action = validate_action_payload(message, STATE_KEYS, (*ARM_LEASE_KEYS, BASE_TEST_STAGE_KEY))
             if not self.control.torque_enabled:
                 raise RuntimeError("servo torque is disabled")
             goal_id = action.pop(ARM_LEASE_KEYS[0], None)
             permission = action.pop(ARM_LEASE_KEYS[1], None)
+            stage = action.pop(BASE_TEST_STAGE_KEY, None)
             if (goal_id is None) != (permission is None) or (
                 goal_id is not None and (
                     not goal_id.is_integer() or not valid_goal_id(int(goal_id)) or permission not in (0, 1)
                 )
             ):
                 raise ValueError("invalid arm trajectory lease")
+            if stage is not None and goal_id is not None:
+                raise ValueError("base qualification cannot renew an arm trajectory")
             if goal_id is not None:
                 self.arm_executor.renew(int(goal_id), bool(permission))
-            # While a local goal owns the arm, legacy streamed setpoints cannot
-            # overwrite it. The retained final target also survives reply latency.
-            if not self.arm_executor.active:
+            if stage is not None:
+                profile = self.base_test_profiles.get(stage)
+                if profile is None or self.arm_executor.active:
+                    raise ValueError("invalid base qualification stage or active arm goal")
+                if self.local_feedback_at is None or self.clock()-self.local_feedback_at > .25:
+                    raise ValueError("base qualification requires fresh local feedback")
+                limits = (profile['linear_speed_m_s'], profile['angular_speed_rad_s'])
+                if math.hypot(action['x.vel'], action['y.vel']) and action['theta.vel']:
+                    limits = (profile['return_linear_speed_m_s'], profile['return_angular_speed_rad_s'])
+                validate_motion_action(action, limits, self.odometry.scales, self.arm_calibration,
+                    self.arm_executor.hold or self.local_observation)
+                if stage != self._base_test_stage:
+                    self._base_test_center = self.odometry.pose[:2]
+                    self._base_test_hold = {f'{joint}.pos': self.local_observation[f'{joint}.pos'] for joint in ARM_JOINTS}
+                if math.dist(self.odometry.pose[:2], self._base_test_center) >= profile['driver_center_radius_m']:
+                    action.update(dict.fromkeys(('x.vel', 'y.vel', 'theta.vel'), 0.0))
+                action.update(self._base_test_hold)
+                self.send_action(action, limits)
+                self._base_test_stage = stage
+            elif not self.arm_executor.active:
                 action.update(self.arm_executor.hold)
                 self.send_action(action)
+                self._base_test_stage = None
         except zmq.Again:
             # Between commands is the normal state; silence past the watchdog
             # timeout is handled by enforce_watchdog().
@@ -485,8 +510,11 @@ class HostLoop:
 
     def enforce_watchdog(self) -> None:
         now = self.clock()
+        timeout = self.host.watchdog_timeout_ms / 1000
+        if self._base_test_stage is not None:
+            timeout = min(timeout, .25)
         if (
-            now - self.last_cmd_time <= self.host.watchdog_timeout_ms / 1000
+            now - self.last_cmd_time <= timeout
             or self.watchdog_active
             or now < self.next_watchdog_attempt
         ):

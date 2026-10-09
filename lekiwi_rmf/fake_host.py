@@ -190,6 +190,7 @@ class FakeLeKiwiHost:
         disarm_on_failure: bool = False, watchdog_timeout_s: float = 0.5,
         arm_calibration_file: str = "", nav2_params_file: str | Path | None = None,
         base_scales: tuple[float, float] = (BASE_XY_SCALE, BASE_YAW_SCALE),
+        base_test_profiles: dict | None = None,
     ):
         if not isinstance(bind_host, str) or not bind_host:
             raise ValueError("bind_host must be a non-empty string")
@@ -209,6 +210,7 @@ class FakeLeKiwiHost:
             # Like the real host, a missing calibration file means identity calibration.
             arm_calibration=load_calibration(arm_calibration_file or "/nonexistent/arm-calibration.json"),
             base_limits=load_base_speed_limits(nav2_params_file or _default_nav2_params()),
+            base_test_profiles=base_test_profiles,
             base_scales=base_scales,
             # Tests observe at every step.
             observation_period_s=0.0,

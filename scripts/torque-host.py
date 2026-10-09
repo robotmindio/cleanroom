@@ -25,7 +25,8 @@ from lerobot.robots.lekiwi.lekiwi import LeKiwi
 
 from lekiwi_rmf.torque_control import validated_bind_address
 from lekiwi_rmf.arm_trajectory import load_calibration
-from lekiwi_rmf.motion_guards import load_base_speed_limits
+from lekiwi_rmf.motion_guards import load_base_speed_limits, load_base_test_profile
+from lekiwi_rmf.host_protocol import BASE_TEST_STAGES
 from lekiwi_rmf.motor_host import (
     TORQUE_RETRIES, HostLoop, MotorHealthCollector, broadcast_torque_off,
     cut_torque_for_shutdown, verify_torque,
@@ -207,6 +208,7 @@ def main(cfg: TorqueHostConfig):
             disarm_on_failure=cfg.safety.disarm_on_failure,
             arm_calibration=load_calibration(cfg.safety.arm_calibration_file),
             base_limits=load_base_speed_limits(cfg.safety.nav2_params_file),
+            base_test_profiles={stage: load_base_test_profile(cfg.safety.nav2_params_file, f'{stage:.2f}') for stage in BASE_TEST_STAGES},
             base_scales=load_base_scales(os.environ.get(
                 "LEKIWI_LAUNCH_CALIBRATION", "~/.ros/lekiwi_launch_calibration.conf")),
         )
