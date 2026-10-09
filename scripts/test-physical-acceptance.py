@@ -63,14 +63,15 @@ class FaultTest(navigation.Test):
                 'base_permitted':self.flags.get('base_motion_permitted'),
                 'faults':self.health.get('faults')})
 
-    def tick(self, twist=None, check=True):
+    def tick(self, twist=None, check=True, pose_source=None):
         # Faults intentionally remove feedback/permission. Keep the finite
         # deadline and radius checks without aborting on the expected dropout.
         super().tick(twist,check=False)
         if check:
             if time.monotonic()>self.deadline:
                 raise RuntimeError('fault-test deadline expired')
-            if self.center and math.dist(self.pose[:2],self.center[:2])>=self.maximum_center_radius_m:
+            pose = self.pose if pose_source is None else pose_source()
+            if self.center and math.dist(pose[:2],self.center[:2])>=self.maximum_center_radius_m:
                 raise RuntimeError('fault test reached its early center boundary')
 
     def action(self, argv, twist=None, data=None):

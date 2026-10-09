@@ -164,6 +164,33 @@ def test_faults_only_batches_all_axes_without_running_nominals(monkeypatch):
     assert len(node.checks)==8
 
 
+def test_return_only_stops_after_the_fixed_center_recovery():
+    from types import SimpleNamespace
+    module=import_module('test-onboard-braking')
+    calls=[]
+    node=SimpleNamespace(config={'stage':'0.30','return_only':True,'body_radius_m':.33,
+        'test_center':(0.,0.,0.)},pose=(0.,0.,0.),ranges=[{'pose':[-.25,0.,0.]}]*21,
+        range_info=[{}],camera_poses=[{}],views={'front':1,'wrist':1,'astra':1},
+        wait_ready=lambda:None,wait=lambda condition,timeout:condition(),
+        move=lambda target,**limits:calls.append(target),save=lambda:calls.append('saved'))
+    module.OnboardBraking.run(node)
+    assert calls==[(0.,0.,0.),'saved']
+
+
+def test_fault_boundary_uses_the_same_pose_frame_as_the_center(monkeypatch):
+    import time
+    module=import_module('test-onboard-braking')
+    monkeypatch.setattr(module.NAV.Test,'tick',lambda *a,**k:None)
+    node=module.FAULT.FaultTest.__new__(module.FAULT.FaultTest)
+    node.deadline,node.center=time.monotonic()+10,(0.,0.,0.)
+    node.maximum_center_radius_m,node.pose=.4,(-.414,0.,0.)
+    with pytest.raises(RuntimeError,match='early center'):
+        module.FAULT.FaultTest.tick(node)
+    module.FAULT.FaultTest.tick(node,pose_source=lambda:(-.25,0.,0.))
+    with pytest.raises(RuntimeError,match='early center'):
+        module.FAULT.FaultTest.tick(node,pose_source=lambda:(-.41,0.,0.))
+
+
 def test_scan_geometry_recovers_motion_and_rejects_a_single_wall():
     module=import_module('test-onboard-braking')
     fit=module.register_scan

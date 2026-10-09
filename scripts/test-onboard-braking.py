@@ -61,7 +61,7 @@ def terminal_observed_speed(samples, angular, window_s=1.):
 
 def resumable_evidence(previous, config):
     """Reuse measurements only under the same speed and stopping conditions."""
-    run_fields = {'nominal_only', 'faults_only', 'direction', 'selected_fault', 'angular_test', 'depth_filter_pid', 'test_center', 'reference_start_pose', 'maximum_runtime_s', 'trials_per_direction'}
+    run_fields = {'nominal_only', 'faults_only', 'return_only', 'direction', 'selected_fault', 'angular_test', 'depth_filter_pid', 'test_center', 'reference_start_pose', 'maximum_runtime_s', 'trials_per_direction'}
     conditions = {k:v for k,v in config.items() if k not in run_fields}
     if {k:v for k,v in previous['profile'].items() if k not in run_fields} != conditions:
         raise ValueError('resumed speed/load/measurement profile differs')
@@ -269,7 +269,8 @@ class OnboardBraking(FAULT.FaultTest):
         self.source_stamps[topic]=stamp
 
     def tick(self,twist=None,check=True):
-        super().tick(twist,check)
+        super().tick(twist,check,pose_source=(lambda:self.ranges[-1]['pose'])
+                     if self.config.get('stage') and self.ranges else None)
         if check and self.active:
             def fresh():
                 return self.ranges and time.monotonic()-self.ranges[-1]['time']+self.ranges[-1]['age']<=.5
@@ -421,6 +422,9 @@ class OnboardBraking(FAULT.FaultTest):
         # A resumed run starts at the previous stop. Anchor its independent
         # boundary at the fixed test center once the return has stopped.
         self.origin_range=list(self.center) if self.config.get('stage') else self.ranges[-1]['pose']
+        if self.config.get('return_only'):
+            self.save()
+            return
         if self.config.get('direction'):
             # Qualification returns to the fixed reference after each trial.
             # Current-speed runs leave the robot at the measured stop.
@@ -528,6 +532,7 @@ def main():
     selection.add_argument('--fault',choices=['scan_disconnect','depth_disconnect','telemetry_loss','compute_command_loss'],help='run one moving fault without nominal repeats')
     selection.add_argument('--attended-sequence',action='store_true',help='run the operator-authorized stage sequence, stopping at the first unqualified trial')
     selection.add_argument('--faults-only',action='store_true',help='run all eight attended moving faults without nominal repeats')
+    selection.add_argument('--return-only',action='store_true',help='return to the fixed qualification center without starting a speed trial')
     parser.add_argument('--angular',action='store_true',help='use rotation for the selected fault')
     parser.add_argument('--stage',choices=['0.20','0.30'],help='explicit attended manual qualification stage; production Nav2 speeds are retained')
     parser.add_argument('--reference-run',type=Path,help='retain the fixed raw-LiDAR reference and center across qualification stages without reusing their trials')
@@ -536,12 +541,14 @@ def main():
     args=parser.parse_args()
     if not math.isfinite(args.payload_g) or args.payload_g<0:
         parser.error('payload must be finite and nonnegative')
-    if args.stage and not (args.direction or args.fault or args.attended_sequence or args.faults_only):
+    if args.stage and not (args.direction or args.fault or args.attended_sequence or args.faults_only or args.return_only):
         parser.error('qualification requires a selected trial or --attended-sequence')
     if args.attended_sequence and not args.stage:
         parser.error('--attended-sequence requires --stage')
     if args.faults_only and (not args.stage or args.nominal_only):
         parser.error('--faults-only requires a stage and conflicts with --nominal-only')
+    if args.return_only and (not args.stage or not (args.reference_run or args.resume)):
+        parser.error('--return-only requires a stage and a saved fixed reference')
     if args.angular and not args.fault:
         parser.error('--angular requires --fault')
     if args.fault and args.nominal_only:
@@ -556,7 +563,8 @@ def main():
         if args.stage=='0.20':
             config['trials_per_direction']=1
     config.update(payload_kg=args.payload_g/1000,linear_speed_m_s=linear,angular_speed_rad_s=angular,
-                  nominal_only=args.nominal_only or args.direction is not None,faults_only=args.faults_only,direction=args.direction,
+                  nominal_only=args.nominal_only or args.direction is not None or args.return_only,
+                  faults_only=args.faults_only,return_only=args.return_only,direction=args.direction,
                   selected_fault=args.fault,angular_test=args.angular,stage=args.stage,
                   point_speed_bound_m_s=config.get('point_speed_bound_m_s',1.15*(linear+config['body_radius_m']*angular)))
     device=next(a.partition(':=')[2] for a in NAV.installed_stack_arguments() if a.startswith('remote_ip:='))
