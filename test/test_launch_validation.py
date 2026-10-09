@@ -102,7 +102,10 @@ def test_qualification_changes_manual_caps_and_zones_without_raising_nav2_speed(
     (include,)=[item for item in navigation if 'include' in item]
     parameters=include['arguments']['params_file']['generated_yaml']
     controller=parameters['controller_server']['ros__parameters']['FollowPath']
-    assert (controller['vx_max'],controller['wz_max'])==(.03,.06)
+    from pathlib import Path
+    from lekiwi_rmf.motion_guards import load_base_speed_limits
+    assert (controller['vx_max'],controller['wz_max'])==load_base_speed_limits(
+        Path(__file__).parents[1]/'config/nav2_params.yaml')
     import yaml
     stop=parameters['collision_monitor']['ros__parameters']['StopZone']
     assert stop['type']=='velocity_polygon' and stop['holonomic']
@@ -147,9 +150,9 @@ def test_qualification_changes_manual_caps_and_zones_without_raising_nav2_speed(
         resolve_bringup(profile='split',base_test_stage='0.30')
 
 
-def test_held_stow_reference_is_used_only_for_the_025_attended_stage():
-    for stage,expected in [(None,[0.,-1.8167,1.6295,1.2367,-.0169,.2095]),
-                           ('0.20',[0.,-1.8167,1.6295,1.2367,-.0169,.2095]),
+def test_qualified_held_stow_reference_is_used_by_production_and_attended_stages():
+    for stage,expected in [(None,[.0092,-1.7967,1.6249,1.2306,-.0077,.2161]),
+                           ('0.20',[.0092,-1.7967,1.6249,1.2306,-.0077,.2161]),
                            ('0.25',[.0092,-1.7967,1.6249,1.2306,-.0077,.2161])]:
         arguments={'bounded_base_test':'true','base_test_stage':stage} if stage else {}
         supervisor=find_node(resolve_bringup(profile='split',**arguments),

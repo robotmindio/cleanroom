@@ -45,7 +45,7 @@ def test_qualification_profiles_fit_the_one_metre_fixture_and_reject_missing_res
                       ('measurement_uncertainty_m',.05),('measurement_uncertainty_m',True),
                       ('maximum_stop_time_s',2.),('maximum_stop_time_s',True)]:
         changed=yaml.safe_load(yaml.safe_dump(data))
-        destination=changed['stages']['0.30'] if key.endswith('speed_m_s') or key=='angular_speed_rad_s' else changed['bounds']
+        destination=changed['stages']['0.30'] if key.endswith('speed_m_s') or key in ('angular_speed_rad_s','maximum_stop_time_s') else changed['bounds']
         destination[key]=value
         (tmp_path/'base_speed_qualification.yaml').write_text(yaml.safe_dump(changed))
         with pytest.raises(ValueError):
@@ -89,6 +89,10 @@ def test_indoor_stop_zone_and_speed_profile_match_the_acceptance_budget():
     assert _polygon_boundary_distance(footprint,stop) == pytest.approx(profile['maximum_stopping_distance_m'])
     linear, angular = load_base_speed_limits(root/'config/nav2_params.yaml')
     assert nav2['velocity_smoother']['ros__parameters']['max_velocity'] == [linear, linear, angular]
+    point_speed=(linear+profile['body_radius_m']*angular)*(1+profile['scale_reserve_fraction'])
+    assert profile['maximum_stopping_distance_m']>=point_speed*profile['maximum_stop_time_s']+profile['measurement_uncertainty_m']
+    acceptance=yaml.safe_load((root/'config/safety_acceptance.yaml').read_text())
+    assert profile['maximum_center_radius_m']>linear*profile['nominal_command_duration_s']+acceptance['maximum_allowed_stopping_distance_m']+profile['measurement_uncertainty_m']
 
 
 @pytest.mark.parametrize('feedback_check',[True,False])

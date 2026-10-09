@@ -259,12 +259,12 @@
       "arm_gripper"
      ],
      "stow_joint_positions": [
-      0.0,
-      -1.8167,
-      1.6295,
-      1.2367,
-      -0.0169,
-      0.2095
+      0.0092,
+      -1.7967,
+      1.6249,
+      1.2306,
+      -0.0077,
+      0.2161
      ],
      "stow_tolerance": 0.02,
      "strict": false,
@@ -714,8 +714,8 @@
   "parameters": {
    "arm_calibration_file": "$(env HOME)/.ros/lekiwi_arm_calibration.json",
    "auto_arm_on_startup": false,
-   "base_test_angular_limit": 0.06,
-   "base_test_linear_limit": 0.03,
+   "base_test_angular_limit": 0.4,
+   "base_test_linear_limit": 0.25,
    "bounded_base_test": false,
    "curve_client_secret_key_file": "",
    "curve_server_public_key_file": "",

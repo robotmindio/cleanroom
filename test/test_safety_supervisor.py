@@ -66,6 +66,19 @@ def test_production_requires_only_inputs_the_shipped_robot_publishes():
     assert arm["perception_timeout"] == parameters["depth_timeout"]
 
 
+@pytest.mark.parametrize('key',['vx_max','wz_max'])
+def test_tracked_acceptance_refuses_commands_above_the_measured_operating_limits(tmp_path,key):
+    root=Path(__file__).parents[1]/'config'
+    nav2=yaml.safe_load((root/'nav2_params.yaml').read_text())
+    nav2['controller_server']['ros__parameters']['FollowPath'][key]+=.01
+    path=tmp_path/'nav2.yaml'
+    path.write_text(yaml.safe_dump(nav2))
+    production=yaml.safe_load((root/'safety_production.yaml').read_text())['safety_supervisor']['ros__parameters']
+    stow=dict(zip(production['stow_joint_names'],production['stow_joint_positions']))
+    valid,detail=validate_acceptance_file(root/'safety_acceptance.yaml',path,stow)
+    assert not valid and 'maximum_tested' in detail
+
+
 def test_production_requires_arm_workspace_gate_but_simulation_profile_does_not():
     root = Path(__file__).parents[1]
     production = yaml.safe_load(

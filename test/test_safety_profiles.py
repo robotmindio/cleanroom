@@ -143,3 +143,29 @@ def test_tracked_acceptance_fits_the_tracked_nav2_and_stow_configuration():
     from lekiwi_rmf.safety_acceptance import validate_tracked_acceptance
 
     assert validate_tracked_acceptance(ROOT / "config") == (True, "physical safety acceptance validated")
+
+
+def test_qualified_speed_acceptance_is_backed_by_complete_loaded_evidence():
+    acceptance=yaml.safe_load((ROOT/'config/safety_acceptance.yaml').read_text())
+    report=json.loads((ROOT/acceptance['evidence_report']).read_text())
+    assert report['counts']=={direction:5 for direction in acceptance['directions']}
+    assert len(report['loaded_trials'])==30 and len(report['moving_faults'])==8
+    assert report['reported_payload_kg']==acceptance['payload_kg']==.2
+    assert report['accepted_stow_joint_positions']==acceptance['accepted_stow_joint_positions']
+    measurements=[]
+    for trial in report['loaded_trials']:
+        speed=acceptance['maximum_tested_angular_speed_rad_s' if trial['direction'].startswith('rotation') else 'maximum_tested_linear_speed_m_s']
+        assert trial['requested_speed']==speed and trial['terminal_observed_speed']>=.9*speed
+        assert trial['qualification_eligible'] and not trial['feedback_interrupted']
+        measurements.append(trial)
+    for axis in ('linear','angular'):
+        for fault in ('scan_disconnect','depth_disconnect','telemetry_loss','compute_command_loss'):
+            case=report['moving_faults'][axis+'/'+fault]
+            assert case['passed'] and case['recovered_driver']=='ARMED'
+            assert case['terminal_observed_speed']>=.9*case['requested_speed']
+            measurements.append(case['independent'])
+    for measurement in measurements:
+        assert measurement['conservative_swept_distance_m']>=measurement['stage_conservative_swept_distance_m']
+        assert measurement['conservative_swept_distance_m']+acceptance['measurement_uncertainty_m']<=acceptance['maximum_allowed_stopping_distance_m']
+        assert measurement['uncertainty_upper_m']<=acceptance['measurement_uncertainty_m']
+        assert measurement['stop_time_receive_upper_s']<=acceptance['maximum_command_stop_latency_s']

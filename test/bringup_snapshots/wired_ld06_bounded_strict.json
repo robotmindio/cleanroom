@@ -47,7 +47,7 @@
          },
          "global_frame": "map",
          "local_frame": "odom",
-         "max_rotational_vel": 0.06,
+         "max_rotational_vel": 0.4,
          "min_rotational_vel": 0.03,
          "robot_base_frame": "base_footprint",
          "spin": {
@@ -85,7 +85,7 @@
           "action_type": "slowdown",
           "enabled": true,
           "min_points": 1,
-          "points": "[[0.36, 0.34], [0.36, -0.34], [-0.34, -0.34], [-0.34, 0.34]]",
+          "points": "[[1.08, 1.06], [1.08, -1.06], [-1.06, -1.06], [-1.06, 1.06]]",
           "polygon_pub_topic": "collision_slowdown_zone",
           "slowdown_ratio": 0.35,
           "type": "polygon",
@@ -95,7 +95,7 @@
           "action_type": "stop",
           "enabled": true,
           "min_points": 1,
-          "points": "[[0.29, 0.27], [0.29, -0.27], [-0.27, -0.27], [-0.27, 0.27]]",
+          "points": "[[1.01, 0.99], [1.01, -0.99], [-0.99, -0.99], [-0.99, 0.99]]",
           "polygon_pub_topic": "collision_stop_zone",
           "type": "polygon",
           "visualize": true
@@ -194,12 +194,12 @@
           "time_steps": 40,
           "transform_tolerance": 0.2,
           "visualize": false,
-          "vx_max": 0.03,
-          "vx_min": -0.03,
+          "vx_max": 0.25,
+          "vx_min": -0.25,
           "vx_std": 0.012,
-          "vy_max": 0.03,
+          "vy_max": 0.25,
           "vy_std": 0.012,
-          "wz_max": 0.06,
+          "wz_max": 0.4,
           "wz_std": 0.04
          },
          "controller_frequency": 20.0,
@@ -424,14 +424,14 @@
           -1.57
          ],
          "max_velocity": [
-          0.03,
-          0.03,
-          0.06
+          0.25,
+          0.25,
+          0.4
          ],
          "min_velocity": [
-          -0.03,
-          -0.03,
-          -0.06
+          -0.25,
+          -0.25,
+          -0.4
          ],
          "odom_duration": 0.1,
          "odom_topic": "/odom",
@@ -554,7 +554,7 @@
          },
          "global_frame": "map",
          "local_frame": "odom",
-         "max_rotational_vel": 0.06,
+         "max_rotational_vel": 0.4,
          "min_rotational_vel": 0.03,
          "robot_base_frame": "base_footprint",
          "spin": {
@@ -592,7 +592,7 @@
           "action_type": "slowdown",
           "enabled": true,
           "min_points": 1,
-          "points": "[[0.36, 0.34], [0.36, -0.34], [-0.34, -0.34], [-0.34, 0.34]]",
+          "points": "[[1.08, 1.06], [1.08, -1.06], [-1.06, -1.06], [-1.06, 1.06]]",
           "polygon_pub_topic": "collision_slowdown_zone",
           "slowdown_ratio": 0.35,
           "type": "polygon",
@@ -602,7 +602,7 @@
           "action_type": "stop",
           "enabled": true,
           "min_points": 1,
-          "points": "[[0.29, 0.27], [0.29, -0.27], [-0.27, -0.27], [-0.27, 0.27]]",
+          "points": "[[1.01, 0.99], [1.01, -0.99], [-0.99, -0.99], [-0.99, 0.99]]",
           "polygon_pub_topic": "collision_stop_zone",
           "type": "polygon",
           "visualize": true
@@ -701,12 +701,12 @@
           "time_steps": 40,
           "transform_tolerance": 0.2,
           "visualize": false,
-          "vx_max": 0.03,
-          "vx_min": -0.03,
+          "vx_max": 0.25,
+          "vx_min": -0.25,
           "vx_std": 0.012,
-          "vy_max": 0.03,
+          "vy_max": 0.25,
           "vy_std": 0.012,
-          "wz_max": 0.06,
+          "wz_max": 0.4,
           "wz_std": 0.04
          },
          "controller_frequency": 20.0,
@@ -931,14 +931,14 @@
           -1.57
          ],
          "max_velocity": [
-          0.03,
-          0.03,
-          0.06
+          0.25,
+          0.25,
+          0.4
          ],
          "min_velocity": [
-          -0.03,
-          -0.03,
-          -0.06
+          -0.25,
+          -0.25,
+          -0.4
          ],
          "odom_duration": 0.1,
          "odom_topic": "/odom",
@@ -1140,7 +1140,7 @@
          },
          "global_frame": "map",
          "local_frame": "odom",
-         "max_rotational_vel": 0.06,
+         "max_rotational_vel": 0.4,
          "min_rotational_vel": 0.03,
          "robot_base_frame": "base_footprint",
          "spin": {
@@ -1178,7 +1178,7 @@
           "action_type": "slowdown",
           "enabled": true,
           "min_points": 1,
-          "points": "[[0.36, 0.34], [0.36, -0.34], [-0.34, -0.34], [-0.34, 0.34]]",
+          "points": "[[1.08, 1.06], [1.08, -1.06], [-1.06, -1.06], [-1.06, 1.06]]",
           "polygon_pub_topic": "collision_slowdown_zone",
           "slowdown_ratio": 0.35,
           "type": "polygon",
@@ -1188,7 +1188,7 @@
           "action_type": "stop",
           "enabled": true,
           "min_points": 1,
-          "points": "[[0.29, 0.27], [0.29, -0.27], [-0.27, -0.27], [-0.27, 0.27]]",
+          "points": "[[1.01, 0.99], [1.01, -0.99], [-0.99, -0.99], [-0.99, 0.99]]",
           "polygon_pub_topic": "collision_stop_zone",
           "type": "polygon",
           "visualize": true
@@ -1287,12 +1287,12 @@
           "time_steps": 40,
           "transform_tolerance": 0.2,
           "visualize": false,
-          "vx_max": 0.03,
-          "vx_min": -0.03,
+          "vx_max": 0.25,
+          "vx_min": -0.25,
           "vx_std": 0.012,
-          "vy_max": 0.03,
+          "vy_max": 0.25,
           "vy_std": 0.012,
-          "wz_max": 0.06,
+          "wz_max": 0.4,
           "wz_std": 0.04
          },
          "controller_frequency": 20.0,
@@ -1517,14 +1517,14 @@
           -1.57
          ],
          "max_velocity": [
-          0.03,
-          0.03,
-          0.06
+          0.25,
+          0.25,
+          0.4
          ],
          "min_velocity": [
-          -0.03,
-          -0.03,
-          -0.06
+          -0.25,
+          -0.25,
+          -0.4
          ],
          "odom_duration": 0.1,
          "odom_topic": "/odom",
@@ -1574,12 +1574,12 @@
       "arm_gripper"
      ],
      "stow_joint_positions": [
-      0.0,
-      -1.8167,
-      1.6295,
-      1.2367,
-      -0.0169,
-      0.2095
+      0.0092,
+      -1.7967,
+      1.6249,
+      1.2306,
+      -0.0077,
+      0.2161
      ],
      "stow_tolerance": 0.02,
      "strict": true,
@@ -1863,8 +1863,8 @@
   "parameters": {
    "arm_calibration_file": "$(env HOME)/.ros/lekiwi_arm_calibration.json",
    "auto_arm_on_startup": false,
-   "base_test_angular_limit": 0.06,
-   "base_test_linear_limit": 0.03,
+   "base_test_angular_limit": 0.4,
+   "base_test_linear_limit": 0.25,
    "bounded_base_test": true,
    "curve_client_secret_key_file": "",
    "curve_server_public_key_file": "",

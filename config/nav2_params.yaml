@@ -59,21 +59,21 @@ controller_server:
       batch_size: 1000
       iteration_count: 1
       motion_model: Omni
-      # Indoor limits paired with the 5 cm stopping clearance below.
+      # Qualified attended limits paired with the measured stopping clearance below.
       # Depth transport and its 0.5 s freshness gate are paired with these
       # limits and the completed attended physical acceptance.
-      vx_max: 0.03
-      vx_min: -0.03
-      vy_max: 0.03
-      wz_max: 0.06
+      vx_max: 0.25
+      vx_min: -0.25
+      vy_max: 0.25
+      wz_max: 0.40
       ax_max: 0.60
       ax_min: -0.60
       ay_max: 0.60
       ay_min: -0.60
       az_max: 1.57
-      vx_std: 0.012
-      vy_std: 0.012
-      wz_std: 0.04
+      vx_std: 0.10
+      vy_std: 0.10
+      wz_std: 0.16
       prune_distance: 1.5
       transform_tolerance: 0.2
       visualize: false
@@ -217,7 +217,7 @@ behavior_server:
     robot_base_frame: base_footprint
     transform_tolerance: 0.2
     cycle_frequency: 10.0
-    max_rotational_vel: 0.06
+    max_rotational_vel: 0.40
     min_rotational_vel: 0.03
     behavior_plugins: [spin, backup, drive_on_heading, assisted_teleop, wait]
     spin:
@@ -246,8 +246,8 @@ velocity_smoother:
     smoothing_frequency: 20.0
     feedback: OPEN_LOOP
     scale_velocities: true
-    max_velocity: [0.03, 0.03, 0.06]
-    min_velocity: [-0.03, -0.03, -0.06]
+    max_velocity: [0.25, 0.25, 0.40]
+    min_velocity: [-0.25, -0.25, -0.40]
     max_accel: [0.60, 0.60, 1.57]
     max_decel: [-0.60, -0.60, -1.57]
     odom_topic: /odom
@@ -273,10 +273,10 @@ collision_monitor:
     polygons: [StopZone, SlowdownZone]
     StopZone:
       type: polygon
-      # Folded footprint plus 5 cm on every side: 0.56 x 0.54 m.
+      # Folded footprint plus 77 cm per side, including simultaneous translation/rotation.
       # Acceptance must cover measured stopping travel plus uncertainty at
       # the indoor speed limits; see config/safety_acceptance.yaml for the record.
-      points: "[[0.29, 0.27], [0.29, -0.27], [-0.27, -0.27], [-0.27, 0.27]]"
+      points: "[[1.01, 0.99], [1.01, -0.99], [-0.99, -0.99], [-0.99, 0.99]]"
       action_type: stop
       min_points: 1
       visualize: true
@@ -284,8 +284,8 @@ collision_monitor:
       enabled: true
     SlowdownZone:
       type: polygon
-      # 12 cm from the folded footprint: 0.70 x 0.68 m.
-      points: "[[0.36, 0.34], [0.36, -0.34], [-0.34, -0.34], [-0.34, 0.34]]"
+      # 84 cm from the folded footprint: 7 cm before the measured stop zone.
+      points: "[[1.08, 1.06], [1.08, -1.06], [-1.06, -1.06], [-1.06, 1.06]]"
       action_type: slowdown
       slowdown_ratio: 0.35
       min_points: 1

@@ -5,11 +5,11 @@
  },
  "base_test_angular_limit": {
   "choices": null,
-  "default": "0.06"
+  "default": "0.4"
  },
  "base_test_linear_limit": {
   "choices": null,
-  "default": "0.03"
+  "default": "0.25"
  },
  "base_test_stage": {
   "choices": null,

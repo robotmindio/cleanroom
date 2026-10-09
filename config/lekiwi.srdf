@@ -101,13 +101,13 @@
   <disable_collisions link1="shoulder_holder_collision_proxy" link2="roll_holder_collision_proxy" reason="MechanicalRest"/>
   <disable_collisions link1="shoulder_collision_proxy" link2="roll_holder_collision_proxy" reason="MechanicalRest"/>
   <group_state name="travel_stow" group="arm">
-    <joint name="arm_shoulder_pan" value="0.0" />
-    <joint name="arm_shoulder_lift" value="-1.8167" />
-    <joint name="arm_elbow_flex" value="1.6295" />
-    <joint name="arm_wrist_flex" value="1.2367" />
-    <joint name="arm_wrist_roll" value="-0.0169" />
+    <joint name="arm_shoulder_pan" value="0.0092" />
+    <joint name="arm_shoulder_lift" value="-1.7967" />
+    <joint name="arm_elbow_flex" value="1.6249" />
+    <joint name="arm_wrist_flex" value="1.2306" />
+    <joint name="arm_wrist_roll" value="-0.0077" />
   </group_state>
   <group_state name="travel_stow" group="gripper">
-    <joint name="arm_gripper" value="0.2095" />
+    <joint name="arm_gripper" value="0.2161" />
   </group_state>
 </robot>

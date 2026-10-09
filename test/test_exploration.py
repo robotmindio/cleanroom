@@ -17,7 +17,7 @@ FOOTPRINT, INSCRIBED_RADIUS, REGION_MARGIN = load_navigation_footprint(
 
 
 def choose(grid, *, revisit=False, visited=(), blocked=(), position=(0, 0), origin=(-2, -2, 0)):
-    return select_target(grid, 0.05, origin, position, (0, 0), 1.8, visited, blocked,
+    return select_target(grid, 0.05, origin, position, (0, 0), 2.5, visited, blocked,
                          clearance=0.22, footprint=FOOTPRINT, region_margin=REGION_MARGIN,
                          observation_distance=0.8, spacing=0.5,
                          revisit_spacing=1.0, free_threshold=20, revisit=revisit)
@@ -29,7 +29,7 @@ def test_frontier_approach_is_known_clear_and_connected():
     target, stage, area = choose(grid)
     assert target is not None and stage == "exploring_frontiers" and area > 0
     assert 0.2 < target[0] < 0.8  # The actual body remains outside unknown cells.
-    assert math.hypot(*target) < 1.8 - 0.38
+    assert math.hypot(*target) < 2.5 - REGION_MARGIN
     # A separating wall makes those frontiers unreachable.
     grid[:, 45] = 100
     assert choose(grid, position=(-0.5, 0))[0] is None
@@ -50,7 +50,7 @@ def test_close_wall_uses_actual_footprint_and_blocks_corner_turns():
     grid[[34, 46], :] = 100  # 55 cm corridor: ~5.5 cm beside the 44 cm body.
     position = (0.025, 0.025)
     assert INSCRIBED_RADIUS == pytest.approx(0.22)
-    assert REGION_MARGIN == pytest.approx(0.38)
+    assert REGION_MARGIN == pytest.approx(1.10)
     assert not known_safe_cells(grid, 0.05, 0.33, 20)[40, 40]
     assert known_safe_cells(grid, 0.05, 0.22, 20)[40, 40]
     assert footprint_is_free(grid, 0.05, (-2, -2, 0), position, 0, FOOTPRINT, 20)
@@ -62,7 +62,7 @@ def test_close_wall_uses_actual_footprint_and_blocks_corner_turns():
     assert not footprint_is_free(grid, 0.05, rotated_origin, rotated_position, 3 * math.pi / 4, FOOTPRINT, 20)
     target, _, area = choose(grid, revisit=True, position=position)
     assert target is not None
-    assert math.hypot(*target) < 1.8 - REGION_MARGIN
+    assert math.hypot(*target) < 2.5 - REGION_MARGIN
     assert area > 0
     grid[40, 40] = -1  # Unknown under the body is blocked, including its interior.
     assert not footprint_is_free(grid, 0.05, (-2, -2, 0), position, 0, FOOTPRINT, 20)

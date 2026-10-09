@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Finite loaded stopping/fault tests; observe with robot cameras and raw LiDAR.
 
-Source setup.bash. Requires the authorized attended 30 cm area and travel_stow.
+Source setup.bash. Requires attended dry clearance and folded travel_stow:
+1.8 m beyond the footprint per direction for default production pulses;
+explicit --stage profiles use their separately bounded qualification fixture.
 Does not restart motor services, change torque or grant acceptance automatically.
 """
 import argparse
@@ -62,9 +64,11 @@ def terminal_observed_speed(samples, angular, window_s=1.):
 
 def resumable_evidence(previous, config):
     """Reuse measurements only under the same speed and stopping conditions."""
-    run_fields = {'nominal_only', 'faults_only', 'return_only', 'direction', 'direction_sequence', 'selected_fault', 'angular_test', 'depth_filter_pid', 'test_center', 'reference_start_pose', 'maximum_runtime_s', 'trials_per_direction', 'corridor'}
+    # Pulse length changes the acceleration allowance; each reused stop still proves its terminal ground speed.
+    run_fields = {'nominal_only', 'faults_only', 'return_only', 'direction', 'direction_sequence', 'selected_fault', 'angular_test', 'depth_filter_pid', 'test_center', 'reference_start_pose', 'maximum_runtime_s', 'trials_per_direction', 'corridor', 'nominal_command_duration_s', 'angular_speed_rad_s'}
     conditions = {k:v for k,v in config.items() if k not in run_fields}
-    if {k:v for k,v in previous['profile'].items() if k not in run_fields} != conditions:
+    if (previous['profile'].get('angular_speed_rad_s',0)<config.get('angular_speed_rad_s',0) or
+            {k:v for k,v in previous['profile'].items() if k not in run_fields} != conditions):
         raise ValueError('resumed speed/load/measurement profile differs')
     trials = [{**t,'source_run':t.get('source_run',previous['source_run'])}
               for t in previous['trials'] if t['qualification_eligible']]
@@ -150,10 +154,12 @@ def stopping_measurement(samples, cut, config, stationary_jitter):
     sweep = maximum_swept_excursion(poses,radius)
     # A hidden excursion between bounded-speed endpoints needs travel out and
     # back. Lipschitz continuity bounds it by speed * capture gap / 2.
-    blind = config['point_speed_bound_m_s']*float(gaps.max())/2
+    point_bound=max(config['point_speed_bound_m_s'],config.get('hardware_point_speed_bound_m_s',0.))
+    blind = point_bound*float(gaps.max())/2
     sigma = max(3*(math.sqrt(max(s['covariance'][0],s['covariance'][1]))+
                    radius*math.sqrt(s['covariance'][2])) for s in samples)
-    error = stationary_jitter+sigma+max(s.get('sector_sensitivity_m',0.) for s in samples)+config['scale_reserve_fraction']*sweep+.001
+    alignment_error = config.get('reference_alignment_error_m',0.)
+    error = stationary_jitter+sigma+max(s.get('sector_sensitivity_m',0.) for s in samples)+config['scale_reserve_fraction']*sweep+.001+alignment_error
     terminal = np.median(np.array(poses[-8:]),axis=0)
     filtered = [np.median(np.array(poses[max(0,i-2):i+1]),axis=0) for i in range(len(poses))]
     outside = [i for i,p in enumerate(filtered) if math.dist(p[:2],terminal[:2])>.005
@@ -163,6 +169,7 @@ def stopping_measurement(samples, cut, config, stationary_jitter):
     distance = sweep+blind
     return {'observed_swept_distance_m':sweep,'unobserved_excursion_bound_m':blind,
             'conservative_swept_distance_m':distance,'uncertainty_upper_m':error,
+            'reference_alignment_uncertainty_m':alignment_error,
             'maximum_capture_gap_s':float(gaps.max()),'stop_time_receive_upper_s':latency,
             'first_sample_time':samples[0]['time'],'last_sample_time':samples[-1]['time'],
             'fault_cut_time':cut,'samples':len(samples),'baseline_time_basis':'sensor_capture_stamp',
@@ -189,6 +196,7 @@ class OnboardBraking(FAULT.FaultTest):
         self.fixed_reference_points=None if reference is None else self.reference_points.copy()
         self.reference_history=[]
         self.reference_locked=False
+        self.reference_alignment_error_m=0.
         self.wheel_velocity=(0.,0.,0.)
         mask=yaml.safe_load((ROOT/'config/lidar_self_mask.yaml').read_text())['scan_self_filter']['ros__parameters']
         self.sectors=parse_sectors(*(mask[k] for k in ('body_start_deg','body_end_deg','body_max_range_m')))
@@ -310,13 +318,13 @@ class OnboardBraking(FAULT.FaultTest):
                     self.command.publish(Twist())
                     raise RuntimeError('independent raw-LiDAR tracking failed during the fault')
                 self.pause_until(fresh,'fresh independent raw-LiDAR capture')
-            if self.origin_range and math.dist(self.ranges[-1]['pose'][:2],self.origin_range[:2])>=self.config.get('independent_center_radius_m',.16):
+            if self.origin_range and math.dist(self.ranges[-1]['pose'][:2],self.origin_range[:2])>=self.config.get('independent_center_radius_m',.16)-self.reference_alignment_error_m:
                 self.command.publish(Twist())
                 raise RuntimeError('independent early center boundary reached')
 
     def move(self,target,linear_limit=None,angular_limit=None):
         if self.config.get('corridor'):
-            end=time.monotonic()+30
+            end=time.monotonic()+60
             try:
                 while True:
                     if time.monotonic()>end:
@@ -324,7 +332,7 @@ class OnboardBraking(FAULT.FaultTest):
                     pose=tuple(self.ranges[-1]['pose'])
                     super().move((*target[:2],pose[2]),
                         linear_limit=self.config.get('return_linear_speed_m_s',.02) if linear_limit is None else linear_limit,
-                        angular_limit=self.config.get('return_angular_speed_rad_s',.06),
+                        angular_limit=0.,
                         pose_source=lambda:tuple(self.ranges[-1]['pose']))
                     while abs(NAV.angle(target[2]-self.ranges[-1]['pose'][2]))>=.03:
                         if time.monotonic()>end:
@@ -371,7 +379,7 @@ class OnboardBraking(FAULT.FaultTest):
         # avoid a microsecond conversion difference selecting an older scan.
         if cut_stamp is not None:
             selected=[{**r,'capture_time':cut+(r['stamp']-cut_stamp)} for r in selected]
-        return stopping_measurement(selected,cut,self.config,self.stationary_jitter)
+        return stopping_measurement(selected,cut,{**self.config,'reference_alignment_error_m':self.reference_alignment_error_m},self.stationary_jitter)
 
     def save(self):
         (self.output/'measurements.json').write_text(json.dumps({
@@ -386,15 +394,28 @@ class OnboardBraking(FAULT.FaultTest):
         self.wait(stopped,5)
         first=len(self.scans)
         self.wait(lambda:len(self.scans)>=first+10,5)
-        scans=self.scans[first:first+10]
+        scans=[]
         poses=[]
         radius=self.config['body_radius_m']
         reserve=self.config['independent_center_radius_m']-self.config['maximum_center_radius_m']
-        for scan in scans:
-            pose,covariance,sensitivity=register_scan(self.fixed_reference_points,
-                np.asarray(scan['points']),self.ranges[-1]['pose'],radius)
-            if 3*(math.sqrt(max(covariance[:2]))+radius*math.sqrt(covariance[2]))+sensitivity>reserve:
+        alignment_error=0.
+        deadline=time.monotonic()+10
+        rejected=[]
+        while len(poses)<10:
+            self.wait(lambda:len(self.scans)>first,max(0.,deadline-time.monotonic()))
+            scan=self.scans[first]
+            first+=1
+            try:
+                pose,covariance,sensitivity=register_scan(self.fixed_reference_points,
+                    np.asarray(scan['points']),self.ranges[-1]['pose'],radius)
+            except ValueError as error:
+                rejected.append({'stamp':scan['stamp'],'error':str(error)})
+                continue
+            error=3*(math.sqrt(max(covariance[:2]))+radius*math.sqrt(covariance[2]))+sensitivity
+            if error>reserve:
                 raise RuntimeError('stationary reference anchor exceeds the center reserve')
+            alignment_error=max(alignment_error,error)
+            scans.append(scan)
             poses.append(pose)
         self.wait(stopped,5)
         if maximum_swept_excursion(poses,radius)>.01:
@@ -402,8 +423,12 @@ class OnboardBraking(FAULT.FaultTest):
         anchor=np.median(poses,axis=0)
         points=stationary_reference([np.asarray(scan['points']) for scan in scans])
         c,s=math.cos(anchor[2]),math.sin(anchor[2])
-        self.reference_points=points@np.array([[c,s],[-s,c]])+anchor[:2]
+        current=points@np.array([[c,s],[-s,c]])+anchor[:2]
+        self.reference_points=np.concatenate((self.fixed_reference_points,current))
+        self.reference_alignment_error_m=alignment_error
         self.reference_history.append({'anchor':anchor.tolist(),'source_stamps':[scan['stamp'] for scan in scans],
+                                       'alignment_uncertainty_m':alignment_error,'includes_fixed_reference':True,
+                                       'rejected_anchor_scans':rejected,
                                        'points':self.reference_points.tolist()})
         first=len(self.ranges)
         self.reference_locked=True
@@ -522,7 +547,11 @@ class OnboardBraking(FAULT.FaultTest):
         self.active=True
         poses=[r['pose'] for r in self.ranges[-15:]]
         self.stationary_jitter=max(maximum_swept_excursion(poses[i:],self.config['body_radius_m']) for i in range(len(poses)))
-        self.move(self.center,linear_limit=self.config.get('return_linear_speed_m_s',.02),
+        initial_target=self.center
+        selected_direction=self.config.get('direction_sequence') or self.config.get('direction')
+        if self.config.get('corridor') and selected_direction:
+            initial_target=(*self.center[:2],self.pulse_start(selected_direction)[2])
+        self.move(initial_target,linear_limit=self.config.get('return_linear_speed_m_s',.02),
                   angular_limit=self.config['angular_speed_rad_s'] if self.config.get('corridor')
                     else self.config.get('return_angular_speed_rad_s',.06))
         # A resumed run starts at the previous stop. Anchor its independent
@@ -531,6 +560,9 @@ class OnboardBraking(FAULT.FaultTest):
         if self.config.get('return_only'):
             self.save()
             return
+        if self.config.get('corridor'):
+            self.refresh_corridor_reference()
+            self.reference_locked=False
         if self.config.get('direction'):
             # Qualification returns to the fixed reference after each trial.
             # Current-speed runs leave the robot at the measured stop.
@@ -617,7 +649,8 @@ class OnboardBraking(FAULT.FaultTest):
             (self.output/'independent-poses.json').write_text(json.dumps({'ranges':self.ranges,'native_poses':self.native_poses,'scans':self.scans,'rejected_scans':self.rejected_scans,'range_info':self.range_info,'camera_poses':self.camera_poses,'joint_samples':self.joint_samples,
                 'reference_points':self.reference_points.tolist() if self.reference_points is not None else None,
                 'fixed_reference_points':self.fixed_reference_points.tolist() if self.fixed_reference_points is not None else None,
-                'reference_history':self.reference_history},indent=2)+'\n')
+                'reference_history':self.reference_history,
+                'reference_alignment_uncertainty_m':self.reference_alignment_error_m},indent=2)+'\n')
         finally:
             for process,log in self.observers:
                 if process.poll() is None:
@@ -635,6 +668,8 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--payload-g',type=float,required=True)
     parser.add_argument('--nominal-only',action='store_true')
+    parser.add_argument('--nominal-duration',type=float,help='increase the nominal pulse duration within the unchanged stage boundary to allow settled ground speed')
+    parser.add_argument('--rotation-speed',type=float,help='qualify a lower angular operating target within the stage cap; higher-speed passing faults remain reusable')
     selection=parser.add_mutually_exclusive_group()
     selection.add_argument('--direction',choices=DIRECTIONS,help='run one nominal stop without retries; qualification stages return to center')
     selection.add_argument('--direction-sequence',choices=DIRECTIONS,help='complete the remaining nominal stops for one direction, stopping at the first unqualified trial')
@@ -669,6 +704,10 @@ def main():
         parser.error('--fault conflicts with --nominal-only')
     if args.reference_run and not args.stage:
         parser.error('--reference-run requires --stage')
+    if args.nominal_duration is not None and not args.stage:
+        parser.error('--nominal-duration requires --stage')
+    if args.rotation_speed is not None and not args.stage:
+        parser.error('--rotation-speed requires --stage')
     config=yaml.safe_load((ROOT/'config/onboard_braking.yaml').read_text())
     linear,angular=NAV.load_base_speed_limits(ROOT/'config/nav2_params.yaml')
     if args.stage:
@@ -676,6 +715,16 @@ def main():
         linear,angular=config['linear_speed_m_s'],config['angular_speed_rad_s']
         if args.stage=='0.20':
             config['trials_per_direction']=1
+    if args.rotation_speed is not None:
+        if not math.isfinite(args.rotation_speed) or not 0<args.rotation_speed<=angular:
+            parser.error('rotation speed must be finite, positive and at most the stage cap')
+        angular=args.rotation_speed
+    if args.nominal_duration is not None:
+        if not math.isfinite(args.nominal_duration) or args.nominal_duration<config['nominal_command_duration_s']:
+            parser.error('nominal duration must be finite and no shorter than the stage default')
+        if args.nominal_duration*linear/2+config['measurement_uncertainty_m']>=config['maximum_center_radius_m']:
+            parser.error('nominal duration exceeds the unchanged stage boundary')
+        config['nominal_command_duration_s']=args.nominal_duration
     config.update(payload_kg=args.payload_g/1000,linear_speed_m_s=linear,angular_speed_rad_s=angular,
                   nominal_only=args.nominal_only or args.direction is not None or args.direction_sequence is not None or args.return_only,
                   faults_only=args.faults_only,return_only=args.return_only,direction=args.direction,direction_sequence=args.direction_sequence,
@@ -695,6 +744,7 @@ def main():
     resumed_faults={}
     reference=None
     fixed_reference=None
+    reference_error=0.
     if args.resume:
         previous=json.loads((args.resume/'measurements.json').read_text())
         previous['source_run']=str(args.resume)
@@ -707,6 +757,10 @@ def main():
         saved=json.loads((reference_run/'independent-poses.json').read_text())
         reference=saved['reference_points']
         fixed_reference=saved.get('fixed_reference_points',reference)
+        reference_error=saved.get('reference_alignment_uncertainty_m',0.)
+        if (type(reference_error) not in (int,float) or not math.isfinite(reference_error) or
+                not 0<=reference_error<=config['independent_center_radius_m']-config['maximum_center_radius_m']):
+            raise ValueError('saved reference alignment exceeds the center reserve')
         if reference is None:
             raise ValueError('fixed raw-LiDAR reference is missing')
         if not saved['ranges']:
@@ -731,6 +785,7 @@ def main():
     (output/'profile.yaml').write_text(yaml.safe_dump(config))
     def node():
         instance=OnboardBraking(output,config,reference)
+        instance.reference_alignment_error_m=reference_error
         if fixed_reference is not None:
             instance.fixed_reference_points=np.asarray(fixed_reference,dtype=float)
             if instance.fixed_reference_points.ndim!=2 or instance.fixed_reference_points.shape[1]!=2 or len(instance.fixed_reference_points)<100 or not np.isfinite(instance.fixed_reference_points).all():

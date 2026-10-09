@@ -144,7 +144,7 @@ def test_corridor_body_directions_all_travel_along_the_saved_forward_axis(direct
             math.sin(heading)*ux+math.cos(heading)*uy)==pytest.approx((math.cos(.3),math.sin(.3)))
 
 
-@pytest.mark.parametrize('case',['stationary','stale_feedback','moving','uncertain_anchor'])
+@pytest.mark.parametrize('case',['stationary','retry_anchor','stale_feedback','moving','uncertain_anchor'])
 def test_stationary_corridor_reference_keeps_the_original_area_anchor(monkeypatch,case):
     import math
     import time
@@ -171,21 +171,31 @@ def test_stationary_corridor_reference_keeps_the_original_area_anchor(monkeypatc
             raise RuntimeError('not stationary')
         elif not node.scans:
             node.scans.extend({'stamp':i,'points':local.tolist()} for i in range(10))
+        elif not node.reference_locked:
+            node.scans.append({'stamp':len(node.scans),'points':local.tolist()})
         else:
             assert node.reference_locked
             node.ranges.extend({'pose':[.01,.02,math.pi]} for _ in range(10))
         assert condition()
     node.wait=wait
+    fits=[]
     def fit(reference,points,guess,radius):
         assert reference is node.fixed_reference_points
+        fits.append(True)
+        if case=='retry_anchor' and len(fits)==1:
+            raise ValueError('independent scan loses observability after removing a sector')
         return [.01,.02,math.pi],[1e-8]*3,.03 if case=='uncertain_anchor' else 0.
     monkeypatch.setattr(module,'register_scan',fit)
-    if case in ('stationary','stale_feedback'):
+    if case in ('stationary','retry_anchor','stale_feedback'):
         node.refresh_corridor_reference()
         assert node.reference_locked and len(node.reference_history)==1
         assert node.reference_history[0]['anchor']==pytest.approx([.01,.02,math.pi])
-        assert np.allclose(node.reference_points, -module.stationary_reference([local]*10)+[.01,.02])
+        assert np.allclose(node.reference_points[1:], -module.stationary_reference([local]*10)+[.01,.02])
+        assert np.array_equal(node.reference_points[:1],node.fixed_reference_points)
+        assert 0<node.reference_alignment_error_m<.02
         assert np.array_equal(node.fixed_reference_points,[[10.,20.]])
+        assert len(node.reference_history[0]['source_stamps'])==10
+        assert len(node.reference_history[0]['rejected_anchor_scans'])==(case=='retry_anchor')
     else:
         error='not stationary' if case=='moving' else 'center reserve'
         with pytest.raises(RuntimeError,match=error):
@@ -247,6 +257,7 @@ def test_corridor_turns_in_place_at_the_stage_cap_and_stops_on_permission_loss(m
     def translate(self,target,**kwargs):
         calls.append(target)
         assert target==(.2,0.,0.)
+        assert kwargs['angular_limit']==0.
     monkeypatch.setattr(module.NAV.Test,'move',translate)
     def tick(command):
         assert command.linear.x==command.linear.y==0.
@@ -382,6 +393,8 @@ def test_resume_rejects_changed_speed_or_stopping_conditions():
     assert list(faults)==['linear/scan_disconnect']
     assert resume(previous,{**config,'trials_per_direction':1})==(trials,faults)
     assert resume(previous,{**config,'reference_start_pose':[.15,0.,0.]})==(trials,faults)
+    assert resume(previous,{**config,'nominal_command_duration_s':2.})==(trials,faults)
+    assert resume(previous,{**config,'angular_speed_rad_s':.04})==(trials,faults)
     for key in ('linear_speed_m_s','angular_speed_rad_s','payload_kg',
                 'measurement_uncertainty_m','maximum_stopping_distance_m'):
         with pytest.raises(ValueError,match='profile differs'):
@@ -418,30 +431,36 @@ def test_selected_stop_does_not_retry_and_qualification_returns_to_fixed_center(
 
 @pytest.mark.parametrize('qualified',[True,False])
 @pytest.mark.parametrize('direction_sequence',[None,'right'])
-def test_attended_sequence_stops_on_the_first_unqualified_trial(qualified,direction_sequence):
+@pytest.mark.parametrize('corridor',[True,False])
+def test_attended_sequence_stops_on_the_first_unqualified_trial(qualified,direction_sequence,corridor):
     from types import SimpleNamespace
     module=import_module('test-onboard-braking')
-    calls=[]
+    calls,targets=[],[]
     node=SimpleNamespace(config={'stage':'0.20','body_radius_m':.33,
-        'trials_per_direction':1,'nominal_only':True,'direction_sequence':direction_sequence},pose=(0.,0.,0.),
+        'trials_per_direction':1,'nominal_only':True,'direction_sequence':direction_sequence,'corridor':corridor,
+        'angular_speed_rad_s':.4},pose=(0.,0.,0.),
         ranges=[{'pose':[0.,0.,0.]}]*21,range_info=[{}],camera_poses=[{}],
         views={'front':1,'wrist':1,'astra':1},trials=[],
-        wait_ready=lambda:None,wait=lambda condition,timeout:condition(),move=lambda *a,**k:None)
+        wait_ready=lambda:None,wait=lambda condition,timeout:condition(),move=lambda target,**k:targets.append(target))
     def trial(direction):
         calls.append(direction)
         node.trials.append({'direction':direction,'qualification_eligible':qualified})
         return qualified
     node.trial=trial
+    node.pulse_start=lambda direction:(0.,0.,.9)
+    node.refresh_corridor_reference=lambda:calls.append('reference')
+    prefix=['reference'] if corridor else []
     if qualified:
         module.OnboardBraking.run(node)
-        assert calls==([direction_sequence] if direction_sequence else list(module.DIRECTIONS))
+        assert calls==prefix+([direction_sequence] if direction_sequence else list(module.DIRECTIONS))
     else:
         with pytest.raises(RuntimeError,match='sequence stopped'):
             module.OnboardBraking.run(node)
-        assert calls==[direction_sequence or 'forward']
+        assert calls==prefix+[direction_sequence or 'forward']
+    assert targets[0]==(0.,0.,.9 if corridor and direction_sequence else 0.)
 
 
-@pytest.mark.parametrize('selection,nominal_only',[(['--fault','scan_disconnect'],False),(['--attended-sequence'],False),(['--attended-sequence','--nominal-only'],True),(['--faults-only'],False),(['--direction-sequence','right'],True)])
+@pytest.mark.parametrize('selection,nominal_only',[(['--fault','scan_disconnect'],False),(['--attended-sequence'],False),(['--attended-sequence','--nominal-only'],True),(['--faults-only'],False),(['--direction-sequence','right'],True),(['--direction-sequence','right','--nominal-duration','2.0'],True),(['--direction-sequence','rotation_cw','--rotation-speed','0.3'],True)])
 @pytest.mark.parametrize('stage,trials',[('0.20',1),('0.25',5),('0.30',5)])
 def test_stage_fault_selection_is_not_skipped(monkeypatch,tmp_path,selection,nominal_only,stage,trials):
     import shutil
@@ -466,6 +485,53 @@ def test_stage_fault_selection_is_not_skipped(monkeypatch,tmp_path,selection,nom
     assert profiles[0]['nominal_only'] is nominal_only
     assert profiles[0]['trials_per_direction']==trials
     assert profiles[0]['faults_only'] is ('--faults-only' in selection)
+    if '--nominal-duration' in selection:
+        assert profiles[0]['nominal_command_duration_s']==2.
+    if '--rotation-speed' in selection:
+        assert profiles[0]['angular_speed_rad_s']==.3
+
+
+@pytest.mark.parametrize('duration',['nan','-1','1.0','2.8'])
+def test_nominal_duration_cannot_shorten_the_pulse_or_expand_the_boundary(monkeypatch,duration):
+    import sys
+    module=import_module('test-onboard-braking')
+    monkeypatch.setattr(sys,'argv',['test-onboard-braking.py','--payload-g','200','--stage','0.25',
+                                 '--direction','right','--nominal-duration',duration])
+    monkeypatch.setattr(module.subprocess,'check_output',lambda *a,**k:pytest.fail('invalid duration reached hardware preflight'))
+    with pytest.raises(SystemExit) as error:
+        module.main()
+    assert error.value.code==2
+
+
+@pytest.mark.parametrize('speed',['nan','-1','0','0.6'])
+def test_selected_rotation_speed_cannot_exceed_the_stage_cap(monkeypatch,speed):
+    import sys
+    module=import_module('test-onboard-braking')
+    monkeypatch.setattr(sys,'argv',['test-onboard-braking.py','--payload-g','200','--stage','0.25',
+                                 '--direction','rotation_cw','--rotation-speed',speed])
+    monkeypatch.setattr(module.subprocess,'check_output',lambda *a,**k:pytest.fail('invalid rotation speed reached hardware preflight'))
+    with pytest.raises(SystemExit) as error:
+        module.main()
+    assert error.value.code==2
+
+
+@pytest.mark.parametrize('translation_only',[False,True])
+def test_half_metre_slowed_return_can_exceed_thirty_seconds(monkeypatch,translation_only):
+    from types import SimpleNamespace
+    module=import_module('test-onboard-braking')
+    clock=[0.]
+    monkeypatch.setattr(module.NAV.time,'monotonic',lambda:clock[0])
+    node=SimpleNamespace(pose=[0.,0.,0.],flags={'base_motion_permitted':True},
+                         monitor_action=('',0),stop=lambda:None)
+    def tick(command):
+        clock[0]+=.5
+        node.pose[0]+=min(.007,.5-node.pose[0])
+        if translation_only:
+            assert command.angular.z==0.
+            node.pose[2]=.2
+    node.tick=tick
+    module.NAV.Test.move(node,(.5,0.,0.),linear_limit=.04,angular_limit=0. if translation_only else .15)
+    assert clock[0]>30 and node.pose[0]>.492
 
 
 def test_faults_only_batches_all_axes_without_running_nominals(monkeypatch):
@@ -585,6 +651,12 @@ def test_independent_stop_bounds_hidden_motion_and_rejects_bad_windows():
     assert result['within_budget']
     assert result['unobserved_excursion_bound_m']==pytest.approx(.005)
     assert result['conservative_swept_distance_m']==pytest.approx(.015)
+    hardware=measure(samples,.1,{**config,'hardware_point_speed_bound_m_s':.4},.001)
+    assert hardware['unobserved_excursion_bound_m']==pytest.approx(.04)
+    assert not hardware['within_budget']
+    aligned=measure(samples,.1,{**config,'reference_alignment_error_m':.01},.001)
+    assert aligned['uncertainty_upper_m']==pytest.approx(result['uncertainty_upper_m']+.01)
+    assert not aligned['within_budget']
     delayed=[{**s,'capture_time':s['time'],'time':s['time']+.3} for s in samples]
     assert measure(delayed,.1,config,.001)['within_budget']
     assert not measure([{**s,'covariance':[.001,.001,.001]} for s in samples],.1,config,.001)['within_budget']

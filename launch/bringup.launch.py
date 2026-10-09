@@ -23,7 +23,7 @@ from launch_ros.substitutions import FindPackageShare
 from nav2_common.launch import RewrittenYaml
 
 from lekiwi_rmf.arm_trajectory import ARM_JOINTS
-from lekiwi_rmf.geometry import polygon, polygon_boundary_distance
+from lekiwi_rmf.geometry import polygon
 from lekiwi_rmf.launch_gates import gated
 from lekiwi_rmf.launch_validation import (
     CHOICES, PROFILES, launch_topology, lidar_default_port, permission_timeout, validate_context)
@@ -55,7 +55,8 @@ def _navigation_params(source_file, bounded_test, linear_limit, angular_limit, q
         xmin, xmax = min(p[0] for p in footprint), max(p[0] for p in footprint)
         ymin, ymax = min(p[1] for p in footprint), max(p[1] for p in footprint)
         monitor = nav2['collision_monitor']['ros__parameters']
-        padding = polygon_boundary_distance(footprint, polygon(monitor['StopZone']['points'], 'StopZone'))
+        # Keep the physically qualified test geometry independent of production clearance.
+        padding = .05
         radius = max(math.hypot(x, y) for x, y in footprint) + padding
         def rectangle(left, right, bottom, top):
             return str([[right, top], [right, bottom], [left, bottom], [left, top]])
