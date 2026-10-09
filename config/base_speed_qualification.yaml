@@ -25,6 +25,15 @@ stages:
     angular_speed_rad_s: 0.50
     # Scan-loss trial modeled 0.045159 m uncertainty; include 5 cm in reserves.
     measurement_uncertainty_m: 0.05
+    # Held fold captured over 60 stationary samples; tolerance stays 0.02 rad.
+    # CAD footprint at the full tolerance and live MoveIt validity both passed.
+    stow_joint_positions:
+      arm_shoulder_pan: 0.0092
+      arm_shoulder_lift: -1.7967
+      arm_elbow_flex: 1.6249
+      arm_wrist_flex: 1.2306
+      arm_wrist_roll: -0.0077
+      arm_gripper: 0.2161
   '0.30':
     linear_speed_m_s: 0.30
     angular_speed_rad_s: 0.60

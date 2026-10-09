@@ -168,7 +168,9 @@ class OnboardBraking(FAULT.FaultTest):
         self.deadline = time.monotonic()+config['maximum_runtime_s']
         self.ranges,self.range_info,self.camera_poses,self.sources = [],[],[],{}
         self.source_stamps={}
+        self.joint_samples=[]
         self.native_poses,self.scans,self.reference_points = [],[],None
+        self.rejected_scans = []
         if reference is not None:
             self.reference_points=np.asarray(reference,dtype=float)
             if self.reference_points.ndim!=2 or self.reference_points.shape[1]!=2 or len(self.reference_points)<100 or not np.isfinite(self.reference_points).all():
@@ -258,7 +260,12 @@ class OnboardBraking(FAULT.FaultTest):
         try:
             pose,covariance,sensitivity=register_scan(self.reference_points,points,predicted,self.config['body_radius_m'])
         except ValueError:
-            pose,covariance,sensitivity=register_scan(self.reference_points,points,guess,self.config['body_radius_m'])
+            try:
+                pose,covariance,sensitivity=register_scan(self.reference_points,points,guess,self.config['body_radius_m'])
+            except ValueError as error:
+                self.rejected_scans.append({'stamp':stamp,'error':str(error)})
+                self.get_logger().warning(f'Rejected independent scan: {error}')
+                return
         received=time.monotonic()
         age=self.get_clock().now().nanoseconds/1e9-stamp
         self.ranges.append({'time':received,'stamp':stamp,'age':age,'capture_time':received-age,
@@ -268,6 +275,9 @@ class OnboardBraking(FAULT.FaultTest):
         stamp=message.header.stamp.sec+message.header.stamp.nanosec/1e9
         self.sources[topic]=time.monotonic()-(self.get_clock().now().nanoseconds/1e9-stamp)
         self.source_stamps[topic]=stamp
+        if topic=='/joint_states':
+            self.joint_samples.append({'stamp':stamp,'capture_time':self.sources[topic],
+                'positions':dict(zip(message.name,message.position))})
 
     def tick(self,twist=None,check=True):
         super().tick(twist,check,pose_source=(lambda:self.ranges[-1]['pose'])
@@ -335,7 +345,9 @@ class OnboardBraking(FAULT.FaultTest):
         while time.monotonic()-start<self.config.get('nominal_command_duration_s',2.5):
             if not self.flags.get('base_motion_permitted'):
                 self.command.publish(Twist())
-                raise RuntimeError('nominal permission withdrawn')
+                raise RuntimeError('nominal permission withdrawn: '+json.dumps({
+                    'flags':self.flags,'health':self.health,
+                    'joints':self.joint_samples[-1] if self.joint_samples else None},sort_keys=True))
             self.tick(command)
         cut=time.monotonic()
         self.command.publish(Twist())
@@ -509,7 +521,7 @@ class OnboardBraking(FAULT.FaultTest):
     def destroy_node(self):
         try:
             self.save()
-            (self.output/'independent-poses.json').write_text(json.dumps({'ranges':self.ranges,'native_poses':self.native_poses,'scans':self.scans,'range_info':self.range_info,'camera_poses':self.camera_poses,
+            (self.output/'independent-poses.json').write_text(json.dumps({'ranges':self.ranges,'native_poses':self.native_poses,'scans':self.scans,'rejected_scans':self.rejected_scans,'range_info':self.range_info,'camera_poses':self.camera_poses,'joint_samples':self.joint_samples,
                 'reference_points':self.reference_points.tolist() if self.reference_points is not None else None},indent=2)+'\n')
         finally:
             for process,log in self.observers:
@@ -598,7 +610,13 @@ def main():
         if len(seed)!=3 or not all(type(v) in (int,float) and math.isfinite(v) for v in seed):
             raise ValueError('saved independent final pose must contain three finite numbers')
         config['reference_start_pose']=seed
-        config['test_center']=json.loads((reference_run/'result.json').read_text())['origin']
+        center=yaml.safe_load((reference_run/'profile.yaml').read_text()).get('test_center')
+        if center is None:
+            center=json.loads((reference_run/'result.json').read_text())['origin']
+        if not isinstance(center,(list,tuple)) or len(center)!=3 or not all(
+                type(v) in (int,float) and math.isfinite(v) for v in center):
+            raise ValueError('saved test center must contain three finite numbers')
+        config['test_center']=center
     if args.center:
         if not all(math.isfinite(v) for v in args.center):
             parser.error('test center must be finite')

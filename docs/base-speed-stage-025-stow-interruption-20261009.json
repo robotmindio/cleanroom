@@ -1,0 +1,185 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-09",
+  "deployed_revision": "83cf67cc4463185041401daf75d08df1a18b6644",
+  "scope": "Excluded 0.25 m/s qualification attempts and read-only held-stow observations. No new speed acceptance or calibration change.",
+  "payload_kg": 0.2,
+  "stage": "0.25",
+  "qualified_trials": 0,
+  "failed_runs": [
+    {
+      "run": "20261009-130051",
+      "source_revision": "e5e6d90d8126125d6d46f7a496e925ca4bb9b7ee",
+      "error": "fresh independent raw-LiDAR capture did not recover: {'base_motion_permitted': 'false', 'arm_motion_permitted': 'true', 'arm_stowed': 'true', 'faults': 'base_test: bounded test lease withdrawn', 'latched_faults': '', 'bounded_base_test': 'true'}",
+      "qualification_eligible": false,
+      "completed_stopping_trials": 0,
+      "accepted_raw_lidar_poses": 37,
+      "rejected_raw_lidar_fits": 127,
+      "final_independent_pose": [
+        -0.034018783533972016,
+        -0.0024342664558787185,
+        0.0014867797586026587
+      ]
+    },
+    {
+      "run": "20261009-130159",
+      "source_revision": "e5e6d90d8126125d6d46f7a496e925ca4bb9b7ee",
+      "error": "nominal permission withdrawn: {\"flags\": {\"arm_motion_permitted\": true, \"arm_stowed\": false, \"base_motion_permitted\": false, \"driver\": \"ARMED\"}, \"health\": {\"arm_motion_permitted\": \"true\", \"arm_stowed\": \"false\", \"base_motion_permitted\": \"false\", \"bounded_base_test\": \"true\", \"faults\": \"\", \"latched_faults\": \"\"}}",
+      "qualification_eligible": false,
+      "completed_stopping_trials": 0,
+      "accepted_raw_lidar_poses": 98,
+      "rejected_raw_lidar_fits": 0,
+      "final_independent_pose": [
+        -0.05242536816884611,
+        0.008438180408781077,
+        0.007490007389083295
+      ],
+      "permission_loss_snapshot": {
+        "flags": {
+          "arm_motion_permitted": true,
+          "arm_stowed": false,
+          "base_motion_permitted": false,
+          "driver": "ARMED"
+        },
+        "health": {
+          "arm_motion_permitted": "true",
+          "arm_stowed": "false",
+          "base_motion_permitted": "false",
+          "bounded_base_test": "true",
+          "faults": "",
+          "latched_faults": ""
+        }
+      }
+    }
+  ],
+  "stationary_stow_samples": 60,
+  "stationary_stow_deviations": {
+    "arm_shoulder_pan": {
+      "minimum": 0.00920613231821188,
+      "maximum": 0.00920613231821188,
+      "expected": 0.0,
+      "maximum_deviation_rad": 0.00920613231821188
+    },
+    "arm_shoulder_lift": {
+      "minimum": -1.796730157437679,
+      "maximum": -1.796730157437679,
+      "expected": -1.8167,
+      "maximum_deviation_rad": 0.019969842562320927
+    },
+    "arm_elbow_flex": {
+      "minimum": 1.6248823541643913,
+      "maximum": 1.6248823541643913,
+      "expected": 1.6295,
+      "maximum_deviation_rad": 0.004617645835608641
+    },
+    "arm_wrist_flex": {
+      "minimum": 1.2305530198676504,
+      "maximum": 1.2305530198676504,
+      "expected": 1.2367,
+      "maximum_deviation_rad": 0.006146980132349489
+    },
+    "arm_wrist_roll": {
+      "minimum": -0.007671776931843066,
+      "maximum": -0.007671776931843066,
+      "expected": -0.0169,
+      "maximum_deviation_rad": 0.009228223068156932
+    },
+    "arm_gripper": {
+      "minimum": 0.21609988469457792,
+      "maximum": 0.21609988469457792,
+      "expected": 0.2095,
+      "maximum_deviation_rad": 0.006599884694577923
+    }
+  },
+  "stow_tolerance_rad": 0.02,
+  "pulse_joint_positions_available": false,
+  "finding": "The fresh-reference pulse was interrupted by arm_stowed=false with empty sensor/driver faults. Stationary shoulder-lift deviation is 0.019969842562320927 rad; the joint that crossed during the pulse was not recorded.",
+  "proposed_reference_applied": false,
+  "proposed_reference_verification": {
+    "read_only": true,
+    "proposed_stow": {
+      "arm_shoulder_pan": 0.0092,
+      "arm_shoulder_lift": -1.7967,
+      "arm_elbow_flex": 1.6249,
+      "arm_wrist_flex": 1.2306,
+      "arm_wrist_roll": -0.0077,
+      "arm_gripper": 0.2161
+    },
+    "stow_tolerance_rad": 0.02,
+    "cad_model_allowance_m": 0.005,
+    "full_tolerance_footprint_check": true,
+    "moveit_state_valid": true,
+    "contact_pairs": []
+  },
+  "production_verification": {
+    "read_only": true,
+    "production_limits": {
+      "FollowPath.vx_max": 0.03,
+      "FollowPath.vy_max": 0.03,
+      "FollowPath.wz_max": 0.06
+    },
+    "base_motion_permitted": true
+  },
+  "artifacts": {
+    ".benchmarks/onboard-braking/20261009-130051/profile.yaml": {
+      "sha256": "6a60c93728446acd7e112312a52b2309e8181b111f887ffd031f548c6f2dc94d",
+      "bytes": 1048
+    },
+    ".benchmarks/onboard-braking/20261009-130051/result.json": {
+      "sha256": "e7d5b22f185725f0f90698eda6222c481ba603453622cde39af882be121b44be",
+      "bytes": 380521
+    },
+    ".benchmarks/onboard-braking/20261009-130051/measurements.json": {
+      "sha256": "9dcbfd6b3ff5a7987e9d4a8b4a2c6009c156f3da1d5b6b8d66a90ea9f7c969eb",
+      "bytes": 1950
+    },
+    ".benchmarks/onboard-braking/20261009-130051/independent-poses.json": {
+      "sha256": "697d51b91d5c3b7f7d54b191486f36568ade6f8c611d48c8ccf2955b71350671",
+      "bytes": 4405883
+    },
+    ".benchmarks/onboard-braking/20261009-130051/stack.log": {
+      "sha256": "f1e35fbf8fd3896bab7e66987aabb74b933c04ad9283431368474c604a94ec5c",
+      "bytes": 149485
+    },
+    ".benchmarks/onboard-braking/20261009-130159/profile.yaml": {
+      "sha256": "e6f839d5529d220d8b6ea1197a0ab00b1596c0c1ac0ff57638c449572651a3f5",
+      "bytes": 867
+    },
+    ".benchmarks/onboard-braking/20261009-130159/result.json": {
+      "sha256": "d6186be7b4985ec6a4c3135db89df3dcbfa4b8654bdc9e84d42193e2cf9e4a56",
+      "bytes": 222109
+    },
+    ".benchmarks/onboard-braking/20261009-130159/measurements.json": {
+      "sha256": "cf59cbd799038cc29eee01b3c749c5d18b282742af4216ea237bf8b4a96fdda9",
+      "bytes": 1706
+    },
+    ".benchmarks/onboard-braking/20261009-130159/independent-poses.json": {
+      "sha256": "27a0443d2193dd59e822fa57ad2ded0a6267aad02e9868e7534e9bc6f3709e76",
+      "bytes": 2859571
+    },
+    ".benchmarks/onboard-braking/20261009-130159/stack.log": {
+      "sha256": "842f1af29afa36787ccfe74c823576dfaeda5e30f76249f3e139109766fe10ef",
+      "bytes": 148836
+    },
+    ".benchmarks/base-speed-qualification/stationary-stow-samples.json": {
+      "sha256": "3b263a02c23046f8fb23ba7e68c668a983d263372f93609875863db9e979b201",
+      "bytes": 16023
+    },
+    ".benchmarks/base-speed-qualification/stationary-stow-deviations.json": {
+      "sha256": "225990dddb2ad58ab73cd476bb8eac480234ca47186c94d95ca0587f774537db",
+      "bytes": 1039
+    },
+    ".benchmarks/base-speed-qualification/proposed-stow-reference.json": {
+      "sha256": "78445bf282609c56a7f76254cb8e9f1f50ddda74562f19bbdb1e8505598ca901",
+      "bytes": 175
+    },
+    ".benchmarks/base-speed-qualification/proposed-stow-verification.json": {
+      "sha256": "45fe837c1eec4d2c6fd324cf003c81b0033c0b680ccec5764e4dfd072debc51d",
+      "bytes": 392
+    },
+    ".benchmarks/base-speed-qualification/directional-live-verification.json": {
+      "sha256": "6aa1efe84eb63d7ba3ceb310e89a98fe1b5abcdd1f98c0b3fe57beda2efbc3de",
+      "bytes": 179
+    }
+  }
+}

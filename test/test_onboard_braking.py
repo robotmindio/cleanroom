@@ -4,6 +4,121 @@ import pytest
 import numpy as np
 
 
+def test_nominal_permission_loss_stops_and_reports_the_gate():
+    from types import SimpleNamespace
+    module=import_module('test-onboard-braking')
+    commands=[]
+    node=SimpleNamespace(move=lambda target:None,pulse_start=lambda direction:(0.,0.,0.),
+        wait=lambda condition,timeout:None,config={'linear_speed_m_s':.25,'angular_speed_rad_s':.5},
+        ranges=[],health_faults=[],joint_samples=[],motion_pauses=0,flags={'base_motion_permitted':False,'arm_stowed':False},
+        health={'arm_stowed':'false','faults':''},command=SimpleNamespace(publish=commands.append))
+    with pytest.raises(RuntimeError,match='nominal permission withdrawn') as error:
+        module.OnboardBraking.trial(node,'forward')
+    assert '"arm_stowed": false' in str(error.value)
+    assert '"faults": ""' in str(error.value)
+    assert len(commands)==1
+    assert commands[0].linear.x==commands[0].linear.y==commands[0].angular.z==0.
+
+
+def test_joint_observation_preserves_the_capture_stamp_and_positions(monkeypatch):
+    from types import SimpleNamespace
+    from sensor_msgs.msg import JointState
+    module=import_module('test-onboard-braking')
+    monkeypatch.setattr(module.time,'monotonic',lambda:20.)
+    message=JointState()
+    message.header.stamp.sec=10
+    message.name=['arm_shoulder_lift']
+    message.position=[-1.7967]
+    node=SimpleNamespace(sources={},source_stamps={},joint_samples=[],
+        get_clock=lambda:SimpleNamespace(now=lambda:SimpleNamespace(nanoseconds=10100000000)))
+    module.OnboardBraking.source_sample(node,'/joint_states',message)
+    assert node.joint_samples==[{'stamp':10.,'capture_time':19.9,
+        'positions':{'arm_shoulder_lift':-1.7967}}]
+
+
+def test_rejected_independent_scan_records_the_error_without_creating_a_pose(monkeypatch):
+    import time
+    from types import SimpleNamespace
+    from geometry_msgs.msg import TransformStamped
+    from sensor_msgs.msg import LaserScan
+    module=import_module('test-onboard-braking')
+    scan=LaserScan()
+    scan.header.stamp.sec=10
+    scan.angle_min=-1.5
+    scan.angle_increment=.02
+    scan.range_min=.1
+    scan.range_max=12.
+    scan.ranges=[2.]*160
+    previous={'pose':[0.,0.,0.],'stamp':9.8}
+    warnings=[]
+    node=SimpleNamespace(sectors=[],scans=[],rejected_scans=[],ranges=[previous],
+        reference_points=np.zeros((100,2)),config={'body_radius_m':.33},odom_at=time.monotonic()-1,
+        buffer=SimpleNamespace(can_transform=lambda *a:True,
+            lookup_transform=lambda *a:TransformStamped()),
+        get_logger=lambda:SimpleNamespace(warning=warnings.append))
+    def reject(*args):
+        raise ValueError('independent scan loses observability after removing a sector')
+    monkeypatch.setattr(module,'register_scan',reject)
+    module.OnboardBraking.direct_scan(node,scan)
+    assert node.ranges==[previous]
+    assert node.rejected_scans==[{'stamp':10.,'error':'independent scan loses observability after removing a sector'}]
+    assert len(node.scans)==len(warnings)==1
+
+
+def test_a_fault_stops_when_rejected_scans_leave_the_last_pose_stale(monkeypatch):
+    import time
+    from types import SimpleNamespace
+    module=import_module('test-onboard-braking')
+    monkeypatch.setattr(module.FAULT.FaultTest,'tick',lambda *a,**k:None)
+    commands=[]
+    node=object.__new__(module.OnboardBraking)
+    node.config={'stage':'0.25'}
+    node.active=True
+    node.phase='scan_disconnect'
+    node.ranges=[{'pose':[0.,0.,0.],'time':time.monotonic()-.51,'age':0.}]
+    node.command=SimpleNamespace(publish=commands.append)
+    node.origin_range=None
+    with pytest.raises(RuntimeError,match='tracking failed during the fault'):
+        module.OnboardBraking.tick(node)
+    assert len(commands)==1
+    assert commands[0].linear.x==commands[0].linear.y==commands[0].angular.z==0.
+
+
+@pytest.mark.parametrize('center',[[0.,0.,0.],[True,0.,0.],[0.,float('nan'),0.],[0.,0.]])
+def test_reference_recovery_uses_the_saved_center_when_the_live_report_is_missing(monkeypatch,tmp_path,center):
+    import json
+    import shutil
+    import sys
+    from pathlib import Path
+    import yaml
+    module=import_module('test-onboard-braking')
+    config=tmp_path/'config'
+    config.mkdir()
+    for name in ('nav2_params.yaml','onboard_braking.yaml','base_speed_qualification.yaml'):
+        shutil.copyfile(Path(__file__).parents[1]/'config'/name,config/name)
+    reference=tmp_path/'reference'
+    reference.mkdir()
+    (reference/'profile.yaml').write_text(yaml.safe_dump({'test_center':center}))
+    (reference/'independent-poses.json').write_text(json.dumps({
+        'reference_points':[[1.,0.]]*100,'ranges':[{'pose':[.1,0.,0.]}]}))
+    monkeypatch.setattr(module,'ROOT',tmp_path)
+    monkeypatch.setattr(sys,'argv',['test-onboard-braking.py','--payload-g','200','--stage','0.25',
+        '--return-only','--reference-run',str(reference)])
+    monkeypatch.setattr(module.NAV,'installed_stack_arguments',lambda:['remote_ip:=robot-1'])
+    monkeypatch.setattr(module.subprocess,'check_output',lambda *a,**k:'123\n')
+    profiles=[]
+    monkeypatch.setattr(module.NAV,'main',lambda node,output,**kwargs:
+        profiles.append(yaml.safe_load((output/'profile.yaml').read_text())))
+    if center==[0.,0.,0.]:
+        module.main()
+        assert profiles[0]['test_center']==center
+        assert profiles[0]['reference_start_pose']==[.1,0.,0.]
+    else:
+        with pytest.raises(ValueError,match='saved test center'):
+            module.main()
+        assert profiles==[]
+
+
 def test_short_qualification_pulses_are_centered_in_the_fixture():
     from types import SimpleNamespace
     pulse=import_module('test-onboard-braking').OnboardBraking.pulse_start

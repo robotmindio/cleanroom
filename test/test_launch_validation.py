@@ -137,6 +137,17 @@ def test_qualification_changes_manual_caps_and_zones_without_raising_nav2_speed(
         resolve_bringup(profile='split',base_test_stage='0.30')
 
 
+def test_held_stow_reference_is_used_only_for_the_025_attended_stage():
+    for stage,expected in [(None,[0.,-1.8167,1.6295,1.2367,-.0169,.2095]),
+                           ('0.20',[0.,-1.8167,1.6295,1.2367,-.0169,.2095]),
+                           ('0.25',[.0092,-1.7967,1.6249,1.2306,-.0077,.2161])]:
+        arguments={'bounded_base_test':'true','base_test_stage':stage} if stage else {}
+        supervisor=find_node(resolve_bringup(profile='split',**arguments),
+            node='lekiwi_rmf/safety_supervisor')['parameters']
+        assert supervisor['stow_joint_positions']==expected
+        assert supervisor['stow_tolerance']==.02
+
+
 def test_nav2_bounded_profile_matches_the_driver_and_preserves_production():
     def navigation_parameters(bounded):
         stage = gate_stage(resolve_bringup(profile="wired", bounded_base_test=bounded), "wait_for_map")

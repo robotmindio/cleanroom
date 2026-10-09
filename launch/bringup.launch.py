@@ -177,6 +177,8 @@ def _stack(context):
             # A validated physical record is accepted only when its measured stopping
             # distance still fits this exact tracked Nav2 footprint and StopZone.
             "nav2_params_file": params_file,
+            **({"stow_joint_positions": [qualification['stow_joint_positions'][name] for name in ARM_JOINTS]}
+               if qualification and qualification.get('stow_joint_positions') else {}),
         }],
         # This node is the one continuously-enforced source of motion permission; a
         # crash must not leave the driver believing its last lease is current.

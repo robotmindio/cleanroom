@@ -49,6 +49,27 @@ def test_qualification_profiles_fit_the_one_metre_fixture_and_reject_missing_res
             load_base_test_profile(tmp_path/'nav2_params.yaml','0.30')
 
 
+@pytest.mark.parametrize('invalid',['missing','boolean','nan','outside_limits','unknown'])
+def test_qualification_stow_rejects_invalid_joint_references(tmp_path,invalid):
+    import copy
+    from pathlib import Path
+    import yaml
+    from lekiwi_rmf.motion_guards import load_base_test_profile
+    root=Path(__file__).parents[1]/'config'
+    data=yaml.safe_load((root/'base_speed_qualification.yaml').read_text())
+    changed=copy.deepcopy(data)
+    stow=changed['stages']['0.25']['stow_joint_positions']
+    if invalid=='missing':
+        stow.pop('arm_shoulder_pan')
+    elif invalid=='unknown':
+        stow['other_joint']=0.
+    else:
+        stow['arm_shoulder_pan']={'boolean':True,'nan':math.nan,'outside_limits':10.}[invalid]
+    (tmp_path/'base_speed_qualification.yaml').write_text(yaml.safe_dump(changed))
+    with pytest.raises(ValueError,match='six finite joints within their limits'):
+        load_base_test_profile(tmp_path/'nav2_params.yaml','0.25')
+
+
 def test_indoor_stop_zone_and_speed_profile_match_the_acceptance_budget():
     from pathlib import Path
     import yaml

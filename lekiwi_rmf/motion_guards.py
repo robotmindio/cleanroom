@@ -57,11 +57,20 @@ def load_base_test_profile(nav2_file, stage):
                  'maximum_center_radius_m', 'independent_center_radius_m',
                  'driver_center_radius_m', 'required_clearance_m', 'nominal_command_duration_s',
                  'return_linear_speed_m_s', 'return_angular_speed_rad_s', 'measurement_uncertainty_m')
-        if set(profile) != set(names) or not all(
+        stow = profile.get('stow_joint_positions')
+        if set(profile) != set(names) | ({'stow_joint_positions'} if stow is not None else set()) or not all(
             isinstance(profile[k], (int, float)) and not isinstance(profile[k], bool)
             and math.isfinite(profile[k]) and profile[k] > 0 for k in names
         ):
             raise ValueError('stage values must be finite and positive')
+        if stow is not None:
+            from lekiwi_rmf.arm_trajectory import ARM_JOINTS, JOINT_LIMITS
+            if not isinstance(stow, dict) or set(stow) != set(ARM_JOINTS) or not all(
+                isinstance(stow[name], (int, float)) and not isinstance(stow[name], bool)
+                and math.isfinite(stow[name]) and JOINT_LIMITS[name][0] <= stow[name] <= JOINT_LIMITS[name][1]
+                for name in ARM_JOINTS
+            ):
+                raise ValueError('qualification stow must contain six finite joints within their limits')
         if profile['linear_speed_m_s'] > .4 or profile['angular_speed_rad_s'] > math.pi / 2:
             raise ValueError('stage exceeds documented hardware speed limits')
         runner, independent, driver, clearance = (profile[k] for k in names[3:7])
