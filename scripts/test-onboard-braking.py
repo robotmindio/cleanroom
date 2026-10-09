@@ -341,7 +341,8 @@ class OnboardBraking(FAULT.FaultTest):
         while time.monotonic()-start<self.config.get('nominal_command_duration_s',2.5):
             if not self.flags.get('base_motion_permitted'):
                 self.command.publish(Twist())
-                raise RuntimeError('nominal permission withdrawn')
+                raise RuntimeError('nominal permission withdrawn: '+json.dumps({
+                    'flags':self.flags,'health':self.health},sort_keys=True))
             self.tick(command)
         cut=time.monotonic()
         self.command.publish(Twist())
