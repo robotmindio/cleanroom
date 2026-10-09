@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-09",
+  "source_revision": "850bac75fe84293262496cf2f980ea60be63b9c4",
+  "scope": "Qualification positioning attempt; no high-speed pulse or braking evidence.",
+  "payload_kg": 0.2,
+  "stage": "0.20",
+  "high_speed_pulse_started": false,
+  "qualified_trials": 0,
+  "max_independent_center_excursion_m": 0.0059674579831420155,
+  "error": "manual motion did not reach target; collision monitor=('', 0)",
+  "collision_monitor_action_at_timeout": [
+    "",
+    0
+  ],
+  "pi_host_rejection": "Motion command rejected: ValueError: motion action exceeds the configured base speed limits",
+  "cause": "Pi host retained the production 0.03 m/s and 0.06 rad/s envelope while only the compute driver had explicit qualification ceilings.",
+  "production_restored": true,
+  "artifacts": {
+    ".benchmarks/onboard-braking/20261009-094438/profile.yaml": {
+      "sha256": "6979b3c8cc678ab87a4c3e494087a812abad41ef9426a826eff43c5dbd2ed01a",
+      "bytes": 815
+    },
+    ".benchmarks/onboard-braking/20261009-094438/measurements.json": {
+      "sha256": "0a5b9923bd7cef489cddb5b32090d3cd44d1b082cdd3ee7065d542f2c4ce636c",
+      "bytes": 1645
+    },
+    ".benchmarks/onboard-braking/20261009-094438/result.json": {
+      "sha256": "4d22e6f63abe5654aec321e52b6335b81365d3a13341bee32a108fe48a9fe8b7",
+      "bytes": 334299
+    },
+    ".benchmarks/onboard-braking/20261009-094438/independent-poses.json": {
+      "sha256": "dc99df5427d20f5daae30f81873f980b378cf0cf2bab9abcbc78c668f1ecc892",
+      "bytes": 5270996
+    },
+    ".benchmarks/onboard-braking/20261009-094438/stack.log": {
+      "sha256": "2609b70f9715fe93bb5785370512660e85f1ca69a07fc6e16d6af67e4ec0d0d6",
+      "bytes": 149988
+    }
+  }
+}

@@ -58,6 +58,12 @@ def _receive(socket):
     return _wait_for(lambda: socket.recv_multipart(zmq.NOBLOCK) if socket.poll(0) else None)
 
 
+def _publish(host):
+    # Receipt does not synchronously free the lossy PUSH queue's capacity.
+    _wait_for(lambda: host._observations.socket.poll(0, zmq.POLLOUT))
+    return host.publish_observation()
+
+
 def _torque(context, host, request):
     socket = context.socket(zmq.REQ)
     socket.setsockopt(zmq.LINGER, 0)
@@ -97,7 +103,7 @@ def test_fake_host_speaks_action_and_versioned_observation_protocol(host, contex
     observation = _pull(context, host.endpoints.observation)
     host.set_state(**{"x.vel": 0.12, "arm_shoulder_pan.pos": 1.5})
 
-    host.publish_observation()
+    _publish(host)
     payload = json.loads(_receive(observation)[0])
     assert payload[TELEMETRY_SEQUENCE_KEY] == 0
     assert payload[TELEMETRY_SESSION_KEY] == host.session
@@ -152,10 +158,36 @@ def test_fake_host_enforces_the_real_motion_envelope_and_watchdog(host, context)
     command.close()
 
 
+def test_qualification_stage_reaches_the_host_without_raising_untagged_caps():
+    from pathlib import Path
+    from lekiwi_rmf.motion_guards import load_base_test_profile
+    from lekiwi_rmf.odometry import BASE_XY_SCALE
+    from lekiwi_rmf.zmq_client import LeKiwiZmqClient
+    from lekiwi_rmf.torque_control import TorqueControlClient
+    profile=load_base_test_profile(Path(__file__).parents[1]/'config/nav2_params.yaml','0.20')
+    with FakeLeKiwiHost(base_test_profiles={.20:profile}) as host:
+        host.start(period_s=.01)
+        client=LeKiwiZmqClient('127.0.0.1',host.command_endpoint_port,host.observation_endpoint_port,STATE_KEYS)
+        client.connect()
+        try:
+            TorqueControlClient('127.0.0.1',host.torque_endpoint_port).set_enabled(True)
+            _wait_for(lambda: client.zmq_cmd_socket.poll(0,zmq.POLLOUT))
+            action=_action(**{'x.vel':.20/BASE_XY_SCALE})
+            client.send_action(action,base_test_stage=.20)
+            _wait_for(lambda:host.actions)
+            assert host.actions[-1]['x.vel']==pytest.approx(.20/BASE_XY_SCALE)
+            count=len(host.actions)
+            client.send_action(action)
+            time.sleep(.05)
+            assert len(host.actions)==count and host.torque_enabled
+        finally:
+            client.disconnect()
+
+
 def test_fake_host_can_inject_motor_health_fault(host, context):
     observation = _pull(context, host.endpoints.observation)
     host.set_motor_health(fault_snapshot(("wheel_left",), "injected bus failure"))
-    host.publish_observation()
+    _publish(host)
     payload = json.loads(_receive(observation)[0])
     assert payload["_lekiwi_motor_health"]["statuses"]["motor_bus"]["level"] == ERROR
     observation.close()
@@ -164,26 +196,26 @@ def test_fake_host_can_inject_motor_health_fault(host, context):
 def test_fake_host_controls_drop_duplicate_stale_malformed_and_session_restart(host, context):
     observation = _pull(context, host.endpoints.observation)
 
-    host.publish_observation()
+    _publish(host)
     first = _receive(observation)
     first_payload = json.loads(first[0])
 
     host.queue_observation_fault(ObservationFault.DUPLICATE)
-    host.publish_observation()
+    _publish(host)
     assert _receive(observation) == first
 
     host.queue_observation_fault("stale")
-    host.publish_observation()
+    _publish(host)
     stale_payload = json.loads(_receive(observation)[0])
     assert stale_payload[TELEMETRY_SEQUENCE_KEY] > first_payload[TELEMETRY_SEQUENCE_KEY]
     assert stale_payload[TELEMETRY_MONOTONIC_NS_KEY] == first_payload[TELEMETRY_MONOTONIC_NS_KEY]
 
     host.queue_observation_fault("malformed")
-    host.publish_observation()
+    _publish(host)
     assert _receive(observation) == [b"{malformed lekiwi observation"]
 
     host.queue_observation_fault("drop")
-    assert host.publish_observation() is None
+    assert _publish(host) is None
     assert not observation.poll(50)
 
     first_session = host.session
@@ -194,7 +226,7 @@ def test_fake_host_controls_drop_duplicate_stale_malformed_and_session_restart(h
     assert host.torque_enabled is False
     time.sleep(0.05)
     _latest(observation)
-    host.publish_observation()
+    _publish(host)
     restarted = json.loads(_receive(observation)[0])
     assert restarted[TELEMETRY_SESSION_KEY] == second_session
     assert restarted[TELEMETRY_SEQUENCE_KEY] == 0

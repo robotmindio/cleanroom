@@ -1437,6 +1437,9 @@ def test_qualification_caps_coupled_motion_and_retains_the_folded_hold():
     node._base_test_center=(0.,0.)
     node._base_test_radius=.45
     node._base_qualification={'return_linear_speed_m_s':.1,'return_angular_speed_rad_s':.06}
+    node._base_test_stage=.30
+    stages=[]
+    node.robot.send_action=lambda action, **kwargs: (node.sent.append(action), stages.append(kwargs))
     node.pose=(0.,0.,0.)
     node.command.linear.x=.3
     node.command.angular.z=.6
@@ -1451,3 +1454,4 @@ def test_qualification_caps_coupled_motion_and_retains_the_folded_hold():
     node._send_armed_command(_Stamp(),{'joint.pos':10.},(0.,0.,0.))
     assert node.sent[-1]['x.vel']==node.sent[-1]['y.vel']==node.sent[-1]['theta.vel']==0.
     assert node.armed and node.sent[-1]['joint.pos']==10.
+    assert stages==[{'base_test_stage':.30}]*3

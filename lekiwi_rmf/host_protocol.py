@@ -9,7 +9,7 @@ coordinated host and driver deployment.
 from lekiwi_rmf.arm_trajectory import ARM_JOINTS
 
 
-TELEMETRY_PROTOCOL_VERSION = 2
+TELEMETRY_PROTOCOL_VERSION = 3
 TELEMETRY_PROTOCOL_KEY = "_lekiwi_protocol"
 TELEMETRY_SESSION_KEY = "_lekiwi_session"
 TELEMETRY_SEQUENCE_KEY = "_lekiwi_sequence"
@@ -30,6 +30,8 @@ MOTOR_HEALTH_KEY = "_lekiwi_motor_health"
 ARM_TRAJECTORY_STATUS_KEY = "_lekiwi_arm_trajectory"
 # Optional action fields that renew the motor host's local arm-goal lease.
 ARM_LEASE_KEYS = ("_lekiwi_arm_goal", "_lekiwi_arm_permission")
+BASE_TEST_STAGE_KEY = "_lekiwi_base_test_stage"
+BASE_TEST_STAGES = (.20, .30)
 
 BASE_VELOCITY_KEYS = ("x.vel", "y.vel", "theta.vel")
 # Every observation carries these, and every motion action contains exactly these.
