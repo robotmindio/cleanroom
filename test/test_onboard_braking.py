@@ -382,6 +382,7 @@ def test_resume_rejects_changed_speed_or_stopping_conditions():
     assert list(faults)==['linear/scan_disconnect']
     assert resume(previous,{**config,'trials_per_direction':1})==(trials,faults)
     assert resume(previous,{**config,'reference_start_pose':[.15,0.,0.]})==(trials,faults)
+    assert resume(previous,{**config,'nominal_command_duration_s':2.})==(trials,faults)
     for key in ('linear_speed_m_s','angular_speed_rad_s','payload_kg',
                 'measurement_uncertainty_m','maximum_stopping_distance_m'):
         with pytest.raises(ValueError,match='profile differs'):
@@ -441,7 +442,7 @@ def test_attended_sequence_stops_on_the_first_unqualified_trial(qualified,direct
         assert calls==[direction_sequence or 'forward']
 
 
-@pytest.mark.parametrize('selection,nominal_only',[(['--fault','scan_disconnect'],False),(['--attended-sequence'],False),(['--attended-sequence','--nominal-only'],True),(['--faults-only'],False),(['--direction-sequence','right'],True)])
+@pytest.mark.parametrize('selection,nominal_only',[(['--fault','scan_disconnect'],False),(['--attended-sequence'],False),(['--attended-sequence','--nominal-only'],True),(['--faults-only'],False),(['--direction-sequence','right'],True),(['--direction-sequence','right','--nominal-duration','2.0'],True)])
 @pytest.mark.parametrize('stage,trials',[('0.20',1),('0.25',5),('0.30',5)])
 def test_stage_fault_selection_is_not_skipped(monkeypatch,tmp_path,selection,nominal_only,stage,trials):
     import shutil
@@ -466,6 +467,20 @@ def test_stage_fault_selection_is_not_skipped(monkeypatch,tmp_path,selection,nom
     assert profiles[0]['nominal_only'] is nominal_only
     assert profiles[0]['trials_per_direction']==trials
     assert profiles[0]['faults_only'] is ('--faults-only' in selection)
+    if '--nominal-duration' in selection:
+        assert profiles[0]['nominal_command_duration_s']==2.
+
+
+@pytest.mark.parametrize('duration',['nan','-1','1.0','2.8'])
+def test_nominal_duration_cannot_shorten_the_pulse_or_expand_the_boundary(monkeypatch,duration):
+    import sys
+    module=import_module('test-onboard-braking')
+    monkeypatch.setattr(sys,'argv',['test-onboard-braking.py','--payload-g','200','--stage','0.25',
+                                 '--direction','right','--nominal-duration',duration])
+    monkeypatch.setattr(module.subprocess,'check_output',lambda *a,**k:pytest.fail('invalid duration reached hardware preflight'))
+    with pytest.raises(SystemExit) as error:
+        module.main()
+    assert error.value.code==2
 
 
 def test_faults_only_batches_all_axes_without_running_nominals(monkeypatch):

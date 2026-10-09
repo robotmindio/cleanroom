@@ -62,7 +62,8 @@ def terminal_observed_speed(samples, angular, window_s=1.):
 
 def resumable_evidence(previous, config):
     """Reuse measurements only under the same speed and stopping conditions."""
-    run_fields = {'nominal_only', 'faults_only', 'return_only', 'direction', 'direction_sequence', 'selected_fault', 'angular_test', 'depth_filter_pid', 'test_center', 'reference_start_pose', 'maximum_runtime_s', 'trials_per_direction', 'corridor'}
+    # Pulse length changes the acceleration allowance; each reused stop still proves its terminal ground speed.
+    run_fields = {'nominal_only', 'faults_only', 'return_only', 'direction', 'direction_sequence', 'selected_fault', 'angular_test', 'depth_filter_pid', 'test_center', 'reference_start_pose', 'maximum_runtime_s', 'trials_per_direction', 'corridor', 'nominal_command_duration_s'}
     conditions = {k:v for k,v in config.items() if k not in run_fields}
     if {k:v for k,v in previous['profile'].items() if k not in run_fields} != conditions:
         raise ValueError('resumed speed/load/measurement profile differs')
@@ -635,6 +636,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--payload-g',type=float,required=True)
     parser.add_argument('--nominal-only',action='store_true')
+    parser.add_argument('--nominal-duration',type=float,help='increase the nominal pulse duration within the unchanged stage boundary to allow settled ground speed')
     selection=parser.add_mutually_exclusive_group()
     selection.add_argument('--direction',choices=DIRECTIONS,help='run one nominal stop without retries; qualification stages return to center')
     selection.add_argument('--direction-sequence',choices=DIRECTIONS,help='complete the remaining nominal stops for one direction, stopping at the first unqualified trial')
@@ -669,6 +671,8 @@ def main():
         parser.error('--fault conflicts with --nominal-only')
     if args.reference_run and not args.stage:
         parser.error('--reference-run requires --stage')
+    if args.nominal_duration is not None and not args.stage:
+        parser.error('--nominal-duration requires --stage')
     config=yaml.safe_load((ROOT/'config/onboard_braking.yaml').read_text())
     linear,angular=NAV.load_base_speed_limits(ROOT/'config/nav2_params.yaml')
     if args.stage:
@@ -676,6 +680,12 @@ def main():
         linear,angular=config['linear_speed_m_s'],config['angular_speed_rad_s']
         if args.stage=='0.20':
             config['trials_per_direction']=1
+    if args.nominal_duration is not None:
+        if not math.isfinite(args.nominal_duration) or args.nominal_duration<config['nominal_command_duration_s']:
+            parser.error('nominal duration must be finite and no shorter than the stage default')
+        if args.nominal_duration*linear/2+config['measurement_uncertainty_m']>=config['maximum_center_radius_m']:
+            parser.error('nominal duration exceeds the unchanged stage boundary')
+        config['nominal_command_duration_s']=args.nominal_duration
     config.update(payload_kg=args.payload_g/1000,linear_speed_m_s=linear,angular_speed_rad_s=angular,
                   nominal_only=args.nominal_only or args.direction is not None or args.direction_sequence is not None or args.return_only,
                   faults_only=args.faults_only,return_only=args.return_only,direction=args.direction,direction_sequence=args.direction_sequence,
