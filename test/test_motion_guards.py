@@ -24,14 +24,16 @@ def test_qualification_profiles_fit_the_one_metre_fixture_and_reject_missing_res
     root=Path(__file__).parents[1]/'config'
     for stage in ('0.20','0.25','0.30'):
         uncertainty=.06 if stage=='0.25' else .04
+        stopping_time=1.6 if stage=='0.25' else 1.5
         profile=load_base_test_profile(root/'nav2_params.yaml',stage)
         assert profile['linear_speed_m_s']==float(stage)
         assert profile['required_clearance_m']==1.
         assert profile['nominal_command_duration_s']==1.6
         assert profile['measurement_uncertainty_m']==uncertainty
         assert profile['point_speed_bound_m_s']==pytest.approx(float(stage)*1.15)
-        assert profile['translation_stopping_margin_m']==pytest.approx(float(stage)*1.15*1.5+uncertainty)
-        assert profile['return_stopping_margin_m']==pytest.approx((.04+.33*.06)*1.15*1.5+uncertainty)
+        assert profile['maximum_stop_time_s']==stopping_time
+        assert profile['translation_stopping_margin_m']==pytest.approx(float(stage)*1.15*stopping_time+uncertainty)
+        assert profile['return_stopping_margin_m']==pytest.approx((.04+.33*.06)*1.15*stopping_time+uncertainty)
     for stage in ('0.06','0.10','0.40',''):
         with pytest.raises(ValueError):
             load_base_test_profile(root/'nav2_params.yaml',stage)
@@ -40,7 +42,8 @@ def test_qualification_profiles_fit_the_one_metre_fixture_and_reject_missing_res
     for key,value in [('required_clearance_m',.8),('driver_center_radius_m',.99),
                       ('nominal_command_duration_s',10.),('linear_speed_m_s',True),
                       ('angular_speed_rad_s',2.),('return_angular_speed_rad_s',.6),
-                      ('measurement_uncertainty_m',.05),('measurement_uncertainty_m',True)]:
+                      ('measurement_uncertainty_m',.05),('measurement_uncertainty_m',True),
+                      ('maximum_stop_time_s',2.),('maximum_stop_time_s',True)]:
         changed=yaml.safe_load(yaml.safe_dump(data))
         destination=changed['stages']['0.30'] if key.endswith('speed_m_s') or key=='angular_speed_rad_s' else changed['bounds']
         destination[key]=value
@@ -57,6 +60,7 @@ def test_qualification_stow_rejects_invalid_joint_references(tmp_path,invalid):
     from lekiwi_rmf.motion_guards import load_base_test_profile
     root=Path(__file__).parents[1]/'config'
     data=yaml.safe_load((root/'base_speed_qualification.yaml').read_text())
+    (tmp_path/'onboard_braking.yaml').write_text((root/'onboard_braking.yaml').read_text())
     changed=copy.deepcopy(data)
     stow=changed['stages']['0.25']['stow_joint_positions']
     if invalid=='missing':

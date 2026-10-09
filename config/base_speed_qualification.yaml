@@ -25,6 +25,8 @@ stages:
     angular_speed_rad_s: 0.50
     # Held-fold scan-loss trial modeled 0.050424 m uncertainty; reserve 6 cm.
     measurement_uncertainty_m: 0.06
+    # Valid scan-loss measurement bounded stop time at 1.500216 s; round up.
+    maximum_stop_time_s: 1.6
     # Held fold captured over 60 stationary samples; tolerance stays 0.02 rad.
     # CAD footprint at the full tolerance and live MoveIt validity both passed.
     stow_joint_positions:

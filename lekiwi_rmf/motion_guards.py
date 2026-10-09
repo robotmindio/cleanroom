@@ -52,11 +52,12 @@ def load_base_test_profile(nav2_file, stage):
     directory = Path(nav2_file).parent
     try:
         data = yaml.safe_load((directory / 'base_speed_qualification.yaml').read_text())
-        profile = {**data['bounds'], **data['stages'][stage]}
+        braking = yaml.safe_load((directory / 'onboard_braking.yaml').read_text())
+        profile = {'maximum_stop_time_s':braking['maximum_stop_time_s'], **data['bounds'], **data['stages'][stage]}
         names = ('linear_speed_m_s', 'angular_speed_rad_s', 'maximum_stopping_distance_m',
                  'maximum_center_radius_m', 'independent_center_radius_m',
                  'driver_center_radius_m', 'required_clearance_m', 'nominal_command_duration_s',
-                 'return_linear_speed_m_s', 'return_angular_speed_rad_s', 'measurement_uncertainty_m')
+                 'return_linear_speed_m_s', 'return_angular_speed_rad_s', 'measurement_uncertainty_m', 'maximum_stop_time_s')
         stow = profile.get('stow_joint_positions')
         if set(profile) != set(names) | ({'stow_joint_positions'} if stow is not None else set()) or not all(
             isinstance(profile[k], (int, float)) and not isinstance(profile[k], bool)
@@ -76,23 +77,23 @@ def load_base_test_profile(nav2_file, stage):
         runner, independent, driver, clearance = (profile[k] for k in names[3:7])
         if not runner < independent < driver < clearance:
             raise ValueError('stage boundaries must increase from runner to clear area')
-        braking = yaml.safe_load((directory / 'onboard_braking.yaml').read_text())
+        stopping_time = profile['maximum_stop_time_s']
         uncertainty = profile['measurement_uncertainty_m']
         point_speed = 1.15 * max(profile['linear_speed_m_s'], braking['body_radius_m'] * profile['angular_speed_rad_s'],
                                  profile['return_linear_speed_m_s'] + braking['body_radius_m'] * profile['return_angular_speed_rad_s'])
-        if clearance - driver < point_speed * braking['maximum_stop_time_s'] + uncertainty:
+        if clearance - driver < point_speed * stopping_time + uncertainty:
             raise ValueError('stage clear area lacks the braking reserve')
         if runner <= profile['nominal_command_duration_s'] * profile['linear_speed_m_s'] / 2 + uncertainty:
             raise ValueError('stage cannot contain a nominal trial')
         profile['point_speed_bound_m_s'] = point_speed
-        profile['translation_stopping_margin_m'] = 1.15 * profile['linear_speed_m_s'] * braking['maximum_stop_time_s'] + uncertainty
-        profile['return_stopping_margin_m'] = 1.15 * (profile['return_linear_speed_m_s'] + braking['body_radius_m'] * profile['return_angular_speed_rad_s']) * braking['maximum_stop_time_s'] + uncertainty
-        turn = profile['return_angular_speed_rad_s'] * braking['maximum_stop_time_s']
+        profile['translation_stopping_margin_m'] = 1.15 * profile['linear_speed_m_s'] * stopping_time + uncertainty
+        profile['return_stopping_margin_m'] = 1.15 * (profile['return_linear_speed_m_s'] + braking['body_radius_m'] * profile['return_angular_speed_rad_s']) * stopping_time + uncertainty
+        turn = profile['return_angular_speed_rad_s'] * stopping_time
         if turn >= math.pi / 4:
             raise ValueError('return rotation leaves its directional braking corridor')
         rotation = 2 * braking['body_radius_m'] * math.sin(turn / 2)
         profile['return_rotation_margin_m'] = 1.15 * rotation + uncertainty
-        profile['return_lateral_margin_m'] = 1.15 * (profile['return_linear_speed_m_s'] * braking['maximum_stop_time_s'] * math.sin(math.pi / 4 + turn) + rotation) + uncertainty
+        profile['return_lateral_margin_m'] = 1.15 * (profile['return_linear_speed_m_s'] * stopping_time * math.sin(math.pi / 4 + turn) + rotation) + uncertainty
         return profile
     except (OSError, yaml.YAMLError, KeyError, TypeError, ValueError) as error:
         raise ValueError(f'invalid base qualification stage {stage}: {error}') from error
