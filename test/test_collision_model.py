@@ -385,7 +385,8 @@ def test_resting_contacts_only_exempt_the_confirmed_parts():
             assert frozenset((shoulder, motor)) not in exemptions
 
 
-def test_travel_stow_fits_navigation_footprint_with_joint_tolerance():
+@pytest.mark.parametrize('qualification',[False,True])
+def test_travel_stow_fits_navigation_footprint_with_joint_tolerance(qualification):
     import itertools
     from scipy.spatial import ConvexHull
 
@@ -393,6 +394,9 @@ def test_travel_stow_fits_navigation_footprint_with_joint_tolerance():
     parents = {j.find("child").get("link"): j for j in robot.findall("joint")}
     config = yaml.safe_load((ROOT / "config/safety_production.yaml").read_text())["safety_supervisor"]["ros__parameters"]
     pose = dict(zip(config["stow_joint_names"], config["stow_joint_positions"]))
+    if qualification:
+        from lekiwi_rmf.motion_guards import load_base_test_profile
+        pose = load_base_test_profile(ROOT/'config/nav2_params.yaml','0.25')['stow_joint_positions']
     geometry = {}
     for name in ("so101_shoulder_link", "so101_upper_arm_link", "so101_lower_arm_link",
                  "so101_wrist_link", "so101_gripper_link", "so101_moving_jaw_link"):

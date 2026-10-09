@@ -1,9 +1,0 @@
-# 0.25 m/s physical qualification
-
-Completed: qualification tooling and reserves (PRs 43–50), rejected-fit capture handling, saved-center recovery, permission-loss snapshots and joint capture logging.
-Verified: 206 focused checks; production deployed 83cf67c remains 0.03 m/s / 0.06 rad/s with permission true. One historical 0.25 forward stop qualifies under its old 4 cm profile; the moving scan-loss attempt does not. The current 5 cm profile has no qualifying trial yet.
-Finding: run 20261009-130159 interrupted its nominal pulse with arm_stowed=false and empty sensor/driver faults. Sixty stationary samples have shoulder-lift deviation 0.01996984256 rad against the 0.02 tolerance. The pulse did not record the individual joint; observer logging now does. No arm command was issued.
-Prepared: held-pose reference {pan .0092, lift -1.7967, elbow 1.6249, wrist flex 1.2306, roll -.0077, gripper .2161}; full ±0.02 rad CAD footprint with 5 mm model allowance passes, and read-only MoveIt state validity passes. Reference has not been applied.
-Next: await the calibration decision requested in-session. If authorized, qualify with a tracked test reference while retaining the 0.02 tolerance and unchanged production acceptance. Run a fresh 0.25 forward stop, all eight moving faults, then five stops per direction.
-Pending: final measured rotation/zones/exploration bounds; matching stow/acceptance/Nav2 configuration PR only after physical passage; clean-main deployment and live verification. Do not raise production caps before passage. No moving jobs remain active. Remove this file before PR/final delivery.
-Artifacts: docs/base-speed-stage-025-stow-interruption-20261009.json; .benchmarks/base-speed-qualification/{025-fresh-gate-acceptance.log,stationary-stow-samples.json,proposed-stow-verification.json}; .benchmarks/onboard-braking/20261009-130159/.
