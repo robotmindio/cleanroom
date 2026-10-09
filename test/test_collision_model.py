@@ -65,14 +65,14 @@ def test_distal_arm_checks_physical_chassis_and_mounted_hardware():
     assert guard.get("filename") == "package://lekiwi_rmf/urdf/chassis_guard.stl"
     assert visible_guard.get("filename") == guard.get("filename")
     assert base.find("collision/origin").get("xyz") == base.find("visual/origin").get("xyz")
-    assert np.fromstring(base.find("collision/origin").get("xyz"), sep=" ") == pytest.approx([0, 0, -0.020])
+    assert np.fromstring(base.find("collision/origin").get("xyz"), sep=" ") == pytest.approx([0, 0, 0.082])
     assert float(base.find("visual/material/color").get("rgba").split()[-1]) > 0
     mesh = np.frombuffer((ROOT / "urdf/chassis_guard.stl").read_bytes()[84:],
                          dtype=np.dtype([("normal", "<f4", (3,)), ("vertices", "<f4", (3, 3)), ("attr", "<u2")]))["vertices"].reshape(-1, 3)
     assert mesh[:, 0].min() == pytest.approx(-0.145)
     assert mesh[:, 0].max() == pytest.approx(-0.003)
     assert np.ptp(mesh[:, 2]) == pytest.approx(0.050)
-    assert np.fromstring(mount.get("xyz"), sep=" ") == pytest.approx([0.0, 0.0, 0.093])
+    assert np.fromstring(mount.get("xyz"), sep=" ") == pytest.approx([0.0, 0.0, 0.0406])
     obstacles = (
         "base_link", "front_camera_collision_proxy", "lidar_collision_proxy",
         "rpi5_stack_collision_proxy", "astra_camera_link",

@@ -34,23 +34,26 @@
        direction, so yaw -90 degrees aligns it with REP-103 +X forward. -->
   <link name="base_footprint"/>
   <link name="base_link">
-    <!-- Keep only the rear of the chassis guard. Its front cut is tangent to
-         the center-facing edge of the arm pedestal; the lower face stays at
-         z=48 mm above the floor, with a 50 mm height. -->
+    <!-- Keep the arm out of the cables above the Raspberry Pi and sensors on
+         the top deck. Only the rear is guarded: the front cut is tangent to the
+         center-facing edge of the arm pedestal. The 50 mm volume rests on the
+         top plate, whose upper face is 57 mm above base_link. -->
     <collision>
-      <origin xyz="0 0 -0.020"/>
+      <origin xyz="0 0 0.082"/>
       <geometry><mesh filename="package://lekiwi_rmf/urdf/chassis_guard.stl"/></geometry>
     </collision>
     <!-- Show the exact restricted volume in the default RViz RobotModel. -->
     <visual>
-      <origin xyz="0 0 -0.020"/>
+      <origin xyz="0 0 0.082"/>
       <geometry><mesh filename="package://lekiwi_rmf/urdf/chassis_guard.stl"/></geometry>
       <material name="chassis_guard"><color rgba="1 0.2 0.1 0.5"/></material>
     </visual>
   </link>
+  <!-- The CAD's omni-wheel rims reach 40.6 mm below the lower plate's top
+       face (base_link), so this places the wheel-contact plane on the floor. -->
   <joint name="base_footprint_to_base_link" type="fixed">
     <parent link="base_footprint"/><child link="base_link"/>
-    <origin xyz="0 0 0.093" rpy="0 0 0"/>
+    <origin xyz="0 0 0.0406" rpy="0 0 0"/>
   </joint>
   <!-- The wheel-contact plane is the floor. Keep modeled parts above it while
        allowing the gripper to approach objects lying on the floor. -->
