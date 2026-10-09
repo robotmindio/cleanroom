@@ -182,6 +182,45 @@ def test_corridor_turns_in_place_at_the_stage_cap_and_stops_on_permission_loss(m
     assert calls[-1]=='stop'
 
 
+@pytest.mark.parametrize('ground_speed',[.20,.24])
+def test_shorter_fault_cruise_still_requires_independent_speed_coverage(monkeypatch,ground_speed):
+    from types import SimpleNamespace
+    from geometry_msgs.msg import Twist
+    module=import_module('test-onboard-braking')
+    clock, injections, zeros=[0.],[],[]
+    monkeypatch.setattr(module.time,'monotonic',lambda:clock[0])
+    node=object.__new__(module.OnboardBraking)
+    node.config={'nominal_command_duration_s':1.6}
+    node.ranges=[{'capture_time':0.}]
+    node.checks={'scan_disconnect':{}}
+    node.test_speed=.25
+    node.angular_test=False
+    node.wait=lambda condition,timeout:None
+    node.command=SimpleNamespace(publish=zeros.append)
+    def tick(command):
+        assert command.linear.x==.25
+        clock[0]+=.2
+        node.ranges.append({'stamp':clock[0],'pose':[ground_speed*clock[0],0.,0.]})
+    node.tick=tick
+    def parent_fault(self,name,inject,*args):
+        command=Twist()
+        command.linear.x=.25
+        inject(command)
+    monkeypatch.setattr(module.FAULT.FaultTest,'fault',parent_fault)
+    def begin(command):
+        injections.append(clock[0])
+        raise RuntimeError('mock physical injection')
+    error='mock physical injection' if ground_speed>=.225 else 'did not attain independent ground speed'
+    with pytest.raises(RuntimeError,match=error):
+        node.fault('scan_disconnect',begin,lambda:None,'scan:')
+    if ground_speed>=.225:
+        assert injections==pytest.approx([1.2])
+        assert node.checks['scan_disconnect']['terminal_observed_speed']==pytest.approx(ground_speed)
+    else:
+        assert injections==[] and len(zeros)==1
+        assert zeros[0].linear.x==zeros[0].angular.z==0.
+
+
 def test_velocity_seed_does_not_replace_the_independent_wall_measurement():
     from types import SimpleNamespace
     import time

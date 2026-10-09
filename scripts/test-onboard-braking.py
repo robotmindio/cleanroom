@@ -413,7 +413,8 @@ class OnboardBraking(FAULT.FaultTest):
         captured={}
         def inject(command):
             first=len(self.ranges)
-            end=time.monotonic()+self.config.get('nominal_command_duration_s',1.2)
+            # Wheel/guarded speed already passed; retain a full terminal fit without another acceleration allowance.
+            end=time.monotonic()+1.2
             while time.monotonic()<end:
                 self.tick(command)
             terminal=[{**r,'pts_ns':int(r['stamp']*1e9)} for r in self.ranges[first:]]
