@@ -6,6 +6,9 @@ live in their own included launch files.
 """
 
 from pathlib import Path
+import math
+import sys
+import tempfile
 
 import yaml
 
@@ -20,6 +23,7 @@ from launch_ros.substitutions import FindPackageShare
 from nav2_common.launch import RewrittenYaml
 
 from lekiwi_rmf.arm_trajectory import ARM_JOINTS
+from lekiwi_rmf.geometry import polygon, polygon_boundary_distance
 from lekiwi_rmf.launch_gates import gated
 from lekiwi_rmf.launch_validation import (
     CHOICES, PROFILES, launch_topology, lidar_default_port, permission_timeout, validate_context)
@@ -43,19 +47,54 @@ def _navigation_params(source_file, bounded_test, linear_limit, angular_limit, q
     if not bounded_test:
         return source_file
     if qualification:
-        # Qualification uses manual commands; keep every production Nav2 speed.
+        # Pure-axis trials need braking reserve along travel; rotation sweeps
+        # the circumscribed footprint. Keep every production Nav2 speed.
         source = Path(get_package_share_directory('lekiwi_rmf')) / 'config/nav2_params.yaml'
         nav2 = yaml.safe_load(source.read_text())
-        footprint = yaml.safe_load(nav2['local_costmap']['local_costmap']['ros__parameters']['footprint'])
+        footprint = polygon(nav2['local_costmap']['local_costmap']['ros__parameters']['footprint'], 'footprint')
         xmin, xmax = min(p[0] for p in footprint), max(p[0] for p in footprint)
         ymin, ymax = min(p[1] for p in footprint), max(p[1] for p in footprint)
-        rewrites = {}
-        for zone, margin in [('StopZone', qualification['maximum_stopping_distance_m']),
-                             ('SlowdownZone', qualification['maximum_stopping_distance_m'] + .07)]:
-            rewrites[f'collision_monitor.ros__parameters.{zone}.points'] = str([
-                [xmax + margin, ymax + margin], [xmax + margin, ymin - margin],
-                [xmin - margin, ymin - margin], [xmin - margin, ymax + margin]])
-        return RewrittenYaml(source_file=source_file, param_rewrites=rewrites, convert_types=True)
+        monitor = nav2['collision_monitor']['ros__parameters']
+        padding = polygon_boundary_distance(footprint, polygon(monitor['StopZone']['points'], 'StopZone'))
+        radius = max(math.hypot(x, y) for x, y in footprint) + padding
+        def rectangle(left, right, bottom, top):
+            return str([[right, top], [right, bottom], [left, bottom], [left, top]])
+        for zone, extra in [('StopZone', 0.0), ('SlowdownZone', .07)]:
+            settings = monitor[zone]
+            settings.pop('points')
+            settings.update(type='velocity_polygon', holonomic=True,
+                velocity_polygons=['rotation', 'return_forward', 'return_reverse', 'return_left', 'return_right',
+                    'forward', 'reverse', 'left', 'right', 'fallback'])
+            limits = dict(linear_min=0.0, linear_max=sys.float_info.max,
+                          theta_min=-sys.float_info.max, theta_max=sys.float_info.max)
+            settings['rotation'] = {**limits, 'linear_max': 0.0,
+                'points': rectangle(-radius-extra, radius+extra, -radius-extra, radius+extra)}
+            for prefix, cone, margin, side, back, velocities in [
+                ('return_', math.pi/4, qualification['return_stopping_margin_m']+extra,
+                    max(padding,qualification['return_lateral_margin_m'])+extra,
+                    max(padding,qualification['return_rotation_margin_m'])+extra,
+                    {**limits,'linear_max': math.nextafter(qualification['return_linear_speed_m_s'],math.inf)}),
+                ('', 1e-6, qualification['translation_stopping_margin_m']+extra,
+                    padding+(qualification['translation_stopping_margin_m']+extra)*1e-6, padding,
+                    {**limits,'theta_min':0.0,'theta_max':0.0}),
+            ]:
+                for direction, angle, bounds in [
+                    ('forward',0.0,(xmin-back,xmax+margin,ymin-side,ymax+side)),
+                    ('reverse',math.pi,(xmin-margin,xmax+back,ymin-side,ymax+side)),
+                    ('left',math.pi/2,(xmin-side,xmax+side,ymin-back,ymax+margin)),
+                    ('right',-math.pi/2,(xmin-side,xmax+side,ymin-margin,ymax+back)),
+                ]:
+                    start,end=angle-cone,angle+cone
+                    settings[prefix+direction]={**velocities,
+                        'direction_start_angle':math.atan2(math.sin(start),math.cos(start)),
+                        'direction_end_angle':math.atan2(math.sin(end),math.cos(end)),
+                        'points':rectangle(*bounds)}
+            margin = qualification['maximum_stopping_distance_m'] + extra
+            settings['fallback'] = {**limits,
+                'points': rectangle(xmin-margin, xmax+margin, ymin-margin, ymax+margin)}
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as output:
+            yaml.safe_dump(nav2, output)
+            return output.name
     # Match the driver's attended-test limits so MPPI predicts actual movement.
     prefix = "controller_server.ros__parameters."
     return RewrittenYaml(source_file=source_file, param_rewrites={

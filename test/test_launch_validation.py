@@ -93,17 +93,44 @@ def test_bounded_launch_defaults_follow_current_production_speed_limits():
         load_base_speed_limits(root / "config/nav2_params.yaml"))
 
 
-def test_qualification_changes_manual_caps_and_zones_without_raising_nav2_speed():
-    records=resolve_bringup(profile='split',bounded_base_test='true',base_test_stage='0.30')
+@pytest.mark.parametrize('stage',['0.20','0.30'])
+def test_qualification_changes_manual_caps_and_zones_without_raising_nav2_speed(stage):
+    records=resolve_bringup(profile='split',bounded_base_test='true',base_test_stage=stage)
     driver=find_node(records,node='lekiwi_rmf/lekiwi_driver')['parameters']
-    assert driver['base_test_stage']=='0.30'
+    assert driver['base_test_stage']==stage
     navigation=gate_stage(records,'wait_for_map')['start']
     (include,)=[item for item in navigation if 'include' in item]
     parameters=include['arguments']['params_file']['generated_yaml']
     controller=parameters['controller_server']['ros__parameters']['FollowPath']
     assert (controller['vx_max'],controller['wz_max'])==(.03,.06)
     import yaml
-    points=yaml.safe_load(parameters['collision_monitor']['ros__parameters']['StopZone']['points'])
+    stop=parameters['collision_monitor']['ros__parameters']['StopZone']
+    assert stop['type']=='velocity_polygon' and stop['holonomic']
+    assert stop['min_points']==1
+    assert stop['velocity_polygons']==['rotation','return_forward','return_reverse','return_left','return_right',
+        'forward','reverse','left','right','fallback']
+    margin=float(stage)*1.15*1.5+.02
+    for direction in ('forward','reverse','left','right'):
+        points=yaml.safe_load(stop[direction]['points'])
+        assert stop[direction]['theta_min']==stop[direction]['theta_max']==0.
+        if direction=='forward':
+            assert max(p[0] for p in points)==pytest.approx(.24+margin)
+            assert max(p[1] for p in points)==pytest.approx(.27,abs=1e-6)
+        elif direction=='reverse':
+            assert min(p[0] for p in points)==pytest.approx(-.22-margin)
+            assert stop[direction]['direction_start_angle']>stop[direction]['direction_end_angle']
+        elif direction=='left':
+            assert max(p[1] for p in points)==pytest.approx(.22+margin)
+        else:
+            assert min(p[1] for p in points)==pytest.approx(-.22-margin)
+    rotation=yaml.safe_load(stop['rotation']['points'])
+    assert max(p[0] for p in rotation)>.326+.049
+    assert stop['rotation']['linear_max']==0.
+    assert stop['return_reverse']['linear_max']==pytest.approx(.1)
+    returning=yaml.safe_load(stop['return_reverse']['points'])
+    assert max(p[1] for p in returning)<.43
+    assert min(p[0] for p in returning)<-.22-(.1+.33*.06)*1.15*1.5-.019
+    points=yaml.safe_load(stop['fallback']['points'])
     assert points[0]==pytest.approx([.89,.87])
     with pytest.raises(ValueError,match='requires bounded_base_test'):
         resolve_bringup(profile='split',base_test_stage='0.30')

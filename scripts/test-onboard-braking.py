@@ -61,7 +61,7 @@ def terminal_observed_speed(samples, angular, window_s=.75):
 
 def resumable_evidence(previous, config):
     """Reuse measurements only under the same speed and stopping conditions."""
-    run_fields = {'nominal_only', 'direction', 'selected_fault', 'angular_test', 'depth_filter_pid', 'test_center', 'maximum_runtime_s'}
+    run_fields = {'nominal_only', 'direction', 'selected_fault', 'angular_test', 'depth_filter_pid', 'test_center', 'maximum_runtime_s', 'trials_per_direction'}
     conditions = {k:v for k,v in config.items() if k not in run_fields}
     if {k:v for k,v in previous['profile'].items() if k not in run_fields} != conditions:
         raise ValueError('resumed speed/load/measurement profile differs')
@@ -395,6 +395,10 @@ class OnboardBraking(FAULT.FaultTest):
                     if topic:
                         captured['cut']=self.sources[topic]
                     captured['measurement']=self.observe_stop(captured['cut'],captured['end'],self.source_stamps[topic] if topic else None)
+                    self.checks[name]['independent']=captured['measurement']
+                    self.save()
+                    if not captured['measurement']['within_budget']:
+                        raise RuntimeError('loaded fault stopping/error bound exceeded')
             finally:
                 if 'cut' in captured:
                     restore()
@@ -402,8 +406,6 @@ class OnboardBraking(FAULT.FaultTest):
         self.checks[name]['independent']=captured['measurement']
         self.save()
         print('FAULT STOP',name,json.dumps(captured['measurement']),flush=True)
-        if not captured['measurement']['within_budget']:
-            raise RuntimeError('loaded fault stopping/error bound exceeded')
 
     def run(self):
         self.wait_ready()
@@ -435,7 +437,10 @@ class OnboardBraking(FAULT.FaultTest):
                 attempts+=1
                 if attempts>10:
                     raise RuntimeError('too many unqualified stopping attempts: '+direction)
-                completed+=int(self.trial(direction))
+                qualified=self.trial(direction)
+                if self.config.get('stage') and not qualified:
+                    raise RuntimeError('qualification sequence stopped at an unqualified trial: '+direction)
+                completed+=int(qualified)
         self.move(self.center)
         if self.config['nominal_only']:
             return
@@ -447,12 +452,12 @@ class OnboardBraking(FAULT.FaultTest):
             self.angular_test=angular
             self.test_speed=self.config['angular_speed_rad_s' if angular else 'linear_speed_m_s']
             axis='angular' if angular else 'linear'
-            self.move(self.pulse_start('rotation_ccw' if angular else 'forward'))
             for label,pid,reason in [('scan_disconnect',scan[0],'scan:'),('compute_command_loss',driver[0],'driver:')]:
                 if self.config.get('selected_fault') and self.config['selected_fault']!=label:
                     continue
                 if axis+'/'+label in self.checks and not self.config.get('selected_fault'):
                     continue
+                self.move(self.pulse_start('rotation_ccw' if angular else 'forward'))
                 timer=f'lekiwi-loaded-{label}-{axis}'
                 def stop(command,pid=pid,timer=timer):
                     self.action(['systemd-run','--user','--quiet','--collect',f'--unit={timer}','--on-active=8s','/usr/bin/kill','-CONT',pid],command)
@@ -473,6 +478,7 @@ class OnboardBraking(FAULT.FaultTest):
                 self.remote(['kill','-CONT',self.config['depth_filter_pid']],Twist())
                 self.remote(['sudo','-n','systemctl','stop','lekiwi-loaded-depth-restore.timer'],Twist())
             if self.config.get('selected_fault') in (None,'depth_disconnect') and (axis+'/depth_disconnect' not in self.checks or self.config.get('selected_fault')):
+                self.move(self.pulse_start('rotation_ccw' if angular else 'forward'))
                 self.fault('depth_disconnect',pause_depth,resume_depth,'depth:')
                 self.checks[axis+'/depth_disconnect']=self.checks.pop('depth_disconnect')
                 self.save()
@@ -480,6 +486,7 @@ class OnboardBraking(FAULT.FaultTest):
                     return
             if axis+'/telemetry_loss' in self.checks and not self.config.get('selected_fault'):
                 continue
+            self.move(self.pulse_start('rotation_ccw' if angular else 'forward'))
             table='lekiwi_loaded_acceptance'
             def block(command):
                 self.remote(['sudo','-n','systemd-run','--quiet','--collect','--unit=lekiwi-loaded-telemetry-restore','--on-active=12s','/usr/sbin/nft','destroy','table','inet',table],command)
@@ -519,6 +526,7 @@ def main():
     selection=parser.add_mutually_exclusive_group()
     selection.add_argument('--direction',choices=DIRECTIONS,help='run one nominal stop without retries; qualification stages return to center')
     selection.add_argument('--fault',choices=['scan_disconnect','depth_disconnect','telemetry_loss','compute_command_loss'],help='run one moving fault without nominal repeats')
+    selection.add_argument('--attended-sequence',action='store_true',help='run the operator-authorized stage sequence, stopping at the first unqualified trial')
     parser.add_argument('--angular',action='store_true',help='use rotation for the selected fault')
     parser.add_argument('--stage',choices=['0.20','0.30'],help='explicit attended manual qualification stage; production Nav2 speeds are retained')
     parser.add_argument('--reference-run',type=Path,help='retain the fixed raw-LiDAR reference and center across qualification stages without reusing their trials')
@@ -527,8 +535,10 @@ def main():
     args=parser.parse_args()
     if not math.isfinite(args.payload_g) or args.payload_g<0:
         parser.error('payload must be finite and nonnegative')
-    if args.stage and not (args.direction or args.fault):
-        parser.error('qualification requires one selected nominal or fault trial')
+    if args.stage and not (args.direction or args.fault or args.attended_sequence):
+        parser.error('qualification requires a selected trial or --attended-sequence')
+    if args.attended_sequence and not args.stage:
+        parser.error('--attended-sequence requires --stage')
     if args.angular and not args.fault:
         parser.error('--angular requires --fault')
     if args.fault and args.nominal_only:
@@ -540,6 +550,8 @@ def main():
     if args.stage:
         config.update(load_base_test_profile(ROOT/'config/nav2_params.yaml',args.stage))
         linear,angular=config['linear_speed_m_s'],config['angular_speed_rad_s']
+        if args.stage=='0.20':
+            config['trials_per_direction']=1
     config.update(payload_kg=args.payload_g/1000,linear_speed_m_s=linear,angular_speed_rad_s=angular,
                   nominal_only=args.nominal_only or args.direction is not None,direction=args.direction,
                   selected_fault=args.fault,angular_test=args.angular,stage=args.stage,

@@ -57,6 +57,7 @@ def test_resume_rejects_changed_speed_or_stopping_conditions():
     trials,faults=resume(previous,config)
     assert trials==[{'qualification_eligible':True,'source_run':'earlier'}]
     assert list(faults)==['linear/scan_disconnect']
+    assert resume(previous,{**config,'trials_per_direction':1})==(trials,faults)
     for key in ('linear_speed_m_s','angular_speed_rad_s','payload_kg',
                 'measurement_uncertainty_m','maximum_stopping_distance_m'):
         with pytest.raises(ValueError,match='profile differs'):
@@ -89,6 +90,55 @@ def test_selected_stop_does_not_retry_and_qualification_returns_to_fixed_center(
     with pytest.raises(RuntimeError,match='unqualified'):
         run(node)
     assert calls==completed+['center','forward']
+
+
+@pytest.mark.parametrize('qualified',[True,False])
+def test_attended_sequence_stops_on_the_first_unqualified_trial(qualified):
+    from types import SimpleNamespace
+    module=import_module('test-onboard-braking')
+    calls=[]
+    node=SimpleNamespace(config={'stage':'0.20','body_radius_m':.33,
+        'trials_per_direction':1,'nominal_only':True},pose=(0.,0.,0.),
+        ranges=[{'pose':[0.,0.,0.]}]*21,range_info=[{}],camera_poses=[{}],
+        views={'front':1,'wrist':1,'astra':1},trials=[],
+        wait_ready=lambda:None,wait=lambda condition,timeout:condition(),move=lambda *a,**k:None)
+    def trial(direction):
+        calls.append(direction)
+        node.trials.append({'direction':direction,'qualification_eligible':qualified})
+        return qualified
+    node.trial=trial
+    if qualified:
+        module.OnboardBraking.run(node)
+        assert calls==list(module.DIRECTIONS)
+    else:
+        with pytest.raises(RuntimeError,match='sequence stopped'):
+            module.OnboardBraking.run(node)
+        assert calls==['forward']
+
+
+@pytest.mark.parametrize('selection,nominal_only',[(['--fault','scan_disconnect'],False),(['--attended-sequence'],False),(['--attended-sequence','--nominal-only'],True)])
+def test_stage_020_fault_selection_is_not_skipped(monkeypatch,tmp_path,selection,nominal_only):
+    import shutil
+    import sys
+    from pathlib import Path
+    module=import_module('test-onboard-braking')
+    config=tmp_path/'config'
+    config.mkdir()
+    for name in ('nav2_params.yaml','onboard_braking.yaml','base_speed_qualification.yaml'):
+        shutil.copyfile(Path(__file__).parents[1]/'config'/name,config/name)
+    monkeypatch.setattr(module,'ROOT',tmp_path)
+    monkeypatch.setattr(sys,'argv',['test-onboard-braking.py','--payload-g','200','--stage','0.20',*selection])
+    monkeypatch.setattr(module.NAV,'installed_stack_arguments',lambda:['remote_ip:=robot-1'])
+    monkeypatch.setattr(module.subprocess,'check_output',lambda *a,**k:'123\n')
+    profiles=[]
+    def launch(node,output,**kwargs):
+        import yaml
+        profiles.append(yaml.safe_load((output/'profile.yaml').read_text()))
+        assert kwargs['production'] is False
+    monkeypatch.setattr(module.NAV,'main',launch)
+    module.main()
+    assert profiles[0]['nominal_only'] is nominal_only
+    assert profiles[0]['trials_per_direction']==1
 
 
 def test_scan_geometry_recovers_motion_and_rejects_a_single_wall():

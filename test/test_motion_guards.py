@@ -28,6 +28,8 @@ def test_qualification_profiles_fit_the_one_metre_fixture_and_reject_missing_res
         assert profile['required_clearance_m']==1.
         assert profile['nominal_command_duration_s']==1.2
         assert profile['point_speed_bound_m_s']==pytest.approx(float(stage)*1.15)
+        assert profile['translation_stopping_margin_m']==pytest.approx(float(stage)*1.15*1.5+.02)
+        assert profile['return_stopping_margin_m']==pytest.approx((.10+.33*.06)*1.15*1.5+.02)
     for stage in ('0.06','0.10','0.40',''):
         with pytest.raises(ValueError):
             load_base_test_profile(root/'nav2_params.yaml',stage)
@@ -35,7 +37,7 @@ def test_qualification_profiles_fit_the_one_metre_fixture_and_reject_missing_res
     data=yaml.safe_load((root/'base_speed_qualification.yaml').read_text())
     for key,value in [('required_clearance_m',.8),('driver_center_radius_m',.99),
                       ('nominal_command_duration_s',10.),('linear_speed_m_s',True),
-                      ('angular_speed_rad_s',2.)]:
+                      ('angular_speed_rad_s',2.),('return_angular_speed_rad_s',.6)]:
         changed=yaml.safe_load(yaml.safe_dump(data))
         destination=changed['stages']['0.30'] if key.endswith('speed_m_s') or key=='angular_speed_rad_s' else changed['bounds']
         destination[key]=value
@@ -61,7 +63,8 @@ def test_indoor_stop_zone_and_speed_profile_match_the_acceptance_budget():
     assert nav2['velocity_smoother']['ros__parameters']['max_velocity'] == [linear, linear, angular]
 
 
-def test_runner_drains_callbacks_and_reports_a_physical_stop(monkeypatch):
+@pytest.mark.parametrize('feedback_check',[True,False])
+def test_runner_drains_callbacks_and_reports_a_physical_stop(monkeypatch,feedback_check):
     import runpy
     import time
     from pathlib import Path
@@ -75,9 +78,13 @@ def test_runner_drains_callbacks_and_reports_a_physical_stop(monkeypatch):
     command = Twist()
     command.linear.x = .03
     with pytest.raises(RuntimeError,match='StopZone blocks motion'):
-        functions['Test'].tick(node,command)
+        functions['Test'].tick(node,command,check=feedback_check)
     assert len(calls) == 21
     assert commands[-1].linear.x == commands[-1].angular.z == 0
+    node.phase='scan_disconnect'
+    node.center=None
+    functions['Test'].tick(node,command,check=False)
+    assert commands[-1].linear.x==.03
 
 
 def test_base_speed_limits_reject_bad_configuration_and_include_reverse(tmp_path):
