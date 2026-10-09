@@ -199,7 +199,7 @@ class Test(Node):
         print('manual target',target,flush=True)
         # Collision monitoring legitimately scales manual commands to 35% near
         # obstacles; a 0.6 rad reversal plus proportional settling exceeds 12 s.
-        end = time.monotonic()+30
+        end = time.monotonic()+60
         while True:
             x,y,a = self.pose if pose_source is None else pose_source()
             dx,dy = target[0]-x,target[1]-y

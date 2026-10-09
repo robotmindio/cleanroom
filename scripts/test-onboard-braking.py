@@ -63,9 +63,10 @@ def terminal_observed_speed(samples, angular, window_s=1.):
 def resumable_evidence(previous, config):
     """Reuse measurements only under the same speed and stopping conditions."""
     # Pulse length changes the acceleration allowance; each reused stop still proves its terminal ground speed.
-    run_fields = {'nominal_only', 'faults_only', 'return_only', 'direction', 'direction_sequence', 'selected_fault', 'angular_test', 'depth_filter_pid', 'test_center', 'reference_start_pose', 'maximum_runtime_s', 'trials_per_direction', 'corridor', 'nominal_command_duration_s'}
+    run_fields = {'nominal_only', 'faults_only', 'return_only', 'direction', 'direction_sequence', 'selected_fault', 'angular_test', 'depth_filter_pid', 'test_center', 'reference_start_pose', 'maximum_runtime_s', 'trials_per_direction', 'corridor', 'nominal_command_duration_s', 'angular_speed_rad_s'}
     conditions = {k:v for k,v in config.items() if k not in run_fields}
-    if {k:v for k,v in previous['profile'].items() if k not in run_fields} != conditions:
+    if (previous['profile'].get('angular_speed_rad_s',0)<config.get('angular_speed_rad_s',0) or
+            {k:v for k,v in previous['profile'].items() if k not in run_fields} != conditions):
         raise ValueError('resumed speed/load/measurement profile differs')
     trials = [{**t,'source_run':t.get('source_run',previous['source_run'])}
               for t in previous['trials'] if t['qualification_eligible']]
@@ -317,7 +318,7 @@ class OnboardBraking(FAULT.FaultTest):
 
     def move(self,target,linear_limit=None,angular_limit=None):
         if self.config.get('corridor'):
-            end=time.monotonic()+30
+            end=time.monotonic()+60
             try:
                 while True:
                     if time.monotonic()>end:
@@ -637,6 +638,7 @@ def main():
     parser.add_argument('--payload-g',type=float,required=True)
     parser.add_argument('--nominal-only',action='store_true')
     parser.add_argument('--nominal-duration',type=float,help='increase the nominal pulse duration within the unchanged stage boundary to allow settled ground speed')
+    parser.add_argument('--rotation-speed',type=float,help='qualify a lower angular operating target within the stage cap; higher-speed passing faults remain reusable')
     selection=parser.add_mutually_exclusive_group()
     selection.add_argument('--direction',choices=DIRECTIONS,help='run one nominal stop without retries; qualification stages return to center')
     selection.add_argument('--direction-sequence',choices=DIRECTIONS,help='complete the remaining nominal stops for one direction, stopping at the first unqualified trial')
@@ -673,6 +675,8 @@ def main():
         parser.error('--reference-run requires --stage')
     if args.nominal_duration is not None and not args.stage:
         parser.error('--nominal-duration requires --stage')
+    if args.rotation_speed is not None and not args.stage:
+        parser.error('--rotation-speed requires --stage')
     config=yaml.safe_load((ROOT/'config/onboard_braking.yaml').read_text())
     linear,angular=NAV.load_base_speed_limits(ROOT/'config/nav2_params.yaml')
     if args.stage:
@@ -680,6 +684,10 @@ def main():
         linear,angular=config['linear_speed_m_s'],config['angular_speed_rad_s']
         if args.stage=='0.20':
             config['trials_per_direction']=1
+    if args.rotation_speed is not None:
+        if not math.isfinite(args.rotation_speed) or not 0<args.rotation_speed<=angular:
+            parser.error('rotation speed must be finite, positive and at most the stage cap')
+        angular=args.rotation_speed
     if args.nominal_duration is not None:
         if not math.isfinite(args.nominal_duration) or args.nominal_duration<config['nominal_command_duration_s']:
             parser.error('nominal duration must be finite and no shorter than the stage default')
