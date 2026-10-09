@@ -391,18 +391,28 @@ class OnboardBraking(FAULT.FaultTest):
         self.wait(stopped,5)
         first=len(self.scans)
         self.wait(lambda:len(self.scans)>=first+10,5)
-        scans=self.scans[first:first+10]
+        scans=[]
         poses=[]
         radius=self.config['body_radius_m']
         reserve=self.config['independent_center_radius_m']-self.config['maximum_center_radius_m']
         alignment_error=0.
-        for scan in scans:
-            pose,covariance,sensitivity=register_scan(self.fixed_reference_points,
-                np.asarray(scan['points']),self.ranges[-1]['pose'],radius)
+        deadline=time.monotonic()+10
+        rejected=[]
+        while len(poses)<10:
+            self.wait(lambda:len(self.scans)>first,max(0.,deadline-time.monotonic()))
+            scan=self.scans[first]
+            first+=1
+            try:
+                pose,covariance,sensitivity=register_scan(self.fixed_reference_points,
+                    np.asarray(scan['points']),self.ranges[-1]['pose'],radius)
+            except ValueError as error:
+                rejected.append({'stamp':scan['stamp'],'error':str(error)})
+                continue
             error=3*(math.sqrt(max(covariance[:2]))+radius*math.sqrt(covariance[2]))+sensitivity
             if error>reserve:
                 raise RuntimeError('stationary reference anchor exceeds the center reserve')
             alignment_error=max(alignment_error,error)
+            scans.append(scan)
             poses.append(pose)
         self.wait(stopped,5)
         if maximum_swept_excursion(poses,radius)>.01:
@@ -415,6 +425,7 @@ class OnboardBraking(FAULT.FaultTest):
         self.reference_alignment_error_m=alignment_error
         self.reference_history.append({'anchor':anchor.tolist(),'source_stamps':[scan['stamp'] for scan in scans],
                                        'alignment_uncertainty_m':alignment_error,'includes_fixed_reference':True,
+                                       'rejected_anchor_scans':rejected,
                                        'points':self.reference_points.tolist()})
         first=len(self.ranges)
         self.reference_locked=True

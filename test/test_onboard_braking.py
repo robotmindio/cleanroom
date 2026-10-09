@@ -144,7 +144,7 @@ def test_corridor_body_directions_all_travel_along_the_saved_forward_axis(direct
             math.sin(heading)*ux+math.cos(heading)*uy)==pytest.approx((math.cos(.3),math.sin(.3)))
 
 
-@pytest.mark.parametrize('case',['stationary','stale_feedback','moving','uncertain_anchor'])
+@pytest.mark.parametrize('case',['stationary','retry_anchor','stale_feedback','moving','uncertain_anchor'])
 def test_stationary_corridor_reference_keeps_the_original_area_anchor(monkeypatch,case):
     import math
     import time
@@ -171,16 +171,22 @@ def test_stationary_corridor_reference_keeps_the_original_area_anchor(monkeypatc
             raise RuntimeError('not stationary')
         elif not node.scans:
             node.scans.extend({'stamp':i,'points':local.tolist()} for i in range(10))
+        elif not node.reference_locked:
+            node.scans.append({'stamp':len(node.scans),'points':local.tolist()})
         else:
             assert node.reference_locked
             node.ranges.extend({'pose':[.01,.02,math.pi]} for _ in range(10))
         assert condition()
     node.wait=wait
+    fits=[]
     def fit(reference,points,guess,radius):
         assert reference is node.fixed_reference_points
+        fits.append(True)
+        if case=='retry_anchor' and len(fits)==1:
+            raise ValueError('independent scan loses observability after removing a sector')
         return [.01,.02,math.pi],[1e-8]*3,.03 if case=='uncertain_anchor' else 0.
     monkeypatch.setattr(module,'register_scan',fit)
-    if case in ('stationary','stale_feedback'):
+    if case in ('stationary','retry_anchor','stale_feedback'):
         node.refresh_corridor_reference()
         assert node.reference_locked and len(node.reference_history)==1
         assert node.reference_history[0]['anchor']==pytest.approx([.01,.02,math.pi])
@@ -188,6 +194,8 @@ def test_stationary_corridor_reference_keeps_the_original_area_anchor(monkeypatc
         assert np.array_equal(node.reference_points[:1],node.fixed_reference_points)
         assert 0<node.reference_alignment_error_m<.02
         assert np.array_equal(node.fixed_reference_points,[[10.,20.]])
+        assert len(node.reference_history[0]['source_stamps'])==10
+        assert len(node.reference_history[0]['rejected_anchor_scans'])==(case=='retry_anchor')
     else:
         error='not stationary' if case=='moving' else 'center reserve'
         with pytest.raises(RuntimeError,match=error):
