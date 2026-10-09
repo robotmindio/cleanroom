@@ -116,6 +116,31 @@ def test_attended_sequence_stops_on_the_first_unqualified_trial(qualified):
         assert calls==['forward']
 
 
+@pytest.mark.parametrize('selection,nominal_only',[(['--fault','scan_disconnect'],False),(['--attended-sequence'],False),(['--attended-sequence','--nominal-only'],True)])
+def test_stage_020_fault_selection_is_not_skipped(monkeypatch,tmp_path,selection,nominal_only):
+    import shutil
+    import sys
+    from pathlib import Path
+    module=import_module('test-onboard-braking')
+    config=tmp_path/'config'
+    config.mkdir()
+    for name in ('nav2_params.yaml','onboard_braking.yaml','base_speed_qualification.yaml'):
+        shutil.copyfile(Path(__file__).parents[1]/'config'/name,config/name)
+    monkeypatch.setattr(module,'ROOT',tmp_path)
+    monkeypatch.setattr(sys,'argv',['test-onboard-braking.py','--payload-g','200','--stage','0.20',*selection])
+    monkeypatch.setattr(module.NAV,'installed_stack_arguments',lambda:['remote_ip:=robot-1'])
+    monkeypatch.setattr(module.subprocess,'check_output',lambda *a,**k:'123\n')
+    profiles=[]
+    def launch(node,output,**kwargs):
+        import yaml
+        profiles.append(yaml.safe_load((output/'profile.yaml').read_text()))
+        assert kwargs['production'] is False
+    monkeypatch.setattr(module.NAV,'main',launch)
+    module.main()
+    assert profiles[0]['nominal_only'] is nominal_only
+    assert profiles[0]['trials_per_direction']==1
+
+
 def test_scan_geometry_recovers_motion_and_rejects_a_single_wall():
     module=import_module('test-onboard-braking')
     fit=module.register_scan

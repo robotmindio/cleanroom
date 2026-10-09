@@ -28,6 +28,8 @@ def test_qualification_profiles_fit_the_one_metre_fixture_and_reject_missing_res
         assert profile['required_clearance_m']==1.
         assert profile['nominal_command_duration_s']==1.2
         assert profile['point_speed_bound_m_s']==pytest.approx(float(stage)*1.15)
+        assert profile['translation_stopping_margin_m']==pytest.approx(float(stage)*1.15*1.5+.02)
+        assert profile['return_stopping_margin_m']==pytest.approx((.10+.33*.06)*1.15*1.5+.02)
     for stage in ('0.06','0.10','0.40',''):
         with pytest.raises(ValueError):
             load_base_test_profile(root/'nav2_params.yaml',stage)
@@ -35,7 +37,7 @@ def test_qualification_profiles_fit_the_one_metre_fixture_and_reject_missing_res
     data=yaml.safe_load((root/'base_speed_qualification.yaml').read_text())
     for key,value in [('required_clearance_m',.8),('driver_center_radius_m',.99),
                       ('nominal_command_duration_s',10.),('linear_speed_m_s',True),
-                      ('angular_speed_rad_s',2.)]:
+                      ('angular_speed_rad_s',2.),('return_angular_speed_rad_s',.6)]:
         changed=yaml.safe_load(yaml.safe_dump(data))
         destination=changed['stages']['0.30'] if key.endswith('speed_m_s') or key=='angular_speed_rad_s' else changed['bounds']
         destination[key]=value

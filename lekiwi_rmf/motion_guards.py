@@ -75,6 +75,14 @@ def load_base_test_profile(nav2_file, stage):
         if runner <= profile['nominal_command_duration_s'] * profile['linear_speed_m_s'] / 2 + braking['measurement_uncertainty_m']:
             raise ValueError('stage cannot contain a nominal trial')
         profile['point_speed_bound_m_s'] = point_speed
+        profile['translation_stopping_margin_m'] = 1.15 * profile['linear_speed_m_s'] * braking['maximum_stop_time_s'] + braking['measurement_uncertainty_m']
+        profile['return_stopping_margin_m'] = 1.15 * (profile['return_linear_speed_m_s'] + braking['body_radius_m'] * profile['return_angular_speed_rad_s']) * braking['maximum_stop_time_s'] + braking['measurement_uncertainty_m']
+        turn = profile['return_angular_speed_rad_s'] * braking['maximum_stop_time_s']
+        if turn >= math.pi / 4:
+            raise ValueError('return rotation leaves its directional braking corridor')
+        rotation = 2 * braking['body_radius_m'] * math.sin(turn / 2)
+        profile['return_rotation_margin_m'] = 1.15 * rotation + braking['measurement_uncertainty_m']
+        profile['return_lateral_margin_m'] = 1.15 * (profile['return_linear_speed_m_s'] * braking['maximum_stop_time_s'] * math.sin(math.pi / 4 + turn) + rotation) + braking['measurement_uncertainty_m']
         return profile
     except (OSError, yaml.YAMLError, KeyError, TypeError, ValueError) as error:
         raise ValueError(f'invalid base qualification stage {stage}: {error}') from error

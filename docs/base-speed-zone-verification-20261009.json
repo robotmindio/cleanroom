@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "verification_date": "2026-10-09",
+  "kind": "isolated_native_collision_monitor_verification",
+  "ros_domain_id": 199,
+  "stage": "0.20",
+  "physical_motion": false,
+  "note": "Synthetic scan and command inputs verify directional zone selection. This is not physical braking acceptance; autonomous speed remains 0.03 m/s and 0.06 rad/s.",
+  "cases": [
+    {
+      "case": "off_path_left",
+      "stopped": false,
+      "last_output": [
+        0.2,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "case": "forward_obstacle",
+      "stopped": true,
+      "last_output": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "case": "reverse_obstacle",
+      "stopped": true,
+      "last_output": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "case": "left_obstacle",
+      "stopped": true,
+      "last_output": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "case": "rotation_clear",
+      "stopped": false,
+      "last_output": [
+        0.0,
+        0.0,
+        0.4
+      ]
+    },
+    {
+      "case": "rotation_obstacle",
+      "stopped": true,
+      "last_output": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    {
+      "case": "return_off_path",
+      "stopped": false,
+      "last_output": [
+        -0.034964999999999996,
+        0.0007,
+        0.006999999999999999
+      ]
+    },
+    {
+      "case": "diagonal_fallback",
+      "stopped": true,
+      "last_output": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    }
+  ]
+}

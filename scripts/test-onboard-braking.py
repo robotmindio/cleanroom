@@ -553,7 +553,7 @@ def main():
         if args.stage=='0.20':
             config['trials_per_direction']=1
     config.update(payload_kg=args.payload_g/1000,linear_speed_m_s=linear,angular_speed_rad_s=angular,
-                  nominal_only=args.nominal_only or args.direction is not None or args.stage=='0.20',direction=args.direction,
+                  nominal_only=args.nominal_only or args.direction is not None,direction=args.direction,
                   selected_fault=args.fault,angular_test=args.angular,stage=args.stage,
                   point_speed_bound_m_s=config.get('point_speed_bound_m_s',1.15*(linear+config['body_radius_m']*angular)))
     device=next(a.partition(':=')[2] for a in NAV.installed_stack_arguments() if a.startswith('remote_ip:='))
