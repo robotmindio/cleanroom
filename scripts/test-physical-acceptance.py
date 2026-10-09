@@ -8,6 +8,7 @@ Wheel readings prove the fault response, not an independent stopping distance.
 import argparse
 import math
 from importlib import import_module
+import os
 import shlex
 import subprocess
 import time
@@ -75,8 +76,10 @@ class FaultTest(navigation.Test):
                 raise RuntimeError('fault test reached its early center boundary')
 
     def action(self, argv, twist=None, data=None):
+        environment = dict(os.environ)
+        environment.setdefault('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')
         with subprocess.Popen(argv,stdin=subprocess.PIPE,stdout=subprocess.PIPE,
-                              stderr=subprocess.STDOUT,text=True) as process:
+                              stderr=subprocess.STDOUT,text=True,env=environment) as process:
             if data:
                 process.stdin.write(data)
             process.stdin.close()
