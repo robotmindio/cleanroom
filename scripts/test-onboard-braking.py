@@ -62,7 +62,7 @@ def terminal_observed_speed(samples, angular, window_s=1.):
 
 def resumable_evidence(previous, config):
     """Reuse measurements only under the same speed and stopping conditions."""
-    run_fields = {'nominal_only', 'faults_only', 'return_only', 'direction', 'selected_fault', 'angular_test', 'depth_filter_pid', 'test_center', 'reference_start_pose', 'maximum_runtime_s', 'trials_per_direction'}
+    run_fields = {'nominal_only', 'faults_only', 'return_only', 'direction', 'selected_fault', 'angular_test', 'depth_filter_pid', 'test_center', 'reference_start_pose', 'maximum_runtime_s', 'trials_per_direction', 'corridor'}
     conditions = {k:v for k,v in config.items() if k not in run_fields}
     if {k:v for k,v in previous['profile'].items() if k not in run_fields} != conditions:
         raise ValueError('resumed speed/load/measurement profile differs')
@@ -295,6 +295,27 @@ class OnboardBraking(FAULT.FaultTest):
                 raise RuntimeError('independent early center boundary reached')
 
     def move(self,target,linear_limit=None,angular_limit=None):
+        if self.config.get('corridor'):
+            pose=tuple(self.ranges[-1]['pose'])
+            super().move((*target[:2],pose[2]),
+                linear_limit=self.config.get('return_linear_speed_m_s',.02) if linear_limit is None else linear_limit,
+                angular_limit=self.config.get('return_angular_speed_rad_s',.06),
+                pose_source=lambda:tuple(self.ranges[-1]['pose']))
+            end=time.monotonic()+30
+            try:
+                while abs(NAV.angle(target[2]-self.ranges[-1]['pose'][2]))>=.03:
+                    if time.monotonic()>end:
+                        raise RuntimeError('corridor rotation did not reach target')
+                    if not self.flags.get('base_motion_permitted'):
+                        self.stop()
+                        self.wait(lambda:self.flags.get('base_motion_permitted'),3)
+                    command=Twist()
+                    limit=self.config['angular_speed_rad_s'] if angular_limit is None else angular_limit
+                    command.angular.z=max(-limit,min(limit,2*NAV.angle(target[2]-self.ranges[-1]['pose'][2])))
+                    self.tick(command)
+            finally:
+                self.stop()
+            return
         super().move(target,
             linear_limit=self.config.get('return_linear_speed_m_s',.02) if linear_limit is None else linear_limit,
             angular_limit=self.config.get('return_angular_speed_rad_s',.06) if angular_limit is None else angular_limit,
@@ -307,6 +328,8 @@ class OnboardBraking(FAULT.FaultTest):
         ux,uy,uw=DIRECTIONS[direction]
         half=self.config['nominal_command_duration_s']/2
         distance=self.config['linear_speed_m_s']*half
+        if self.config.get('corridor') and not uw:
+            return (x-distance*math.cos(a),y-distance*math.sin(a),NAV.angle(a-math.atan2(uy,ux)))
         return (x-distance*(math.cos(a)*ux-math.sin(a)*uy),
                 y-distance*(math.sin(a)*ux+math.cos(a)*uy),
                 a-self.config['angular_speed_rad_s']*half*uw)
@@ -390,7 +413,8 @@ class OnboardBraking(FAULT.FaultTest):
         captured={}
         def inject(command):
             first=len(self.ranges)
-            end=time.monotonic()+self.config.get('nominal_command_duration_s',1.2)
+            # Wheel/guarded speed already passed; retain a full terminal fit without another acceleration allowance.
+            end=time.monotonic()+1.2
             while time.monotonic()<end:
                 self.tick(command)
             terminal=[{**r,'pts_ns':int(r['stamp']*1e9)} for r in self.ranges[first:]]
@@ -488,12 +512,13 @@ class OnboardBraking(FAULT.FaultTest):
                 if self.config.get('selected_fault'):
                     return
             def pause_depth(command):
-                self.remote(['sudo','-n','systemd-run','--quiet','--collect','--unit=lekiwi-loaded-depth-restore',
-                    '--on-active=8s','/usr/bin/kill','-CONT',self.config['depth_filter_pid']],command)
-                self.remote(['kill','-STOP',self.config['depth_filter_pid']],command)
+                timer=['sudo','-n','systemd-run','--quiet','--collect','--unit=lekiwi-loaded-depth-restore',
+                    '--on-active=8s','/usr/bin/kill','-CONT',self.config['depth_filter_pid']]
+                # One SSH handshake; arm recovery before pausing the sensor.
+                self.remote(['bash','-c',shlex.join(timer)+' && '+shlex.join(['kill','-STOP',self.config['depth_filter_pid']])],command)
             def resume_depth():
-                self.remote(['kill','-CONT',self.config['depth_filter_pid']],Twist())
-                self.remote(['sudo','-n','systemctl','stop','lekiwi-loaded-depth-restore.timer'],Twist())
+                self.remote(['bash','-c',shlex.join(['kill','-CONT',self.config['depth_filter_pid']])+
+                    ' && '+shlex.join(['sudo','-n','systemctl','stop','lekiwi-loaded-depth-restore.timer'])],Twist())
             if self.config.get('selected_fault') in (None,'depth_disconnect') and (axis+'/depth_disconnect' not in self.checks or self.config.get('selected_fault')):
                 self.move(self.pulse_start('rotation_ccw' if angular else 'forward'))
                 self.fault('depth_disconnect',pause_depth,resume_depth,'depth:')
@@ -506,14 +531,12 @@ class OnboardBraking(FAULT.FaultTest):
             self.move(self.pulse_start('rotation_ccw' if angular else 'forward'))
             table='lekiwi_loaded_acceptance'
             def block(command):
-                self.remote(['sudo','-n','systemd-run','--quiet','--collect','--unit=lekiwi-loaded-telemetry-restore','--on-active=12s','/usr/sbin/nft','destroy','table','inet',table],command)
+                timer=['sudo','-n','systemd-run','--quiet','--collect','--unit=lekiwi-loaded-telemetry-restore','--on-active=12s','/usr/sbin/nft','destroy','table','inet',table]
                 rules=f'add table inet {table}\nadd chain inet {table} output {{ type filter hook output priority 0; policy accept; }}\nadd rule inet {table} output tcp sport 5556 drop\n'
-                self.remote(['sudo','-n','/usr/sbin/nft','-f','-'],command,rules)
+                self.remote(['bash','-c',shlex.join(timer)+' && '+shlex.join(['sudo','-n','/usr/sbin/nft','-f','-'])],command,rules)
             def unblock():
-                try:
-                    self.remote(['sudo','-n','/usr/sbin/nft','destroy','table','inet',table],Twist())
-                finally:
-                    self.remote(['sudo','-n','systemctl','stop','lekiwi-loaded-telemetry-restore.timer'],Twist())
+                self.remote(['bash','-c',shlex.join(['sudo','-n','/usr/sbin/nft','destroy','table','inet',table])+
+                    ' && '+shlex.join(['sudo','-n','systemctl','stop','lekiwi-loaded-telemetry-restore.timer'])],Twist())
             self.fault('telemetry_loss',block,unblock,'driver:')
             self.checks[axis+'/telemetry_loss']=self.checks.pop('telemetry_loss')
             self.save()
@@ -548,6 +571,7 @@ def main():
     selection.add_argument('--return-only',action='store_true',help='return to the fixed qualification center without starting a speed trial')
     parser.add_argument('--angular',action='store_true',help='use rotation for the selected fault')
     parser.add_argument('--stage',choices=[f'{stage:.2f}' for stage in BASE_TEST_STAGES],help='explicit attended manual qualification stage; production Nav2 speeds are retained')
+    parser.add_argument('--corridor',action='store_true',help='orient each body direction along the saved forward corridor; position and rotate separately')
     parser.add_argument('--reference-run',type=Path,help='retain the fixed raw-LiDAR reference and center across qualification stages without reusing their trials')
     parser.add_argument('--resume',type=Path,help='retain qualified trials and the fixed center from this earlier loaded run')
     parser.add_argument('--center',type=float,nargs=3,metavar=('X','Y','YAW'),help='clear test center in wheel coordinates; the existing 12 cm relocation guard still applies')
@@ -562,6 +586,8 @@ def main():
         parser.error('--faults-only requires a stage and conflicts with --nominal-only')
     if args.return_only and (not args.stage or not (args.reference_run or args.resume)):
         parser.error('--return-only requires a stage and a saved fixed reference')
+    if args.corridor and (not args.stage or not args.resume):
+        parser.error('--corridor requires a stage and a saved qualification center via --resume')
     if args.angular and not args.fault:
         parser.error('--angular requires --fault')
     if args.fault and args.nominal_only:
@@ -580,6 +606,8 @@ def main():
                   faults_only=args.faults_only,return_only=args.return_only,direction=args.direction,
                   selected_fault=args.fault,angular_test=args.angular,stage=args.stage,
                   point_speed_bound_m_s=config.get('point_speed_bound_m_s',1.15*(linear+config['body_radius_m']*angular)))
+    if args.corridor:
+        config['corridor']=True
     device=next(a.partition(':=')[2] for a in NAV.installed_stack_arguments() if a.startswith('remote_ip:='))
     # The stream filter publishes required safety depth. Its raw camera remains
     # powered; pausing it exercises missing input without resetting the USB hub.

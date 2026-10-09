@@ -130,6 +130,97 @@ def test_short_qualification_pulses_are_centered_in_the_fixture():
     assert pulse(node,'rotation_ccw')==pytest.approx((0.,0.,np.pi/2-.36))
 
 
+@pytest.mark.parametrize('direction',['forward','reverse','left','right'])
+def test_corridor_body_directions_all_travel_along_the_saved_forward_axis(direction):
+    import math
+    from types import SimpleNamespace
+    module=import_module('test-onboard-braking')
+    node=SimpleNamespace(center=(.2,0.,.3),config={'stage':'0.25','corridor':True,
+        'nominal_command_duration_s':1.6,'linear_speed_m_s':.25,'angular_speed_rad_s':.5})
+    x,y,heading=module.OnboardBraking.pulse_start(node,direction)
+    assert (x,y)==pytest.approx((.2-.2*math.cos(.3),-.2*math.sin(.3)))
+    ux,uy,_=module.DIRECTIONS[direction]
+    assert (math.cos(heading)*ux-math.sin(heading)*uy,
+            math.sin(heading)*ux+math.cos(heading)*uy)==pytest.approx((math.cos(.3),math.sin(.3)))
+
+
+@pytest.mark.parametrize('permitted',[True,False])
+def test_corridor_turns_in_place_at_the_stage_cap_and_stops_on_permission_loss(monkeypatch,permitted):
+    import math
+    module=import_module('test-onboard-braking')
+    calls,commands,clock=[],[],[0.]
+    monkeypatch.setattr(module.time,'monotonic',lambda:clock[0])
+    node=object.__new__(module.OnboardBraking)
+    node.config={'corridor':True,'angular_speed_rad_s':.5,'return_linear_speed_m_s':.04,'return_angular_speed_rad_s':.06}
+    node.ranges=[{'pose':[.2,0.,0.]}]
+    node.flags={'base_motion_permitted':permitted}
+    def translate(self,target,**kwargs):
+        calls.append(target)
+        assert target==(.2,0.,0.)
+    monkeypatch.setattr(module.NAV.Test,'move',translate)
+    def tick(command):
+        assert command.linear.x==command.linear.y==0.
+        assert abs(command.angular.z)<=.5
+        commands.append(command)
+        node.ranges[-1]['pose'][2]+=command.angular.z*.05
+        clock[0]+=.05
+    node.tick=tick
+    node.stop=lambda:calls.append('stop')
+    def wait(condition,timeout):
+        assert timeout==3
+        if not condition():
+            raise RuntimeError('permission did not recover')
+    node.wait=wait
+    if permitted:
+        node.move((.2,0.,math.pi))
+        assert abs(module.NAV.angle(math.pi-node.ranges[-1]['pose'][2]))<.03
+        assert max(abs(c.angular.z) for c in commands)==.5
+    else:
+        with pytest.raises(RuntimeError,match='permission did not recover'):
+            node.move((.2,0.,math.pi))
+        assert commands==[]
+    assert calls[-1]=='stop'
+
+
+@pytest.mark.parametrize('ground_speed',[.20,.24])
+def test_shorter_fault_cruise_still_requires_independent_speed_coverage(monkeypatch,ground_speed):
+    from types import SimpleNamespace
+    from geometry_msgs.msg import Twist
+    module=import_module('test-onboard-braking')
+    clock, injections, zeros=[0.],[],[]
+    monkeypatch.setattr(module.time,'monotonic',lambda:clock[0])
+    node=object.__new__(module.OnboardBraking)
+    node.config={'nominal_command_duration_s':1.6}
+    node.ranges=[{'capture_time':0.}]
+    node.checks={'scan_disconnect':{}}
+    node.test_speed=.25
+    node.angular_test=False
+    node.wait=lambda condition,timeout:None
+    node.command=SimpleNamespace(publish=zeros.append)
+    def tick(command):
+        assert command.linear.x==.25
+        clock[0]+=.2
+        node.ranges.append({'stamp':clock[0],'pose':[ground_speed*clock[0],0.,0.]})
+    node.tick=tick
+    def parent_fault(self,name,inject,*args):
+        command=Twist()
+        command.linear.x=.25
+        inject(command)
+    monkeypatch.setattr(module.FAULT.FaultTest,'fault',parent_fault)
+    def begin(command):
+        injections.append(clock[0])
+        raise RuntimeError('mock physical injection')
+    error='mock physical injection' if ground_speed>=.225 else 'did not attain independent ground speed'
+    with pytest.raises(RuntimeError,match=error):
+        node.fault('scan_disconnect',begin,lambda:None,'scan:')
+    if ground_speed>=.225:
+        assert injections==pytest.approx([1.2])
+        assert node.checks['scan_disconnect']['terminal_observed_speed']==pytest.approx(ground_speed)
+    else:
+        assert injections==[] and len(zeros)==1
+        assert zeros[0].linear.x==zeros[0].angular.z==0.
+
+
 def test_velocity_seed_does_not_replace_the_independent_wall_measurement():
     from types import SimpleNamespace
     import time
@@ -278,6 +369,45 @@ def test_faults_only_batches_all_axes_without_running_nominals(monkeypatch):
     assert names==[(angular,name) for angular in (False,True) for name in
         ('scan_disconnect','compute_command_loss','depth_disconnect','telemetry_loss')]
     assert len(node.checks)==8
+
+
+@pytest.mark.parametrize('selected',['depth_disconnect','telemetry_loss'])
+def test_remote_fault_and_recovery_use_one_connection_each_with_safe_ordering(monkeypatch,selected):
+    import shlex
+    from types import SimpleNamespace
+    from geometry_msgs.msg import Twist
+    module=import_module('test-onboard-braking')
+    monkeypatch.setattr(module.subprocess,'check_output',lambda *a,**k:'123\n')
+    calls=[]
+    node=SimpleNamespace(config={'stage':'0.25','body_radius_m':.33,'selected_fault':selected,
+        'angular_test':False,'nominal_only':False,'linear_speed_m_s':.25,'angular_speed_rad_s':.5,'depth_filter_pid':'456'},
+        pose=(0.,0.,0.),ranges=[{'pose':[0.,0.,0.]}]*21,range_info=[{}],camera_poses=[{}],
+        views={'front':1,'wrist':1,'astra':1},trials=[],checks={},
+        wait_ready=lambda:None,wait=lambda condition,timeout:condition(),move=lambda *a,**k:None,
+        pulse_start=lambda direction:direction,save=lambda:None,
+        remote=lambda argv,command,data=None:calls.append((argv,data)))
+    def fault(name,begin,restore,reason):
+        assert name==selected and reason==('depth:' if selected=='depth_disconnect' else 'driver:')
+        begin(Twist())
+        restore()
+        node.checks[name]={'passed':True}
+    node.fault=fault
+    module.OnboardBraking.run(node)
+    assert len(calls)==2 and all(argv[:2]==['bash','-c'] for argv,_ in calls)
+    arm,pause=map(shlex.split,calls[0][0][2].split(' && '))
+    assert arm[:3]==['sudo','-n','systemd-run']
+    resume,clear=map(shlex.split,calls[1][0][2].split(' && '))
+    if selected=='depth_disconnect':
+        assert '--on-active=8s' in arm and arm[-3:]==['/usr/bin/kill','-CONT','456']
+        assert pause==['kill','-STOP','456'] and resume==['kill','-CONT','456']
+        assert clear==['sudo','-n','systemctl','stop','lekiwi-loaded-depth-restore.timer']
+    else:
+        assert '--on-active=12s' in arm
+        assert arm[-5:]==['/usr/sbin/nft','destroy','table','inet','lekiwi_loaded_acceptance']
+        assert pause==['sudo','-n','/usr/sbin/nft','-f','-']
+        assert 'tcp sport 5556 drop' in calls[0][1]
+        assert resume==['sudo','-n','/usr/sbin/nft','destroy','table','inet','lekiwi_loaded_acceptance']
+        assert clear==['sudo','-n','systemctl','stop','lekiwi-loaded-telemetry-restore.timer']
 
 
 def test_return_only_stops_after_the_fixed_center_recovery():
