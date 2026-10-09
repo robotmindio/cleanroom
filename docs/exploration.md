@@ -6,8 +6,27 @@ type is `lekiwi_rmf/action/Explore`. AMCL has no exploration server; fixed-map
 and RMF configurations refuse exploration. There is no startup movement or
 change to arming, disarming, stow, payload acceptance or production speeds.
 
-After building and sourcing `scripts/setup.bash`, request exploration with the
-default ten-metre radius from the starting robot pose, for at most 15 minutes:
+Start attended exploration with the default ten-metre radius from the starting
+robot pose, for at most 15 minutes:
+
+```bash
+scripts/explore.sh
+```
+
+The launcher sources `scripts/setup.bash`, revisits known space and prints action
+feedback and the terminal result. Ctrl-C requests cancellation of its own goal.
+For a managed split deployment, select the active installed workspace:
+
+```bash
+LEKIWI_WS=~/lekiwi_ws/current scripts/explore.sh
+```
+
+The operator must remain at the motor-power stop with the accepted payload and
+folded arm. Clear the full production stop zone around the base before starting;
+an obstacle in that zone holds motion even when the goal is accepted.
+
+To set reduced limits or search frontiers only, source `scripts/setup.bash` and
+use the existing ROS action directly:
 
 ```bash
 ros2 action send_goal /robot/explore lekiwi_rmf/action/Explore \
@@ -34,10 +53,10 @@ self-observed, and a stationary robot adds no map node that could clear it.
 Real nearby obstacles are handled live by the Nav2 collision monitor's stop
 zone and the local costmap. The footprint comes from the same selected
 Nav2 parameter file as navigation, with zero additional padding. Nav2 retains
-its stop polygon with 5 cm on every side. Costmap inflation is a soft cost field,
+its accepted stop polygon with 77 cm on every side. Costmap inflation is a soft cost field,
 not extra footprint padding; local inflation still encloses the corners so
 MPPI's native footprint-check optimization remains valid. The exploration
-region retains a 0.38 m body/stopping inset; targets and preflight paths stay
+region retains a 1.10 m body/stopping inset; targets and preflight paths stay
 inside it, and the active task ends if the live pose approaches the boundary.
 A new goal is rejected while the map, services, SLAM/TF, motion permission or
 arm stow are not healthy.
