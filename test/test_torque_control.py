@@ -369,7 +369,7 @@ def test_host_speed_profile_is_resolved_in_source_and_installed_layouts(monkeypa
     profile.write_text((root / "config/nav2_params.yaml").read_text())
     host = _torque_host_script(monkeypatch, filename)
     assert pathlib.Path(host.TorqueSafetyConfig().nav2_params_file) == profile
-    assert host.load_base_speed_limits(profile) == (0.03, 0.06)
+    assert host.load_base_speed_limits(profile) == load_base_speed_limits(root / 'config/nav2_params.yaml')
 
 
 class _Bus:
@@ -771,7 +771,8 @@ def test_out_of_envelope_commands_never_reach_motors_or_refresh_watchdog(host, t
     loop.control.torque_enabled = True
     last_command = loop.last_cmd_time
     clock.now += 0.4
-    for changes in ({"x.vel": 1000000.0}, {"x.vel": 0.03, "y.vel": 0.03},
+    linear=load_base_speed_limits(ROOT / 'config/nav2_params.yaml')[0]/BASE_XY_SCALE
+    for changes in ({"x.vel": 1000000.0}, {"x.vel": linear, "y.vel": linear},
                     {"arm_shoulder_pan.pos": 180.0}, {"arm_gripper.pos": 101.0}):
         loop.host.zmq_cmd_socket.messages.append(_action(**changes))
         loop.receive_command()
@@ -792,7 +793,8 @@ def test_host_qualification_requires_stage_holds_arm_and_bounds_motion(host,tmp_
     def command(**changes):
         loop.host.zmq_cmd_socket.messages.append(_action(**changes))
         loop.receive_command()
-    command(**{'x.vel':stage/BASE_XY_SCALE})
+    production=load_base_speed_limits(ROOT/'config/nav2_params.yaml')[0]
+    command(**{'x.vel':max(stage,production+.01)/BASE_XY_SCALE})
     assert not robot.actions
     command(**{BASE_TEST_STAGE_KEY:stage,'x.vel':stage/BASE_XY_SCALE,'arm_shoulder_pan.pos':1.})
     assert robot.actions[-1]['x.vel']==pytest.approx(stage/BASE_XY_SCALE)
@@ -816,7 +818,7 @@ def test_host_qualification_requires_stage_holds_arm_and_bounds_motion(host,tmp_
     loop.publish_observation()
     command(**{'x.vel':.01/BASE_XY_SCALE})
     assert loop._base_test_stage is None and robot.actions[-1]['x.vel']==pytest.approx(.01/BASE_XY_SCALE)
-    command(**{'x.vel':stage/BASE_XY_SCALE})
+    command(**{'x.vel':max(stage,production+.01)/BASE_XY_SCALE})
     assert robot.actions[-1]['x.vel']==pytest.approx(.01/BASE_XY_SCALE)
 
 

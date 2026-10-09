@@ -190,7 +190,7 @@ def graph(tmp_path):
 def start(graph, duration=8, revisit=False):
     peers, _, client = graph
     handle = response(client.send_goal_async(Explore.Goal(
-        revisit_known=revisit, max_duration_sec=float(duration), max_radius_m=1.8)))
+        revisit_known=revisit, max_duration_sec=float(duration), max_radius_m=2.5)))
     assert handle.accepted
     wait(lambda: peers.nav_active)
     return handle
@@ -218,7 +218,7 @@ def test_success_confirms_visited_target_and_retains_database(graph):
     explorer.database.write_bytes(b"retained-map")
     peers.nav_mode = "success"
     feedback = []
-    handle = response(client.send_goal_async(Explore.Goal(max_radius_m=1.8),
+    handle = response(client.send_goal_async(Explore.Goal(max_radius_m=2.5),
                                               feedback_callback=feedback.append))
     assert handle.accepted
     result = response(handle.get_result_async())
@@ -249,7 +249,7 @@ def test_recoverable_fault_stops_the_robot_then_resumes_instead_of_aborting(grap
     explorer.config["slam_timeout_sec"] = 1.0
     feedback = []
     handle = response(client.send_goal_async(
-        Explore.Goal(max_duration_sec=10.0, max_radius_m=1.8),
+        Explore.Goal(max_duration_sec=10.0, max_radius_m=2.5),
         feedback_callback=lambda message: feedback.append(message.feedback.stage)))
     assert handle.accepted
     wait(lambda: peers.nav_active)
@@ -277,7 +277,7 @@ def test_a_mapped_cell_under_the_robot_neither_blocks_a_goal_nor_pauses_it(graph
     peers.grid.data[40 * 80 + 44] = 100  # Stale obstacle under the front corner, before the goal.
     feedback = []
     handle = response(client.send_goal_async(
-        Explore.Goal(max_duration_sec=8.0, max_radius_m=1.8),
+        Explore.Goal(max_duration_sec=8.0, max_radius_m=2.5),
         feedback_callback=lambda message: feedback.append(message.feedback.stage)))
     assert handle.accepted
     wait(lambda: peers.nav_active)
@@ -306,7 +306,7 @@ def test_close_wall_exploration_uses_the_actual_body_instead_of_a_corner_circle(
     peers.nav_mode = "success"
     wait(lambda: explorer._map[0][34, 40] == 100
          and abs(explorer._pose().pose.position.y - 0.025) < 1e-6)
-    handle = response(client.send_goal_async(Explore.Goal(max_radius_m=1.8)))
+    handle = response(client.send_goal_async(Explore.Goal(max_radius_m=2.5)))
     assert handle.accepted
     result = response(handle.get_result_async())
     assert result.status == GoalStatus.STATUS_SUCCEEDED and result.result.complete
@@ -388,7 +388,7 @@ def test_camera_stamped_slam_has_a_separate_bounded_freshness_budget(graph, dela
     wait(lambda: (explorer.get_clock().now() - rclpy.time.Time.from_msg(
         explorer._inputs["slam"][0].stamp)).nanoseconds / 1e9 >= delay)
     assert explorer.config["data_timeout_sec"] == 1.0
-    handle = response(client.send_goal_async(Explore.Goal(max_radius_m=1.8)))
+    handle = response(client.send_goal_async(Explore.Goal(max_radius_m=2.5)))
     assert handle.accepted is accepted
     if accepted:
         wait(lambda: peers.nav_active)
@@ -403,7 +403,7 @@ def test_late_nav2_acceptance_is_canceled_and_ownership_is_retained(graph):
     # Cleanup gives up after two 2 s service deadlines; accepting well after
     # that keeps the retained-ownership window open on a slow runner.
     peers.acceptance_delay = 8.0
-    handle = response(client.send_goal_async(Explore.Goal(max_radius_m=1.8)))
+    handle = response(client.send_goal_async(Explore.Goal(max_radius_m=2.5)))
     assert handle.accepted
     result = response(handle.get_result_async(), timeout=10)
     assert result.status == GoalStatus.STATUS_ABORTED

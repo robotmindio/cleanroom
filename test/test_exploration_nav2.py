@@ -92,7 +92,7 @@ def test_real_nav2_tree_uses_known_space_planner_and_cancels_controller(tmp_path
                 assert reply.success, log_path.read_text()
             wait(lambda: client.server_is_ready() and explorer._navigation.server_is_ready()
                  and explorer._planner.server_is_ready())
-            handle = response(client.send_goal_async(Explore.Goal(max_radius_m=1.8)))
+            handle = response(client.send_goal_async(Explore.Goal(max_radius_m=2.5)))
             assert handle.accepted, log_path.read_text()
             if cancel:
                 wait(lambda: peers.nav_active)
