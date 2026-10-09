@@ -213,6 +213,13 @@ def test_terminal_capture_fit_uses_the_final_capture_interval():
         module.terminal_observed_speed(samples[:5],False)
 
 
+def test_terminal_capture_fit_excludes_acceleration_with_five_hz_captures():
+    module=import_module('test-onboard-braking')
+    samples=[{'pts_ns':i*200_000_000,'pose':[.2*max(0.,i*.2-.3),0.,0.]}
+             for i in range(8)]
+    assert module.terminal_observed_speed(samples,False)==pytest.approx(.2)
+
+
 def test_stopping_clearance_uses_farthest_point_excursion_without_summing_jitter():
     excursion=import_module('test-onboard-braking').maximum_swept_excursion
     assert excursion([[0,0,0],*[p for _ in range(100) for p in [[.001,0,0],[0,0,0]]]],.53)==.001

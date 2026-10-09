@@ -43,7 +43,7 @@ def maximum_swept_excursion(poses, radius):
                for pose in poses)
 
 
-def terminal_observed_speed(samples, angular, window_s=.75):
+def terminal_observed_speed(samples, angular, window_s=1.):
     """Fit the final capture interval instead of differentiating sensor noise."""
     if len(samples)<5:
         raise ValueError('too few captures for terminal speed')
@@ -342,7 +342,7 @@ class OnboardBraking(FAULT.FaultTest):
         covered=self.safe_speed is not None and self.safe_speed>=speed*.9 and self.measured_speed>=(.015 if self.angular_test else .005) and time.monotonic()-self.odom_at<.3
         wheel_speed,guarded_speed=self.measured_speed,self.safe_speed
         terminal=[{**r,'pts_ns':int(r['stamp']*1e9)} for r in self.ranges[begin:]]
-        observed=terminal_observed_speed(terminal,direction.startswith('rotation'),window_s=1.2)
+        observed=terminal_observed_speed(terminal,direction.startswith('rotation'))
         until=time.monotonic()+2.5
         while time.monotonic()<until:
             self.tick(Twist())
@@ -380,7 +380,7 @@ class OnboardBraking(FAULT.FaultTest):
             while time.monotonic()<end:
                 self.tick(command)
             terminal=[{**r,'pts_ns':int(r['stamp']*1e9)} for r in self.ranges[first:]]
-            observed=terminal_observed_speed(terminal,self.angular_test,window_s=1.2)
+            observed=terminal_observed_speed(terminal,self.angular_test)
             if observed<self.test_speed*.9:
                 self.command.publish(Twist())
                 raise RuntimeError('fault trial did not attain independent ground speed')

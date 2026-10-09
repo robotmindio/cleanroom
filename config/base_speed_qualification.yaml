@@ -1,7 +1,7 @@
 # Attended manual braking stages; these are test ceilings, not acceptance.
 # Rotation is a provisional 2 rad/m ratio, to be replaced from measurements.
 # Pure translation/rotation pulses fit the confirmed 1 m fixture. Even a stop
-# at the driver boundary leaves 0.55 m: 0.30 * 1.15 * 1.5 + 0.02 = 0.5375 m.
+# at the driver boundary leaves 0.55 m: 0.30 * 1.15 * 1.5 + 0.03 = 0.5475 m.
 # Coupled return commands are capped at the separately covered 0.10/0.06 rates.
 # Production Nav2 speeds and physical acceptance remain unchanged.
 bounds:
@@ -10,7 +10,10 @@ bounds:
   independent_center_radius_m: 0.42
   driver_center_radius_m: 0.45
   required_clearance_m: 1.0
-  nominal_command_duration_s: 1.2
+  # The first 0.20 pulse had 0.024741 m measured uncertainty; round up to 3 cm.
+  measurement_uncertainty_m: 0.03
+  # Allow acceleration before fitting the final 1 s of independent captures.
+  nominal_command_duration_s: 1.6
   return_linear_speed_m_s: 0.10
   return_angular_speed_rad_s: 0.06
 stages:
