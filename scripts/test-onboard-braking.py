@@ -168,6 +168,7 @@ class OnboardBraking(FAULT.FaultTest):
         self.deadline = time.monotonic()+config['maximum_runtime_s']
         self.ranges,self.range_info,self.camera_poses,self.sources = [],[],[],{}
         self.source_stamps={}
+        self.joint_samples=[]
         self.native_poses,self.scans,self.reference_points = [],[],None
         self.rejected_scans = []
         if reference is not None:
@@ -274,6 +275,9 @@ class OnboardBraking(FAULT.FaultTest):
         stamp=message.header.stamp.sec+message.header.stamp.nanosec/1e9
         self.sources[topic]=time.monotonic()-(self.get_clock().now().nanoseconds/1e9-stamp)
         self.source_stamps[topic]=stamp
+        if topic=='/joint_states':
+            self.joint_samples.append({'stamp':stamp,'capture_time':self.sources[topic],
+                'positions':dict(zip(message.name,message.position))})
 
     def tick(self,twist=None,check=True):
         super().tick(twist,check,pose_source=(lambda:self.ranges[-1]['pose'])
@@ -342,7 +346,8 @@ class OnboardBraking(FAULT.FaultTest):
             if not self.flags.get('base_motion_permitted'):
                 self.command.publish(Twist())
                 raise RuntimeError('nominal permission withdrawn: '+json.dumps({
-                    'flags':self.flags,'health':self.health},sort_keys=True))
+                    'flags':self.flags,'health':self.health,
+                    'joints':self.joint_samples[-1] if self.joint_samples else None},sort_keys=True))
             self.tick(command)
         cut=time.monotonic()
         self.command.publish(Twist())
@@ -516,7 +521,7 @@ class OnboardBraking(FAULT.FaultTest):
     def destroy_node(self):
         try:
             self.save()
-            (self.output/'independent-poses.json').write_text(json.dumps({'ranges':self.ranges,'native_poses':self.native_poses,'scans':self.scans,'rejected_scans':self.rejected_scans,'range_info':self.range_info,'camera_poses':self.camera_poses,
+            (self.output/'independent-poses.json').write_text(json.dumps({'ranges':self.ranges,'native_poses':self.native_poses,'scans':self.scans,'rejected_scans':self.rejected_scans,'range_info':self.range_info,'camera_poses':self.camera_poses,'joint_samples':self.joint_samples,
                 'reference_points':self.reference_points.tolist() if self.reference_points is not None else None},indent=2)+'\n')
         finally:
             for process,log in self.observers:
