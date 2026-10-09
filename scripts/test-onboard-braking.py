@@ -74,6 +74,16 @@ def resumable_evidence(previous, config):
     return trials, faults
 
 
+def stationary_reference(scans):
+    cloud=np.concatenate(scans)
+    bins=(np.degrees(np.arctan2(cloud[:,1],cloud[:,0]))%360).astype(int)
+    reference=np.array([np.median(cloud[bins==key],axis=0)
+                        for key in np.unique(bins) if (bins==key).sum()>=5])
+    if len(reference)<100 or not np.isfinite(reference).all():
+        raise ValueError('stationary LiDAR reference needs 100 finite angular samples')
+    return reference
+
+
 def register_scan(reference, points, guess, radius):
     """Point-to-line SE(2) fit, with geometry covariance and sector jackknife.
 
@@ -176,6 +186,9 @@ class OnboardBraking(FAULT.FaultTest):
             if self.reference_points.ndim!=2 or self.reference_points.shape[1]!=2 or len(self.reference_points)<100 or not np.isfinite(self.reference_points).all():
                 raise ValueError('invalid fixed independent LiDAR reference')
         self.reference_scans=[]
+        self.fixed_reference_points=None if reference is None else self.reference_points.copy()
+        self.reference_history=[]
+        self.reference_locked=False
         self.wheel_velocity=(0.,0.,0.)
         mask=yaml.safe_load((ROOT/'config/lidar_self_mask.yaml').read_text())['scan_self_filter']['ros__parameters']
         self.sectors=parse_sectors(*(mask[k] for k in ('body_start_deg','body_end_deg','body_max_range_m')))
@@ -245,9 +258,8 @@ class OnboardBraking(FAULT.FaultTest):
                 return
             # A stationary median reference prevents noise in one initial scan
             # from becoming a persistent wall/heading error in every later fit.
-            cloud=np.concatenate(self.reference_scans)
-            bins=(np.degrees(np.arctan2(cloud[:,1],cloud[:,0]))%360).astype(int)
-            self.reference_points=np.array([np.median(cloud[bins==key],axis=0) for key in np.unique(bins) if (bins==key).sum()>=5])
+            self.reference_points=stationary_reference(self.reference_scans)
+            self.fixed_reference_points=self.reference_points.copy()
         guess=self.ranges[-1]['pose'] if self.ranges else self.config.get('reference_start_pose',[0.,0.,0.])
         predicted=list(guess)
         if self.ranges and time.monotonic()-self.odom_at<.3:
@@ -263,9 +275,17 @@ class OnboardBraking(FAULT.FaultTest):
             try:
                 pose,covariance,sensitivity=register_scan(self.reference_points,points,guess,self.config['body_radius_m'])
             except ValueError as error:
-                self.rejected_scans.append({'stamp':stamp,'error':str(error)})
-                self.get_logger().warning(f'Rejected independent scan: {error}')
-                return
+                fixed=getattr(self,'fixed_reference_points',None)
+                if fixed is None or getattr(self,'reference_locked',False):
+                    self.rejected_scans.append({'stamp':stamp,'error':str(error)})
+                    self.get_logger().warning(f'Rejected independent scan: {error}')
+                    return
+                try:
+                    pose,covariance,sensitivity=register_scan(fixed,points,guess,self.config['body_radius_m'])
+                except ValueError as fixed_error:
+                    self.rejected_scans.append({'stamp':stamp,'error':str(fixed_error)})
+                    self.get_logger().warning(f'Rejected independent scan: {fixed_error}')
+                    return
         received=time.monotonic()
         age=self.get_clock().now().nanoseconds/1e9-stamp
         self.ranges.append({'time':received,'stamp':stamp,'age':age,'capture_time':received-age,
@@ -353,8 +373,37 @@ class OnboardBraking(FAULT.FaultTest):
             'independent_final_pose':self.ranges[-1]['pose'] if self.ranges else None,
             'physical_acceptance_granted':False},indent=2)+'\n')
 
+    def refresh_corridor_reference(self):
+        first=len(self.scans)
+        self.wait(lambda:len(self.scans)>=first+10,5)
+        scans=self.scans[first:first+10]
+        poses=[]
+        radius=self.config['body_radius_m']
+        reserve=self.config['independent_center_radius_m']-self.config['maximum_center_radius_m']
+        for scan in scans:
+            pose,covariance,sensitivity=register_scan(self.fixed_reference_points,
+                np.asarray(scan['points']),self.ranges[-1]['pose'],radius)
+            if 3*(math.sqrt(max(covariance[:2]))+radius*math.sqrt(covariance[2]))+sensitivity>reserve:
+                raise RuntimeError('stationary reference anchor exceeds the center reserve')
+            poses.append(pose)
+        if self.speed>.001 or maximum_swept_excursion(poses,radius)>.01:
+            raise RuntimeError('corridor reference capture was not stationary')
+        anchor=np.median(poses,axis=0)
+        points=stationary_reference([np.asarray(scan['points']) for scan in scans])
+        c,s=math.cos(anchor[2]),math.sin(anchor[2])
+        self.reference_points=points@np.array([[c,s],[-s,c]])+anchor[:2]
+        self.reference_history.append({'anchor':anchor.tolist(),'source_stamps':[scan['stamp'] for scan in scans],
+                                       'points':self.reference_points.tolist()})
+        first=len(self.ranges)
+        self.reference_locked=True
+        self.wait(lambda:len(self.ranges)>=first+10,5)
+        self.stationary_jitter=max(self.stationary_jitter,
+            maximum_swept_excursion([r['pose'] for r in self.ranges[first:]],radius))
+
     def trial(self,direction):
         self.move(self.pulse_start(direction))
+        if self.config.get('corridor'):
+            self.refresh_corridor_reference()
         self.wait(lambda:self.flags.get('base_motion_permitted'),15)
         linear,angular=self.config['linear_speed_m_s'],self.config['angular_speed_rad_s']
         speed=angular if direction.startswith('rotation') else linear
@@ -400,6 +449,7 @@ class OnboardBraking(FAULT.FaultTest):
                       feedback_interrupted=len(self.health_faults)>faults or self.motion_pauses>pauses)
         result['qualification_eligible']=result['within_budget'] and result['requested_speed_covered'] and not result['feedback_interrupted']
         self.trials.append(result)
+        self.reference_locked=False
         self.save()
         print('STOP',json.dumps(result),flush=True)
         if not result['within_budget']:
@@ -440,7 +490,12 @@ class OnboardBraking(FAULT.FaultTest):
             finally:
                 if 'cut' in captured:
                     restore()
-        super().fault(name,inject,recover,expected)
+                self.reference_locked=False
+        self.reference_locked=True
+        try:
+            super().fault(name,inject,recover,expected)
+        finally:
+            self.reference_locked=False
         self.checks[name]['independent']=captured['measurement']
         self.save()
         print('FAULT STOP',name,json.dumps(captured['measurement']),flush=True)
@@ -455,7 +510,8 @@ class OnboardBraking(FAULT.FaultTest):
         poses=[r['pose'] for r in self.ranges[-15:]]
         self.stationary_jitter=max(maximum_swept_excursion(poses[i:],self.config['body_radius_m']) for i in range(len(poses)))
         self.move(self.center,linear_limit=self.config.get('return_linear_speed_m_s',.02),
-                  angular_limit=self.config.get('return_angular_speed_rad_s',.06))
+                  angular_limit=self.config['angular_speed_rad_s'] if self.config.get('corridor')
+                    else self.config.get('return_angular_speed_rad_s',.06))
         # A resumed run starts at the previous stop. Anchor its independent
         # boundary at the fixed test center once the return has stopped.
         self.origin_range=list(self.center) if self.config.get('stage') else self.ranges[-1]['pose']
@@ -545,7 +601,9 @@ class OnboardBraking(FAULT.FaultTest):
         try:
             self.save()
             (self.output/'independent-poses.json').write_text(json.dumps({'ranges':self.ranges,'native_poses':self.native_poses,'scans':self.scans,'rejected_scans':self.rejected_scans,'range_info':self.range_info,'camera_poses':self.camera_poses,'joint_samples':self.joint_samples,
-                'reference_points':self.reference_points.tolist() if self.reference_points is not None else None},indent=2)+'\n')
+                'reference_points':self.reference_points.tolist() if self.reference_points is not None else None,
+                'fixed_reference_points':self.fixed_reference_points.tolist() if self.fixed_reference_points is not None else None,
+                'reference_history':self.reference_history},indent=2)+'\n')
         finally:
             for process,log in self.observers:
                 if process.poll() is None:
@@ -619,6 +677,7 @@ def main():
     resumed=[]
     resumed_faults={}
     reference=None
+    fixed_reference=None
     if args.resume:
         previous=json.loads((args.resume/'measurements.json').read_text())
         previous['source_run']=str(args.resume)
@@ -630,6 +689,7 @@ def main():
     if reference_run:
         saved=json.loads((reference_run/'independent-poses.json').read_text())
         reference=saved['reference_points']
+        fixed_reference=saved.get('fixed_reference_points',reference)
         if reference is None:
             raise ValueError('fixed raw-LiDAR reference is missing')
         if not saved['ranges']:
@@ -654,6 +714,10 @@ def main():
     (output/'profile.yaml').write_text(yaml.safe_dump(config))
     def node():
         instance=OnboardBraking(output,config,reference)
+        if fixed_reference is not None:
+            instance.fixed_reference_points=np.asarray(fixed_reference,dtype=float)
+            if instance.fixed_reference_points.ndim!=2 or instance.fixed_reference_points.shape[1]!=2 or len(instance.fixed_reference_points)<100 or not np.isfinite(instance.fixed_reference_points).all():
+                raise ValueError('invalid fixed center-anchor LiDAR reference')
         instance.trials=resumed
         instance.checks=resumed_faults
         return instance

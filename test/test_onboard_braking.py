@@ -144,6 +144,87 @@ def test_corridor_body_directions_all_travel_along_the_saved_forward_axis(direct
             math.sin(heading)*ux+math.cos(heading)*uy)==pytest.approx((math.cos(.3),math.sin(.3)))
 
 
+@pytest.mark.parametrize('case',['stationary','moving','uncertain_anchor'])
+def test_stationary_corridor_reference_keeps_the_original_area_anchor(monkeypatch,case):
+    import math
+    module=import_module('test-onboard-braking')
+    node=object.__new__(module.OnboardBraking)
+    node.config={'body_radius_m':.33,'maximum_center_radius_m':.4,'independent_center_radius_m':.42}
+    node.scans=[]
+    node.ranges=[{'pose':[.01,.02,math.pi]}]
+    node.fixed_reference_points=np.array([[10.,20.]])
+    node.reference_history=[]
+    node.reference_locked=False
+    node.stationary_jitter=.001
+    node.speed=.01 if case=='moving' else 0.
+    angles=np.linspace(0,2*math.pi,360,endpoint=False)
+    local=np.column_stack((np.cos(angles),np.sin(angles)))
+    def wait(condition,timeout):
+        if not node.scans:
+            node.scans.extend({'stamp':i,'points':local.tolist()} for i in range(10))
+        else:
+            assert node.reference_locked
+            node.ranges.extend({'pose':[.01,.02,math.pi]} for _ in range(10))
+        assert condition()
+    node.wait=wait
+    def fit(reference,points,guess,radius):
+        assert reference is node.fixed_reference_points
+        return [.01,.02,math.pi],[1e-8]*3,.03 if case=='uncertain_anchor' else 0.
+    monkeypatch.setattr(module,'register_scan',fit)
+    if case=='stationary':
+        node.refresh_corridor_reference()
+        assert node.reference_locked and len(node.reference_history)==1
+        assert node.reference_history[0]['anchor']==pytest.approx([.01,.02,math.pi])
+        assert np.allclose(node.reference_points, -module.stationary_reference([local]*10)+[.01,.02])
+        assert np.array_equal(node.fixed_reference_points,[[10.,20.]])
+    else:
+        error='not stationary' if case=='moving' else 'center reserve'
+        with pytest.raises(RuntimeError,match=error):
+            node.refresh_corridor_reference()
+        assert not node.reference_locked and node.reference_history==[]
+
+
+def test_stationary_reference_rejects_sparse_geometry():
+    module=import_module('test-onboard-braking')
+    with pytest.raises(ValueError,match='100 finite angular samples'):
+        module.stationary_reference([np.array([[1.,0.]])]*10)
+
+
+@pytest.mark.parametrize('locked',[False,True])
+def test_stopping_observation_never_falls_back_to_a_different_reference(monkeypatch,locked):
+    import time
+    from types import SimpleNamespace
+    from sensor_msgs.msg import LaserScan
+    module=import_module('test-onboard-braking')
+    primary,fixed=np.ones((200,2)),np.zeros((200,2))
+    calls=[]
+    def fit(reference,*args):
+        calls.append(reference)
+        if reference is primary:
+            raise ValueError('primary geometry lost')
+        assert reference is fixed
+        return [0.,0.,0.],[1e-8]*3,0.
+    monkeypatch.setattr(module,'register_scan',fit)
+    transform=SimpleNamespace(rotation=SimpleNamespace(x=0.,y=0.,z=0.,w=1.),
+                              translation=SimpleNamespace(x=0.,y=0.))
+    node=SimpleNamespace(sectors=[],scans=[],ranges=[],rejected_scans=[],
+        reference_points=primary,fixed_reference_points=fixed,reference_locked=locked,
+        wheel_velocity=(0.,0.,0.),odom_at=time.monotonic(),config={'body_radius_m':.33},
+        buffer=SimpleNamespace(can_transform=lambda *args:True,
+            lookup_transform=lambda *args:SimpleNamespace(transform=transform)),
+        get_clock=lambda:SimpleNamespace(now=lambda:SimpleNamespace(nanoseconds=10**9)),
+        get_logger=lambda:SimpleNamespace(warning=lambda message:None))
+    scan=LaserScan(angle_min=-np.pi,angle_increment=2*np.pi/200,
+                   range_min=.05,range_max=5.,ranges=[1.]*200)
+    scan.header.frame_id='lidar'
+    scan.header.stamp.sec=1
+    module.OnboardBraking.direct_scan(node,scan)
+    if locked:
+        assert len(calls)==2 and node.ranges==[] and len(node.rejected_scans)==1
+    else:
+        assert len(calls)==3 and len(node.ranges)==1 and node.rejected_scans==[]
+
+
 @pytest.mark.parametrize('permitted',[True,False])
 def test_corridor_turns_in_place_at_the_stage_cap_and_stops_on_permission_loss(monkeypatch,permitted):
     import math
