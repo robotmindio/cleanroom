@@ -1,0 +1,7 @@
+# 0.25 m/s final qualification
+
+Deployed: cdb3c8a / PR #52, with 6 cm uncertainty reserve and captured held-fold test reference; production caps/stow acceptance remain old. All 67 compute and 16 Pi release checks passed on the retry with OPENBLAS/OMP threads=1; GitHub CI passed on retry.
+Finding: production shoulder lift -1.7951958 is one encoder step outside old -1.8167 ±0.02, which denies stow and suppresses SLAM cloud/map/Nav2 startup. The new test reference -1.7967 permits the same held pose with unchanged tolerance. No arm command was issued. Do not report old production base permission as true.
+Active: lekiwi-025-six-cm-attended-sequence, log .benchmarks/base-speed-qualification/025-six-cm-attended-sequence.log. Managed-stack test launches enforce the captured stow and all sensor gates. No explorer was running; wrapper cancellation is bounded and fails if an active explorer cannot cancel.
+Verified: return-only 20261009-135733 reached original center. New-profile forward 20261009-135817 qualifies at 0.230010 m/s, conservative distance 0.105677 m, error 0.026790 m, stop bound 0.894004 s. Sequence now runs all eight moving faults, then five stops per direction from matching evidence.
+Next: inspect outcomes and preserve qualified measurements. Full target passage is required before applying new production stow/SRDF, Nav2 caps, acceptance and measured all-direction zones/exploration/test bounds together. Then PR, clean-main deploy and live caps/permission verification. Remove this file before PR/final delivery.
