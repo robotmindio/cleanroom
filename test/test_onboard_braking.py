@@ -116,7 +116,7 @@ def test_attended_sequence_stops_on_the_first_unqualified_trial(qualified):
         assert calls==['forward']
 
 
-@pytest.mark.parametrize('selection,nominal_only',[(['--fault','scan_disconnect'],False),(['--attended-sequence'],False),(['--attended-sequence','--nominal-only'],True)])
+@pytest.mark.parametrize('selection,nominal_only',[(['--fault','scan_disconnect'],False),(['--attended-sequence'],False),(['--attended-sequence','--nominal-only'],True),(['--faults-only'],False)])
 def test_stage_020_fault_selection_is_not_skipped(monkeypatch,tmp_path,selection,nominal_only):
     import shutil
     import sys
@@ -139,6 +139,28 @@ def test_stage_020_fault_selection_is_not_skipped(monkeypatch,tmp_path,selection
     module.main()
     assert profiles[0]['nominal_only'] is nominal_only
     assert profiles[0]['trials_per_direction']==1
+    assert profiles[0]['faults_only'] is ('--faults-only' in selection)
+
+
+def test_faults_only_batches_all_axes_without_running_nominals(monkeypatch):
+    from types import SimpleNamespace
+    module=import_module('test-onboard-braking')
+    monkeypatch.setattr(module.subprocess,'check_output',lambda *a,**k:'123\n')
+    names=[]
+    node=SimpleNamespace(config={'stage':'0.20','body_radius_m':.33,'faults_only':True,
+        'nominal_only':False,'linear_speed_m_s':.2,'angular_speed_rad_s':.4,'depth_filter_pid':'123'},
+        pose=(0.,0.,0.),ranges=[{'pose':[0.,0.,0.]}]*21,range_info=[{}],camera_poses=[{}],
+        views={'front':1,'wrist':1,'astra':1},trials=[],checks={},
+        wait_ready=lambda:None,wait=lambda condition,timeout:condition(),move=lambda *a,**k:None,
+        pulse_start=lambda direction:direction,save=lambda:None)
+    def fault(name,*args):
+        names.append((node.angular_test,name))
+        node.checks[name]={'passed':True}
+    node.fault=fault
+    module.OnboardBraking.run(node)
+    assert names==[(angular,name) for angular in (False,True) for name in
+        ('scan_disconnect','compute_command_loss','depth_disconnect','telemetry_loss')]
+    assert len(node.checks)==8
 
 
 def test_scan_geometry_recovers_motion_and_rejects_a_single_wall():
