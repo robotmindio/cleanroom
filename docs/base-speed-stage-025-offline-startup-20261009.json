@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-09",
+  "source_revision": "9e441b32a2085c1ac76faae04dc47e1cb09e2248",
+  "deployed_revision": "9e441b32a2085c1ac76faae04dc47e1cb09e2248",
+  "payload_kg": 0.2,
+  "stage": "0.25",
+  "scope": "Excluded startup interruption: no robot data or moving trials. Production speed acceptance remains unchanged.",
+  "startup_error": "timed out waiting for readiness; device bridge and motor connection timed out",
+  "reporting_error": "IndexError in final reporting because independent pose list was empty; result.json was not written",
+  "independent_pose_samples": 0,
+  "scan_samples": 0,
+  "joint_samples": 0,
+  "trials": [],
+  "faults": {},
+  "artifacts": {
+    ".benchmarks/onboard-braking/20261009-142120/profile.yaml": {
+      "sha256": "a3a55dee934d598e5c5bf1ee411adb17d4a40ad5d4cef65f1b55847122afae36",
+      "bytes": 1202
+    },
+    ".benchmarks/onboard-braking/20261009-142120/measurements.json": {
+      "sha256": "a23fa7152c4b102f4ff84a47dc2d3dbd5338cc3152f2453e41d2de42adabd81e",
+      "bytes": 1722
+    },
+    ".benchmarks/onboard-braking/20261009-142120/independent-poses.json": {
+      "sha256": "e4602a37c3410807935e2d45fe662bfcb65f150d0488b2ed3f0de482b7b8ad3d",
+      "bytes": 16209
+    },
+    ".benchmarks/onboard-braking/20261009-142120/stack.log": {
+      "sha256": "15cc304f0d997d4db46f911b505879de35224c98723e09becadd9fdc71cbc7ef",
+      "bytes": 148159
+    },
+    ".benchmarks/base-speed-qualification/025-measured-time-acceptance.log": {
+      "sha256": "a39bc99c0b36f483a895aaf82d6b3808361f7983474e487765f103877f1bc4e2",
+      "bytes": 1837
+    }
+  }
+}

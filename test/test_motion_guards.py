@@ -226,6 +226,40 @@ def test_shared_runner_restores_production_if_the_test_stack_has_already_exited(
     assert calls[-1][-2:]==['start','lekiwi-stack.service']
 
 
+@pytest.mark.parametrize('center,ranges',[(None,[]),((0.,0.,0.),[]),
+    (None,[{'pose':[.1,0.,0.]}]),((0.,0.,0.),[{'pose':[.1,0.,0.]}])])
+def test_qualification_startup_failure_keeps_the_error_and_restores_production(tmp_path,monkeypatch,center,ranges):
+    import json
+    import runpy
+    from pathlib import Path
+    main=runpy.run_path(str(Path(__file__).parents[1]/'scripts/test-navigation.py'))['main']
+    calls=[]
+    monkeypatch.setitem(main.__globals__,'installed_stack_arguments',lambda:[])
+    monkeypatch.setitem(main.__globals__,'subprocess',types.SimpleNamespace(STDOUT=-2,
+        run=lambda argv,**kwargs:(calls.append(argv) or types.SimpleNamespace(returncode=0)),
+        Popen=lambda *args,**kwargs:types.SimpleNamespace(poll=lambda:0),
+        check_output=lambda *args,**kwargs:'tested-revision'))
+    monkeypatch.setitem(main.__globals__,'rclpy',types.SimpleNamespace(
+        init=lambda **kwargs:None,try_shutdown=lambda:calls.append('shutdown')))
+    def fail():
+        raise RuntimeError('sensor startup timed out')
+    unavailable=types.SimpleNamespace(wait_for_service=lambda **kwargs:False)
+    node=types.SimpleNamespace(run=fail,goal=None,stop=lambda:calls.append('stop'),
+        destroy_node=lambda:calls.append('destroy'),navigation=types.SimpleNamespace(destroy=lambda:None),
+        listener=types.SimpleNamespace(unregister=lambda:None),map_client=unavailable,lifecycle_client=unavailable,
+        center=center,pose=None,counts={},health={},monitor_action=None,trace=[],slam={},health_faults=[],
+        config={'stage':'0.25'},ranges=ranges)
+    with pytest.raises(RuntimeError,match='sensor startup timed out'):
+        main(lambda:node,tmp_path)
+    report=json.loads((tmp_path/'result.json').read_text())
+    assert report['error']=='sensor startup timed out'
+    assert report['final_pose']==(ranges[-1]['pose'] if ranges else None)
+    assert report['max_radius_m']==(.1 if center is not None and ranges else None)
+    assert report['origin_frame']=='raw_lidar_reference'
+    assert 'stop' in calls and 'destroy' in calls and 'shutdown' in calls
+    assert calls[-1][-2:]==['start','lekiwi-stack.service']
+
+
 @pytest.mark.parametrize('angular_test',[False,True])
 def test_physical_fault_probe_restores_service_when_injection_fails(angular_test):
     import runpy
