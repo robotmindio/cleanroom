@@ -273,14 +273,17 @@ def test_corridor_turns_in_place_at_the_stage_cap_and_stops_on_permission_loss(m
 
 
 @pytest.mark.parametrize('ground_speed',[.20,.24])
-def test_shorter_fault_cruise_still_requires_independent_speed_coverage(monkeypatch,ground_speed):
+@pytest.mark.parametrize('corridor',[True,False])
+def test_shorter_fault_cruise_still_requires_independent_speed_coverage(monkeypatch,ground_speed,corridor):
     from types import SimpleNamespace
     from geometry_msgs.msg import Twist
     module=import_module('test-onboard-braking')
     clock, injections, zeros=[0.],[],[]
     monkeypatch.setattr(module.time,'monotonic',lambda:clock[0])
     node=object.__new__(module.OnboardBraking)
-    node.config={'nominal_command_duration_s':1.6}
+    node.config={'nominal_command_duration_s':1.6,'corridor':corridor}
+    references=[]
+    node.refresh_corridor_reference=lambda:references.append(clock[0])
     node.ranges=[{'capture_time':0.}]
     node.checks={'scan_disconnect':{}}
     node.test_speed=.25
@@ -303,6 +306,7 @@ def test_shorter_fault_cruise_still_requires_independent_speed_coverage(monkeypa
     error='mock physical injection' if ground_speed>=.225 else 'did not attain independent ground speed'
     with pytest.raises(RuntimeError,match=error):
         node.fault('scan_disconnect',begin,lambda:None,'scan:')
+    assert references==([0.] if corridor else [])
     if ground_speed>=.225:
         assert injections==pytest.approx([1.2])
         assert node.checks['scan_disconnect']['terminal_observed_speed']==pytest.approx(ground_speed)
@@ -390,12 +394,13 @@ def test_selected_stop_does_not_retry_and_qualification_returns_to_fixed_center(
 
 
 @pytest.mark.parametrize('qualified',[True,False])
-def test_attended_sequence_stops_on_the_first_unqualified_trial(qualified):
+@pytest.mark.parametrize('direction_sequence',[None,'right'])
+def test_attended_sequence_stops_on_the_first_unqualified_trial(qualified,direction_sequence):
     from types import SimpleNamespace
     module=import_module('test-onboard-braking')
     calls=[]
     node=SimpleNamespace(config={'stage':'0.20','body_radius_m':.33,
-        'trials_per_direction':1,'nominal_only':True},pose=(0.,0.,0.),
+        'trials_per_direction':1,'nominal_only':True,'direction_sequence':direction_sequence},pose=(0.,0.,0.),
         ranges=[{'pose':[0.,0.,0.]}]*21,range_info=[{}],camera_poses=[{}],
         views={'front':1,'wrist':1,'astra':1},trials=[],
         wait_ready=lambda:None,wait=lambda condition,timeout:condition(),move=lambda *a,**k:None)
@@ -406,14 +411,14 @@ def test_attended_sequence_stops_on_the_first_unqualified_trial(qualified):
     node.trial=trial
     if qualified:
         module.OnboardBraking.run(node)
-        assert calls==list(module.DIRECTIONS)
+        assert calls==([direction_sequence] if direction_sequence else list(module.DIRECTIONS))
     else:
         with pytest.raises(RuntimeError,match='sequence stopped'):
             module.OnboardBraking.run(node)
-        assert calls==['forward']
+        assert calls==[direction_sequence or 'forward']
 
 
-@pytest.mark.parametrize('selection,nominal_only',[(['--fault','scan_disconnect'],False),(['--attended-sequence'],False),(['--attended-sequence','--nominal-only'],True),(['--faults-only'],False)])
+@pytest.mark.parametrize('selection,nominal_only',[(['--fault','scan_disconnect'],False),(['--attended-sequence'],False),(['--attended-sequence','--nominal-only'],True),(['--faults-only'],False),(['--direction-sequence','right'],True)])
 @pytest.mark.parametrize('stage,trials',[('0.20',1),('0.25',5),('0.30',5)])
 def test_stage_fault_selection_is_not_skipped(monkeypatch,tmp_path,selection,nominal_only,stage,trials):
     import shutil

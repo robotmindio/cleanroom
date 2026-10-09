@@ -62,7 +62,7 @@ def terminal_observed_speed(samples, angular, window_s=1.):
 
 def resumable_evidence(previous, config):
     """Reuse measurements only under the same speed and stopping conditions."""
-    run_fields = {'nominal_only', 'faults_only', 'return_only', 'direction', 'selected_fault', 'angular_test', 'depth_filter_pid', 'test_center', 'reference_start_pose', 'maximum_runtime_s', 'trials_per_direction', 'corridor'}
+    run_fields = {'nominal_only', 'faults_only', 'return_only', 'direction', 'direction_sequence', 'selected_fault', 'angular_test', 'depth_filter_pid', 'test_center', 'reference_start_pose', 'maximum_runtime_s', 'trials_per_direction', 'corridor'}
     conditions = {k:v for k,v in config.items() if k not in run_fields}
     if {k:v for k,v in previous['profile'].items() if k not in run_fields} != conditions:
         raise ValueError('resumed speed/load/measurement profile differs')
@@ -463,6 +463,8 @@ class OnboardBraking(FAULT.FaultTest):
         return result['qualification_eligible']
 
     def fault(self,name,begin,restore,expected):
+        if self.config.get('corridor'):
+            self.refresh_corridor_reference()
         self.wait(lambda:self.ranges and time.monotonic()-self.ranges[-1]['capture_time']<.3,10)
         captured={}
         def inject(command):
@@ -531,7 +533,8 @@ class OnboardBraking(FAULT.FaultTest):
                 self.move(self.center)
                 self.save()
             return
-        for direction in (() if self.config.get('selected_fault') or self.config.get('faults_only') else DIRECTIONS):
+        directions=(self.config['direction_sequence'],) if self.config.get('direction_sequence') else DIRECTIONS
+        for direction in (() if self.config.get('selected_fault') or self.config.get('faults_only') else directions):
             completed=sum(t['direction']==direction and t['qualification_eligible'] for t in self.trials)
             attempts=0
             while completed<self.config['trials_per_direction']:
@@ -627,6 +630,7 @@ def main():
     parser.add_argument('--nominal-only',action='store_true')
     selection=parser.add_mutually_exclusive_group()
     selection.add_argument('--direction',choices=DIRECTIONS,help='run one nominal stop without retries; qualification stages return to center')
+    selection.add_argument('--direction-sequence',choices=DIRECTIONS,help='complete the remaining nominal stops for one direction, stopping at the first unqualified trial')
     selection.add_argument('--fault',choices=['scan_disconnect','depth_disconnect','telemetry_loss','compute_command_loss'],help='run one moving fault without nominal repeats')
     selection.add_argument('--attended-sequence',action='store_true',help='run the operator-authorized stage sequence, stopping at the first unqualified trial')
     selection.add_argument('--faults-only',action='store_true',help='run all eight attended moving faults without nominal repeats')
@@ -640,10 +644,12 @@ def main():
     args=parser.parse_args()
     if not math.isfinite(args.payload_g) or args.payload_g<0:
         parser.error('payload must be finite and nonnegative')
-    if args.stage and not (args.direction or args.fault or args.attended_sequence or args.faults_only or args.return_only):
+    if args.stage and not (args.direction or args.direction_sequence or args.fault or args.attended_sequence or args.faults_only or args.return_only):
         parser.error('qualification requires a selected trial or --attended-sequence')
     if args.attended_sequence and not args.stage:
         parser.error('--attended-sequence requires --stage')
+    if args.direction_sequence and not args.stage:
+        parser.error('--direction-sequence requires --stage')
     if args.faults_only and (not args.stage or args.nominal_only):
         parser.error('--faults-only requires a stage and conflicts with --nominal-only')
     if args.return_only and (not args.stage or not (args.reference_run or args.resume)):
@@ -664,8 +670,8 @@ def main():
         if args.stage=='0.20':
             config['trials_per_direction']=1
     config.update(payload_kg=args.payload_g/1000,linear_speed_m_s=linear,angular_speed_rad_s=angular,
-                  nominal_only=args.nominal_only or args.direction is not None or args.return_only,
-                  faults_only=args.faults_only,return_only=args.return_only,direction=args.direction,
+                  nominal_only=args.nominal_only or args.direction is not None or args.direction_sequence is not None or args.return_only,
+                  faults_only=args.faults_only,return_only=args.return_only,direction=args.direction,direction_sequence=args.direction_sequence,
                   selected_fault=args.fault,angular_test=args.angular,stage=args.stage,
                   point_speed_bound_m_s=config.get('point_speed_bound_m_s',1.15*(linear+config['body_radius_m']*angular)))
     if args.corridor:
