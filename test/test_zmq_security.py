@@ -180,8 +180,9 @@ def test_repository_client_command_send_is_nonblocking_and_reports_backpressure(
     assert socket.calls[-1][1] == Zmq.NOBLOCK
 
     from lekiwi_rmf.host_protocol import BASE_TEST_STAGE_KEY
-    assert client.send_action({'joint.pos':2},base_test_stage=.20)[BASE_TEST_STAGE_KEY]==.20
-    assert json.loads(socket.calls[-1][0])[BASE_TEST_STAGE_KEY]==.20
+    for stage in (.20,.25,.30):
+        assert client.send_action({'joint.pos':2},base_test_stage=stage)[BASE_TEST_STAGE_KEY]==stage
+        assert json.loads(socket.calls[-1][0])[BASE_TEST_STAGE_KEY]==stage
     for stage in (.1,.4,True,float('nan'),'0.20'):
         with pytest.raises(ValueError,match='qualification stage'):
             client.send_action({'joint.pos':2},base_test_stage=stage)

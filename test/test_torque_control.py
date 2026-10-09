@@ -779,7 +779,7 @@ def test_out_of_envelope_commands_never_reach_motors_or_refresh_watchdog(host, t
     assert loop.control.torque_enabled
 
 
-@pytest.mark.parametrize('stage',[.20,.30])
+@pytest.mark.parametrize('stage',[.20,.25,.30])
 def test_host_qualification_requires_stage_holds_arm_and_bounds_motion(host,tmp_path,stage):
     from lekiwi_rmf.host_protocol import BASE_TEST_STAGE_KEY
     from lekiwi_rmf.motion_guards import load_base_test_profile

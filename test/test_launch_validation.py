@@ -93,7 +93,7 @@ def test_bounded_launch_defaults_follow_current_production_speed_limits():
         load_base_speed_limits(root / "config/nav2_params.yaml"))
 
 
-@pytest.mark.parametrize('stage',['0.20','0.30'])
+@pytest.mark.parametrize('stage',['0.20','0.25','0.30'])
 def test_qualification_changes_manual_caps_and_zones_without_raising_nav2_speed(stage):
     records=resolve_bringup(profile='split',bounded_base_test='true',base_test_stage=stage)
     driver=find_node(records,node='lekiwi_rmf/lekiwi_driver')['parameters']

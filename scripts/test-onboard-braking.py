@@ -21,6 +21,7 @@ from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from rtabmap_msgs.msg import OdomInfo
 from sensor_msgs.msg import JointState, LaserScan, PointCloud2
+from lekiwi_rmf.host_protocol import BASE_TEST_STAGES
 from lekiwi_rmf.scan_self_filter import blank_body_sectors, parse_sectors
 from lekiwi_rmf.motion_guards import load_base_test_profile
 
@@ -534,7 +535,7 @@ def main():
     selection.add_argument('--faults-only',action='store_true',help='run all eight attended moving faults without nominal repeats')
     selection.add_argument('--return-only',action='store_true',help='return to the fixed qualification center without starting a speed trial')
     parser.add_argument('--angular',action='store_true',help='use rotation for the selected fault')
-    parser.add_argument('--stage',choices=['0.20','0.30'],help='explicit attended manual qualification stage; production Nav2 speeds are retained')
+    parser.add_argument('--stage',choices=[f'{stage:.2f}' for stage in BASE_TEST_STAGES],help='explicit attended manual qualification stage; production Nav2 speeds are retained')
     parser.add_argument('--reference-run',type=Path,help='retain the fixed raw-LiDAR reference and center across qualification stages without reusing their trials')
     parser.add_argument('--resume',type=Path,help='retain qualified trials and the fixed center from this earlier loaded run')
     parser.add_argument('--center',type=float,nargs=3,metavar=('X','Y','YAW'),help='clear test center in wheel coordinates; the existing 12 cm relocation guard still applies')

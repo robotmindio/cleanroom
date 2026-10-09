@@ -20,6 +20,9 @@ stages:
   '0.20':
     linear_speed_m_s: 0.20
     angular_speed_rad_s: 0.40
+  '0.25':
+    linear_speed_m_s: 0.25
+    angular_speed_rad_s: 0.50
   '0.30':
     linear_speed_m_s: 0.30
     angular_speed_rad_s: 0.60

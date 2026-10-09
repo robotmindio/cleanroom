@@ -118,7 +118,8 @@ def test_attended_sequence_stops_on_the_first_unqualified_trial(qualified):
 
 
 @pytest.mark.parametrize('selection,nominal_only',[(['--fault','scan_disconnect'],False),(['--attended-sequence'],False),(['--attended-sequence','--nominal-only'],True),(['--faults-only'],False)])
-def test_stage_020_fault_selection_is_not_skipped(monkeypatch,tmp_path,selection,nominal_only):
+@pytest.mark.parametrize('stage,trials',[('0.20',1),('0.25',5),('0.30',5)])
+def test_stage_fault_selection_is_not_skipped(monkeypatch,tmp_path,selection,nominal_only,stage,trials):
     import shutil
     import sys
     from pathlib import Path
@@ -128,7 +129,7 @@ def test_stage_020_fault_selection_is_not_skipped(monkeypatch,tmp_path,selection
     for name in ('nav2_params.yaml','onboard_braking.yaml','base_speed_qualification.yaml'):
         shutil.copyfile(Path(__file__).parents[1]/'config'/name,config/name)
     monkeypatch.setattr(module,'ROOT',tmp_path)
-    monkeypatch.setattr(sys,'argv',['test-onboard-braking.py','--payload-g','200','--stage','0.20',*selection])
+    monkeypatch.setattr(sys,'argv',['test-onboard-braking.py','--payload-g','200','--stage',stage,*selection])
     monkeypatch.setattr(module.NAV,'installed_stack_arguments',lambda:['remote_ip:=robot-1'])
     monkeypatch.setattr(module.subprocess,'check_output',lambda *a,**k:'123\n')
     profiles=[]
@@ -139,7 +140,7 @@ def test_stage_020_fault_selection_is_not_skipped(monkeypatch,tmp_path,selection
     monkeypatch.setattr(module.NAV,'main',launch)
     module.main()
     assert profiles[0]['nominal_only'] is nominal_only
-    assert profiles[0]['trials_per_direction']==1
+    assert profiles[0]['trials_per_direction']==trials
     assert profiles[0]['faults_only'] is ('--faults-only' in selection)
 
 

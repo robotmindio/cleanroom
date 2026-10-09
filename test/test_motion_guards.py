@@ -22,7 +22,7 @@ def test_qualification_profiles_fit_the_one_metre_fixture_and_reject_missing_res
     import yaml
     from lekiwi_rmf.motion_guards import load_base_test_profile
     root=Path(__file__).parents[1]/'config'
-    for stage in ('0.20','0.30'):
+    for stage in ('0.20','0.25','0.30'):
         profile=load_base_test_profile(root/'nav2_params.yaml',stage)
         assert profile['linear_speed_m_s']==float(stage)
         assert profile['required_clearance_m']==1.
