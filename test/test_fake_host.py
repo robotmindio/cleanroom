@@ -160,7 +160,7 @@ def test_fake_host_enforces_the_real_motion_envelope_and_watchdog(host, context)
 
 def test_qualification_stage_reaches_the_host_without_raising_untagged_caps():
     from pathlib import Path
-    from lekiwi_rmf.motion_guards import load_base_test_profile
+    from lekiwi_rmf.motion_guards import load_base_speed_limits, load_base_test_profile
     from lekiwi_rmf.odometry import BASE_XY_SCALE
     from lekiwi_rmf.zmq_client import LeKiwiZmqClient
     from lekiwi_rmf.torque_control import TorqueControlClient
@@ -177,7 +177,8 @@ def test_qualification_stage_reaches_the_host_without_raising_untagged_caps():
             _wait_for(lambda:host.actions)
             assert host.actions[-1]['x.vel']==pytest.approx(.20/BASE_XY_SCALE)
             count=len(host.actions)
-            client.send_action(action)
+            production=load_base_speed_limits(Path(__file__).parents[1]/'config/nav2_params.yaml')[0]
+            client.send_action(_action(**{'x.vel':(production+.01)/BASE_XY_SCALE}))
             time.sleep(.05)
             assert len(host.actions)==count and host.torque_enabled
         finally:

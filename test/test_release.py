@@ -8,6 +8,7 @@ import tempfile
 import time
 
 import pytest
+import yaml
 
 
 ROOT = Path(__file__).parents[1]
@@ -346,6 +347,8 @@ def test_release_check_rejects_a_stale_safety_acceptance(tmp_path):
         (source / name).write_text((ROOT / name).read_text())
     checker.check_safety_acceptance(source)
     production = source / "config/safety_production.yaml"
-    production.write_text(production.read_text().replace("stow_joint_positions: [0.0,", "stow_joint_positions: [0.1,"))
+    parameters=yaml.safe_load(production.read_text())
+    parameters['safety_supervisor']['ros__parameters']['stow_joint_positions'][0]+=.1
+    production.write_text(yaml.safe_dump(parameters))
     with pytest.raises(ValueError, match="accepted arm stow differs"):
         checker.check_safety_acceptance(source)
