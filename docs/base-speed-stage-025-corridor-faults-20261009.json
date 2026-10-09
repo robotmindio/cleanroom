@@ -1,0 +1,397 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-09",
+  "source_revision": "bd371937baaf8cf5748ef02033b8c044f65139a7",
+  "deployed_revision": "9e441b32a2085c1ac76faae04dc47e1cb09e2248",
+  "payload_kg": 0.2,
+  "stage": "0.25",
+  "scope": "Three passing linear moving faults in the 1 m forward corridor. Five forward nominal stops are recorded separately. Other 25 nominal stops and five moving faults remain unqualified. Production acceptance and speed limits are unchanged.",
+  "nominal_evidence_report": "docs/base-speed-stage-025-corridor-forward-20261009.json",
+  "test_center": [
+    0.2,
+    0.0,
+    0.0
+  ],
+  "measurement_uncertainty_m": 0.06,
+  "maximum_stop_time_s": 1.6,
+  "summary": {
+    "passed_moving_faults": 3,
+    "worst_conservative_stopping_distance_m": 0.2298420977167808,
+    "maximum_modeled_uncertainty_m": 0.05249852950042584,
+    "maximum_stop_time_receive_upper_s": 1.3335223993344698
+  },
+  "faults": {
+    "linear/scan_disconnect": {
+      "passed": true,
+      "angular_test": false,
+      "requested_speed": 0.25,
+      "injection_speed": 0.23707875858692198,
+      "terminal_observed_speed": 0.2320939265414444,
+      "denial": {
+        "base_motion_permitted": "false",
+        "arm_motion_permitted": "true",
+        "arm_stowed": "true",
+        "faults": "scan: stale",
+        "latched_faults": "",
+        "bounded_base_test": "true"
+      },
+      "independent": {
+        "observed_swept_distance_m": 0.20101614262387385,
+        "unobserved_excursion_bound_m": 0.02882595509290695,
+        "conservative_swept_distance_m": 0.2298420977167808,
+        "uncertainty_upper_m": 0.05249852950042584,
+        "maximum_capture_gap_s": 0.20052838325500488,
+        "stop_time_receive_upper_s": 1.3335223993344698,
+        "first_sample_time": 107570.270268381,
+        "last_sample_time": 107572.885231397,
+        "fault_cut_time": 107570.14134629192,
+        "samples": 14,
+        "baseline_time_basis": "sensor_capture_stamp",
+        "within_budget": true
+      },
+      "recovered_driver": "ARMED",
+      "stopped_wheel_speed": 0.0,
+      "observed_displacement_m": 0.5303227779500667,
+      "wheel_feedback_samples": 44,
+      "source_run": ".benchmarks/onboard-braking/20261009-151628",
+      "source_revision": "4b0aa25880ad91082784d5f328d0e7b182247305"
+    },
+    "linear/compute_command_loss": {
+      "passed": true,
+      "angular_test": false,
+      "requested_speed": 0.25,
+      "injection_speed": 0.22808562890975062,
+      "terminal_observed_speed": 0.23115010871759326,
+      "denial": {
+        "base_motion_permitted": "false",
+        "arm_motion_permitted": "false",
+        "arm_stowed": "false",
+        "faults": "driver: stale; joints: stale; arm_workspace: MoveIt reports collision or workspace monitor is unhealthy",
+        "latched_faults": "",
+        "bounded_base_test": "true"
+      },
+      "independent": {
+        "observed_swept_distance_m": 0.1413317523904662,
+        "unobserved_excursion_bound_m": 0.02880415767431259,
+        "conservative_swept_distance_m": 0.1701359100647788,
+        "uncertainty_upper_m": 0.041355816366396195,
+        "maximum_capture_gap_s": 0.2003767490386963,
+        "stop_time_receive_upper_s": 0.9594624290330103,
+        "first_sample_time": 108128.724615745,
+        "last_sample_time": 108131.141791367,
+        "fault_cut_time": 108128.767398147,
+        "samples": 13,
+        "baseline_time_basis": "sensor_capture_stamp",
+        "within_budget": true
+      },
+      "recovered_driver": "ARMED",
+      "stopped_wheel_speed": 0.0,
+      "observed_displacement_m": 0.4971932018701125,
+      "wheel_feedback_samples": 23,
+      "source_run": ".benchmarks/onboard-braking/20261009-152547",
+      "source_revision": "3b925a4d4fef51bec629e0dfabcafc7bf2aba1a6"
+    },
+    "linear/telemetry_loss": {
+      "passed": true,
+      "angular_test": false,
+      "requested_speed": 0.25,
+      "injection_speed": 0.2480989665404626,
+      "terminal_observed_speed": 0.23595016901987523,
+      "denial": {
+        "base_motion_permitted": "false",
+        "arm_motion_permitted": "false",
+        "arm_stowed": "false",
+        "faults": "driver: stale; joints: stale; arm_workspace: MoveIt reports collision or workspace monitor is unhealthy",
+        "latched_faults": "",
+        "bounded_base_test": "true"
+      },
+      "independent": {
+        "observed_swept_distance_m": 0.15590626745259953,
+        "unobserved_excursion_bound_m": 0.02881992310285568,
+        "conservative_swept_distance_m": 0.1847261905554552,
+        "uncertainty_upper_m": 0.045846528431182226,
+        "maximum_capture_gap_s": 0.200486421585083,
+        "stop_time_receive_upper_s": 1.169993554474786,
+        "first_sample_time": 109500.537829079,
+        "last_sample_time": 109502.948970755,
+        "fault_cut_time": 109500.57008367611,
+        "samples": 13,
+        "baseline_time_basis": "sensor_capture_stamp",
+        "within_budget": true
+      },
+      "recovered_driver": "ARMED",
+      "stopped_wheel_speed": 0.0,
+      "observed_displacement_m": 0.5018159054752193,
+      "wheel_feedback_samples": 18,
+      "source_run": ".benchmarks/onboard-braking/20261009-154824",
+      "source_revision": "bd371937baaf8cf5748ef02033b8c044f65139a7"
+    }
+  },
+  "excluded_attempts": [
+    {
+      "error": "fault test reached its early center boundary",
+      "health": {
+        "base_motion_permitted": "false",
+        "arm_motion_permitted": "true",
+        "arm_stowed": "true",
+        "faults": "base_test: bounded test lease withdrawn",
+        "latched_faults": "",
+        "bounded_base_test": "true"
+      },
+      "max_radius_m": 0.47108320246829655,
+      "collision_monitor_action": [
+        "",
+        0
+      ],
+      "source_revision": "3b925a4d4fef51bec629e0dfabcafc7bf2aba1a6",
+      "source_run": ".benchmarks/onboard-braking/20261009-152640",
+      "independent_final_pose": [
+        0.6635152812861037,
+        -0.03557728478395229,
+        0.06035135805605835
+      ],
+      "qualified_new_measurements": false
+    },
+    {
+      "error": "independent stop window needs a preceding sample and eight captures",
+      "health": {
+        "base_motion_permitted": "false",
+        "arm_motion_permitted": "true",
+        "arm_stowed": "true",
+        "faults": "base_test: bounded test lease withdrawn",
+        "latched_faults": "",
+        "bounded_base_test": "true"
+      },
+      "max_radius_m": 0.4848676695576879,
+      "collision_monitor_action": null,
+      "source_revision": "504adc4480962ff7e80a212dd7c6164948409fe8",
+      "source_run": ".benchmarks/onboard-braking/20261009-153337",
+      "independent_final_pose": [
+        0.6784318549994348,
+        -0.010249432613713033,
+        -0.04263130506233548
+      ],
+      "qualified_new_measurements": false,
+      "primary_error": "fault test reached its early center boundary",
+      "cleanup_measurement_error": "independent stop window needs a preceding sample and eight captures"
+    },
+    {
+      "error": "timed out waiting for <function OnboardBraking.move.<locals>.<lambda> at 0x75c9dbd59d00>",
+      "health": {
+        "base_motion_permitted": "false",
+        "arm_motion_permitted": "false",
+        "arm_stowed": "true",
+        "faults": "depth: invalid, blind, or stampless point cloud; base_test: bounded test lease withdrawn",
+        "latched_faults": "",
+        "bounded_base_test": "true"
+      },
+      "max_radius_m": 0.20700644848836966,
+      "collision_monitor_action": [
+        "",
+        0
+      ],
+      "source_revision": "bd371937baaf8cf5748ef02033b8c044f65139a7",
+      "source_run": ".benchmarks/onboard-braking/20261009-154934",
+      "independent_final_pose": [
+        -0.005357844887756309,
+        -0.002369014319220948,
+        -0.56553251283975
+      ],
+      "qualified_new_measurements": false
+    }
+  ],
+  "stationary_depth_diagnostic": {
+    "frames_observed": 140,
+    "valid_frames": 0,
+    "usable_points_per_compact_cloud": 8,
+    "required_valid_points": 16,
+    "raw_depth_nonzero_pixels": 498,
+    "raw_depth_resolution": [
+      320,
+      240
+    ],
+    "raw_depth_range_mm": [
+      514,
+      532
+    ],
+    "observation": "Astra colour view faces a door covered in shiny plastic; nearly all depth pixels are missing. Fresh compact clouds fail the existing point-count gate.",
+    "arm_stowed": true,
+    "arm_motion_commanded": false,
+    "last_independent_pose": [
+      -0.005357844887756309,
+      -0.002369014319220948,
+      -0.56553251283975
+    ]
+  },
+  "remaining": [
+    "five nominal stops each: reverse, left, right, rotation_cw, rotation_ccw",
+    "linear/depth_disconnect",
+    "angular/scan_disconnect",
+    "angular/compute_command_loss",
+    "angular/depth_disconnect",
+    "angular/telemetry_loss"
+  ],
+  "artifacts": {
+    ".benchmarks/onboard-braking/20261009-151628/profile.yaml": {
+      "sha256": "13db8996bce4ed845d86d4530a394e6b836c35ac3c99a4c0ea1ab4e4956434bb",
+      "bytes": 1158
+    },
+    ".benchmarks/onboard-braking/20261009-151628/result.json": {
+      "sha256": "dee1200b65dc07f775cb2597b12f2120a70d542d478db6c9d4f912aa17e077fb",
+      "bytes": 445573
+    },
+    ".benchmarks/onboard-braking/20261009-151628/measurements.json": {
+      "sha256": "40dedef6aea71c57d390190eb206ca7e98ea23fb74e5b8c7ad8366b4546a5230",
+      "bytes": 22668
+    },
+    ".benchmarks/onboard-braking/20261009-151628/independent-poses.json": {
+      "sha256": "77f09fed3687c46a3243d32f174d867de5581c8e686e36fe51ec5470ed9bd51d",
+      "bytes": 5473469
+    },
+    ".benchmarks/onboard-braking/20261009-151628/stack.log": {
+      "sha256": "123b3aee6044da5a8893ba1e77e76c7b59918a9ece1fe028f6aa5ab0841af153",
+      "bytes": 163127
+    },
+    ".benchmarks/onboard-braking/20261009-152547/profile.yaml": {
+      "sha256": "bd937faba6d8656f363095faa5ee2e5b6d821177013db497b4ad6ec941c3dd8f",
+      "bytes": 1162
+    },
+    ".benchmarks/onboard-braking/20261009-152547/result.json": {
+      "sha256": "34059b6c82bb5affefb95963535d40adfed6dfb363dfa3b60ec2619b27023650",
+      "bytes": 431642
+    },
+    ".benchmarks/onboard-braking/20261009-152547/measurements.json": {
+      "sha256": "bb718aac6e6a18268e37d0ff65f4c6e8e714a7b92e21fb606ab4c03601443a98",
+      "bytes": 32047
+    },
+    ".benchmarks/onboard-braking/20261009-152547/independent-poses.json": {
+      "sha256": "047a34283aa6bcb93dac4dec213a580feed77c8f51658941c4550051a939dca7",
+      "bytes": 5240688
+    },
+    ".benchmarks/onboard-braking/20261009-152547/stack.log": {
+      "sha256": "4673047001f9670f88253976be5d29ecbe89084a748e39d746d4b2311fcb2135",
+      "bytes": 153456
+    },
+    ".benchmarks/onboard-braking/20261009-154824/profile.yaml": {
+      "sha256": "d03acd6dffd4274aa6ec99ea44331e88f6f63662ee6b96163771ae5ea08c6a1d",
+      "bytes": 1155
+    },
+    ".benchmarks/onboard-braking/20261009-154824/result.json": {
+      "sha256": "3447ca70ed13e4b8fc21aee0c727bdb8d07d2e83f20d11c792c4eba67932c1be",
+      "bytes": 672467
+    },
+    ".benchmarks/onboard-braking/20261009-154824/measurements.json": {
+      "sha256": "8e600e974ca5b468288164691da2d0f72a7636f9e1b7285f80fe45aad48c01e0",
+      "bytes": 39427
+    },
+    ".benchmarks/onboard-braking/20261009-154824/independent-poses.json": {
+      "sha256": "a7fc0b47eaf5228d291efdb355fca5c5cb423c3fc347f14aff7ae6fb9d423886",
+      "bytes": 7324336
+    },
+    ".benchmarks/onboard-braking/20261009-154824/stack.log": {
+      "sha256": "be9c25017c03ab7422cc2704dcf3e60f1c9b38792110572eab62048214d02077",
+      "bytes": 158931
+    },
+    ".benchmarks/onboard-braking/20261009-152640/profile.yaml": {
+      "sha256": "5afdfb58e403b89d35e5fc01383f2509535ff7dbdf8611f8704b15f098c95d9a",
+      "bytes": 1159
+    },
+    ".benchmarks/onboard-braking/20261009-152640/result.json": {
+      "sha256": "50d6451c24e36eda85823364925b7cfbf4f991e129be5d9b90949db24198f3a1",
+      "bytes": 340541
+    },
+    ".benchmarks/onboard-braking/20261009-152640/measurements.json": {
+      "sha256": "4d541e0cc17026af0b0ecea49f774369782f47c18462482ea78a8467d969ede4",
+      "bytes": 62118
+    },
+    ".benchmarks/onboard-braking/20261009-152640/independent-poses.json": {
+      "sha256": "b8de41f4fc5b5ad0f023546ca5195b0f740756812441d8f6a70bd8a61db73c1c",
+      "bytes": 4102823
+    },
+    ".benchmarks/onboard-braking/20261009-152640/stack.log": {
+      "sha256": "86df8df64bdace1ab738ded5964d5123a5d073a41a185fe609b98f1016e3c092",
+      "bytes": 163426
+    },
+    ".benchmarks/onboard-braking/20261009-153337/profile.yaml": {
+      "sha256": "5d21c5fbd8be8a9faf541cb8abe588f075b9cb2bce2531c23443aebb48af6a19",
+      "bytes": 1157
+    },
+    ".benchmarks/onboard-braking/20261009-153337/result.json": {
+      "sha256": "9ecaa0c78530ccb2280061670109deab5270a42fc9aa32dc1c7791456811c23d",
+      "bytes": 385401
+    },
+    ".benchmarks/onboard-braking/20261009-153337/measurements.json": {
+      "sha256": "558324958232738e4559b6c367c1f910ca8e84718ee82a274e53814ce5072b4d",
+      "bytes": 60838
+    },
+    ".benchmarks/onboard-braking/20261009-153337/independent-poses.json": {
+      "sha256": "a31c39c2cd7d285e2c716cdbafb73ea2538d66b39e29ab9506a04821550528d2",
+      "bytes": 4626534
+    },
+    ".benchmarks/onboard-braking/20261009-153337/stack.log": {
+      "sha256": "c0bc59e08aa7844a49cf3c00e8e4d5b3935cd36f415a73f7bbe3aebbd6afd85f",
+      "bytes": 154653
+    },
+    ".benchmarks/onboard-braking/20261009-154934/profile.yaml": {
+      "sha256": "440c5b5c936b3d2f142e0d0ae83193b6f42f63442de4201aad140d63a86d054c",
+      "bytes": 1161
+    },
+    ".benchmarks/onboard-braking/20261009-154934/result.json": {
+      "sha256": "ec1586864584daa9f801568a57ff7bd5aad386d07a8f34eec439a44887820430",
+      "bytes": 392825
+    },
+    ".benchmarks/onboard-braking/20261009-154934/measurements.json": {
+      "sha256": "405798553a29e2a5f1e437641ca9daa2b17e36393567e9d8432f8654415d98f9",
+      "bytes": 39623
+    },
+    ".benchmarks/onboard-braking/20261009-154934/independent-poses.json": {
+      "sha256": "4a88f5eadf8efcdd4362399695997e5cc9294a949032422954155d6680281a3e",
+      "bytes": 4528958
+    },
+    ".benchmarks/onboard-braking/20261009-154934/stack.log": {
+      "sha256": "f79aee89bf537aaf9134c9b6950962f385e937b1d06adc025174bed960a5489f",
+      "bytes": 156425
+    },
+    ".benchmarks/onboard-braking/20261009-153109/profile.yaml": {
+      "sha256": "bdbbe6176e8819469b09fb94773104b0fc4e875f701cbf664fc523703686d422",
+      "bytes": 1140
+    },
+    ".benchmarks/onboard-braking/20261009-153109/result.json": {
+      "sha256": "3824eb2eaf12d41f7d663e6d779381c5368d8e5f1a8e9e3e0932201af04d299b",
+      "bytes": 327298
+    },
+    ".benchmarks/onboard-braking/20261009-153109/measurements.json": {
+      "sha256": "030af556ae32adcf3824292b5e5d50dabdce187ca66d77102b943bf92c038b04",
+      "bytes": 2091
+    },
+    ".benchmarks/onboard-braking/20261009-153109/independent-poses.json": {
+      "sha256": "adbe1eeda37ce7eccc10bf504e8d36a0d9a21c7cb5539bf64c189540f0058809",
+      "bytes": 3776830
+    },
+    ".benchmarks/onboard-braking/20261009-153109/stack.log": {
+      "sha256": "ea98c8a9d42d47fae584821964a7ada639db494045551ecbb977f6e05f1a245e",
+      "bytes": 148527
+    },
+    ".benchmarks/onboard-braking/20261009-153844/profile.yaml": {
+      "sha256": "19abe5fc9d2acce4e5ea29881a52b2b0288d310afe06cd95a78bf44b52838fcb",
+      "bytes": 1142
+    },
+    ".benchmarks/onboard-braking/20261009-153844/result.json": {
+      "sha256": "86d26e28c59ea670a4191ed186cff1eebdda71c2466c458f96f975ced6d4e10c",
+      "bytes": 450201
+    },
+    ".benchmarks/onboard-braking/20261009-153844/measurements.json": {
+      "sha256": "38f22e7dcefed409f2dcce527909599298207a55761890c49e6be9f8bfdff59d",
+      "bytes": 2094
+    },
+    ".benchmarks/onboard-braking/20261009-153844/independent-poses.json": {
+      "sha256": "4cba01d00ad50cb27d060e9161eeedffadb9ff982217f2ad79cfc35252a9610c",
+      "bytes": 5103397
+    },
+    ".benchmarks/onboard-braking/20261009-153844/stack.log": {
+      "sha256": "f4384bdda1dd56235bc090b62ab1fa0591b39046aee73713da6e5d7a29f9e535",
+      "bytes": 156025
+    }
+  },
+  "physical_acceptance_granted": false
+}
