@@ -270,27 +270,27 @@ collision_monitor:
     source_timeout: 0.75
     stop_pub_timeout: 1.0
     base_shift_correction: true
-    polygons: [StopZone, SlowdownZone]
+    polygons: [StopZone, FootprintApproach]
     StopZone:
       type: polygon
-      # Folded footprint plus 77 cm per side, including simultaneous translation/rotation.
-      # Acceptance must cover measured stopping travel plus uncertainty at
-      # the indoor speed limits; see config/safety_acceptance.yaml for the record.
-      points: "[[1.01, 0.99], [1.01, -0.99], [-0.99, -0.99], [-0.99, 0.99]]"
+      # Actual folded body: no fixed clearance outside the physical footprint.
+      points: "[[-0.22, -0.22], [0.24, -0.22], [0.24, 0.22], [-0.22, 0.22]]"
       action_type: stop
       min_points: 1
       visualize: true
       polygon_pub_topic: collision_stop_zone
       enabled: true
-    SlowdownZone:
+    FootprintApproach:
       type: polygon
-      # 84 cm from the folded footprint: 7 cm before the measured stop zone.
-      points: "[[1.08, 1.06], [1.08, -1.06], [-1.06, -1.06], [-1.06, 1.06]]"
-      action_type: slowdown
-      slowdown_ratio: 0.35
+      points: "[[-0.22, -0.22], [0.24, -0.22], [0.24, 0.22], [-0.22, 0.22]]"
+      action_type: approach
+      # Measured stops + 6 cm uncertainty: max(0.447666/0.25,
+      # 0.307951/(hypot(0.24,0.22)*0.40)) + 0.05 s < 2.5 s.
+      time_before_collision: 2.5
+      simulation_time_step: 0.05
       min_points: 1
       visualize: true
-      polygon_pub_topic: collision_slowdown_zone
+      polygon_pub_topic: collision_approach_footprint
       enabled: true
     observation_sources: [scan]
     scan:

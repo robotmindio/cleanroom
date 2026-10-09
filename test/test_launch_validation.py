@@ -107,7 +107,10 @@ def test_qualification_changes_manual_caps_and_zones_without_raising_nav2_speed(
     assert (controller['vx_max'],controller['wz_max'])==load_base_speed_limits(
         Path(__file__).parents[1]/'config/nav2_params.yaml')
     import yaml
-    stop=parameters['collision_monitor']['ros__parameters']['StopZone']
+    monitor=parameters['collision_monitor']['ros__parameters']
+    assert monitor['polygons']==['StopZone','SlowdownZone']
+    assert 'FootprintApproach' not in monitor
+    stop=monitor['StopZone']
     assert stop['type']=='velocity_polygon' and stop['holonomic']
     assert stop['min_points']==1
     assert stop['velocity_polygons']==['rotation','return_forward','return_reverse','return_left','return_right',

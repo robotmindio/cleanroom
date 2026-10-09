@@ -11,6 +11,7 @@ Start with one of these:
 | Stop a manually launched stack | `scripts/ros-stop.sh` |
 | Calibrate the robot | `scripts/calibrate.sh` |
 | Drive with the keyboard | `scripts/teleop.sh` |
+| Start attended exploration | `scripts/explore.sh` |
 | Open RViz or camera views | `scripts/rviz.sh`, `scripts/cameras.sh` |
 
 Configuration comes from `.env` (only `LEKIWI_ROBOT_HOST`,
@@ -65,6 +66,7 @@ before using them; the robot runtime does not require it.
 - `rviz.sh` opens RViz on a running stack; `cameras.sh` opens one viewer per published camera.
 - `foxglove.sh` opens Foxglove Desktop on the local read-only bridge.
 - `teleop.sh` and `teleop.py` drive the robot from the keyboard.
+- `explore.sh` starts `/robot/explore` with feedback, revisits known space and uses the tracked duration/radius limits. Ctrl-C requests cancellation. See [ROS/MCP exploration](../docs/exploration.md).
 
 ## Calibration and hardware tools
 
