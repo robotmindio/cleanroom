@@ -12,6 +12,15 @@ import runpy
 
 import pytest
 
+from lekiwi_rmf.arm_trajectory import JOINT_LIMITS, action_positions, load_calibration
+from lekiwi_rmf.motion_guards import load_base_speed_limits
+from lekiwi_rmf.odometry import BASE_XY_SCALE, BASE_YAW_SCALE
+from lekiwi_rmf.torque_control import (
+    TorqueControlClient, TorqueControlError, enable_with_rollback,
+    react_to_command_silence, run_all_safety_steps, torque_readback_matches,
+    validate_action_payload, validated_bind_address,
+)
+
 
 def test_qualification_socket_changes_only_wire_data_and_expires():
     cls = runpy.run_path(str(pathlib.Path(__file__).parents[1] /
@@ -41,16 +50,6 @@ def test_qualification_socket_changes_only_wire_data_and_expires():
     assert sent[-1] == new
     with pytest.raises(ValueError, match='unsupported'):
         socket.inject('unknown')
-
-from lekiwi_rmf.arm_trajectory import JOINT_LIMITS, action_positions, load_calibration
-from lekiwi_rmf.motion_guards import load_base_speed_limits
-from lekiwi_rmf.odometry import BASE_XY_SCALE, BASE_YAW_SCALE
-from lekiwi_rmf.torque_control import (
-    TorqueControlClient, TorqueControlError, enable_with_rollback,
-    react_to_command_silence, run_all_safety_steps, torque_readback_matches,
-    validate_action_payload, validated_bind_address,
-)
-
 
 def test_wire_contract_matches_the_deployed_motor_host():
     from lekiwi_rmf import host_protocol as protocol
@@ -519,6 +518,17 @@ def test_configure_never_energizes_the_servos(monkeypatch):
         "write Torque_Enable", "read Torque_Enable", "write Lock", "configure_motors",
     ]
     assert "enable_torque" not in robot.bus.calls
+
+
+def test_wheel_conversion_covers_validated_translation_without_removing_saturation(monkeypatch):
+    host = _torque_host_script(monkeypatch)
+    robot = host.SafetyLeKiwi(host.LeKiwiConfig())
+    monkeypatch.setattr(host.LeKiwi, '_body_to_wheel_raw', lambda self, *args: args, raising=False)
+    assert robot._body_to_wheel_raw(.03, 0., 0.)[-1] == 3000
+    robot.maximum_base_linear_speed_m_s = .30
+    assert robot._body_to_wheel_raw(.30, 0., 0.) == (.30, 0., 0., .05, .125, 3912)
+    assert robot._body_to_wheel_raw(0., .30, 0.)[-1] == 3912
+    assert robot._body_to_wheel_raw(.30, 0., 0., max_raw=2000)[-1] == 2000
 
 
 def test_loaded_arm_joints_get_tuned_position_gain(monkeypatch):

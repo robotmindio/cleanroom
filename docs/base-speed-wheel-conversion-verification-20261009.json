@@ -1,0 +1,172 @@
+{
+  "scope": "Pure kinematic verification using installed LeRobot; no motor bus or motion.",
+  "vendor_path": "/home/nex/lekiwi_ws/.venv-lerobot/lib/python3.12/site-packages/lerobot/robots/lekiwi/lekiwi.py",
+  "vendor_sha256": "8fb7bbf11b6e0e354c8d32a4b1c1eb567bed27e799e8296867129228bddc6fd2",
+  "repository_script_sha256": "378a5577a452329b2039b00c4b6f2f2c4a7fcf4b6de1dea78f9d714aa255a1da",
+  "cases": [
+    {
+      "case": "normal",
+      "requested": [
+        0.03,
+        0.0,
+        0.0
+      ],
+      "vendor_raw": {
+        "base_left_wheel": -339,
+        "base_back_wheel": 0,
+        "base_right_wheel": 339
+      },
+      "repository_raw": {
+        "base_left_wheel": -339,
+        "base_back_wheel": 0,
+        "base_right_wheel": 339
+      },
+      "inverse_body": {
+        "x.vel": 0.030023339085712877,
+        "y.vel": 1.831849961448517e-18,
+        "theta.vel": 4.451950157174148e-17
+      }
+    },
+    {
+      "case": "forward",
+      "requested": [
+        0.3,
+        0.0,
+        0.0
+      ],
+      "vendor_raw": {
+        "base_left_wheel": -3000,
+        "base_back_wheel": 0,
+        "base_right_wheel": 3000
+      },
+      "repository_raw": {
+        "base_left_wheel": -3387,
+        "base_back_wheel": 0,
+        "base_right_wheel": 3387
+      },
+      "inverse_body": {
+        "x.vel": 0.2999676975908836,
+        "y.vel": 9.070898727917306e-18,
+        "theta.vel": -2.2033156549250425e-15
+      }
+    },
+    {
+      "case": "reverse",
+      "requested": [
+        -0.3,
+        0.0,
+        0.0
+      ],
+      "vendor_raw": {
+        "base_left_wheel": 3000,
+        "base_back_wheel": 0,
+        "base_right_wheel": -3000
+      },
+      "repository_raw": {
+        "base_left_wheel": 3387,
+        "base_back_wheel": 0,
+        "base_right_wheel": -3387
+      },
+      "inverse_body": {
+        "x.vel": -0.2999676975908836,
+        "y.vel": -9.070898727917306e-18,
+        "theta.vel": 2.2033156549250425e-15
+      }
+    },
+    {
+      "case": "left",
+      "requested": [
+        0.0,
+        0.3,
+        0.0
+      ],
+      "vendor_raw": {
+        "base_left_wheel": 1500,
+        "base_back_wheel": -3000,
+        "base_right_wheel": 1500
+      },
+      "repository_raw": {
+        "base_left_wheel": 1956,
+        "base_back_wheel": -3911,
+        "base_right_wheel": 1956
+      },
+      "inverse_body": {
+        "x.vel": -6.631661960767326e-18,
+        "y.vel": 0.2999955094175019,
+        "theta.vel": 0.011718750000015227
+      }
+    },
+    {
+      "case": "right",
+      "requested": [
+        0.0,
+        -0.3,
+        0.0
+      ],
+      "vendor_raw": {
+        "base_left_wheel": -1500,
+        "base_back_wheel": 3000,
+        "base_right_wheel": -1500
+      },
+      "repository_raw": {
+        "base_left_wheel": -1956,
+        "base_back_wheel": 3911,
+        "base_right_wheel": -1956
+      },
+      "inverse_body": {
+        "x.vel": 6.631661960767326e-18,
+        "y.vel": -0.2999955094175019,
+        "theta.vel": -0.011718750000015227
+      }
+    },
+    {
+      "case": "diagonal",
+      "requested": [
+        0.21213203435596423,
+        0.21213203435596423,
+        0.0
+      ],
+      "vendor_raw": {
+        "base_left_wheel": -804,
+        "base_back_wheel": -2196,
+        "base_right_wheel": 3000
+      },
+      "repository_raw": {
+        "base_left_wheel": -1012,
+        "base_back_wheel": -2766,
+        "base_right_wheel": 3778
+      },
+      "inverse_body": {
+        "x.vel": 0.21211179088578866,
+        "y.vel": 0.21214954296458421,
+        "theta.vel": 1.7830700906945474e-15
+      }
+    },
+    {
+      "case": "rotation",
+      "requested": [
+        0.0,
+        0.0,
+        34.37746770784939
+      ],
+      "vendor_raw": {
+        "base_left_wheel": 978,
+        "base_back_wheel": 978,
+        "base_right_wheel": 978
+      },
+      "repository_raw": {
+        "base_left_wheel": 978,
+        "base_back_wheel": 978,
+        "base_right_wheel": 978
+      },
+      "inverse_body": {
+        "x.vel": -2.413251269210535e-17,
+        "y.vel": -1.2952817717063984e-17,
+        "theta.vel": 34.38281250000001
+      }
+    }
+  ],
+  "schema_version": 1,
+  "date": "2026-10-09",
+  "source_revision": "7ac06380de1b9381fa2c212e339383b49251d372"
+}

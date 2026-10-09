@@ -314,6 +314,11 @@ python ~/lerobot-src/examples/lekiwi/teleoperate.py
 | Q | Quit |
 
 Speed modes are 0.4 / 0.25 / 0.1 m/s with 90 / 60 / 30 deg/s rotation.
+LeRobot 0.6.1 also saturates wheel goals at 3000 ticks/s, which limits forward
+translation to about 0.266 m/s with its 5 cm wheel radius. The repository motor
+host derives its wheel ceiling from the highest validated tracked linear profile
+(3912 ticks/s for the 0.30 m/s attended stage); body command limits still apply.
+These command ceilings do not establish physical speed or braking acceptance.
 
 This script drives the **arm from a leader arm** and the base from the keyboard.
 Without a leader arm built it will fail at connect; drive the base only by
