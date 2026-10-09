@@ -1,0 +1,11 @@
+# Remaining 0.25 m/s corridor qualification
+
+Completed: five independently measured forward stops at 0.25 m/s command with 200 g payload, held folded arm and unchanged 0.02 rad stow tolerance. Ground speeds 0.230074–0.239606 m/s; worst conservative stop 0.165177 m, modeled uncertainty 0.036126 m, stop-time upper bound 1.088423 s. All pass the 0.06 m / 1.6 s profile and 90% speed coverage without feedback interruption. Latest resumable source: .benchmarks/onboard-braking/20261009-150027. Fixed raw-LiDAR center [0.2, 0, 0]; final measured pose approximately [0.1915, -0.00088, -0.01578].
+
+PR #54 (https://github.com/robotmindio/cleanroom/pull/54) contains the startup-report fix, excluded attempts and five forward stops with immutable raw-artifact hashes. 324 focused tests, Ruff and diff checks passed. PR remains open. This branch starts from its head; rebase onto main after merge if needed.
+
+Motion jobs inactive; managed compute stack restored. Both machines deploy 9e441b3, with matching test-only stage profile. Production still uses old accepted stow and 0.03 m/s / 0.06 rad/s caps; stow can deny production base permission. Never command the arm or widen tolerance.
+
+Physical fixture currently permits 1 m forward travel from the supplied starting front position, rather than clearance in all directions. Forward-only tests used --center 0.2 0 0 and returned to that fixed center. Await corridor width and rear clearance; rotations need about 0.76 m total clear width and existing pulses position 0.20 m before the speed segment. Do not run the default all-direction sequence until its trajectories fit the actual corridor. Continuous attended authorization remains in force; operator at motor-power stop, payload 200 g, dry floor.
+
+Next: fit reverse/lateral and rotational tests into confirmed dimensions, using the existing gates and measured reserves. Still required: five nominal stops in each of reverse, left, right, rotation_cw and rotation_ccw (25), plus eight moving faults (four linear, four angular). Rotation stage cap 0.50 rad/s remains provisional. Full passage is required before production stow/SRDF, acceptance, speed limits, stopping zones and exploration/test bounds are updated together. Then clean-main deploy and live controller limits/base-permission verification. Remove WIP before the next PR/final delivery.
