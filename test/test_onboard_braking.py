@@ -184,7 +184,9 @@ def test_stationary_corridor_reference_keeps_the_original_area_anchor(monkeypatc
         node.refresh_corridor_reference()
         assert node.reference_locked and len(node.reference_history)==1
         assert node.reference_history[0]['anchor']==pytest.approx([.01,.02,math.pi])
-        assert np.allclose(node.reference_points, -module.stationary_reference([local]*10)+[.01,.02])
+        assert np.allclose(node.reference_points[1:], -module.stationary_reference([local]*10)+[.01,.02])
+        assert np.array_equal(node.reference_points[:1],node.fixed_reference_points)
+        assert 0<node.reference_alignment_error_m<.02
         assert np.array_equal(node.fixed_reference_points,[[10.,20.]])
     else:
         error='not stationary' if case=='moving' else 'center reserve'
@@ -636,6 +638,9 @@ def test_independent_stop_bounds_hidden_motion_and_rejects_bad_windows():
     assert result['within_budget']
     assert result['unobserved_excursion_bound_m']==pytest.approx(.005)
     assert result['conservative_swept_distance_m']==pytest.approx(.015)
+    aligned=measure(samples,.1,{**config,'reference_alignment_error_m':.01},.001)
+    assert aligned['uncertainty_upper_m']==pytest.approx(result['uncertainty_upper_m']+.01)
+    assert not aligned['within_budget']
     delayed=[{**s,'capture_time':s['time'],'time':s['time']+.3} for s in samples]
     assert measure(delayed,.1,config,.001)['within_budget']
     assert not measure([{**s,'covariance':[.001,.001,.001]} for s in samples],.1,config,.001)['within_budget']
