@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "date": "2026-10-09",
+  "source_revision": "c29c753",
+  "deployed_revision": "80c25f6e7707d164b34c7a7ec855dcf57eb9975c",
+  "payload_kg": 0.2,
+  "stage": "0.25",
+  "scope": "No 0.25 m/s pulse ran; startup alignment and return positioning failures are excluded from acceptance.",
+  "attempts": [
+    {
+      "run": ".benchmarks/onboard-braking/20261009-114357",
+      "reason": "Older fixed reference did not align with the current stationary scans; zero independent poses.",
+      "artifacts": {
+        ".benchmarks/onboard-braking/20261009-114357/profile.yaml": {
+          "sha256": "641a968e373250780d1747877333255b6c76fa0753e810e21bf38c636ffa53aa",
+          "bytes": 1029
+        },
+        ".benchmarks/onboard-braking/20261009-114357/measurements.json": {
+          "sha256": "9a6061f419508bb204dd94b53619c34ebd1ba122c4dbcf2ae5a9528090356135",
+          "bytes": 1493
+        },
+        ".benchmarks/onboard-braking/20261009-114357/independent-poses.json": {
+          "sha256": "488f67272a5c02f480a9314ac5030b0aa56291dfccfa3773fddaa763e64e877c",
+          "bytes": 62696
+        },
+        ".benchmarks/onboard-braking/20261009-114357/stack.log": {
+          "sha256": "b1a540949521876142be63f89e76567c5b2c17fb02400439848a07b6cdffe3b5",
+          "bytes": 54792
+        }
+      },
+      "high_speed_trials": 0
+    },
+    {
+      "run": ".benchmarks/onboard-braking/20261009-114544",
+      "reason": "Collision monitor stopped backward positioning at a 0.10 m/s cap, before the selected forward pulse.",
+      "artifacts": {
+        ".benchmarks/onboard-braking/20261009-114544/profile.yaml": {
+          "sha256": "1466d119c284a2dd5c1973b0af8fcbeb949c003c8261253b4f4577b12c005183",
+          "bytes": 854
+        },
+        ".benchmarks/onboard-braking/20261009-114544/measurements.json": {
+          "sha256": "d1b960e3e42e85cc678e5d139b3ad2351e05abad75b548a660d1fe7947ef98e2",
+          "bytes": 1695
+        },
+        ".benchmarks/onboard-braking/20261009-114544/result.json": {
+          "sha256": "656a20d94e3e0bf59581d629dbfc09fc0844dca238ad0943ab7f06c676f64237",
+          "bytes": 160799
+        },
+        ".benchmarks/onboard-braking/20261009-114544/independent-poses.json": {
+          "sha256": "7e0646f871411c30fe125bd795d0302c1cee4f3f7c97c071cc7388967b57addb",
+          "bytes": 2658478
+        },
+        ".benchmarks/onboard-braking/20261009-114544/stack.log": {
+          "sha256": "216b321b3086d730f899d718615f60f214a12684860449580215ca947e53f98f",
+          "bytes": 147210
+        }
+      },
+      "error": "collision-monitor StopZone blocks motion",
+      "final_pose": [
+        -0.12764340512414185,
+        0.0021640936328086316,
+        0.00906774289019099
+      ],
+      "max_radius_m": 0.1322016013186279,
+      "high_speed_trials": 0
+    }
+  ]
+}
