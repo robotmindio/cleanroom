@@ -71,7 +71,7 @@ class RobotExplorer(Node):
                 raise ValueError(f"{name} must be finite and positive")
         if (not 0 < self.config["free_threshold"] < 100
                 or self.config["clearance_m"] < inscribed - 1e-6
-                or self.config["max_radius_m"] <= 2 * self._region_margin
+                or self.config["max_radius_m"] <= self._region_margin
                 or self.config["observation_distance_m"] <= self.config["clearance_m"]):
             raise ValueError("invalid exploration clearance, observation distance or region")
         self.database = Path(self.config["database_path"]).expanduser()
@@ -303,7 +303,7 @@ class RobotExplorer(Node):
                 raise RuntimeError("exploration is disabled for fixed-map/RMF operation")
             _, radius = task_limits(request.max_duration_sec, request.max_radius_m,
                                     self.config["max_duration_sec"], self.config["max_radius_m"])
-            if radius <= 2 * self._region_margin:
+            if radius <= self._region_margin:
                 raise ValueError("exploration radius is too small for the footprint")
             with self._lock:
                 reason = self._readiness_reason()

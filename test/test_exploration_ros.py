@@ -248,6 +248,23 @@ def test_success_confirms_visited_target_and_retains_database(graph):
     assert peers.mapping_requests == [True, False]
 
 
+def test_small_requested_region_keeps_the_full_stopping_margin(graph):
+    peers, explorer, client = graph
+    for radius in (explorer._region_margin, explorer._region_margin - 0.01):
+        rejected = response(client.send_goal_async(Explore.Goal(max_radius_m=radius)))
+        assert not rejected.accepted and not explorer._busy
+    handle = response(client.send_goal_async(Explore.Goal(
+        revisit_known=True, max_duration_sec=8.0, max_radius_m=2.0)))
+    assert handle.accepted
+    wait(lambda: peers.nav_active)
+    peers.position = (2.0 - explorer._region_margin + 0.01, 0.0)
+    result = response(handle.get_result_async())
+    assert result.status == GoalStatus.STATUS_ABORTED
+    assert result.result.message == "exploration region stopping margin reached"
+    assert peers.nav_canceled == 1 and not peers.nav_active
+    assert peers.mapping_requests == [True, False]
+
+
 @pytest.mark.parametrize("fault", ["database", "duration", "mode"])
 def test_quota_duration_or_mode_change_ends_and_cancels_the_owned_navigation_goal(graph, fault):
     peers, explorer, _ = graph
