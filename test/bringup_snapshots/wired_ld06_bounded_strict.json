@@ -280,6 +280,7 @@
           "global_frame": "map",
           "inflation_layer": {
            "cost_scaling_factor": 4.0,
+           "inflate_around_unknown": true,
            "inflation_radius": 0.4,
            "plugin": "nav2_costmap_2d::InflationLayer"
           },
@@ -376,9 +377,11 @@
         "ros__parameters": {
          "ExploreKnown": {
           "allow_unknown": false,
-          "plugin": "nav2_navfn_planner::NavfnPlanner",
-          "tolerance": 0.0,
-          "use_astar": true
+          "lattice_filepath": "$(find-pkg-share nav2_smac_planner)/sample_primitives/5cm_resolution/0.5m_turning_radius/omni/output.json",
+          "max_planning_time": 1.0,
+          "plugin": "nav2_smac_planner::SmacPlannerLattice",
+          "smooth_path": false,
+          "tolerance": 0.0
          },
          "GridBased": {
           "allow_unknown": true,
@@ -788,6 +791,7 @@
           "global_frame": "map",
           "inflation_layer": {
            "cost_scaling_factor": 4.0,
+           "inflate_around_unknown": true,
            "inflation_radius": 0.4,
            "plugin": "nav2_costmap_2d::InflationLayer"
           },
@@ -884,9 +888,11 @@
         "ros__parameters": {
          "ExploreKnown": {
           "allow_unknown": false,
-          "plugin": "nav2_navfn_planner::NavfnPlanner",
-          "tolerance": 0.0,
-          "use_astar": true
+          "lattice_filepath": "$(find-pkg-share nav2_smac_planner)/sample_primitives/5cm_resolution/0.5m_turning_radius/omni/output.json",
+          "max_planning_time": 1.0,
+          "plugin": "nav2_smac_planner::SmacPlannerLattice",
+          "smooth_path": false,
+          "tolerance": 0.0
          },
          "GridBased": {
           "allow_unknown": true,
@@ -1388,6 +1394,7 @@
           "global_frame": "map",
           "inflation_layer": {
            "cost_scaling_factor": 4.0,
+           "inflate_around_unknown": true,
            "inflation_radius": 0.4,
            "plugin": "nav2_costmap_2d::InflationLayer"
           },
@@ -1484,9 +1491,11 @@
         "ros__parameters": {
          "ExploreKnown": {
           "allow_unknown": false,
-          "plugin": "nav2_navfn_planner::NavfnPlanner",
-          "tolerance": 0.0,
-          "use_astar": true
+          "lattice_filepath": "$(find-pkg-share nav2_smac_planner)/sample_primitives/5cm_resolution/0.5m_turning_radius/omni/output.json",
+          "max_planning_time": 1.0,
+          "plugin": "nav2_smac_planner::SmacPlannerLattice",
+          "smooth_path": false,
+          "tolerance": 0.0
          },
          "GridBased": {
           "allow_unknown": true,
