@@ -298,6 +298,41 @@ def test_a_timed_out_mode_query_keeps_the_last_reading_until_it_ages_out():
     assert explorer._mapping is False and explorer._mode_at == 12.0
 
 
+@pytest.mark.parametrize("rpc", ["mode", "freeze"])
+def test_timed_out_monitor_rpc_is_retried_and_confirmed(graph, rpc):
+    from rclpy.task import Future as RosFuture
+
+    peers, explorer, _ = graph
+    explorer._timer.cancel()
+    wait(lambda: explorer._mode_future.done())
+    now = time.monotonic()
+    stalled = RosFuture()
+    setattr(explorer, f"_{rpc}_future", stalled)
+    setattr(explorer, f"_{rpc}_requested_at", now - explorer.config["service_timeout_sec"] - 1)
+    if rpc == "mode":
+        explorer._mode_at = 0.0
+        stalled.add_done_callback(lambda future: explorer._mode_response(future, now - 4))
+    else:
+        peers.set_mode(True, Empty.Response())
+        explorer._mapping = True
+        explorer._mapping_started = now - explorer.config["mapping_max_seconds"] - 1
+        # Keep the parallel mode query pending while exercising the quota RPC.
+        explorer._mode_future = RosFuture()
+        explorer._mode_requested_at = now
+        stalled.add_done_callback(explorer._check_freeze)
+
+    explorer._monitor()
+    assert stalled.cancelled() and not stalled.done()  # Real rclpy cancellation semantics.
+    retried = getattr(explorer, f"_{rpc}_future")
+    assert retried is not stalled
+    wait(retried.done)
+    if rpc == "mode":
+        wait(lambda: explorer._mapping is False and explorer._mode_at >= now)
+    else:
+        assert peers.mapping_requests == [True, False]
+        assert retried.result() is not None
+
+
 def test_close_wall_exploration_uses_the_actual_body_instead_of_a_corner_circle(graph):
     peers, explorer, client = graph
     peers.position = (0.025, 0.025)

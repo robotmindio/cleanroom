@@ -150,6 +150,7 @@ class RobotExplorer(Node):
                 if now - self._mode_requested_at > self.config["service_timeout_sec"]:
                     # Ask again; the last confirmed reading ages out through _mode_at.
                     self._mode_future.cancel()
+                    self._mode_future = None
             if self._mode_future is None or self._mode_future.done():
                 self._mode_requested_at = now
                 self._mode_future = self._mapping_parameters.get_parameters(["Mem/IncrementalMemory"])
@@ -167,6 +168,7 @@ class RobotExplorer(Node):
                 if (self._freeze_future is not None and not self._freeze_future.done()
                         and now - self._freeze_requested_at > self.config["service_timeout_sec"]):
                     self._freeze_future.cancel()
+                    self._freeze_future = None
                 if self._localization_client.service_is_ready() and (
                         self._freeze_future is None or self._freeze_future.done()):
                     self.get_logger().warning(f"freezing RTAB-Map: {reason}", throttle_duration_sec=5)
