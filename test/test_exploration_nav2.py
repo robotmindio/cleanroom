@@ -159,7 +159,7 @@ def test_real_nav2_tree_recovers_with_the_same_target_and_cancels_its_actions(tm
                 response(handle.cancel_goal_async())
             result = response(handle.get_result_async(), timeout=20)
             cancel = failure in ("cancel", "cancel_recovery")
-            failed = failure in ("exhausted", "fatal")
+            failed = failure == "fatal"
             expected = (GoalStatus.STATUS_CANCELED if cancel else
                         GoalStatus.STATUS_ABORTED if failed else GoalStatus.STATUS_SUCCEEDED)
             assert result.status == expected, (result.result.message, log_path.read_text())
@@ -168,9 +168,9 @@ def test_real_nav2_tree_recovers_with_the_same_target_and_cancels_its_actions(tm
             assert peers.nav_canceled == int(failure == "cancel")
             assert recovery["active"] is None
             assert recovery["canceled"] == int(failure == "cancel_recovery")
-            assert len(set(follow_goals)) == 1 + int(failed)
-            assert result.result.unreachable_targets == int(failed)
-            assert result.result.visited_targets == int(not cancel)
+            assert len(set(follow_goals)) == 1 + int(failure == "exhausted")
+            assert result.result.unreachable_targets == 0
+            assert result.result.visited_targets == int(not cancel and not failed)
             if failure == "planner":
                 assert "global" in clears
             if failure == "controller":
@@ -183,7 +183,8 @@ def test_real_nav2_tree_recovers_with_the_same_target_and_cancels_its_actions(tm
                 assert len(follow_goals) == failed_controls + 1
                 assert len(set(follow_goals[:-1])) == 1
             if failure == "fatal":
-                assert not clears and not recoveries and len(follow_goals) == 2
+                assert result.result.message == "Nav2 controller plugin is invalid"
+                assert not clears and not recoveries and len(follow_goals) == 1
         finally:
             peers.nav_mode = "fail"
             peers.permitted = False

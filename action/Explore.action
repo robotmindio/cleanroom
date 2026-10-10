@@ -2,6 +2,8 @@
 bool revisit_known
 float64 max_duration_sec
 float64 max_radius_m
+# Empty starts a new task; a saved task UUID resumes its original bounds and progress.
+string resume_task_id
 ---
 # Complete means no further accessible targets in the requested area.
 bool complete

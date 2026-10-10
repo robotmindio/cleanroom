@@ -13,7 +13,7 @@ from action_msgs.msg import GoalStatus
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from ament_index_python.packages import get_package_share_directory
 from geometry_msgs.msg import PoseStamped
-from nav2_msgs.action import ComputePathToPose, NavigateToPose
+from nav2_msgs.action import ComputePathToPose, FollowPath, NavigateToPose
 from nav2_msgs.msg import CollisionMonitorState
 from nav_msgs.msg import OccupancyGrid
 import rclpy
@@ -35,7 +35,7 @@ from lekiwi_rmf.action import Explore
 from lekiwi_rmf.exploration_owner_guard import owned_goal_id
 from lekiwi_rmf.exploration import (
     database_size, footprint_is_free, load_navigation_footprint, map_geometry, select_target, task_limits,
-    with_body_free,
+    with_body_free, load_task_checkpoint, save_task_checkpoint, task_time,
 )
 
 
@@ -75,6 +75,7 @@ class RobotExplorer(Node):
                 or self.config["observation_distance_m"] <= self.config["clearance_m"]):
             raise ValueError("invalid exploration clearance, observation distance or region")
         self.database = Path(self.config["database_path"]).expanduser()
+        self._task_file = Path(f"{self.database}.exploration.json")
         self._lock = threading.Lock()
         self._busy = False
         self._nav_uncertain = False
@@ -305,6 +306,11 @@ class RobotExplorer(Node):
                                     self.config["max_duration_sec"], self.config["max_radius_m"])
             if radius <= self._region_margin:
                 raise ValueError("exploration radius is too small for the footprint")
+            if request.resume_task_id:
+                state = self._resume_task(request.resume_task_id)
+                if (request.max_duration_sec or request.max_radius_m
+                        or request.revisit_known != state["revisit_known"]):
+                    raise ValueError("resume must retain the saved task's bounds and revisit setting")
             with self._lock:
                 reason = self._readiness_reason()
                 if reason:
@@ -322,8 +328,16 @@ class RobotExplorer(Node):
             self.get_logger().warning(f"exploration rejected: {error}")
             return GoalResponse.REJECT
 
+    def _resume_task(self, identifier):
+        return load_task_checkpoint(
+            self._task_file, identifier, maximum_duration=self.config["max_duration_sec"],
+            maximum_radius=self.config["max_radius_m"], region_margin=self._region_margin,
+            maximum_points=self.config["max_map_cells"])
+
     def _readiness_reason(self, require_permission=True):
         try:
+            if self._shutdown_requested.is_set():
+                return "exploration server is shutting down"
             if not self.config["allow_exploration"]:
                 return "exploration disabled for fixed-map/RMF operation"
             self._healthy(require_permission=require_permission)
@@ -345,7 +359,7 @@ class RobotExplorer(Node):
             raise RuntimeError("exploration server is shutting down")
         if goal.is_cancel_requested:
             raise InterruptedError("exploration canceled")
-        if time.monotonic() >= deadline:
+        if task_time() >= deadline:
             raise TimeoutError("exploration duration reached")
         self._healthy()
         reason = self._quota_reason or self._quota_limit(time.monotonic())
@@ -460,12 +474,25 @@ class RobotExplorer(Node):
         previous_mapping = self._mapping
         visited, blocked = [], []
         mapping_requested = False
+        state = None
         try:
             duration, radius = task_limits(goal.request.max_duration_sec, goal.request.max_radius_m,
                                            self.config["max_duration_sec"], self.config["max_radius_m"])
             pose = self._pose()
             center = (pose.pose.position.x, pose.pose.position.y)
-            deadline = time.monotonic() + duration
+            deadline = task_time() + duration
+            if goal.request.resume_task_id:
+                state = self._resume_task(goal.request.resume_task_id)
+                center, radius, deadline = state["center"], state["radius"], state["deadline"]
+                visited, blocked = state["visited"], state["blocked"]
+                previous_mapping = state["previous_mapping"]
+                result.mapped_area_m2 = state["mapped_area_m2"]
+            else:
+                state = {"schema": 1, "id": bytes(goal.goal_id.uuid).hex(),
+                         "boot_id": Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
+                         "center": center, "radius": radius, "deadline": deadline,
+                         "revisit_known": goal.request.revisit_known, "retrying": False,
+                         "previous_mapping": previous_mapping}
             mapping_confirmed = False
 
             def check():
@@ -477,6 +504,12 @@ class RobotExplorer(Node):
             def progress():
                 return {"visited_targets": len(visited), "unreachable_targets": len(blocked),
                         "mapped_area_m2": result.mapped_area_m2}
+
+            def save():
+                state.update(visited=visited, blocked=blocked, mapped_area_m2=result.mapped_area_m2)
+                save_task_checkpoint(self._task_file, state)
+
+            save()
             while True:
                 try:
                     if not mapping_confirmed:
@@ -485,7 +518,20 @@ class RobotExplorer(Node):
                         self._set_mapping(True)
                         mapping_confirmed = True
                     if not self._explore_step(goal, check, center, radius, visited, blocked, result):
+                        if blocked and not state["retrying"]:
+                            # Retry once after other observations; temporary obstacles can clear.
+                            state["retrying"] = True
+                            blocked.clear()
+                            save()
+                            self._stage = "retrying_failed_targets"
+                            goal.publish_feedback(Explore.Feedback(stage=self._stage, **progress()))
+                            until = time.monotonic() + self.config["settle_sec"]
+                            while time.monotonic() < until:
+                                check()
+                                time.sleep(0.05)
+                            continue
                         break
+                    save()
                 except Paused as reason:
                     self._pause(goal, check, reason, progress)
         except Exception as error:
@@ -499,6 +545,13 @@ class RobotExplorer(Node):
                 except Exception as error:
                     result.complete = False
                     result.message += f"; cleanup failed: {error}"
+                    self.get_logger().error(result.message)
+            if state is not None and (not self._shutdown_requested.is_set() or goal.is_cancel_requested):
+                try:
+                    self._task_file.unlink(missing_ok=True)
+                except OSError as error:
+                    result.complete = False
+                    result.message += f"; checkpoint cleanup failed: {error}"
                     self.get_logger().error(result.message)
             result.visited_targets, result.unreachable_targets = len(visited), len(blocked)
             if self._nav_uncertain:
@@ -552,6 +605,8 @@ class RobotExplorer(Node):
             route = self._wait(plan.get_result_async(), self.config["service_timeout_sec"], check)
         finally:
             plan.cancel_goal_async()
+        if route.result.error_code == ComputePathToPose.Result.INVALID_PLANNER:
+            raise RuntimeError("Nav2 planner plugin is invalid")
         if (route.status != GoalStatus.STATUS_SUCCEEDED or route.result.error_code
                 or route.result.path.header.frame_id != "map" or not route.result.path.poses):
             blocked.append(target)
@@ -596,6 +651,8 @@ class RobotExplorer(Node):
         if navigation.status == GoalStatus.STATUS_CANCELED:
             raise RuntimeError("Nav2 goal canceled or replaced by another client")
         check()
+        if navigation.result.error_code == FollowPath.Result.INVALID_CONTROLLER:
+            raise RuntimeError("Nav2 controller plugin is invalid")
         (visited if navigation.status == GoalStatus.STATUS_SUCCEEDED else blocked).append(target)
         until = time.monotonic() + self.config["settle_sec"]
         while time.monotonic() < until:

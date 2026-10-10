@@ -193,10 +193,12 @@ planner_server:
     expected_planner_frequency: 5.0
     planner_plugins: [GridBased, ExploreKnown]
     GridBased:
-      plugin: nav2_navfn_planner::NavfnPlanner
+      plugin: nav2_smac_planner::SmacPlannerLattice
       tolerance: 0.20
-      use_astar: true
       allow_unknown: true
+      max_planning_time: 1.0
+      smooth_path: false
+      lattice_filepath: "$(find-pkg-share nav2_smac_planner)/sample_primitives/5cm_resolution/0.5m_turning_radius/omni/output.json"
     ExploreKnown:
       plugin: nav2_smac_planner::SmacPlannerLattice
       tolerance: 0.0

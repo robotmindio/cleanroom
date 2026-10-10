@@ -1,7 +1,11 @@
 """ROS-free map target selection and the shared mapping storage quota."""
 
 from pathlib import Path
+import json
 import math
+import os
+import tempfile
+import time
 
 import cv2
 import numpy as np
@@ -10,6 +14,63 @@ import yaml
 
 # Accepted stopping bound; separate from the folded body's map clearance.
 STOPPING_MARGIN_M = 0.77
+
+
+def task_time():
+    """Task budgets include suspend time and survive process restarts."""
+    return time.clock_gettime(time.CLOCK_BOOTTIME)
+
+
+def save_task_checkpoint(path, state):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as output:
+            temporary = Path(output.name)
+            json.dump(state, output, allow_nan=False)
+            output.flush()
+            os.fsync(output.fileno())
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def load_task_checkpoint(path, identifier, *, maximum_duration, maximum_radius, region_margin, maximum_points):
+    """Reject lost, expired or altered bounds instead of starting a fresh task."""
+    if len(identifier) != 32 or any(c not in "0123456789abcdef" for c in identifier):
+        raise ValueError("invalid exploration resume task ID")
+    if path.stat().st_size > 1024 * 1024:
+        raise ValueError("exploration checkpoint is too large")
+    state = json.loads(path.read_text())
+    if (not isinstance(state, dict) or type(state.get("schema")) is not int or state["schema"] != 1
+            or state.get("id") != identifier
+            or state.get("boot_id") != Path("/proc/sys/kernel/random/boot_id").read_text().strip()):
+        raise ValueError("exploration checkpoint does not match this task and host boot")
+    for name in ("deadline", "radius", "mapped_area_m2"):
+        value = state.get(name)
+        if type(value) not in (float, int) or not math.isfinite(value) or value < 0:
+            raise ValueError(f"invalid checkpoint {name}")
+    if not 0 < state["deadline"] - task_time() <= maximum_duration:
+        raise ValueError("saved exploration duration reached or exceeds current limits")
+    if not region_margin < state["radius"] <= maximum_radius:
+        raise ValueError("saved exploration radius exceeds current limits")
+    for name in ("revisit_known", "retrying", "previous_mapping"):
+        if type(state.get(name)) is not bool:
+            raise ValueError(f"invalid checkpoint {name}")
+    center = state.get("center")
+    groups = [state.get("visited"), state.get("blocked")]
+    if (not isinstance(center, list) or len(center) != 2
+            or any(not isinstance(points, list) for points in groups)
+            or sum(map(len, groups)) > maximum_points):
+        raise ValueError("invalid exploration checkpoint progress")
+    for point in [center, *groups[0], *groups[1]]:
+        if (not isinstance(point, list) or len(point) != 2
+                or any(type(v) not in (float, int) or not math.isfinite(v) for v in point)):
+            raise ValueError("invalid checkpoint position")
+        if math.dist(point, center) >= state["radius"] - region_margin:
+            raise ValueError("checkpoint progress exceeds its original region")
+    return state
 
 
 def load_navigation_footprint(path):
