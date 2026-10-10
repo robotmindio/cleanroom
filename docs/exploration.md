@@ -69,7 +69,8 @@ MPPI's native footprint-check optimization remains valid. The exploration
 region retains a 1.10 m body/stopping inset; targets and preflight paths stay
 inside it, and the active task ends if the live pose approaches the boundary.
 This inset is only the reserve at the task's maximum travel radius, not
-clearance from walls or furniture.
+clearance from walls or furniture. A requested radius must exceed this inset;
+for example, a 2.0 m radius permits centre travel up to 0.90 m from the start.
 A new goal is rejected while the map, services, SLAM/TF, motion permission or
 arm stow are not healthy.
 
