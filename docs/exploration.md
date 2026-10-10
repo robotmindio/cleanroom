@@ -13,12 +13,16 @@ robot pose, for at most 15 minutes:
 scripts/explore.sh
 ```
 
-The launcher sources `scripts/setup.bash`, revisits known space and prints action
-feedback and the terminal result. Ctrl-C requests cancellation of its own goal.
-For a managed split deployment, select the active installed workspace:
+The launcher uses `~/lekiwi_ws/current` when a managed deployment is installed,
+otherwise the checkout's build. It sources `scripts/setup.bash`, revisits known
+space and prints action feedback and the terminal result. A workspace containing
+a managed `current` release selects that release, including `LEKIWI_WS=~/lekiwi_ws`.
+Python imports use
+the selected installation, avoiding source packages hiding generated ROS types.
+Ctrl-C requests cancellation of its own goal. To select another workspace:
 
 ```bash
-LEKIWI_WS=~/lekiwi_ws/current scripts/explore.sh
+LEKIWI_WS=/path/to/workspace scripts/explore.sh
 ```
 
 The operator must remain at the motor-power stop with the accepted payload and
