@@ -27,6 +27,10 @@ class ExploreClient(Node):
         self.result = self.create_client(Explore.Impl.GetResultService, '/robot/explore/_action/get_result')
         self.reason = 'no exploration status received'
         self.status_at = time.monotonic()
+        self.ready = False
+        self.busy = None
+        self._prerequisites_ready = False
+        self._idle_since = None
         self._sent_id = self._sent_future = None
         self.create_subscription(DiagnosticArray, '/diagnostics', self._status, 10)
 
@@ -39,7 +43,16 @@ class ExploreClient(Node):
             if status.name == 'lekiwi/exploration':
                 values = {item.key: item.value for item in status.values}
                 self.reason = values.get('last_rejection') or status.message
-                self.status_at = time.monotonic()
+                self.busy = {'true': True, 'false': False}.get(values.get('busy'))
+                self.ready = status.message == 'ready' and self.busy is not None
+                self._prerequisites_ready = values.get('prerequisite_reason') == ''
+                if self.busy is not None:
+                    self.status_at = time.monotonic()
+                if self.busy is False and self._sent_id is not None:
+                    if self._idle_since is None:
+                        self._idle_since = time.monotonic()
+                else:
+                    self._idle_since = None
 
     def wait(self, predicate, seconds, interrupted=None):
         until = time.monotonic() + seconds
@@ -65,7 +78,8 @@ class ExploreClient(Node):
             self._client_executor.shutdown()
 
     def _run(self, interrupted):
-        if not self.wait(self.action.server_is_ready, 10, interrupted):
+        if not self.wait(lambda: self.action.server_is_ready() and self.ready
+                         and time.monotonic() - self.status_at < 1, 10, interrupted):
             print(f'Exploration unavailable: {self.reason}', flush=True)
             return 130 if interrupted.is_set() else 2
         goal_id = UUID(uuid=list(uuid.uuid4().bytes))
@@ -80,21 +94,27 @@ class ExploreClient(Node):
                 print(f'Exploration rejected: {self.reason}', flush=True)
                 return 2
             result = handle.get_result_async()
+            self._idle_since = None
             # The tracked server owns the task duration; Ctrl-C cancels this exact UUID.
             while (rclpy.ok(context=self.context) and not result.done() and not interrupted.is_set()
-                   and time.monotonic() - self.status_at < 10):
+                   and time.monotonic() - self.status_at < 10
+                   and (self._idle_since is None or time.monotonic() - self._idle_since < 1)):
                 rclpy.spin_once(self, executor=self._client_executor, timeout_sec=0.1)
             if result.done():
                 response = result.result()
                 print(response.result.message, flush=True)
                 return 0 if response.status == GoalStatus.STATUS_SUCCEEDED else 1
+            if self._idle_since is not None and time.monotonic() - self._idle_since >= 1:
+                print('Exploration task is no longer active; recovering its result or confirming its stop', flush=True)
         return self._stop(goal_id, future, interrupted)
 
     def _stop(self, goal_id, future, interrupted):
         # Acceptance can arrive late: cancellation still targets the UUID we sent.
         until = time.monotonic() + 10
         terminal = False
+        result_status = None
         while time.monotonic() < until and rclpy.ok(context=self.context):
+            accepted = False
             if self.cancel.service_is_ready():
                 request = CancelGoal.Request()
                 request.goal_info.goal_id = goal_id
@@ -102,7 +122,8 @@ class ExploreClient(Node):
                 self.wait(cancellation.done, 1)
             if future.done():
                 try:
-                    rejected = not future.result().accepted
+                    accepted = future.result().accepted
+                    rejected = not accepted
                 except Exception:
                     rejected = False  # The exact UUID can still be canceled without a client handle.
                 if rejected:
@@ -110,13 +131,26 @@ class ExploreClient(Node):
                     break
             if self.result.service_is_ready():
                 reply = self.result.call_async(Explore.Impl.GetResultService.Request(goal_id=goal_id))
-                if self.wait(reply.done, 1) and reply.result().status in (
-                        GoalStatus.STATUS_SUCCEEDED, GoalStatus.STATUS_CANCELED, GoalStatus.STATUS_ABORTED):
-                    terminal = True
-                    break
+                if self.wait(reply.done, 1):
+                    result_status = reply.result().status
+                    if result_status in (GoalStatus.STATUS_SUCCEEDED, GoalStatus.STATUS_CANCELED, GoalStatus.STATUS_ABORTED):
+                        terminal = True
+                        break
+                    # Fresh idle prerequisites include the independent navigation ownership guard.
+                    if (result_status == GoalStatus.STATUS_UNKNOWN and accepted and self.busy is False
+                            and self._prerequisites_ready and time.monotonic() - self.status_at < 1):
+                        print('Exploration server lost this task; owned navigation has stopped', flush=True)
+                        terminal = True
+                        break
             self.wait(lambda: False, 0.1)
         print('Exploration stopped' if terminal else 'Exploration stop unconfirmed; check robot status', flush=True)
-        return 130 if interrupted.is_set() and terminal else 2
+        if interrupted.is_set() and terminal:
+            return 130
+        if terminal and result_status == GoalStatus.STATUS_SUCCEEDED:
+            return 0
+        if terminal and result_status in (GoalStatus.STATUS_CANCELED, GoalStatus.STATUS_ABORTED):
+            return 1
+        return 2
 
 
 def main(args=None):

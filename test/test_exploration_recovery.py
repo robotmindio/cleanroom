@@ -12,6 +12,56 @@ from lekiwi_rmf.action import Explore
 from test_exploration_ros import graph as graph, response, start, wait
 
 
+def test_operator_waits_for_recovering_startup_inputs_without_a_rejected_goal(graph):
+    from lekiwi_rmf.explore_client import ExploreClient
+
+    peers, explorer, _ = graph
+    peers.publish_slam = False
+    wait(lambda: 'slam' in explorer._readiness_reason())
+    interrupted = threading.Event()
+    node = ExploreClient(context=explorer.context)
+
+    def recover():
+        time.sleep(0.5)
+        peers.publish_slam = True
+        wait(lambda: peers.nav_active)
+        interrupted.set()
+
+    worker = threading.Thread(target=recover)
+    worker.start()
+    try:
+        assert node.run(interrupted) == 130
+        assert not explorer._rejection
+        assert peers.nav_count == 1 and peers.nav_canceled == 1
+    finally:
+        peers.publish_slam = True
+        worker.join(timeout=5)
+        assert not worker.is_alive()
+        node.destroy_node()
+
+
+@pytest.mark.parametrize('success', [False, True])
+def test_operator_recovers_a_lost_result_reply_from_an_idle_server(graph, monkeypatch, success):
+    from lekiwi_rmf.explore_client import ExploreClient
+    from rclpy.task import Future
+
+    peers, explorer, _ = graph
+    if success:
+        peers.grid.data = [0 if 33 <= i % 80 < 47 and 33 <= i // 80 < 47 else 100
+                           for i in range(6400)]
+        wait(lambda: explorer._map[0][0, 0] == 100)
+    else:
+        explorer.config['max_duration_sec'] = 0.7
+    node = ExploreClient(context=explorer.context)
+    # Drop the first result RPC; the real server still completes and retains the result.
+    monkeypatch.setattr(node.action, '_get_result_async', lambda _goal: Future())
+    try:
+        assert node.run(threading.Event()) == (0 if success else 1)
+        assert not peers.nav_active and not explorer._busy
+    finally:
+        node.destroy_node()
+
+
 @pytest.mark.parametrize('failure', ['overlap', 'invalid_source', 'missing_status'])
 def test_collision_stop_pauses_without_discarding_targets_and_clearing_resumes(graph, failure):
     peers, explorer, client = graph
