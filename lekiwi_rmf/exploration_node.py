@@ -10,6 +10,7 @@ import time
 import yaml
 
 from action_msgs.msg import GoalStatus
+from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from ament_index_python.packages import get_package_share_directory
 from geometry_msgs.msg import PoseStamped
 from nav2_msgs.action import ComputePathToPose, NavigateToPose
@@ -27,8 +28,10 @@ from rtabmap_msgs.msg import Info
 from std_msgs.msg import Bool
 from std_srvs.srv import Empty
 from tf2_ros import Buffer, TransformException, TransformListener
+from unique_identifier_msgs.msg import UUID
 
 from lekiwi_rmf.action import Explore
+from lekiwi_rmf.exploration_owner_guard import owned_goal_id
 from lekiwi_rmf.exploration import (
     database_size, footprint_is_free, load_navigation_footprint, map_geometry, select_target, task_limits,
     with_body_free,
@@ -75,6 +78,10 @@ class RobotExplorer(Node):
         self._busy = False
         self._nav_uncertain = False
         self._nav_request = self._nav_handle = self._nav_result = None
+        self._owned_id = None
+        self._guard_ack = None
+        self._stage = "idle"
+        self._rejection = ""
         self._map = None
         self._inputs = {}
         self._mapping = None
@@ -83,6 +90,7 @@ class RobotExplorer(Node):
         self._mapping_started = None
         self._quota_reason = ""
         self._mode_future = self._freeze_future = None
+        self._freeze_unconfirmed = False
         self._mode_requested_at = 0.0
         self._freeze_requested_at = 0.0
         self._shutdown_requested = threading.Event()
@@ -95,6 +103,12 @@ class RobotExplorer(Node):
             self.create_subscription(Bool, f"/safety/{topic}",
                                      lambda msg, name=topic: self._record(name, msg.data), latched)
         self.create_subscription(Info, "/info", lambda msg: self._record("slam", msg.header), 1)
+        self.create_subscription(Bool, "/robot/explore/navigation_guard_ready",
+                                 lambda msg: self._record("navigation_guard", msg.data), 1)
+        self.create_subscription(UUID, "/robot/explore/navigation_guarded", self._on_guard_ack, 10)
+        self._owner_pub = self.create_publisher(UUID, "/robot/explore/navigation_owner", 10)
+        self._diagnostics = self.create_publisher(DiagnosticArray, "/diagnostics", 10)
+        self.create_timer(0.2, self._owner_heartbeat, clock=Clock(clock_type=ClockType.STEADY_TIME))
         self._mapping_parameters = AsyncParameterClient(self, "/rtabmap", callback_group=self._group)
         self._mapping_client = self.create_client(Empty, "/rtabmap/set_mode_mapping", callback_group=self._group)
         self._localization_client = self.create_client(Empty, "/rtabmap/set_mode_localization", callback_group=self._group)
@@ -106,6 +120,13 @@ class RobotExplorer(Node):
         )
         # Wall time quotas remain effective even if simulation time stops.
         self._timer = self.create_timer(0.25, self._monitor, clock=Clock(clock_type=ClockType.STEADY_TIME))
+
+    def destroy_node(self):
+        # rclpy Node.destroy_node does not destroy action waitables.
+        self._action.destroy()
+        self._navigation.destroy()
+        self._planner.destroy()
+        return super().destroy_node()
 
     def _record(self, name, value):
         self._inputs[name] = (value, time.monotonic())
@@ -144,6 +165,28 @@ class RobotExplorer(Node):
                 self.get_logger().error(f"cannot read mapping mode: {error}", throttle_duration_sec=5)
 
     def _monitor(self):
+        self._monitor_mapping()
+        reason = self._readiness_reason()
+        status = DiagnosticStatus(name="lekiwi/exploration", hardware_id="lekiwi",
+                                  level=DiagnosticStatus.WARN if reason else DiagnosticStatus.OK,
+                                  message=reason or "ready")
+        status.values = [KeyValue(key="stage", value=self._stage),
+                         KeyValue(key="busy", value=str(self._busy).lower()),
+                         KeyValue(key="prerequisite_reason", value=self._readiness_reason(require_permission=False)),
+                         KeyValue(key="last_rejection", value=self._rejection)]
+        message = DiagnosticArray(status=[status])
+        message.header.stamp = self.get_clock().now().to_msg()
+        self._diagnostics.publish(message)
+
+    def _on_guard_ack(self, message):
+        self._guard_ack = (bytes(message.uuid), time.monotonic())
+
+    def _owner_heartbeat(self):
+        owned = self._owned_id
+        if owned is not None:
+            self._owner_pub.publish(owned)
+
+    def _monitor_mapping(self):
         now = time.monotonic()
         if self._mapping_parameters.services_are_ready():
             if self._mode_future is not None and not self._mode_future.done():
@@ -157,28 +200,33 @@ class RobotExplorer(Node):
                 self._mode_future.add_done_callback(lambda future, sent=now: self._mode_response(future, sent))
         # Mode replies cannot restart a session midway through an old freeze decision.
         with self._lock:
-            if self._mapping_started is None:
-                return
+            if (self._freeze_future is not None and not self._freeze_future.done()
+                    and now - self._freeze_requested_at > self.config["service_timeout_sec"]):
+                self._freeze_future.cancel()
+                self._freeze_future = None
             try:
-                reason = self._quota_limit(now)
+                reason = self._quota_limit(now) if self._mapping_started is not None else ""
             except OSError as error:
                 reason = f"cannot measure mapping storage: {error}"
             if reason:
                 self._quota_reason = reason
-                if (self._freeze_future is not None and not self._freeze_future.done()
-                        and now - self._freeze_requested_at > self.config["service_timeout_sec"]):
-                    self._freeze_future.cancel()
-                    self._freeze_future = None
+            if reason or self._freeze_unconfirmed:
                 if self._localization_client.service_is_ready() and (
                         self._freeze_future is None or self._freeze_future.done()):
-                    self.get_logger().warning(f"freezing RTAB-Map: {reason}", throttle_duration_sec=5)
+                    self.get_logger().warning(f"freezing RTAB-Map: {self._quota_reason}", throttle_duration_sec=5)
+                    self._freeze_unconfirmed = True
                     self._freeze_future = self._localization_client.call_async(Empty.Request())
                     self._freeze_requested_at = now
                     self._freeze_future.add_done_callback(self._check_freeze)
 
     def _check_freeze(self, future):
+        if future.cancelled():
+            return
         try:
             future.result()
+            with self._lock:
+                if future is self._freeze_future:
+                    self._freeze_unconfirmed = False
         except Exception as error:
             self.get_logger().error(f"cannot freeze RTAB-Map: {error}")
 
@@ -206,11 +254,13 @@ class RobotExplorer(Node):
         pose.pose.orientation = q
         return pose
 
-    def _healthy(self):
+    def _healthy(self, require_permission=True):
         now = time.monotonic()
         if self._map is None:
             raise Paused("no valid occupancy map")
         for name in ("base_motion_permitted", "arm_stowed", "slam"):
+            if name == "base_motion_permitted" and not require_permission:
+                continue
             value, received = self._inputs.get(name, (None, 0))
             timeout = self.config["slam_timeout_sec"] if name == "slam" else self.config["data_timeout_sec"]
             if not value or now - received > timeout:
@@ -221,6 +271,9 @@ class RobotExplorer(Node):
                     raise Paused("SLAM observations are stale")
         if self._mapping is None or now - self._mode_at > self.config["service_timeout_sec"]:
             raise Paused("mapping mode is unknown or stale")
+        value, seen = self._inputs.get("navigation_guard", (False, 0.0))
+        if self.config["allow_exploration"] and (not value or now - seen > self.config["data_timeout_sec"]):
+            raise Paused("navigation ownership guard unavailable or stopping an orphaned goal")
 
     def _footprint_clear(self, pose, grid=None):
         q, p = pose.pose.orientation, pose.pose.position
@@ -243,22 +296,40 @@ class RobotExplorer(Node):
                                     self.config["max_duration_sec"], self.config["max_radius_m"])
             if radius <= 2 * self._region_margin:
                 raise ValueError("exploration radius is too small for the footprint")
-            self._healthy()
+            with self._lock:
+                reason = self._readiness_reason()
+                if reason:
+                    raise RuntimeError(reason)
+                if self._busy or self._nav_uncertain:
+                    raise RuntimeError("another goal is active or its navigation stop is unconfirmed")
+                self._busy = True
+                if self._mapping is False:
+                    self._quota_reason = ""
+                self._rejection = ""
+                self._stage = "starting"
+            return GoalResponse.ACCEPT
+        except (RuntimeError, ValueError, OSError, TransformException) as error:
+            self._rejection = str(error)
+            self.get_logger().warning(f"exploration rejected: {error}")
+            return GoalResponse.REJECT
+
+    def _readiness_reason(self, require_permission=True):
+        try:
+            if not self.config["allow_exploration"]:
+                return "exploration disabled for fixed-map/RMF operation"
+            self._healthy(require_permission=require_permission)
             self._pose()
             if (not self._navigation.server_is_ready() or not self._planner.server_is_ready()
                     or not self._mapping_client.service_is_ready()
                     or not self._localization_client.service_is_ready()):
-                raise RuntimeError("Nav2 or mapping services are unavailable")
-            if self._quota_limit(time.monotonic()):
-                raise RuntimeError(self._quota_limit(time.monotonic()))
-            with self._lock:
-                if self._busy or self._nav_uncertain:
-                    raise RuntimeError("another goal is active or its navigation stop is unconfirmed")
-                self._busy = True
-            return GoalResponse.ACCEPT
-        except (RuntimeError, ValueError, OSError, TransformException) as error:
-            self.get_logger().warning(f"exploration rejected: {error}")
-            return GoalResponse.REJECT
+                return "Nav2 or mapping services are unavailable"
+            if self._nav_uncertain:
+                return "previous navigation stop is unconfirmed"
+            if self._freeze_unconfirmed or (self._freeze_future is not None and not self._freeze_future.done()):
+                return "waiting for mapping quota freeze to finish"
+            return self._quota_limit(time.monotonic())
+        except (RuntimeError, OSError, TransformException) as error:
+            return str(error)
 
     def _checkpoint(self, goal, deadline, center, radius):
         if self._shutdown_requested.is_set():
@@ -310,7 +381,9 @@ class RobotExplorer(Node):
                 handle.cancel_goal_async()
                 handle.get_result_async().add_done_callback(self._late_stopped)
             else:
-                self._nav_uncertain = False
+                with self._lock:
+                    self._owned_id = None
+                    self._nav_uncertain = False
         except Exception as error:
             self.get_logger().error(f"late navigation cancellation failed: {error}")
 
@@ -318,12 +391,16 @@ class RobotExplorer(Node):
         try:
             if future.result().status in (GoalStatus.STATUS_SUCCEEDED, GoalStatus.STATUS_CANCELED,
                                           GoalStatus.STATUS_ABORTED):
-                self._nav_uncertain = False
+                with self._lock:
+                    self._owned_id = None
+                    self._nav_uncertain = False
         except Exception as error:
             self.get_logger().error(f"late navigation stop is unconfirmed: {error}")
 
     def _stop_navigation(self):
         if self._nav_request is None:
+            if not self._nav_uncertain:
+                self._owned_id = None
             return
         self._nav_uncertain = True
         try:
@@ -337,10 +414,12 @@ class RobotExplorer(Node):
                                            GoalStatus.STATUS_ABORTED):
                     raise RuntimeError("Nav2 did not confirm a terminal status")
             self._nav_uncertain = False
+            self._owned_id = None
         except Exception as error:
             # Preserve ownership until a late acceptance/result is canceled.
             # An unconfirmed stop always ends the task, never pauses it.
             self._nav_request.add_done_callback(self._cancel_late)
+            self._owned_id = None
             raise RuntimeError(f"navigation stop unconfirmed: {error}") from error
         finally:
             self._nav_request = self._nav_handle = self._nav_result = None
@@ -353,12 +432,17 @@ class RobotExplorer(Node):
         """
         self._stop_navigation()
         self.get_logger().warning(f"exploration paused: {reason}")
-        goal.publish_feedback(Explore.Feedback(stage=f"paused: {reason}", **progress()))
+        self._stage = f"paused: {reason}"
+        goal.publish_feedback(Explore.Feedback(stage=self._stage, **progress()))
         while True:
             try:
                 check()
                 break
-            except Paused:
+            except Paused as current:
+                stage = f"paused: {current}"
+                if stage != self._stage:
+                    self._stage = stage
+                    goal.publish_feedback(Explore.Feedback(stage=stage, **progress()))
                 time.sleep(0.2)
         self.get_logger().info("exploration resumed")
 
@@ -419,6 +503,7 @@ class RobotExplorer(Node):
                 goal.abort()
             with self._lock:
                 self._busy = False
+                self._stage = "idle"
         return result
 
     def _explore_step(self, goal, check, center, radius, visited, blocked, result):
@@ -468,8 +553,19 @@ class RobotExplorer(Node):
                     or not self._footprint_clear(waypoint, grid)):
                 blocked.append(target)
                 return True
+        self._owned_id = owned_goal_id()
+        until = time.monotonic() + self.config["service_timeout_sec"]
+        while (self._guard_ack is None or self._guard_ack[0] != bytes(self._owned_id.uuid)
+               or time.monotonic() - self._guard_ack[1] > self.config["data_timeout_sec"]):
+            check()
+            if time.monotonic() >= until:
+                self._owned_id = None
+                raise Paused("navigation ownership guard did not acknowledge this goal")
+            time.sleep(0.05)
+        self._stage = stage
         self._nav_request = self._navigation.send_goal_async(NavigateToPose.Goal(
             pose=destination, behavior_tree=self.config["navigation_tree"]),
+            goal_uuid=self._owned_id,
             feedback_callback=lambda _msg: goal.publish_feedback(Explore.Feedback(
                 stage=stage, current_pose=_msg.feedback.current_pose, visited_targets=len(visited),
                 unreachable_targets=len(blocked), mapped_area_m2=result.mapped_area_m2)))

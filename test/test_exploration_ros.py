@@ -28,6 +28,7 @@ from tf2_ros import TransformBroadcaster
 
 from lekiwi_rmf.action import Explore
 from lekiwi_rmf.exploration_node import RobotExplorer
+from lekiwi_rmf.exploration_owner_guard import ExplorationOwnerGuard
 
 
 def wait(predicate, timeout=5):
@@ -146,12 +147,19 @@ class RobotPeers(Node):
         time.sleep(self.acceptance_delay)
         return GoalResponse.ACCEPT
 
+    def destroy_node(self):
+        if self.navigator is not None:
+            self.navigator.destroy()
+        self.planner.destroy()
+        return super().destroy_node()
+
 
 @pytest.fixture
 def graph(tmp_path):
     context = Context()
     rclpy.init(context=context)
     peers = RobotPeers(context)
+    guard = ExplorationOwnerGuard(context=context)
     explorer = RobotExplorer(context=context, parameter_overrides=[
         Parameter("database_path", value=str(tmp_path / "map.db")),
         Parameter("mapping_max_bytes", value=4096),
@@ -163,28 +171,33 @@ def graph(tmp_path):
     client_node = Node("exploration_test", context=context)
     client = ActionClient(client_node, Explore, "/robot/explore")
     executor = MultiThreadedExecutor(num_threads=6, context=context)
-    for node in (peers, explorer, client_node):
+    for node in (peers, guard, explorer, client_node):
         executor.add_node(node)
     finished = Future()
     thread = threading.Thread(target=executor.spin_until_future_complete, args=(finished,), daemon=True)
     thread.start()
-    wait(lambda: client.server_is_ready() and explorer._mapping is False and explorer._map is not None)
-    wait(lambda: "slam" in explorer._inputs and explorer._navigation.server_is_ready()
-         and explorer._planner.server_is_ready() and explorer._tf.can_transform("map", "base_footprint", rclpy.time.Time()))
     try:
+        wait(lambda: client.server_is_ready() and explorer._mapping is False and explorer._map is not None)
+        wait(lambda: "slam" in explorer._inputs and explorer._navigation.server_is_ready()
+             and explorer._planner.server_is_ready() and explorer._tf.can_transform("map", "base_footprint", rclpy.time.Time()))
+        wait(lambda: explorer._inputs.get("navigation_guard", (False,))[0])
         yield peers, explorer, client
     finally:
         peers.nav_mode = "fail"
         peers.permitted = False
-        wait(lambda: not explorer._busy, timeout=6)
-        wait(lambda: not peers.nav_active)
-        finished.set_result(True)
-        thread.join(timeout=5)
-        assert not thread.is_alive()
-        assert executor.shutdown(timeout_sec=5)
-        for node in (client_node, explorer, peers):
-            node.destroy_node()
-        context.shutdown()
+        explorer._shutdown_requested.set()
+        try:
+            wait(lambda: not explorer._busy, timeout=6)
+            wait(lambda: not peers.nav_active)
+        finally:
+            finished.set_result(True)
+            thread.join(timeout=5)
+            assert not thread.is_alive()
+            assert executor.shutdown(timeout_sec=5)
+            client.destroy()
+            for node in (client_node, explorer, guard, peers):
+                node.destroy_node()
+            context.shutdown()
 
 
 def start(graph, duration=8, revisit=False):

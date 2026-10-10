@@ -104,9 +104,7 @@ def test_map_readiness_receives_rtabmaps_latched_grid():
 
 
 def test_map_gate_requests_the_saved_rtabmap_grid_once():
-    class Future:
-        def add_done_callback(self, callback):
-            self.callback = callback
+    from rclpy.task import Future
 
     class Client:
         def __init__(self):
@@ -122,6 +120,8 @@ def test_map_gate_requests_the_saved_rtabmap_grid_once():
     gate = ReadinessGate.__new__(ReadinessGate)
     gate._ready = False
     gate._map_publish_requested = False
+    gate._map_publish_at = 0.0
+    gate._map_future = None
     gate._map_publish_client = Client()
 
     gate._request_map_publication()
@@ -143,10 +143,10 @@ def test_map_gate_retries_when_the_publish_service_call_fails():
     gate._map_publish_requested = True
     gate.get_logger = lambda: types.SimpleNamespace(warning=warnings.append)
 
-    def fail():
-        raise RuntimeError("service unavailable")
-
-    gate._map_publication_finished(types.SimpleNamespace(result=fail))
+    from rclpy.task import Future
+    gate._map_future = Future()
+    gate._map_future.set_exception(RuntimeError("service unavailable"))
+    gate._map_publication_finished(gate._map_future)
 
     assert not gate._map_publish_requested
     assert "service unavailable" in warnings[0]
@@ -358,3 +358,65 @@ def test_immediate_mapping_session_is_reported_and_reaches_the_mapper():
     assert mapper["parameters"]["Rtabmap/StartNewMapOnLoopClosure"] == "false"
     mapper = find_node(resolve_bringup(profile="sim", slam_mode="localization"), name="rtabmap")
     assert mapper["parameters"]["Rtabmap/StartNewMapOnLoopClosure"] == "true"
+
+
+def test_lost_lifecycle_reply_is_retried_without_pretending_ready(monkeypatch):
+    from rclpy.task import Future
+    import lekiwi_rmf.readiness_gate as module
+
+    now = [10.0]
+    monkeypatch.setattr(module.time, 'monotonic', lambda: now[0])
+    replies = [Future(), Future()]
+    calls = []
+    gate = ReadinessGate.__new__(ReadinessGate)
+    gate._ready = False
+    gate._lifecycle_future = None
+    gate._action_client = types.SimpleNamespace(wait_for_server=lambda **_: True)
+    gate._lifecycle_client = types.SimpleNamespace(wait_for_service=lambda **_: True,
+        call_async=lambda request: calls.append(request) or replies[len(calls) - 1])
+    gate.get_logger = lambda: types.SimpleNamespace(warning=lambda _: None)
+    gate._check_action()
+    now[0] += 4
+    gate._check_action()
+    assert replies[0].cancelled() and len(calls) == 2 and not gate._ready
+    replies[1].set_result(types.SimpleNamespace(current_state=types.SimpleNamespace(id=State.PRIMARY_STATE_ACTIVE)))
+    gate._check_action()
+    assert gate._ready
+
+
+@pytest.mark.parametrize('lost_reply', [True, False])
+def test_map_publication_retries_until_a_valid_grid_arrives(monkeypatch, lost_reply):
+    from rclpy.task import Future
+    import lekiwi_rmf.readiness_gate as module
+
+    now = [10.0]
+    monkeypatch.setattr(module.time, 'monotonic', lambda: now[0])
+    replies = [Future(), Future()]
+    requests = []
+    gate = ReadinessGate.__new__(ReadinessGate)
+    gate._ready = gate._map_publish_requested = False
+    gate._map_future = None
+    gate.get_logger = lambda: types.SimpleNamespace(warning=lambda _: None, info=lambda _: None)
+    gate._map_publish_client = types.SimpleNamespace(service_is_ready=lambda: True,
+        call_async=lambda request: requests.append(request) or replies[len(requests) - 1])
+    gate._request_map_publication()
+    if not lost_reply:
+        replies[0].set_result(object())
+    now[0] += 4
+    gate._request_map_publication()
+    assert len(requests) == 2 and not gate._ready
+    grid = OccupancyGrid()
+    grid.info.width = grid.info.height = 1
+    grid.info.resolution = 0.05
+    grid.data = [0]
+    gate._on_message(grid)
+    now[0] += 4
+    gate._request_map_publication()
+    assert len(requests) == 2 and gate._ready
+
+
+def test_navigation_and_mapping_children_recover_after_exit():
+    records = resolve_bringup(profile='sim')
+    for name in ('cmd_vel_mux', 'slam_cloud', 'robot_explorer', 'exploration_owner_guard'):
+        node = find_node(records, name=name)
+        assert (node['respawn'], node['respawn_delay']) == (True, 2.0)

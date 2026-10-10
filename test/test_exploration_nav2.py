@@ -22,6 +22,7 @@ from rclpy.parameter import Parameter
 
 from lekiwi_rmf.action import Explore
 from lekiwi_rmf.exploration_node import RobotExplorer
+from lekiwi_rmf.exploration_owner_guard import ExplorationOwnerGuard
 from test_exploration_ros import RobotPeers, response, wait
 
 
@@ -33,6 +34,7 @@ def test_real_nav2_tree_uses_known_space_planner_and_cancels_controller(tmp_path
     context = Context()
     rclpy.init(context=context)
     peers = RobotPeers(context, native_navigation=True)
+    guard = ExplorationOwnerGuard(context=context)
     peers.nav_mode = "hold" if cancel else "success"
 
     def follow(goal):
@@ -65,7 +67,7 @@ def test_real_nav2_tree_uses_known_space_planner_and_cancels_controller(tmp_path
     client = ActionClient(client_node, Explore, "/robot/explore")
     lifecycle = client_node.create_client(ChangeState, "/bt_navigator/change_state")
     executor = MultiThreadedExecutor(num_threads=6, context=context)
-    for node in (peers, explorer, client_node):
+    for node in (peers, guard, explorer, client_node):
         executor.add_node(node)
     finished = Future()
     thread = threading.Thread(target=executor.spin_until_future_complete, args=(finished,), daemon=True)
@@ -92,6 +94,7 @@ def test_real_nav2_tree_uses_known_space_planner_and_cancels_controller(tmp_path
                 assert reply.success, log_path.read_text()
             wait(lambda: client.server_is_ready() and explorer._navigation.server_is_ready()
                  and explorer._planner.server_is_ready())
+            wait(lambda: explorer._inputs.get("navigation_guard", (False,))[0])
             handle = response(client.send_goal_async(Explore.Goal(max_radius_m=2.5)))
             assert handle.accepted, log_path.read_text()
             if cancel:
@@ -119,6 +122,7 @@ def test_real_nav2_tree_uses_known_space_planner_and_cancels_controller(tmp_path
             assert not thread.is_alive()
             assert executor.shutdown(timeout_sec=5)
             controller.destroy()
-            for node in (client_node, explorer, peers):
+            client.destroy()
+            for node in (client_node, explorer, guard, peers):
                 node.destroy_node()
             context.shutdown()

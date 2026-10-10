@@ -112,6 +112,22 @@ result explicitly reports that the stop is unconfirmed, blocks further
 exploration, and cancels a late acceptance when it arrives. Normal SIGINT and
 SIGTERM keep DDS alive for that cleanup before shutting the server down.
 
+An independent `exploration_owner_guard` watches each Explorer-generated Nav2
+UUID with a one-second wall-time ownership lease. The Explorer obtains its
+acknowledgment before sending navigation. If the Explorer dies, the guard cancels
+that UUID and waits for a terminal Nav2 status before allowing another owner.
+A restarted guard discovers prior ownership through Nav2's retained action status.
+Ordinary Nav2 client UUIDs are unaffected. The mux, merged SLAM cloud, Explorer and
+owner guard restart after an unexpected exit; permission and sensor leases still
+apply during recovery.
+
+`scripts/explore.sh` returns 0 only for a successful action result, 1 for an
+aborted/canceled result, 2 for rejection, unavailable peers or an unconfirmed stop,
+and 130 after Ctrl-C confirms cancellation. Discovery and cancellation are bounded;
+the server owns the configured task duration. `/diagnostics`, status
+`lekiwi/exploration`, exposes current readiness, stage and the last refusal reason.
+Paused feedback updates when the blocking cause changes.
+
 ## Mapping lifecycle and quotas
 
 The task verifies `/rtabmap/set_mode_mapping` before navigating. It preserves
@@ -127,7 +143,9 @@ from localization starts a fresh wall-time session; a transient parameter RPC
 failure does not renew its budget. At `rtabmap_mapping_max_seconds` or
 `rtabmap_mapping_max_bytes`, the monitor calls `/rtabmap/set_mode_localization`;
 an active exploration cancels navigation and returns incomplete. Switching
-back to mapping cannot bypass a full storage quota. The robot's normal safety
+back to mapping cannot bypass a full storage quota. After a completed duration
+freeze is confirmed, the next accepted task starts a fresh session without
+inheriting the previous session's stop reason. The robot's normal safety
 and torque policy stays unchanged.
 
 The mapper and this quota monitor must remain running. This task runner does

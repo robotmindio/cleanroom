@@ -91,6 +91,21 @@ disarm() {
     sleep 3
   done
 }
+operational_ready() {
+  local timeout_sec=$1 armed=$2 setting
+  local arguments=(--timeout "$timeout_sec") stack_arguments=()
+  local exploration=true
+  read -r -a stack_arguments <<<"$(sed -n 's/^LEKIWI_STACK_ARGS=//p' /etc/default/lekiwi-stack)"
+  for setting in "${stack_arguments[@]}"; do
+    case $setting in
+      localization:=amcl|start_rmf:=true) exploration=false ;;
+      map:=?*) exploration=false ;;
+    esac
+  done
+  [[ $exploration != true ]] || arguments+=(--exploration)
+  [[ $armed != true ]] || arguments+=(--armed)
+  /usr/bin/python3 -m lekiwi_rmf.stack_readiness "${arguments[@]}"
+}
 remote_unit_exists() {
   "${ssh_command[@]}" /usr/bin/systemctl cat "$1" >/dev/null 2>&1
 }
@@ -306,8 +321,12 @@ if [[ $refresh_compute == false && $refresh_device == false &&
       $("${ssh_command[@]}" "cat '$remote_marker' 2>/dev/null || true") == "$target" ]] &&
     /usr/bin/systemctl is-active --quiet lekiwi-stack.service &&
     remote_unit_active_all "${device_units[@]}" && verify_release; then
-  echo "already deployed ${target:0:12}; services and sealed releases are current"
-  exit 0
+  ros_setup
+  if operational_ready 30 "$([[ ${LEKIWI_DISARM_ON_FAILURE:-false} == true ]] && echo false || echo true)"; then
+    echo "already deployed ${target:0:12}; sealed releases and robot readiness verified"
+    exit 0
+  fi
+  log "Current revision is installed but not operationally ready; continuing deployment recovery"
 fi
 
 /usr/bin/systemctl is-active --quiet lekiwi-stack.service || die "lekiwi-stack.service must be running before deployment"
@@ -451,10 +470,7 @@ lidar_frame=$(timeout 30 ros2 topic echo --once --field header.frame_id /scan | 
 [[ $lidar_frame == laser ]] || die "canonical /scan is not the LD06 frame: $lidar_frame"
 
 verify_release || die "qualified release changed during deployment"
-log "Recording the verified deployment revision"
-printf '%s\n' "$target" > "$marker"
-"${ssh_command[@]}" "mkdir -p '$remote_home/.ros/lekiwi' && printf '%s\\n' '$target' > '$remote_marker'"
-trap - EXIT
+operational_ready 120 false || die "navigation did not become operationally ready"
 # The verification above left the driver deliberately disarmed. A domestic robot stays
 # armed, so arm it again; only LEKIWI_DISARM_ON_FAILURE=true keeps it disarmed for an operator.
 outcome="robot remains disarmed"
@@ -462,9 +478,14 @@ if [[ ${LEKIWI_DISARM_ON_FAILURE:-false} != true ]]; then
   if wait_for 60 sh -c "ros2 service call /safety/arm std_srvs/srv/Trigger '{}' | grep -q 'success=True'"; then
     outcome="robot armed"
   else
-    outcome="robot could not be armed (run: ros2 service call /safety/arm std_srvs/srv/Trigger '{}')"
+    die "required re-arm failed; deployment remains unverified"
   fi
+  operational_ready 30 true || die "armed robot did not grant fresh base permission"
 fi
+log "Recording the verified deployment revision"
+printf '%s\n' "$target" > "$marker"
+"${ssh_command[@]}" "mkdir -p '$remote_home/.ros/lekiwi' && printf '%s\\n' '$target' > '$remote_marker'"
+trap - EXIT
 echo "deployed ${target:0:12} to compute and $device; $outcome"
-exit
+exit 0
 }

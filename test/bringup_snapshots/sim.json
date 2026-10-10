@@ -88,8 +88,24 @@
      "use_sim_time": true
     },
     "remappings": [],
-    "respawn": false,
-    "respawn_delay": null,
+    "respawn": true,
+    "respawn_delay": 2.0,
+    "ros_arguments": []
+   },
+   {
+    "arguments": [],
+    "env": {
+     "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
+     "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
+    },
+    "name": "exploration_owner_guard",
+    "namespace": "",
+    "node": "lekiwi_rmf/exploration_owner_guard",
+    "output": "screen",
+    "parameters": {},
+    "remappings": [],
+    "respawn": true,
+    "respawn_delay": 2.0,
     "ros_arguments": []
    },
    {
@@ -417,8 +433,8 @@
    "use_sim_time": true
   },
   "remappings": [],
-  "respawn": false,
-  "respawn_delay": null,
+  "respawn": true,
+  "respawn_delay": 2.0,
   "ros_arguments": []
  },
  {
@@ -435,8 +451,8 @@
    "permission_timeout": 0.5
   },
   "remappings": [],
-  "respawn": false,
-  "respawn_delay": null,
+  "respawn": true,
+  "respawn_delay": 2.0,
   "ros_arguments": []
  },
  {

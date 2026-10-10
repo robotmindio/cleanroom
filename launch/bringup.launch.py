@@ -320,6 +320,7 @@ def _stack(context):
             name="cmd_vel_mux",
             parameters=[{"permission_timeout": lease}],
             output="screen",
+            respawn=True, respawn_delay=2.0,
         ),
         *_include(nav2_launch("localization_launch.py"), topology.amcl,
                   map=selected_map, params_file=params_file, use_sim_time=use_sim_time),

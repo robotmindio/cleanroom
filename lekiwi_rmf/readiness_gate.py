@@ -10,6 +10,7 @@ starting a degraded control stack after an arbitrary delay.
 from __future__ import annotations
 
 import math
+import time
 from typing import Optional
 
 import rclpy
@@ -71,6 +72,8 @@ class ReadinessGate(Node):
         self.declare_parameter("minimum_joint_samples", 20)
         self._ready = False
         self._map_publish_requested = False
+        self._map_publish_at = self._lifecycle_at = 0.0
+        self._map_future = None
         kind = str(self.get_parameter("kind").value)
 
         if kind == "topic":
@@ -155,17 +158,27 @@ class ReadinessGate(Node):
             )
 
     def _request_map_publication(self) -> None:
-        if self._ready or self._map_publish_requested or not self._map_publish_client.service_is_ready():
+        if self._ready or not self._map_publish_client.service_is_ready():
             return
+        if self._map_publish_requested:
+            if time.monotonic() - self._map_publish_at < 3.0:
+                return
+            if self._map_future is not None and not self._map_future.done():
+                self._map_future.cancel()
+            self.get_logger().warning("still waiting for /map; retrying RTAB-Map publication")
         request = PublishMap.Request()
         request.global_map = True
         request.optimized = True
         request.graph_only = False
         self._map_publish_requested = True
+        self._map_publish_at = time.monotonic()
         future = self._map_publish_client.call_async(request)
+        self._map_future = future
         future.add_done_callback(self._map_publication_finished)
 
     def _map_publication_finished(self, future) -> None:
+        if future.cancelled() or future is not self._map_future:
+            return
         try:
             future.result()
         except Exception as error:
@@ -197,11 +210,17 @@ class ReadinessGate(Node):
         if self._lifecycle_client is None:
             self._ready = True
             return
+        if (self._lifecycle_future is not None and not self._lifecycle_future.done()
+                and time.monotonic() - self._lifecycle_at >= 3.0):
+            self._lifecycle_future.cancel()
+            self._lifecycle_future = None
+            self.get_logger().warning("lifecycle reply timed out; retrying readiness check")
         if self._lifecycle_future is None:
             if self._lifecycle_client.wait_for_service(timeout_sec=0.0):
                 self._lifecycle_future = self._lifecycle_client.call_async(
                     GetState.Request()
                 )
+                self._lifecycle_at = time.monotonic()
             return
         if not self._lifecycle_future.done():
             return
@@ -211,8 +230,9 @@ class ReadinessGate(Node):
                 response is not None
                 and response.current_state.id == State.PRIMARY_STATE_ACTIVE
             )
-        except Exception:
+        except Exception as error:
             self._ready = False
+            self.get_logger().warning(f"lifecycle readiness request failed: {error}")
         finally:
             if not self._ready:
                 self._lifecycle_future = None
