@@ -117,7 +117,10 @@ def test_operator_client_success_and_interrupt_confirm_its_owned_stop(graph, out
     interrupted = threading.Event()
     node = ExploreClient(context=explorer.context)
     if outcome == 'success':
-        peers.nav_mode = 'success'
+        # No accessible observation targets: success must not race a revisit budget.
+        peers.grid.data = [0 if 33 <= i % 80 < 47 and 33 <= i // 80 < 47 else 100
+                           for i in range(6400)]
+        wait(lambda: explorer._map[0][0, 0] == 100)
     else:
         if outcome == 'late_acceptance':
             def delayed(request):
