@@ -120,6 +120,13 @@ class RobotExplorer(Node):
         # Wall time quotas remain effective even if simulation time stops.
         self._timer = self.create_timer(0.25, self._monitor, clock=Clock(clock_type=ClockType.STEADY_TIME))
 
+    def destroy_node(self):
+        # rclpy Node.destroy_node does not destroy action waitables.
+        self._action.destroy()
+        self._navigation.destroy()
+        self._planner.destroy()
+        return super().destroy_node()
+
     def _record(self, name, value):
         self._inputs[name] = (value, time.monotonic())
 

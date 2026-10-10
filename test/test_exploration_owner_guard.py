@@ -86,6 +86,8 @@ def test_killed_explorer_is_canceled_and_unrelated_navigation_is_preserved(tmp_p
             thread.join(timeout=5)
             assert not thread.is_alive()
             assert executor.shutdown(timeout_sec=5)
+            explore.destroy()
+            navigate.destroy()
             for node in (client_node, peers):
                 node.destroy_node()
             context.shutdown()

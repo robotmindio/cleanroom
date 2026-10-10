@@ -115,6 +115,7 @@ def test_operator_client_success_and_interrupt_confirm_its_owned_stop(graph, out
 
     peers, explorer, _ = graph
     interrupted = threading.Event()
+    node = ExploreClient(context=explorer.context)
     if outcome == 'success':
         peers.nav_mode = 'success'
     else:
@@ -127,11 +128,10 @@ def test_operator_client_success_and_interrupt_confirm_its_owned_stop(graph, out
             if outcome == 'cancel':
                 wait(lambda: peers.nav_active)
             else:
-                time.sleep(0.1)
+                wait(lambda: node._sent_id is not None)
             interrupted.set()
         worker = threading.Thread(target=cancel)
         worker.start()
-    node = ExploreClient(context=explorer.context)
     try:
         assert node.run(interrupted) == (0 if outcome == 'success' else 130)
         assert not peers.nav_active and not explorer._busy

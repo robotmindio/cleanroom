@@ -30,6 +30,10 @@ class ExploreClient(Node):
         self._sent_id = self._sent_future = None
         self.create_subscription(DiagnosticArray, '/diagnostics', self._status, 10)
 
+    def destroy_node(self):
+        self.action.destroy()
+        return super().destroy_node()
+
     def _status(self, message):
         for status in message.status:
             if status.name == 'lekiwi/exploration':

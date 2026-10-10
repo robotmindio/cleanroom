@@ -122,6 +122,7 @@ def test_real_nav2_tree_uses_known_space_planner_and_cancels_controller(tmp_path
             assert not thread.is_alive()
             assert executor.shutdown(timeout_sec=5)
             controller.destroy()
+            client.destroy()
             for node in (client_node, explorer, guard, peers):
                 node.destroy_node()
             context.shutdown()
