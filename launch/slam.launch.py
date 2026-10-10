@@ -46,6 +46,7 @@ def _slam(context):
             parameters=[{"use_sim_time": topology.sim, "require_arm_stowed": topology.real and camera_on}],
             additional_env={"OPENBLAS_NUM_THREADS": "1"},
             output="screen",
+            respawn=True, respawn_delay=2.0,
         ))
     rtabmap = Node(
         package="rtabmap_slam", executable="rtabmap", name="rtabmap",
@@ -100,6 +101,11 @@ def _slam(context):
         # Keep watching mapping transitions even when startup selected localization.
         additional_env={"OPENBLAS_NUM_THREADS": "1", "OMP_NUM_THREADS": "1"},
         output="screen",
+        respawn=True, respawn_delay=2.0,
+    )
+    owner_guard = Node(
+        package="lekiwi_rmf", executable="exploration_owner_guard", name="exploration_owner_guard",
+        output="screen", respawn=True, respawn_delay=2.0,
     )
     sensor_gate = Node(
         package="lekiwi_rmf", executable="readiness_gate", name="wait_for_slam_sensor",
@@ -110,7 +116,7 @@ def _slam(context):
         }],
         output="screen",
     )
-    actions.extend(gated(sensor_gate, "SLAM sensor", [rtabmap, robot_explorer]))
+    actions.extend(gated(sensor_gate, "SLAM sensor", [rtabmap, owner_guard, robot_explorer]))
     if camera_on:
         # The front camera uses visible range returns. Astra uses its own
         # dense registered depth, sent losslessly from the device at 2 Hz.

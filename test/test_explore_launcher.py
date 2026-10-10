@@ -20,9 +20,12 @@ def test_explore_launcher_sources_environment_and_preserves_failures(
     (scripts / "setup.bash").write_text(
         f"export EXPLORE_TEST_READY=1\nreturn {setup_status}\n"
     )
+    package = tmp_path / "lekiwi_rmf"
+    package.mkdir()
+    (package / "__init__.py").touch()
     binary = tmp_path / "bin"
     binary.mkdir()
-    ros = binary / "ros2"
+    ros = package / "explore_client.py"
     ros.write_text(
         "#!/usr/bin/python3\n"
         "import json, os, sys\n"
@@ -42,10 +45,4 @@ def test_explore_launcher_sources_environment_and_preserves_failures(
         assert result.stdout == ""
     else:
         arguments = json.loads(result.stdout)
-        assert arguments[:4] == [
-            "action", "send_goal", "/robot/explore", "lekiwi_rmf/action/Explore",
-        ]
-        assert arguments[4] == (
-            "{revisit_known: true, max_duration_sec: 0.0, max_radius_m: 0.0}"
-        )
-        assert arguments[5:] == ["--feedback"]
+        assert arguments == []

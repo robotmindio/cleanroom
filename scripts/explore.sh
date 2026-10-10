@@ -9,5 +9,4 @@ set +u
 source scripts/setup.bash
 set -u
 
-exec ros2 action send_goal /robot/explore lekiwi_rmf/action/Explore \
-  '{revisit_known: true, max_duration_sec: 0.0, max_radius_m: 0.0}' --feedback
+exec /usr/bin/python3 -m lekiwi_rmf.explore_client

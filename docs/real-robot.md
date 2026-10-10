@@ -207,6 +207,16 @@ listed in `config/device_tests.txt`. Device builds omit Gazebo, MoveIt, RViz, an
 compute-native patches (`build-lekiwi.sh --device`). A build or test failure
 leaves the active source, installed files, and release pointers unchanged.
 
+Deployment success also requires active Nav2 controller, planner and navigator,
+a valid map and fresh map-to-base transform. Mapping profiles require current
+SLAM observations, the Explorer's prerequisites and its independent ownership
+guard. After the required re-arm, a fresh ARMED driver state, folded stow and base
+permission must be observed. Failed re-arm returns failure and writes no verified
+revision marker. The same-revision shortcut repeats these read-only checks;
+installed artifacts alone do not establish readiness. `LEKIWI_DISARM_ON_FAILURE=true`
+retains the existing explicit option to finish disarmed. Readiness gates retry lost
+lifecycle and map-publication replies while still waiting for actual readiness.
+
 Each qualified release contains `source/`, `build/`, `install/`, and a
 `release.json` manifest. The manifest checks the exact source revision, tracked
 source files, installed artifacts, private `.env` snapshot, and passing results

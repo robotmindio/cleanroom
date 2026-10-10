@@ -352,3 +352,59 @@ def test_release_check_rejects_a_stale_safety_acceptance(tmp_path):
     production.write_text(yaml.safe_dump(parameters))
     with pytest.raises(ValueError, match="accepted arm stow differs"):
         checker.check_safety_acceptance(source)
+
+
+@pytest.mark.parametrize('arm_ok, readiness_ok, strict, expected', [
+    (True, True, False, 0), (False, True, False, 1),
+    (True, False, False, 1), (False, True, True, 0),
+])
+def test_deployment_records_success_only_after_required_readiness_and_rearm(
+    tmp_path, arm_ok, readiness_ok, strict, expected,
+):
+    deploy = (ROOT / 'scripts/deploy-split.sh').read_text()
+    final = deploy.rsplit('verify_release || die "qualified release changed during deployment"', 1)[1]
+    marker = tmp_path / 'deployed-revision'
+    remote = tmp_path / 'remote-recorded'
+    script = '''
+set -e
+log() { :; }
+die() { echo "$*" >&2; exit 1; }
+verify_release() { return 0; }
+operational_ready() { [[ $LEKIWI_TEST_READY == true ]]; }
+wait_for() { [[ $LEKIWI_TEST_ARM == true ]]; }
+record_remote() { touch "$LEKIWI_TEST_REMOTE"; }
+ssh_command=(record_remote)
+marker=$LEKIWI_TEST_MARKER
+remote_home=/unused
+remote_marker=/unused/marker
+target=abcdef0123456789
+device=test-peer
+{
+''' + final
+    result = subprocess.run(['bash', '-c', script], capture_output=True, text=True,
+        env={**os.environ, 'LEKIWI_TEST_READY': str(readiness_ok).lower(),
+             'LEKIWI_TEST_ARM': str(arm_ok).lower(), 'LEKIWI_TEST_MARKER': str(marker),
+             'LEKIWI_TEST_REMOTE': str(remote), 'LEKIWI_DISARM_ON_FAILURE': str(strict).lower()})
+    assert result.returncode == expected, result.stderr
+    assert marker.exists() == remote.exists() == (expected == 0)
+    if not expected:
+        assert marker.read_text().strip() == 'abcdef0123456789'
+
+
+def test_same_revision_shortcut_checks_operational_readiness_before_success(tmp_path):
+    deploy = (ROOT / 'scripts/deploy-split.sh').read_text()
+    block = deploy.split('    remote_unit_active_all "${device_units[@]}" && verify_release; then\n', 1)[1]
+    block = block.split('\nfi\n', 1)[0]
+    for ready in ('true', 'false'):
+        script = '''
+set -e
+ros_setup() { :; }
+operational_ready() { [[ $1 == 30 && $2 == true && $READY == true ]]; }
+log() { echo recovery; }
+target=abcdef0123456789
+''' + block + '\necho continued\n'
+        result = subprocess.run(['bash', '-c', script], capture_output=True, text=True,
+                                env={**os.environ, 'READY': ready, 'LEKIWI_DISARM_ON_FAILURE': 'false'})
+        assert result.returncode == 0, result.stderr
+        assert ('continued' in result.stdout) == (ready == 'false')
+        assert ('readiness verified' in result.stdout) == (ready == 'true')
