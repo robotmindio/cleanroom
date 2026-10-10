@@ -90,7 +90,13 @@ acceptance; room-scale coverage has not been physically qualified by the tests.
 
 The `ExploreKnown` Nav2 planner and the tracked `explore_nav_to_pose.xml` behavior
 tree prohibit planning through unknown space. Ordinary `GridBased` navigation
-retains its existing behavior. Failed approaches are excluded for the task;
+retains its existing behavior. Exploration uses bounded Nav2 recovery: recoverable
+planner/controller failures refresh the affected costmap and retry the same goal.
+Repeated failures also replan after refreshing both costmaps, turning, waiting,
+or backing up 0.15 m at 0.15 m/s through the existing collision-checked behavior
+server and final velocity monitor. A real body overlap or invalid sensor source
+still stops the task's navigation; ordinary obstacles outside the footprint do
+not trigger that hard-stop pause. Failed approaches after recovery are excluded for the task;
 exhausting them produces an incomplete result. A canceled/replaced Nav2 goal
 ends exploration instead of fighting another navigation client. Cancel an
 exploration before sending an unrelated navigation task.

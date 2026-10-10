@@ -11,7 +11,8 @@ from action_msgs.msg import GoalStatus
 from ament_index_python.packages import get_package_prefix
 from lifecycle_msgs.msg import Transition
 from lifecycle_msgs.srv import ChangeState
-from nav2_msgs.action import FollowPath
+from nav2_msgs.action import BackUp, ComputePathToPose, FollowPath, Spin, Wait
+from nav2_msgs.srv import ClearEntireCostmap
 import pytest
 import rclpy
 from rclpy.action import ActionClient, ActionServer, CancelResponse
@@ -29,16 +30,67 @@ from test_exploration_ros import RobotPeers, response, wait
 ROOT = Path(__file__).parents[1]
 
 
-@pytest.mark.parametrize("cancel", [False, True])
-def test_real_nav2_tree_uses_known_space_planner_and_cancels_controller(tmp_path, cancel):
+@pytest.mark.parametrize("failure", [
+    "none", "cancel", "planner", "controller", "backup", "cancel_recovery", "exhausted", "fatal",
+])
+def test_real_nav2_tree_recovers_with_the_same_target_and_cancels_its_actions(tmp_path, failure):
     context = Context()
     rclpy.init(context=context)
-    peers = RobotPeers(context, native_navigation=True)
+
+    class Peers(RobotPeers):
+        def plan(self, goal):
+            # Let Explorer's preflight pass, then fail the native tree's first plan.
+            if failure == "planner" and len(self.planner_ids) == 1:
+                self.planner_ids.append(goal.request.planner_id)
+                goal.abort()
+                return ComputePathToPose.Result(error_code=ComputePathToPose.Result.NO_VALID_PATH)
+            return super().plan(goal)
+
+    peers = Peers(context, native_navigation=True)
     guard = ExplorationOwnerGuard(context=context)
-    peers.nav_mode = "hold" if cancel else "success"
+    peers.nav_mode = "hold" if failure == "cancel" else "success"
+    failed_controls = {"controller": 1, "backup": 8, "cancel_recovery": 6,
+                       "exhausted": 14, "fatal": 1}.get(failure, 0)
+    follow_goals, clears, recoveries = [], [], []
+    recovery = {"active": None, "canceled": 0}
+
+    def clear(_request, reply, which):
+        clears.append(which)
+        return reply
+
+    for which in ("local", "global"):
+        peers.create_service(ClearEntireCostmap, f"/{which}_costmap/clear_entirely_{which}_costmap",
+                             lambda request, reply, which=which: clear(request, reply, which),
+                             callback_group=peers.group)
+
+    def recover(goal, kind, action):
+        recoveries.append(kind)
+        recovery["active"] = kind
+        while failure == "cancel_recovery" and kind == "wait" and not goal.is_cancel_requested:
+            time.sleep(0.03)
+        if goal.is_cancel_requested:
+            recovery["canceled"] += 1
+            goal.canceled()
+        else:
+            goal.succeed()
+        recovery["active"] = None
+        return action.Result()
+
+    behaviors = [ActionServer(peers, action, f"/{kind}",
+                              lambda goal, kind=kind, action=action: recover(goal, kind, action),
+                              cancel_callback=lambda _goal: CancelResponse.ACCEPT,
+                              callback_group=peers.group)
+                 for kind, action in (("spin", Spin), ("wait", Wait), ("backup", BackUp))]
 
     def follow(goal):
         peers.nav_active = True
+        p = goal.request.path.poses[-1].pose.position
+        follow_goals.append((p.x, p.y))
+        if len(follow_goals) <= failed_controls:
+            peers.nav_active = False
+            goal.abort()
+            code = FollowPath.Result.INVALID_CONTROLLER if failure == "fatal" else FollowPath.Result.FAILED_TO_MAKE_PROGRESS
+            return FollowPath.Result(error_code=code)
         while peers.nav_mode == "hold" and not goal.is_cancel_requested:
             time.sleep(0.03)
         if goal.is_cancel_requested:
@@ -57,7 +109,8 @@ def test_real_nav2_tree_uses_known_space_planner_and_cancels_controller(tmp_path
                               callback_group=peers.group)
     explorer = RobotExplorer(context=context, parameter_overrides=[
         Parameter("database_path", value=str(tmp_path / "map.db")),
-        Parameter("max_duration_sec", value=10.0),
+        Parameter("navigation_tree", value=str(ROOT / "config/explore_nav_to_pose.xml")),
+        Parameter("max_duration_sec", value=30.0),
         # This test covers the native tree against instrumented Python peers.
         # Production one-second input leases are exercised by the ROS fault tests.
         Parameter("data_timeout_sec", value=3.0),
@@ -98,15 +151,39 @@ def test_real_nav2_tree_uses_known_space_planner_and_cancels_controller(tmp_path
             wait(lambda: "collision_monitor" in explorer._inputs)
             handle = response(client.send_goal_async(Explore.Goal(max_radius_m=2.5)))
             assert handle.accepted, log_path.read_text()
-            if cancel:
+            if failure == "cancel":
                 wait(lambda: peers.nav_active)
                 response(handle.cancel_goal_async())
-            result = response(handle.get_result_async(), timeout=10)
-            expected = GoalStatus.STATUS_CANCELED if cancel else GoalStatus.STATUS_SUCCEEDED
+            elif failure == "cancel_recovery":
+                wait(lambda: recovery["active"] == "wait", timeout=15)
+                response(handle.cancel_goal_async())
+            result = response(handle.get_result_async(), timeout=20)
+            cancel = failure in ("cancel", "cancel_recovery")
+            failed = failure in ("exhausted", "fatal")
+            expected = (GoalStatus.STATUS_CANCELED if cancel else
+                        GoalStatus.STATUS_ABORTED if failed else GoalStatus.STATUS_SUCCEEDED)
             assert result.status == expected, (result.result.message, log_path.read_text())
             assert len(peers.planner_ids) >= 2 and set(peers.planner_ids) == {"ExploreKnown"}
             wait(lambda: not peers.nav_active)
-            assert peers.nav_canceled == int(cancel)
+            assert peers.nav_canceled == int(failure == "cancel")
+            assert recovery["active"] is None
+            assert recovery["canceled"] == int(failure == "cancel_recovery")
+            assert len(set(follow_goals)) == 1 + int(failed)
+            assert result.result.unreachable_targets == int(failed)
+            assert result.result.visited_targets == int(not cancel)
+            if failure == "planner":
+                assert "global" in clears
+            if failure == "controller":
+                assert clears == ["local"] and len(follow_goals) == 2
+            if failure == "backup":
+                assert recoveries == ["spin", "wait", "backup"]
+                assert len(follow_goals) == failed_controls + 1
+            if failure == "exhausted":
+                assert recoveries == ["spin", "wait", "backup", "spin"]
+                assert len(follow_goals) == failed_controls + 1
+                assert len(set(follow_goals[:-1])) == 1
+            if failure == "fatal":
+                assert not clears and not recoveries and len(follow_goals) == 2
         finally:
             peers.nav_mode = "fail"
             peers.permitted = False
@@ -123,6 +200,8 @@ def test_real_nav2_tree_uses_known_space_planner_and_cancels_controller(tmp_path
             assert not thread.is_alive()
             assert executor.shutdown(timeout_sec=5)
             controller.destroy()
+            for behavior in behaviors:
+                behavior.destroy()
             client.destroy()
             for node in (client_node, explorer, guard, peers):
                 node.destroy_node()
