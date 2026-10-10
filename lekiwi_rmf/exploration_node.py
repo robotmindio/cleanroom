@@ -14,6 +14,7 @@ from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from ament_index_python.packages import get_package_share_directory
 from geometry_msgs.msg import PoseStamped
 from nav2_msgs.action import ComputePathToPose, NavigateToPose
+from nav2_msgs.msg import CollisionMonitorState
 from nav_msgs.msg import OccupancyGrid
 import rclpy
 from rclpy.action import ActionClient, ActionServer, CancelResponse, GoalResponse
@@ -105,6 +106,8 @@ class RobotExplorer(Node):
         self.create_subscription(Info, "/info", lambda msg: self._record("slam", msg.header), 1)
         self.create_subscription(Bool, "/robot/explore/navigation_guard_ready",
                                  lambda msg: self._record("navigation_guard", msg.data), 1)
+        self.create_subscription(CollisionMonitorState, "/collision_monitor_state",
+                                 lambda msg: self._record("collision_monitor", msg), 1)
         self.create_subscription(UUID, "/robot/explore/navigation_guarded", self._on_guard_ack, 10)
         self._owner_pub = self.create_publisher(UUID, "/robot/explore/navigation_owner", 10)
         self._diagnostics = self.create_publisher(DiagnosticArray, "/diagnostics", 10)
@@ -274,6 +277,12 @@ class RobotExplorer(Node):
         value, seen = self._inputs.get("navigation_guard", (False, 0.0))
         if self.config["allow_exploration"] and (not value or now - seen > self.config["data_timeout_sec"]):
             raise Paused("navigation ownership guard unavailable or stopping an orphaned goal")
+        if self.config["allow_exploration"]:
+            state, seen = self._inputs.get("collision_monitor", (None, 0.0))
+            if state is None or now - seen > self.config["data_timeout_sec"]:
+                raise Paused("collision monitor state is unavailable or stale")
+            if require_permission and state.action_type == CollisionMonitorState.STOP:
+                raise Paused(f"collision monitor stop: {state.polygon_name}")
 
     def _footprint_clear(self, pose, grid=None):
         q, p = pose.pose.orientation, pose.pose.position
@@ -580,11 +589,13 @@ class RobotExplorer(Node):
         except ResponseTimeout:
             # A target Nav2 cannot reach in time is unreachable, not a fault.
             self._stop_navigation()
+            check()
             blocked.append(target)
             return True
         self._stop_navigation()
         if navigation.status == GoalStatus.STATUS_CANCELED:
             raise RuntimeError("Nav2 goal canceled or replaced by another client")
+        check()
         (visited if navigation.status == GoalStatus.STATUS_SUCCEEDED else blocked).append(target)
         until = time.monotonic() + self.config["settle_sec"]
         while time.monotonic() < until:

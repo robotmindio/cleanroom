@@ -1,0 +1,35 @@
+diff --git a/nav2_collision_monitor/src/collision_monitor_node.cpp b/nav2_collision_monitor/src/collision_monitor_node.cpp
+--- a/nav2_collision_monitor/src/collision_monitor_node.cpp
++++ b/nav2_collision_monitor/src/collision_monitor_node.cpp
+@@ -510,6 +510,16 @@
+   if ((robot_action.polygon_name != robot_action_prev_.polygon_name) && enabled_) {
+     // Report changed robot behavior
+     notifyActionState(robot_action, action_polygon);
++  }
++
++  // Late subscribers and recovery checks need the current state, even when unchanged.
++  if (state_pub_) {
++    std::unique_ptr<nav2_msgs::msg::CollisionMonitorState> state_msg =
++      std::make_unique<nav2_msgs::msg::CollisionMonitorState>();
++    state_msg->polygon_name = robot_action.polygon_name;
++    state_msg->action_type = robot_action.action_type;
++
++    state_pub_->publish(std::move(state_msg));
+   }
+ 
+   // Publish required robot velocity
+@@ -647,14 +657,6 @@
+       "Robot to continue normal operation");
+   }
+ 
+-  if (state_pub_) {
+-    std::unique_ptr<nav2_msgs::msg::CollisionMonitorState> state_msg =
+-      std::make_unique<nav2_msgs::msg::CollisionMonitorState>();
+-    state_msg->polygon_name = robot_action.polygon_name;
+-    state_msg->action_type = robot_action.action_type;
+-
+-    state_pub_->publish(std::move(state_msg));
+-  }
+ }
+ 
+ void CollisionMonitor::publishPolygons() const

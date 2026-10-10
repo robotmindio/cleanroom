@@ -49,13 +49,13 @@ export MAKEFLAGS=-j$native_jobs
 export PATH=/usr/bin:/bin:$PATH
 override_args=()
 if colcon_supports_overriding; then
-  override_args=(--allow-overriding class_loader rclcpp nav2_util nav2_lifecycle_manager nav2_bringup rviz_ogre_vendor ament_cmake_vendor_package)
+  override_args=(--allow-overriding class_loader rclcpp nav2_util nav2_lifecycle_manager nav2_bringup nav2_collision_monitor rviz_ogre_vendor ament_cmake_vendor_package)
 fi
 colcon --log-base "$workspace/log" build \
   --base-paths "$vendor_tools/ament_cmake_vendor_package" "$workspace/src/class_loader" "$workspace/src/rclcpp/rclcpp" \
     "$workspace/src/navigation2/nav2_util" "$workspace/src/navigation2/nav2_lifecycle_manager" \
-    "$workspace/src/navigation2/nav2_bringup" "$workspace/src/rviz/rviz_ogre_vendor" \
-  --packages-select ament_cmake_vendor_package class_loader rclcpp nav2_util nav2_lifecycle_manager nav2_bringup rviz_ogre_vendor \
+    "$workspace/src/navigation2/nav2_bringup" "$workspace/src/navigation2/nav2_collision_monitor" "$workspace/src/rviz/rviz_ogre_vendor" \
+  --packages-select ament_cmake_vendor_package class_loader rclcpp nav2_util nav2_lifecycle_manager nav2_bringup nav2_collision_monitor rviz_ogre_vendor \
   --executor sequential "${override_args[@]}" \
   --build-base "$workspace/build" --install-base "$workspace/install" \
   --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
@@ -64,6 +64,7 @@ colcon --log-base "$workspace/log" build \
 [[ -s $workspace/install/rclcpp/lib/librclcpp.so &&
    -s $workspace/install/class_loader/lib/libclass_loader.so &&
    -x $workspace/install/nav2_lifecycle_manager/lib/nav2_lifecycle_manager/lifecycle_manager &&
+   -x $workspace/install/nav2_collision_monitor/lib/nav2_collision_monitor/collision_monitor &&
    -s $workspace/install/rviz_ogre_vendor/opt/rviz_ogre_vendor/lib/OGRE/RenderSystem_GL.so ]] || \
   die "native build did not install the required library and manager"
 git -C "$project_root" rev-parse HEAD > "$workspace/install/.lekiwi-native-revision"

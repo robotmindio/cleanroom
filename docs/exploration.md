@@ -75,7 +75,12 @@ arm stow are not healthy.
 
 During a task, those conditions are recoverable faults: a stale SLAM update or
 TF, withdrawn motion permission, an unfolded arm, a stale mapping-mode reading,
-or a ROS peer that answers late. The task cancels its Nav2 goal so the robot stops, reports a
+or a ROS peer that answers late. A collision-monitor stop is also a pause:
+feedback identifies the triggering polygon (or invalid sensor source), and
+targets stay eligible when the obstruction clears. Missing or stale collision
+status pauses the task as well. The native monitor publishes its current state
+for every velocity input, including an unchanged stop, so a restarted Explorer
+does not miss it. The task cancels its Nav2 goal so the robot stops, reports a
 `paused: <reason>` feedback stage, and resumes target selection once every input
 is healthy again. Only cancellation, the duration limit, the storage/session
 quota, a mapping-mode change, the region boundary, another Nav2 client or an

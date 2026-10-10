@@ -95,6 +95,7 @@ def test_real_nav2_tree_uses_known_space_planner_and_cancels_controller(tmp_path
             wait(lambda: client.server_is_ready() and explorer._navigation.server_is_ready()
                  and explorer._planner.server_is_ready())
             wait(lambda: explorer._inputs.get("navigation_guard", (False,))[0])
+            wait(lambda: "collision_monitor" in explorer._inputs)
             handle = response(client.send_goal_async(Explore.Goal(max_radius_m=2.5)))
             assert handle.accepted, log_path.read_text()
             if cancel:
