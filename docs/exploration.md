@@ -15,7 +15,9 @@ scripts/explore.sh
 
 The launcher uses `~/lekiwi_ws/current` when a managed deployment is installed,
 otherwise the checkout's build. It sources `scripts/setup.bash`, revisits known
-space and prints action feedback and the terminal result. Python imports use
+space and prints action feedback and the terminal result. A workspace containing
+a managed `current` release selects that release, including `LEKIWI_WS=~/lekiwi_ws`.
+Python imports use
 the selected installation, avoiding source packages hiding generated ROS types.
 Ctrl-C requests cancellation of its own goal. To select another workspace:
 

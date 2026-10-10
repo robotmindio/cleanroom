@@ -10,7 +10,7 @@ import pytest
 
 
 @pytest.mark.parametrize("setup_status, ros_status", [(0, 0), (0, 7), (23, 0)])
-@pytest.mark.parametrize("workspace_kind", ["checkout", "deployed", "override"])
+@pytest.mark.parametrize("workspace_kind", ["checkout", "deployed", "parent", "current", "override"])
 def test_explore_launcher_sources_environment_and_preserves_failures(
     tmp_path, setup_status, ros_status, workspace_kind,
 ):
@@ -22,7 +22,7 @@ def test_explore_launcher_sources_environment_and_preserves_failures(
     if workspace_kind != "checkout":
         (deployed / "install").mkdir(parents=True)
         (deployed / "install/setup.bash").touch()
-    workspace = {"checkout": tmp_path, "deployed": deployed,
+    workspace = {"checkout": tmp_path, "deployed": deployed, "parent": deployed, "current": deployed,
                  "override": tmp_path / "custom"}[workspace_kind]
     (scripts / "setup.bash").write_text(
         'export EXPLORE_TEST_READY=1\n'
@@ -52,7 +52,9 @@ def test_explore_launcher_sources_environment_and_preserves_failures(
                    "EXPLORE_TEST_STATUS": str(ros_status),
                    "EXPLORE_TEST_WORKSPACE": "" if workspace_kind == "checkout" else str(workspace)}
     environment.pop("LEKIWI_WS", None)
-    if workspace_kind == "override":
+    if workspace_kind == "parent":
+        environment["LEKIWI_WS"] = str(deployed.parent)
+    elif workspace_kind in ("override", "current"):
         environment["LEKIWI_WS"] = str(workspace)
     result = subprocess.run(
         ["bash", str(launcher)], cwd=tmp_path.parent,
