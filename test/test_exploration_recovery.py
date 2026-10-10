@@ -107,3 +107,38 @@ def test_readonly_deployment_check_requires_active_nav2_and_fresh_permission(gra
         peers.destroy_publisher(driver)
         for service in services:
             peers.destroy_service(service)
+
+
+@pytest.mark.parametrize('outcome', ['success', 'cancel', 'late_acceptance'])
+def test_operator_client_success_and_interrupt_confirm_its_owned_stop(graph, outcome):
+    from lekiwi_rmf.explore_client import ExploreClient
+
+    peers, explorer, _ = graph
+    interrupted = threading.Event()
+    if outcome == 'success':
+        peers.nav_mode = 'success'
+    else:
+        if outcome == 'late_acceptance':
+            def delayed(request):
+                time.sleep(0.6)
+                return explorer._accept(request)
+            explorer._action.register_goal_callback(delayed)
+        def cancel():
+            if outcome == 'cancel':
+                wait(lambda: peers.nav_active)
+            else:
+                time.sleep(0.1)
+            interrupted.set()
+        worker = threading.Thread(target=cancel)
+        worker.start()
+    node = ExploreClient(context=explorer.context)
+    try:
+        assert node.run(interrupted) == (0 if outcome == 'success' else 130)
+        assert not peers.nav_active and not explorer._busy
+        if outcome == 'cancel':
+            assert peers.nav_canceled == 1
+    finally:
+        node.destroy_node()
+        if outcome != 'success':
+            worker.join(timeout=5)
+            assert not worker.is_alive()
