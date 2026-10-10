@@ -142,3 +142,26 @@ def test_operator_client_success_and_interrupt_confirm_its_owned_stop(graph, out
         if outcome != 'success':
             worker.join(timeout=5)
             assert not worker.is_alive()
+
+
+def test_lost_freeze_reply_is_retried_even_after_localization_is_observed(graph):
+    from rclpy.task import Future
+
+    peers, explorer, client = graph
+    explorer._timer.cancel()
+    wait(lambda: explorer._mode_future.done())
+    stalled = Future()
+    explorer._freeze_future = stalled
+    explorer._freeze_unconfirmed = True
+    explorer._freeze_requested_at = time.monotonic() - explorer.config['service_timeout_sec'] - 1
+    explorer._quota_reason = 'mapping session duration reached'
+    assert explorer._mapping is False and explorer._mapping_started is None
+    assert not response(client.send_goal_async(Explore.Goal())).accepted
+    explorer._monitor()
+    assert stalled.cancelled()
+    wait(lambda: not explorer._freeze_unconfirmed and explorer._freeze_future.done())
+    explorer._timer.reset()
+    handle = start(graph)
+    assert not explorer._quota_reason and peers.mapping_requests[:2] == [False, True]
+    response(handle.cancel_goal_async())
+    assert response(handle.get_result_async()).status == GoalStatus.STATUS_CANCELED

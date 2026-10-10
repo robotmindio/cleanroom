@@ -90,6 +90,7 @@ class RobotExplorer(Node):
         self._mapping_started = None
         self._quota_reason = ""
         self._mode_future = self._freeze_future = None
+        self._freeze_unconfirmed = False
         self._mode_requested_at = 0.0
         self._freeze_requested_at = 0.0
         self._shutdown_requested = threading.Event()
@@ -199,28 +200,33 @@ class RobotExplorer(Node):
                 self._mode_future.add_done_callback(lambda future, sent=now: self._mode_response(future, sent))
         # Mode replies cannot restart a session midway through an old freeze decision.
         with self._lock:
-            if self._mapping_started is None:
-                return
+            if (self._freeze_future is not None and not self._freeze_future.done()
+                    and now - self._freeze_requested_at > self.config["service_timeout_sec"]):
+                self._freeze_future.cancel()
+                self._freeze_future = None
             try:
-                reason = self._quota_limit(now)
+                reason = self._quota_limit(now) if self._mapping_started is not None else ""
             except OSError as error:
                 reason = f"cannot measure mapping storage: {error}"
             if reason:
                 self._quota_reason = reason
-                if (self._freeze_future is not None and not self._freeze_future.done()
-                        and now - self._freeze_requested_at > self.config["service_timeout_sec"]):
-                    self._freeze_future.cancel()
-                    self._freeze_future = None
+            if reason or self._freeze_unconfirmed:
                 if self._localization_client.service_is_ready() and (
                         self._freeze_future is None or self._freeze_future.done()):
-                    self.get_logger().warning(f"freezing RTAB-Map: {reason}", throttle_duration_sec=5)
+                    self.get_logger().warning(f"freezing RTAB-Map: {self._quota_reason}", throttle_duration_sec=5)
+                    self._freeze_unconfirmed = True
                     self._freeze_future = self._localization_client.call_async(Empty.Request())
                     self._freeze_requested_at = now
                     self._freeze_future.add_done_callback(self._check_freeze)
 
     def _check_freeze(self, future):
+        if future.cancelled():
+            return
         try:
             future.result()
+            with self._lock:
+                if future is self._freeze_future:
+                    self._freeze_unconfirmed = False
         except Exception as error:
             self.get_logger().error(f"cannot freeze RTAB-Map: {error}")
 
@@ -319,7 +325,7 @@ class RobotExplorer(Node):
                 return "Nav2 or mapping services are unavailable"
             if self._nav_uncertain:
                 return "previous navigation stop is unconfirmed"
-            if self._freeze_future is not None and not self._freeze_future.done():
+            if self._freeze_unconfirmed or (self._freeze_future is not None and not self._freeze_future.done()):
                 return "waiting for mapping quota freeze to finish"
             return self._quota_limit(time.monotonic())
         except (RuntimeError, OSError, TransformException) as error:
