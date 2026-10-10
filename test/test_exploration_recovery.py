@@ -4,11 +4,55 @@ import threading
 import time
 
 from action_msgs.msg import GoalStatus
+from nav2_msgs.msg import CollisionMonitorState
 import pytest
 from std_srvs.srv import Empty
 
 from lekiwi_rmf.action import Explore
 from test_exploration_ros import graph as graph, response, start, wait
+
+
+@pytest.mark.parametrize('failure', ['overlap', 'invalid_source', 'missing_status'])
+def test_collision_stop_pauses_without_discarding_targets_and_clearing_resumes(graph, failure):
+    peers, explorer, client = graph
+    feedback = []
+    handle = response(client.send_goal_async(Explore.Goal(max_radius_m=2.5),
+                      feedback_callback=lambda msg: feedback.append(msg.feedback)))
+    assert handle.accepted
+    wait(lambda: peers.nav_active)
+    if failure == 'missing_status':
+        peers.publish_collision = False
+    else:
+        peers.collision = CollisionMonitorState(
+            action_type=CollisionMonitorState.STOP,
+            polygon_name='StopZone' if failure == 'overlap' else 'invalid source')
+    wait(lambda: 'paused: collision monitor' in explorer._stage)
+    wait(lambda: not peers.nav_active and peers.nav_canceled == 1)
+    count = peers.nav_count
+    time.sleep(0.3)
+    assert peers.nav_count == count
+    assert feedback and all(message.unreachable_targets == 0 for message in feedback)
+    assert not handle.get_result_async().done()
+    peers.collision = CollisionMonitorState()
+    peers.publish_collision = True
+    wait(lambda: peers.nav_active and peers.nav_count == count + 1)
+    response(handle.cancel_goal_async())
+    result = response(handle.get_result_async())
+    assert result.status == GoalStatus.STATUS_CANCELED
+    assert result.result.unreachable_targets == 0
+
+
+def test_collision_stop_refuses_a_new_goal_but_does_not_poison_readiness_after_clear(graph):
+    peers, explorer, client = graph
+    peers.collision = CollisionMonitorState(action_type=CollisionMonitorState.STOP, polygon_name='StopZone')
+    wait(lambda: 'collision monitor stop: StopZone' in explorer._readiness_reason())
+    assert not response(client.send_goal_async(Explore.Goal())).accepted
+    assert explorer._readiness_reason(require_permission=False) == ''
+    peers.collision = CollisionMonitorState()
+    wait(lambda: not explorer._readiness_reason())
+    handle = start(graph)
+    response(handle.cancel_goal_async())
+    assert response(handle.get_result_async()).status == GoalStatus.STATUS_CANCELED
 
 
 def test_completed_duration_quota_does_not_poison_the_next_explore_goal(graph):

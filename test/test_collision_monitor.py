@@ -11,6 +11,7 @@ from ament_index_python.packages import get_package_prefix
 from geometry_msgs.msg import TransformStamped, Twist
 from lifecycle_msgs.msg import Transition
 from lifecycle_msgs.srv import ChangeState
+from nav2_msgs.msg import CollisionMonitorState
 import pytest
 import rclpy
 from rclpy.context import Context
@@ -84,7 +85,7 @@ def monitor(tmp_path):
                 last = received[-1]
                 return last.linear.x, last.linear.y, last.angular.z
 
-            yield request
+            yield request, node, executor
         finally:
             process.send_signal(signal.SIGINT)
             try:
@@ -99,7 +100,8 @@ def monitor(tmp_path):
 
 @pytest.mark.parametrize("velocity", [(0.25, 0.0, 0.0), (-0.25, 0.0, 0.0)])
 def test_straight_travel_passes_with_one_mm_beside_the_actual_body(monitor, velocity):
-    assert monitor([(0.0, 0.221), (0.0, -0.221)], velocity) == pytest.approx(velocity)
+    request, _, _ = monitor
+    assert request([(0.0, 0.221), (0.0, -0.221)], velocity) == pytest.approx(velocity)
 
 
 @pytest.mark.parametrize("points, velocity", [
@@ -112,19 +114,43 @@ def test_straight_travel_passes_with_one_mm_beside_the_actual_body(monitor, velo
     ([(0.0, -0.221)], (0.0, 0.0, -0.4)),
 ])
 def test_obstacles_in_the_swept_body_reduce_every_component(monitor, points, velocity):
-    safe = monitor(points, velocity)
+    request, _, _ = monitor
+    safe = request(points, velocity)
     ratios = [actual / requested for actual, requested in zip(safe, velocity) if requested]
     assert 0 <= ratios[0] < 1
     assert ratios == pytest.approx([ratios[0]] * len(ratios))
 
 
 def test_overlap_stops_and_clearing_the_body_restores_motion(monitor):
+    request, _, _ = monitor
     velocity = (0.25, 0.0, 0.0)
-    assert monitor([(0.10, 0.0)], velocity) == pytest.approx((0.0, 0.0, 0.0))
-    assert monitor([], velocity) == pytest.approx(velocity)
+    assert request([(0.10, 0.0)], velocity) == pytest.approx((0.0, 0.0, 0.0))
+    assert request([], velocity) == pytest.approx(velocity)
 
 
 def test_stale_scan_still_stops(monitor):
+    request, _, _ = monitor
     velocity = (0.25, 0.0, 0.0)
-    assert monitor([], velocity) == pytest.approx(velocity)
-    assert monitor([], velocity, scan=False, seconds=1.1) == pytest.approx((0.0, 0.0, 0.0))
+    assert request([], velocity) == pytest.approx(velocity)
+    assert request([], velocity, scan=False, seconds=1.1) == pytest.approx((0.0, 0.0, 0.0))
+
+
+@pytest.mark.parametrize("points, scan, action, polygon", [
+    ([], True, CollisionMonitorState.DO_NOTHING, ""),
+    ([(0.10, 0.0)], True, CollisionMonitorState.STOP, "StopZone"),
+    ([], False, CollisionMonitorState.STOP, "invalid source"),
+])
+def test_unchanged_collision_status_reaches_late_subscribers(monitor, points, scan, action, polygon):
+    request, node, executor = monitor
+    request(points, (0.0, 0.0, 0.0), scan=scan, seconds=1.1)
+    received = []
+    # Subscribe after the state transition, as a restarted Explorer does.
+    subscription = node.create_subscription(CollisionMonitorState, "/collision_monitor_state", received.append, 1)
+    try:
+        end = time.monotonic() + 2
+        while time.monotonic() < end and len(received) < 5:
+            executor.spin_once(timeout_sec=0.03)
+        assert len(received) >= 5
+        assert all((message.action_type, message.polygon_name) == (action, polygon) for message in received)
+    finally:
+        node.destroy_subscription(subscription)

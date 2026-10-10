@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from action_msgs.msg import GoalStatus
 from geometry_msgs.msg import PoseStamped, TransformStamped
 from nav2_msgs.action import ComputePathToPose, NavigateToPose
+from nav2_msgs.msg import CollisionMonitorState
 from nav_msgs.msg import OccupancyGrid, Path
 import pytest
 import rclpy
@@ -51,6 +52,8 @@ class RobotPeers(Node):
         self.declare_parameter("Mem/IncrementalMemory", "false")
         self.mapping_requests = []
         self.permitted = True
+        self.collision = CollisionMonitorState()
+        self.publish_collision = True
         self.publish_slam = True
         self.slam_delay = 0.0
         self.nav_mode = "hold"
@@ -76,6 +79,7 @@ class RobotPeers(Node):
         self.base_pub = self.create_publisher(Bool, "/safety/base_motion_permitted", latched)
         self.stow_pub = self.create_publisher(Bool, "/safety/arm_stowed", latched)
         self.info_pub = self.create_publisher(Info, "/info", 1)
+        self.collision_pub = self.create_publisher(CollisionMonitorState, "/collision_monitor_state", 1)
         self.tf_pub = TransformBroadcaster(self)
         self.grid = OccupancyGrid()
         self.grid.header.frame_id = "map"
@@ -97,6 +101,8 @@ class RobotPeers(Node):
         self.map_pub.publish(self.grid)
         self.base_pub.publish(Bool(data=self.permitted))
         self.stow_pub.publish(Bool(data=True))
+        if self.publish_collision:
+            self.collision_pub.publish(self.collision)
         if self.publish_slam:
             message = Info()
             message.header.stamp = (self.get_clock().now() - Duration(seconds=self.slam_delay)).to_msg()
@@ -181,6 +187,7 @@ def graph(tmp_path):
         wait(lambda: "slam" in explorer._inputs and explorer._navigation.server_is_ready()
              and explorer._planner.server_is_ready() and explorer._tf.can_transform("map", "base_footprint", rclpy.time.Time()))
         wait(lambda: explorer._inputs.get("navigation_guard", (False,))[0])
+        wait(lambda: "collision_monitor" in explorer._inputs)
         yield peers, explorer, client
     finally:
         peers.nav_mode = "fail"
