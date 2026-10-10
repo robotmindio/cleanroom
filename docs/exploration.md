@@ -136,6 +136,13 @@ and 130 after Ctrl-C confirms cancellation. Discovery and cancellation are bound
 the server owns the configured task duration. `/diagnostics`, status
 `lekiwi/exploration`, exposes current readiness, stage and the last refusal reason.
 Paused feedback updates when the blocking cause changes.
+The client waits for fresh operational readiness before sending its goal, rather
+than treating action-server discovery as proof that SLAM and safety inputs are
+ready. If a restarted server reports idle while the old result request remains
+unanswered, the client queries that exact goal again and ends with a failure
+instead of hanging. An unknown goal counts as stopped only after its original
+acceptance and fresh idle prerequisites, including the independent ownership
+guard, are confirmed.
 
 ## Mapping lifecycle and quotas
 
