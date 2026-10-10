@@ -96,7 +96,10 @@ omnidirectional motion set and the unpadded body footprint. Its paths include
 feasible orientations; NavFn's centreline and placeholder orientations could
 fail the full-body preflight before any motion. Global inflation also includes
 unknown boundaries so the planner checks footprint corners there. The existing
-full-body preflight remains in place. Exploration uses bounded Nav2 recovery: recoverable
+full-body preflight remains in place. The map's coarse centre-clearance filter
+uses the metric radius without rounding it up to a whole grid cell; that rounding
+added clearance beyond the body and could prevent resuming after a pause.
+Exploration uses bounded Nav2 recovery: recoverable
 planner/controller failures refresh the affected costmap and retry the same goal.
 Repeated failures also replan after refreshing both costmaps, turning, waiting,
 or backing up 0.15 m at 0.15 m/s through the existing collision-checked behavior

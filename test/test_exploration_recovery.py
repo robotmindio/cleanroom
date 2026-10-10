@@ -105,6 +105,26 @@ def test_collision_stop_refuses_a_new_goal_but_does_not_poison_readiness_after_c
     assert response(handle.get_result_async()).status == GoalStatus.STATUS_CANCELED
 
 
+def test_permission_pause_resumes_in_a_corridor_fitting_the_actual_body(graph):
+    peers, explorer, client = graph
+    handle = response(client.send_goal_async(Explore.Goal(revisit_known=True, max_duration_sec=10.0, max_radius_m=2.5)))
+    assert handle.accepted
+    wait(lambda: peers.nav_active)
+    peers.permitted = False
+    wait(lambda: peers.nav_canceled == 1 and not peers.nav_active)
+    peers.position = (0.025, 0.025)
+    peers.grid.data = [100 if i // 80 in (35, 45) else 0 for i in range(6400)]
+    wait(lambda: explorer._map[0][35, 0] == 100)
+    peers.permitted = True
+    wait(lambda: peers.nav_active and peers.nav_count == 2)
+    assert explorer._busy
+    response(handle.cancel_goal_async())
+    result = response(handle.get_result_async())
+    assert result.status == GoalStatus.STATUS_CANCELED
+    assert result.result.unreachable_targets == 0
+    assert not peers.nav_active and explorer._mapping is False
+
+
 def test_completed_duration_quota_does_not_poison_the_next_explore_goal(graph):
     peers, explorer, client = graph
     explorer.config['mapping_max_seconds'] = 0.6
