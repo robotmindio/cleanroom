@@ -91,6 +91,23 @@ def test_cells_under_the_current_body_count_as_free_and_nothing_beyond_it():
     assert choose(cleared, revisit=True, position=position)[0] is not None
 
 
+def test_body_fitting_a_45_cm_corridor_needs_no_rounded_extra_clearance():
+    grid = np.zeros((80, 80), dtype=np.int16)
+    grid[[35, 45], :] = 100
+    position = (0.025, 0.025)
+    assert footprint_is_free(grid, 0.05, (-2, -2, 0), position, 0, FOOTPRINT, 20)
+    assert choose(grid, revisit=True, position=position)[0] is not None
+
+
+@pytest.mark.parametrize("yaw", [0.0, 0.65, math.pi / 4])
+def test_rotated_current_body_is_not_rejected_by_grid_clearance_rounding(yaw):
+    grid = np.full((80, 80), -1, dtype=np.int16)
+    position = (0.026, 0.026)
+    grid = with_body_free(grid, 0.05, (-2, -2, 0), position, yaw, FOOTPRINT)
+    assert footprint_is_free(grid, 0.05, (-2, -2, 0), position, yaw, FOOTPRINT, 20)
+    assert choose(grid, revisit=True, position=position)[0] is None
+
+
 def test_unknown_or_unsafe_start_and_blocked_regions_are_not_traversed():
     grid = np.zeros((80, 80), dtype=np.int16)
     grid[:, 60:] = -1

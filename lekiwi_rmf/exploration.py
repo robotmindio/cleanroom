@@ -139,7 +139,8 @@ def cell_to_world(xs, ys, resolution, origin):
 def disk(radius, resolution):
     cells = math.ceil(radius / resolution)
     y, x = np.ogrid[-cells:cells + 1, -cells:cells + 1]
-    return (x * x + y * y <= cells * cells).astype(np.uint8)
+    # Keep the metric radius, allowing only floating-point roundoff.
+    return ((x * x + y * y) * resolution ** 2 <= radius ** 2 + 1e-12).astype(np.uint8)
 
 
 def known_safe_cells(grid, resolution, clearance, free_threshold):
