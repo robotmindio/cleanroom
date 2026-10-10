@@ -32,7 +32,8 @@ ROOT = Path(__file__).parents[1]
 
 
 @pytest.mark.parametrize("scene", ["unknown_corner", "close_corridor"])
-def test_native_exploration_routes_fit_the_body_without_extra_wall_clearance(tmp_path, scene):
+@pytest.mark.parametrize("planner_id", ["ExploreKnown", "GridBased"])
+def test_native_routes_fit_the_body_without_extra_wall_clearance(tmp_path, scene, planner_id):
     context = Context()
     rclpy.init(context=context)
     node = Node("exploration_planner_fixture", context=context)
@@ -117,7 +118,7 @@ def test_native_exploration_routes_fit_the_body_without_extra_wall_clearance(tmp
             while time.monotonic() < until:
                 executor.spin_once(timeout_sec=0.05)
             goal.header.stamp = node.get_clock().now().to_msg()
-            handle = response(client.send_goal_async(ComputePathToPose.Goal(goal=goal, planner_id="ExploreKnown")))
+            handle = response(client.send_goal_async(ComputePathToPose.Goal(goal=goal, planner_id=planner_id)))
             assert handle.accepted
             result = response(handle.get_result_async())
             assert result.status == GoalStatus.STATUS_SUCCEEDED and not result.result.error_code, log_path.read_text()

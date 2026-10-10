@@ -4,6 +4,7 @@ from concurrent.futures import Future
 from pathlib import Path
 import subprocess
 import threading
+import json
 import time
 
 from action_msgs.msg import GoalStatus
@@ -22,7 +23,8 @@ from test_exploration_ros import RobotPeers, response, wait
 
 
 @pytest.mark.parametrize('restart_guard', [False, True])
-def test_killed_explorer_stops_client_recovers_and_unrelated_navigation_is_preserved(tmp_path, restart_guard):
+@pytest.mark.parametrize('graceful', [False, True])
+def test_restarted_explorer_resumes_original_bounds_and_preserves_unrelated_navigation(tmp_path, restart_guard, graceful):
     context = Context()
     rclpy.init(context=context)
     peers = RobotPeers(context)
@@ -52,7 +54,12 @@ def test_killed_explorer_stops_client_recovers_and_unrelated_navigation_is_prese
             wait(lambda: ready and ready[-1], timeout=10)
             operator_thread.start()
             wait(lambda: peers.nav_active, timeout=10)
-            process.kill()
+            checkpoint = tmp_path / 'map.db.exploration.json'
+            original = json.loads(checkpoint.read_text())
+            if graceful:
+                process.terminate()
+            else:
+                process.kill()
             process.wait(timeout=5)
             if restart_guard:
                 guard.kill()
@@ -64,19 +71,29 @@ def test_killed_explorer_stops_client_recovers_and_unrelated_navigation_is_prese
             except AssertionError:
                 raise AssertionError(log_path.read_text())
             wait(lambda: ready[-1], timeout=5)
+            peers.position = (0.2, 0.1)
             process = subprocess.Popen(['/usr/bin/python3', '-m', 'lekiwi_rmf.exploration_node',
                                         '--ros-args', '-p', f'database_path:={tmp_path / "map.db"}'],
                                        stdout=log, stderr=subprocess.STDOUT, cwd=Path(__file__).parents[1])
+            try:
+                wait(lambda: peers.nav_active and peers.nav_count == 2, timeout=10)
+            except AssertionError:
+                raise AssertionError(log_path.read_text())
+            resumed = json.loads(checkpoint.read_text())
+            for key in ('id', 'center', 'radius', 'deadline', 'previous_mapping'):
+                assert resumed[key] == original[key]
+            interrupted.set()
             operator_thread.join(timeout=10)
             assert not operator_thread.is_alive(), log_path.read_text()
-            assert codes == [2], log_path.read_text()
+            assert codes == [130], log_path.read_text()
+            assert peers.nav_canceled == 2 and not checkpoint.exists()
             # A normal client UUID has no Explorer ownership namespace.
             other = response(navigate.send_goal_async(NavigateToPose.Goal(
                 pose=PoseStamped(), behavior_tree='explore_nav_to_pose.xml')))
             assert other.accepted
             wait(lambda: peers.nav_active)
             time.sleep(1.5)
-            assert peers.nav_active and peers.nav_canceled == 1
+            assert peers.nav_active and peers.nav_canceled == 2
             response(other.cancel_goal_async())
             assert response(other.get_result_async()).status == GoalStatus.STATUS_CANCELED
         finally:

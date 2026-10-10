@@ -10,10 +10,62 @@ import pytest
 from lekiwi_rmf.exploration import (
     cell_to_world, footprint_is_free, known_safe_cells, load_navigation_footprint,
     map_geometry, select_target, task_limits, with_body_free, world_to_cell,
+    load_task_checkpoint, save_task_checkpoint, task_time,
 )
 
 FOOTPRINT, INSCRIBED_RADIUS, REGION_MARGIN = load_navigation_footprint(
     Path(__file__).parents[1] / "config/nav2_params.yaml")
+
+
+@pytest.fixture
+def checkpoint(tmp_path):
+    state = dict(schema=1, id="a" * 32,
+                 boot_id=Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
+                 deadline=task_time() + 30, radius=2.5, center=[0.0, 0.0],
+                 visited=[[0.5, 0.0]], blocked=[[0.0, 0.5]], mapped_area_m2=2.0,
+                 retrying=True, previous_mapping=False, revisit_known=True)
+    path = tmp_path / "task.json"
+    return path, state
+
+
+def restore(path):
+    return load_task_checkpoint(path, "a" * 32, maximum_duration=900, maximum_radius=10,
+                                region_margin=REGION_MARGIN, maximum_points=100)
+
+
+def test_checkpoint_retains_original_bounds_progress_and_mapping(checkpoint):
+    path, state = checkpoint
+    save_task_checkpoint(path, state)
+    assert restore(path) == state
+    assert path.stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.parametrize("changes", [
+    {"deadline": 0}, {"deadline": float("nan")}, {"deadline": task_time() + 1000},
+    {"radius": 20}, {"radius": 0.5}, {"boot_id": "other-boot"}, {"id": "b" * 32},
+    {"visited": [[3, 0]]}, {"blocked": [[0, "bad"]]}, {"center": [0]},
+    {"visited": [[0, 0]] * 101}, {"previous_mapping": None}, {"retrying": 1},
+])
+def test_checkpoint_cannot_expand_or_reset_an_interrupted_task(checkpoint, changes):
+    import json
+    path, state = checkpoint
+    state.update(changes)
+    path.write_text(json.dumps(state))
+    with pytest.raises(ValueError):
+        restore(path)
+
+
+def test_checkpoint_write_failure_preserves_last_complete_record(checkpoint, monkeypatch):
+    import os
+    path, state = checkpoint
+    save_task_checkpoint(path, state)
+    def fail(_fd):
+        raise OSError("storage unavailable")
+    monkeypatch.setattr(os, "fsync", fail)
+    with pytest.raises(OSError, match="storage unavailable"):
+        save_task_checkpoint(path, {**state, "visited": []})
+    assert restore(path) == state
+    assert list(path.parent.iterdir()) == [path]
 
 
 def choose(grid, *, revisit=False, visited=(), blocked=(), position=(0, 0), origin=(-2, -2, 0)):

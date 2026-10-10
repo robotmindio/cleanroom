@@ -21,7 +21,7 @@ fault test, and the production profile requires every physical input it names.
 Tracked in [#6](https://github.com/robotmindio/cleanroom/issues/6).
 
 The accepted scope is attended autonomous base motion on dry concrete with the
-installed reported 200 g load, at 0.03 m/s and 0.06 rad/s, with an operator at the
+installed reported 200 g load, at 0.25 m/s and 0.40 rad/s, with an operator at the
 physical motor-power stop. The recorded software, stow, stopping measurements
 and fault results are in `config/safety_acceptance.yaml` and its dated evidence
 report. Bumper, IMU and battery monitoring are absent. The full-hardware items
@@ -65,8 +65,9 @@ unattended operation.
   depth, diagnostics, telemetry loss
   and replay, host and ROS restart, unauthorized ZMQ, DDS and rosbridge policy,
   Nav2 obstacle stop, and arm-workspace intrusion stop.
-- Confirm the enabled Nav2 StopZone contains the accepted footprint plus the
-  measured worst stopping distance and uncertainty. Update tracked parameters
+- Confirm the enabled Nav2 StopZone contains the accepted footprint and the
+  velocity-dependent FootprintApproach covers measured stopping and uncertainty.
+  Update tracked parameters
   from the reviewed measurements; do not tune only in RViz.
 - Record the exact software revision, sensor configuration, payload, surface,
   validation time, all six measured stow positions and all trial results before

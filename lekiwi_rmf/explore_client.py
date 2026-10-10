@@ -78,12 +78,24 @@ class ExploreClient(Node):
             self._client_executor.shutdown()
 
     def _run(self, interrupted):
+        task_id = None
+        while True:
+            outcome, task_id = self._attempt(interrupted, task_id)
+            if outcome is not None:
+                return outcome
+            print('Exploration server recovered; resuming the original task bounds and progress', flush=True)
+
+    def _attempt(self, interrupted, task_id):
+        requested_at = time.monotonic()
         if not self.wait(lambda: self.action.server_is_ready() and self.ready
-                         and time.monotonic() - self.status_at < 1, 10, interrupted):
+                         and self.busy is False and time.monotonic() - self.status_at < 1
+                         and (task_id is None or self.status_at > requested_at), 10, interrupted):
             print(f'Exploration unavailable: {self.reason}', flush=True)
-            return 130 if interrupted.is_set() else 2
+            return (130 if interrupted.is_set() else 2), task_id
         goal_id = UUID(uuid=list(uuid.uuid4().bytes))
-        future = self.action.send_goal_async(Explore.Goal(revisit_known=True), goal_uuid=goal_id,
+        request = Explore.Goal(revisit_known=True, resume_task_id=task_id or '')
+        task_id = task_id or bytes(goal_id.uuid).hex()
+        future = self.action.send_goal_async(request, goal_uuid=goal_id,
                                             feedback_callback=lambda msg: print(msg.feedback.stage, flush=True))
         self._sent_id, self._sent_future = goal_id, future
         if self.wait(future.done, 10, interrupted):
@@ -92,7 +104,7 @@ class ExploreClient(Node):
                 # Let the periodic diagnostic carry the goal callback's refusal reason.
                 self.wait(lambda: False, 0.5)
                 print(f'Exploration rejected: {self.reason}', flush=True)
-                return 2
+                return 2, task_id
             result = handle.get_result_async()
             self._idle_since = None
             # The tracked server owns the task duration; Ctrl-C cancels this exact UUID.
@@ -102,11 +114,34 @@ class ExploreClient(Node):
                 rclpy.spin_once(self, executor=self._client_executor, timeout_sec=0.1)
             if result.done():
                 response = result.result()
-                print(response.result.message, flush=True)
-                return 0 if response.status == GoalStatus.STATUS_SUCCEEDED else 1
+                if response.status != GoalStatus.STATUS_UNKNOWN:
+                    return self._finished(response, interrupted), task_id
+                # Failover may answer UNKNOWN before the restarted peer's idle status arrives.
+                self.wait(lambda: self._idle_since is not None and self.busy is False
+                          and self._prerequisites_ready and time.monotonic() - self.status_at < 1
+                          and time.monotonic() - self._idle_since >= 1, 10, interrupted)
             if self._idle_since is not None and time.monotonic() - self._idle_since >= 1:
                 print('Exploration task is no longer active; recovering its result or confirming its stop', flush=True)
-        return self._stop(goal_id, future, interrupted)
+                if self.result.service_is_ready() and not interrupted.is_set():
+                    reply = self.result.call_async(Explore.Impl.GetResultService.Request(goal_id=goal_id))
+                    if self.wait(reply.done, 1, interrupted):
+                        response = reply.result()
+                        if response.status in (GoalStatus.STATUS_SUCCEEDED, GoalStatus.STATUS_CANCELED,
+                                               GoalStatus.STATUS_ABORTED):
+                            return self._finished(response, interrupted), task_id
+                        if (response.status == GoalStatus.STATUS_UNKNOWN and self.busy is False
+                                and self._prerequisites_ready and time.monotonic() - self.status_at < 1
+                                and not interrupted.is_set()):
+                            return None, task_id
+        return self._stop(goal_id, future, interrupted), task_id
+
+    def _finished(self, response, interrupted):
+        print(response.result.message, flush=True)
+        if (response.status == GoalStatus.STATUS_ABORTED
+                and response.result.message == 'exploration server is shutting down'
+                and not interrupted.is_set()):
+            return None
+        return 0 if response.status == GoalStatus.STATUS_SUCCEEDED else 1
 
     def _stop(self, goal_id, future, interrupted):
         # Acceptance can arrive late: cancellation still targets the UUID we sent.

@@ -378,9 +378,9 @@ the physical acceptance record and its revalidation procedure. In short:
   `LEKIWI_DISARM_ON_FAILURE=true` (launch argument `safety_policy:=strict`) faults disarm, cut torque and
   latch until an operator re-arms. See
   [Arming and recovery](docs/launch-options.md#arming-and-recovery).
-- `config/safety_acceptance.yaml` is validated (2026-10-06) for attended
+- `config/safety_acceptance.yaml` is validated (2026-10-09) for attended
   autonomous base operation on dry concrete with the installed 200 g load,
-  folded `travel_stow`, 0.03 m/s and 0.06 rad/s, with an operator at the
+  folded `travel_stow`, 0.25 m/s and 0.40 rad/s, with an operator at the
   physical motor-power stop. It grants no unattended scope, other payload or
   higher speed.
 - Keep a hardwired physical E-stop reachable and supervise every hardware run.

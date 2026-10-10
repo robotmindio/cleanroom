@@ -385,9 +385,11 @@
          },
          "GridBased": {
           "allow_unknown": true,
-          "plugin": "nav2_navfn_planner::NavfnPlanner",
-          "tolerance": 0.2,
-          "use_astar": true
+          "lattice_filepath": "$(find-pkg-share nav2_smac_planner)/sample_primitives/5cm_resolution/0.5m_turning_radius/omni/output.json",
+          "max_planning_time": 1.0,
+          "plugin": "nav2_smac_planner::SmacPlannerLattice",
+          "smooth_path": false,
+          "tolerance": 0.2
          },
          "expected_planner_frequency": 5.0,
          "planner_plugins": [
@@ -896,9 +898,11 @@
          },
          "GridBased": {
           "allow_unknown": true,
-          "plugin": "nav2_navfn_planner::NavfnPlanner",
-          "tolerance": 0.2,
-          "use_astar": true
+          "lattice_filepath": "$(find-pkg-share nav2_smac_planner)/sample_primitives/5cm_resolution/0.5m_turning_radius/omni/output.json",
+          "max_planning_time": 1.0,
+          "plugin": "nav2_smac_planner::SmacPlannerLattice",
+          "smooth_path": false,
+          "tolerance": 0.2
          },
          "expected_planner_frequency": 5.0,
          "planner_plugins": [
@@ -1499,9 +1503,11 @@
          },
          "GridBased": {
           "allow_unknown": true,
-          "plugin": "nav2_navfn_planner::NavfnPlanner",
-          "tolerance": 0.2,
-          "use_astar": true
+          "lattice_filepath": "$(find-pkg-share nav2_smac_planner)/sample_primitives/5cm_resolution/0.5m_turning_radius/omni/output.json",
+          "max_planning_time": 1.0,
+          "plugin": "nav2_smac_planner::SmacPlannerLattice",
+          "smooth_path": false,
+          "tolerance": 0.2
          },
          "expected_planner_frequency": 5.0,
          "planner_plugins": [

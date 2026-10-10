@@ -12,6 +12,35 @@ from lekiwi_rmf.action import Explore
 from test_exploration_ros import graph as graph, response, start, wait
 
 
+@pytest.mark.parametrize('recovers', [False, True])
+def test_failed_targets_get_one_second_pass_without_an_endless_retry(graph, recovers):
+    peers, explorer, client = graph
+    peers.nav_mode = 'fail'
+    stages = []
+    def feedback(message):
+        stages.append(message.feedback.stage)
+        if recovers and message.feedback.stage == 'retrying_failed_targets':
+            peers.nav_mode = 'success'
+    handle = response(client.send_goal_async(Explore.Goal(max_radius_m=2.5), feedback_callback=feedback))
+    assert handle.accepted
+    result = response(handle.get_result_async(), timeout=12)
+    assert stages.count('retrying_failed_targets') == 1
+    if recovers:
+        assert result.status == GoalStatus.STATUS_SUCCEEDED
+        assert result.result.visited_targets > 0 and result.result.unreachable_targets == 0
+    else:
+        assert result.status == GoalStatus.STATUS_ABORTED
+        assert result.result.message == 'remaining targets failed navigation'
+        assert result.result.unreachable_targets > 0
+    assert not explorer._task_file.exists()
+
+
+def test_resume_with_a_missing_checkpoint_is_rejected_without_navigation(graph):
+    peers, explorer, client = graph
+    assert not response(client.send_goal_async(Explore.Goal(resume_task_id='a' * 32))).accepted
+    assert peers.nav_count == 0
+
+
 def test_operator_waits_for_recovering_startup_inputs_without_a_rejected_goal(graph):
     from lekiwi_rmf.explore_client import ExploreClient
 
@@ -41,7 +70,8 @@ def test_operator_waits_for_recovering_startup_inputs_without_a_rejected_goal(gr
 
 
 @pytest.mark.parametrize('success', [False, True])
-def test_operator_recovers_a_lost_result_reply_from_an_idle_server(graph, monkeypatch, success):
+@pytest.mark.parametrize('unknown_reply', [False, True])
+def test_operator_recovers_a_lost_result_reply_from_an_idle_server(graph, monkeypatch, success, unknown_reply):
     from lekiwi_rmf.explore_client import ExploreClient
     from rclpy.task import Future
 
@@ -54,7 +84,12 @@ def test_operator_recovers_a_lost_result_reply_from_an_idle_server(graph, monkey
         explorer.config['max_duration_sec'] = 0.7
     node = ExploreClient(context=explorer.context)
     # Drop the first result RPC; the real server still completes and retains the result.
-    monkeypatch.setattr(node.action, '_get_result_async', lambda _goal: Future())
+    def lost_result(_goal):
+        future = Future()
+        if unknown_reply:
+            future.set_result(Explore.Impl.GetResultService.Response(status=GoalStatus.STATUS_UNKNOWN))
+        return future
+    monkeypatch.setattr(node.action, '_get_result_async', lost_result)
     try:
         assert node.run(threading.Event()) == (0 if success else 1)
         assert not peers.nav_active and not explorer._busy

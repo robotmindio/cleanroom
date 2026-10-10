@@ -47,7 +47,7 @@ and failed target counts, and known map area in the bounded region.
 `max_duration_sec` and `max_radius_m` equal to zero select the tracked defaults
 in `config/exploration.yaml` (900 seconds and 10 metres). Positive goal values
 can only reduce these maxima. The centre reachability prefilter is 0.22 m,
-the body's inscribed radius (conservatively 0.25 m on a 5 cm grid). The former
+the body's inscribed radius, without rounding up on the 5 cm grid. The former
 0.33 m circle rounded to 0.35 m and unnecessarily blocked close side clearance.
 Goals and preflight waypoints check the whole oriented 46 x 44 cm footprint
 against occupied and unknown cell areas, including the interior and corners
@@ -91,8 +91,9 @@ acceptance; room-scale coverage has not been physically qualified by the tests.
 
 The `ExploreKnown` Nav2 planner and the tracked `explore_nav_to_pose.xml` behavior
 tree prohibit planning through unknown space. Ordinary `GridBased` navigation
-retains its NavFn planner. Exploration uses Smac's state lattice with the native
-omnidirectional motion set and the unpadded body footprint. Its paths include
+uses the same Smac lattice planner, retaining its explicit-goal unknown-space
+policy and 0.20 m planner tolerance. Both use the native
+omnidirectional motion set and the unpadded body footprint. Their paths include
 feasible orientations; NavFn's centreline and placeholder orientations could
 fail the full-body preflight before any motion. Global inflation also includes
 unknown boundaries so the planner checks footprint corners there. The existing
@@ -105,8 +106,11 @@ Repeated failures also replan after refreshing both costmaps, turning, waiting,
 or backing up 0.15 m at 0.15 m/s through the existing collision-checked behavior
 server and final velocity monitor. A real body overlap or invalid sensor source
 still stops the task's navigation; ordinary obstacles outside the footprint do
-not trigger that hard-stop pause. Failed approaches after recovery are excluded for the task;
-exhausting them produces an incomplete result. A canceled/replaced Nav2 goal
+not trigger that hard-stop pause. Failed approaches are deferred while other
+targets are observed, then retried in one second pass after the settling interval.
+Persistent failures produce an incomplete result; the original task deadline
+also bounds these retries. Invalid planner/controller plugins end the task with
+a configuration error instead of being retried as blocked destinations. A canceled/replaced Nav2 goal
 ends exploration instead of fighting another navigation client. Cancel an
 exploration before sending an unrelated navigation task.
 
@@ -154,10 +158,22 @@ Paused feedback updates when the blocking cause changes.
 The client waits for fresh operational readiness before sending its goal, rather
 than treating action-server discovery as proof that SLAM and safety inputs are
 ready. If a restarted server reports idle while the old result request remains
-unanswered, the client queries that exact goal again and ends with a failure
-instead of hanging. An unknown goal counts as stopped only after its original
+unanswered, the client queries that exact goal again. An unknown goal counts as
+stopped only after its original
 acceptance and fresh idle prerequisites, including the independent ownership
-guard, are confirmed.
+guard, are confirmed. The client then resumes the saved task with
+`resume_task_id` set to the original accepted goal UUID's 32 lowercase hex digits.
+No task resumes merely because the server starts. A running client requests the
+continuation, after the ownership guard confirms the old navigation has stopped.
+
+Checkpoints next to the mapping database retain the original center, radius,
+deadline, visited/deferred targets, retry pass and preceding mapping mode.
+Restart recovery cannot extend the deadline or recenter the travel region.
+The deadline includes system suspend time. A missing, invalid, expired or
+superseded checkpoint, changed host boot, or reduced configuration limits refuse
+continuation. Cancellation and ordinary terminal results remove the checkpoint;
+server shutdown preserves it for a running client's continuation. The optional
+resume request uses zero duration/radius and the original `revisit_known` setting.
 
 ## Mapping lifecycle and quotas
 
