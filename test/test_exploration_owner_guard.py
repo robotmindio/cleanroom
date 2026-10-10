@@ -22,9 +22,12 @@ from lekiwi_rmf.explore_client import ExploreClient
 from test_exploration_ros import RobotPeers, response, wait
 
 
-@pytest.mark.parametrize('restart_guard', [False, True])
-@pytest.mark.parametrize('graceful', [False, True])
-def test_restarted_explorer_resumes_original_bounds_and_preserves_unrelated_navigation(tmp_path, restart_guard, graceful):
+@pytest.mark.parametrize('graceful,restart_guard,delayed_result', [
+    (False, False, False), (False, True, False), (True, False, False),
+    (True, True, False), (False, False, True),
+])
+def test_restarted_explorer_resumes_original_bounds_and_preserves_unrelated_navigation(
+        tmp_path, monkeypatch, restart_guard, graceful, delayed_result):
     context = Context()
     rclpy.init(context=context)
     peers = RobotPeers(context)
@@ -33,6 +36,13 @@ def test_restarted_explorer_resumes_original_bounds_and_preserves_unrelated_navi
     client_node.create_subscription(Bool, '/robot/explore/navigation_guard_ready',
                                     lambda msg: ready.append(msg.data), 1)
     operator = ExploreClient(context=context)
+    if delayed_result:
+        ready_probe = operator.result.service_is_ready
+        probes = []
+        def result_ready():
+            probes.append(True)
+            return len(probes) > 1 and ready_probe()
+        monkeypatch.setattr(operator.result, 'service_is_ready', result_ready)
     interrupted = threading.Event()
     codes = []
     operator_thread = threading.Thread(target=lambda: codes.append(operator.run(interrupted)))
@@ -86,6 +96,8 @@ def test_restarted_explorer_resumes_original_bounds_and_preserves_unrelated_navi
             operator_thread.join(timeout=10)
             assert not operator_thread.is_alive(), log_path.read_text()
             assert codes == [130], log_path.read_text()
+            if delayed_result:
+                assert len(probes) > 1
             assert peers.nav_canceled == 2 and not checkpoint.exists()
             # A normal client UUID has no Explorer ownership namespace.
             other = response(navigate.send_goal_async(NavigateToPose.Goal(

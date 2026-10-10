@@ -133,7 +133,7 @@ class ExploreClient(Node):
                                 and self._prerequisites_ready and time.monotonic() - self.status_at < 1
                                 and not interrupted.is_set()):
                             return None, task_id
-        return self._stop(goal_id, future, interrupted), task_id
+        return self._stop(goal_id, future, interrupted, allow_resume=True), task_id
 
     def _finished(self, response, interrupted):
         print(response.result.message, flush=True)
@@ -143,7 +143,7 @@ class ExploreClient(Node):
             return None
         return 0 if response.status == GoalStatus.STATUS_SUCCEEDED else 1
 
-    def _stop(self, goal_id, future, interrupted):
+    def _stop(self, goal_id, future, interrupted, allow_resume=False):
         # Acceptance can arrive late: cancellation still targets the UUID we sent.
         until = time.monotonic() + 10
         terminal = False
@@ -178,6 +178,9 @@ class ExploreClient(Node):
                         terminal = True
                         break
             self.wait(lambda: False, 0.1)
+        if (terminal and result_status == GoalStatus.STATUS_UNKNOWN
+                and allow_resume and not interrupted.is_set()):
+            return None
         print('Exploration stopped' if terminal else 'Exploration stop unconfirmed; check robot status', flush=True)
         if interrupted.is_set() and terminal:
             return 130
