@@ -139,7 +139,12 @@ if(BUILD_TESTING)
     RESULT_VARIABLE test_python_has_zmq
     OUTPUT_QUIET ERROR_QUIET)
   function(add_lekiwi_pytest name)
-    ament_add_ros_isolated_pytest_test(${name} test/${name}.py ENV "${test_launch_environment}")
+    set(timeout_args)
+    # Expanded process-restart and result-recovery matrices exceed one minute.
+    if(name STREQUAL "test_exploration_owner_guard" OR name STREQUAL "test_exploration_recovery")
+      set(timeout_args TIMEOUT 120)
+    endif()
+    ament_add_ros_isolated_pytest_test(${name} test/${name}.py ${timeout_args} ENV "${test_launch_environment}")
     isolate_lekiwi_test(${name})
   endfunction()
   function(add_lekiwi_launch_test name timeout)
