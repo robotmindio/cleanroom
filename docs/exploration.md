@@ -91,7 +91,12 @@ acceptance; room-scale coverage has not been physically qualified by the tests.
 
 The `ExploreKnown` Nav2 planner and the tracked `explore_nav_to_pose.xml` behavior
 tree prohibit planning through unknown space. Ordinary `GridBased` navigation
-retains its existing behavior. Exploration uses bounded Nav2 recovery: recoverable
+retains its NavFn planner. Exploration uses Smac's state lattice with the native
+omnidirectional motion set and the unpadded body footprint. Its paths include
+feasible orientations; NavFn's centreline and placeholder orientations could
+fail the full-body preflight before any motion. Global inflation also includes
+unknown boundaries so the planner checks footprint corners there. The existing
+full-body preflight remains in place. Exploration uses bounded Nav2 recovery: recoverable
 planner/controller failures refresh the affected costmap and retry the same goal.
 Repeated failures also replan after refreshing both costmaps, turning, waiting,
 or backing up 0.15 m at 0.15 m/s through the existing collision-checked behavior

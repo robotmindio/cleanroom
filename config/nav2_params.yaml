@@ -185,6 +185,8 @@ global_costmap:
         plugin: nav2_costmap_2d::InflationLayer
         inflation_radius: 0.40
         cost_scaling_factor: 4.0
+        # Keep SE2 collision checks active near unknown-space boundaries.
+        inflate_around_unknown: true
 
 planner_server:
   ros__parameters:
@@ -196,10 +198,12 @@ planner_server:
       use_astar: true
       allow_unknown: true
     ExploreKnown:
-      plugin: nav2_navfn_planner::NavfnPlanner
+      plugin: nav2_smac_planner::SmacPlannerLattice
       tolerance: 0.0
-      use_astar: true
       allow_unknown: false
+      max_planning_time: 1.0
+      smooth_path: false
+      lattice_filepath: "$(find-pkg-share nav2_smac_planner)/sample_primitives/5cm_resolution/0.5m_turning_radius/omni/output.json"
 
 smoother_server:
   ros__parameters:
