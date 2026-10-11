@@ -20,5 +20,5 @@ robot_explorer:
     # Mapping quota: the session guard freezes the map (switches RTAB-Map to
     # localization) at whichever comes first. bringup's
     # rtabmap_mapping_max_bytes/_seconds arguments default to these values.
-    mapping_max_bytes: 536870912
+    mapping_max_bytes: 17179869184
     mapping_max_seconds: 14400.0

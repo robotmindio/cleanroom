@@ -6,4 +6,6 @@ Verified: all 73 compute and 16 device release checks passed; cd70aef6384fb09aca
 
 Implemented follow-up: use a fresh Nav2 costmap service snapshot when selecting goals; preserve soft inflation as a cost; retry occupied starts without rejecting untried targets; require one second of clear collision status before resuming; preserve active time during pauses and across checkpoint recovery. Mapping quotas still apply during a stop. The 97-case recovery matrix and five final focused regressions passed.
 
-Pending: qualify and deploy the follow-up, then verify live target completion and pause/resume behavior. Previous trials completed no target; nearby human presence explains the earlier repeated front-right stops and does not justify a self-mask change. Collision guards remain intact. Remove this file before final delivery.
+The follow-up passed all 73 compute and 16 device checks. Deployment readiness was blocked by the existing 514 MiB map exceeding the old 512 MiB storage quota; the tracked default is now 16 GiB (the compute host has 36 GiB free; the Pi does not run mapping), preserving the map and four-hour session limit.
+
+Pending: qualify and deploy the quota adjustment, then verify live target completion and pause/resume behavior. Previous trials completed no target; nearby human presence explains the earlier repeated front-right stops and does not justify a self-mask change. Collision guards remain intact. Remove this file before final delivery.

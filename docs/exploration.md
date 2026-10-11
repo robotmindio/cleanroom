@@ -205,7 +205,8 @@ database. If the task began in localization, it restores localization when it
 finishes, fails or is canceled; an existing mapping session remains mapping
 unless it reaches a quota.
 
-The always-running monitor reads RTAB-Map's `Mem/IncrementalMemory` and counts
+The default limits are 16 GiB of database storage and four hours per mapping
+session. The always-running monitor reads RTAB-Map's `Mem/IncrementalMemory` and counts
 the database plus `-wal`, `-shm` and `-journal` sidecars. Both mapping-startup
 and later direct calls to `/rtabmap/set_mode_mapping` are covered. A transition
 from localization starts a fresh wall-time session; a transient parameter RPC

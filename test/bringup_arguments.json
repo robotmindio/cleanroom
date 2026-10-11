@@ -149,7 +149,7 @@
  },
  "rtabmap_mapping_max_bytes": {
   "choices": null,
-  "default": "536870912"
+  "default": "17179869184"
  },
  "rtabmap_mapping_max_seconds": {
   "choices": null,
