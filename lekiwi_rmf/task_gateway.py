@@ -127,8 +127,18 @@ class TaskGateway(Node):
     def _update(self, identifier, state, detail, result=None):
         if not self._journal.update(identifier, state, detail, result):
             return
-        self._events.publish(String(data=json.dumps(dict(self._row(identifier)), default=lambda value: bytes(value).hex())))
+        row = self._row(identifier)
+        self._events.publish(String(data=json.dumps(dict(row), default=lambda value: bytes(value).hex())))
         if state in TERMINAL:
+            for kind, client in (('send', None), ('result', self._result_clients[row['capability']]),
+                                 ('cancel', self._cancel_clients[row['capability']])):
+                key = (kind, identifier)
+                future = self._pending.pop(key, None)
+                if future is not None:
+                    if client is not None:
+                        client.remove_pending_request(future)
+                    future.cancel()
+                self._queried.pop(key, None)
             self._recovering.discard(identifier)
             self._sent.discard(identifier)
             self._started.pop(identifier, None)
@@ -230,7 +240,9 @@ class TaskGateway(Node):
     def _result(self, identifier, future):
         if future.cancelled():
             return
-        self._pending.pop(('result', identifier), None)
+        key = ('result', identifier)
+        if self._pending.get(key) is future:
+            self._pending.pop(key)
         if self._row(identifier)['state'] in TERMINAL:
             return
         try:
@@ -266,11 +278,11 @@ class TaskGateway(Node):
         if self._row(identifier)['state'] in TERMINAL:
             return
         try:
-            handle = future.result()
+            accepted = future.result().accepted
         except Exception as error:
             self._delivery_failed(identifier, error)
             return
-        if not handle.accepted:
+        if not accepted:
             self._update(identifier, 'failed', 'ROS action server rejected the goal')
             return
         row = self._row(identifier)
@@ -281,7 +293,11 @@ class TaskGateway(Node):
     def _canceled(self, identifier, future):
         if future.cancelled():
             return
-        self._pending.pop(('cancel', identifier), None)
+        key = ('cancel', identifier)
+        if self._pending.get(key) is future:
+            self._pending.pop(key)
+        if self._row(identifier)['state'] in TERMINAL:
+            return
         try:
             reply = future.result()
             if reply.return_code:
