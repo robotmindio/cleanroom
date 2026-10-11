@@ -165,7 +165,7 @@ def test_unknown_or_unsafe_start_and_blocked_regions_are_not_traversed():
     grid[:, 60:] = -1
     first = choose(grid)[0]
     second = choose(grid, blocked=[first])[0]
-    assert second is not None and 0.025 <= math.dist(first, second) < 0.5
+    assert second is None or math.dist(first, second) >= 0.5
     grid[40, 40] = 100
     with pytest.raises(ValueError, match="clearance"):
         choose(grid)

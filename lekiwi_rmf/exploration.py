@@ -236,11 +236,8 @@ def select_target(grid, resolution, origin, position, center, radius, visited, b
     frontier = (connected_free == 2).astype(np.uint8) & unknown_neighbor
     candidates = reachable & (cv2.dilate(frontier, disk(observation_distance, resolution)) != 0)
     available = reachable & ((wx - position[0]) ** 2 + (wy - position[1]) ** 2 >= spacing ** 2)
-    for vx, vy in visited:
+    for vx, vy in (*visited, *blocked):
         available &= (wx - vx) ** 2 + (wy - vy) ** 2 >= spacing ** 2
-    # A failed pose does not prove that neighbouring observation poses are unreachable.
-    for vx, vy in blocked:
-        available &= (wx - vx) ** 2 + (wy - vy) ** 2 >= (resolution / 2) ** 2
     candidates &= available
     stages = [("exploring_frontiers", candidates)]
     if revisit:

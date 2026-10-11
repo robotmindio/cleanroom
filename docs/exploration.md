@@ -241,7 +241,6 @@ robot. These tests exercise the task runner without commanding hardware.
 
 The planner's first lattice pose may round the measured starting heading. Route
 preflight uses the measured starting footprint when that first pose is within
-half a map cell; all subsequent footprints and region bounds remain checked.
-A failed target excludes that pose, rather than the whole observation-spacing
-neighbourhood, so nearby reachable alternatives can still be tried. Nav2 action
+half a map cell; the connection to the next waypoint, all subsequent footprints,
+and region bounds remain checked. Nav2 action
 acknowledgements have a bounded one-second budget on the physical stack.

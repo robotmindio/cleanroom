@@ -63,6 +63,7 @@ class RobotPeers(Node):
         self.nav_active = False
         self.nav_canceled = 0
         self.nav_count = 0
+        self.navigation_goals = []
         self.planner_ids = []
         self.acceptance_delay = 0.0
         self.position = (0.0, 0.0)
@@ -131,6 +132,7 @@ class RobotPeers(Node):
 
     def navigate(self, goal):
         assert goal.request.behavior_tree.endswith("explore_nav_to_pose.xml")
+        self.navigation_goals.append(goal.request.pose)
         self.nav_count += 1
         self.nav_active = True
         while self.nav_mode == "hold" and not goal.is_cancel_requested:
