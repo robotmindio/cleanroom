@@ -26,12 +26,12 @@ from rclpy.qos import DurabilityPolicy, QoSProfile
 from tf2_ros import TransformBroadcaster
 import yaml
 
-from lekiwi_rmf.exploration import footprint_is_free, load_navigation_footprint
+from lekiwi_rmf.exploration import footprint_is_free, load_navigation_footprint, with_body_free
 
 ROOT = Path(__file__).parents[1]
 
 
-@pytest.mark.parametrize("scene", ["unknown_corner", "close_corridor"])
+@pytest.mark.parametrize("scene", ["unknown_corner", "close_corridor", "occupied_start", "unknown_start"])
 @pytest.mark.parametrize("planner_id", ["ExploreKnown", "GridBased"])
 def test_native_routes_fit_the_body_without_extra_wall_clearance(tmp_path, scene, planner_id):
     context = Context()
@@ -53,8 +53,13 @@ def test_native_routes_fit_the_body_without_extra_wall_clearance(tmp_path, scene
         grid[45:, 45:] = -1
         goal.pose.position.x, goal.pose.position.y = -0.4, 0.4
         yaw = 3 * math.pi / 4
-    else:
+    elif scene == "close_corridor":
         grid[[34, 46], :] = 100
+        goal.pose.position.x = 0.8
+        yaw = 0.0
+    else:
+        grid[40, 42] = 100 if scene == "occupied_start" else -1
+        grid[40, 49] = 100  # A real obstacle beyond the body's front remains blocked.
         goal.pose.position.x = 0.8
         yaw = 0.0
     goal.pose.orientation.z, goal.pose.orientation.w = math.sin(yaw / 2), math.cos(yaw / 2)
@@ -124,8 +129,11 @@ def test_native_routes_fit_the_body_without_extra_wall_clearance(tmp_path, scene
             assert result.status == GoalStatus.STATUS_SUCCEEDED and not result.result.error_code, log_path.read_text()
             path = result.result.path.poses
             footprint, _, _ = load_navigation_footprint(ROOT / "config/nav2_params.yaml")
+            checked_grid = with_body_free(grid, 0.05, (-2.0, -2.0, 0.0), position, 0, footprint)
+            if scene in ("occupied_start", "unknown_start"):
+                assert checked_grid[40, 49] == 100
             assert path and all(footprint_is_free(
-                grid, 0.05, (-2.0, -2.0, 0.0), (pose.pose.position.x, pose.pose.position.y),
+                checked_grid, 0.05, (-2.0, -2.0, 0.0), (pose.pose.position.x, pose.pose.position.y),
                 2 * math.atan2(pose.pose.orientation.z, pose.pose.orientation.w), footprint, 20,
             ) for pose in path), [(pose.pose.position, pose.pose.orientation) for pose in path]
             assert math.hypot(path[-1].pose.position.x - goal.pose.position.x,

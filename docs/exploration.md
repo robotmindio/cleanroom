@@ -244,3 +244,8 @@ preflight uses the measured starting footprint when that first pose is within
 half a map cell; the connection to the next waypoint, all subsequent footprints,
 and region bounds remain checked. Nav2 action
 acknowledgements have a bounded one-second budget on the physical stack.
+
+The global static costmap also clears cells under the robot's current footprint,
+matching target preflight. Unknown or self-mapped cells under the standing body
+therefore do not make every target fail with Nav2's "Start occupied" error.
+Obstacles outside the current footprint and live lidar collision checks remain active.
