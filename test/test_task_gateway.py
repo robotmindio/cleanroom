@@ -91,6 +91,7 @@ def system(tmp_path):
     guard = ExplorationOwnerGuard(context=context)
     path = str(tmp_path / 'tasks.sqlite3')
     gateway = TaskGateway(context=context, parameter_overrides=[Parameter('database_path', value=path)])
+    peers.gateway = gateway
     client = Node('task_client', context=context)
     executor = MultiThreadedExecutor(num_threads=6, context=context)
     for node in (peers, guard, client):
@@ -224,7 +225,7 @@ def test_other_ros_clients_keep_their_ownership(system):
     handle = accepted.result()
     assert handle.accepted
     wait(lambda: len(peers.received) == 1)
-    time.sleep(0.2)
+    wait(lambda: bool(peers.gateway._observed['explore']))
     assert not start().accepted
     assert not stop('').accepted
     result = handle.get_result_async()
