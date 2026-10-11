@@ -143,8 +143,9 @@ if(BUILD_TESTING)
     OUTPUT_QUIET ERROR_QUIET)
   function(add_lekiwi_pytest name)
     set(timeout_args)
-    # Expanded process-restart and result-recovery matrices exceed one minute.
-    if(name STREQUAL "test_exploration_owner_guard" OR name STREQUAL "test_exploration_recovery")
+    # Expanded exploration action and restart matrices exceed one minute.
+    if(name STREQUAL "test_exploration_owner_guard" OR name STREQUAL "test_exploration_recovery"
+        OR name STREQUAL "test_exploration_ros")
       set(timeout_args TIMEOUT 120)
     endif()
     ament_add_ros_isolated_pytest_test(${name} test/${name}.py ${timeout_args} ENV "${test_launch_environment}")

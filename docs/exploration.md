@@ -46,7 +46,9 @@ and failed target counts, and known map area in the bounded region.
 
 `max_duration_sec` and `max_radius_m` equal to zero select the tracked defaults
 in `config/exploration.yaml` (900 seconds and 10 metres). Positive goal values
-can only reduce these maxima. The centre reachability prefilter is 0.22 m,
+can only reduce these maxima. Duration counts active exploration time; recoverable
+pauses preserve the remaining budget, including across a server restart. Mapping
+storage and session quotas continue to apply while paused. The centre reachability prefilter is 0.22 m,
 the body's inscribed radius, without rounding up on the 5 cm grid. The former
 0.33 m circle rounded to 0.35 m and unnecessarily blocked close side clearance.
 Goals and preflight waypoints check the whole oriented 46 x 44 cm footprint
@@ -78,7 +80,14 @@ During a task, those conditions are recoverable faults: a stale SLAM update or
 TF, withdrawn motion permission, an unfolded arm, a stale mapping-mode reading,
 or a ROS peer that answers late. A collision-monitor stop is also a pause:
 feedback identifies the triggering polygon (or invalid sensor source), and
-targets stay eligible when the obstruction clears. Missing or stale collision
+targets stay eligible when the obstruction clears. Collision status must remain
+clear for one second before movement resumes, preventing isolated clear scans
+near a person's foot from repeatedly restarting navigation. Target selection combines the
+SLAM map with a fresh service snapshot of Nav2's global costmap, so current LiDAR
+obstacles exclude blocked goals without treating soft inflation costs as walls.
+Invalid, stale or temporarily unaligned costmap replies pause exploration.
+An occupied planner start is retried without declaring untried targets unreachable.
+Missing or stale collision
 status pauses the task as well. The native monitor publishes its current state
 for every velocity input, including an unchanged stop, so a restarted Explorer
 does not miss it. The task cancels its Nav2 goal so the robot stops, reports a
@@ -179,6 +188,8 @@ continuation, after the ownership guard confirms the old navigation has stopped.
 
 Checkpoints next to the mapping database retain the original center, radius,
 deadline, visited/deferred targets, retry pass and preceding mapping mode.
+A paused checkpoint also records when the pause began, allowing recovery to
+retain the same remaining active time without renewing the task's budget.
 Restart recovery cannot extend the deadline or recenter the travel region.
 The deadline includes system suspend time. A missing, invalid, expired or
 superseded checkpoint, changed host boot, or reduced configuration limits refuse

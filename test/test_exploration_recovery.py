@@ -112,8 +112,11 @@ def test_operator_recovers_a_lost_result_reply_from_an_idle_server(graph, monkey
 @pytest.mark.parametrize('failure', ['overlap', 'invalid_source', 'missing_status'])
 def test_collision_stop_pauses_without_discarding_targets_and_clearing_resumes(graph, failure):
     peers, explorer, client = graph
+    if failure == 'overlap':
+        explorer.config['mapping_max_seconds'] = 30.0
     feedback = []
-    handle = response(client.send_goal_async(Explore.Goal(max_radius_m=2.5),
+    handle = response(client.send_goal_async(Explore.Goal(max_radius_m=2.5,
+                      max_duration_sec=5.0 if failure == 'overlap' else 0.0),
                       feedback_callback=lambda msg: feedback.append(msg.feedback)))
     assert handle.accepted
     wait(lambda: peers.nav_active)
@@ -126,12 +129,15 @@ def test_collision_stop_pauses_without_discarding_targets_and_clearing_resumes(g
     wait(lambda: 'paused: collision monitor' in explorer._stage)
     wait(lambda: not peers.nav_active and peers.nav_canceled == 1)
     count = peers.nav_count
-    time.sleep(0.3)
+    time.sleep(5.5 if failure == 'overlap' else 0.3)
     assert peers.nav_count == count
     assert feedback and all(message.unreachable_targets == 0 for message in feedback)
     assert not handle.get_result_async().done()
     peers.collision = CollisionMonitorState()
     peers.publish_collision = True
+    if failure == 'overlap':
+        time.sleep(0.4)
+        assert peers.nav_count == count and not peers.nav_active
     wait(lambda: peers.nav_active and peers.nav_count == count + 1)
     response(handle.cancel_goal_async())
     result = response(handle.get_result_async())
@@ -150,6 +156,19 @@ def test_collision_stop_refuses_a_new_goal_but_does_not_poison_readiness_after_c
     handle = start(graph)
     response(handle.cancel_goal_async())
     assert response(handle.get_result_async()).status == GoalStatus.STATUS_CANCELED
+
+
+def test_mapping_quota_still_ends_a_collision_paused_task(graph):
+    peers, explorer, _ = graph
+    handle = start(graph)
+    peers.collision = CollisionMonitorState(action_type=CollisionMonitorState.STOP, polygon_name='StopZone')
+    wait(lambda: explorer._stage.startswith('paused: collision monitor'))
+    wait(lambda: not peers.nav_active)
+    explorer.database.write_bytes(b'x' * 4096)
+    result = response(handle.get_result_async())
+    assert result.status == GoalStatus.STATUS_ABORTED
+    assert 'mapping database quota reached' in result.result.message
+    assert not peers.nav_active
 
 
 def test_permission_pause_resumes_in_a_corridor_fitting_the_actual_body(graph):
