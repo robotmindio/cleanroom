@@ -110,13 +110,10 @@ def test_operator_recovers_a_lost_result_reply_from_an_idle_server(graph, monkey
 
 
 @pytest.mark.parametrize('failure', ['overlap', 'invalid_source', 'missing_status'])
-def test_collision_stop_pauses_without_discarding_targets_and_clearing_resumes(graph, failure):
+def test_collision_stop_pauses_without_discarding_targets_and_clearing_resumes(graph, failure, monkeypatch):
     peers, explorer, client = graph
-    if failure == 'overlap':
-        explorer.config['mapping_max_seconds'] = 30.0
     feedback = []
-    handle = response(client.send_goal_async(Explore.Goal(max_radius_m=2.5,
-                      max_duration_sec=5.0 if failure == 'overlap' else 0.0),
+    handle = response(client.send_goal_async(Explore.Goal(max_radius_m=2.5),
                       feedback_callback=lambda msg: feedback.append(msg.feedback)))
     assert handle.accepted
     wait(lambda: peers.nav_active)
@@ -129,7 +126,19 @@ def test_collision_stop_pauses_without_discarding_targets_and_clearing_resumes(g
     wait(lambda: 'paused: collision monitor' in explorer._stage)
     wait(lambda: not peers.nav_active and peers.nav_canceled == 1)
     count = peers.nav_count
-    time.sleep(5.5 if failure == 'overlap' else 0.3)
+    if failure == 'overlap':
+        from lekiwi_rmf import exploration_node
+        clock = exploration_node.task_time
+        observed = threading.Event()
+
+        def advance_past_original_deadline():
+            observed.set()
+            return clock() + TEST_TASK_DURATION + 1
+
+        monkeypatch.setattr(exploration_node, 'task_time', advance_past_original_deadline)
+        wait(observed.is_set)
+    else:
+        time.sleep(0.3)
     assert peers.nav_count == count
     assert feedback and all(message.unreachable_targets == 0 for message in feedback)
     assert not handle.get_result_async().done()
