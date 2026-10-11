@@ -50,6 +50,10 @@ def compact_cloud(message: PointCloud2, stride: int) -> PointCloud2 | None:
     else:
         selected = finite.reshape(message.height, message.width)[::stride, ::stride].ravel()
         output = decimated[selected].tobytes()
+        if not output:
+            # A sampling grid can miss every return even when the frame exceeds its budget.
+            indices = np.flatnonzero(finite)
+            output = samples[indices[::math.ceil(len(indices) / len(decimated))]].tobytes()
     # Empty measured frames distinguish a close/unreadable surface from a dead camera.
     cloud = PointCloud2()
     cloud.header = message.header

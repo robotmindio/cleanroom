@@ -646,11 +646,13 @@ class RobotExplorer(Node):
         pose = check()
         q = pose.pose.orientation
         grid, resolution, origin = self._map
+        request = self._costmap.call_async(GetCostmap.Request())
         try:
-            costmap = self._wait(self._costmap.call_async(GetCostmap.Request()),
-                                 self.config["service_timeout_sec"], check).map
+            costmap = self._wait(request, self.config["service_timeout_sec"], check).map
         except ResponseTimeout as error:
             raise Paused("navigation costmap service is unavailable") from error
+        finally:
+            self._costmap.remove_pending_request(request)
         metadata = costmap.metadata
         if len(costmap.data) > self.config["max_map_cells"]:
             raise Paused("navigation costmap exceeds the cell limit")

@@ -32,7 +32,7 @@ from std_srvs.srv import Empty
 from tf2_ros import TransformBroadcaster
 
 from lekiwi_rmf.action import Explore
-from lekiwi_rmf.exploration_node import Paused, RobotExplorer
+from lekiwi_rmf.exploration_node import Paused, ResponseTimeout, RobotExplorer
 from lekiwi_rmf.exploration_owner_guard import ExplorationOwnerGuard
 
 
@@ -338,6 +338,25 @@ def test_occupied_start_does_not_discard_untried_targets(graph):
     response(handle.cancel_goal_async())
     result = response(handle.get_result_async())
     assert result.status == GoalStatus.STATUS_CANCELED and result.result.unreachable_targets == 0
+
+
+@pytest.mark.parametrize("failure", [Paused, InterruptedError, ResponseTimeout])
+def test_interrupted_costmap_queries_release_the_pending_request(graph, monkeypatch, failure):
+    from rclpy.task import Future as RosFuture
+
+    _, explorer, _ = graph
+    request = RosFuture()
+    removed = []
+    monkeypatch.setattr(explorer._costmap, "call_async", lambda _: request)
+    monkeypatch.setattr(explorer._costmap, "remove_pending_request", removed.append)
+
+    def interrupted_wait(*_):
+        raise failure("interrupted query")
+
+    monkeypatch.setattr(explorer, "_wait", interrupted_wait)
+    with pytest.raises(Paused if failure is ResponseTimeout else failure):
+        explorer._explore_step(None, lambda: PoseStamped(), (0, 0), 2.5, [], [], Explore.Result())
+    assert removed == [request]
 
 
 def test_small_requested_region_keeps_the_full_stopping_margin(graph):
