@@ -127,6 +127,7 @@ def system(tmp_path):
         gateway_thread.join(timeout=5)
         gateway.destroy_node()
         gateway = TaskGateway(context=context, parameter_overrides=[Parameter('database_path', value=path)])
+        peers.gateway = gateway
         gateway_executor = SingleThreadedExecutor(context=context)
         gateway_executor.add_node(gateway)
         gateway_thread = threading.Thread(target=gateway_executor.spin, daemon=True)
@@ -273,3 +274,106 @@ def test_lost_cancel_reply_is_retried_without_claiming_termination():
     assert gateway._pending[('cancel', 'task-1')] is retry
     TaskGateway._canceled(gateway, 'task-1', old)
     assert gateway._pending[('cancel', 'task-1')] is retry
+
+
+def test_late_acceptance_error_cannot_replace_terminal_result():
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from rclpy.task import Future
+
+    future = Future()
+    future.set_exception(RuntimeError('lost acceptance reply'))
+    gateway = SimpleNamespace(_pending={}, _row=lambda _: {'state': 'succeeded'},
+                              _update=Mock(), get_logger=Mock())
+    TaskGateway._accepted(gateway, 'task-1', future)
+    gateway._update.assert_not_called()
+
+
+@pytest.mark.parametrize('cancel_before_restart', [False, True])
+def test_restart_handles_proven_unsent_task(system, cancel_before_restart):
+    peers, start, status, stop, restart = system
+    # Hold the dispatch loop while service callbacks still admit and cancel work.
+    for timer in peers.gateway.timers:
+        timer.cancel()
+    assert start('navigate', '{"x":0,"y":0}').accepted
+    assert not peers.received
+    if cancel_before_restart:
+        assert stop().accepted
+    restart()
+    if cancel_before_restart:
+        wait(lambda: status().state == 'canceled')
+        assert not peers.received
+    else:
+        wait(lambda: status().state == 'running')
+        assert len(peers.received) == 1
+        stop()
+        wait(lambda: status().state == 'canceled')
+
+
+def test_failed_submission_is_durable_and_never_replayed(tmp_path):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from lekiwi_rmf.task_journal import TaskJournal
+
+    journal = TaskJournal(tmp_path / 'tasks.db')
+    try:
+        journal.admit('task', 'explore', '{}', bytes(16))
+        action = Mock()
+        action.server_is_ready.return_value = True
+        action.send_goal_async.side_effect = RuntimeError('transport lost')
+        gateway = SimpleNamespace(_journal=journal, _observed={'explore': set()},
+                                  _action_clients={'explore': action}, _sent=set(),
+                                  _started={}, _recovering=set(), _update=journal.update,
+                                  get_logger=Mock())
+        gateway._delivery_failed = lambda task, error: TaskGateway._delivery_failed(gateway, task, error)
+        TaskGateway._dispatch(gateway, journal.row('task'), time.monotonic())
+        assert journal.row('task')['dispatched']
+        assert journal.row('task')['state'] == 'unknown'
+        assert gateway._recovering == {'task'}
+    finally:
+        journal.close()
+
+
+def test_dispatch_waits_for_observed_foreign_goal(tmp_path):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from lekiwi_rmf.task_journal import TaskJournal
+
+    journal = TaskJournal(tmp_path / 'tasks.db')
+    try:
+        journal.admit('task', 'explore', '{}', bytes(16))
+        action = Mock()
+        gateway = SimpleNamespace(_journal=journal, _observed={'navigate': {bytes(range(16))}},
+                                  _action_clients={'explore': action})
+        TaskGateway._dispatch(gateway, journal.row('task'), time.monotonic())
+        assert not journal.row('task')['dispatched']
+        action.send_goal_async.assert_not_called()
+    finally:
+        journal.close()
+
+
+def test_user_cancel_preserves_navigation_deadline_failure(tmp_path):
+    from types import SimpleNamespace
+    from rclpy.task import Future
+    from action_msgs.msg import GoalStatus
+
+    from lekiwi_rmf.task_journal import TaskJournal
+
+    journal = TaskJournal(tmp_path / 'tasks.db')
+    try:
+        journal.admit('task', 'navigate', '{}', bytes(16))
+        journal.request_cancel('task', reason=2)
+        gateway = SimpleNamespace(_journal=journal, _active=journal.active,
+                                  _row=journal.row, _update=journal.update, _pending={})
+        response = TaskGateway._cancel(gateway, CancelTask.Request(task_id='task'), CancelTask.Response())
+        assert response.accepted
+        future = Future()
+        future.set_result(NavigateToPose.Impl.GetResultService.Response(
+            status=GoalStatus.STATUS_CANCELED, result=NavigateToPose.Result()))
+        TaskGateway._result(gateway, 'task', future)
+        assert journal.row('task')['state'] == 'failed'
+        assert 'navigation deadline reached' in journal.row('task')['detail']
+    finally:
+        journal.close()

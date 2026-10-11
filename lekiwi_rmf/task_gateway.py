@@ -2,10 +2,8 @@
 """Durable admission and observation of existing ROS actions; never a motion controller."""
 
 import json
-import fcntl
 import math
 from pathlib import Path
-import sqlite3
 from queue import Empty, SimpleQueue
 import time
 import uuid
@@ -27,9 +25,9 @@ from unique_identifier_msgs.msg import UUID
 from lekiwi_rmf.action import Explore
 from lekiwi_rmf.exploration_owner_guard import owned_goal_id
 from lekiwi_rmf.srv import CancelTask, GetTask, SubmitTask
+from lekiwi_rmf.task_journal import TERMINAL, TaskJournal
 
 
-TERMINAL = {'succeeded', 'canceled', 'failed'}
 ACTIONS = {'navigate': ('/navigate_to_pose', NavigateToPose), 'explore': ('/robot/explore', Explore)}
 
 
@@ -88,29 +86,13 @@ class TaskGateway(Node):
         self._timeout = self.get_parameter('navigation_timeout_sec').value
         if type(self._timeout) not in (float, int) or not math.isfinite(self._timeout) or self._timeout <= 0:
             raise ValueError('navigation_timeout_sec must be positive and finite')
-        path = Path(self.get_parameter('database_path').value).expanduser()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        # Two gateways must never race to submit the same journaled action.
-        self._journal_lock = Path(f'{path}.lock').open('a')
-        fcntl.flock(self._journal_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        # All callbacks share the default mutually exclusive ROS callback group.
-        self._db = sqlite3.connect(path, check_same_thread=False)
-        path.chmod(0o600)
-        self._db.row_factory = sqlite3.Row
-        if self._db.execute('PRAGMA user_version').fetchone()[0] not in (0, 1):
-            raise RuntimeError('unsupported task journal version')
-        self._db.execute('''CREATE TABLE IF NOT EXISTS tasks (
-            id TEXT PRIMARY KEY, capability TEXT NOT NULL, parameters TEXT NOT NULL,
-            goal_id BLOB NOT NULL, state TEXT NOT NULL, detail TEXT NOT NULL,
-            result TEXT NOT NULL DEFAULT '{}', cancel_requested INTEGER NOT NULL DEFAULT 0)''')
-        self._db.execute('PRAGMA user_version=1')
-        self._db.commit()
+        self._journal = TaskJournal(self.get_parameter('database_path').value)
         self._pending = {}
         self._replies = SimpleQueue()
         self._queried = {}
         self._sent = set()
         self._started = {}
-        self._recovering = {row['id'] for row in self._active()}
+        self._recovering = {row['id'] for row in self._active() if row['dispatched']}
         self._observed = {capability: set() for capability in ACTIONS}
         self._terminal_seen = {}
         self._guard = (False, 0.0)
@@ -137,18 +119,14 @@ class TaskGateway(Node):
         self.create_timer(0.2, self._tick, clock=Clock(clock_type=ClockType.STEADY_TIME))
 
     def _active(self):
-        return self._db.execute("SELECT * FROM tasks WHERE state NOT IN ('succeeded','canceled','failed')").fetchall()
+        return self._journal.active()
 
     def _row(self, identifier):
-        return self._db.execute('SELECT * FROM tasks WHERE id=?', (identifier,)).fetchone()
+        return self._journal.row(identifier)
 
     def _update(self, identifier, state, detail, result=None):
-        row = self._row(identifier)
-        if row['state'] == state and row['detail'] == detail and result is None:
+        if not self._journal.update(identifier, state, detail, result):
             return
-        with self._db:
-            self._db.execute('UPDATE tasks SET state=?,detail=?,result=? WHERE id=?',
-                             (state, detail, json.dumps(result, allow_nan=False) if result is not None else row['result'], identifier))
         self._events.publish(String(data=json.dumps(dict(self._row(identifier)), default=lambda value: bytes(value).hex())))
         if state in TERMINAL:
             self._recovering.discard(identifier)
@@ -175,9 +153,7 @@ class TaskGateway(Node):
                 if not self._action_clients[request.capability].server_is_ready():
                     raise ValueError('capability action server unavailable')
                 goal_id = bytes(owned_goal_id().uuid) if request.capability == 'navigate' else uuid.uuid4().bytes
-                with self._db:
-                    self._db.execute('INSERT INTO tasks (id,capability,parameters,goal_id,state,detail) VALUES (?,?,?,?,?,?)',
-                                     (request.task_id, request.capability, parameters, goal_id, 'starting', 'durably admitted; awaiting action acceptance'))
+                self._journal.admit(request.task_id, request.capability, parameters, goal_id)
                 row = self._row(request.task_id)
             response.accepted, response.state, response.detail = True, row['state'], row['detail']
         except (ValueError, TypeError, OverflowError) as error:
@@ -199,8 +175,7 @@ class TaskGateway(Node):
             response.detail = 'task not found'
             return response
         if row['state'] not in TERMINAL:
-            with self._db:
-                self._db.execute('UPDATE tasks SET cancel_requested=1 WHERE id=?', (identifier,))
+            self._journal.request_cancel(identifier)
             self._update(identifier, 'canceling', 'cancellation requested; awaiting terminal ROS result')
         row = self._row(identifier)
         response.accepted, response.state, response.detail = True, row['state'], row['detail']
@@ -223,7 +198,7 @@ class TaskGateway(Node):
         self._ack = bytes(message.uuid), time.monotonic()
 
     def _feedback(self, message):
-        row = self._db.execute('SELECT * FROM tasks WHERE goal_id=?', (bytes(message.goal_id.uuid),)).fetchone()
+        row = self._journal.goal(bytes(message.goal_id.uuid))
         if row is None or row['state'] in TERMINAL or row['cancel_requested']:
             return
         stage = getattr(message.feedback, 'stage', 'navigating')
@@ -233,7 +208,7 @@ class TaskGateway(Node):
         self._observed[capability] = {bytes(status.goal_info.goal_id.uuid) for status in message.status_list
                                       if status.status not in (GoalStatus.STATUS_SUCCEEDED, GoalStatus.STATUS_CANCELED, GoalStatus.STATUS_ABORTED)}
         for status in message.status_list:
-            row = self._db.execute('SELECT * FROM tasks WHERE goal_id=?', (bytes(status.goal_info.goal_id.uuid),)).fetchone()
+            row = self._journal.goal(bytes(status.goal_info.goal_id.uuid))
             if row is not None and row['state'] not in TERMINAL:
                 if status.status in (4, 5, 6):
                     self._terminal_seen.setdefault(row['id'], time.monotonic())
@@ -260,39 +235,47 @@ class TaskGateway(Node):
             return
         try:
             response = future.result()
-            if response.status == GoalStatus.STATUS_UNKNOWN:
-                self._update(identifier, 'unknown', 'ROS server has no result; delivery or termination remains unconfirmed')
-                return
-            states = {GoalStatus.STATUS_SUCCEEDED: 'succeeded', GoalStatus.STATUS_CANCELED: 'canceled', GoalStatus.STATUS_ABORTED: 'failed'}
-            if response.status not in states:
-                self._update(identifier, 'unknown', 'nonterminal ROS result')
-                return
-            state = states[response.status]
             result = dict(message_to_ordereddict(response.result))
-            if state == 'succeeded' and (result.get('complete') is False or result.get('error_code', 0)):
-                state = 'failed'
-            detail = result.get('message') or result.get('error_msg') or state
-            if self._row(identifier)['cancel_requested'] == 2:
-                state, detail = 'failed', f'navigation deadline reached; ROS terminal state: {state}'
-            self._update(identifier, state, detail, result)
         except Exception as error:
             self.get_logger().error(f'task result unconfirmed: {error}')
             self._update(identifier, 'unknown', 'result transport failed; termination unconfirmed')
+            return
+        if response.status == GoalStatus.STATUS_UNKNOWN:
+            self._update(identifier, 'unknown', 'ROS server has no result; delivery or termination remains unconfirmed')
+            return
+        states = {GoalStatus.STATUS_SUCCEEDED: 'succeeded', GoalStatus.STATUS_CANCELED: 'canceled', GoalStatus.STATUS_ABORTED: 'failed'}
+        if response.status not in states:
+            self._update(identifier, 'unknown', 'nonterminal ROS result')
+            return
+        state = states[response.status]
+        if state == 'succeeded' and (result.get('complete') is False or result.get('error_code', 0)):
+            state = 'failed'
+        detail = result.get('message') or result.get('error_msg') or state
+        if self._row(identifier)['cancel_requested'] == 2:
+            state, detail = 'failed', f'navigation deadline reached; ROS terminal state: {state}'
+        self._update(identifier, state, detail, result)
+
+    def _delivery_failed(self, identifier, error):
+        self.get_logger().error(f'task acceptance unconfirmed: {error}')
+        self._recovering.add(identifier)
+        self._update(identifier, 'unknown', 'action acceptance unconfirmed; not resubmitted')
 
     def _accepted(self, identifier, future):
         self._pending.pop(('send', identifier), None)
+        if self._row(identifier)['state'] in TERMINAL:
+            return
         try:
             handle = future.result()
-            if not handle.accepted:
-                self._update(identifier, 'failed', 'ROS action server rejected the goal')
-                return
-            row = self._row(identifier)
-            if not row['cancel_requested'] and row['state'] not in TERMINAL:
-                self._update(identifier, 'running', 'ROS action accepted')
-            self._lookup_result(self._row(identifier))
         except Exception as error:
-            self.get_logger().error(f'task acceptance unconfirmed: {error}')
-            self._update(identifier, 'unknown', 'action acceptance unconfirmed; not resubmitted')
+            self._delivery_failed(identifier, error)
+            return
+        if not handle.accepted:
+            self._update(identifier, 'failed', 'ROS action server rejected the goal')
+            return
+        row = self._row(identifier)
+        if not row['cancel_requested']:
+            self._update(identifier, 'running', 'ROS action accepted')
+        self._lookup_result(self._row(identifier))
 
     def _canceled(self, identifier, future):
         if future.cancelled():
@@ -304,6 +287,31 @@ class TaskGateway(Node):
                 self.get_logger().warning(f'task cancellation returned {reply.return_code}; terminal result still required', throttle_duration_sec=5)
         except Exception as error:
             self.get_logger().error(f'task cancellation unconfirmed: {error}')
+
+    def _dispatch(self, row, now):
+        identifier, capability = row['id'], row['capability']
+        goal_id = UUID(uuid=list(row['goal_id']))
+        if any(self._observed.values()):
+            return
+        if capability == 'navigate':
+            self._owner.publish(goal_id)
+            if not (self._guard[0] and now - self._guard[1] < 1.0
+                    and self._ack[0] == row['goal_id'] and now - self._ack[1] < 1.0):
+                return
+        client = self._action_clients[capability]
+        if not client.server_is_ready():
+            return
+        goal, _ = task_goal(capability, row['parameters'])
+        self._journal.mark_dispatched(identifier)
+        self._sent.add(identifier)
+        self._started[identifier] = now
+        try:
+            future = client.send_goal_async(goal, goal_uuid=goal_id)
+        except Exception as error:
+            self._delivery_failed(identifier, error)
+            return
+        self._pending[('send', identifier)] = future
+        future.add_done_callback(lambda done, task=identifier: self._replies.put(('accepted', task, done)))
 
     def _tick(self):
         while True:
@@ -336,24 +344,10 @@ class TaskGateway(Node):
                 if row['cancel_requested']:
                     self._update(identifier, 'canceled', 'canceled before action submission')
                     continue
-                if capability == 'navigate':
-                    self._owner.publish(goal_id)
-                    if not (self._guard[0] and now - self._guard[1] < 1.0
-                            and self._ack[0] == row['goal_id'] and now - self._ack[1] < 1.0):
-                        continue
-                client = self._action_clients[capability]
-                if not client.server_is_ready():
-                    continue
-                goal, _ = task_goal(capability, row['parameters'])
-                self._sent.add(identifier)
-                self._started[identifier] = now
-                future = client.send_goal_async(goal, goal_uuid=goal_id)
-                self._pending[('send', identifier)] = future
-                future.add_done_callback(lambda done, task=identifier: self._replies.put(('accepted', task, done)))
+                self._dispatch(row, now)
             elif capability == 'navigate' and not row['cancel_requested']:
                 if now - self._started[identifier] >= self._timeout:
-                    with self._db:
-                        self._db.execute('UPDATE tasks SET cancel_requested=2 WHERE id=?', (identifier,))
+                    self._journal.request_cancel(identifier, reason=2)
                     self._update(identifier, 'canceling', 'navigation deadline reached; awaiting terminal ROS result')
                 else:
                     self._owner.publish(goal_id)
@@ -371,8 +365,9 @@ class TaskGateway(Node):
                 self._lookup_result(row)
 
     def destroy_node(self):
-        self._db.close()
-        self._journal_lock.close()
+        for client in self._action_clients.values():
+            client.destroy()
+        self._journal.close()
         return super().destroy_node()
 
 

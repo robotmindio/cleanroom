@@ -12,10 +12,10 @@ from diagnostic_msgs.msg import DiagnosticStatus
 
 from lekiwi_rmf.safety_acceptance import nav2_stop_zone_clearance, validate_acceptance_file
 from lekiwi_rmf.safety_supervisor import (
-    Requirement, SafetyState, SafetyStateMachine, SafetySupervisor, _valid_battery,
+    SafetySupervisor, _valid_battery,
     _scan_masked_angle, _valid_depth_points, _valid_scan_ranges,
 )
-
+from lekiwi_rmf.safety_state import Requirement, SafetyState, SafetyStateMachine
 
 SECOND = 1_000_000_000
 
@@ -807,7 +807,7 @@ def test_an_estop_still_latches_when_fault_latching_is_off():
 
 
 def test_non_strict_mode_preserves_health_gates_for_both_capabilities():
-    from lekiwi_rmf.safety_supervisor import permit_unless_strict
+    from lekiwi_rmf.safety_state import permit_unless_strict
 
     machine = _machine()  # nothing has reported: default-deny in the state machine
     machine.arm_stowed = True
@@ -827,7 +827,7 @@ def test_non_strict_mode_preserves_health_gates_for_both_capabilities():
 
 
 def test_normal_mode_motor_error_blocks_arm_without_latching_recovery():
-    from lekiwi_rmf.safety_supervisor import permit_unless_strict
+    from lekiwi_rmf.safety_state import permit_unless_strict
     machine = SafetyStateMachine({'motor_health':Requirement(SECOND)},
                                 driver_state='ARMED',arm_stowed=True,latch_faults=False)
     machine.update('motor_health',True,SECOND)
@@ -843,7 +843,7 @@ def test_normal_mode_motor_error_blocks_arm_without_latching_recovery():
 
 
 def test_non_strict_mode_keeps_acceptance_and_fresh_stow_as_base_gates():
-    from lekiwi_rmf.safety_supervisor import permit_unless_strict
+    from lekiwi_rmf.safety_state import permit_unless_strict
 
     machine = SafetyStateMachine({
         "driver": Requirement(SECOND),
@@ -890,7 +890,7 @@ def test_non_strict_mode_keeps_acceptance_and_fresh_stow_as_base_gates():
 
 
 def test_non_strict_mode_still_blocks_arm_when_moveit_reports_floor_collision():
-    from lekiwi_rmf.safety_supervisor import permit_unless_strict
+    from lekiwi_rmf.safety_state import permit_unless_strict
 
     machine = SafetyStateMachine({
         "driver": Requirement(SECOND),
@@ -913,7 +913,7 @@ def test_non_strict_mode_still_blocks_arm_when_moveit_reports_floor_collision():
 
 
 def test_non_strict_mode_keeps_arm_disarmed_until_workspace_monitor_is_ready():
-    from lekiwi_rmf.safety_supervisor import permit_unless_strict
+    from lekiwi_rmf.safety_state import permit_unless_strict
 
     machine = SafetyStateMachine({
         "driver": Requirement(SECOND),
@@ -933,7 +933,7 @@ def test_non_strict_mode_keeps_arm_disarmed_until_workspace_monitor_is_ready():
 
 
 def test_non_strict_permissions_never_override_an_estop():
-    from lekiwi_rmf.safety_supervisor import permit_unless_strict
+    from lekiwi_rmf.safety_state import permit_unless_strict
 
     machine = _machine()
     machine.update("estop", False, SECOND)
@@ -1015,3 +1015,13 @@ def test_navigation_test_inherits_all_installed_arguments(tmp_path):
     for value in [args, repr(args), '"'+args+'"']:
         path.write_text('LEKIWI_STACK_ARGS='+value+'\n')
         assert parse(path) == expected
+
+
+def test_safety_policy_import_requires_no_ros():
+    import subprocess
+    import sys
+
+    subprocess.run([sys.executable, '-c',
+                    'import sys; import lekiwi_rmf.safety_state; '
+                    'assert not any(name.startswith(("rclpy", "sensor_msgs", "nav_msgs")) '
+                    'for name in sys.modules)'], check=True)
