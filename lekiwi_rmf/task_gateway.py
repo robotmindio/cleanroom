@@ -236,6 +236,7 @@ class TaskGateway(Node):
         try:
             response = future.result()
             result = dict(message_to_ordereddict(response.result))
+            json.dumps(result, allow_nan=False)
         except Exception as error:
             self.get_logger().error(f'task result unconfirmed: {error}')
             self._update(identifier, 'unknown', 'result transport failed; termination unconfirmed')

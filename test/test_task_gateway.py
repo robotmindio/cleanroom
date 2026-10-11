@@ -377,3 +377,27 @@ def test_user_cancel_preserves_navigation_deadline_failure(tmp_path):
         assert 'navigation deadline reached' in journal.row('task')['detail']
     finally:
         journal.close()
+
+
+def test_invalid_native_result_does_not_crash_gateway(tmp_path):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from rclpy.task import Future
+    from action_msgs.msg import GoalStatus
+
+    from lekiwi_rmf.task_journal import TaskJournal
+
+    journal = TaskJournal(tmp_path / 'tasks.db')
+    try:
+        journal.admit('task', 'explore', '{}', bytes(16))
+        gateway = SimpleNamespace(_row=journal.row, _update=journal.update,
+                                  _pending={}, get_logger=Mock())
+        future = Future()
+        future.set_result(Explore.Impl.GetResultService.Response(
+            status=GoalStatus.STATUS_SUCCEEDED,
+            result=Explore.Result(complete=True, mapped_area_m2=float('nan'))))
+        TaskGateway._result(gateway, 'task', future)
+        assert journal.row('task')['state'] == 'unknown'
+        assert journal.row('task')['result'] == '{}'
+    finally:
+        journal.close()
