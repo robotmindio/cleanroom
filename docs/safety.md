@@ -180,8 +180,9 @@ base qualification mode still requires both scopes. Obstacles below the LD06
 plane are not detected.
 The Astra compactor retains every finite return when a sparse frame fits its
 existing point budget, avoiding an artificial arm-depth fault from sampling
-between valid pixels. Dense frames retain the tracked eight-pixel stride and
-10 Hz rate; the minimum valid-point requirement is unchanged.
+between valid pixels. Larger frames retain the tracked eight-pixel stride;
+if that grid misses every return, a bounded sample of finite points is kept.
+The 10 Hz rate and minimum valid-point requirement are unchanged.
 
 ## Motor-host motion limits
 

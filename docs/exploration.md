@@ -190,7 +190,7 @@ Checkpoints next to the mapping database retain the original center, radius,
 deadline, visited/deferred targets, retry pass and preceding mapping mode.
 A paused checkpoint also records when the pause began, allowing recovery to
 retain the same remaining active time without renewing the task's budget.
-Restart recovery cannot extend the deadline or recenter the travel region.
+Restart recovery cannot replenish the active-time budget or recenter the travel region.
 The deadline includes system suspend time. A missing, invalid, expired or
 superseded checkpoint, changed host boot, or reduced configuration limits refuse
 continuation. Cancellation and ordinary terminal results remove the checkpoint;
