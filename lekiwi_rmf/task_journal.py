@@ -31,6 +31,8 @@ class TaskJournal:
                 if version < 2:
                     # Old rows may already have been sent; never replay them after migration.
                     self._db.execute('ALTER TABLE tasks ADD COLUMN dispatched INTEGER NOT NULL DEFAULT 1')
+                self._db.execute('CREATE INDEX IF NOT EXISTS tasks_goal_id ON tasks(goal_id)')
+                self._db.execute("CREATE INDEX IF NOT EXISTS tasks_active ON tasks(id) WHERE state NOT IN ('succeeded','canceled','failed')")
                 self._db.execute('PRAGMA user_version=2')
         except BaseException:
             if hasattr(self, '_db'):
