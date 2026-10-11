@@ -1,0 +1,7 @@
+# Empty cancels the currently managed task, without affecting other ROS clients.
+string task_id
+---
+# Accepted means cancellation requested. Poll GetTask for a terminal state.
+bool accepted
+string state
+string detail

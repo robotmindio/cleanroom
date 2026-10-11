@@ -322,6 +322,16 @@ def _stack(context):
             output="screen",
             respawn=True, respawn_delay=2.0,
         ),
+        Node(
+            package="lekiwi_rmf", executable="robot_tasks", name="robot_tasks",
+            parameters=[{"use_sim_time": sim, "allow_navigation": not topology.start_rmf,
+                         "allow_exploration": topology.visual_slam and not (topology.static_map or topology.start_rmf)}],
+            output="screen", respawn=True, respawn_delay=2.0,
+        ),
+        Node(
+            package="lekiwi_rmf", executable="exploration_owner_guard", name="exploration_owner_guard",
+            output="screen", respawn=True, respawn_delay=2.0,
+        ),
         *_include(nav2_launch("localization_launch.py"), topology.amcl,
                   map=selected_map, params_file=params_file, use_sim_time=use_sim_time),
     ])

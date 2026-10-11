@@ -98,22 +98,6 @@
      "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
      "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
     },
-    "name": "exploration_owner_guard",
-    "namespace": "",
-    "node": "lekiwi_rmf/exploration_owner_guard",
-    "output": "screen",
-    "parameters": {},
-    "remappings": [],
-    "respawn": true,
-    "respawn_delay": 2.0,
-    "ros_arguments": []
-   },
-   {
-    "arguments": [],
-    "env": {
-     "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
-     "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
-    },
     "name": "rtabmap",
     "namespace": "",
     "node": "rtabmap_slam/rtabmap",
@@ -461,6 +445,22 @@
    "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
    "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
   },
+  "name": "exploration_owner_guard",
+  "namespace": "",
+  "node": "lekiwi_rmf/exploration_owner_guard",
+  "output": "screen",
+  "parameters": {},
+  "remappings": [],
+  "respawn": true,
+  "respawn_delay": 2.0,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {
+   "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
+   "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
+  },
   "name": "foxglove_bridge",
   "namespace": "",
   "node": "foxglove_bridge/foxglove_bridge",
@@ -520,6 +520,26 @@
   "remappings": [],
   "respawn": false,
   "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {
+   "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
+   "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
+  },
+  "name": "robot_tasks",
+  "namespace": "",
+  "node": "lekiwi_rmf/robot_tasks",
+  "output": "screen",
+  "parameters": {
+   "allow_exploration": false,
+   "allow_navigation": true,
+   "use_sim_time": true
+  },
+  "remappings": [],
+  "respawn": true,
+  "respawn_delay": 2.0,
   "ros_arguments": []
  },
  {
