@@ -10,7 +10,7 @@ import pytest
 from std_srvs.srv import Empty
 
 from lekiwi_rmf.action import Explore
-from test_exploration_ros import graph as graph, response, start, wait
+from test_exploration_ros import graph as graph, response, start, wait, TEST_TASK_DURATION
 
 
 def test_operator_prints_stage_changes_without_repeated_feedback(capsys):
@@ -35,7 +35,7 @@ def test_failed_targets_get_one_second_pass_without_an_endless_retry(graph, reco
             peers.nav_mode = 'success'
     handle = response(client.send_goal_async(Explore.Goal(max_radius_m=2.5), feedback_callback=feedback))
     assert handle.accepted
-    result = response(handle.get_result_async(), timeout=12)
+    result = response(handle.get_result_async(), timeout=TEST_TASK_DURATION)
     assert stages.count('retrying_failed_targets') == 1
     if recovers:
         assert result.status == GoalStatus.STATUS_SUCCEEDED
@@ -204,7 +204,7 @@ def test_completed_duration_quota_does_not_poison_the_next_explore_goal(graph):
     peers.set_mode(True, Empty.Response())
     wait(lambda: explorer._mapping is False and explorer._quota_reason
          and explorer._freeze_future is not None and explorer._freeze_future.done())
-    explorer.config['mapping_max_seconds'] = 10.0
+    explorer.config['mapping_max_seconds'] = 2 * TEST_TASK_DURATION
     handle = start(graph)
     assert not explorer._quota_reason
     response(handle.cancel_goal_async())
