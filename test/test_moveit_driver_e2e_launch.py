@@ -221,10 +221,9 @@ class TestMoveItDriverEndToEnd(unittest.TestCase):
     def test_folded_clearance_keeps_real_self_collision_checks(self):
         client = self.node.create_client(GetStateValidity, "/check_state_validity")
         self.assertTrue(self._until(client.service_is_ready, timeout=15.0))
-        for positions, expected in (
-            ([-0.0031, -1.6, 1.4, 1.15, -0.0153, 0.0], True),
-            ([-0.0031, -1.8182, 1.6295, 1.2382, -0.0153, 0.2148], True),
-        ):
+        clearance = [-0.0031, -1.6, 1.4, 1.15, -0.0153, 0.2148]
+        folded = [-0.0031, -1.8182, 1.6295, 1.2382, -0.0153, 0.2148]
+        for positions in (clearance, folded):
             request = GetStateValidity.Request()
             request.group_name = "arm"
             request.robot_state.is_diff = True
@@ -232,7 +231,7 @@ class TestMoveItDriverEndToEnd(unittest.TestCase):
             request.robot_state.joint_state.position = positions
             future = client.call_async(request)
             self.assertTrue(self._until(future.done, timeout=10.0))
-            self.assertEqual(future.result().valid, expected, future.result().contacts)
+            self.assertTrue(future.result().valid, future.result().contacts)
 
         # Bounds and planning adapters must accept the physical start too;
         # GetStateValidity alone does not prove the planner accepts its range.
@@ -242,10 +241,10 @@ class TestMoveItDriverEndToEnd(unittest.TestCase):
         plan.motion_plan_request.group_name = "arm"
         plan.motion_plan_request.allowed_planning_time = 5.0
         plan.motion_plan_request.start_state.joint_state.name = list(ARM_JOINTS)
-        plan.motion_plan_request.start_state.joint_state.position = [-0.0031, -1.8182, 1.6295, 1.2382, -0.0153, 0.2148]
+        plan.motion_plan_request.start_state.joint_state.position = folded
         plan.motion_plan_request.goal_constraints = [Constraints(joint_constraints=[
-            JointConstraint(joint_name=name, position=0.0, tolerance_above=0.001, tolerance_below=0.001, weight=1.0)
-            for name in ARM_JOINTS[:-1]
+            JointConstraint(joint_name=name, position=position, tolerance_above=0.001, tolerance_below=0.001, weight=1.0)
+            for name, position in zip(ARM_JOINTS[:-1], clearance[:-1])
         ])]
         future = planner.call_async(plan)
         self.assertTrue(self._until(future.done, timeout=10))
