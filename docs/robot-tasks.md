@@ -56,8 +56,9 @@ covers the admitted task, including its local exploration pauses/recovery.
 The connector's exact service allow-list must include the four services above.
 Rosbridge itself retains its general ROS functionality for other clients.
 
-Enable the existing tailnet binding with the repository compute installer's
-`--rosbridge-tailnet` option. Never bind the unauthenticated bridge to a public
+Enable the existing tailnet binding with
+`scripts/deploy-split.sh robot-1 --rosbridge-tailnet` (or the compute installer's
+matching option). Never bind the unauthenticated bridge to a public
 interface. Fiber's integration URL must match the compute host's tailnet IP;
 its encrypted integration configuration is maintained through Fiber's API.
 
