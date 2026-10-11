@@ -292,6 +292,9 @@ class TaskGateway(Node):
     def _dispatch(self, row, now):
         identifier, capability = row['id'], row['capability']
         goal_id = UUID(uuid=list(row['goal_id']))
+        if not self._enabled[capability]:
+            self._update(identifier, 'failed', 'capability disabled by this deployment profile before submission')
+            return
         if any(self._observed.values()):
             return
         if capability == 'navigate':

@@ -121,12 +121,13 @@ def system(tmp_path):
     def stop(identifier='task-1'):
         return call(cancel, CancelTask.Request(task_id=identifier))
 
-    def restart():
+    def restart(allow_navigation=True):
         nonlocal gateway, gateway_executor, gateway_thread
         gateway_executor.shutdown(timeout_sec=5)
         gateway_thread.join(timeout=5)
         gateway.destroy_node()
-        gateway = TaskGateway(context=context, parameter_overrides=[Parameter('database_path', value=path)])
+        gateway = TaskGateway(context=context, parameter_overrides=[
+            Parameter('database_path', value=path), Parameter('allow_navigation', value=allow_navigation)])
         peers.gateway = gateway
         gateway_executor = SingleThreadedExecutor(context=context)
         gateway_executor.add_node(gateway)
@@ -289,8 +290,8 @@ def test_late_acceptance_error_cannot_replace_terminal_result():
     gateway._update.assert_not_called()
 
 
-@pytest.mark.parametrize('cancel_before_restart', [False, True])
-def test_restart_handles_proven_unsent_task(system, cancel_before_restart):
+@pytest.mark.parametrize('cancel_before_restart,allow_navigation', [(False, True), (True, True), (False, False)])
+def test_restart_handles_proven_unsent_task(system, cancel_before_restart, allow_navigation):
     peers, start, status, stop, restart = system
     # Hold the dispatch loop while service callbacks still admit and cancel work.
     for timer in peers.gateway.timers:
@@ -299,8 +300,11 @@ def test_restart_handles_proven_unsent_task(system, cancel_before_restart):
     assert not peers.received
     if cancel_before_restart:
         assert stop().accepted
-    restart()
-    if cancel_before_restart:
+    restart(allow_navigation=allow_navigation)
+    if not allow_navigation:
+        wait(lambda: status().state == 'failed')
+        assert not peers.received
+    elif cancel_before_restart:
         wait(lambda: status().state == 'canceled')
         assert not peers.received
     else:
@@ -322,7 +326,7 @@ def test_failed_submission_is_durable_and_never_replayed(tmp_path):
         action = Mock()
         action.server_is_ready.return_value = True
         action.send_goal_async.side_effect = RuntimeError('transport lost')
-        gateway = SimpleNamespace(_journal=journal, _observed={'explore': set()},
+        gateway = SimpleNamespace(_journal=journal, _enabled={'explore': True}, _observed={'explore': set()},
                                   _action_clients={'explore': action}, _sent=set(),
                                   _started={}, _recovering=set(), _update=journal.update,
                                   get_logger=Mock())
@@ -345,7 +349,7 @@ def test_dispatch_waits_for_observed_foreign_goal(tmp_path):
     try:
         journal.admit('task', 'explore', '{}', bytes(16))
         action = Mock()
-        gateway = SimpleNamespace(_journal=journal, _observed={'navigate': {bytes(range(16))}},
+        gateway = SimpleNamespace(_journal=journal, _enabled={'explore': True}, _observed={'navigate': {bytes(range(16))}},
                                   _action_clients={'explore': action})
         TaskGateway._dispatch(gateway, journal.row('task'), time.monotonic())
         assert not journal.row('task')['dispatched']
