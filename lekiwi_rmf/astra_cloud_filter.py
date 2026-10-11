@@ -36,13 +36,20 @@ def compact_cloud(message: PointCloud2, stride: int) -> PointCloud2 | None:
     )
     samples = raster[:, :message.width * message.point_step].reshape(
         message.height, message.width, message.point_step
-    )[::stride, ::stride].reshape(-1, message.point_step)
+    )
+    decimated = samples[::stride, ::stride].reshape(-1, message.point_step)
+    samples = samples.reshape(-1, message.point_step)
     float32 = np.dtype(">f4" if message.is_bigendian else "<f4")
     finite = np.ones(len(samples), dtype=bool)
     for name in ("x", "y", "z"):
         column = np.ascontiguousarray(samples[:, offsets[name]:offsets[name] + 4]).view(float32)
         finite &= np.isfinite(column[:, 0])
-    output = samples[finite].tobytes()
+    # Sparse frames already fit the traffic budget; do not discard their real returns.
+    if np.count_nonzero(finite) <= len(decimated):
+        output = samples[finite].tobytes()
+    else:
+        selected = finite.reshape(message.height, message.width)[::stride, ::stride].ravel()
+        output = decimated[selected].tobytes()
     # Empty measured frames distinguish a close/unreadable surface from a dead camera.
     cloud = PointCloud2()
     cloud.header = message.header

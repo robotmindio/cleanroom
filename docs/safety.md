@@ -178,6 +178,10 @@ withdraw base permission. Arm motion additionally requires enough valid depth
 measurements; an empty or blind cloud continues to deny the arm. The attended
 base qualification mode still requires both scopes. Obstacles below the LD06
 plane are not detected.
+The Astra compactor retains every finite return when a sparse frame fits its
+existing point budget, avoiding an artificial arm-depth fault from sampling
+between valid pixels. Dense frames retain the tracked eight-pixel stride and
+10 Hz rate; the minimum valid-point requirement is unchanged.
 
 ## Motor-host motion limits
 
