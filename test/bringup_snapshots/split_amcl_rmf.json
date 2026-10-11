@@ -338,6 +338,19 @@
  {
   "arguments": [],
   "env": {},
+  "name": "exploration_owner_guard",
+  "namespace": "",
+  "node": "lekiwi_rmf/exploration_owner_guard",
+  "output": "screen",
+  "parameters": {},
+  "remappings": [],
+  "respawn": true,
+  "respawn_delay": 2.0,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {},
   "name": "foxglove_bridge",
   "namespace": "",
   "node": "foxglove_bridge/foxglove_bridge",
@@ -355,6 +368,23 @@
   "remappings": [],
   "respawn": false,
   "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {},
+  "name": "robot_tasks",
+  "namespace": "",
+  "node": "lekiwi_rmf/robot_tasks",
+  "output": "screen",
+  "parameters": {
+   "allow_exploration": false,
+   "allow_navigation": false,
+   "use_sim_time": false
+  },
+  "remappings": [],
+  "respawn": true,
+  "respawn_delay": 2.0,
   "ros_arguments": []
  },
  {

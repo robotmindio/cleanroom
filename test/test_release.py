@@ -303,13 +303,14 @@ def test_activation_retains_the_previous_release_and_refuses_an_unknown_previous
     assert (tmp_path / "previous").read_text() == "operator file"
 
 
-def test_compute_service_migration_preserves_curve_and_tailnet_options(tmp_path):
+@pytest.mark.parametrize("existing,requested", [(True, False), (False, True), (False, False)])
+def test_compute_service_migration_preserves_curve_and_tailnet_options(tmp_path, existing, requested):
     deploy = (ROOT / "scripts/deploy-split.sh").read_text()
     function = "refresh_compute_service() {" + deploy.split("refresh_compute_service() {", 1)[1].split(
         "\ncompute_configuration_current()", 1)[0]
     settings = tmp_path / "settings"
-    settings.write_text("LEKIWI_STACK_ARGS=start_rosbridge:=true rosbridge_address:=100.64.0.1 "
-                        "curve_client_secret_key_file:=/private/curve/clients/driver.key_secret\n")
+    settings.write_text("LEKIWI_STACK_ARGS=" + ("start_rosbridge:=true rosbridge_address:=100.64.0.1 " if existing else "")
+                        + "curve_client_secret_key_file:=/private/curve/clients/driver.key_secret\n")
     output = tmp_path / "arguments"
     installer = tmp_path / "current/source/scripts/reinstall-compute.sh"
     write_executable(installer, 'printf "%s\\n" "$@" > "$LEKIWI_TEST_OUTPUT"\n')
@@ -320,10 +321,11 @@ grep() { command grep "${@:1:$#-1}" "$LEKIWI_TEST_SETTINGS"; }
 sed() { command sed "${@:1:$#-1}" "$LEKIWI_TEST_SETTINGS"; }
 compute_current=$1/current
 device=device.example
+rosbridge_tailnet=$2
 ''' + function + "\nrefresh_compute_service\n"
-    subprocess.run(["bash", "-ec", script, "migration", str(tmp_path)], check=True,
+    subprocess.run(["bash", "-ec", script, "migration", str(tmp_path), str(requested).lower()], check=True,
                    env={**os.environ, "LEKIWI_TEST_OUTPUT": str(output), "LEKIWI_TEST_SETTINGS": str(settings)})
-    assert output.read_text().splitlines() == ["--no-start", "--curve-dir", "/private/curve", "--rosbridge-tailnet"]
+    assert output.read_text().splitlines() == ["--no-start", "--curve-dir", "/private/curve"] + (["--rosbridge-tailnet"] if existing or requested else [])
 
 
 def test_deployment_failure_trap_preserves_the_original_failure_status():

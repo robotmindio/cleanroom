@@ -6,7 +6,7 @@
 set -Eeuo pipefail
 
 usage() {
-  echo "usage: $0 [[USER@]DEVICE] [--remote-repo PATH] [--workspace PATH] [--remote-workspace PATH]" >&2
+  echo "usage: $0 [[USER@]DEVICE] [--remote-repo PATH] [--workspace PATH] [--remote-workspace PATH] [--rosbridge-tailnet]" >&2
   exit 2
 }
 
@@ -29,11 +29,13 @@ device_address=${device#*@}
 remote_repo=""
 workspace=${LEKIWI_WS:-$HOME/lekiwi_ws}
 remote_workspace=""
+rosbridge_tailnet=false
 while [[ $# -gt 0 ]]; do
   case $1 in
     --remote-repo) [[ $# -ge 2 ]] || usage; remote_repo=$2; shift 2 ;;
     --workspace) [[ $# -ge 2 ]] || usage; workspace=$2; shift 2 ;;
     --remote-workspace) [[ $# -ge 2 ]] || usage; remote_workspace=$2; shift 2 ;;
+    --rosbridge-tailnet) rosbridge_tailnet=true; shift ;;
     *) usage ;;
   esac
 done
@@ -138,8 +140,9 @@ refresh_compute_service() {
       installer_args+=(--curve-dir "$curve_directory")
     fi
   done
-  if grep -Fq 'start_rosbridge:=true' /etc/default/lekiwi-stack &&
-     grep -Fq 'rosbridge_address:=' /etc/default/lekiwi-stack; then
+  if [[ $rosbridge_tailnet == true ]] || {
+     grep -Fq 'start_rosbridge:=true' /etc/default/lekiwi-stack &&
+     grep -Fq 'rosbridge_address:=' /etc/default/lekiwi-stack; }; then
     installer_args+=(--rosbridge-tailnet)
   fi
   # The stack is stopped here; preserve its optional tailnet access on migration.
@@ -220,7 +223,8 @@ remote_service_marker=$remote_home/.ros/lekiwi/service-fingerprint-device
 # A stale compute configuration is reinstalled only after the robot is disarmed and
 # its stack stopped (below). Check sudo access before changing the robot state.
 refresh_compute=false
-if ! compute_configuration_current || ! compute_tls_current; then
+if ! compute_configuration_current || ! compute_tls_current ||
+   { [[ $rosbridge_tailnet == true ]] && ! grep -Fq 'start_rosbridge:=true' /etc/default/lekiwi-stack; }; then
   refresh_compute=true
   if ! sudo -n true 2>/dev/null; then
     [[ -t 0 ]] || die "compute service refresh needs an interactive terminal for sudo"

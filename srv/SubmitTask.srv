@@ -1,0 +1,9 @@
+# Caller-generated idempotency key. Reusing it requires identical capability/parameters.
+string task_id
+string capability
+string parameters_json
+---
+# Admission is durable; execution may still be starting or paused.
+bool accepted
+string state
+string detail

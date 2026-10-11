@@ -103,10 +103,6 @@ def _slam(context):
         output="screen",
         respawn=True, respawn_delay=2.0,
     )
-    owner_guard = Node(
-        package="lekiwi_rmf", executable="exploration_owner_guard", name="exploration_owner_guard",
-        output="screen", respawn=True, respawn_delay=2.0,
-    )
     sensor_gate = Node(
         package="lekiwi_rmf", executable="readiness_gate", name="wait_for_slam_sensor",
         parameters=[{
@@ -116,7 +112,7 @@ def _slam(context):
         }],
         output="screen",
     )
-    actions.extend(gated(sensor_gate, "SLAM sensor", [rtabmap, owner_guard, robot_explorer]))
+    actions.extend(gated(sensor_gate, "SLAM sensor", [rtabmap, robot_explorer]))
     if camera_on:
         # The front camera uses visible range returns. Astra uses its own
         # dense registered depth, sent losslessly from the device at 2 Hz.
