@@ -2,14 +2,18 @@
 
 from concurrent.futures import Future
 from itertools import groupby
+import math
+import numpy as np
 import threading
 import time
 from types import SimpleNamespace
 
 from action_msgs.msg import GoalStatus
+from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from geometry_msgs.msg import PoseStamped, TransformStamped
 from nav2_msgs.action import ComputePathToPose, NavigateToPose
-from nav2_msgs.msg import CollisionMonitorState
+from nav2_msgs.msg import CollisionMonitorState, CostmapMetaData
+from nav2_msgs.srv import GetCostmap
 from nav_msgs.msg import OccupancyGrid, Path
 import pytest
 import rclpy
@@ -28,7 +32,7 @@ from std_srvs.srv import Empty
 from tf2_ros import TransformBroadcaster
 
 from lekiwi_rmf.action import Explore
-from lekiwi_rmf.exploration_node import RobotExplorer
+from lekiwi_rmf.exploration_node import Paused, ResponseTimeout, RobotExplorer
 from lekiwi_rmf.exploration_owner_guard import ExplorationOwnerGuard
 
 
@@ -60,6 +64,7 @@ class RobotPeers(Node):
         self.nav_active = False
         self.nav_canceled = 0
         self.nav_count = 0
+        self.navigation_goals = []
         self.planner_ids = []
         self.acceptance_delay = 0.0
         self.position = (0.0, 0.0)
@@ -76,6 +81,11 @@ class RobotPeers(Node):
                                       callback_group=self.group)
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.map_pub = self.create_publisher(OccupancyGrid, "/map", latched)
+        self.costmap = None
+        self.plan_error = 0
+        self.costmap_free_cost = 0
+        self.costmap_service = self.create_service(GetCostmap, "/global_costmap/get_costmap",
+                                                   self.get_costmap, callback_group=self.group)
         self.base_pub = self.create_publisher(Bool, "/safety/base_motion_permitted", latched)
         self.stow_pub = self.create_publisher(Bool, "/safety/arm_stowed", latched)
         self.info_pub = self.create_publisher(Info, "/info", 1)
@@ -89,6 +99,16 @@ class RobotPeers(Node):
         self.grid.info.origin.orientation.w = 1.0
         self.grid.data = [0 if index % 80 < 60 else -1 for index in range(6400)]
         self.create_timer(0.05, self.publish)
+
+    def get_costmap(self, _request, result):
+        source = self.costmap if self.costmap is not None else self.grid
+        result.map.header = source.header
+        result.map.header.stamp = self.get_clock().now().to_msg()
+        result.map.metadata = CostmapMetaData(
+            resolution=source.info.resolution, size_x=source.info.width,
+            size_y=source.info.height, origin=source.info.origin)
+        result.map.data = [255 if v < 0 else 254 if v == 100 else self.costmap_free_cost for v in source.data]
+        return result
 
     def set_mode(self, mapping, result):
         self.mapping_requests.append(mapping)
@@ -116,6 +136,9 @@ class RobotPeers(Node):
 
     def plan(self, goal):
         self.planner_ids.append(goal.request.planner_id)
+        if self.plan_error:
+            goal.abort()
+            return ComputePathToPose.Result(error_code=self.plan_error)
         start = PoseStamped()
         start.header.frame_id = "map"
         start.pose.position.x, start.pose.position.y = self.position
@@ -128,6 +151,7 @@ class RobotPeers(Node):
 
     def navigate(self, goal):
         assert goal.request.behavior_tree.endswith("explore_nav_to_pose.xml")
+        self.navigation_goals.append(goal.request.pose)
         self.nav_count += 1
         self.nav_active = True
         while self.nav_mode == "hold" and not goal.is_cancel_requested:
@@ -246,6 +270,93 @@ def test_success_confirms_visited_target_and_retains_database(graph):
     assert result.result.visited_targets == 1 and result.result.mapped_area_m2 > 0
     assert feedback and explorer.database.read_bytes() == b"retained-map"
     assert peers.mapping_requests == [True, False]
+
+
+@pytest.mark.parametrize("free_cost", [0, 253])
+def test_target_selection_uses_live_obstacles_without_treating_inflation_as_a_wall(graph, free_cost):
+    from copy import deepcopy
+    from lekiwi_rmf.exploration import select_target, world_to_cell, footprint_is_free
+
+    peers, explorer, _ = graph
+    grid, resolution, origin = explorer._map
+    original, _, _ = select_target(
+        grid, resolution, origin, peers.position, peers.position, 2.5, [], [],
+        clearance=explorer.config["clearance_m"], footprint=explorer._footprint,
+        region_margin=explorer._region_margin,
+        observation_distance=explorer.config["observation_distance_m"],
+        spacing=explorer.config["target_spacing_m"], revisit_spacing=explorer.config["revisit_spacing_m"],
+        free_threshold=explorer.config["free_threshold"], revisit=False)
+    assert original is not None
+    peers.costmap = deepcopy(peers.grid)
+    peers.costmap_free_cost = free_cost
+    x, y = world_to_cell(original, resolution, origin)
+    peers.costmap.data[y * peers.grid.info.width + x] = 100
+    handle = start(graph)
+    destination = peers.navigation_goals[-1].pose
+    live = np.asarray(peers.costmap.data).reshape(grid.shape)
+    assert footprint_is_free(live, resolution, origin,
+        (destination.position.x, destination.position.y),
+        2 * math.atan2(destination.orientation.z, destination.orientation.w), explorer._footprint, 20)
+    assert math.dist(original, (destination.position.x, destination.position.y)) > 0.1
+    response(handle.cancel_goal_async())
+    result = response(handle.get_result_async())
+    assert result.status == GoalStatus.STATUS_CANCELED and result.result.unreachable_targets == 0
+
+
+@pytest.mark.parametrize("invalid", ["frame", "geometry"])
+def test_invalid_or_unaligned_live_costmap_pauses_and_recovers(graph, invalid):
+    from copy import deepcopy
+
+    peers, explorer, client = graph
+    peers.costmap = deepcopy(peers.grid)
+    if invalid == "frame":
+        peers.costmap.header.frame_id = "odom"
+    else:
+        peers.costmap.info.origin.position.x += 0.1
+    handle = response(client.send_goal_async(Explore.Goal(max_radius_m=2.5)))
+    assert handle.accepted
+    wait(lambda: explorer._stage.startswith("paused:"))
+    assert peers.nav_count == 0 and not handle.get_result_async().done()
+    peers.costmap = None
+    wait(lambda: peers.nav_active)
+    response(handle.cancel_goal_async())
+    assert response(handle.get_result_async()).status == GoalStatus.STATUS_CANCELED
+
+
+def test_occupied_start_does_not_discard_untried_targets(graph):
+    peers, explorer, client = graph
+    peers.plan_error = ComputePathToPose.Result.START_OCCUPIED
+    feedback = []
+    handle = response(client.send_goal_async(Explore.Goal(max_radius_m=2.5),
+                      feedback_callback=lambda msg: feedback.append(msg.feedback)))
+    assert handle.accepted
+    wait(lambda: explorer._stage == 'paused: navigation starting footprint is occupied')
+    assert peers.nav_count == 0 and not handle.get_result_async().done()
+    assert feedback and all(f.unreachable_targets == 0 for f in feedback)
+    peers.plan_error = 0
+    wait(lambda: peers.nav_active)
+    response(handle.cancel_goal_async())
+    result = response(handle.get_result_async())
+    assert result.status == GoalStatus.STATUS_CANCELED and result.result.unreachable_targets == 0
+
+
+@pytest.mark.parametrize("failure", [Paused, InterruptedError, ResponseTimeout])
+def test_interrupted_costmap_queries_release_the_pending_request(graph, monkeypatch, failure):
+    from rclpy.task import Future as RosFuture
+
+    _, explorer, _ = graph
+    request = RosFuture()
+    removed = []
+    monkeypatch.setattr(explorer._costmap, "call_async", lambda _: request)
+    monkeypatch.setattr(explorer._costmap, "remove_pending_request", removed.append)
+
+    def interrupted_wait(*_):
+        raise failure("interrupted query")
+
+    monkeypatch.setattr(explorer, "_wait", interrupted_wait)
+    with pytest.raises(Paused if failure is ResponseTimeout else failure):
+        explorer._explore_step(None, lambda: PoseStamped(), (0, 0), 2.5, [], [], Explore.Result())
+    assert removed == [request]
 
 
 def test_small_requested_region_keeps_the_full_stopping_margin(graph):
@@ -436,6 +547,30 @@ def test_invalid_or_denied_requests_have_no_mapping_or_navigation_side_effects(g
     assert peers.mapping_requests == [] and peers.nav_count == 0
 
 
+def test_permission_pause_reports_only_fresh_safety_faults_and_recovers(graph):
+    peers, explorer, _ = graph
+    publisher = peers.create_publisher(DiagnosticArray, "/diagnostics", 10)
+    peers.permitted = False
+    wait(lambda: not explorer._inputs["base_motion_permitted"][0])
+    message = DiagnosticArray(status=[DiagnosticStatus(
+        name="lekiwi/safety_supervisor", message="ARMED",
+        values=[KeyValue(key="faults", value="depth_stream: stale")])])
+    deadline = time.monotonic() + 5
+    while "safety_reason" not in explorer._inputs and time.monotonic() < deadline:
+        publisher.publish(message)
+        time.sleep(0.05)
+    assert "safety_reason" in explorer._inputs
+    with pytest.raises(Paused, match="denied base_motion_permitted: depth_stream: stale"):
+        explorer._healthy()
+    reason, _ = explorer._inputs["safety_reason"]
+    explorer._inputs["safety_reason"] = (reason, time.monotonic() - 10)
+    with pytest.raises(Paused, match="^denied base_motion_permitted$"):
+        explorer._healthy()
+    peers.permitted = True
+    wait(lambda: explorer._inputs["base_motion_permitted"][0])
+    explorer._healthy()
+
+
 def test_disabled_exploration_keeps_the_mapping_monitor_without_navigation_geometry(tmp_path):
     context = Context()
     rclpy.init(context=context)
@@ -492,3 +627,39 @@ def test_shutdown_request_cancels_before_ros_context_is_closed(graph):
     explorer._shutdown_requested.set()
     assert response(handle.get_result_async()).status == GoalStatus.STATUS_ABORTED
     assert peers.nav_canceled == 1 and not peers.nav_active
+
+
+@pytest.mark.parametrize("fault", ["none", "remote_start", "later_collision", "connection_collision", "invalid_heading", "outside_region"])
+def test_route_uses_measured_start_but_preserves_other_footprint_checks(fault):
+    from pathlib import Path as FilePath
+    from lekiwi_rmf.exploration import load_navigation_footprint
+    footprint, _, margin = load_navigation_footprint(FilePath(__file__).parents[1] / "config/nav2_params.yaml")
+    grid = np.zeros((80, 80), dtype=np.int16)
+    grid[45, 42] = -1
+    geometry = (grid, 0.05, (-2.0, -2.0, 0.0))
+    explorer = SimpleNamespace(_footprint=footprint, _region_margin=margin, config={"free_threshold": 20})
+    explorer._footprint_clear = lambda pose, grid: RobotExplorer._footprint_clear(explorer, pose, grid)
+    start = PoseStamped()
+    start.pose.orientation.w = 1.0
+    rounded = PoseStamped()
+    rounded.pose.orientation.z = math.sin(0.4636476 / 2)
+    rounded.pose.orientation.w = math.cos(0.4636476 / 2)
+    end = PoseStamped()
+    end.pose.position.x = -0.5
+    end.pose.orientation.w = 1.0
+    assert explorer._footprint_clear(start, geometry)
+    assert not explorer._footprint_clear(rounded, geometry)
+    route = [rounded, end]
+    if fault == "remote_start":
+        rounded.pose.position.y = 0.03
+    elif fault == "later_collision":
+        route.append(rounded)
+    elif fault == "connection_collision":
+        grid[40, 33] = 100
+        end.pose.position.x = -0.8
+        assert explorer._footprint_clear(end, geometry)
+    elif fault == "invalid_heading":
+        rounded.pose.orientation.w = float("nan")
+    elif fault == "outside_region":
+        end.pose.position.x = 2.0
+    assert RobotExplorer._route_clear(explorer, route, start, geometry, (0, 0), 2.5) == (fault == "none")

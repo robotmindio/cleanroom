@@ -1,0 +1,231 @@
+--- a/nav2_smac_planner/src/collision_checker.cpp
++++ b/nav2_smac_planner/src/collision_checker.cpp
+@@ -12,6 +12,8 @@
+ // See the License for the specific language governing permissions and
+ // limitations under the License. Reserved.
+
++#include <algorithm>
++
+ #include "nav2_smac_planner/collision_checker.hpp"
+
+ namespace nav2_smac_planner
+@@ -116,12 +118,12 @@
+
+   // Assumes setFootprint already set
+   center_cost_ = static_cast<float>(costmap_->getCost(
+-    static_cast<unsigned int>(x + 0.5f), static_cast<unsigned int>(y + 0.5f)));
++    static_cast<unsigned int>(x), static_cast<unsigned int>(y)));
+
+   if (!footprint_is_radius_) {
+     // if footprint, then we check for the footprint's points, but first see
+     // if the robot is even potentially in an inscribed collision
+-    if (center_cost_ < possible_collision_cost_ && possible_collision_cost_ > 0.0f) {
++    if (traverse_unknown && center_cost_ < possible_collision_cost_ && possible_collision_cost_ > 0.0f) {
+       return false;
+     }
+
+@@ -138,26 +140,76 @@
+     // if possible inscribed, need to check actual footprint pose.
+     // Use precomputed oriented footprints are done on initialization,
+     // offset by translation value to collision check
+-    double wx, wy;
+-    costmap_->mapToWorld(static_cast<double>(x), static_cast<double>(y), wx, wy);
++    const double wx = costmap_->getOriginX() + x * costmap_->getResolution();
++    const double wy = costmap_->getOriginY() + y * costmap_->getResolution();
+     geometry_msgs::msg::Point new_pt;
+     const nav2_costmap_2d::Footprint & oriented_footprint = oriented_footprints_[angle_bin];
++    // Preserve the fractional heading between cached orientation bins.
++    const double offset = (angle_bin - static_cast<unsigned int>(angle_bin)) *
++      2.0 * M_PI / angles_.size();
++    const double c = std::cos(offset), s = std::sin(offset);
+     nav2_costmap_2d::Footprint current_footprint;
+     current_footprint.reserve(oriented_footprint.size());
+     for (unsigned int i = 0; i < oriented_footprint.size(); ++i) {
+-      new_pt.x = wx + oriented_footprint[i].x;
+-      new_pt.y = wy + oriented_footprint[i].y;
++      new_pt.x = wx + c * oriented_footprint[i].x - s * oriented_footprint[i].y;
++      new_pt.y = wy + s * oriented_footprint[i].x + c * oriented_footprint[i].y;
+       current_footprint.push_back(new_pt);
+     }
+
+-    float footprint_cost = static_cast<float>(footprintCost(current_footprint));
+-
+-    if (footprint_cost == UNKNOWN && traverse_unknown) {
+-      return false;
+-    }
+-
+-    // if occupied or unknown and not to traverse unknown space
+-    return footprint_cost >= OCCUPIED;
++    // Check area overlap with the convex body, including partial and interior cells.
++    double min_wx = current_footprint.front().x, max_wx = min_wx;
++    double min_wy = current_footprint.front().y, max_wy = min_wy;
++    unsigned int min_x = costmap_->getSizeInCellsX(), min_y = costmap_->getSizeInCellsY();
++    unsigned int max_x = 0, max_y = 0;
++    for (const auto & point : current_footprint) {
++      unsigned int mx, my;
++      if (!costmap_->worldToMap(point.x, point.y, mx, my)) {
++        return true;
++      }
++      min_wx = std::min(min_wx, point.x);
++      min_wy = std::min(min_wy, point.y);
++      max_wx = std::max(max_wx, point.x);
++      max_wy = std::max(max_wy, point.y);
++      min_x = std::min(min_x, mx);
++      min_y = std::min(min_y, my);
++      max_x = std::max(max_x, mx);
++      max_y = std::max(max_y, my);
++    }
++    const double half_cell = costmap_->getResolution() / 2.0;
++    for (unsigned int mx = min_x; mx <= max_x; ++mx) {
++      for (unsigned int my = min_y; my <= max_y; ++my) {
++        const auto cost = costmap_->getCost(mx, my);
++        if (cost != OCCUPIED && (cost != UNKNOWN || traverse_unknown)) {
++          continue;
++        }
++        double cx, cy;
++        costmap_->mapToWorld(mx, my, cx, cy);
++        if (cx + half_cell <= min_wx || cx - half_cell >= max_wx ||
++          cy + half_cell <= min_wy || cy - half_cell >= max_wy)
++        {
++          continue;
++        }
++        bool overlaps = true;
++        for (unsigned int i = 0; i < current_footprint.size(); ++i) {
++          const auto & a = current_footprint[i];
++          const auto & b = current_footprint[(i + 1) % current_footprint.size()];
++          const double nx = a.y - b.y, ny = b.x - a.x;
++          const double side = nx * (wx - a.x) + ny * (wy - a.y);
++          const double distance = nx * (cx - a.x) + ny * (cy - a.y);
++          const double extent = half_cell * (std::abs(nx) + std::abs(ny));
++          if ((side > 0 && distance + extent <= 0) ||
++            (side < 0 && distance - extent >= 0))
++          {
++            overlaps = false;
++            break;
++          }
++        }
++        if (overlaps) {
++          return true;
++        }
++      }
++    }
++    return false;
+   } else {
+     // if radius, then we can check the center of the cost assuming inflation is used
+     if (center_cost_ == UNKNOWN && traverse_unknown) {
+@@ -190,7 +242,7 @@
+
+ bool GridCollisionChecker::outsideRange(const unsigned int & max, const float & value)
+ {
+-  return value < 0.0f || value > max;
++  return value < 0.0f || value >= max;
+ }
+
+ }  // namespace nav2_smac_planner
+--- a/nav2_smac_planner/src/node_lattice.cpp
++++ b/nav2_smac_planner/src/node_lattice.cpp
+@@ -226,10 +226,7 @@
+   MotionPrimitive * motion_primitive,
+   bool is_backwards)
+ {
+-  // Already found, we can return the result
+-  if (!std::isnan(_cell_cost)) {
+-    return _is_node_valid;
+-  }
++  // Different continuous poses sharing a grid index need independent body checks.
+
+   // Check primitive end pose
+   // Convert grid quantization of primitives to radians, then collision checker quantization
+@@ -247,12 +244,9 @@
+   // Set the cost of a node to the highest cost across the primitive
+   float max_cell_cost = collision_checker->getCost();
+
+-  // If valid motion primitives are set, check intermediary poses > 1 cell apart
++  // Check every pose returned in the dense primitive path, including in-place turns.
+   if (motion_primitive) {
+     const float & grid_resolution = motion_table.lattice_metadata.grid_resolution;
+-    const float & resolution_diag_sq = 2.0 * grid_resolution * grid_resolution;
+-    MotionPose last_pose(1e9, 1e9, 1e9, TurnDirection::UNKNOWN);
+-    MotionPose pose_dist(0.0, 0.0, 0.0, TurnDirection::UNKNOWN);
+
+     // Back out the initial node starting point to move motion primitive relative to
+     MotionPose initial_pose, prim_pose;
+@@ -260,34 +254,22 @@
+     initial_pose._y = this->pose.y - (motion_primitive->poses.back()._y / grid_resolution);
+     initial_pose._theta = motion_table.getAngleFromBin(motion_primitive->start_angle);
+
+-    for (auto it = motion_primitive->poses.begin(); it != motion_primitive->poses.end(); ++it) {
+-      // poses are in metric coordinates from (0, 0), not grid space yet
+-      pose_dist = *it - last_pose;
+-      // Avoid square roots by (hypot(x, y) > res) == (x*x+y*y > diag*diag)
+-      if (pose_dist._x * pose_dist._x + pose_dist._y * pose_dist._y > resolution_diag_sq) {
+-        last_pose = *it;
+-        // Convert primitive pose into grid space if it should be checked
+-        prim_pose._x = initial_pose._x + (it->_x / grid_resolution);
+-        prim_pose._y = initial_pose._y + (it->_y / grid_resolution);
+-        // If reversing, invert the angle because the robot is backing into the primitive
+-        // not driving forward with it
+-        if (is_backwards) {
+-          prim_pose._theta = std::fmod(it->_theta + M_PI, 2.0 * M_PI);
+-        } else {
+-          prim_pose._theta = std::fmod(it->_theta, 2.0 * M_PI);
+-        }
+-        if (collision_checker->inCollision(
+-            prim_pose._x,
+-            prim_pose._y,
+-            prim_pose._theta / bin_size /*bin in collision checker*/,
+-            traverse_unknown))
+-        {
+-          _is_node_valid = false;
+-          _cell_cost = std::max(max_cell_cost, collision_checker->getCost());
+-          return false;
+-        }
+-        max_cell_cost = std::max(max_cell_cost, collision_checker->getCost());
++    for (const auto & pose : motion_primitive->poses) {
++      prim_pose._x = initial_pose._x + (pose._x / grid_resolution);
++      prim_pose._y = initial_pose._y + (pose._y / grid_resolution);
++      // If reversing, invert the angle because the robot is backing into the primitive.
++      prim_pose._theta = std::fmod(pose._theta + (is_backwards ? M_PI : 0), 2.0 * M_PI);
++      if (collision_checker->inCollision(
++          prim_pose._x,
++          prim_pose._y,
++          prim_pose._theta / bin_size /*bin in collision checker*/,
++          traverse_unknown))
++      {
++        _is_node_valid = false;
++        _cell_cost = std::max(max_cell_cost, collision_checker->getCost());
++        return false;
+       }
++      max_cell_cost = std::max(max_cell_cost, collision_checker->getCost());
+     }
+   }
+
+--- a/nav2_smac_planner/src/smac_planner_lattice.cpp
++++ b/nav2_smac_planner/src/smac_planner_lattice.cpp
+@@ -145,13 +145,6 @@
+   _search_info.minimum_turning_radius =
+     _metadata.min_turning_radius / (_costmap->getResolution());
+   _motion_model = MotionModel::STATE_LATTICE;
+-
+-  if (_metadata.motion_model == "omni" && _search_info.allow_reverse_expansion) {
+-    RCLCPP_WARN(
+-      _logger,
+-      "allow_reverse_expansion is not applicable for omnidirectional robots. Disabling.");
+-    _search_info.allow_reverse_expansion = false;
+-  }
+
+   if (_max_on_approach_iterations <= 0) {
+     RCLCPP_INFO(
+@@ -652,12 +645,6 @@
+
+     // Re-Initialize A* template
+     if (reinit_a_star) {
+-      if (_metadata.motion_model == "omni" && _search_info.allow_reverse_expansion) {
+-        RCLCPP_WARN(
+-          _logger,
+-          "allow_reverse_expansion is not applicable for omnidirectional robots. Disabling.");
+-        _search_info.allow_reverse_expansion = false;
+-      }
+       _a_star = std::make_unique<AStarAlgorithm<NodeLattice>>(_motion_model, _search_info);
+       _a_star->initialize(
+         _allow_unknown,

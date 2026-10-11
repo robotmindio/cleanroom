@@ -1,5 +1,6 @@
 # Zero limits select the tracked defaults; positive limits may only reduce them.
 bool revisit_known
+# Active seconds; recoverable pauses preserve the remaining budget.
 float64 max_duration_sec
 float64 max_radius_m
 # Empty starts a new task; a saved task UUID resumes its original bounds and progress.

@@ -22,7 +22,8 @@ bt_navigator:
     robot_base_frame: base_footprint
     odom_topic: /odom
     bt_loop_duration: 10
-    default_server_timeout: 20
+    # Goal acknowledgements exceeded 20 ms on the physical stack; keep RPCs bounded.
+    default_server_timeout: 1000
     wait_for_service_timeout: 1000
     navigators: [navigate_to_pose, navigate_through_poses]
     navigate_to_pose:
@@ -98,6 +99,8 @@ controller_server:
         threshold_to_consider: 0.5
       PathAlignCritic:
         enabled: true
+        # Follow the lattice body headings during reverse and lateral moves.
+        use_path_orientations: true
         cost_weight: 10.0
         offset_from_furthest: 10
         threshold_to_consider: 0.5
@@ -108,6 +111,7 @@ controller_server:
         threshold_to_consider: 1.0
       PathAngleCritic:
         enabled: true
+        mode: 2
         cost_weight: 2.0
         offset_from_furthest: 4
         threshold_to_consider: 0.5
@@ -171,6 +175,8 @@ global_costmap:
       static_layer:
         plugin: nav2_costmap_2d::StaticLayer
         map_subscribe_transient_local: true
+        # The current body is occupied by the robot, including unobserved/self-mapped cells.
+        footprint_clearing_enabled: true
       obstacle_layer:
         plugin: nav2_costmap_2d::ObstacleLayer
         observation_sources: scan
@@ -196,6 +202,7 @@ planner_server:
       plugin: nav2_smac_planner::SmacPlannerLattice
       tolerance: 0.20
       allow_unknown: true
+      allow_reverse_expansion: true
       max_planning_time: 1.0
       smooth_path: false
       lattice_filepath: "$(find-pkg-share nav2_smac_planner)/sample_primitives/5cm_resolution/0.5m_turning_radius/omni/output.json"
@@ -203,6 +210,7 @@ planner_server:
       plugin: nav2_smac_planner::SmacPlannerLattice
       tolerance: 0.0
       allow_unknown: false
+      allow_reverse_expansion: true
       max_planning_time: 1.0
       smooth_path: false
       lattice_filepath: "$(find-pkg-share nav2_smac_planner)/sample_primitives/5cm_resolution/0.5m_turning_radius/omni/output.json"

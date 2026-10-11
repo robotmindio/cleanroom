@@ -7,6 +7,7 @@ import signal
 import threading
 import time
 
+import numpy as np
 import yaml
 
 from action_msgs.msg import GoalStatus
@@ -15,7 +16,8 @@ from ament_index_python.packages import get_package_share_directory
 from geometry_msgs.msg import PoseStamped
 from nav2_msgs.action import ComputePathToPose, FollowPath, NavigateToPose
 from nav2_msgs.msg import CollisionMonitorState
-from nav_msgs.msg import OccupancyGrid
+from nav2_msgs.srv import GetCostmap
+from nav_msgs.msg import MapMetaData, OccupancyGrid
 import rclpy
 from rclpy.action import ActionClient, ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
@@ -86,6 +88,8 @@ class RobotExplorer(Node):
         self._rejection = ""
         self._map = None
         self._inputs = {}
+        self._collision_clear_after = 0.0
+        self._collision_stop_name = ""
         self._mapping = None
         self._mode_at = 0.0
         self._mode_query_at = 0.0
@@ -104,6 +108,7 @@ class RobotExplorer(Node):
         for topic in ("base_motion_permitted", "arm_stowed"):
             self.create_subscription(Bool, f"/safety/{topic}",
                                      lambda msg, name=topic: self._record(name, msg.data), latched)
+        self.create_subscription(DiagnosticArray, "/diagnostics", self._on_safety_status, 10)
         self.create_subscription(Info, "/info", lambda msg: self._record("slam", msg.header), 1)
         self.create_subscription(Bool, "/robot/explore/navigation_guard_ready",
                                  lambda msg: self._record("navigation_guard", msg.data), 1)
@@ -118,6 +123,7 @@ class RobotExplorer(Node):
         self._localization_client = self.create_client(Empty, "/rtabmap/set_mode_localization", callback_group=self._group)
         self._navigation = ActionClient(self, NavigateToPose, "/navigate_to_pose", callback_group=self._group)
         self._planner = ActionClient(self, ComputePathToPose, "/compute_path_to_pose", callback_group=self._group)
+        self._costmap = self.create_client(GetCostmap, "/global_costmap/get_costmap", callback_group=self._group)
         self._action = ActionServer(
             self, Explore, "/robot/explore", self._execute, goal_callback=self._accept,
             cancel_callback=lambda _goal: CancelResponse.ACCEPT, callback_group=self._group,
@@ -133,7 +139,19 @@ class RobotExplorer(Node):
         return super().destroy_node()
 
     def _record(self, name, value):
-        self._inputs[name] = (value, time.monotonic())
+        now = time.monotonic()
+        if name == "collision_monitor" and value.action_type == CollisionMonitorState.STOP:
+            # A single clear scan near a person's foot must not restart movement.
+            self._collision_clear_after = now + 1.0
+            self._collision_stop_name = value.polygon_name
+        self._inputs[name] = (value, now)
+
+    def _on_safety_status(self, message):
+        for status in message.status:
+            if status.name == "lekiwi/safety_supervisor":
+                values = {item.key: item.value for item in status.values}
+                reason = values.get("latched_faults") or values.get("faults") or status.message
+                self._record("safety_reason", reason)
 
     def _on_map(self, message):
         try:
@@ -267,8 +285,14 @@ class RobotExplorer(Node):
                 continue
             value, received = self._inputs.get(name, (None, 0))
             timeout = self.config["slam_timeout_sec"] if name == "slam" else self.config["data_timeout_sec"]
-            if not value or now - received > timeout:
-                raise Paused(f"missing, stale or denied {name}")
+            if value is None:
+                raise Paused(f"missing {name}")
+            if now - received > timeout:
+                raise Paused(f"stale {name}")
+            if not value:
+                reason, seen = self._inputs.get("safety_reason", ("", 0))
+                detail = f": {reason}" if name == "base_motion_permitted" and reason and now - seen <= timeout else ""
+                raise Paused(f"denied {name}{detail}")
             if name == "slam":
                 age = (self.get_clock().now() - rclpy.time.Time.from_msg(value.stamp)).nanoseconds / 1e9
                 if not -0.3 <= age <= timeout:
@@ -282,8 +306,9 @@ class RobotExplorer(Node):
             state, seen = self._inputs.get("collision_monitor", (None, 0.0))
             if state is None or now - seen > self.config["data_timeout_sec"]:
                 raise Paused("collision monitor state is unavailable or stale")
-            if require_permission and state.action_type == CollisionMonitorState.STOP:
-                raise Paused(f"collision monitor stop: {state.polygon_name}")
+            if require_permission and (state.action_type == CollisionMonitorState.STOP
+                    or now < self._collision_clear_after):
+                raise Paused(f"collision monitor stop: {self._collision_stop_name}")
 
     def _footprint_clear(self, pose, grid=None):
         q, p = pose.pose.orientation, pose.pose.position
@@ -295,6 +320,39 @@ class RobotExplorer(Node):
             return False
         return footprint_is_free(*grid, (p.x, p.y), 2 * math.atan2(q.z, q.w),
                                  self._footprint, self.config["free_threshold"])
+
+    def _route_clear(self, waypoints, start, grid, center, radius):
+        measured_start = False
+        for index, waypoint in enumerate(waypoints):
+            p, q = waypoint.pose.position, waypoint.pose.orientation
+            # The lattice's first heading is quantized; validate the measured starting body instead.
+            if (index == 0 and math.hypot(p.x - start.pose.position.x, p.y - start.pose.position.y) <= grid[1] / 2
+                    and all(math.isfinite(v) for v in (q.x, q.y, q.z, q.w))
+                    and abs(q.x) <= 1e-6 and abs(q.y) <= 1e-6
+                    and abs(q.z * q.z + q.w * q.w - 1) <= 1e-3):
+                waypoint = start
+                p = waypoint.pose.position
+                measured_start = True
+            if (math.hypot(p.x - center[0], p.y - center[1]) >= radius - self._region_margin
+                    or not self._footprint_clear(waypoint, grid)):
+                return False
+            if index == 1 and measured_start:
+                yaw = 2 * math.atan2(start.pose.orientation.z, start.pose.orientation.w)
+                turn = math.remainder(2 * math.atan2(q.z, q.w) - yaw, 2 * math.pi)
+                distance = math.hypot(p.x - start.pose.position.x, p.y - start.pose.position.y)
+                corner_radius = max(math.hypot(x, y) for x, y in self._footprint)
+                steps = math.ceil((distance + corner_radius * abs(turn)) / (grid[1] / 4))
+                # Check the connection from the measured body to the remaining lattice route.
+                for step in range(1, steps):
+                    fraction = step / steps
+                    sample = PoseStamped()
+                    sample.pose.position.x = start.pose.position.x + fraction * (p.x - start.pose.position.x)
+                    sample.pose.position.y = start.pose.position.y + fraction * (p.y - start.pose.position.y)
+                    sample.pose.orientation.z = math.sin((yaw + fraction * turn) / 2)
+                    sample.pose.orientation.w = math.cos((yaw + fraction * turn) / 2)
+                    if not self._footprint_clear(sample, grid):
+                        return False
+        return True
 
     def _accept(self, request):
         try:
@@ -343,6 +401,7 @@ class RobotExplorer(Node):
             self._healthy(require_permission=require_permission)
             self._pose()
             if (not self._navigation.server_is_ready() or not self._planner.server_is_ready()
+                    or not self._costmap.service_is_ready()
                     or not self._mapping_client.service_is_ready()
                     or not self._localization_client.service_is_ready()):
                 return "Nav2 or mapping services are unavailable"
@@ -361,10 +420,10 @@ class RobotExplorer(Node):
             raise InterruptedError("exploration canceled")
         if task_time() >= deadline:
             raise TimeoutError("exploration duration reached")
-        self._healthy()
         reason = self._quota_reason or self._quota_limit(time.monotonic())
         if reason:
             raise RuntimeError(reason)
+        self._healthy()
         pose = self._pose()
         xy = pose.pose.position
         if math.hypot(xy.x - center[0], xy.y - center[1]) >= radius - self._region_margin:
@@ -450,7 +509,7 @@ class RobotExplorer(Node):
     def _pause(self, goal, check, reason, progress):
         """Hold the robot still until every input recovers.
 
-        Only the task's own end conditions (cancel, duration, quota, region,
+        Only the task's own end conditions (cancel, quota, region,
         shutdown) or an unconfirmed navigation stop end it while paused.
         """
         self._stop_navigation()
@@ -533,7 +592,21 @@ class RobotExplorer(Node):
                         break
                     save()
                 except Paused as reason:
-                    self._pause(goal, check, reason, progress)
+                    paused_at = task_time()
+                    state["paused_at"] = paused_at
+                    save()
+
+                    def paused_check():
+                        nonlocal deadline, paused_at
+                        now = task_time()
+                        deadline += now - paused_at
+                        paused_at = now
+                        return check()
+
+                    self._pause(goal, paused_check, reason, progress)
+                    state["deadline"] = deadline
+                    state.pop("paused_at")
+                    save()
         except Exception as error:
             result.message = str(error)
             self.get_logger().warning(f"exploration ended: {error}")
@@ -573,6 +646,33 @@ class RobotExplorer(Node):
         pose = check()
         q = pose.pose.orientation
         grid, resolution, origin = self._map
+        request = self._costmap.call_async(GetCostmap.Request())
+        try:
+            costmap = self._wait(request, self.config["service_timeout_sec"], check).map
+        except ResponseTimeout as error:
+            raise Paused("navigation costmap service is unavailable") from error
+        finally:
+            self._costmap.remove_pending_request(request)
+        metadata = costmap.metadata
+        if len(costmap.data) > self.config["max_map_cells"]:
+            raise Paused("navigation costmap exceeds the cell limit")
+        observed = OccupancyGrid(header=costmap.header, info=MapMetaData(
+            resolution=metadata.resolution, width=metadata.size_x, height=metadata.size_y,
+            origin=metadata.origin))
+        # Inflation is a soft cost; only lethal and unknown cells block the body.
+        costs = np.asarray(costmap.data, dtype=np.int16)
+        observed.data = np.where(costs == 255, -1, np.where(costs == 254, 100, 0)).tolist()
+        try:
+            live, live_resolution, live_origin = map_geometry(observed, self.config["max_map_cells"])
+        except ValueError as error:
+            raise Paused(f"invalid navigation costmap: {error}") from error
+        age = (self.get_clock().now() - rclpy.time.Time.from_msg(costmap.header.stamp)).nanoseconds / 1e9
+        if not -0.3 <= age <= self.config["service_timeout_sec"]:
+            raise Paused("navigation costmap is stale")
+        if (live.shape != grid.shape or abs(live_resolution - resolution) > 1e-6
+                or not np.allclose(live_origin, origin, atol=1e-4, rtol=0)):
+            raise Paused("navigation and SLAM maps are not aligned yet")
+        grid = np.where((live < 0) | (live == 100), live, grid)
         # Cells under the robot's own body are free: it is standing there.
         grid = (with_body_free(grid, resolution, origin, (pose.pose.position.x, pose.pose.position.y),
                                2 * math.atan2(q.z, q.w), self._footprint), resolution, origin)
@@ -607,16 +707,20 @@ class RobotExplorer(Node):
             plan.cancel_goal_async()
         if route.result.error_code == ComputePathToPose.Result.INVALID_PLANNER:
             raise RuntimeError("Nav2 planner plugin is invalid")
+        if route.result.error_code == ComputePathToPose.Result.START_OCCUPIED:
+            # A blocked start says nothing about whether this target is reachable.
+            until = time.monotonic() + self.config["settle_sec"]
+            while time.monotonic() < until:
+                check()
+                time.sleep(0.05)
+            raise Paused("navigation starting footprint is occupied")
         if (route.status != GoalStatus.STATUS_SUCCEEDED or route.result.error_code
                 or route.result.path.header.frame_id != "map" or not route.result.path.poses):
             blocked.append(target)
             return True
-        for waypoint in route.result.path.poses:
-            p = waypoint.pose.position
-            if (math.hypot(p.x - center[0], p.y - center[1]) >= radius - self._region_margin
-                    or not self._footprint_clear(waypoint, grid)):
-                blocked.append(target)
-                return True
+        if not self._route_clear(route.result.path.poses, pose, grid, center, radius):
+            blocked.append(target)
+            return True
         self._owned_id = owned_goal_id()
         until = time.monotonic() + self.config["service_timeout_sec"]
         while (self._guard_ack is None or self._guard_ack[0] != bytes(self._owned_id.uuid)

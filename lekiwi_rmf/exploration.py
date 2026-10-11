@@ -51,7 +51,15 @@ def load_task_checkpoint(path, identifier, *, maximum_duration, maximum_radius, 
         value = state.get(name)
         if type(value) not in (float, int) or not math.isfinite(value) or value < 0:
             raise ValueError(f"invalid checkpoint {name}")
-    if not 0 < state["deadline"] - task_time() <= maximum_duration:
+    now = task_time()
+    if "paused_at" in state:
+        paused_at = state.pop("paused_at")
+        if (type(paused_at) not in (float, int) or not math.isfinite(paused_at)
+                or not 0 <= paused_at <= now
+                or not 0 < state["deadline"] - paused_at <= maximum_duration):
+            raise ValueError("invalid checkpoint pause budget")
+        state["deadline"] += now - paused_at
+    if not 0 < state["deadline"] - now <= maximum_duration:
         raise ValueError("saved exploration duration reached or exceeds current limits")
     if not region_margin < state["radius"] <= maximum_radius:
         raise ValueError("saved exploration radius exceeds current limits")

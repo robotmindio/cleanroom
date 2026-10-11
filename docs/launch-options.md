@@ -26,7 +26,7 @@ shared saved calibration, including negative pitch.
 | `safety_policy` | `hold`, `strict` | `hold` | `hold` (domestic robot) stays armed through failures and re-arms itself. `strict` (larger robots): every failure disarms, cuts torque and waits for `/safety/arm`, startup included, and the safety supervisor denies motion. See [Arming and recovery](#arming-and-recovery). `scripts/ros-start.sh` passes `strict` when `LEKIWI_DISARM_ON_FAILURE=true` |
 | `rtabmap_database` | file path | sim: `~/.ros/lekiwi_rtabmap_sim.db`; real: `~/.ros/lekiwi_rtabmap.db` | RTAB-Map map database |
 | `rtabmap_wm_nodes` | integer | `300` | Nodes kept in RTAB-Map working memory before older ones move to the database |
-| `rtabmap_mapping_max_bytes`, `rtabmap_mapping_max_seconds` | integers | `536870912`, `14400` | Mapping-session quota; reaching either switches RTAB-Map to localization |
+| `rtabmap_mapping_max_bytes`, `rtabmap_mapping_max_seconds` | integers | `17179869184`, `14400` | Mapping-session quota; reaching either switches RTAB-Map to localization |
 | `static_map` | `true`, `false` | `false` | Serve the checked-in floor plan on `/map` and move RTAB-Map's own grid to `/rtabmap/map` |
 | `map_bundle` | YAML path | `maps/bundles/cleanroom-development.yaml` | Immutable map bundle used for the map, graph and fleet config when `amcl`, `static_map` or RMF is selected |
 | `publish_camera` | `true`, `false` | `true` | Enable the front-camera pipeline (local V4L2 or the remote relay) |

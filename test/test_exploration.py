@@ -68,6 +68,28 @@ def test_checkpoint_write_failure_preserves_last_complete_record(checkpoint, mon
     assert list(path.parent.iterdir()) == [path]
 
 
+def test_paused_checkpoint_retains_remaining_active_time_after_restart(checkpoint, monkeypatch):
+    path, state = checkpoint
+    monkeypatch.setattr("lekiwi_rmf.exploration.task_time", lambda: 120.0)
+    state.update(deadline=105.0, paused_at=100.0)
+    save_task_checkpoint(path, state)
+    restored = restore(path)
+    assert restored["deadline"] == 125.0
+    assert "paused_at" not in restored
+    assert restored["visited"] == state["visited"]
+
+
+@pytest.mark.parametrize("paused_at", [-1, True, "100", float("nan"), 106, 121])
+def test_paused_checkpoint_cannot_renew_an_invalid_budget(checkpoint, monkeypatch, paused_at):
+    import json
+    path, state = checkpoint
+    monkeypatch.setattr("lekiwi_rmf.exploration.task_time", lambda: 120.0)
+    state.update(deadline=105.0, paused_at=paused_at)
+    path.write_text(json.dumps(state))
+    with pytest.raises(ValueError, match="pause budget"):
+        restore(path)
+
+
 def choose(grid, *, revisit=False, visited=(), blocked=(), position=(0, 0), origin=(-2, -2, 0)):
     return select_target(grid, 0.05, origin, position, (0, 0), 2.5, visited, blocked,
                          clearance=0.22, footprint=FOOTPRINT, region_margin=REGION_MARGIN,

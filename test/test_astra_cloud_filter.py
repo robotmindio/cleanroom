@@ -89,6 +89,46 @@ def test_a_field_that_overruns_the_point_is_rejected():
     assert compact_cloud(cloud, 1) is None
 
 
+def test_blind_frame_is_published_empty_with_its_capture_stamp():
+    cloud = PointCloud2(height=1, width=2, point_step=12, row_step=24)
+    cloud.header.stamp.sec = 7
+    cloud.fields = [PointField(name=name, offset=index * 4,
+                              datatype=PointField.FLOAT32, count=1)
+                    for index, name in enumerate("xyz")]
+    cloud.data = struct.pack("<fff", math.nan, math.nan, math.nan) * 2
+    compact = compact_cloud(cloud, 1)
+    assert compact is not None and compact.width == 0 and compact.height == 1
+    assert not compact.data and compact.row_step == 0 and compact.header.stamp.sec == 7
+
+
+def test_sparse_returns_between_sampling_pixels_are_kept_within_the_budget():
+    cloud = PointCloud2(height=8, width=8, point_step=12, row_step=96)
+    cloud.fields = [PointField(name=name, offset=index * 4,
+                              datatype=PointField.FLOAT32, count=1)
+                    for index, name in enumerate("xyz")]
+    points = [(math.nan, math.nan, math.nan)] * 64
+    for index in (9, 18, 27):
+        points[index] = (0.1, 0.2, 0.6)
+    cloud.data = b"".join(struct.pack("<fff", *point) for point in points)
+    compact = compact_cloud(cloud, 4)
+    assert compact.width == 3 <= 4
+    assert bytes(compact.data) == struct.pack("<fff", 0.1, 0.2, 0.6) * 3
+
+
+def test_valid_frame_exceeding_budget_cannot_become_an_empty_measured_frame():
+    cloud = PointCloud2(height=8, width=8, point_step=12, row_step=96)
+    cloud.fields = [PointField(name=name, offset=index * 4,
+                              datatype=PointField.FLOAT32, count=1)
+                    for index, name in enumerate("xyz")]
+    points = [(math.nan, math.nan, math.nan)] * 64
+    for index in range(9, 17):
+        points[index] = (0.1, 0.2, 0.6)
+    cloud.data = b"".join(struct.pack("<fff", *point) for point in points)
+    compact = compact_cloud(cloud, 4)
+    assert compact.width == 4
+    assert bytes(compact.data) == struct.pack("<fff", 0.1, 0.2, 0.6) * 4
+
+
 def test_rgb_encoding_is_eager_rate_limited_and_keeps_capture_stamp(monkeypatch):
     import cv2
     import rclpy

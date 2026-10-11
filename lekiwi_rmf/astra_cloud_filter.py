@@ -19,9 +19,10 @@ from sensor_msgs.msg import CompressedImage, Image, PointCloud2, PointField
 
 def compact_cloud(message: PointCloud2, stride: int) -> PointCloud2 | None:
     """Decimate finite XYZ samples while preserving the driver's calibrated fields."""
-    if stride < 1 or message.point_step <= 0 or message.row_step < message.width * message.point_step:
+    if stride < 1 or message.height <= 0 or message.point_step <= 0 or message.row_step < message.width * message.point_step:
         return None
-    offsets = {field.name: field.offset for field in message.fields if field.datatype == PointField.FLOAT32}
+    offsets = {field.name: field.offset for field in message.fields
+               if field.datatype == PointField.FLOAT32 and field.count == 1}
     if not all(
         name in offsets and 0 <= offsets[name] and offsets[name] + 4 <= message.point_step
         for name in ("x", "y", "z")
@@ -35,15 +36,25 @@ def compact_cloud(message: PointCloud2, stride: int) -> PointCloud2 | None:
     )
     samples = raster[:, :message.width * message.point_step].reshape(
         message.height, message.width, message.point_step
-    )[::stride, ::stride].reshape(-1, message.point_step)
+    )
+    decimated = samples[::stride, ::stride].reshape(-1, message.point_step)
+    samples = samples.reshape(-1, message.point_step)
     float32 = np.dtype(">f4" if message.is_bigendian else "<f4")
     finite = np.ones(len(samples), dtype=bool)
     for name in ("x", "y", "z"):
         column = np.ascontiguousarray(samples[:, offsets[name]:offsets[name] + 4]).view(float32)
         finite &= np.isfinite(column[:, 0])
-    output = samples[finite].tobytes()
-    if not output:
-        return None
+    # Sparse frames already fit the traffic budget; do not discard their real returns.
+    if np.count_nonzero(finite) <= len(decimated):
+        output = samples[finite].tobytes()
+    else:
+        selected = finite.reshape(message.height, message.width)[::stride, ::stride].ravel()
+        output = decimated[selected].tobytes()
+        if not output:
+            # A sampling grid can miss every return even when the frame exceeds its budget.
+            indices = np.flatnonzero(finite)
+            output = samples[indices[::math.ceil(len(indices) / len(decimated))]].tobytes()
+    # Empty measured frames distinguish a close/unreadable surface from a dead camera.
     cloud = PointCloud2()
     cloud.header = message.header
     cloud.height = 1
@@ -120,7 +131,7 @@ class AstraCloudFilter(Node):
             return
         cloud = compact_cloud(deserialize_message(serialized, PointCloud2), self._stride)
         if cloud is None:
-            self.get_logger().warning("discarding Astra cloud without finite XYZ data", throttle_duration_sec=5)
+            self.get_logger().warning("discarding malformed Astra cloud", throttle_duration_sec=5)
             return
         self._last_publish = now
         self._publisher.publish(cloud)

@@ -216,7 +216,7 @@ def valid_arguments(**overrides):
         "yaw_velocity_scale": "0.9",
         "rtabmap_database": "/tmp/lekiwi.db",
         "rtabmap_wm_nodes": "300",
-        "rtabmap_mapping_max_bytes": "536870912",
+        "rtabmap_mapping_max_bytes": "17179869184",
         "rtabmap_mapping_max_seconds": "14400",
         "map_bundle": "/tmp/not-used-without-rmf.yaml",
         "static_map": "false",

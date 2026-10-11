@@ -70,6 +70,7 @@ def inventory(release, role):
     native_artifacts = (
         "rclcpp/lib/librclcpp.so", "class_loader/lib/libclass_loader.so",
         "nav2_lifecycle_manager/lib/nav2_lifecycle_manager/lifecycle_manager",
+        "nav2_smac_planner/lib/libnav2_smac_planner_lattice.so",
         "rviz_ogre_vendor/opt/rviz_ogre_vendor/lib/OGRE/RenderSystem_GL.so",
     ) if role == "compute" else ()
     for name in native_artifacts:

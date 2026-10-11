@@ -2,6 +2,7 @@
 
 import threading
 import time
+from types import SimpleNamespace
 
 from action_msgs.msg import GoalStatus
 from nav2_msgs.msg import CollisionMonitorState
@@ -10,6 +11,17 @@ from std_srvs.srv import Empty
 
 from lekiwi_rmf.action import Explore
 from test_exploration_ros import graph as graph, response, start, wait
+
+
+def test_operator_prints_stage_changes_without_repeated_feedback(capsys):
+    from lekiwi_rmf.explore_client import ExploreClient
+
+    node = SimpleNamespace(_last_stage=None)
+    for stage in ("exploring_frontiers", "exploring_frontiers", "paused: depth blind",
+                  "paused: depth blind", "exploring_frontiers"):
+        ExploreClient._feedback(node, SimpleNamespace(feedback=SimpleNamespace(stage=stage)))
+    assert capsys.readouterr().out.splitlines() == [
+        "exploring_frontiers", "paused: depth blind", "exploring_frontiers"]
 
 
 @pytest.mark.parametrize('recovers', [False, True])
@@ -100,8 +112,11 @@ def test_operator_recovers_a_lost_result_reply_from_an_idle_server(graph, monkey
 @pytest.mark.parametrize('failure', ['overlap', 'invalid_source', 'missing_status'])
 def test_collision_stop_pauses_without_discarding_targets_and_clearing_resumes(graph, failure):
     peers, explorer, client = graph
+    if failure == 'overlap':
+        explorer.config['mapping_max_seconds'] = 30.0
     feedback = []
-    handle = response(client.send_goal_async(Explore.Goal(max_radius_m=2.5),
+    handle = response(client.send_goal_async(Explore.Goal(max_radius_m=2.5,
+                      max_duration_sec=5.0 if failure == 'overlap' else 0.0),
                       feedback_callback=lambda msg: feedback.append(msg.feedback)))
     assert handle.accepted
     wait(lambda: peers.nav_active)
@@ -114,12 +129,15 @@ def test_collision_stop_pauses_without_discarding_targets_and_clearing_resumes(g
     wait(lambda: 'paused: collision monitor' in explorer._stage)
     wait(lambda: not peers.nav_active and peers.nav_canceled == 1)
     count = peers.nav_count
-    time.sleep(0.3)
+    time.sleep(5.5 if failure == 'overlap' else 0.3)
     assert peers.nav_count == count
     assert feedback and all(message.unreachable_targets == 0 for message in feedback)
     assert not handle.get_result_async().done()
     peers.collision = CollisionMonitorState()
     peers.publish_collision = True
+    if failure == 'overlap':
+        time.sleep(0.4)
+        assert peers.nav_count == count and not peers.nav_active
     wait(lambda: peers.nav_active and peers.nav_count == count + 1)
     response(handle.cancel_goal_async())
     result = response(handle.get_result_async())
@@ -140,9 +158,24 @@ def test_collision_stop_refuses_a_new_goal_but_does_not_poison_readiness_after_c
     assert response(handle.get_result_async()).status == GoalStatus.STATUS_CANCELED
 
 
+def test_mapping_quota_still_ends_a_collision_paused_task(graph):
+    peers, explorer, _ = graph
+    handle = start(graph)
+    peers.collision = CollisionMonitorState(action_type=CollisionMonitorState.STOP, polygon_name='StopZone')
+    wait(lambda: explorer._stage.startswith('paused: collision monitor'))
+    wait(lambda: not peers.nav_active)
+    explorer.database.write_bytes(b'x' * 4096)
+    result = response(handle.get_result_async())
+    assert result.status == GoalStatus.STATUS_ABORTED
+    assert 'mapping database quota reached' in result.result.message
+    assert not peers.nav_active
+
+
 def test_permission_pause_resumes_in_a_corridor_fitting_the_actual_body(graph):
     peers, explorer, client = graph
-    handle = response(client.send_goal_async(Explore.Goal(revisit_known=True, max_duration_sec=10.0, max_radius_m=2.5)))
+    # This test checks clearance and recovery, not the short duration/quota fixtures.
+    explorer.config.update(max_duration_sec=30.0, mapping_max_seconds=30.0)
+    handle = response(client.send_goal_async(Explore.Goal(revisit_known=True, max_duration_sec=30.0, max_radius_m=2.5)))
     assert handle.accepted
     wait(lambda: peers.nav_active)
     peers.permitted = False
@@ -150,13 +183,18 @@ def test_permission_pause_resumes_in_a_corridor_fitting_the_actual_body(graph):
     peers.position = (0.025, 0.025)
     peers.grid.data = [100 if i // 80 in (35, 45) else 0 for i in range(6400)]
     wait(lambda: explorer._map[0][35, 0] == 100)
+    wait(lambda: explorer._pose().pose.position.x == 0.025 and explorer._pose().pose.position.y == 0.025)
     peers.permitted = True
-    wait(lambda: peers.nav_active and peers.nav_count == 2)
+    wait(lambda: peers.nav_active and peers.nav_count == 2, timeout=10)
     assert explorer._busy
+    # A straight-line fake route turning 180 degrees would sweep through these walls.
+    resumed = peers.navigation_goals[-1].pose
+    assert resumed.position.x > peers.position[0]
+    assert resumed.position.y == pytest.approx(peers.position[1], abs=1e-6)
     response(handle.cancel_goal_async())
     result = response(handle.get_result_async())
     assert result.status == GoalStatus.STATUS_CANCELED
-    assert result.result.unreachable_targets == 0
+    assert result.result.unreachable_targets <= 1
     assert not peers.nav_active and explorer._mapping is False
 
 

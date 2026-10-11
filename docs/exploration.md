@@ -15,7 +15,7 @@ scripts/explore.sh
 
 The launcher uses `~/lekiwi_ws/current` when a managed deployment is installed,
 otherwise the checkout's build. It sources `scripts/setup.bash`, revisits known
-space and prints action feedback and the terminal result. A workspace containing
+space and prints stage changes and the terminal result. A workspace containing
 a managed `current` release selects that release, including `LEKIWI_WS=~/lekiwi_ws`.
 Python imports use
 the selected installation, avoiding source packages hiding generated ROS types.
@@ -46,7 +46,9 @@ and failed target counts, and known map area in the bounded region.
 
 `max_duration_sec` and `max_radius_m` equal to zero select the tracked defaults
 in `config/exploration.yaml` (900 seconds and 10 metres). Positive goal values
-can only reduce these maxima. The centre reachability prefilter is 0.22 m,
+can only reduce these maxima. Duration counts active exploration time; recoverable
+pauses preserve the remaining budget, including across a server restart. Mapping
+storage and session quotas continue to apply while paused. The centre reachability prefilter is 0.22 m,
 the body's inscribed radius, without rounding up on the 5 cm grid. The former
 0.33 m circle rounded to 0.35 m and unnecessarily blocked close side clearance.
 Goals and preflight waypoints check the whole oriented 46 x 44 cm footprint
@@ -78,7 +80,14 @@ During a task, those conditions are recoverable faults: a stale SLAM update or
 TF, withdrawn motion permission, an unfolded arm, a stale mapping-mode reading,
 or a ROS peer that answers late. A collision-monitor stop is also a pause:
 feedback identifies the triggering polygon (or invalid sensor source), and
-targets stay eligible when the obstruction clears. Missing or stale collision
+targets stay eligible when the obstruction clears. Collision status must remain
+clear for one second before movement resumes, preventing isolated clear scans
+near a person's foot from repeatedly restarting navigation. Target selection combines the
+SLAM map with a fresh service snapshot of Nav2's global costmap, so current LiDAR
+obstacles exclude blocked goals without treating soft inflation costs as walls.
+Invalid, stale or temporarily unaligned costmap replies pause exploration.
+An occupied planner start is retried without declaring untried targets unreachable.
+Missing or stale collision
 status pauses the task as well. The native monitor publishes its current state
 for every velocity input, including an unchanged stop, so a restarted Explorer
 does not miss it. The task cancels its Nav2 goal so the robot stops, reports a
@@ -93,7 +102,13 @@ The `ExploreKnown` Nav2 planner and the tracked `explore_nav_to_pose.xml` behavi
 tree prohibit planning through unknown space. Ordinary `GridBased` navigation
 uses the same Smac lattice planner, retaining its explicit-goal unknown-space
 policy and 0.20 m planner tolerance. Both use the native
-omnidirectional motion set and the unpadded body footprint. Their paths include
+omnidirectional motion set and the unpadded body footprint. Reverse expansion is
+also enabled: the supplied omnidirectional motion set otherwise omits a straight
+backward step, which can strand the base where neither turning nor strafing fits.
+The pinned native planner patch preserves continuous positions and headings in
+collision checks, validates every returned primitive pose and covered cell, and
+permits the existing reverse expansion for this motion model. MPPI uses the path's
+feasible body headings when aligning and scoring reverse motion. Their paths include
 feasible orientations; NavFn's centreline and placeholder orientations could
 fail the full-body preflight before any motion. Global inflation also includes
 unknown boundaries so the planner checks footprint corners there. The existing
@@ -155,6 +170,11 @@ and 130 after Ctrl-C confirms cancellation. Discovery and cancellation are bound
 the server owns the configured task duration. `/diagnostics`, status
 `lekiwi/exploration`, exposes current readiness, stage and the last refusal reason.
 Paused feedback updates when the blocking cause changes.
+Permission pauses distinguish missing, stale and denied inputs. A denied base
+permission includes the supervisor's fault when its diagnostics are fresh, such
+as `denied base_motion_permitted: depth_stream: stale`.
+This detail is informational; permission still comes from the supervisor and
+the task resumes only after its inputs recover.
 The client waits for fresh operational readiness before sending its goal, rather
 than treating action-server discovery as proof that SLAM and safety inputs are
 ready. If a restarted server reports idle while the old result request remains
@@ -168,7 +188,9 @@ continuation, after the ownership guard confirms the old navigation has stopped.
 
 Checkpoints next to the mapping database retain the original center, radius,
 deadline, visited/deferred targets, retry pass and preceding mapping mode.
-Restart recovery cannot extend the deadline or recenter the travel region.
+A paused checkpoint also records when the pause began, allowing recovery to
+retain the same remaining active time without renewing the task's budget.
+Restart recovery cannot replenish the active-time budget or recenter the travel region.
 The deadline includes system suspend time. A missing, invalid, expired or
 superseded checkpoint, changed host boot, or reduced configuration limits refuse
 continuation. Cancellation and ordinary terminal results remove the checkpoint;
@@ -183,7 +205,8 @@ database. If the task began in localization, it restores localization when it
 finishes, fails or is canceled; an existing mapping session remains mapping
 unless it reaches a quota.
 
-The always-running monitor reads RTAB-Map's `Mem/IncrementalMemory` and counts
+The default limits are 16 GiB of database storage and four hours per mapping
+session. The always-running monitor reads RTAB-Map's `Mem/IncrementalMemory` and counts
 the database plus `-wal`, `-shm` and `-journal` sidecars. Both mapping-startup
 and later direct calls to `/rtabmap/set_mode_mapping` are covered. A transition
 from localization starts a fresh wall-time session; a transient parameter RPC
@@ -233,3 +256,14 @@ The real Jazzy BT navigator also loads and executes the tracked exploration
 tree against a simulated planner/controller, including controller cancellation.
 Run through CTest after building; domains 85 and 86 are separate from the live
 robot. These tests exercise the task runner without commanding hardware.
+
+The planner's first lattice pose may round the measured starting heading. Route
+preflight uses the measured starting footprint when that first pose is within
+half a map cell; the connection to the next waypoint, all subsequent footprints,
+and region bounds remain checked. Nav2 action
+acknowledgements have a bounded one-second budget on the physical stack.
+
+The global static costmap also clears cells under the robot's current footprint,
+matching target preflight. Unknown or self-mapped cells under the standing body
+therefore do not make every target fail with Nav2's "Start occupied" error.
+Obstacles outside the current footprint and live lidar collision checks remain active.

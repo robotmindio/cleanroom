@@ -89,7 +89,7 @@
      "data_timeout_sec": 1.0,
      "database_path": "$(env HOME)/.ros/lekiwi_rtabmap_sim.db",
      "free_threshold": 20,
-     "mapping_max_bytes": 536870912,
+     "mapping_max_bytes": 17179869184,
      "mapping_max_seconds": 14400.0,
      "max_duration_sec": 900.0,
      "max_map_cells": 250000,
