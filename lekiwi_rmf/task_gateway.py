@@ -112,6 +112,7 @@ class TaskGateway(Node):
         self._started = {}
         self._recovering = {row['id'] for row in self._active()}
         self._observed = {capability: set() for capability in ACTIONS}
+        self._terminal_seen = {}
         self._guard = (False, 0.0)
         self._ack = (b'', 0.0)
         self._action_clients = {}
@@ -153,6 +154,7 @@ class TaskGateway(Node):
             self._recovering.discard(identifier)
             self._sent.discard(identifier)
             self._started.pop(identifier, None)
+            self._terminal_seen.pop(identifier, None)
 
     def _submit(self, request, response):
         try:
@@ -233,6 +235,8 @@ class TaskGateway(Node):
         for status in message.status_list:
             row = self._db.execute('SELECT * FROM tasks WHERE goal_id=?', (bytes(status.goal_info.goal_id.uuid),)).fetchone()
             if row is not None and row['state'] not in TERMINAL:
+                if status.status in (4, 5, 6):
+                    self._terminal_seen.setdefault(row['id'], time.monotonic())
                 self._lookup_result(row)
 
     def _lookup_result(self, row):
@@ -249,6 +253,8 @@ class TaskGateway(Node):
         future.add_done_callback(lambda done: self._replies.put(('result', row['id'], done)))
 
     def _result(self, identifier, future):
+        if future.cancelled():
+            return
         self._pending.pop(('result', identifier), None)
         if self._row(identifier)['state'] in TERMINAL:
             return
@@ -289,6 +295,8 @@ class TaskGateway(Node):
             self._update(identifier, 'unknown', 'action acceptance unconfirmed; not resubmitted')
 
     def _canceled(self, identifier, future):
+        if future.cancelled():
+            return
         self._pending.pop(('cancel', identifier), None)
         try:
             reply = future.result()
@@ -308,6 +316,19 @@ class TaskGateway(Node):
         for row in self._active():
             identifier, capability = row['id'], row['capability']
             goal_id = UUID(uuid=list(row['goal_id']))
+            # Result calls wait through execution; only expire after observed termination.
+            for kind in ('cancel', 'result'):
+                key = (kind, identifier)
+                since = self._queried.get(key, now) if kind == 'cancel' else self._terminal_seen.get(identifier, now)
+                if key in self._pending and now - since >= 3.0:
+                    future = self._pending.pop(key)
+                    client = self._cancel_clients[capability] if kind == 'cancel' else self._result_clients[capability]
+                    client.remove_pending_request(future)
+                    future.cancel()
+                    if kind == 'result':
+                        self._terminal_seen[identifier] = now
+            if identifier in self._terminal_seen:
+                self._lookup_result(row)
             if identifier in self._recovering:
                 # Never revive a potentially expired Nav2 ownership lease after a crash.
                 self._lookup_result(row)

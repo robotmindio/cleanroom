@@ -245,3 +245,30 @@ def test_duplicate_gateway_cannot_own_the_same_journal(tmp_path):
     finally:
         gateway.destroy_node()
         context.try_shutdown()
+
+
+def test_lost_cancel_reply_is_retried_without_claiming_termination():
+    from queue import SimpleQueue
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from rclpy.task import Future
+
+    old, retry = Future(), Future()
+    client = Mock()
+    client.service_is_ready.return_value = True
+    client.call_async.return_value = retry
+    row = {'id': 'task-1', 'capability': 'explore', 'goal_id': bytes(16), 'cancel_requested': 1}
+    gateway = SimpleNamespace(
+        _replies=SimpleQueue(), _active=lambda: [row], _recovering={'task-1'},
+        _pending={('cancel', 'task-1'): old},
+        _queried={('cancel', 'task-1'): time.monotonic() - 4},
+        _terminal_seen={}, _cancel_clients={'explore': client},
+        _lookup_result=Mock(), _result=Mock(), _accepted=Mock(), _canceled=Mock(),
+    )
+    TaskGateway._tick(gateway)
+    assert old.cancelled()
+    client.remove_pending_request.assert_called_once_with(old)
+    client.call_async.assert_called_once()
+    assert gateway._pending[('cancel', 'task-1')] is retry
+    TaskGateway._canceled(gateway, 'task-1', old)
+    assert gateway._pending[('cancel', 'task-1')] is retry
