@@ -2,6 +2,8 @@
 
 from concurrent.futures import Future
 from itertools import groupby
+import math
+import numpy as np
 import threading
 import time
 from types import SimpleNamespace
@@ -517,3 +519,39 @@ def test_shutdown_request_cancels_before_ros_context_is_closed(graph):
     explorer._shutdown_requested.set()
     assert response(handle.get_result_async()).status == GoalStatus.STATUS_ABORTED
     assert peers.nav_canceled == 1 and not peers.nav_active
+
+
+@pytest.mark.parametrize("fault", ["none", "remote_start", "later_collision", "connection_collision", "invalid_heading", "outside_region"])
+def test_route_uses_measured_start_but_preserves_other_footprint_checks(fault):
+    from pathlib import Path as FilePath
+    from lekiwi_rmf.exploration import load_navigation_footprint
+    footprint, _, margin = load_navigation_footprint(FilePath(__file__).parents[1] / "config/nav2_params.yaml")
+    grid = np.zeros((80, 80), dtype=np.int16)
+    grid[45, 42] = -1
+    geometry = (grid, 0.05, (-2.0, -2.0, 0.0))
+    explorer = SimpleNamespace(_footprint=footprint, _region_margin=margin, config={"free_threshold": 20})
+    explorer._footprint_clear = lambda pose, grid: RobotExplorer._footprint_clear(explorer, pose, grid)
+    start = PoseStamped()
+    start.pose.orientation.w = 1.0
+    rounded = PoseStamped()
+    rounded.pose.orientation.z = math.sin(0.4636476 / 2)
+    rounded.pose.orientation.w = math.cos(0.4636476 / 2)
+    end = PoseStamped()
+    end.pose.position.x = -0.5
+    end.pose.orientation.w = 1.0
+    assert explorer._footprint_clear(start, geometry)
+    assert not explorer._footprint_clear(rounded, geometry)
+    route = [rounded, end]
+    if fault == "remote_start":
+        rounded.pose.position.y = 0.03
+    elif fault == "later_collision":
+        route.append(rounded)
+    elif fault == "connection_collision":
+        grid[40, 33] = 100
+        end.pose.position.x = -0.8
+        assert explorer._footprint_clear(end, geometry)
+    elif fault == "invalid_heading":
+        rounded.pose.orientation.w = float("nan")
+    elif fault == "outside_region":
+        end.pose.position.x = 2.0
+    assert RobotExplorer._route_clear(explorer, route, start, geometry, (0, 0), 2.5) == (fault == "none")

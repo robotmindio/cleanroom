@@ -22,7 +22,8 @@ bt_navigator:
     robot_base_frame: base_footprint
     odom_topic: /odom
     bt_loop_duration: 10
-    default_server_timeout: 20
+    # Goal acknowledgements exceeded 20 ms on the physical stack; keep RPCs bounded.
+    default_server_timeout: 1000
     wait_for_service_timeout: 1000
     navigators: [navigate_to_pose, navigate_through_poses]
     navigate_to_pose:

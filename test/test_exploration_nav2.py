@@ -15,7 +15,7 @@ from nav2_msgs.action import BackUp, ComputePathToPose, FollowPath, Spin, Wait
 from nav2_msgs.srv import ClearEntireCostmap
 import pytest
 import rclpy
-from rclpy.action import ActionClient, ActionServer, CancelResponse
+from rclpy.action import ActionClient, ActionServer, CancelResponse, GoalResponse
 from rclpy.context import Context
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
@@ -31,7 +31,7 @@ ROOT = Path(__file__).parents[1]
 
 
 @pytest.mark.parametrize("failure", [
-    "none", "cancel", "planner", "controller", "backup", "cancel_recovery", "exhausted", "fatal",
+    "none", "acknowledgement", "cancel", "planner", "controller", "backup", "cancel_recovery", "exhausted", "fatal",
 ])
 def test_real_nav2_tree_recovers_with_the_same_target_and_cancels_its_actions(tmp_path, failure):
     context = Context()
@@ -104,7 +104,13 @@ def test_real_nav2_tree_recovers_with_the_same_target_and_cancels_its_actions(tm
         peers.nav_active = False
         return FollowPath.Result()
 
+    def accept_follow(_request):
+        if failure == "acknowledgement":
+            time.sleep(0.08)
+        return GoalResponse.ACCEPT
+
     controller = ActionServer(peers, FollowPath, "/follow_path", follow,
+                              goal_callback=accept_follow,
                               cancel_callback=lambda _goal: CancelResponse.ACCEPT,
                               callback_group=peers.group)
     explorer = RobotExplorer(context=context, parameter_overrides=[
@@ -131,10 +137,6 @@ def test_real_nav2_tree_recovers_with_the_same_target_and_cancels_its_actions(tm
         process = subprocess.Popen([
             str(executable), "--ros-args", "--params-file", str(ROOT / "config/nav2_params.yaml"),
             "-p", "navigators:=[navigate_to_pose]",
-            # Python peers under coverage need longer than the production 20 ms
-            # goal-response budget; task RPC/cleanup deadlines remain bounded.
-            "-p", "default_server_timeout:=1000",
-
             "-p", f"default_nav_to_pose_bt_xml:={ROOT / 'config/explore_nav_to_pose.xml'}",
         ], stdout=log, stderr=subprocess.STDOUT)
         try:

@@ -310,6 +310,39 @@ class RobotExplorer(Node):
         return footprint_is_free(*grid, (p.x, p.y), 2 * math.atan2(q.z, q.w),
                                  self._footprint, self.config["free_threshold"])
 
+    def _route_clear(self, waypoints, start, grid, center, radius):
+        measured_start = False
+        for index, waypoint in enumerate(waypoints):
+            p, q = waypoint.pose.position, waypoint.pose.orientation
+            # The lattice's first heading is quantized; validate the measured starting body instead.
+            if (index == 0 and math.hypot(p.x - start.pose.position.x, p.y - start.pose.position.y) <= grid[1] / 2
+                    and all(math.isfinite(v) for v in (q.x, q.y, q.z, q.w))
+                    and abs(q.x) <= 1e-6 and abs(q.y) <= 1e-6
+                    and abs(q.z * q.z + q.w * q.w - 1) <= 1e-3):
+                waypoint = start
+                p = waypoint.pose.position
+                measured_start = True
+            if (math.hypot(p.x - center[0], p.y - center[1]) >= radius - self._region_margin
+                    or not self._footprint_clear(waypoint, grid)):
+                return False
+            if index == 1 and measured_start:
+                yaw = 2 * math.atan2(start.pose.orientation.z, start.pose.orientation.w)
+                turn = math.remainder(2 * math.atan2(q.z, q.w) - yaw, 2 * math.pi)
+                distance = math.hypot(p.x - start.pose.position.x, p.y - start.pose.position.y)
+                corner_radius = max(math.hypot(x, y) for x, y in self._footprint)
+                steps = math.ceil((distance + corner_radius * abs(turn)) / (grid[1] / 4))
+                # Check the connection from the measured body to the remaining lattice route.
+                for step in range(1, steps):
+                    fraction = step / steps
+                    sample = PoseStamped()
+                    sample.pose.position.x = start.pose.position.x + fraction * (p.x - start.pose.position.x)
+                    sample.pose.position.y = start.pose.position.y + fraction * (p.y - start.pose.position.y)
+                    sample.pose.orientation.z = math.sin((yaw + fraction * turn) / 2)
+                    sample.pose.orientation.w = math.cos((yaw + fraction * turn) / 2)
+                    if not self._footprint_clear(sample, grid):
+                        return False
+        return True
+
     def _accept(self, request):
         try:
             if self._shutdown_requested.is_set():
@@ -625,12 +658,9 @@ class RobotExplorer(Node):
                 or route.result.path.header.frame_id != "map" or not route.result.path.poses):
             blocked.append(target)
             return True
-        for waypoint in route.result.path.poses:
-            p = waypoint.pose.position
-            if (math.hypot(p.x - center[0], p.y - center[1]) >= radius - self._region_margin
-                    or not self._footprint_clear(waypoint, grid)):
-                blocked.append(target)
-                return True
+        if not self._route_clear(route.result.path.poses, pose, grid, center, radius):
+            blocked.append(target)
+            return True
         self._owned_id = owned_goal_id()
         until = time.monotonic() + self.config["service_timeout_sec"]
         while (self._guard_ack is None or self._guard_ack[0] != bytes(self._owned_id.uuid)
