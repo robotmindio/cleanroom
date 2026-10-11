@@ -7,6 +7,7 @@ import time
 from types import SimpleNamespace
 
 from action_msgs.msg import GoalStatus
+from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from geometry_msgs.msg import PoseStamped, TransformStamped
 from nav2_msgs.action import ComputePathToPose, NavigateToPose
 from nav2_msgs.msg import CollisionMonitorState
@@ -28,7 +29,7 @@ from std_srvs.srv import Empty
 from tf2_ros import TransformBroadcaster
 
 from lekiwi_rmf.action import Explore
-from lekiwi_rmf.exploration_node import RobotExplorer
+from lekiwi_rmf.exploration_node import Paused, RobotExplorer
 from lekiwi_rmf.exploration_owner_guard import ExplorationOwnerGuard
 
 
@@ -434,6 +435,30 @@ def test_invalid_or_denied_requests_have_no_mapping_or_navigation_side_effects(g
     wait(lambda: not explorer._inputs["base_motion_permitted"][0])
     assert not response(client.send_goal_async(Explore.Goal())).accepted
     assert peers.mapping_requests == [] and peers.nav_count == 0
+
+
+def test_permission_pause_reports_only_fresh_safety_faults_and_recovers(graph):
+    peers, explorer, _ = graph
+    publisher = peers.create_publisher(DiagnosticArray, "/diagnostics", 10)
+    peers.permitted = False
+    wait(lambda: not explorer._inputs["base_motion_permitted"][0])
+    message = DiagnosticArray(status=[DiagnosticStatus(
+        name="lekiwi/safety_supervisor", message="ARMED",
+        values=[KeyValue(key="faults", value="depth: invalid, blind, or stampless point cloud")])])
+    deadline = time.monotonic() + 5
+    while "safety_reason" not in explorer._inputs and time.monotonic() < deadline:
+        publisher.publish(message)
+        time.sleep(0.05)
+    assert "safety_reason" in explorer._inputs
+    with pytest.raises(Paused, match="denied base_motion_permitted: depth: invalid"):
+        explorer._healthy()
+    reason, _ = explorer._inputs["safety_reason"]
+    explorer._inputs["safety_reason"] = (reason, time.monotonic() - 10)
+    with pytest.raises(Paused, match="^denied base_motion_permitted$"):
+        explorer._healthy()
+    peers.permitted = True
+    wait(lambda: explorer._inputs["base_motion_permitted"][0])
+    explorer._healthy()
 
 
 def test_disabled_exploration_keeps_the_mapping_monitor_without_navigation_geometry(tmp_path):

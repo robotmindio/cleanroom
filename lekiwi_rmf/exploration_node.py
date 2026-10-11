@@ -104,6 +104,7 @@ class RobotExplorer(Node):
         for topic in ("base_motion_permitted", "arm_stowed"):
             self.create_subscription(Bool, f"/safety/{topic}",
                                      lambda msg, name=topic: self._record(name, msg.data), latched)
+        self.create_subscription(DiagnosticArray, "/diagnostics", self._on_safety_status, 10)
         self.create_subscription(Info, "/info", lambda msg: self._record("slam", msg.header), 1)
         self.create_subscription(Bool, "/robot/explore/navigation_guard_ready",
                                  lambda msg: self._record("navigation_guard", msg.data), 1)
@@ -134,6 +135,13 @@ class RobotExplorer(Node):
 
     def _record(self, name, value):
         self._inputs[name] = (value, time.monotonic())
+
+    def _on_safety_status(self, message):
+        for status in message.status:
+            if status.name == "lekiwi/safety_supervisor":
+                values = {item.key: item.value for item in status.values}
+                reason = values.get("latched_faults") or values.get("faults") or status.message
+                self._record("safety_reason", reason)
 
     def _on_map(self, message):
         try:
@@ -267,8 +275,14 @@ class RobotExplorer(Node):
                 continue
             value, received = self._inputs.get(name, (None, 0))
             timeout = self.config["slam_timeout_sec"] if name == "slam" else self.config["data_timeout_sec"]
-            if not value or now - received > timeout:
-                raise Paused(f"missing, stale or denied {name}")
+            if value is None:
+                raise Paused(f"missing {name}")
+            if now - received > timeout:
+                raise Paused(f"stale {name}")
+            if not value:
+                reason, seen = self._inputs.get("safety_reason", ("", 0))
+                detail = f": {reason}" if name == "base_motion_permitted" and reason and now - seen <= timeout else ""
+                raise Paused(f"denied {name}{detail}")
             if name == "slam":
                 age = (self.get_clock().now() - rclpy.time.Time.from_msg(value.stamp)).nanoseconds / 1e9
                 if not -0.3 <= age <= timeout:

@@ -2,6 +2,7 @@
 
 import threading
 import time
+from types import SimpleNamespace
 
 from action_msgs.msg import GoalStatus
 from nav2_msgs.msg import CollisionMonitorState
@@ -10,6 +11,17 @@ from std_srvs.srv import Empty
 
 from lekiwi_rmf.action import Explore
 from test_exploration_ros import graph as graph, response, start, wait
+
+
+def test_operator_prints_stage_changes_without_repeated_feedback(capsys):
+    from lekiwi_rmf.explore_client import ExploreClient
+
+    node = SimpleNamespace(_last_stage=None)
+    for stage in ("exploring_frontiers", "exploring_frontiers", "paused: depth blind",
+                  "paused: depth blind", "exploring_frontiers"):
+        ExploreClient._feedback(node, SimpleNamespace(feedback=SimpleNamespace(stage=stage)))
+    assert capsys.readouterr().out.splitlines() == [
+        "exploring_frontiers", "paused: depth blind", "exploring_frontiers"]
 
 
 @pytest.mark.parametrize('recovers', [False, True])

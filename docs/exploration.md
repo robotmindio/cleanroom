@@ -15,7 +15,7 @@ scripts/explore.sh
 
 The launcher uses `~/lekiwi_ws/current` when a managed deployment is installed,
 otherwise the checkout's build. It sources `scripts/setup.bash`, revisits known
-space and prints action feedback and the terminal result. A workspace containing
+space and prints stage changes and the terminal result. A workspace containing
 a managed `current` release selects that release, including `LEKIWI_WS=~/lekiwi_ws`.
 Python imports use
 the selected installation, avoiding source packages hiding generated ROS types.
@@ -155,6 +155,11 @@ and 130 after Ctrl-C confirms cancellation. Discovery and cancellation are bound
 the server owns the configured task duration. `/diagnostics`, status
 `lekiwi/exploration`, exposes current readiness, stage and the last refusal reason.
 Paused feedback updates when the blocking cause changes.
+Permission pauses distinguish missing, stale and denied inputs. A denied base
+permission includes the supervisor's fault when its diagnostics are fresh, such
+as `denied base_motion_permitted: depth: invalid, blind, or stampless point cloud`.
+This detail is informational; permission still comes from the supervisor and
+the task resumes only after its inputs recover.
 The client waits for fresh operational readiness before sending its goal, rather
 than treating action-server discovery as proof that SLAM and safety inputs are
 ready. If a restarted server reports idle while the old result request remains

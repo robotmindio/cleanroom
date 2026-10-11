@@ -32,6 +32,7 @@ class ExploreClient(Node):
         self._prerequisites_ready = False
         self._idle_since = None
         self._sent_id = self._sent_future = None
+        self._last_stage = None
         self.create_subscription(DiagnosticArray, '/diagnostics', self._status, 10)
 
     def destroy_node(self):
@@ -61,6 +62,12 @@ class ExploreClient(Node):
                 return False
             rclpy.spin_once(self, executor=self._client_executor, timeout_sec=0.1)
         return bool(predicate())
+
+    def _feedback(self, message):
+        stage = message.feedback.stage
+        if stage != self._last_stage:
+            print(stage, flush=True)
+            self._last_stage = stage
 
     def run(self, interrupted):
         self._client_executor = SingleThreadedExecutor(context=self.context)
@@ -96,7 +103,7 @@ class ExploreClient(Node):
         request = Explore.Goal(revisit_known=True, resume_task_id=task_id or '')
         task_id = task_id or bytes(goal_id.uuid).hex()
         future = self.action.send_goal_async(request, goal_uuid=goal_id,
-                                            feedback_callback=lambda msg: print(msg.feedback.stage, flush=True))
+                                            feedback_callback=self._feedback)
         self._sent_id, self._sent_future = goal_id, future
         if self.wait(future.done, 10, interrupted):
             handle = future.result()
