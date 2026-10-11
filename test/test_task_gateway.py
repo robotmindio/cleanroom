@@ -121,12 +121,14 @@ def system(tmp_path):
     def stop(identifier='task-1'):
         return call(cancel, CancelTask.Request(task_id=identifier))
 
-    def restart():
+    def restart(allow_navigation=True):
         nonlocal gateway, gateway_executor, gateway_thread
         gateway_executor.shutdown(timeout_sec=5)
         gateway_thread.join(timeout=5)
         gateway.destroy_node()
-        gateway = TaskGateway(context=context, parameter_overrides=[Parameter('database_path', value=path)])
+        gateway = TaskGateway(context=context, parameter_overrides=[
+            Parameter('database_path', value=path), Parameter('allow_navigation', value=allow_navigation)])
+        peers.gateway = gateway
         gateway_executor = SingleThreadedExecutor(context=context)
         gateway_executor.add_node(gateway)
         gateway_thread = threading.Thread(target=gateway_executor.spin, daemon=True)
@@ -248,28 +250,231 @@ def test_duplicate_gateway_cannot_own_the_same_journal(tmp_path):
         context.try_shutdown()
 
 
-def test_lost_cancel_reply_is_retried_without_claiming_termination():
+@pytest.mark.parametrize('completed_late', [False, True])
+def test_lost_cancel_reply_is_retried_without_claiming_termination(completed_late):
     from queue import SimpleQueue
     from types import SimpleNamespace
     from unittest.mock import Mock
     from rclpy.task import Future
 
     old, retry = Future(), Future()
+    if completed_late:
+        old.set_result(SimpleNamespace(return_code=0))
     client = Mock()
     client.service_is_ready.return_value = True
     client.call_async.return_value = retry
-    row = {'id': 'task-1', 'capability': 'explore', 'goal_id': bytes(16), 'cancel_requested': 1}
+    row = {'id': 'task-1', 'capability': 'explore', 'goal_id': bytes(16), 'cancel_requested': 1, 'state': 'canceling'}
     gateway = SimpleNamespace(
-        _replies=SimpleQueue(), _active=lambda: [row], _recovering={'task-1'},
+        _replies=SimpleQueue(), _active=lambda: [row], _row=lambda _: row, _recovering={'task-1'},
         _pending={('cancel', 'task-1'): old},
         _queried={('cancel', 'task-1'): time.monotonic() - 4},
         _terminal_seen={}, _cancel_clients={'explore': client},
         _lookup_result=Mock(), _result=Mock(), _accepted=Mock(), _canceled=Mock(),
     )
     TaskGateway._tick(gateway)
-    assert old.cancelled()
+    assert old.cancelled() == (not completed_late)
     client.remove_pending_request.assert_called_once_with(old)
     client.call_async.assert_called_once()
     assert gateway._pending[('cancel', 'task-1')] is retry
     TaskGateway._canceled(gateway, 'task-1', old)
     assert gateway._pending[('cancel', 'task-1')] is retry
+
+
+def test_late_acceptance_error_cannot_replace_terminal_result():
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from rclpy.task import Future
+
+    future = Future()
+    future.set_exception(RuntimeError('lost acceptance reply'))
+    gateway = SimpleNamespace(_pending={}, _row=lambda _: {'state': 'succeeded'},
+                              _update=Mock(), get_logger=Mock())
+    TaskGateway._accepted(gateway, 'task-1', future)
+    gateway._update.assert_not_called()
+
+
+@pytest.mark.parametrize('cancel_before_restart,allow_navigation', [(False, True), (True, True), (False, False)])
+def test_restart_handles_proven_unsent_task(system, cancel_before_restart, allow_navigation):
+    peers, start, status, stop, restart = system
+    # Hold the dispatch loop while service callbacks still admit and cancel work.
+    for timer in peers.gateway.timers:
+        timer.cancel()
+    assert start('navigate', '{"x":0,"y":0}').accepted
+    assert not peers.received
+    if cancel_before_restart:
+        assert stop().accepted
+    restart(allow_navigation=allow_navigation)
+    if not allow_navigation:
+        wait(lambda: status().state == 'failed')
+        assert not peers.received
+    elif cancel_before_restart:
+        wait(lambda: status().state == 'canceled')
+        assert not peers.received
+    else:
+        wait(lambda: status().state == 'running')
+        assert len(peers.received) == 1
+        stop()
+        wait(lambda: status().state == 'canceled')
+
+
+def test_failed_submission_is_durable_and_never_replayed(tmp_path):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from lekiwi_rmf.task_journal import TaskJournal
+
+    journal = TaskJournal(tmp_path / 'tasks.db')
+    try:
+        journal.admit('task', 'explore', '{}', bytes(16))
+        action = Mock()
+        action.server_is_ready.return_value = True
+        action.send_goal_async.side_effect = RuntimeError('transport lost')
+        gateway = SimpleNamespace(_journal=journal, _enabled={'explore': True}, _observed={'explore': set()},
+                                  _action_clients={'explore': action}, _sent=set(),
+                                  _started={}, _recovering=set(), _update=journal.update,
+                                  get_logger=Mock())
+        gateway._delivery_failed = lambda task, error: TaskGateway._delivery_failed(gateway, task, error)
+        TaskGateway._dispatch(gateway, journal.row('task'), time.monotonic())
+        assert journal.row('task')['dispatched']
+        assert journal.row('task')['state'] == 'unknown'
+        assert gateway._recovering == {'task'}
+    finally:
+        journal.close()
+
+
+def test_dispatch_waits_for_observed_foreign_goal(tmp_path):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from lekiwi_rmf.task_journal import TaskJournal
+
+    journal = TaskJournal(tmp_path / 'tasks.db')
+    try:
+        journal.admit('task', 'explore', '{}', bytes(16))
+        action = Mock()
+        gateway = SimpleNamespace(_journal=journal, _enabled={'explore': True}, _observed={'navigate': {bytes(range(16))}},
+                                  _action_clients={'explore': action})
+        TaskGateway._dispatch(gateway, journal.row('task'), time.monotonic())
+        assert not journal.row('task')['dispatched']
+        action.send_goal_async.assert_not_called()
+    finally:
+        journal.close()
+
+
+def test_user_cancel_preserves_navigation_deadline_failure(tmp_path):
+    from types import SimpleNamespace
+    from rclpy.task import Future
+    from action_msgs.msg import GoalStatus
+
+    from lekiwi_rmf.task_journal import TaskJournal
+
+    journal = TaskJournal(tmp_path / 'tasks.db')
+    try:
+        journal.admit('task', 'navigate', '{}', bytes(16))
+        journal.request_cancel('task', reason=2)
+        gateway = SimpleNamespace(_journal=journal, _active=journal.active,
+                                  _row=journal.row, _update=journal.update, _pending={})
+        response = TaskGateway._cancel(gateway, CancelTask.Request(task_id='task'), CancelTask.Response())
+        assert response.accepted
+        future = Future()
+        future.set_result(NavigateToPose.Impl.GetResultService.Response(
+            status=GoalStatus.STATUS_CANCELED, result=NavigateToPose.Result()))
+        TaskGateway._result(gateway, 'task', future)
+        assert journal.row('task')['state'] == 'failed'
+        assert 'navigation deadline reached' in journal.row('task')['detail']
+    finally:
+        journal.close()
+
+
+def test_invalid_native_result_does_not_crash_gateway(tmp_path):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from rclpy.task import Future
+    from action_msgs.msg import GoalStatus
+
+    from lekiwi_rmf.task_journal import TaskJournal
+
+    journal = TaskJournal(tmp_path / 'tasks.db')
+    try:
+        journal.admit('task', 'explore', '{}', bytes(16))
+        gateway = SimpleNamespace(_row=journal.row, _update=journal.update,
+                                  _pending={}, get_logger=Mock())
+        future = Future()
+        future.set_result(Explore.Impl.GetResultService.Response(
+            status=GoalStatus.STATUS_SUCCEEDED,
+            result=Explore.Result(complete=True, mapped_area_m2=float('nan'))))
+        TaskGateway._result(gateway, 'task', future)
+        assert journal.row('task')['state'] == 'unknown'
+        assert journal.row('task')['result'] == '{}'
+    finally:
+        journal.close()
+
+
+def test_canceled_acceptance_request_records_uncertain_delivery():
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from rclpy.task import Future
+
+    future = Future()
+    future.cancel()
+    gateway = SimpleNamespace(_pending={}, _recovering=set(),
+                              _row=lambda _: {'state': 'starting'}, _update=Mock(), get_logger=Mock())
+    gateway._delivery_failed = lambda task, error: TaskGateway._delivery_failed(gateway, task, error)
+    TaskGateway._accepted(gateway, 'task', future)
+    assert gateway._recovering == {'task'}
+    gateway._update.assert_called_once_with('task', 'unknown', 'action acceptance unconfirmed; not resubmitted')
+
+
+def test_terminal_task_releases_lost_transport_requests(tmp_path):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from rclpy.task import Future
+
+    from lekiwi_rmf.task_journal import TaskJournal
+
+    journal = TaskJournal(tmp_path / 'tasks.db')
+    try:
+        journal.admit('task', 'explore', '{}', bytes(16))
+        futures = {kind: Future() for kind in ('send', 'result', 'cancel')}
+        result_client, cancel_client = Mock(), Mock()
+        gateway = SimpleNamespace(
+            _journal=journal, _row=journal.row, _events=Mock(),
+            _pending={(kind, 'task'): future for kind, future in futures.items()},
+            _queried={(kind, 'task'): 0 for kind in futures},
+            _result_clients={'explore': result_client}, _cancel_clients={'explore': cancel_client},
+            _recovering={'task'}, _sent={'task'}, _started={'task': 0}, _terminal_seen={'task': 0})
+        TaskGateway._update(gateway, 'task', 'succeeded', 'finished', {'complete': True})
+        assert journal.row('task')['state'] == 'succeeded'
+        assert not gateway._pending and not gateway._queried
+        assert all(future.cancelled() for future in futures.values())
+        result_client.remove_pending_request.assert_called_once_with(futures['result'])
+        cancel_client.remove_pending_request.assert_called_once_with(futures['cancel'])
+        assert not gateway._recovering and not gateway._sent
+    finally:
+        journal.close()
+
+
+def test_late_result_reply_preserves_current_lookup(tmp_path):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from rclpy.task import Future
+    from action_msgs.msg import GoalStatus
+
+    from lekiwi_rmf.task_journal import TaskJournal
+
+    journal = TaskJournal(tmp_path / 'tasks.db')
+    try:
+        journal.admit('task', 'explore', '{}', bytes(16))
+        old, current = Future(), Future()
+        gateway = SimpleNamespace(_row=journal.row, _update=journal.update,
+                                  _pending={('result', 'task'): current}, get_logger=Mock())
+        old.set_result(Explore.Impl.GetResultService.Response(status=GoalStatus.STATUS_UNKNOWN))
+        TaskGateway._result(gateway, 'task', old)
+        assert gateway._pending[('result', 'task')] is current
+        current.set_result(Explore.Impl.GetResultService.Response(
+            status=GoalStatus.STATUS_SUCCEEDED, result=Explore.Result(complete=True)))
+        TaskGateway._result(gateway, 'task', current)
+        assert journal.row('task')['state'] == 'succeeded'
+        assert not gateway._pending
+    finally:
+        journal.close()

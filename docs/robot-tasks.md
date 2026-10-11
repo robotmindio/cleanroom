@@ -28,14 +28,19 @@ An aborted or incomplete exploration is `failed`.
 Repeated submission of the same ID and identical parameters returns the
 existing task; it never sends a second goal. Conflicting reuse is rejected.
 Only one managed task can be active, and observed native navigation/exploration
-goals prevent admission. External ROS clients still own their goals; cancellation
+goals prevent admission and defer pending dispatch. External ROS clients still own their goals; cancellation
 through this API does not cancel their unrelated actions.
 
 The private SQLite journal defaults to `~/.ros/lekiwi_tasks.sqlite3`. Other ROS
 domains and simulated-time deployments use distinct journals. A process lock
 prevents competing gateways from owning one journal. A reconnect can query
-historical results. A gateway restart observes the original ROS goal instead of
-resubmitting it. Exploration can continue in its local server; navigation's
+historical results. `task_journal.py` owns persistence and schema migration;
+`task_gateway.py` owns ROS admission, transport and observation. A dispatch
+marker commits before sending an action. After restart, proven-unsent tasks
+can be sent once or canceled without sending; attempted deliveries are observed
+without resubmission. Existing version-1 rows migrate conservatively as attempted
+deliveries. Terminal results cannot be overwritten by late callbacks, and a
+repeated user cancellation preserves an earlier navigation deadline failure. Exploration can continue in its local server; navigation's
 independent owner guard cancels a lost lease, which a restarted gateway never
 revives. If ROS has forgotten the goal/result, state stays `unknown`, admission
 stays blocked, and cancellation continues to require terminal evidence. This is

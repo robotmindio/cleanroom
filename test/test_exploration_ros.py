@@ -36,7 +36,10 @@ from lekiwi_rmf.exploration_node import Paused, ResponseTimeout, RobotExplorer
 from lekiwi_rmf.exploration_owner_guard import ExplorationOwnerGuard
 
 
-def wait(predicate, timeout=5):
+TEST_TASK_DURATION = 60.0
+
+
+def wait(predicate, timeout=10):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if predicate():
@@ -45,7 +48,7 @@ def wait(predicate, timeout=5):
     raise AssertionError("ROS condition did not complete before its deadline")
 
 
-def response(future, timeout=5):
+def response(future, timeout=10):
     wait(future.done, timeout)
     return future.result()
 
@@ -190,11 +193,12 @@ def graph(tmp_path):
     rclpy.init(context=context)
     peers = RobotPeers(context)
     guard = ExplorationOwnerGuard(context=context)
+    # Non-deadline scenarios must survive coverage instrumentation and slow CI scheduling.
     explorer = RobotExplorer(context=context, parameter_overrides=[
         Parameter("database_path", value=str(tmp_path / "map.db")),
         Parameter("mapping_max_bytes", value=4096),
-        Parameter("mapping_max_seconds", value=10.0),
-        Parameter("max_duration_sec", value=10.0),
+        Parameter("mapping_max_seconds", value=2 * TEST_TASK_DURATION),
+        Parameter("max_duration_sec", value=TEST_TASK_DURATION),
         Parameter("service_timeout_sec", value=2.0),
         Parameter("settle_sec", value=0.1),
     ])
@@ -231,7 +235,7 @@ def graph(tmp_path):
             context.shutdown()
 
 
-def start(graph, duration=8, revisit=False):
+def start(graph, duration=TEST_TASK_DURATION, revisit=False):
     peers, _, client = graph
     handle = response(client.send_goal_async(Explore.Goal(
         revisit_known=revisit, max_duration_sec=float(duration), max_radius_m=2.5)))
@@ -365,7 +369,7 @@ def test_small_requested_region_keeps_the_full_stopping_margin(graph):
         rejected = response(client.send_goal_async(Explore.Goal(max_radius_m=radius)))
         assert not rejected.accepted and not explorer._busy
     handle = response(client.send_goal_async(Explore.Goal(
-        revisit_known=True, max_duration_sec=8.0, max_radius_m=2.0)))
+        revisit_known=True, max_duration_sec=TEST_TASK_DURATION, max_radius_m=2.0)))
     assert handle.accepted
     wait(lambda: peers.nav_active)
     peers.position = (2.0 - explorer._region_margin + 0.01, 0.0)
@@ -377,15 +381,21 @@ def test_small_requested_region_keeps_the_full_stopping_margin(graph):
 
 
 @pytest.mark.parametrize("fault", ["database", "duration", "mode"])
-def test_quota_duration_or_mode_change_ends_and_cancels_the_owned_navigation_goal(graph, fault):
+def test_quota_duration_or_mode_change_ends_and_cancels_the_owned_navigation_goal(graph, fault, monkeypatch):
     peers, explorer, _ = graph
-    handle = start(graph, duration=2 if fault == "duration" else 8)
-    if fault == "database":
+    handle = start(graph)
+    if fault == "duration":
+        from lekiwi_rmf import exploration_node
+        clock = exploration_node.task_time
+        monkeypatch.setattr(exploration_node, "task_time", lambda: clock() + TEST_TASK_DURATION + 1)
+    elif fault == "database":
         explorer.database.write_bytes(b"x" * 4096)
     elif fault == "mode":
         peers.set_mode(False, Empty.Response())
     result = response(handle.get_result_async(), timeout=6)
     assert result.status == GoalStatus.STATUS_ABORTED and not result.result.complete
+    if fault == "duration":
+        assert result.result.message == "exploration duration reached"
     assert peers.nav_canceled == 1 and not peers.nav_active
     assert explorer._mapping is False
 
@@ -393,11 +403,11 @@ def test_quota_duration_or_mode_change_ends_and_cancels_the_owned_navigation_goa
 @pytest.mark.parametrize("fault", ["permission", "slam"])
 def test_recoverable_fault_stops_the_robot_then_resumes_instead_of_aborting(graph, fault):
     peers, explorer, client = graph
-    # The tracked 4 s SLAM budget would consume most of the task's duration on a slow runner.
-    explorer.config["slam_timeout_sec"] = 1.0
+    if fault == "slam":
+        explorer.config["slam_timeout_sec"] = 1.0
     feedback = []
     handle = response(client.send_goal_async(
-        Explore.Goal(max_duration_sec=10.0, max_radius_m=2.5),
+        Explore.Goal(max_duration_sec=TEST_TASK_DURATION, max_radius_m=2.5),
         feedback_callback=lambda message: feedback.append(message.feedback.stage)))
     assert handle.accepted
     wait(lambda: peers.nav_active)
@@ -425,7 +435,7 @@ def test_a_mapped_cell_under_the_robot_neither_blocks_a_goal_nor_pauses_it(graph
     peers.grid.data[40 * 80 + 44] = 100  # Stale obstacle under the front corner, before the goal.
     feedback = []
     handle = response(client.send_goal_async(
-        Explore.Goal(max_duration_sec=8.0, max_radius_m=2.5),
+        Explore.Goal(max_duration_sec=TEST_TASK_DURATION, max_radius_m=2.5),
         feedback_callback=lambda message: feedback.append(message.feedback.stage)))
     assert handle.accepted
     wait(lambda: peers.nav_active)
@@ -538,7 +548,7 @@ def test_mode_rpc_failures_and_old_replies_do_not_reset_the_session_budget(graph
 
 def test_invalid_or_denied_requests_have_no_mapping_or_navigation_side_effects(graph):
     peers, explorer, client = graph
-    for value in (float("nan"), -1.0, 11.0):
+    for value in (float("nan"), -1.0, TEST_TASK_DURATION + 1):
         handle = response(client.send_goal_async(Explore.Goal(max_duration_sec=value)))
         assert not handle.accepted
     peers.permitted = False
