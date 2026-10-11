@@ -293,6 +293,30 @@ def _point_field_format(field: PointField) -> tuple[str, int] | None:
     return None
 
 
+def _depth_layout(message: PointCloud2) -> list[tuple[int, str]] | None:
+    """Validate XYZ storage, including a measured frame with no returns."""
+    if (
+        message.height <= 0 or message.point_step <= 0
+        or message.row_step < message.width * message.point_step
+        or len(message.data) < message.height * message.row_step
+    ):
+        return None
+    fields = {field.name: field for field in message.fields}
+    layouts: list[tuple[int, str]] = []
+    for name in ("x", "y", "z"):
+        field = fields.get(name)
+        if field is None:
+            return None
+        field_format = _point_field_format(field)
+        if field_format is None:
+            return None
+        code, size = field_format
+        if field.offset < 0 or field.offset + size > message.point_step:
+            return None
+        layouts.append((int(field.offset), code))
+    return layouts
+
+
 def _valid_depth_points(
     message: PointCloud2,
     minimum_valid_points: int,
@@ -303,26 +327,9 @@ def _valid_depth_points(
 ) -> bool:
     """Validate the layout and sampled XYZ content of a depth point cloud."""
     point_count = int(message.width) * int(message.height)
-    if (
-        point_count < minimum_valid_points
-        or message.point_step <= 0
-        or message.row_step < message.width * message.point_step
-        or len(message.data) < message.height * message.row_step
-    ):
+    layouts = _depth_layout(message)
+    if layouts is None or point_count < minimum_valid_points:
         return False
-    fields = {field.name: field for field in message.fields}
-    layouts: list[tuple[int, str]] = []
-    for name in ("x", "y", "z"):
-        field = fields.get(name)
-        if field is None:
-            return False
-        field_format = _point_field_format(field)
-        if field_format is None:
-            return False
-        code, size = field_format
-        if field.offset < 0 or field.offset + size > message.point_step:
-            return False
-        layouts.append((int(field.offset), code))
 
     sample_count = min(point_count, maximum_samples)
     required = max(
@@ -438,7 +445,9 @@ class SafetySupervisor(Node):
         if self.get_parameter("require_scan").value:
             requirements["scan"] = Requirement(sensor_timeout, base=True, arm=False)
         if self.get_parameter("require_depth").value:
-            requirements["depth"] = Requirement(depth_timeout, tolerate_invalid=True)
+            # The sideways Astra cannot measure nearby walls; lidar guards the base.
+            requirements["depth_stream"] = Requirement(depth_timeout, base=True, arm=False)
+            requirements["depth"] = Requirement(depth_timeout, base=False, arm=True, tolerate_invalid=True)
         if self.get_parameter("require_bumper").value:
             requirements["bumper"] = Requirement(state_timeout)
         if self.get_parameter("require_estop").value:
@@ -603,6 +612,12 @@ class SafetySupervisor(Node):
         )
 
     def _on_depth(self, message: PointCloud2) -> None:
+        stamp = stamp_ns(message.header.stamp)
+        stream_healthy = _depth_layout(message) is not None and stamp > 0
+        self._machine.update(
+            "depth_stream", stream_healthy, stamp or self._now(),
+            "malformed or stampless depth stream",
+        )
         healthy = (
             _valid_depth_points(
                 message,
@@ -611,7 +626,7 @@ class SafetySupervisor(Node):
                 self._minimum_depth_range,
                 self._maximum_depth_range,
             )
-            and stamp_ns(message.header.stamp) > 0
+            and stamp > 0
         )
         if not healthy:
             self.get_logger().warning(
@@ -619,7 +634,7 @@ class SafetySupervisor(Node):
                 throttle_duration_sec=5.0,
             )
         self._machine.update(
-            "depth", healthy, stamp_ns(message.header.stamp) or self._now(),
+            "depth", healthy, stamp or self._now(),
             "invalid, blind, or stampless point cloud",
         )
 

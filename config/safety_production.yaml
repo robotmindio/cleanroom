@@ -22,6 +22,8 @@ safety_supervisor:
     minimum_scan_coverage: 4.3
     minimum_scan_valid_fraction: 0.05
     require_depth: true
+    # Base requires a fresh, well-formed stream; arm also requires valid returns.
+    # Nearby surfaces inside the Astra's minimum range must not strand the base.
     minimum_depth_valid_points: 16
     minimum_depth_valid_fraction: 0.01
     minimum_depth_range: 0.05

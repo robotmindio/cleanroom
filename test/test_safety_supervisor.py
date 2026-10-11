@@ -595,7 +595,10 @@ def test_live_acceptance_requirement_is_base_only():
         )
         assert node._machine.requirements["scan"].max_age_ns == 500_000_000
         assert node._machine.requirements["depth"] == Requirement(
-            500_000_000, tolerate_invalid=True
+            500_000_000, base=False, arm=True, tolerate_invalid=True
+        )
+        assert node._machine.requirements["depth_stream"] == Requirement(
+            500_000_000, base=True, arm=False
         )
         node._machine.driver_state = "ARMED"
         node._machine.arm_stowed = True
@@ -606,10 +609,10 @@ def test_live_acceptance_requirement_is_base_only():
         node._publish()
         assert published[-1].data
         # A disconnected camera stops publishing; its last cloud ages out.
-        node._machine.samples["depth"].stamp_ns -= 600_000_000
+        node._machine.samples["depth_stream"].stamp_ns -= 600_000_000
         node._publish()
         assert not published[-1].data and not node._machine.fault_latched
-        node._machine.update("depth", True, node._now())
+        node._machine.update("depth_stream", True, node._now())
         node._publish()
         assert published[-1].data
     finally:
@@ -686,6 +689,48 @@ def _cloud(points: list[tuple[float, float, float]]) -> PointCloud2:
     cloud.row_step = cloud.width * cloud.point_step
     cloud.data = b"".join(struct.pack("<fff", *point) for point in points)
     return cloud
+
+
+@pytest.mark.parametrize("points", [[], [(0.0, 0.0, 0.5)], [(math.nan, math.nan, math.nan)] * 20])
+def test_close_or_unreadable_depth_does_not_strand_the_stowed_base(points):
+    import rclpy
+
+    production = Path(__file__).parents[1] / "config" / "safety_production.yaml"
+    rclpy.init(args=["--ros-args", "--params-file", str(production)])
+    node = None
+    try:
+        node = SafetySupervisor()
+        node._machine.driver_state = "ARMED"
+        node._machine.arm_stowed = True
+        for name in node._machine.requirements:
+            node._machine.update(name, True, node._now())
+        # End the arm's dropped-frame grace period; the base needs stream health only.
+        node._machine.samples["depth"].stamp_ns -= 600_000_000
+        cloud = _cloud(points)
+        cloud.header.stamp = node.get_clock().now().to_msg()
+        node._on_depth(cloud)
+        decision = node._machine.decision(node._now())
+        assert decision.base_permitted and not decision.arm_permitted
+        # A person blocking lidar still withdraws permission, and clearing restores it.
+        node._machine.update("scan", False, node._now(), "blocked")
+        assert not node._machine.decision(node._now()).base_permitted
+        node._machine.update("scan", True, node._now())
+        assert node._machine.decision(node._now()).base_permitted
+        # Malformed frames and a silent/disconnected camera still deny the base.
+        cloud.fields.pop()
+        node._on_depth(cloud)
+        assert not node._machine.decision(node._now()).base_permitted
+        cloud = _cloud(points)
+        node._on_depth(cloud)
+        assert not node._machine.decision(node._now()).base_permitted
+        cloud.header.stamp = node.get_clock().now().to_msg()
+        node._on_depth(cloud)
+        node._machine.samples["depth_stream"].stamp_ns -= 600_000_000
+        assert not node._machine.decision(node._now()).base_permitted
+    finally:
+        if node is not None:
+            node.destroy_node()
+        rclpy.shutdown()
 
 
 def test_depth_health_requires_xyz_layout_and_enough_finite_in_range_points():

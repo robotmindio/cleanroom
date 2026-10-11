@@ -171,7 +171,13 @@ them. Full surrounding coverage needs a moved lidar or a second sensor.
 The Astra depth cloud is not a collision-monitor source: it faces
 sideways/rearward and its minimum depth (~0.55 m) lies beyond both zones, so it
 cannot see an obstacle inside them. `require_depth` gates base motion on its
-freshness only; obstacles below the LD06 plane are not detected.
+freshness and a valid XYZ frame layout, including fresh frames with no returns.
+Nearby or unreadable surfaces therefore do not strand the stowed base when the
+lidar is healthy. Missing, stale, malformed or stampless depth frames still
+withdraw base permission. Arm motion additionally requires enough valid depth
+measurements; an empty or blind cloud continues to deny the arm. The attended
+base qualification mode still requires both scopes. Obstacles below the LD06
+plane are not detected.
 
 ## Motor-host motion limits
 

@@ -444,13 +444,13 @@ def test_permission_pause_reports_only_fresh_safety_faults_and_recovers(graph):
     wait(lambda: not explorer._inputs["base_motion_permitted"][0])
     message = DiagnosticArray(status=[DiagnosticStatus(
         name="lekiwi/safety_supervisor", message="ARMED",
-        values=[KeyValue(key="faults", value="depth: invalid, blind, or stampless point cloud")])])
+        values=[KeyValue(key="faults", value="depth_stream: stale")])])
     deadline = time.monotonic() + 5
     while "safety_reason" not in explorer._inputs and time.monotonic() < deadline:
         publisher.publish(message)
         time.sleep(0.05)
     assert "safety_reason" in explorer._inputs
-    with pytest.raises(Paused, match="denied base_motion_permitted: depth: invalid"):
+    with pytest.raises(Paused, match="denied base_motion_permitted: depth_stream: stale"):
         explorer._healthy()
     reason, _ = explorer._inputs["safety_reason"]
     explorer._inputs["safety_reason"] = (reason, time.monotonic() - 10)

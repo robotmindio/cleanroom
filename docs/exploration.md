@@ -157,7 +157,7 @@ the server owns the configured task duration. `/diagnostics`, status
 Paused feedback updates when the blocking cause changes.
 Permission pauses distinguish missing, stale and denied inputs. A denied base
 permission includes the supervisor's fault when its diagnostics are fresh, such
-as `denied base_motion_permitted: depth: invalid, blind, or stampless point cloud`.
+as `denied base_motion_permitted: depth_stream: stale`.
 This detail is informational; permission still comes from the supervisor and
 the task resumes only after its inputs recover.
 The client waits for fresh operational readiness before sending its goal, rather
