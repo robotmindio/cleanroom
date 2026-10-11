@@ -99,6 +99,8 @@ controller_server:
         threshold_to_consider: 0.5
       PathAlignCritic:
         enabled: true
+        # Follow the lattice body headings during reverse and lateral moves.
+        use_path_orientations: true
         cost_weight: 10.0
         offset_from_furthest: 10
         threshold_to_consider: 0.5
@@ -109,6 +111,7 @@ controller_server:
         threshold_to_consider: 1.0
       PathAngleCritic:
         enabled: true
+        mode: 2
         cost_weight: 2.0
         offset_from_furthest: 4
         threshold_to_consider: 0.5
@@ -199,6 +202,7 @@ planner_server:
       plugin: nav2_smac_planner::SmacPlannerLattice
       tolerance: 0.20
       allow_unknown: true
+      allow_reverse_expansion: true
       max_planning_time: 1.0
       smooth_path: false
       lattice_filepath: "$(find-pkg-share nav2_smac_planner)/sample_primitives/5cm_resolution/0.5m_turning_radius/omni/output.json"
@@ -206,6 +210,7 @@ planner_server:
       plugin: nav2_smac_planner::SmacPlannerLattice
       tolerance: 0.0
       allow_unknown: false
+      allow_reverse_expansion: true
       max_planning_time: 1.0
       smooth_path: false
       lattice_filepath: "$(find-pkg-share nav2_smac_planner)/sample_primitives/5cm_resolution/0.5m_turning_radius/omni/output.json"

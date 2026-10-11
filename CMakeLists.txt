@@ -91,6 +91,9 @@ if(BUILD_TESTING)
     find_package(control_msgs REQUIRED)
     add_executable(test_native_waitable test/test_native_waitable.cpp)
     ament_target_dependencies(test_native_waitable rclcpp rclcpp_action control_msgs)
+    find_package(nav2_smac_planner REQUIRED)
+    add_executable(test_native_lattice test/test_native_lattice.cpp)
+    ament_target_dependencies(test_native_lattice nav2_smac_planner)
     add_executable(test_rest_contacts test/test_rest_contacts.cpp)
     target_compile_features(test_rest_contacts PUBLIC cxx_std_17)
     ament_target_dependencies(test_rest_contacts moveit_core)
@@ -158,6 +161,11 @@ if(BUILD_TESTING)
       RUNNER "${test_isolated_runner}"
       GENERATE_RESULT_FOR_RETURN_CODE_ZERO)
     isolate_lekiwi_test(test_native_waitable)
+    ament_add_test(test_native_lattice
+      COMMAND "$<TARGET_FILE:test_native_lattice>"
+      RUNNER "${test_isolated_runner}"
+      GENERATE_RESULT_FOR_RETURN_CODE_ZERO)
+    isolate_lekiwi_test(test_native_lattice)
   endif()
   if(NOT LEKIWI_BUILD_COMPUTE)
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/config/device_tests.txt")

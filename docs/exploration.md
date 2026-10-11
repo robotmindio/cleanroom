@@ -93,7 +93,13 @@ The `ExploreKnown` Nav2 planner and the tracked `explore_nav_to_pose.xml` behavi
 tree prohibit planning through unknown space. Ordinary `GridBased` navigation
 uses the same Smac lattice planner, retaining its explicit-goal unknown-space
 policy and 0.20 m planner tolerance. Both use the native
-omnidirectional motion set and the unpadded body footprint. Their paths include
+omnidirectional motion set and the unpadded body footprint. Reverse expansion is
+also enabled: the supplied omnidirectional motion set otherwise omits a straight
+backward step, which can strand the base where neither turning nor strafing fits.
+The pinned native planner patch preserves continuous positions and headings in
+collision checks, validates every returned primitive pose and covered cell, and
+permits the existing reverse expansion for this motion model. MPPI uses the path's
+feasible body headings when aligning and scoring reverse motion. Their paths include
 feasible orientations; NavFn's centreline and placeholder orientations could
 fail the full-body preflight before any motion. Global inflation also includes
 unknown boundaries so the planner checks footprint corners there. The existing

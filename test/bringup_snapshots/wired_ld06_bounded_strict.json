@@ -152,11 +152,13 @@
            "cost_weight": 10.0,
            "enabled": true,
            "offset_from_furthest": 10,
-           "threshold_to_consider": 0.5
+           "threshold_to_consider": 0.5,
+           "use_path_orientations": true
           },
           "PathAngleCritic": {
            "cost_weight": 2.0,
            "enabled": true,
+           "mode": 2,
            "offset_from_furthest": 4,
            "threshold_to_consider": 0.5
           },
@@ -377,6 +379,7 @@
        "planner_server": {
         "ros__parameters": {
          "ExploreKnown": {
+          "allow_reverse_expansion": true,
           "allow_unknown": false,
           "lattice_filepath": "$(find-pkg-share nav2_smac_planner)/sample_primitives/5cm_resolution/0.5m_turning_radius/omni/output.json",
           "max_planning_time": 1.0,
@@ -385,6 +388,7 @@
           "tolerance": 0.0
          },
          "GridBased": {
+          "allow_reverse_expansion": true,
           "allow_unknown": true,
           "lattice_filepath": "$(find-pkg-share nav2_smac_planner)/sample_primitives/5cm_resolution/0.5m_turning_radius/omni/output.json",
           "max_planning_time": 1.0,
@@ -666,11 +670,13 @@
            "cost_weight": 10.0,
            "enabled": true,
            "offset_from_furthest": 10,
-           "threshold_to_consider": 0.5
+           "threshold_to_consider": 0.5,
+           "use_path_orientations": true
           },
           "PathAngleCritic": {
            "cost_weight": 2.0,
            "enabled": true,
+           "mode": 2,
            "offset_from_furthest": 4,
            "threshold_to_consider": 0.5
           },
@@ -891,6 +897,7 @@
        "planner_server": {
         "ros__parameters": {
          "ExploreKnown": {
+          "allow_reverse_expansion": true,
           "allow_unknown": false,
           "lattice_filepath": "$(find-pkg-share nav2_smac_planner)/sample_primitives/5cm_resolution/0.5m_turning_radius/omni/output.json",
           "max_planning_time": 1.0,
@@ -899,6 +906,7 @@
           "tolerance": 0.0
          },
          "GridBased": {
+          "allow_reverse_expansion": true,
           "allow_unknown": true,
           "lattice_filepath": "$(find-pkg-share nav2_smac_planner)/sample_primitives/5cm_resolution/0.5m_turning_radius/omni/output.json",
           "max_planning_time": 1.0,
@@ -1272,11 +1280,13 @@
            "cost_weight": 10.0,
            "enabled": true,
            "offset_from_furthest": 10,
-           "threshold_to_consider": 0.5
+           "threshold_to_consider": 0.5,
+           "use_path_orientations": true
           },
           "PathAngleCritic": {
            "cost_weight": 2.0,
            "enabled": true,
+           "mode": 2,
            "offset_from_furthest": 4,
            "threshold_to_consider": 0.5
           },
@@ -1497,6 +1507,7 @@
        "planner_server": {
         "ros__parameters": {
          "ExploreKnown": {
+          "allow_reverse_expansion": true,
           "allow_unknown": false,
           "lattice_filepath": "$(find-pkg-share nav2_smac_planner)/sample_primitives/5cm_resolution/0.5m_turning_radius/omni/output.json",
           "max_planning_time": 1.0,
@@ -1505,6 +1516,7 @@
           "tolerance": 0.0
          },
          "GridBased": {
+          "allow_reverse_expansion": true,
           "allow_unknown": true,
           "lattice_filepath": "$(find-pkg-share nav2_smac_planner)/sample_primitives/5cm_resolution/0.5m_turning_radius/omni/output.json",
           "max_planning_time": 1.0,

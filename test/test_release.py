@@ -62,7 +62,7 @@ def release_fixture(tmp_path):
 [[ ${LEKIWI_TEST_BUILD_FAIL:-0} != 1 ]] || exit 42
 [[ -z ${LEKIWI_TEST_BUILD_LOG:-} ]] || echo native >> "$LEKIWI_TEST_BUILD_LOG"
 git -C "$(dirname "$0")/.." rev-parse HEAD > "$LEKIWI_WS/install/.lekiwi-native-revision"
-for file in rclcpp/lib/librclcpp.so class_loader/lib/libclass_loader.so nav2_lifecycle_manager/lib/nav2_lifecycle_manager/lifecycle_manager rviz_ogre_vendor/opt/rviz_ogre_vendor/lib/OGRE/RenderSystem_GL.so; do
+for file in rclcpp/lib/librclcpp.so class_loader/lib/libclass_loader.so nav2_lifecycle_manager/lib/nav2_lifecycle_manager/lifecycle_manager nav2_smac_planner/lib/libnav2_smac_planner_lattice.so rviz_ogre_vendor/opt/rviz_ogre_vendor/lib/OGRE/RenderSystem_GL.so; do
   mkdir -p "$LEKIWI_WS/install/${file%/*}"
   printf artifact > "$LEKIWI_WS/install/$file"
 done
