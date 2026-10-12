@@ -74,8 +74,9 @@ The Fiber rosbridge connector exposes `rosbridge.capabilities`,
 `rosbridge.tasks.status`, `rosbridge.tasks.submit` and `rosbridge.tasks.cancel`.
 Use these named operations for role grants instead of granting unrestricted raw
 ROS frames. Read/status are read-only; cancellation is low-impact; starting a
-physical task retains Fiber's high-impact policy classification. One approval
-covers the admitted task, including its local exploration pauses/recovery.
+physical task retains its high-impact metadata but the managed submission
+operation is L1: authorized callers execute with an audit record and no human
+approval wait. Role scopes, exact service allow-lists and local safety still apply.
 The connector's exact service allow-list must include the four services above.
 Rosbridge itself retains its general ROS functionality for other clients.
 
@@ -92,8 +93,13 @@ manipulation, docking, unrestricted unattended operation or learned skills.
 Install the tracked single-rule `config/fiber_robot_tasks.yaml` with Fiber's
 `append_workflow` operation for the intended tenant; it appends without replacing
 other workflows. Invoke `robot-task-submit` with `task_id`, `capability` and a
-JSON string `parameters_json`. Its governed execution creates the durable Matrix
-approval wait and then admits the local task. Direct action calls can return a
-policy gate without creating that workflow wait; use the named workflow for
-physical submissions. Poll `rosbridge.tasks.status` by the same task ID after
+JSON string `parameters_json`. Its governed execution admits the local task
+automatically under L1. A tenant can explicitly require L2; that creates a durable
+approval wait before admission. Approval notifications use the configured channel
+(e.g. Matrix); declaring a channel does not provision its connection. A human
+approver resolves the gate in Fiber's approvals UI or authenticated API. Fiber
+checks approver identity and binds the single-use approval to that execution and
+action. With `on_timeout: deny`, an unanswered request never admits the task.
+Direct action calls can return a policy gate without creating the workflow wait;
+use the named workflow for physical submissions. Poll `rosbridge.tasks.status` by the same task ID after
 admission; workflow completion means admission, not physical completion.
