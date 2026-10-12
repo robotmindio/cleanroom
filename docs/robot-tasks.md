@@ -90,9 +90,11 @@ This contract exposes navigation/exploration only. It does not qualify household
 manipulation, docking, unrestricted unattended operation or learned skills.
 
 
-Install the tracked single-rule `config/fiber_robot_tasks.yaml` with Fiber's
-`append_workflow` operation for the intended tenant; it appends without replacing
-other workflows. Invoke `robot-task-submit` with `task_id`, `capability` and a
+The operator robot belongs to Fiber's `default` tenant, matching the human
+Fiber UI session. Its workflows are declared in the integrations plugin's
+`routes.d/robot.yaml` and deployed through GitOps. For a separate DB tenant,
+install the tracked single-rule `config/fiber_robot_tasks.yaml` with Fiber's
+`append_workflow` operation; this does not install a default-tenant file route. Invoke `robot-task-submit` with `task_id`, `capability` and a
 JSON string `parameters_json`. Its governed execution admits the local task
 automatically under L1. A tenant can explicitly require L2; that creates a durable
 approval wait before admission. Approval notifications use the configured channel
