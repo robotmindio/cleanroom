@@ -1,0 +1,16 @@
+# Raw exchange retains L2 policy even though this specific request only reads.
+name: robot-l2-approval-check
+"on": robot.approval.check
+strict: true
+do:
+  - rosbridge.exchange:
+      frame:
+        op: call_service
+        id: robot-l2-capabilities
+        service: /robot/capabilities
+        type: std_srvs/srv/Trigger
+        args: {}
+      timeout_ms: 10000
+      max_frames: 1
+      max_response_bytes: 16384
+    as: capabilities
