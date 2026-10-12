@@ -147,7 +147,7 @@ if(BUILD_TESTING)
     set(timeout_args)
     # Expanded exploration action and restart matrices exceed one minute.
     if(name STREQUAL "test_exploration_owner_guard" OR name STREQUAL "test_exploration_recovery"
-        OR name STREQUAL "test_exploration_ros")
+        OR name STREQUAL "test_exploration_ros" OR name STREQUAL "test_task_gateway")
       set(timeout_args TIMEOUT 120)
     endif()
     ament_add_ros_isolated_pytest_test(${name} test/${name}.py ${timeout_args} ENV "${test_launch_environment}")
