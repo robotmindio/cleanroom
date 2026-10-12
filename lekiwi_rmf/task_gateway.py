@@ -12,6 +12,7 @@ from action_msgs.msg import GoalStatus, GoalStatusArray
 from action_msgs.srv import CancelGoal
 from geometry_msgs.msg import PoseStamped
 from nav2_msgs.action import NavigateToPose
+from nav2_msgs.msg import CollisionMonitorState
 import rclpy
 from rclpy.action import ActionClient
 from rclpy.clock import Clock, ClockType
@@ -26,6 +27,8 @@ from lekiwi_rmf.action import Explore
 from lekiwi_rmf.exploration_owner_guard import owned_goal_id
 from lekiwi_rmf.srv import CancelTask, GetTask, SubmitTask
 from lekiwi_rmf.task_journal import TERMINAL, TaskJournal
+from lekiwi_rmf.navigation_pause import NavigationPause
+from lekiwi_rmf.navigation_observer import NavigationObserver, server_instance
 
 
 ACTIONS = {'navigate': ('/navigate_to_pose', NavigateToPose), 'explore': ('/robot/explore', Explore)}
@@ -95,6 +98,15 @@ class TaskGateway(Node):
         self._recovering = {row['id'] for row in self._active() if row['dispatched']}
         self._observed = {capability: set() for capability in ACTIONS}
         self._terminal_seen = {}
+        self._navigation = NavigationPause()
+        self._children = NavigationObserver(self)
+        self._pausing = {row['id'] for row in self._active()
+                         if row['capability'] == 'navigate' and row['pause_requested']
+                         and row['dispatched'] and not row['cancel_requested']}
+        self._pause_started = {identifier: time.monotonic() - 3.0 for identifier in self._pausing}
+        self._unknown_results = {}
+        self._unknown_cancels = {}
+        self._unknown_since = {}
         self._guard = (False, 0.0)
         self._ack = (b'', 0.0)
         self._action_clients = {}
@@ -103,6 +115,11 @@ class TaskGateway(Node):
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self._events = self.create_publisher(String, '/robot/tasks/events', latched)
         self._owner = self.create_publisher(UUID, '/robot/explore/navigation_owner', 10)
+        self.create_subscription(Bool, '/safety/base_motion_permitted',
+                                 lambda msg: self._navigation.permission(msg.data, time.monotonic()), latched)
+        self.create_subscription(CollisionMonitorState, '/collision_monitor_state',
+                                 lambda msg: self._navigation.collision(msg.action_type == CollisionMonitorState.STOP,
+                                                                       msg.polygon_name, time.monotonic()), 1)
         self.create_subscription(Bool, '/robot/explore/navigation_guard_ready', self._guard_ready, 1)
         self.create_subscription(UUID, '/robot/explore/navigation_guarded', self._guard_ack, 10)
         for capability, (name, action) in ACTIONS.items():
@@ -130,19 +147,27 @@ class TaskGateway(Node):
         row = self._row(identifier)
         self._events.publish(String(data=json.dumps(dict(row), default=lambda value: bytes(value).hex())))
         if state in TERMINAL:
-            for kind, client in (('send', None), ('result', self._result_clients[row['capability']]),
-                                 ('cancel', self._cancel_clients[row['capability']])):
-                key = (kind, identifier)
-                future = self._pending.pop(key, None)
-                if future is not None:
-                    if client is not None:
-                        client.remove_pending_request(future)
-                    future.cancel()
-                self._queried.pop(key, None)
-            self._recovering.discard(identifier)
-            self._sent.discard(identifier)
-            self._started.pop(identifier, None)
-            self._terminal_seen.pop(identifier, None)
+            self._release_requests(identifier, row)
+
+    def _release_requests(self, identifier, row):
+        for kind, client in (('send', None), ('result', self._result_clients[row['capability']]),
+                             ('cancel', self._cancel_clients[row['capability']])):
+            key = (kind, identifier)
+            future = self._pending.pop(key, None)
+            if future is not None:
+                if client is not None:
+                    client.remove_pending_request(future)
+                future.cancel()
+            self._queried.pop(key, None)
+        self._recovering.discard(identifier)
+        self._sent.discard(identifier)
+        self._started.pop(identifier, None)
+        self._terminal_seen.pop(identifier, None)
+        self._pausing.discard(identifier)
+        self._pause_started.pop(identifier, None)
+        self._unknown_results.pop(identifier, None)
+        self._unknown_cancels.pop(identifier, None)
+        self._unknown_since.pop(identifier, None)
 
     def _submit(self, request, response):
         try:
@@ -158,7 +183,7 @@ class TaskGateway(Node):
                     raise ValueError('capability disabled by this deployment profile')
                 if self._active():
                     raise ValueError('another managed task is active or its result is unconfirmed')
-                if any(self._observed.values()):
+                if any(self._observed.values()) or self._children.busy():
                     raise ValueError('another ROS navigation or exploration client has an active goal')
                 if not self._action_clients[request.capability].server_is_ready():
                     raise ValueError('capability action server unavailable')
@@ -209,7 +234,9 @@ class TaskGateway(Node):
 
     def _feedback(self, message):
         row = self._journal.goal(bytes(message.goal_id.uuid))
-        if row is None or row['state'] in TERMINAL or row['cancel_requested']:
+        if row is None or row['state'] in TERMINAL or row['cancel_requested'] or row['navigation_stopped']:
+            return
+        if row['id'] in self._pausing:
             return
         stage = getattr(message.feedback, 'stage', 'navigating')
         self._update(row['id'], 'paused' if stage.startswith('paused:') else 'running', stage)
@@ -219,7 +246,7 @@ class TaskGateway(Node):
                                       if status.status not in (GoalStatus.STATUS_SUCCEEDED, GoalStatus.STATUS_CANCELED, GoalStatus.STATUS_ABORTED)}
         for status in message.status_list:
             row = self._journal.goal(bytes(status.goal_info.goal_id.uuid))
-            if row is not None and row['state'] not in TERMINAL:
+            if row is not None and row['state'] not in TERMINAL and not row['navigation_stopped']:
                 if status.status in (4, 5, 6):
                     self._terminal_seen.setdefault(row['id'], time.monotonic())
                 self._lookup_result(row)
@@ -232,18 +259,19 @@ class TaskGateway(Node):
             return
         action = ACTIONS[row['capability']][1]
         request = action.Impl.GetResultService.Request(goal_id=UUID(uuid=list(row['goal_id'])))
+        server_id = self._server_id(row['capability'])
         future = client.call_async(request)
         self._queried[key] = time.monotonic()
         self._pending[key] = future
-        future.add_done_callback(lambda done: self._replies.put(('result', row['id'], done)))
+        future.add_done_callback(lambda done: self._queue_reply('result', row, done, server_id))
 
-    def _result(self, identifier, future):
+    def _result(self, identifier, future, server_id=''):
         if future.cancelled():
             return
         key = ('result', identifier)
         if self._pending.get(key) is future:
             self._pending.pop(key)
-        if self._row(identifier)['state'] in TERMINAL:
+        if self._row(identifier)['state'] in TERMINAL or self._row(identifier)['navigation_stopped']:
             return
         try:
             response = future.result()
@@ -254,6 +282,11 @@ class TaskGateway(Node):
             self._update(identifier, 'unknown', 'result transport failed; termination unconfirmed')
             return
         if response.status == GoalStatus.STATUS_UNKNOWN:
+            self._recovering.add(identifier)
+            if server_id and self._server_id(self._row(identifier)['capability']) == server_id:
+                if self._unknown_results.get(identifier) != server_id:
+                    self._unknown_since[identifier] = time.monotonic()
+                self._unknown_results[identifier] = server_id
             self._update(identifier, 'unknown', 'ROS server has no result; delivery or termination remains unconfirmed')
             return
         states = {GoalStatus.STATUS_SUCCEEDED: 'succeeded', GoalStatus.STATUS_CANCELED: 'canceled', GoalStatus.STATUS_ABORTED: 'failed'}
@@ -266,6 +299,15 @@ class TaskGateway(Node):
         detail = result.get('message') or result.get('error_msg') or state
         if self._row(identifier)['cancel_requested'] == 2:
             state, detail = 'failed', f'navigation deadline reached; ROS terminal state: {state}'
+        row = self._row(identifier)
+        if row['capability'] == 'navigate' and identifier in self._pausing and not row['cancel_requested']:
+            if response.status == GoalStatus.STATUS_SUCCEEDED and not result.get('error_code', 0):
+                self._update(identifier, state, detail, result)
+            else:
+                self._journal.navigation_stopped(identifier)
+                self._release_requests(identifier, row)
+                self._update(identifier, 'paused', 'paused: navigation stopped; waiting for safety recovery')
+            return
         self._update(identifier, state, detail, result)
 
     def _delivery_failed(self, identifier, error):
@@ -286,11 +328,11 @@ class TaskGateway(Node):
             self._update(identifier, 'failed', 'ROS action server rejected the goal')
             return
         row = self._row(identifier)
-        if not row['cancel_requested']:
+        if not row['cancel_requested'] and identifier not in self._pausing:
             self._update(identifier, 'running', 'ROS action accepted')
         self._lookup_result(self._row(identifier))
 
-    def _canceled(self, identifier, future):
+    def _canceled(self, identifier, future, server_id=''):
         if future.cancelled():
             return
         key = ('cancel', identifier)
@@ -300,6 +342,9 @@ class TaskGateway(Node):
             return
         try:
             reply = future.result()
+            if (server_id and reply.return_code == CancelGoal.Response.ERROR_UNKNOWN_GOAL_ID
+                    and self._server_id(self._row(identifier)['capability']) == server_id):
+                self._unknown_cancels[identifier] = server_id
             if reply.return_code:
                 self.get_logger().warning(f'task cancellation returned {reply.return_code}; terminal result still required', throttle_duration_sec=5)
         except Exception as error:
@@ -311,7 +356,7 @@ class TaskGateway(Node):
         if not self._enabled[capability]:
             self._update(identifier, 'failed', 'capability disabled by this deployment profile before submission')
             return
-        if any(self._observed.values()):
+        if any(self._observed.values()) or self._children.busy():
             return
         if capability == 'navigate':
             self._owner.publish(goal_id)
@@ -322,7 +367,17 @@ class TaskGateway(Node):
         if not client.server_is_ready():
             return
         goal, _ = task_goal(capability, row['parameters'])
-        self._journal.mark_dispatched(identifier)
+        if capability == 'navigate':
+            reason = self._navigation.reason(now)
+            if reason:
+                self._update(identifier, 'paused', f'paused: {reason}')
+                return
+            if row['remaining_sec'] is None:
+                self._journal.navigation_budget(identifier, self._timeout)
+        server_id = self._server_id(capability)
+        if not server_id:
+            return
+        self._journal.mark_dispatched(identifier, server_id)
         self._sent.add(identifier)
         self._started[identifier] = now
         try:
@@ -331,19 +386,27 @@ class TaskGateway(Node):
             self._delivery_failed(identifier, error)
             return
         self._pending[('send', identifier)] = future
-        future.add_done_callback(lambda done, task=identifier: self._replies.put(('accepted', task, done)))
+        future.add_done_callback(lambda done: self._queue_reply('accepted', row, done))
 
     def _tick(self):
         while True:
             try:
-                kind, identifier, future = self._replies.get_nowait()
+                reply = self._replies.get_nowait()
             except Empty:
                 break
-            {'result': self._result, 'accepted': self._accepted, 'canceled': self._canceled}[kind](identifier, future)
+            kind, identifier, goal_id, server_id, future = reply
+            if self._row(identifier)['goal_id'] != goal_id:
+                continue
+            if kind == 'accepted':
+                self._accepted(identifier, future)
+            else:
+                {'result': self._result, 'canceled': self._canceled}[kind](identifier, future, server_id)
         now = time.monotonic()
         for row in self._active():
             identifier, capability = row['id'], row['capability']
             goal_id = UUID(uuid=list(row['goal_id']))
+            if self._reconcile(row, now):
+                continue
             # Result calls wait through execution; only expire after observed termination.
             for kind in ('cancel', 'result'):
                 key = (kind, identifier)
@@ -357,6 +420,14 @@ class TaskGateway(Node):
                         self._terminal_seen[identifier] = now
             if identifier in self._terminal_seen:
                 self._lookup_result(row)
+            if row['navigation_stopped']:
+                if row['cancel_requested']:
+                    self._update(identifier, 'canceled', 'canceled after confirmed navigation stop')
+                elif not self._navigation.reason(now) and not any(self._observed.values()) and not self._children.busy():
+                    self._release_requests(identifier, row)
+                    self._journal.resume_navigation(identifier, bytes(owned_goal_id().uuid))
+                    self._dispatch(self._row(identifier), now)
+                continue
             if identifier in self._recovering:
                 # Never revive a potentially expired Nav2 ownership lease after a crash.
                 self._lookup_result(row)
@@ -366,23 +437,77 @@ class TaskGateway(Node):
                     continue
                 self._dispatch(row, now)
             elif capability == 'navigate' and not row['cancel_requested']:
-                if now - self._started[identifier] >= self._timeout:
-                    self._journal.request_cancel(identifier, reason=2)
-                    self._update(identifier, 'canceling', 'navigation deadline reached; awaiting terminal ROS result')
-                else:
-                    self._owner.publish(goal_id)
-            if row['cancel_requested']:
+                self._navigation_tick(row, now)
+            row = self._row(identifier)
+            if row['state'] in TERMINAL:
+                continue
+            if row['cancel_requested'] or identifier in self._pausing or identifier in self._unknown_results:
                 client = self._cancel_clients[capability]
                 key = ('cancel', identifier)
                 if (key not in self._pending and client.service_is_ready()
                         and now - self._queried.get(key, 0.0) >= 1.0):
                     request = CancelGoal.Request()
                     request.goal_info.goal_id = goal_id
+                    server_id = self._server_id(capability)
                     future = client.call_async(request)
                     self._queried[key] = now
                     self._pending[key] = future
-                    future.add_done_callback(lambda done, task=identifier: self._replies.put(('canceled', task, done)))
+                    future.add_done_callback(lambda done, task=row, server=server_id: self._queue_reply('canceled', task, done, server))
                 self._lookup_result(row)
+
+    def _reconcile(self, row, now):
+        identifier, capability = row['id'], row['capability']
+        original = row['server_id']
+        current = self._unknown_results.get(identifier, '')
+        if not original or not current or original == current or self._unknown_cancels.get(identifier) != current:
+            return False
+        # Let the independent guard expire an orphan's lease before clearing uncertainty.
+        if now - self._unknown_since.get(identifier, now) < 3.0:
+            return False
+        if self._server_id(capability) != current:
+            return False
+        # The replacement server denied this goal; its old latched status is obsolete.
+        self._observed[capability].discard(row['goal_id'])
+        if any(self._observed.values()) or self._children.busy():
+            return False
+        if not self._guard[0] or now - self._guard[1] >= 1.0:
+            return False
+        detail = 'action server restarted; goal absent and owned navigation stopped; outcome unavailable'
+        if row['cancel_requested'] == 2:
+            detail = f'navigation deadline reached; {detail}'
+        self._update(identifier, 'failed', detail, {'outcome_known': False, 'termination_confirmed': True})
+        return True
+
+    def _server_id(self, capability):
+        return server_instance(self, ACTIONS[capability][0])
+
+    def _queue_reply(self, kind, row, future, server_id=''):
+        self._replies.put((kind, row['id'], row['goal_id'], server_id, future))
+
+    def _navigation_tick(self, row, now):
+        identifier = row['id']
+        reason = self._navigation.reason(now)
+        previous = self._started.get(identifier, now)
+        self._started[identifier] = now
+        remaining = row['remaining_sec']
+        if not reason and identifier not in self._pausing:
+            remaining -= max(0.0, now - previous)
+            self._journal.navigation_budget(identifier, remaining)
+        if remaining <= 0:
+            self._journal.request_cancel(identifier, reason=2)
+            self._update(identifier, 'canceling', 'navigation deadline reached; awaiting terminal ROS result')
+            return
+        if identifier in self._pausing and now - self._pause_started[identifier] >= 3.0:
+            self._recovering.add(identifier)
+            self._update(identifier, 'unknown', 'navigation pause stop unconfirmed; ownership lease no longer renewed')
+            return
+        self._owner.publish(UUID(uuid=list(row['goal_id'])))
+        if reason or identifier in self._pausing:
+            if identifier not in self._pausing:
+                self._journal.request_navigation_pause(identifier)
+            self._pause_started.setdefault(identifier, now)
+            self._pausing.add(identifier)
+            self._update(identifier, 'paused', f'paused: {reason or "awaiting confirmed navigation stop"}')
 
     def destroy_node(self):
         for client in self._action_clients.values():
