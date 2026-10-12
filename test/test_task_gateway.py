@@ -680,3 +680,14 @@ def test_owner_guard_terminal_cleanup_releases_pending_requests():
     assert cancel.cancelled() and result.cancelled()
     guard._cancel.remove_pending_request.assert_called_once_with(cancel)
     guard._result.remove_pending_request.assert_called_once_with(result)
+
+
+def test_owner_guard_recovers_terminal_proof_when_status_was_lost(system):
+    peers, start, status, _, _ = system
+    assert start('navigate', '{"x":1,"y":2}').accepted
+    wait(lambda: peers.guard._active and status().state == 'running')
+    peers.guard._status = lambda *_: None
+    peers.finish = True
+    wait(lambda: status().state == 'succeeded')
+    wait(lambda: not peers.guard._active)
+    assert len(peers.received) == 1

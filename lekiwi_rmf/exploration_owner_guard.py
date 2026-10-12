@@ -120,7 +120,7 @@ class ExplorationOwnerGuard(Node):
         self._seen = {key: seen for key, seen in self._seen.items()
                       if key in self._active or now - seen <= LEASE_SEC}
 
-    def _confirm_forgotten(self, key, instance):
+    def _lookup_orphan_result(self, key, instance):
         previous, sent = self._results.get(key, (None, 0.0))
         if previous is not None and not previous.done():
             if time.monotonic() - sent < LEASE_SEC:
@@ -138,7 +138,10 @@ class ExplorationOwnerGuard(Node):
         if future.cancelled():
             return
         try:
-            if (future.result().status == GoalStatus.STATUS_UNKNOWN
+            status = future.result().status
+            if status in TERMINAL and server_instance(self, '/navigate_to_pose') == instance:
+                self._finished(key)
+            elif (status == GoalStatus.STATUS_UNKNOWN
                     and key in self._expired() and self._instances.get(key) != instance
                     and server_instance(self, '/navigate_to_pose') == instance):
                 if self._forgotten.get(key, ('', 0.0))[0] != instance:
@@ -151,10 +154,10 @@ class ExplorationOwnerGuard(Node):
             return
         try:
             reply = future.result()
-            if (reply.return_code == CancelGoal.Response.ERROR_UNKNOWN_GOAL_ID and instance
-                    and self._instances.get(key) and self._instances[key] != instance
+            if (reply.return_code in (CancelGoal.Response.ERROR_UNKNOWN_GOAL_ID, CancelGoal.Response.ERROR_GOAL_TERMINATED)
+                    and instance and key in self._active
                     and server_instance(self, '/navigate_to_pose') == instance):
-                self._confirm_forgotten(key, instance)
+                self._lookup_orphan_result(key, instance)
             if reply.return_code:
                 self.get_logger().warning(f'orphan cancellation returned code {reply.return_code}', throttle_duration_sec=5)
         except Exception as error:
