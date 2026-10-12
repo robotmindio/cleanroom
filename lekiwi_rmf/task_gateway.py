@@ -280,11 +280,11 @@ class TaskGateway(Node):
             self._update(identifier, 'unknown', 'result transport failed; termination unconfirmed')
             return
         if response.status == GoalStatus.STATUS_UNKNOWN:
+            self._recovering.add(identifier)
             if server_id and self._server_id(self._row(identifier)['capability']) == server_id:
                 if self._unknown_results.get(identifier) != server_id:
                     self._unknown_since[identifier] = time.monotonic()
                 self._unknown_results[identifier] = server_id
-                self._recovering.add(identifier)
             self._update(identifier, 'unknown', 'ROS server has no result; delivery or termination remains unconfirmed')
             return
         states = {GoalStatus.STATUS_SUCCEEDED: 'succeeded', GoalStatus.STATUS_CANCELED: 'canceled', GoalStatus.STATUS_ABORTED: 'failed'}

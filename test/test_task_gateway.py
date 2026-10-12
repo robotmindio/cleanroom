@@ -507,7 +507,7 @@ def test_late_result_reply_preserves_current_lookup(tmp_path):
         journal.admit('task', 'explore', '{}', bytes(16))
         old, current = Future(), Future()
         gateway = SimpleNamespace(_row=journal.row, _update=journal.update,
-                                  _pending={('result', 'task'): current}, get_logger=Mock())
+                                  _pending={('result', 'task'): current}, _recovering=set(), get_logger=Mock())
         old.set_result(Explore.Impl.GetResultService.Response(status=GoalStatus.STATUS_UNKNOWN))
         TaskGateway._result(gateway, 'task', old)
         assert gateway._pending[('result', 'task')] is current
@@ -691,3 +691,22 @@ def test_owner_guard_recovers_terminal_proof_when_status_was_lost(system):
     wait(lambda: status().state == 'succeeded')
     wait(lambda: not peers.guard._active)
     assert len(peers.received) == 1
+
+
+def test_unknown_native_result_stops_lease_without_a_server_identity(tmp_path):
+    from types import SimpleNamespace
+    from rclpy.task import Future
+    from action_msgs.msg import GoalStatus
+    from lekiwi_rmf.task_journal import TaskJournal
+    journal = TaskJournal(tmp_path / 'tasks.db')
+    try:
+        journal.admit('task', 'navigate', '{"x":1,"y":2}', bytes(16))
+        journal.mark_dispatched('task')
+        gateway = SimpleNamespace(_row=journal.row, _update=journal.update, _pending={}, _recovering=set())
+        future = Future()
+        future.set_result(NavigateToPose.Impl.GetResultService.Response(status=GoalStatus.STATUS_UNKNOWN))
+        TaskGateway._result(gateway, 'task', future)
+        assert gateway._recovering == {'task'}
+        assert journal.row('task')['state'] == 'unknown'
+    finally:
+        journal.close()
