@@ -87,3 +87,13 @@ its encrypted integration configuration is maintained through Fiber's API.
 
 This contract exposes navigation/exploration only. It does not qualify household
 manipulation, docking, unrestricted unattended operation or learned skills.
+
+
+Install the tracked single-rule `config/fiber_robot_tasks.yaml` with Fiber's
+`append_workflow` operation for the intended tenant; it appends without replacing
+other workflows. Invoke `robot-task-submit` with `task_id`, `capability` and a
+JSON string `parameters_json`. Its governed execution creates the durable Matrix
+approval wait and then admits the local task. Direct action calls can return a
+policy gate without creating that workflow wait; use the named workflow for
+physical submissions. Poll `rosbridge.tasks.status` by the same task ID after
+admission; workflow completion means admission, not physical completion.
