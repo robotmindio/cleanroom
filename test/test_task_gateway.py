@@ -627,16 +627,19 @@ def test_replacement_server_reconciles_forgotten_task_without_replay(system, cap
     ('', 'new', True, False, False), ('old', 'new', False, False, False),
     ('old', 'new', True, True, False),
 ])
-def test_reconciliation_requires_replacement_server_and_clear_owner_guard(original, current, guard, foreign, expected):
+@pytest.mark.parametrize('deadline', [False, True])
+def test_reconciliation_requires_replacement_server_and_clear_owner_guard(original, current, guard, foreign, expected, deadline):
     from types import SimpleNamespace
     from unittest.mock import Mock
-    row = {'id': 'task', 'capability': 'explore', 'server_id': original, 'goal_id': bytes(16)}
+    row = {'id': 'task', 'capability': 'explore', 'server_id': original, 'goal_id': bytes(16), 'cancel_requested': 2 if deadline else 0}
     gateway = SimpleNamespace(
         _unknown_results={'task': current}, _unknown_cancels={'task': current}, _unknown_since={'task': 5.0},
         _server_id=lambda _: current, _observed={'explore': {bytes(range(16))} if foreign else set()},
         _guard=(guard, 10.0), _children=Mock(busy=lambda: False), _update=Mock())
     assert TaskGateway._reconcile(gateway, row, 10.1) == expected
     assert gateway._update.called == expected
+    if expected and deadline:
+        assert gateway._update.call_args.args[2].startswith('navigation deadline reached;')
 
 
 def test_navigation_pause_with_unconfirmed_stop_expires_owner_lease(system):
@@ -710,3 +713,26 @@ def test_unknown_native_result_stops_lease_without_a_server_identity(tmp_path):
         assert journal.row('task')['state'] == 'unknown'
     finally:
         journal.close()
+
+
+@pytest.mark.parametrize('stop_unconfirmed', [False, True])
+def test_restart_during_navigation_pause_preserves_intent_until_terminal_proof(system, stop_unconfirmed):
+    peers, start, status, stop, restart = system
+    assert start('navigate', '{"x":1,"y":2}').accepted
+    wait(lambda: len(peers.received) == 1 and status().state == 'running')
+    peers.hold_cancel = True
+    peers.collision_stop = True
+    wait(lambda: status().state == 'paused')
+    budget = peers.journal_row('task-1')['remaining_sec']
+    if stop_unconfirmed:
+        peers.gateway._pause_started['task-1'] -= 4.0
+        wait(lambda: status().state == 'unknown')
+    restart()
+    peers.collision_stop = False
+    time.sleep(1.2)
+    assert len(peers.received) == 1
+    assert peers.journal_row('task-1')['remaining_sec'] == budget
+    peers.hold_cancel = False
+    wait(lambda: len(peers.received) == 2)
+    assert stop().accepted
+    wait(lambda: status().state == 'canceled')

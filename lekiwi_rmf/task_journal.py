@@ -20,7 +20,7 @@ class TaskJournal:
             path.chmod(0o600)
             self._db.row_factory = sqlite3.Row
             version = self._db.execute('PRAGMA user_version').fetchone()[0]
-            if version not in (0, 1, 2, 3):
+            if version not in (0, 1, 2, 3, 4):
                 raise RuntimeError('unsupported task journal version')
             with self._db:
                 self._db.execute('BEGIN')
@@ -35,9 +35,13 @@ class TaskJournal:
                     self._db.execute("ALTER TABLE tasks ADD COLUMN server_id TEXT NOT NULL DEFAULT ''")
                     self._db.execute('ALTER TABLE tasks ADD COLUMN remaining_sec REAL')
                     self._db.execute('ALTER TABLE tasks ADD COLUMN navigation_stopped INTEGER NOT NULL DEFAULT 0')
+                if version < 4:
+                    self._db.execute('ALTER TABLE tasks ADD COLUMN pause_requested INTEGER NOT NULL DEFAULT 0')
+                    if version == 3:
+                        self._db.execute("UPDATE tasks SET pause_requested=1 WHERE capability='navigate' AND dispatched=1 AND state='paused'")
                 self._db.execute('CREATE INDEX IF NOT EXISTS tasks_goal_id ON tasks(goal_id)')
                 self._db.execute("CREATE INDEX IF NOT EXISTS tasks_active ON tasks(id) WHERE state NOT IN ('succeeded','canceled','failed')")
-                self._db.execute('PRAGMA user_version=3')
+                self._db.execute('PRAGMA user_version=4')
         except BaseException:
             if hasattr(self, '_db'):
                 self._db.close()
@@ -78,13 +82,17 @@ class TaskJournal:
         with self._db:
             self._db.execute('UPDATE tasks SET remaining_sec=? WHERE id=?', (max(0.0, remaining), identifier))
 
+    def request_navigation_pause(self, identifier):
+        with self._db:
+            self._db.execute('UPDATE tasks SET pause_requested=1 WHERE id=?', (identifier,))
+
     def navigation_stopped(self, identifier):
         with self._db:
             self._db.execute('UPDATE tasks SET navigation_stopped=1 WHERE id=?', (identifier,))
 
     def resume_navigation(self, identifier, goal_id):
         with self._db:
-            cursor = self._db.execute("""UPDATE tasks SET goal_id=?,dispatched=0,navigation_stopped=0,server_id='',
+            cursor = self._db.execute("""UPDATE tasks SET goal_id=?,dispatched=0,navigation_stopped=0,pause_requested=0,server_id='',
                 state='starting',detail='resuming navigation after confirmed stop'
                 WHERE id=? AND capability='navigate' AND navigation_stopped=1 AND cancel_requested=0
                 AND state NOT IN ('succeeded','canceled','failed')""", (goal_id, identifier))

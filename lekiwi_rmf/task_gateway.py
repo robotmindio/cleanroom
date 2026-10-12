@@ -100,8 +100,10 @@ class TaskGateway(Node):
         self._terminal_seen = {}
         self._navigation = NavigationPause()
         self._children = NavigationObserver(self)
-        self._pausing = set()
-        self._pause_started = {}
+        self._pausing = {row['id'] for row in self._active()
+                         if row['capability'] == 'navigate' and row['pause_requested']
+                         and row['dispatched'] and not row['cancel_requested']}
+        self._pause_started = {identifier: time.monotonic() - 3.0 for identifier in self._pausing}
         self._unknown_results = {}
         self._unknown_cancels = {}
         self._unknown_since = {}
@@ -470,8 +472,10 @@ class TaskGateway(Node):
             return False
         if not self._guard[0] or now - self._guard[1] >= 1.0:
             return False
-        self._update(identifier, 'failed', 'action server restarted; goal absent and owned navigation stopped; outcome unavailable',
-                     {'outcome_known': False, 'termination_confirmed': True})
+        detail = 'action server restarted; goal absent and owned navigation stopped; outcome unavailable'
+        if row['cancel_requested'] == 2:
+            detail = f'navigation deadline reached; {detail}'
+        self._update(identifier, 'failed', detail, {'outcome_known': False, 'termination_confirmed': True})
         return True
 
     def _server_id(self, capability):
@@ -499,6 +503,8 @@ class TaskGateway(Node):
             return
         self._owner.publish(UUID(uuid=list(row['goal_id'])))
         if reason or identifier in self._pausing:
+            if identifier not in self._pausing:
+                self._journal.request_navigation_pause(identifier)
             self._pause_started.setdefault(identifier, now)
             self._pausing.add(identifier)
             self._update(identifier, 'paused', f'paused: {reason or "awaiting confirmed navigation stop"}')

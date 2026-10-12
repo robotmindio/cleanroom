@@ -82,7 +82,7 @@ def test_navigation_resume_requires_terminal_proof_and_preserves_budget(tmp_path
         row = journal.row('task')
         assert row['remaining_sec'] == 123.4
         assert row['goal_id'] == bytes(range(16))
-        assert not row['dispatched'] and not row['navigation_stopped']
+        assert not row['dispatched'] and not row['navigation_stopped'] and not row['pause_requested']
         journal.navigation_stopped('task')
         journal.request_cancel('task')
         with pytest.raises(RuntimeError, match='confirmed termination'):
@@ -103,7 +103,47 @@ def test_version_two_migration_preserves_unsent_rows(tmp_path):
     journal = TaskJournal(path)
     try:
         row = journal.row('old')
-        assert not row['dispatched'] and not row['navigation_stopped']
+        assert not row['dispatched'] and not row['navigation_stopped'] and not row['pause_requested']
         assert row['server_id'] == '' and row['remaining_sec'] is None
+    finally:
+        journal.close()
+
+
+def test_pause_intent_survives_restart_and_clears_only_when_resuming(tmp_path):
+    path = tmp_path / 'tasks.db'
+    journal = TaskJournal(path)
+    journal.admit('task', 'navigate', '{}', bytes(16))
+    journal.mark_dispatched('task', 'server')
+    journal.request_navigation_pause('task')
+    journal.close()
+    journal = TaskJournal(path)
+    try:
+        assert journal.row('task')['pause_requested']
+        assert not journal.row('task')['navigation_stopped']
+        with pytest.raises(RuntimeError, match='confirmed termination'):
+            journal.resume_navigation('task', bytes(range(16)))
+        journal.navigation_stopped('task')
+        journal.resume_navigation('task', bytes(range(16)))
+        assert not journal.row('task')['pause_requested']
+    finally:
+        journal.close()
+
+
+def test_version_three_migration_recovers_explicit_pending_pause(tmp_path):
+    path = tmp_path / 'tasks.db'
+    journal = TaskJournal(path)
+    journal.admit('task', 'navigate', '{}', bytes(16))
+    journal.mark_dispatched('task', 'server')
+    journal.navigation_budget('task', 123.4)
+    journal.update('task', 'paused', 'paused: StopZone')
+    journal.close()
+    with sqlite3.connect(path) as database:
+        database.execute('ALTER TABLE tasks DROP COLUMN pause_requested')
+        database.execute('PRAGMA user_version=3')
+    journal = TaskJournal(path)
+    try:
+        row = journal.row('task')
+        assert row['pause_requested'] and not row['navigation_stopped']
+        assert row['remaining_sec'] == 123.4 and row['server_id'] == 'server'
     finally:
         journal.close()

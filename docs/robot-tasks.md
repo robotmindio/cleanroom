@@ -45,8 +45,10 @@ historical results. `task_journal.py` owns persistence and schema migration;
 marker commits before sending an action. After restart, proven-unsent tasks
 can be sent once or canceled without sending; attempted deliveries are observed
 without resubmission. Existing version-1 rows migrate conservatively as attempted
-deliveries; version-2 rows preserve their dispatch marker. Schema 3 persists
-navigation budget, confirmed stop and the dispatch server instance. Terminal results cannot be overwritten by late callbacks, and a
+deliveries; version-2 rows preserve their dispatch marker. Schema 4 persists
+navigation budget, pause intent, confirmed stop and the dispatch server instance.
+A restart during a pending pause restores that intent and still waits for native
+terminal proof before resuming. Terminal results cannot be overwritten by late callbacks, and a
 repeated user cancellation preserves an earlier navigation deadline failure. Exploration can continue in its local server; navigation's
 independent owner guard cancels a lost lease, which a restarted gateway never
 revives. If ROS has forgotten the goal/result, state stays `unknown` unless the gateway
