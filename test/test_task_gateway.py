@@ -1,11 +1,14 @@
 """Native ROS actions behind durable, reconnectable robot task services; no motors."""
 
 import json
+import sqlite3
 import threading
 import time
 
 from geometry_msgs.msg import PoseStamped
 from nav2_msgs.action import NavigateToPose
+from nav2_msgs.msg import CollisionMonitorState
+from std_msgs.msg import Bool
 import pytest
 import rclpy
 from rclpy.action import ActionServer, CancelResponse
@@ -14,6 +17,7 @@ from rclpy.context import Context
 from rclpy.executors import MultiThreadedExecutor, SingleThreadedExecutor
 from rclpy.node import Node
 from rclpy.parameter import Parameter
+from rclpy.qos import DurabilityPolicy, QoSProfile
 
 from lekiwi_rmf.action import Explore
 from lekiwi_rmf.exploration_owner_guard import ExplorationOwnerGuard
@@ -46,9 +50,17 @@ class Peers(Node):
         super().__init__('task_peers', context=context)
         self.finish = False
         self.abort = False
+        self.hold_cancel = False
+        self.completed = []
         self.paused = False
         self.received = []
         self.acceptance_delay = 0.0
+        self.permission = True
+        self.collision_stop = False
+        self.permission_pub = self.create_publisher(Bool, '/safety/base_motion_permitted',
+                                                    QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
+        self.collision_pub = self.create_publisher(CollisionMonitorState, '/collision_monitor_state', 10)
+        self.create_timer(0.05, self.safety)
         group = ReentrantCallbackGroup()
         self.navigation = ActionServer(self, NavigateToPose, '/navigate_to_pose', self.navigate,
                                        goal_callback=self.accept, cancel_callback=lambda _: CancelResponse.ACCEPT,
@@ -57,6 +69,17 @@ class Peers(Node):
                                         goal_callback=self.accept, cancel_callback=lambda _: CancelResponse.ACCEPT,
                                         callback_group=group)
 
+    def destroy_node(self):
+        self.navigation.destroy()
+        self.exploration.destroy()
+        return super().destroy_node()
+
+    def safety(self):
+        self.permission_pub.publish(Bool(data=self.permission))
+        self.collision_pub.publish(CollisionMonitorState(
+            action_type=CollisionMonitorState.STOP if self.collision_stop else CollisionMonitorState.DO_NOTHING,
+            polygon_name='StopZone'))
+
     def accept(self, _request):
         from rclpy.action import GoalResponse
         time.sleep(self.acceptance_delay)
@@ -64,7 +87,7 @@ class Peers(Node):
 
     def execute(self, goal, result, feedback):
         self.received.append(bytes(goal.goal_id.uuid))
-        while not self.finish and not goal.is_cancel_requested:
+        while not self.finish and (not goal.is_cancel_requested or self.hold_cancel):
             goal.publish_feedback(feedback())
             time.sleep(0.05)
         if goal.is_cancel_requested:
@@ -73,6 +96,7 @@ class Peers(Node):
             goal.abort()
         else:
             goal.succeed()
+        self.completed.append(bytes(goal.goal_id.uuid))
         return result
 
     def navigate(self, goal):
@@ -92,6 +116,7 @@ def system(tmp_path):
     path = str(tmp_path / 'tasks.sqlite3')
     gateway = TaskGateway(context=context, parameter_overrides=[Parameter('database_path', value=path)])
     peers.gateway = gateway
+    peers.guard = guard
     client = Node('task_client', context=context)
     executor = MultiThreadedExecutor(num_threads=6, context=context)
     for node in (peers, guard, client):
@@ -135,6 +160,18 @@ def system(tmp_path):
         gateway_thread.start()
         wait(submit.service_is_ready)
 
+    def journal_row(identifier):
+        with sqlite3.connect(path) as database:
+            database.row_factory = sqlite3.Row
+            return database.execute('SELECT * FROM tasks WHERE id=?', (identifier,)).fetchone()
+
+    def on_gateway(function, *args):
+        future = gateway_executor.create_task(function, *args)
+        wait(future.done)
+        return future.result()
+
+    peers.journal_row = journal_row
+    peers.on_gateway = on_gateway
     yield peers, start, status, stop, restart
     peers.finish = True
     gateway_executor.shutdown(timeout_sec=5)
@@ -263,13 +300,14 @@ def test_lost_cancel_reply_is_retried_without_claiming_termination(completed_lat
     client = Mock()
     client.service_is_ready.return_value = True
     client.call_async.return_value = retry
-    row = {'id': 'task-1', 'capability': 'explore', 'goal_id': bytes(16), 'cancel_requested': 1, 'state': 'canceling'}
+    row = {'id': 'task-1', 'capability': 'explore', 'goal_id': bytes(16), 'cancel_requested': 1, 'state': 'canceling', 'navigation_stopped': 0}
     gateway = SimpleNamespace(
         _replies=SimpleQueue(), _active=lambda: [row], _row=lambda _: row, _recovering={'task-1'},
         _pending={('cancel', 'task-1'): old},
         _queried={('cancel', 'task-1'): time.monotonic() - 4},
         _terminal_seen={}, _cancel_clients={'explore': client},
-        _lookup_result=Mock(), _result=Mock(), _accepted=Mock(), _canceled=Mock(),
+        _reconcile=Mock(return_value=False), _unknown_results={}, _pausing=set(), _server_id=lambda _: 'server',
+        _queue_reply=Mock(), _lookup_result=Mock(), _result=Mock(), _accepted=Mock(), _canceled=Mock(),
     )
     TaskGateway._tick(gateway)
     assert old.cancelled() == (not completed_late)
@@ -288,7 +326,7 @@ def test_late_acceptance_error_cannot_replace_terminal_result():
     future = Future()
     future.set_exception(RuntimeError('lost acceptance reply'))
     gateway = SimpleNamespace(_pending={}, _row=lambda _: {'state': 'succeeded'},
-                              _update=Mock(), get_logger=Mock())
+                              _update=Mock(), get_logger=Mock(), _pausing=set())
     TaskGateway._accepted(gateway, 'task-1', future)
     gateway._update.assert_not_called()
 
@@ -330,9 +368,9 @@ def test_failed_submission_is_durable_and_never_replayed(tmp_path):
         action.server_is_ready.return_value = True
         action.send_goal_async.side_effect = RuntimeError('transport lost')
         gateway = SimpleNamespace(_journal=journal, _enabled={'explore': True}, _observed={'explore': set()},
-                                  _action_clients={'explore': action}, _sent=set(),
+                                  _action_clients={'explore': action}, _children=Mock(busy=lambda: False), _sent=set(),
                                   _started={}, _recovering=set(), _update=journal.update,
-                                  get_logger=Mock())
+                                  _server_id=lambda _: 'server', get_logger=Mock())
         gateway._delivery_failed = lambda task, error: TaskGateway._delivery_failed(gateway, task, error)
         TaskGateway._dispatch(gateway, journal.row('task'), time.monotonic())
         assert journal.row('task')['dispatched']
@@ -373,7 +411,7 @@ def test_user_cancel_preserves_navigation_deadline_failure(tmp_path):
         journal.admit('task', 'navigate', '{}', bytes(16))
         journal.request_cancel('task', reason=2)
         gateway = SimpleNamespace(_journal=journal, _active=journal.active,
-                                  _row=journal.row, _update=journal.update, _pending={})
+                                  _row=journal.row, _update=journal.update, _pending={}, _pausing=set())
         response = TaskGateway._cancel(gateway, CancelTask.Request(task_id='task'), CancelTask.Response())
         assert response.accepted
         future = Future()
@@ -398,7 +436,7 @@ def test_invalid_native_result_does_not_crash_gateway(tmp_path):
     try:
         journal.admit('task', 'explore', '{}', bytes(16))
         gateway = SimpleNamespace(_row=journal.row, _update=journal.update,
-                                  _pending={}, get_logger=Mock())
+                                  _pending={}, get_logger=Mock(), _pausing=set())
         future = Future()
         future.set_result(Explore.Impl.GetResultService.Response(
             status=GoalStatus.STATUS_SUCCEEDED,
@@ -442,7 +480,9 @@ def test_terminal_task_releases_lost_transport_requests(tmp_path):
             _pending={(kind, 'task'): future for kind, future in futures.items()},
             _queried={(kind, 'task'): 0 for kind in futures},
             _result_clients={'explore': result_client}, _cancel_clients={'explore': cancel_client},
-            _recovering={'task'}, _sent={'task'}, _started={'task': 0}, _terminal_seen={'task': 0})
+            _recovering={'task'}, _sent={'task'}, _started={'task': 0}, _terminal_seen={'task': 0},
+            _pausing=set(), _pause_started={}, _unknown_results={}, _unknown_cancels={}, _unknown_since={})
+        gateway._release_requests = lambda task, row: TaskGateway._release_requests(gateway, task, row)
         TaskGateway._update(gateway, 'task', 'succeeded', 'finished', {'complete': True})
         assert journal.row('task')['state'] == 'succeeded'
         assert not gateway._pending and not gateway._queried
@@ -478,3 +518,140 @@ def test_late_result_reply_preserves_current_lookup(tmp_path):
         assert not gateway._pending
     finally:
         journal.close()
+
+
+@pytest.mark.parametrize('fault', ['collision', 'permission'])
+def test_navigation_pause_waits_for_terminal_proof_then_resumes_same_destination(system, fault):
+    peers, start, status, stop, _ = system
+    assert start('navigate', '{"x":1,"y":2,"yaw":0.5}').accepted
+    wait(lambda: len(peers.received) == 1 and status().state == 'running')
+    original = peers.received[0]
+    peers.hold_cancel = True
+    if fault == 'collision':
+        peers.collision_stop = True
+    else:
+        peers.permission = False
+    wait(lambda: status().state == 'paused')
+    budget = peers.journal_row('task-1')['remaining_sec']
+    time.sleep(1.2)
+    assert peers.journal_row('task-1')['remaining_sec'] == budget
+    assert peers.received == [original]
+    peers.collision_stop, peers.permission = False, True
+    time.sleep(1.2)
+    assert peers.received == [original]  # Clear inputs alone cannot authorize a second attempt.
+    peers.hold_cancel = False
+    wait(lambda: len(peers.received) == 2)
+    assert peers.received[1] != original
+    assert peers.journal_row('task-1')['parameters'] == '{"x": 1, "y": 2, "yaw": 0.5}'
+    assert stop().accepted
+    wait(lambda: status().state == 'canceled')
+
+
+@pytest.mark.parametrize('cancel', [False, True])
+def test_cancel_and_restart_while_navigation_is_safely_paused(system, cancel):
+    peers, start, status, stop, restart = system
+    assert start('navigate', '{"x":1,"y":2}').accepted
+    wait(lambda: len(peers.received) == 1 and status().state == 'running')
+    peers.collision_stop = True
+    wait(lambda: peers.journal_row('task-1')['navigation_stopped'])
+    restart()
+    time.sleep(0.3)
+    assert len(peers.received) == 1
+    if cancel:
+        assert stop().accepted
+        wait(lambda: status().state == 'canceled')
+        peers.collision_stop = False
+        time.sleep(1.2)
+        assert len(peers.received) == 1
+    else:
+        peers.collision_stop = False
+        wait(lambda: len(peers.received) == 2)
+        stop()
+        wait(lambda: status().state == 'canceled')
+
+
+@pytest.mark.parametrize('capability,child_active', [('explore', False), ('navigate', False), ('navigate', True)])
+def test_replacement_server_reconciles_forgotten_task_without_replay(system, capability, child_active):
+    peers, start, status, _, _ = system
+    gateway = peers.gateway
+    lookup = gateway._lookup_result
+    gateway._lookup_result = lambda _: None  # Simulate unavailable result transport.
+    assert start(capability, '{"x":1,"y":2}' if capability == 'navigate' else '{}').accepted
+    wait(lambda: len(peers.received) == 1 and status().state == 'running')
+    if capability == 'navigate':
+        wait(lambda: bool(peers.guard._active))
+        peers.guard._status = lambda *_: None  # Lose terminal status, as with a crashed Nav2 server.
+    server_id = peers.journal_row('task-1')['server_id']
+    assert server_id
+    child = None
+    if child_active:
+        from action_msgs.msg import GoalStatus, GoalStatusArray
+        child = peers.create_publisher(GoalStatusArray, '/follow_path/_action/status',
+                                       QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
+        child.publish(GoalStatusArray(status_list=[GoalStatus(status=GoalStatus.STATUS_EXECUTING)]))
+        wait(gateway._children.busy)
+    peers.finish = True
+    wait(lambda: bool(peers.completed))
+    server = 'navigation' if capability == 'navigate' else 'exploration'
+    getattr(peers, server).destroy()
+    setattr(peers, server, ActionServer(
+        peers, NavigateToPose if capability == 'navigate' else Explore,
+        '/navigate_to_pose' if capability == 'navigate' else '/robot/explore',
+        peers.navigate if capability == 'navigate' else peers.explore, goal_callback=peers.accept,
+        cancel_callback=lambda _: CancelResponse.ACCEPT, callback_group=ReentrantCallbackGroup()))
+    wait(lambda: gateway._server_id(capability) not in ('', server_id))
+    gateway._recovering.add('task-1')
+    gateway._lookup_result = lookup
+    if child_active:
+        wait(lambda: status().state == 'unknown')
+        time.sleep(3.5)
+        assert status().state == 'unknown'
+        assert not start(identifier='blocked').accepted
+        child.publish(GoalStatusArray())
+    wait(lambda: status().state == 'failed', timeout=10)
+    assert json.loads(status().result_json) == {'outcome_known': False, 'termination_confirmed': True}
+    assert len(peers.received) == 1
+    assert start(identifier='task-2').accepted
+
+
+@pytest.mark.parametrize('original,current,guard,foreign,expected', [
+    ('old', 'new', True, False, True), ('same', 'same', True, False, False),
+    ('', 'new', True, False, False), ('old', 'new', False, False, False),
+    ('old', 'new', True, True, False),
+])
+def test_reconciliation_requires_replacement_server_and_clear_owner_guard(original, current, guard, foreign, expected):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    row = {'id': 'task', 'capability': 'explore', 'server_id': original, 'goal_id': bytes(16)}
+    gateway = SimpleNamespace(
+        _unknown_results={'task': current}, _unknown_cancels={'task': current}, _unknown_since={'task': 5.0},
+        _server_id=lambda _: current, _observed={'explore': {bytes(range(16))} if foreign else set()},
+        _guard=(guard, 10.0), _children=Mock(busy=lambda: False), _update=Mock())
+    assert TaskGateway._reconcile(gateway, row, 10.1) == expected
+    assert gateway._update.called == expected
+
+
+def test_navigation_pause_with_unconfirmed_stop_expires_owner_lease(system):
+    peers, start, status, _, _ = system
+    assert start('navigate', '{"x":1,"y":2}').accepted
+    wait(lambda: len(peers.received) == 1 and status().state == 'running')
+    peers.hold_cancel = True
+    peers.collision_stop = True
+    wait(lambda: 'task-1' in peers.gateway._pausing)
+    peers.gateway._pause_started['task-1'] -= 4.0
+    wait(lambda: status().state == 'unknown')
+    assert 'task-1' in peers.gateway._recovering
+    assert len(peers.received) == 1
+    peers.hold_cancel = False
+    wait(lambda: peers.journal_row('task-1')['navigation_stopped'])
+    assert status().state == 'paused'
+
+
+def test_navigation_active_budget_reaches_deadline(system):
+    peers, start, status, _, _ = system
+    assert start('navigate', '{"x":1,"y":2}').accepted
+    wait(lambda: len(peers.received) == 1 and status().state == 'running')
+    peers.on_gateway(peers.gateway._journal.navigation_budget, 'task-1', 0.01)
+    wait(lambda: status().state == 'failed')
+    assert 'navigation deadline reached' in status().detail
+    assert len(peers.received) == 1

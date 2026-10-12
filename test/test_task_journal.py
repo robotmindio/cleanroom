@@ -63,3 +63,29 @@ def test_rejected_journal_version_releases_lock(tmp_path):
         database.execute('PRAGMA user_version=0')
     journal = TaskJournal(path)
     journal.close()
+
+
+def test_navigation_resume_requires_terminal_proof_and_preserves_budget(tmp_path):
+    path = tmp_path / 'tasks.db'
+    journal = TaskJournal(path)
+    journal.admit('task', 'navigate', '{"x":1,"y":2}', bytes(16))
+    journal.mark_dispatched('task', 'original-server')
+    journal.navigation_budget('task', 123.4)
+    with pytest.raises(RuntimeError, match='confirmed termination'):
+        journal.resume_navigation('task', bytes(range(16)))
+    journal.navigation_stopped('task')
+    journal.close()
+    journal = TaskJournal(path)
+    try:
+        assert journal.row('task')['server_id'] == 'original-server'
+        journal.resume_navigation('task', bytes(range(16)))
+        row = journal.row('task')
+        assert row['remaining_sec'] == 123.4
+        assert row['goal_id'] == bytes(range(16))
+        assert not row['dispatched'] and not row['navigation_stopped']
+        journal.navigation_stopped('task')
+        journal.request_cancel('task')
+        with pytest.raises(RuntimeError, match='confirmed termination'):
+            journal.resume_navigation('task', bytes(16))
+    finally:
+        journal.close()

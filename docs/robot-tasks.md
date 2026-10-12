@@ -12,7 +12,13 @@ ROS owns physical execution, collision checking and the local motion guards.
 | `/robot/tasks/cancel` (`lekiwi_rmf/srv/CancelTask`) | task ID; empty selects the managed active task | cancellation requested, **not a confirmed stop** |
 
 `navigate` accepts finite map-frame `x`, `y` and optional `yaw` (radians), and
-uses the normal Nav2 controller. It has a 180-second wall-time deadline.
+uses the normal Nav2 controller. It has a 180-second active-time budget. A collision STOP, stale collision state or
+denied/stale base permission pauses the managed task without spending that budget.
+The gateway cancels its current Nav2 attempt and waits for a terminal native
+result before resending the same destination with a new owned goal ID. Fresh
+safety inputs and one second of collision settling are required to resume.
+An unconfirmed stop expires the ownership lease and blocks resubmission.
+Direct legacy Nav2 clients retain their existing behavior.
 `explore` accepts `revisit_known`, `max_duration_sec`, `max_radius_m` and
 `resume_task_id`; the Explorer enforces its tracked bounds, quotas and recovery
 policy. Exploration's recoverable pauses do not finish the task or spend its
@@ -39,12 +45,19 @@ historical results. `task_journal.py` owns persistence and schema migration;
 marker commits before sending an action. After restart, proven-unsent tasks
 can be sent once or canceled without sending; attempted deliveries are observed
 without resubmission. Existing version-1 rows migrate conservatively as attempted
-deliveries. Terminal results cannot be overwritten by late callbacks, and a
+deliveries; version-2 rows preserve their dispatch marker. Schema 3 persists
+navigation budget, confirmed stop and the dispatch server instance. Terminal results cannot be overwritten by late callbacks, and a
 repeated user cancellation preserves an earlier navigation deadline failure. Exploration can continue in its local server; navigation's
 independent owner guard cancels a lost lease, which a restarted gateway never
-revives. If ROS has forgotten the goal/result, state stays `unknown`, admission
-stays blocked, and cancellation continues to require terminal evidence. This is
-an explicit uncertainty, not proof of completion or permission to replay motion.
+revives. If ROS has forgotten the goal/result, state stays `unknown` unless the gateway
+can prove that the original action server instance was replaced. Reconciliation
+requires the unique replacement server to return UNKNOWN for both result and
+cancellation, an expired lease grace period, no observed active ROS goals and
+a fresh ready owner guard. It then records `failed` with `outcome_known=false`
+and `termination_confirmed=true`; it never replays that task or claims success.
+Same-instance uncertainty and legacy rows without a recorded server instance
+remain blocked until native terminal evidence becomes available. A canceled
+request alone is never proof that motion stopped.
 
 `/robot/tasks/events` publishes state changes as `std_msgs/msg/String` JSON.
 Events accelerate observation; the journal/status service is authoritative
