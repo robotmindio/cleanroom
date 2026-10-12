@@ -89,3 +89,21 @@ def test_navigation_resume_requires_terminal_proof_and_preserves_budget(tmp_path
             journal.resume_navigation('task', bytes(16))
     finally:
         journal.close()
+
+
+def test_version_two_migration_preserves_unsent_rows(tmp_path):
+    path = tmp_path / 'tasks.db'
+    with sqlite3.connect(path) as database:
+        database.execute('''CREATE TABLE tasks (
+            id TEXT PRIMARY KEY, capability TEXT, parameters TEXT, goal_id BLOB,
+            state TEXT, detail TEXT, result TEXT DEFAULT '{}', cancel_requested INTEGER DEFAULT 0,
+            dispatched INTEGER NOT NULL DEFAULT 1)''')
+        database.execute("INSERT INTO tasks (id,state,dispatched) VALUES ('old','starting',0)")
+        database.execute('PRAGMA user_version=2')
+    journal = TaskJournal(path)
+    try:
+        row = journal.row('old')
+        assert not row['dispatched'] and not row['navigation_stopped']
+        assert row['server_id'] == '' and row['remaining_sec'] is None
+    finally:
+        journal.close()

@@ -73,14 +73,21 @@ class ExplorationOwnerGuard(Node):
             if not key.startswith(PREFIX):
                 continue
             if item.status in TERMINAL:
-                self._active.discard(key)
-                self._seen.pop(key, None)
-                self._cancels.pop(key, None)
-                self._instances.pop(key, None)
-                self._forgotten.pop(key, None)
+                self._finished(key)
             else:
                 self._active.add(key)
                 self._instances.setdefault(key, status_instance(self, '/navigate_to_pose'))
+
+    def _finished(self, key):
+        self._active.discard(key)
+        self._seen.pop(key, None)
+        self._instances.pop(key, None)
+        self._forgotten.pop(key, None)
+        for requests, client in ((self._cancels, self._cancel), (self._results, self._result)):
+            future, _ = requests.pop(key, (None, 0.0))
+            if future is not None and not future.done():
+                client.remove_pending_request(future)
+                future.cancel()
 
     def _tick(self):
         self._ready.publish(Bool(data=self._available()))
@@ -88,11 +95,7 @@ class ExplorationOwnerGuard(Node):
             forgotten, since = self._forgotten.get(key, ('', time.monotonic()))
             if (forgotten and time.monotonic() - since >= 3.0
                     and server_instance(self, '/navigate_to_pose') == forgotten and not self._children.busy()):
-                self._active.discard(key)
-                self._seen.pop(key, None)
-                self._cancels.pop(key, None)
-                self._instances.pop(key, None)
-                self._forgotten.pop(key, None)
+                self._finished(key)
                 continue
             future, sent = self._cancels.get(key, (None, 0.0))
             if future is not None and not future.done():
@@ -138,7 +141,8 @@ class ExplorationOwnerGuard(Node):
             if (future.result().status == GoalStatus.STATUS_UNKNOWN
                     and key in self._expired() and self._instances.get(key) != instance
                     and server_instance(self, '/navigate_to_pose') == instance):
-                self._forgotten.setdefault(key, (instance, time.monotonic()))
+                if self._forgotten.get(key, ('', 0.0))[0] != instance:
+                    self._forgotten[key] = (instance, time.monotonic())
         except Exception as error:
             self.get_logger().error(f'orphan result is unconfirmed: {error}')
 

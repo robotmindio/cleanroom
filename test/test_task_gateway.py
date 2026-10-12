@@ -526,6 +526,7 @@ def test_navigation_pause_waits_for_terminal_proof_then_resumes_same_destination
     assert start('navigate', '{"x":1,"y":2,"yaw":0.5}').accepted
     wait(lambda: len(peers.received) == 1 and status().state == 'running')
     original = peers.received[0]
+    old_row = peers.journal_row('task-1')
     peers.hold_cancel = True
     if fault == 'collision':
         peers.collision_stop = True
@@ -542,6 +543,13 @@ def test_navigation_pause_waits_for_terminal_proof_then_resumes_same_destination
     peers.hold_cancel = False
     wait(lambda: len(peers.received) == 2)
     assert peers.received[1] != original
+    from rclpy.task import Future
+    from action_msgs.msg import GoalStatus
+    late = Future()
+    late.set_result(NavigateToPose.Impl.GetResultService.Response(status=GoalStatus.STATUS_SUCCEEDED))
+    peers.gateway._queue_reply('result', old_row, late)
+    time.sleep(0.3)
+    assert status().state == 'running'
     assert peers.journal_row('task-1')['parameters'] == '{"x": 1, "y": 2, "yaw": 0.5}'
     assert stop().accepted
     wait(lambda: status().state == 'canceled')
@@ -655,3 +663,20 @@ def test_navigation_active_budget_reaches_deadline(system):
     wait(lambda: status().state == 'failed')
     assert 'navigation deadline reached' in status().detail
     assert len(peers.received) == 1
+
+
+def test_owner_guard_terminal_cleanup_releases_pending_requests():
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from rclpy.task import Future
+    goal = bytes(16)
+    cancel, result = Future(), Future()
+    guard = SimpleNamespace(_active={goal}, _seen={goal: 1}, _instances={goal: 'old'},
+                            _forgotten={goal: ('new', 1)}, _cancels={goal: (cancel, 1)},
+                            _results={goal: (result, 1)}, _cancel=Mock(), _result=Mock())
+    ExplorationOwnerGuard._finished(guard, goal)
+    assert not guard._active and not guard._instances and not guard._forgotten
+    assert not guard._cancels and not guard._results
+    assert cancel.cancelled() and result.cancelled()
+    guard._cancel.remove_pending_request.assert_called_once_with(cancel)
+    guard._result.remove_pending_request.assert_called_once_with(result)

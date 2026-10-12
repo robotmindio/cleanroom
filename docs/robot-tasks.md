@@ -53,7 +53,10 @@ revives. If ROS has forgotten the goal/result, state stays `unknown` unless the 
 can prove that the original action server instance was replaced. Reconciliation
 requires the unique replacement server to return UNKNOWN for both result and
 cancellation, an expired lease grace period, no observed active ROS goals and
-a fresh ready owner guard. It then records `failed` with `outcome_known=false`
+a fresh ready owner guard. Nav2 controller/recovery action status is also
+observed: a forgotten parent cannot release admission while a child executes.
+The owner guard reconciles its forgotten parent only after the same replacement
+server evidence and child termination. It then records `failed` with `outcome_known=false`
 and `termination_confirmed=true`; it never replays that task or claims success.
 Same-instance uncertainty and legacy rows without a recorded server instance
 remain blocked until native terminal evidence becomes available. A canceled
