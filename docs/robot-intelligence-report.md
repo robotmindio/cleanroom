@@ -59,6 +59,11 @@ completed individually without inventing evidence or enabling an unqualified sta
 
 ## Verification and practical limits
 
+Verification recorded on the implementation branches: **255 ROS tests**,
+**179 Fiber tests**, and **17 UI/i18n tests** passed. Strict mypy checks for the
+robot modules/API, targeted Ruff/ESLint, UI TypeScript, repository-configured
+ament_flake8 and three registered perception CTest targets passed.
+
 The ROS package builds locally. Tests exercise standard messages and real ROS
 services on an isolated graph, storage retention/quota/pins/replay, calibrated
 geometry and capture-time TF failures, odometry resets, gateway deadline and
