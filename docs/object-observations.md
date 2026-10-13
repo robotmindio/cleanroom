@@ -122,6 +122,12 @@ physical task success, and synthetic ROS fixtures do not establish its accuracy.
 
 ## Next gate
 
+The package build, 138 selected unit/ROS/release/qualification tests, isolated
+CTest registration, and repository Python/shell checks passed during development.
+A saved Astra image also passed the complete pinned-model ROS replay on domain
+232; five local inference runs took 0.37–0.45 seconds on this workstation. This
+checks execution only and is not the recorded-scene accuracy evaluation.
+
 The software foundation has unit and isolated ROS service tests. The controlled
 recorded-scene corpus and accuracy acceptance are outstanding; a single existing
 camera image can check inference execution but cannot close that gate. Complete

@@ -153,6 +153,18 @@ def test_evidence_corruption_and_competing_writer_fail_clearly(tmp_path):
         store.close()
 
 
+def test_oversized_capture_does_not_evict_existing_evidence(tmp_path):
+    store = ObservationStore(tmp_path / 'store.db', max_bytes=65536)
+    try:
+        record, jpeg = document()
+        store.put(record, jpeg)
+        with pytest.raises(ValueError, match='quota'):
+            store.put({**record, 'id': 'a' * 64}, bytes(65536))
+        assert store.evidence(record['id'])[0] == jpeg
+    finally:
+        store.close()
+
+
 def test_recognition_uses_source_coordinates_and_keeps_different_cups():
     from lekiwi_rmf.object_detector import detect
 
