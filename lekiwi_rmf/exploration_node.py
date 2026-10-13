@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Explicit, bounded Nav2 exploration and an always-on RTAB-Map quota guard."""
 
+import json
 import math
 from pathlib import Path
 import signal
@@ -28,7 +29,7 @@ from rclpy.parameter_client import AsyncParameterClient
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from rclpy.signals import SignalHandlerOptions
 from rtabmap_msgs.msg import Info
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, String
 from std_srvs.srv import Empty
 from tf2_ros import Buffer, TransformException, TransformListener
 from unique_identifier_msgs.msg import UUID
@@ -76,6 +77,11 @@ class RobotExplorer(Node):
                 or self.config["max_radius_m"] <= self._region_margin
                 or self.config["observation_distance_m"] <= self.config["clearance_m"]):
             raise ValueError("invalid exploration clearance, observation distance or region")
+        self._task_defaults = self.create_publisher(
+            String, '/robot/explore/defaults',
+            QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
+        self._task_defaults.publish(String(data=json.dumps({
+            name: self.config[name] for name in ('max_duration_sec', 'max_radius_m')})))
         self.database = Path(self.config["database_path"]).expanduser()
         self._task_file = Path(f"{self.database}.exploration.json")
         self._lock = threading.Lock()

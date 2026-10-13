@@ -32,8 +32,8 @@ def generate_test_description():
         name="rmf_owner_guard_launch_test",
         parameters=[{
             "fleet_name": "lekiwi",
-            # Give peer discovery a full second before and during the scan.
-            "settle_seconds": 1.0,
+            # Hosted parallel tests can delay DDS discovery beyond one second.
+            "settle_seconds": 5.0,
             "poll_period_seconds": 0.05,
         }],
         output="screen",

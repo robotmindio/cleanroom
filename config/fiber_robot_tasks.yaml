@@ -1,8 +1,9 @@
 # Admission only; observe the same task_id with rosbridge.tasks.status.
-# Fiber's governed workflow owns the durable Matrix approval wait.
+# L1 admits automatically; Fiber owns a durable approval wait if policy requires L2.
 name: robot-task-submit
 "on": robot.task.submit
 strict: true
+returns: task
 do:
   - rosbridge.tasks.submit:
       task_id: "{task_id}"
