@@ -9,6 +9,9 @@ the surveyed site are outside this source review.
 
 ## Product decision
 
+The concrete delivery sequence, proposed contracts and robot-goal policy changes
+are in the [implementation plan](robot-intelligence-implementation-plan.md).
+
 The next user-visible capability should be **“find the blue cup and show me
 where it is,” with fresh supporting evidence**. Start with stationary observation,
 then add bounded search within a qualified attended site. This exercises object
@@ -340,6 +343,9 @@ coordinates or turn incomplete observations into achieved goals.
 propagates to owned work and waits for confirmed termination, and ambiguous
 references require resolution. Goal completion requires the declared evidence;
 an accepted command or a completed Fiber workflow cannot satisfy it alone.
+The implementation proposal includes scoped automatic completion by a trusted
+verifier for robot goals; it does not assume existing operator-managed goal
+policy must remain unchanged for every goal kind.
 
 **Owner/dependency:** Fiber goal/plugin owner and robot product owner; E2
 execution linkage and E10 semantic references. Reuse Fiber persistence and
