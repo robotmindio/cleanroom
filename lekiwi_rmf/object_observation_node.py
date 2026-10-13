@@ -3,6 +3,7 @@
 
 import base64
 import json
+import math
 from pathlib import Path
 import sqlite3
 import time
@@ -105,13 +106,17 @@ class ObjectObservations(Node):
 
     def _map(self, message):
         try:
+            if len(message.data.encode()) > 4096:
+                raise ValueError('map context exceeds 4096 bytes')
             value = json.loads(message.data)
             if not isinstance(value, dict) or type(value.get('ready')) is not bool:
                 raise ValueError('invalid map context')
-            if value['ready'] and (not valid_id(value.get('map_id')) or not isinstance(value.get('epoch'), str)):
+            if value['ready'] and (not valid_id(value.get('map_id')) or not isinstance(value.get('epoch'), str) or len(value['epoch']) != 32 or any(c not in '0123456789abcdef' for c in value['epoch'])):
                 raise ValueError('invalid approved map identity')
+            if value['ready'] and (type(value.get('started_at')) not in (int, float) or not math.isfinite(value['started_at']) or value['started_at'] <= 0):
+                raise ValueError('map context requires its activation timestamp')
             self._map_context = value
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, RecursionError):
             self._map_context = {'ready': False, 'reason': 'invalid map context'}
 
     def _query(self, request, response):

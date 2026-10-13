@@ -506,6 +506,7 @@
   "parameters": {
    "allow_exploration": false,
    "allow_navigation": false,
+   "map_bundle": "$(share lekiwi_rmf)/maps/bundles/cleanroom-development.yaml",
    "use_sim_time": true
   },
   "remappings": [],

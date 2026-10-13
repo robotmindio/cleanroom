@@ -3,7 +3,7 @@
 This is the ROS foundation for implementation slices 0–1. It detects cup
 candidates and measures the fraction of blue pixels in each candidate's
 interior region. It does not identify a permanent object, resolve a user goal,
-publish a metric pose or authorize motion. Multiple cups remain separate
+authorize motion. Calibrated metric results are optional, as described below. Multiple cups remain separate
 candidates; an empty result means no detector candidates in that capture.
 
 ## Install and launch
@@ -134,3 +134,53 @@ camera image can check inference execution but cannot close that gate. Complete
 this evaluation before implementing Fiber goal completion or moving search.
 Metric grounding follows measured calibration/time/frame acceptance. See the
 [implementation plan](robot-intelligence-implementation-plan.md).
+
+## Goal evidence and metric grounding
+
+The completed Fiber consumer lives in `fiber-core`'s company plugin, under
+`robot/`, with the authenticated `/robot` API and Fiber UI `/robot` page. See
+[implementation report](robot-intelligence-report.md) for deployment order.
+Generic goal APIs cannot complete a robot-owned goal; the verifier re-reads ROS
+metadata, requires two fresh distinct unambiguous captures, checks pinned JPEG
+hashes and atomically commits the result with the goal status.
+
+`/robot/observations/pin` accepts `PinObservationEvidence` JSON with a stable
+`request_id` and 1–20 immutable `observation_ids`. Repeating the same request is
+idempotent; changing its IDs fails. Pins reserve evidence within existing
+storage quotas for the configured retention interval. Quota pressure rejects
+new captures instead of evicting reserved evidence. An ID query with
+`pin_request_id` returns the actual reservation expirations. Expired pins are
+pruned; no pin can request an arbitrary path or extend retention indefinitely.
+
+Perception is integrated into bringup. `config/object_perception_deployment.yaml`
+sets its release default, disabled initially. Its calibration path is relative
+to the tracked package config directory; an empty path produces image results.
+The existing install/deploy scripts consume these defaults through bringup.
+The standalone perception wrapper remains useful for replay and diagnostics.
+
+Metric mode requires a reviewed measured YAML/JSON calibration, schema 1,
+`validated: true`, `depth_registered: true`, `camera_id`, `optical_frame`,
+`rgb_size`/`depth_size`, measured `rgb_k` (9 values), `rgb_p` (12), `rgb_r` (9),
+`rgb_d` (distortion), and `rgb_to_depth` (3×3 raster correspondence). Registration
+is provided by the existing Astra ROS driver (`depth_registration: true`), not
+inferred from a homography between different optical viewpoints. Include
+measured `camera_uncertainty_m`, `map_uncertainty_m` and `clock_uncertainty_sec`.
+Their gates are 0.10 m, 0.20 m and 0.02 s respectively. Do not copy synthetic
+unit-test calibration values onto hardware.
+
+The collector matches depth and CameraInfo within 50 ms, checks dimensions,
+frame identity and all measured intrinsics, and uses `image_geometry` to project
+a robust registered depth sample from blue pixels. Accepted depths are
+0.55–3.0 m. The result estimates a **visible surface**, with uncertainty; it is
+not a grasp pose or permanent object identity. Missing or incompatible geometry
+leaves the image observation intact. Map positions require capture-time TF and
+a capture after the current approved map epoch began. Historical TF failure
+leaves a camera position with an explicit map-unavailable reason.
+
+`/robot/map_context` publishes the validated map-manifest hash, epoch and
+activation time. `/robot/navigation/odometry` provides a read-only cumulative
+travel counter and epoch. Stale samples, gaps and resets invalidate travel
+accounting. Optional navigation `deadline_unix_sec` and `max_travel_m` bounds
+are persisted by the existing task gateway and enforced locally. They cancel
+only the admitted owned task, retain pending termination status, and preserve
+existing safety/ownership handling and deployment re-arm behavior.

@@ -220,3 +220,39 @@ def test_evaluation_matches_each_target_once_and_reports_uncertainty():
     assert module.interval(0, 0) is None
     low, high = module.interval(20, 20)
     assert low < .9 and high == 1
+
+
+def test_pin_preserves_evidence_and_reports_receipt(tmp_path):
+    store = ObservationStore(tmp_path / 'store.db', max_records=2, retention_sec=10)
+    first, jpeg = document(stamp=1)
+    second, other = document(stamp=2)
+    third, newest = document(stamp=3)
+    store.put(first, jpeg, now=100)
+    request = json.dumps({'request_id': 'goal-example', 'observation_ids': [first['id']]})
+    store.pin(request, now=105)
+    store.pin(request, now=106)
+    store.put(second, other, now=111)
+    store.put(third, newest, now=112)
+    receipt = store.query(json.dumps({'observation_ids': [first['id']], 'pin_request_id': 'goal-example'}), now=112)
+    assert receipt['pins'] == {first['id']: 115}
+    assert store.evidence(first['id'], now=112)[0] == jpeg
+    with pytest.raises(ValueError, match='different evidence'):
+        store.pin(json.dumps({'request_id': 'goal-example', 'observation_ids': [third['id']]}), now=112)
+    with pytest.raises(ValueError, match='expired'):
+        store.evidence(first['id'], now=116)
+    store.close()
+
+
+def test_pin_is_atomic_and_cannot_evict_reserved_evidence(tmp_path):
+    store = ObservationStore(tmp_path / 'store.db', max_records=1)
+    first, jpeg = document()
+    store.put(first, jpeg, now=100)
+    with pytest.raises(ValueError, match='missing'):
+        store.pin(json.dumps({'request_id': 'attempt', 'observation_ids': [first['id'], 'f' * 64]}), now=101)
+    assert store.query(json.dumps({'observation_ids': [first['id']], 'pin_request_id': 'attempt'}), now=101)['pins'] == {}
+    store.pin(json.dumps({'request_id': 'attempt', 'observation_ids': [first['id']]}), now=101)
+    second, jpeg2 = document(stamp=2)
+    with pytest.raises(ValueError, match='reserved'):
+        store.put(second, jpeg2, now=102)
+    assert store.evidence(first['id'], now=102)[0] == jpeg
+    store.close()

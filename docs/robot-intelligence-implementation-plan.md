@@ -5,13 +5,13 @@ Proposed 2026-10-14. This is a delivery plan for E9–E14 in
 read-only inspection of the adjacent Fiber source. It proposes APIs, policies
 and thresholds; none is installed or physically accepted by this document.
 
-Implementation status: the ROS stationary recognition/observation foundation
-and recorded-image evaluator are implemented in the
-[object observation guide](object-observations.md). The controlled held-out
-recognition gate remains pending. Runtime contracts now reuse standard
-`vision_msgs/Detection2DArray` and exact ROS message synchronization; downstream
-Fiber goal work follows that gate. Proposed interfaces below remain design
-guidance where the implemented guide specifies a narrower current contract.
+Implementation status: software for slices 0–4 is implemented across cleanroom
+and the adjacent Fiber repository, using existing ROS navigation, camera
+registration, TF and Fiber governance. See the [implementation report](robot-intelligence-report.md)
+for delivered contracts, verification and remaining acceptance epics.
+Recognition accuracy, measured metric calibration, deployed canaries and attended
+moving-search acceptance remain open. Both perception and robot profiles are
+disabled by default. Slice 5 remains the explicitly separate expansion backlog.
 
 ## First deliverable
 

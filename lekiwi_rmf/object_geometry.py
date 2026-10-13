@@ -4,7 +4,6 @@ import hashlib
 import math
 from pathlib import Path
 
-import cv2
 from cv_bridge import CvBridge
 from geometry_msgs.msg import PointStamped
 from image_geometry import PinholeCameraModel
@@ -27,6 +26,8 @@ class ObjectGeometry:
             value = yaml.safe_load(content)
             if not isinstance(value, dict) or value.get('schema') != 1 or value.get('validated') is not True:
                 raise ValueError('metric calibration must be explicitly validated')
+            if value.get('depth_registered') is not True:
+                raise ValueError('metric grounding requires depth registered by the ROS camera driver')
             for name in ('camera_uncertainty_m', 'map_uncertainty_m', 'clock_uncertainty_sec'):
                 number = value.get(name)
                 if type(number) not in (int, float) or not math.isfinite(number) or number < 0:
@@ -39,8 +40,14 @@ class ObjectGeometry:
             if (matrix.shape != (3, 3) or intrinsics.shape != (9,) or
                     projection.shape != (12,) or not np.isfinite(projection).all() or projection[0] <= 0 or projection[5] <= 0 or
                     not np.isfinite(matrix).all() or not np.isfinite(intrinsics).all() or
-                    abs(np.linalg.det(matrix)) < 1e-12 or intrinsics[0] <= 0 or intrinsics[4] <= 0):
+                    abs(np.linalg.det(matrix)) < 1e-12 or np.abs(matrix).max() > 1e6 or intrinsics[0] <= 0 or intrinsics[4] <= 0):
                 raise ValueError('calibration requires measured RGB intrinsics and raster mapping')
+            rotation = np.asarray(value.get('rgb_r'), dtype=float)
+            distortion = np.asarray(value.get('rgb_d'), dtype=float)
+            if (rotation.shape != (9,) or not np.isfinite(rotation).all() or
+                    abs(np.linalg.det(rotation.reshape(3, 3))) < 1e-12 or
+                    distortion.ndim != 1 or not 4 <= len(distortion) <= 14 or not np.isfinite(distortion).all()):
+                raise ValueError('calibration requires measured distortion and rectification')
             for name in ('rgb_size', 'depth_size'):
                 size = value.get(name)
                 if not isinstance(size, list) or len(size) != 2 or any(type(v) is not int or not 0 < v <= 1920 for v in size):
@@ -53,13 +60,15 @@ class ObjectGeometry:
         value = self.calibration
         if value is None or depth is None or info is None:
             return
-        stamp = lambda msg: msg.header.stamp.sec + msg.header.stamp.nanosec / 10**9
+        def stamp(msg):
+            return msg.header.stamp.sec + msg.header.stamp.nanosec / 10**9
         if (record['camera_id'] != value['camera_id'] or
                 any(msg.header.frame_id != value['optical_frame'] for msg in (image, depth, info)) or
                 abs(stamp(image)-stamp(depth)) > .05 or abs(stamp(image)-stamp(info)) > .05 or
                 [image.width, image.height] != value['rgb_size'] or [depth.width, depth.height] != value['depth_size'] or
-                list(info.k) != value['rgb_k'] or list(info.p) != value['rgb_p'] or [info.width, info.height] != value['rgb_size'] or
-                depth.encoding != '16UC1'):
+                list(info.k) != value['rgb_k'] or list(info.p) != value['rgb_p'] or
+                list(info.r) != value['rgb_r'] or list(info.d) != value['rgb_d'] or [info.width, info.height] != value['rgb_size'] or
+                depth.encoding != '16UC1' or depth.step < depth.width * 2 or len(depth.data) != depth.step * depth.height):
             return
         pixels = self.bridge.imgmsg_to_cv2(image, 'bgr8')
         depths = self.bridge.imgmsg_to_cv2(depth, 'passthrough')
@@ -94,11 +103,13 @@ class ObjectGeometry:
                 continue
             pixel = camera.rectifyPoint((float(np.median(rgb[0])), float(np.median(rgb[1]))))
             ray = camera.projectPixelTo3dRay(pixel)
+            if not all(math.isfinite(coordinate) for coordinate in ray) or abs(ray[2]) < 1e-12:
+                continue
             xyz = [float(coordinate*median/ray[2]) for coordinate in ray]
             position = {'mode': 'camera', 'xyz': xyz, 'frame_id': image.header.frame_id,
                         'uncertainty_m': uncertainty, 'calibration_sha256': self.sha256,
                         'meaning': 'visible_surface', 'depth_samples': len(samples)}
-            if map_context.get('ready'):
+            if map_context.get('ready') and stamp(image) >= map_context.get('started_at', math.inf):
                 try:
                     transform = transforms.lookup_transform('map', image.header.frame_id, Time.from_msg(image.header.stamp))
                     point = PointStamped(header=image.header)

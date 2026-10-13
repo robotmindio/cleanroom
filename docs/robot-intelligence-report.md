@@ -1,0 +1,77 @@
+# Robot intelligence implementation and strategic completion report
+
+2026-10-14. Scope: the original plan's blue-cup deliverable and software slices
+0–4. Slice 5 is the separately qualified expansion backlog. No Astra agent was
+used for implementation. No production policy, deployment or robot motion was
+changed during this work.
+
+## Delivered
+
+| Stage | Implementation | Acceptance status |
+| --- | --- | --- |
+| Contracts and fixtures | Schema 1 observations, strict camera/model/clock/geometry contracts, immutable evidence IDs, typed Fiber requests/profiles/runs, rejection and replay fixtures. | Software checks pass; physical corpus remains open. |
+| Recognition and evidence | Pinned OpenCV Zoo YOLOX, standard `vision_msgs`, exact source synchronization, blue attribute, bounded SQLite/JPEG store, cursor epochs, authenticated on-demand evidence and quota-bounded pin receipts. | CPU inference and ROS replay work; recognition accuracy is unqualified. |
+| Complete stationary journey | Existing Fiber Goal/Execution/subject ledger and Temporal integration; retry-safe admission, one active goal per robot, observe→clarify→verify, owned cancellation, admin override and dashboard/MCP callers. | Fixed software journey, persistence, API, verifier and UI tests pass. Deployed canary remains open. |
+| Scoped completion policy | Generic status changes cannot complete robot-owned goals. The trusted verifier re-reads concrete ROS metadata, pin receipts and JPEG hashes, checks live policy/revision/cancellation/termination and atomically commits evidence plus status. Planning/plan writes retain existing behavior. | Contract and race-fence tests pass; profile promotion requires normal release authority. |
+| Metric grounding | Existing Astra driver registration, ROS camera geometry and capture-time TF; calibration hash, strict measured intrinsics/registration/time gates, robust depth samples, camera/map uncertainty and map epoch checks. | Synthetic geometry/failure tests pass; no hardware calibration is claimed. Defaults remain image-only. |
+| Bounded attended search | At most five surveyed views, last-sighting ranking, existing Nav2 planner/gateway, stable owned task IDs, nonrefundable route reservations, measured odometry, local deadline/travel enforcement, candidate-triggered cancellation and fresh post-stop verification. | Software ownership, cancellation, telemetry and deadline tests pass; moving trials remain unqualified and search is disabled. |
+| Release integration | Tracked disabled perception deployment settings, bringup inclusion, ROS install/dependency declarations, exact Fiber allow-lists, disabled profile example, operator UI and deployment/rollback guide. | Reviewable changes prepared; compatible ROS must deploy before Fiber. |
+
+The world catalog keeps bounded sighting facts, provenance, surveyed places and
+freshness/map compatibility. It does not infer permanent named-object identity.
+An old sighting may rank existing approved views; it cannot satisfy a new goal.
+Catalog saturation is explicit rather than silently discarding facts.
+
+## Policy decision implemented in source
+
+Adopt **automatic verifier-backed completion only for explicitly admitted robot
+objectives**. Each goal freezes robot/site/model/calibration/map/policy/scopes
+and has a separate status owner. Existing company goals and generic plan writes
+retain their current policies. Every physical mutation still passes Fiber's
+existing action grants, L1/L2 handling, durable approvals and idempotency.
+
+Cancellation is persisted before reconciliation. A queued physical submission
+is rechecked at the actual policy stage. A lost reply, missing task or accepted
+cancel never proves termination. The robot locally enforces requested deadline
+and travel bounds through its existing task cancellation path. No automatic
+disarm or new global motion-state policy was added; deployment re-arm is intact.
+
+An administrator override records actor/reason/revision and remains distinct
+from sensor success. Withdrawal disables admission or revokes a policy revision;
+existing owned work reconciles rather than being forgotten or resubmitted.
+
+## Strategic epics still required
+
+| Priority / epic | Concrete remaining work | Definition of done / owner |
+| --- | --- | --- |
+| P0 — E9 recognition qualification | Collect permitted held-out single, negative and ambiguous cup scenes across approved lighting/viewpoints; run the shipped evaluator against the pinned release. | Proposed ≥80 held-out scenes, ≥20 positives, ≥20 negatives, ≥10 ambiguous; precision ≥98%, recall ≥90%, p95 ≤1.5 s. Perception/site owner accepts statistical report and known limits. |
+| P0 — E4 metric qualification | Measure RGB/depth registration, intrinsics, optical transform, clock error and camera/map uncertainty with independent references; commit the reviewed calibration and hashes. | Proposed camera error ≤0.10 m, map error ≤0.20 m and clock uncertainty ≤0.02 s; invalid geometry never yields a metric success. Calibration/site owner. |
+| P0 — E10/E11/E14 stationary release | Bind the actual Fiber tenant/robot/private connector, promote disabled perception/profile via the release process, check authenticated UI evidence, duplicate/reconnect/restart/cancel canaries and retention policy. | Repeatable stationary goal with inspectable authoritative evidence; unauthorized or fabricated evidence cannot close it; deployment identities recorded. Fiber/release/product owners. |
+| P0 — E1/E2/E4/E7/E8/E12/E13 moving acceptance | Qualify the chosen map and 3–5 surveyed views; run attended blocked-route, stale perception, map/odom reset, restart, approval timeout and cancellation trials with independent power stop. | Correct scoped findings; bounded measured travel/time; native termination proof and unchanged local safeguards across the scenario matrix. Robot/site/release owners. |
+| P1 — E10 world/catalog operations | Qualify usefulness of the bounded sighting catalog, saturation handling and stale-map presentation against real site usage. Establish evidence access/retention ownership before persistent household collection. | Operator can distinguish recent, stale and incompatible-map sightings; saturation and expiration are visible. Product/site owners. |
+| P1 — E3/E5 qualified inspect/approach | Add only after geometry and stopping gates: approach envelope, viewpoint/visibility criteria and separate skill outcome predicates. | Independent collision/clearance and inspection acceptance; locating a cup alone grants no manipulation readiness. Motion/product owners. |
+| P2 — E6 grasp/carry/place and broader vocabulary/sites | Introduce separately qualified capabilities and distinct grasp, retention and placement evidence; expand recognizer/site profiles using measured datasets. | Each capability has its own physical acceptance and verifier. No trajectory or detector claim substitutes for object-in-hand or placement proof. Manipulation/perception owners. |
+
+Sequence: recognition qualification → stationary release → measured metric
+release → attended search release → inspect/approach → manipulation. Software
+for later stages exists behind explicit configuration so these gates can be
+completed individually without inventing evidence or enabling an unqualified stage.
+
+## Verification and practical limits
+
+The ROS package builds locally. Tests exercise standard messages and real ROS
+services on an isolated graph, storage retention/quota/pins/replay, calibrated
+geometry and capture-time TF failures, odometry resets, gateway deadline and
+admission bounds, bringup defaults and tracked launch snapshots.
+
+Fiber checks cover strict typing, existing goals/connectors/MCP regressions,
+tenant isolation, CAS/revocation/cancellation, authoritative evidence/pins,
+Temporal sandbox loading, a complete fixed stationary workflow using real
+persistence, and dashboard retry/reconnect/i18n behavior. Transport fixtures and
+synthetic geometry are software verification, not physical accuracy evidence.
+
+No live cluster, production database, robot or camera was modified. The required
+held-out dataset, measured calibration and attended/deployed acceptance evidence
+were unavailable. Promotion remains disabled until those specific epics pass.
+See [object observations](object-observations.md) and the adjacent Fiber
+`fiber-core/docs/ROBOT-GOALS.md` for runtime contracts and deployment order.

@@ -846,3 +846,18 @@ def test_unsent_exploration_preserves_admitted_limits_after_restart(system):
     assert peers.requests[0].max_radius_m == 3
     assert start().accepted  # Original omitted arguments still deduplicate.
     assert len(peers.requests) == 1
+
+
+def test_navigation_deadline_is_enforced_locally_and_retries_keep_identity(system):
+    peers, start, status, _, _ = system
+    parameters = json.dumps({'x': 1., 'y': 0., 'deadline_unix_sec': time.time() + .5})
+    assert start(capability='navigate', parameters=parameters).accepted
+    wait(lambda: status().state in ('succeeded', 'canceled', 'failed'))
+    assert status().state == 'canceled'
+    assert start(capability='navigate', parameters=parameters).accepted
+
+
+def test_travel_bound_requires_odometry_before_admission(system):
+    _, start, _, _, _ = system
+    response = start(capability='navigate', parameters='{"x":1,"y":0,"max_travel_m":1}')
+    assert not response.accepted and 'odometry' in response.detail

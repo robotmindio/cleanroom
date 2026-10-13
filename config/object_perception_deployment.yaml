@@ -1,0 +1,4 @@
+# Promote through the normal release after stationary recognition qualification.
+start: false
+# Relative to this package's config directory; empty means image-only.
+calibration_file: ''

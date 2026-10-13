@@ -16,7 +16,7 @@ from vision_msgs.msg import Detection2DArray
 
 from lekiwi_rmf.object_model import MODEL_SHA256
 from lekiwi_rmf.object_observation_node import ObjectObservations
-from lekiwi_rmf.srv import GetObservationEvidence, QueryObservations
+from lekiwi_rmf.srv import GetObservationEvidence, PinObservationEvidence, QueryObservations
 from test_object_observations import capture
 
 
@@ -39,6 +39,7 @@ def test_synchronized_capture_query_evidence_and_stale_stream(tmp_path):
     detections = peer.create_publisher(Detection2DArray, 'detections', 1)
     query = peer.create_client(QueryObservations, '/robot/observations/query')
     evidence = peer.create_client(GetObservationEvidence, '/robot/observations/evidence')
+    pin = peer.create_client(PinObservationEvidence, '/robot/observations/pin')
     status = peer.create_client(Trigger, '/robot/observations/status')
     executor = SingleThreadedExecutor(context=context)
     executor.add_node(peer)
@@ -74,6 +75,11 @@ def test_synchronized_capture_query_evidence_and_stale_stream(tmp_path):
         saved = call(evidence, GetObservationEvidence.Request(observation_id=record['id']))
         assert saved.success and len(base64.b64decode(saved.data_base64)) == record['evidence']['size']
         assert saved.sha256 == record['evidence']['sha256']
+        assert call(pin, PinObservationEvidence.Request(request_json=json.dumps({
+            'request_id': 'goal-ros-test', 'observation_ids': [record['id']]}))).success
+        receipt = call(query, QueryObservations.Request(request_json=json.dumps({
+            'observation_ids': [record['id']], 'pin_request_id': 'goal-ros-test'})))
+        assert record['id'] in json.loads(receipt.response_json)['pins']
         assert not call(query, QueryObservations.Request(request_json='{"limit":true}')).success
         assert not call(evidence, GetObservationEvidence.Request(observation_id='../secret')).success
         wait(lambda: not call(status, Trigger.Request()).success)
