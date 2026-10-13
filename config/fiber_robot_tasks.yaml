@@ -3,6 +3,7 @@
 name: robot-task-submit
 "on": robot.task.submit
 strict: true
+returns: task
 do:
   - rosbridge.tasks.submit:
       task_id: "{task_id}"

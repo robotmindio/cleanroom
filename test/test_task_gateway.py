@@ -9,6 +9,7 @@ from geometry_msgs.msg import PoseStamped
 from nav2_msgs.action import NavigateToPose
 from nav2_msgs.msg import CollisionMonitorState
 from std_msgs.msg import Bool
+from std_srvs.srv import Trigger
 import pytest
 import rclpy
 from rclpy.action import ActionServer, CancelResponse
@@ -54,6 +55,7 @@ class Peers(Node):
         self.completed = []
         self.paused = False
         self.received = []
+        self.requests = []
         self.acceptance_delay = 0.0
         self.permission = True
         self.collision_stop = False
@@ -87,6 +89,7 @@ class Peers(Node):
 
     def execute(self, goal, result, feedback):
         self.received.append(bytes(goal.goal_id.uuid))
+        self.requests.append(goal.request)
         while not self.finish and (not goal.is_cancel_requested or self.hold_cancel):
             goal.publish_feedback(feedback())
             time.sleep(0.05)
@@ -617,7 +620,10 @@ def test_replacement_server_reconciles_forgotten_task_without_replay(system, cap
         assert not start(identifier='blocked').accepted
         child.publish(GoalStatusArray())
     wait(lambda: status().state == 'failed', timeout=10)
-    assert json.loads(status().result_json) == {'outcome_known': False, 'termination_confirmed': True}
+    result = json.loads(status().result_json)
+    assert result['outcome_known'] is False
+    assert result['termination_confirmed'] is True
+    assert '_task' in result
     assert len(peers.received) == 1
     assert start(identifier='task-2').accepted
 
@@ -736,3 +742,86 @@ def test_restart_during_navigation_pause_preserves_intent_until_terminal_proof(s
     wait(lambda: len(peers.received) == 2)
     assert stop().accepted
     wait(lambda: status().state == 'canceled')
+
+
+def test_exploration_defaults_are_valid_without_any_parameters():
+    goal, parameters = task_goal('explore', '{}')
+    assert parameters == '{}'
+    assert goal.revisit_known is False
+    assert goal.max_duration_sec == goal.max_radius_m == 0.0
+    assert goal.resume_task_id == ''
+
+
+def test_capability_defaults_and_task_metadata_come_from_explorer(system):
+    from std_msgs.msg import String
+
+    peers, start, status, _, restart = system
+    gateway = peers.gateway
+    publisher = peers.create_publisher(String, '/robot/explore/defaults',
+                                      QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
+    publisher.publish(String(data=json.dumps({'max_duration_sec': 60.0, 'max_radius_m': 3.0})))
+    wait(lambda: gateway._exploration_defaults is not None)
+    catalog = json.loads(gateway._capabilities(None, Trigger.Response()).message)
+    explore = next(item for item in catalog['capabilities'] if item['name'] == 'explore')
+    assert explore['required_parameters'] == []
+    assert explore['defaults'] == {'revisit_known': False, 'max_duration_sec': 0.0,
+                                   'max_radius_m': 0.0, 'resume_task_id': ''}
+    assert explore['effective_defaults']['max_duration_sec'] == 60.0
+    assert explore['effective_defaults']['max_radius_m'] == 3.0
+    assert catalog['terminal_states'] == ['canceled', 'failed', 'succeeded']
+    assert start(parameters='{"max_radius_m":2,"revisit_known":true}').accepted
+    wait(lambda: status().state == 'running')
+    metadata = json.loads(status().result_json)['_task']
+    assert metadata['effective_parameters'] == {
+        'max_duration_sec': 60.0, 'max_radius_m': 2,
+        'revisit_known': True, 'resume_task_id': ''}
+    restart()
+    assert json.loads(status().result_json)['_task'] == metadata
+    peers.finish = True
+    wait(lambda: status().state == 'succeeded')
+    result = json.loads(status().result_json)
+    assert result['complete'] is True
+    assert result['_task'] == metadata
+
+
+def test_missing_explorer_defaults_are_explicit_and_do_not_block_submission(system):
+    peers, start, status, _, _ = system
+    catalog = json.loads(peers.gateway._capabilities(None, Trigger.Response()).message)
+    explore = next(item for item in catalog['capabilities'] if item['name'] == 'explore')
+    assert explore['effective_defaults'] is None
+    assert start().accepted
+    assert json.loads(status().result_json)['_task']['effective_parameters'] is None
+
+
+@pytest.mark.parametrize('text', ['invalid', '[]', '{}', '{"max_duration_sec":true,"max_radius_m":3}',
+                                 '{"max_duration_sec":NaN,"max_radius_m":3}',
+                                 '{"max_duration_sec":60,"max_radius_m":-1}'])
+def test_invalid_explorer_defaults_are_not_advertised(system, text):
+    from std_msgs.msg import String
+
+    peers, _, _, _, _ = system
+    peers.gateway._explore_defaults(String(data=text))
+    assert peers.gateway._exploration_defaults is None
+
+
+def test_unsent_exploration_preserves_admitted_limits_after_restart(system):
+    from std_msgs.msg import String
+
+    peers, start, status, _, restart = system
+    for timer in peers.gateway.timers:
+        timer.cancel()
+    publisher = peers.create_publisher(String, '/robot/explore/defaults',
+                                      QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
+    publisher.publish(String(data='{"max_duration_sec":60,"max_radius_m":3}'))
+    wait(lambda: peers.gateway._exploration_defaults is not None)
+    assert start().accepted
+    assert not peers.received
+    publisher.publish(String(data='{"max_duration_sec":120,"max_radius_m":6}'))
+    wait(lambda: peers.gateway._exploration_defaults['max_radius_m'] == 6)
+    restart()
+    wait(lambda: status().state == 'running')
+    assert len(peers.requests) == 1
+    assert peers.requests[0].max_duration_sec == 60
+    assert peers.requests[0].max_radius_m == 3
+    assert start().accepted  # Original omitted arguments still deduplicate.
+    assert len(peers.requests) == 1
