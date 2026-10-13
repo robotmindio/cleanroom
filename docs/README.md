@@ -1,5 +1,6 @@
-- [Robot intelligence implementation report](robot-intelligence-report.md): delivered software, scoped completion policy and remaining qualification epics.
 # Documentation
+
+- [Robot intelligence implementation report](robot-intelligence-report.md): delivered software, scoped completion policy and remaining qualification epics.
 
 - [Product readiness and epics](product-readiness.md): capability status,
   object recognition, semantic world state, robot goals and planning, completed
