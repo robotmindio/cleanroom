@@ -1,7 +1,8 @@
 # Documentation
 
 - [Product readiness and epics](product-readiness.md): capability status,
-  completed source changes, delivery sequence and measurable completion gates.
+  object recognition, semantic world state, robot goals and planning, completed
+  source changes, delivery sequence and measurable completion gates.
 - [Robot task contract](robot-tasks.md): managed admission, status, cancellation,
   live defaults and Fiber workflow responsibilities.
 - [Launch options](launch-options.md): `bringup.launch.py` arguments, arm
