@@ -24,6 +24,7 @@ from std_srvs.srv import Trigger
 from unique_identifier_msgs.msg import UUID
 
 from lekiwi_rmf.action import Explore
+from lekiwi_rmf.exploration import task_limits
 from lekiwi_rmf.exploration_owner_guard import owned_goal_id
 from lekiwi_rmf.srv import CancelTask, GetTask, SubmitTask
 from lekiwi_rmf.task_journal import TERMINAL, TaskJournal
@@ -38,7 +39,10 @@ def task_goal(capability, text):
     """Keep untrusted commands finite, small and limited to the advertised fields."""
     if len(text.encode()) > 4096:
         raise ValueError('parameters exceed 4096 bytes')
-    values = json.loads(text)
+    try:
+        values = json.loads(text)
+    except RecursionError as error:
+        raise ValueError('parameters JSON is nested too deeply') from error
     if not isinstance(values, dict):
         raise ValueError('parameters must be an object')
     if capability == 'navigate':
@@ -65,6 +69,8 @@ def task_goal(capability, text):
         resume = values.get('resume_task_id', '')
         if not isinstance(resume, str) or (resume and (len(resume) != 32 or any(c not in '0123456789abcdef' for c in resume))):
             raise ValueError('invalid exploration resume ID')
+        if resume and (values.get('max_duration_sec') or values.get('max_radius_m')):
+            raise ValueError('resumed exploration preserves its original duration and radius')
         goal = Explore.Goal(revisit_known=values.get('revisit_known', False),
                             max_duration_sec=float(values.get('max_duration_sec', 0.0)),
                             max_radius_m=float(values.get('max_radius_m', 0.0)), resume_task_id=resume)
@@ -200,8 +206,10 @@ class TaskGateway(Node):
                     effective = {**values, 'yaw': values.get('yaw', 0.0),
                                  'max_duration_sec': self._timeout}
                 elif self._exploration_defaults is not None and not values.get('resume_task_id'):
-                    effective = {name: values.get(name) or limit
-                                 for name, limit in self._exploration_defaults.items()}
+                    duration, radius = task_limits(
+                        values.get('max_duration_sec', 0.0), values.get('max_radius_m', 0.0),
+                        self._exploration_defaults['max_duration_sec'], self._exploration_defaults['max_radius_m'])
+                    effective = {'max_duration_sec': duration, 'max_radius_m': radius}
                     effective['revisit_known'] = values.get('revisit_known', False)
                     effective['resume_task_id'] = ''
                 self._journal.admit(request.task_id, request.capability, parameters, goal_id,
@@ -235,12 +243,14 @@ class TaskGateway(Node):
 
     def _explore_defaults(self, message):
         try:
+            if len(message.data.encode()) > 4096:
+                raise ValueError('exploration defaults exceed 4096 bytes')
             values = json.loads(message.data)
             if (not isinstance(values, dict) or set(values) != {'max_duration_sec', 'max_radius_m'}
                     or any(type(value) not in (int, float) or not math.isfinite(value) or value <= 0
                            for value in values.values())):
                 raise ValueError('invalid exploration defaults')
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, RecursionError, OverflowError):
             self._exploration_defaults = None
             self.get_logger().error('invalid exploration defaults contract')
             return

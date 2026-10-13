@@ -122,6 +122,9 @@ currently 900 active seconds and 10 m in `config/exploration.yaml`; a positive
 override may only reduce those limits. An agent uses `revisit_known=true` when
 the user's intent includes surveying already mapped space. Navigation still
 requires map-frame `x` and `y`; omitted `yaw` is zero radians.
+When live Explorer defaults are known, an override above either maximum is
+rejected before durable admission. A resume request cannot supply positive
+duration/radius overrides; the saved task owns those bounds.
 
 The Explorer publishes its actual configured limits on the local, latched
 `/robot/explore/defaults` topic. The task gateway exposes them as

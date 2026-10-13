@@ -40,6 +40,9 @@ def wait(predicate, timeout=5):
     ('navigate', '{"x":0,"y":0,"behavior_tree":"unsafe"}'), ('explore', '{"revisit_known":1}'),
     ('explore', '{"max_radius_m":-1}'), ('explore', '{"resume_task_id":"arbitrary"}'),
     ('explore', '[]'), ('drive', '{}'), ('navigate', ' ' * 4097),
+    ('explore', '{"resume_task_id":"' + 'a' * 32 + '","max_radius_m":1}'),
+    ('explore', '{"resume_task_id":"' + 'a' * 32 + '","max_duration_sec":1}'),
+    ('explore', '[' * 1100 + '0' + ']' * 1100),
 ])
 def test_invalid_goal(capability, parameters):
     with pytest.raises(ValueError):
@@ -795,13 +798,29 @@ def test_missing_explorer_defaults_are_explicit_and_do_not_block_submission(syst
 
 @pytest.mark.parametrize('text', ['invalid', '[]', '{}', '{"max_duration_sec":true,"max_radius_m":3}',
                                  '{"max_duration_sec":NaN,"max_radius_m":3}',
-                                 '{"max_duration_sec":60,"max_radius_m":-1}'])
+                                 '{"max_duration_sec":60,"max_radius_m":-1}',
+                                 '[' * 1100 + '0' + ']' * 1100, ' ' * 4097,
+                                 '{"max_duration_sec":' + '9' * 400 + ',"max_radius_m":3}'])
 def test_invalid_explorer_defaults_are_not_advertised(system, text):
     from std_msgs.msg import String
 
     peers, _, _, _, _ = system
     peers.gateway._explore_defaults(String(data=text))
     assert peers.gateway._exploration_defaults is None
+
+
+@pytest.mark.parametrize('parameters', ['{"max_duration_sec":61}', '{"max_radius_m":4}'])
+def test_exploration_overrides_above_advertised_limits_are_rejected_before_admission(system, parameters):
+    from std_msgs.msg import String
+
+    peers, start, status, _, _ = system
+    peers.on_gateway(peers.gateway._explore_defaults,
+                     String(data='{"max_duration_sec":60,"max_radius_m":3}'))
+    response = start(parameters=parameters)
+    assert not response.accepted
+    assert 'must be zero or within' in response.detail
+    assert not status().found
+    assert not peers.received
 
 
 def test_unsent_exploration_preserves_admitted_limits_after_restart(system):
