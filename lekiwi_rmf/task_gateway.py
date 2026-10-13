@@ -114,6 +114,8 @@ class TaskGateway(Node):
         self._cancel_clients = {}
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self._events = self.create_publisher(String, '/robot/tasks/events', latched)
+        self._exploration_defaults = None
+        self.create_subscription(String, '/robot/explore/defaults', self._explore_defaults, latched)
         self._owner = self.create_publisher(UUID, '/robot/explore/navigation_owner', 10)
         self.create_subscription(Bool, '/safety/base_motion_permitted',
                                  lambda msg: self._navigation.permission(msg.data, time.monotonic()), latched)
@@ -142,6 +144,10 @@ class TaskGateway(Node):
         return self._journal.row(identifier)
 
     def _update(self, identifier, state, detail, result=None):
+        if result is not None:
+            metadata = json.loads(self._row(identifier)['result']).get('_task')
+            if metadata is not None:
+                result = {**result, '_task': metadata}
         if not self._journal.update(identifier, state, detail, result):
             return
         row = self._row(identifier)
@@ -188,7 +194,18 @@ class TaskGateway(Node):
                 if not self._action_clients[request.capability].server_is_ready():
                     raise ValueError('capability action server unavailable')
                 goal_id = bytes(owned_goal_id().uuid) if request.capability == 'navigate' else uuid.uuid4().bytes
-                self._journal.admit(request.task_id, request.capability, parameters, goal_id)
+                values = json.loads(parameters)
+                effective = None
+                if request.capability == 'navigate':
+                    effective = {**values, 'yaw': values.get('yaw', 0.0),
+                                 'max_duration_sec': self._timeout}
+                elif self._exploration_defaults is not None and not values.get('resume_task_id'):
+                    effective = {name: values.get(name) or limit
+                                 for name, limit in self._exploration_defaults.items()}
+                    effective['revisit_known'] = values.get('revisit_known', False)
+                    effective['resume_task_id'] = ''
+                self._journal.admit(request.task_id, request.capability, parameters, goal_id,
+                                    result={'_task': {'parameters': values, 'effective_parameters': effective}})
                 row = self._row(request.task_id)
             response.accepted, response.state, response.detail = True, row['state'], row['detail']
         except (ValueError, TypeError, OverflowError) as error:
@@ -216,12 +233,39 @@ class TaskGateway(Node):
         response.accepted, response.state, response.detail = True, row['state'], row['detail']
         return response
 
+    def _explore_defaults(self, message):
+        try:
+            values = json.loads(message.data)
+            if (not isinstance(values, dict) or set(values) != {'max_duration_sec', 'max_radius_m'}
+                    or any(type(value) not in (int, float) or not math.isfinite(value) or value <= 0
+                           for value in values.values())):
+                raise ValueError('invalid exploration defaults')
+        except (ValueError, TypeError):
+            self._exploration_defaults = None
+            self.get_logger().error('invalid exploration defaults contract')
+            return
+        self._exploration_defaults = values
+
     def _capabilities(self, _request, response):
         response.success = True
         response.message = json.dumps({'schema': 1, 'capabilities': [
             {'name': name, 'available': self._enabled[name] and client.server_is_ready(), 'parameters':
-             ['x', 'y', 'yaw'] if name == 'navigate' else ['revisit_known', 'max_duration_sec', 'max_radius_m', 'resume_task_id']}
+             ['x', 'y', 'yaw'] if name == 'navigate' else ['revisit_known', 'max_duration_sec', 'max_radius_m', 'resume_task_id'],
+             'required_parameters': ['x', 'y'] if name == 'navigate' else [],
+             'defaults': {'yaw': 0.0} if name == 'navigate' else {
+                 'revisit_known': False, 'max_duration_sec': 0.0, 'max_radius_m': 0.0, 'resume_task_id': ''},
+             'effective_defaults': {'yaw': 0.0, 'max_duration_sec': self._timeout} if name == 'navigate'
+             else ({**self._exploration_defaults, 'revisit_known': False, 'resume_task_id': ''}
+                   if self._exploration_defaults is not None else None),
+             'description': ('Map-frame x, y; yaw in radians. Pauses preserve the active-time budget.' if name == 'navigate'
+                             else 'Omit parameters to explore unmapped space. revisit_known=true also revisits mapped space. '
+                             'Omitted/zero limits use the tracked robot limits; positive limits may only reduce them. '
+                             'Duration is active seconds, radius is metres around the starting pose. '
+                             'resume_task_id is a saved native exploration UUID and preserves its original bounds.')}
             for name, client in self._action_clients.items()],
+            'terminal_states': sorted(TERMINAL),
+            'examples': [{'capability': 'explore', 'parameters': {}},
+                         {'capability': 'explore', 'parameters': {'revisit_known': True}}],
             'services': {'submit': '/robot/tasks/submit', 'get': '/robot/tasks/get', 'cancel': '/robot/tasks/cancel'},
             'events': '/robot/tasks/events'})
         return response
@@ -366,7 +410,12 @@ class TaskGateway(Node):
         client = self._action_clients[capability]
         if not client.server_is_ready():
             return
-        goal, _ = task_goal(capability, row['parameters'])
+        parameters = row['parameters']
+        if capability == 'explore':
+            effective = json.loads(row['result']).get('_task', {}).get('effective_parameters')
+            if effective is not None:
+                parameters = json.dumps(effective, allow_nan=False)
+        goal, _ = task_goal(capability, parameters)
         if capability == 'navigate':
             reason = self._navigation.reason(now)
             if reason:

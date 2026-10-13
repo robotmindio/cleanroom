@@ -673,3 +673,22 @@ def test_route_uses_measured_start_but_preserves_other_footprint_checks(fault):
     elif fault == "outside_region":
         end.pose.position.x = 2.0
     assert RobotExplorer._route_clear(explorer, route, start, geometry, (0, 0), 2.5) == (fault == "none")
+
+
+def test_explorer_advertises_actual_defaults_to_late_subscribers_without_motion(graph):
+    import json
+    from std_msgs.msg import String
+
+    peers, explorer, _ = graph
+    received = []
+    subscription = peers.create_subscription(
+        String, '/robot/explore/defaults', lambda message: received.append(json.loads(message.data)),
+        QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
+    try:
+        wait(lambda: received)
+        assert received[-1] == {'max_duration_sec': TEST_TASK_DURATION,
+                                'max_radius_m': explorer.config['max_radius_m']}
+        assert not peers.nav_active
+        assert not explorer._busy
+    finally:
+        peers.destroy_subscription(subscription)

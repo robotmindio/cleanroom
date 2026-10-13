@@ -57,12 +57,12 @@ class TaskJournal:
     def goal(self, goal_id):
         return self._db.execute('SELECT * FROM tasks WHERE goal_id=?', (goal_id,)).fetchone()
 
-    def admit(self, identifier, capability, parameters, goal_id):
+    def admit(self, identifier, capability, parameters, goal_id, result=None):
         with self._db:
             self._db.execute('''INSERT INTO tasks
-                (id,capability,parameters,goal_id,state,detail,dispatched) VALUES (?,?,?,?,?,?,0)''',
+                (id,capability,parameters,goal_id,state,detail,result,dispatched) VALUES (?,?,?,?,?,?,?,0)''',
                 (identifier, capability, parameters, goal_id, 'starting',
-                 'durably admitted; awaiting action acceptance'))
+                 'durably admitted; awaiting action acceptance', json.dumps(result or {}, allow_nan=False)))
 
     def update(self, identifier, state, detail, result=None):
         row = self.row(identifier)

@@ -74,8 +74,9 @@ The Fiber rosbridge connector exposes `rosbridge.capabilities`,
 `rosbridge.tasks.status`, `rosbridge.tasks.submit` and `rosbridge.tasks.cancel`.
 Use these named operations for role grants instead of granting unrestricted raw
 ROS frames. Read/status are read-only; cancellation is low-impact; starting a
-physical task retains Fiber's high-impact policy classification. One approval
-covers the admitted task, including its local exploration pauses/recovery.
+physical task retains its high-impact metadata but the managed submission
+operation is L1: authorized callers execute with an audit record and no human
+approval wait. Role scopes, exact service allow-lists and local safety still apply.
 The connector's exact service allow-list must include the four services above.
 Rosbridge itself retains its general ROS functionality for other clients.
 
@@ -89,11 +90,54 @@ This contract exposes navigation/exploration only. It does not qualify household
 manipulation, docking, unrestricted unattended operation or learned skills.
 
 
-Install the tracked single-rule `config/fiber_robot_tasks.yaml` with Fiber's
-`append_workflow` operation for the intended tenant; it appends without replacing
-other workflows. Invoke `robot-task-submit` with `task_id`, `capability` and a
-JSON string `parameters_json`. Its governed execution creates the durable Matrix
-approval wait and then admits the local task. Direct action calls can return a
-policy gate without creating that workflow wait; use the named workflow for
-physical submissions. Poll `rosbridge.tasks.status` by the same task ID after
+The operator robot belongs to Fiber's `default` tenant, matching the human
+Fiber UI session. Its workflows are declared in the integrations plugin's
+`routes.d/robot.yaml` and deployed through GitOps. For a separate DB tenant,
+install the tracked single-rule `config/fiber_robot_tasks.yaml` with Fiber's
+`append_workflow` operation; this does not install a default-tenant file route. Invoke `robot-task-submit` with no vars for default exploration. Optional
+`task_id`, `capability` and `parameters_json` retain the legacy calling contract. Its governed execution admits the local task
+automatically under L1. A tenant can explicitly require L2; that creates a durable
+approval wait before admission. Approval notifications use the configured channel
+(e.g. Matrix); declaring a channel does not provision its connection. A human
+approver resolves the gate in Fiber's approvals UI or authenticated API. Fiber
+checks approver identity and binds the single-use approval to that execution and
+action. With `on_timeout: deny`, an unanswered request never admits the task.
+Direct action calls can return a policy gate without creating the workflow wait;
+use the named workflow for physical submissions. Poll `rosbridge.tasks.status` by the same task ID after
 admission; workflow completion means admission, not physical completion.
+
+## Agent-facing defaults
+
+A user can ask an agent to “have the robot explore the house.” The agent reads
+Fiber's action descriptions and `rosbridge.capabilities`, then submits with
+`rosbridge.tasks.submit` (no arguments required). Fiber selects the authenticated
+tenant's configured robot, defaults capability to `explore`, derives an omitted
+task ID from its existing idempotency context and returns it for observation.
+A structured `parameters` object is preferred to JSON strings in direct calls.
+The tracked workflow remains the path for durable approval when policy gates.
+
+No exploration parameters means `revisit_known=false`, empty `resume_task_id`,
+and zero duration/radius overrides. Zero selects the Explorer's tracked limits,
+currently 900 active seconds and 10 m in `config/exploration.yaml`; a positive
+override may only reduce those limits. An agent uses `revisit_known=true` when
+the user's intent includes surveying already mapped space. Navigation still
+requires map-frame `x` and `y`; omitted `yaw` is zero radians.
+
+The Explorer publishes its actual configured limits on the local, latched
+`/robot/explore/defaults` topic. The task gateway exposes them as
+`effective_defaults` in the capability catalog alongside `defaults`,
+`required_parameters`, descriptions, examples and terminal states. It snapshots
+resolved parameters at admission into `result_json._task.effective_parameters`,
+retained through restarts and native terminal results. New unsent exploration
+tasks dispatch those captured limits, so a later default increase cannot expand
+the admitted task; the Explorer still enforces its current maximum limits. `_task.parameters` records
+the requested parameters. Effective exploration values are explicitly `null`
+when the Explorer has not advertised them or a saved native task is resumed;
+its original saved bounds remain owned by the Explorer. Older task rows remain
+queryable without this additive metadata.
+
+Retries use the returned task ID or the same Fiber idempotency key and identical
+arguments. A new task uses a new key or explicit task ID. Omission uses Fiber's
+normal execution/source identity or direct-call time-bucket deduplication; it
+does not identify a retry across unrelated execution contexts. Starting remains
+L1, so an admitted task can begin physical motion immediately.
