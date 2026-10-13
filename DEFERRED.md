@@ -10,6 +10,8 @@ listed below. Outstanding work limits expansion of that scope; simulation and
 unit tests cannot grant or extend physical acceptance. Runtime capability gates
 remain enforced in both recoverable and strict modes.
 Each section names its completion condition and its tracking issue.
+Delivery priorities and dependencies are in
+[the product readiness report](docs/product-readiness.md).
 
 ## Physical safety hardware and acceptance
 
@@ -69,6 +71,9 @@ unattended operation.
   velocity-dependent FootprintApproach covers measured stopping and uncertainty.
   Update tracked parameters
   from the reviewed measurements; do not tune only in RViz.
+- Repeat the attended physical obstacle-response check for the current
+  predictive FootprintApproach collision model. Its isolated DDS tests and
+  earlier static-zone obstacle evidence do not qualify physical prediction.
 - Record the exact software revision, sensor configuration, payload, surface,
   validation time, all six measured stow positions and all trial results before
   setting `validated: true`.
@@ -135,8 +140,10 @@ the calibration and RTAB-Map shutdown trials are recorded. Tracked in
   centimetres during small turns that lidar measures in millimetres; the
   production EKF uses wheel odometry only, but SLAM uses visual registration,
   so room-scale localization accuracy and precision placement are unverified.
-- Run a controlled RTAB-Map session and verify quota-triggered orderly
-  shutdown, SQLite/WAL closure, archive rotation and successful reopen.
+- Run a controlled RTAB-Map session and verify that duration/storage quotas
+  switch it to localization while retaining the live database. Separately
+  verify orderly process shutdown, SQLite/WAL closure, a consistent offline
+  archive and successful reopen. Bringup does not rotate the active database.
 - Survey the real cleanroom and produce a map no coarser than 0.05 m, an RMF
   navigation graph, fitted robot/RMF reference coordinates and an approval
   report. Pin every artifact and the acceptance report by SHA-256 in a new map

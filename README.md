@@ -3,6 +3,8 @@
 A shared ROS 2 Jazzy stack for running a LeKiwi mobile manipulator in Gazebo or on real hardware. Nav2 and Open-RMF see the same robot interface in both modes.
 
 The usual operator commands are indexed in [`scripts/README.md`](scripts/README.md).
+Capability readiness and the remaining delivery epics are in
+[`docs/product-readiness.md`](docs/product-readiness.md).
 
 ```text
 Open-RMF -> Free Fleet -> Nav2 -> cmd_vel_smoothed --+
