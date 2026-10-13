@@ -141,6 +141,7 @@ class TaskGateway(Node):
         self.create_service(GetTask, '/robot/tasks/get', self._get)
         self.create_service(CancelTask, '/robot/tasks/cancel', self._cancel)
         self.create_service(Trigger, '/robot/capabilities', self._capabilities)
+        self._observation_status = self.create_client(Trigger, '/robot/observations/status')
         self.create_timer(0.2, self._tick, clock=Clock(clock_type=ClockType.STEADY_TIME))
 
     def _active(self):
@@ -274,6 +275,12 @@ class TaskGateway(Node):
                              'resume_task_id is a saved native exploration UUID and preserves its original bounds.')}
             for name, client in self._action_clients.items()],
             'terminal_states': sorted(TERMINAL),
+            'observations': {'available': self._observation_status.service_is_ready(),
+                             'schema': 1, 'grounding': 'image_only',
+                             'services': {'query': '/robot/observations/query',
+                                          'evidence': '/robot/observations/evidence',
+                                          'status': '/robot/observations/status'},
+                             'events': '/robot/observations/events'},
             'examples': [{'capability': 'explore', 'parameters': {}},
                          {'capability': 'explore', 'parameters': {'revisit_known': True}}],
             'services': {'submit': '/robot/tasks/submit', 'get': '/robot/tasks/get', 'cancel': '/robot/tasks/cancel'},

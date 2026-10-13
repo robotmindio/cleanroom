@@ -790,6 +790,8 @@ def test_capability_defaults_and_task_metadata_come_from_explorer(system):
 def test_missing_explorer_defaults_are_explicit_and_do_not_block_submission(system):
     peers, start, status, _, _ = system
     catalog = json.loads(peers.gateway._capabilities(None, Trigger.Response()).message)
+    assert catalog['observations']['services']['query'] == '/robot/observations/query'
+    assert not catalog['observations']['available']
     explore = next(item for item in catalog['capabilities'] if item['name'] == 'explore')
     assert explore['effective_defaults'] is None
     assert start().accepted
