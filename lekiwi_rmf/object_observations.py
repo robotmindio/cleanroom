@@ -20,7 +20,7 @@ def query_parameters(text):
         values = json.loads(text)
     except RecursionError as error:
         raise ValueError('query is nested too deeply') from error
-    if not isinstance(values, dict) or set(values) - {'after_sequence', 'observation_ids', 'limit', 'epoch'}:
+    if not isinstance(values, dict) or set(values) - {'after_sequence', 'observation_ids', 'limit', 'epoch', 'pin_request_id'}:
         raise ValueError('unknown observation query fields')
     limit = values.get('limit', 20)
     if type(limit) is not int or not 1 <= limit <= 100:
@@ -30,6 +30,10 @@ def query_parameters(text):
         if ('after_sequence' in values or not isinstance(ids, list) or not 1 <= len(ids) <= 100
                 or any(not valid_id(identifier) for identifier in ids)):
             raise ValueError('observation_ids requires 1..100 SHA-256 IDs without a cursor')
+    request = values.get('pin_request_id')
+    if request is not None and (ids is None or not isinstance(request, str) or not 1 <= len(request) <= 128
+            or any(c not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_' for c in request)):
+        raise ValueError('pin receipt requires IDs and a valid request identity')
     cursor = values.get('after_sequence', 0)
     if type(cursor) is not int or not 0 <= cursor < 2**63:
         raise ValueError('after_sequence must be a nonnegative SQLite integer')
@@ -43,6 +47,10 @@ def query_parameters(text):
 
 def valid_id(value):
     return isinstance(value, str) and len(value) == 64 and all(c in '0123456789abcdef' for c in value)
+
+
+def blue_mask(pixels):
+    return cv2.inRange(cv2.cvtColor(pixels, cv2.COLOR_BGR2HSV), (90, 60, 40), (130, 255, 255))
 
 
 def observation(image, detections, model_sha256, camera_id):
@@ -84,8 +92,7 @@ def observation(image, detections, model_sha256, camera_id):
         # An interior sample reduces background; this attribute is not calibrated probability.
         left, top = int(x + w * .2), int(y + h * .2)
         right, bottom = max(left + 1, int(x + w * .8)), max(top + 1, int(y + h * .8))
-        hsv = cv2.cvtColor(pixels[top:bottom, left:right], cv2.COLOR_BGR2HSV)
-        blue = cv2.inRange(hsv, (90, 60, 40), (130, 255, 255))
+        blue = blue_mask(pixels[top:bottom, left:right])
         results.append({'label': label, 'score': score, 'bbox': [x, y, w, h],
                         'blue_fraction': float(np.count_nonzero(blue) / blue.size)})
     ok, encoded = cv2.imencode('.jpg', pixels, [cv2.IMWRITE_JPEG_QUALITY, 80])
@@ -132,6 +139,9 @@ class ObservationStore:
                     bytes INTEGER NOT NULL)''')
                 self._db.execute('CREATE INDEX IF NOT EXISTS observations_time ON observations(stored_at)')
                 self._db.execute('CREATE INDEX IF NOT EXISTS observations_size ON observations(bytes)')
+                self._db.execute('''CREATE TABLE IF NOT EXISTS pins (
+                    request_id TEXT NOT NULL, observation_id TEXT NOT NULL, expires_at REAL NOT NULL,
+                    PRIMARY KEY(request_id,observation_id))''')
                 self._db.execute('CREATE TABLE IF NOT EXISTS metadata (epoch TEXT NOT NULL)')
                 if self._db.execute('SELECT epoch FROM metadata').fetchone() is None:
                     self._db.execute('INSERT INTO metadata VALUES (?)', (uuid.uuid4().hex,))
@@ -147,7 +157,39 @@ class ObservationStore:
             raise
 
     def _prune(self, now):
-        self._db.execute('DELETE FROM observations WHERE stored_at<?', (now - self.retention_sec,))
+        self._db.execute('DELETE FROM pins WHERE expires_at<?', (now,))
+        self._db.execute('DELETE FROM observations WHERE stored_at<? AND id NOT IN (SELECT observation_id FROM pins)',
+                         (now - self.retention_sec,))
+
+    def pin(self, text, now=None):
+        if len(text.encode()) > 4096:
+            raise ValueError('pin request exceeds 4096 bytes')
+        try:
+            values = json.loads(text)
+        except RecursionError as error:
+            raise ValueError('pin request is nested too deeply') from error
+        if not isinstance(values, dict) or set(values) != {'request_id', 'observation_ids'}:
+            raise ValueError('pin requires request_id and observation_ids')
+        request, ids = values['request_id'], values['observation_ids']
+        if (not isinstance(request, str) or not 1 <= len(request) <= 128
+                or any(c not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_' for c in request)
+                or not isinstance(ids, list) or not 1 <= len(ids) <= 20 or any(not valid_id(i) for i in ids)
+                or len(set(ids)) != len(ids)):
+            raise ValueError('invalid evidence pin identity')
+        now = time.time() if now is None else now
+        with self._db:
+            self._prune(now)
+            previous = self._db.execute('SELECT observation_id FROM pins WHERE request_id=?', (request,)).fetchall()
+            if previous:
+                if {row[0] for row in previous} != set(ids):
+                    raise ValueError('pin request ID already has different evidence')
+                return
+            if self._db.execute('SELECT COUNT(DISTINCT request_id) FROM pins').fetchone()[0] >= 1000:
+                raise ValueError('evidence pin request quota reached')
+            for identifier in ids:
+                if self._db.execute('SELECT 1 FROM observations WHERE id=?', (identifier,)).fetchone() is None:
+                    raise ValueError('cannot pin missing or expired evidence')
+                self._db.execute('INSERT INTO pins VALUES (?,?,?)', (request, identifier, now + self.retention_sec))
 
     def put(self, document, evidence, now=None):
         now = time.time() if now is None else now
@@ -166,7 +208,10 @@ class ObservationStore:
                 count, used = self._db.execute('SELECT COUNT(*),COALESCE(SUM(bytes),0) FROM observations INDEXED BY observations_size').fetchone()
                 if count < self.max_records and used + size <= self.max_bytes:
                     break
-                self._db.execute('DELETE FROM observations WHERE sequence=(SELECT MIN(sequence) FROM observations)')
+                oldest = self._db.execute('SELECT MIN(sequence) FROM observations WHERE id NOT IN (SELECT observation_id FROM pins)').fetchone()[0]
+                if oldest is None:
+                    raise ValueError('storage quota reserved by pinned evidence')
+                self._db.execute('DELETE FROM observations WHERE sequence=?', (oldest,))
             cursor = self._db.execute('INSERT INTO observations (id,stored_at,document,evidence,bytes) VALUES (?,?,?,?,?)',
                                       (document['id'], now, text, evidence, size))
             return cursor.lastrowid
@@ -192,7 +237,10 @@ class ObservationStore:
                 break
             records.append({**json.loads(row['document']), 'sequence': row['sequence'], 'stored_at_unix_sec': row['stored_at']})
             size += len(row['document'].encode())
-        return {'schema': 1, 'epoch': self.epoch, 'observations': records,
+        request = json.loads(text).get('pin_request_id')
+        pins = {} if request is None else {row[0]: row[1] for row in self._db.execute(
+            'SELECT observation_id,expires_at FROM pins WHERE request_id=?', (request,))}
+        return {'schema': 1, 'epoch': self.epoch, 'observations': records, 'pins': pins,
                 'next_sequence': records[-1]['sequence'] if records else cursor,
                 'latest_sequence': last[0] if last is not None else 0,
                 'cursor_gap': bool(ids is None and cursor and

@@ -2,6 +2,7 @@
 """Durable admission and observation of existing ROS actions; never a motion controller."""
 
 import json
+import hashlib
 import math
 from pathlib import Path
 from queue import Empty, SimpleQueue
@@ -13,6 +14,7 @@ from action_msgs.srv import CancelGoal
 from geometry_msgs.msg import PoseStamped
 from nav2_msgs.action import NavigateToPose
 from nav2_msgs.msg import CollisionMonitorState
+from nav_msgs.msg import Odometry
 import rclpy
 from rclpy.action import ActionClient
 from rclpy.clock import Clock, ClockType
@@ -30,6 +32,8 @@ from lekiwi_rmf.srv import CancelTask, GetTask, SubmitTask
 from lekiwi_rmf.task_journal import TERMINAL, TaskJournal
 from lekiwi_rmf.navigation_pause import NavigationPause
 from lekiwi_rmf.navigation_observer import NavigationObserver, server_instance
+from lekiwi_rmf.navigation_distance import NavigationDistance
+from lekiwi_rmf.map_bundle import validate_map_bundle
 
 
 ACTIONS = {'navigate': ('/navigate_to_pose', NavigateToPose), 'explore': ('/robot/explore', Explore)}
@@ -90,6 +94,7 @@ class TaskGateway(Node):
         self.declare_parameter('navigation_timeout_sec', 180.0)
         self.declare_parameter('allow_navigation', True)
         self.declare_parameter('allow_exploration', True)
+        self.declare_parameter('map_bundle', '')
         self._enabled = {'navigate': self.get_parameter('allow_navigation').value,
                          'explore': self.get_parameter('allow_exploration').value}
         self._timeout = self.get_parameter('navigation_timeout_sec').value
@@ -120,6 +125,14 @@ class TaskGateway(Node):
         self._cancel_clients = {}
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self._events = self.create_publisher(String, '/robot/tasks/events', latched)
+        self._map_publisher = self.create_publisher(String, '/robot/map_context', latched)
+        bundle_path = self.get_parameter('map_bundle').value
+        map_context = {'ready': False}
+        if bundle_path:
+            validate_map_bundle(bundle_path)
+            map_context = {'ready': True, 'map_id': hashlib.sha256(Path(bundle_path).read_bytes()).hexdigest(),
+                           'epoch': uuid.uuid4().hex}
+        self._map_publisher.publish(String(data=json.dumps(map_context)))
         self._exploration_defaults = None
         self.create_subscription(String, '/robot/explore/defaults', self._explore_defaults, latched)
         self._owner = self.create_publisher(UUID, '/robot/explore/navigation_owner', 10)
@@ -142,6 +155,9 @@ class TaskGateway(Node):
         self.create_service(CancelTask, '/robot/tasks/cancel', self._cancel)
         self.create_service(Trigger, '/robot/capabilities', self._capabilities)
         self._observation_status = self.create_client(Trigger, '/robot/observations/status')
+        self._distance = NavigationDistance()
+        self.create_subscription(Odometry, '/odom', self._distance.update, 1)
+        self.create_service(Trigger, '/robot/navigation/odometry', self._odometry)
         self.create_timer(0.2, self._tick, clock=Clock(clock_type=ClockType.STEADY_TIME))
 
     def _active(self):
@@ -279,6 +295,7 @@ class TaskGateway(Node):
                              'schema': 1, 'grounding': 'image_only',
                              'services': {'query': '/robot/observations/query',
                                           'evidence': '/robot/observations/evidence',
+                                          'pin': '/robot/observations/pin',
                                           'status': '/robot/observations/status'},
                              'events': '/robot/observations/events'},
             'examples': [{'capability': 'explore', 'parameters': {}},
@@ -289,6 +306,12 @@ class TaskGateway(Node):
 
     def _guard_ready(self, message):
         self._guard = message.data, time.monotonic()
+
+    def _odometry(self, _request, response):
+        result = self._distance.status()
+        response.success = result['ready']
+        response.message = json.dumps(result, allow_nan=False)
+        return response
 
     def _guard_ack(self, message):
         self._ack = bytes(message.uuid), time.monotonic()

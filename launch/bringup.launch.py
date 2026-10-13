@@ -325,6 +325,7 @@ def _stack(context):
         Node(
             package="lekiwi_rmf", executable="robot_tasks", name="robot_tasks",
             parameters=[{"use_sim_time": sim, "allow_navigation": not topology.start_rmf,
+                         "map_bundle": LaunchConfiguration('map_bundle') if topology.static_map or LaunchConfiguration('localization').perform(context) == 'amcl' else '',
                          "allow_exploration": topology.visual_slam and not (topology.static_map or topology.start_rmf)}],
             output="screen", respawn=True, respawn_delay=2.0,
         ),
@@ -352,6 +353,8 @@ def _stack(context):
                 output="screen",
             ),
         ])
+    actions.extend(_include(launch_file("object_perception.launch.py"), flag("start_object_perception"),
+        use_sim_time=use_sim_time, calibration_file=LaunchConfiguration("object_calibration_file")))
     actions.extend([
         *_include(launch_file("slam.launch.py"), topology.visual_slam, navigation_params_file=params_file),
         *gated(
@@ -468,6 +471,8 @@ def generate_launch_description():
             ),
             # The Astra Pro is an additional third camera. Existing front and
             # wrist V4L2 cameras continue to publish unchanged.
+            DeclareLaunchArgument("start_object_perception", default_value="false", choices=["true", "false"]),
+            DeclareLaunchArgument("object_calibration_file", default_value=""),
             DeclareLaunchArgument("publish_astra", default_value="true", choices=["true", "false"]),
             # A serial is deliberately read from this tracked deployment file,
             # not an environment variable or a one-off launch command. An

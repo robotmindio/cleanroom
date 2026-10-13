@@ -7,7 +7,7 @@ find_package(rosidl_default_generators REQUIRED)
 find_package(geometry_msgs REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME} "action/Explore.action"
   "srv/SubmitTask.srv" "srv/GetTask.srv" "srv/CancelTask.srv"
-  "srv/QueryObservations.srv" "srv/GetObservationEvidence.srv" DEPENDENCIES geometry_msgs)
+  "srv/QueryObservations.srv" "srv/GetObservationEvidence.srv" "srv/PinObservationEvidence.srv" DEPENDENCIES geometry_msgs)
 ament_export_dependencies(rosidl_default_runtime)
 option(LEKIWI_BUILD_COMPUTE "Build compute-only Gazebo and MoveIt plugins" ON)
 if(LEKIWI_BUILD_COMPUTE)

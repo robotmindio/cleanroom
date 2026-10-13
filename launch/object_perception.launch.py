@@ -15,10 +15,12 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('use_sim_time', default_value='false'),
         DeclareLaunchArgument('image_topic', default_value='/camera/astra/color/image_raw'),
+        DeclareLaunchArgument('calibration_file', default_value=''),
         Node(package='lekiwi_rmf', executable='object_detector', name='object_detector',
              parameters=[config, clock], remappings=[('image', LaunchConfiguration('image_topic')),
                 ('source_image', '/robot/perception/source_image'), ('detections', '/robot/perception/detections')], output='screen'),
         Node(package='lekiwi_rmf', executable='object_observations', name='object_observations',
-             parameters=[config, clock], remappings=[('image', '/robot/perception/source_image'),
-                ('detections', '/robot/perception/detections')], output='screen'),
+             parameters=[config, clock, {'calibration_file': LaunchConfiguration('calibration_file')}],
+             remappings=[('image', '/robot/perception/source_image'), ('detections', '/robot/perception/detections'),
+                         ('depth', '/camera/astra/depth/image_raw'), ('camera_info', '/camera/astra/color/camera_info')], output='screen'),
     ])

@@ -26,6 +26,8 @@
   <exec_depend>cv_bridge</exec_depend>
   <exec_depend>message_filters</exec_depend>
   <exec_depend>vision_msgs</exec_depend>
+  <exec_depend>image_geometry</exec_depend>
+  <exec_depend>tf2_geometry_msgs</exec_depend>
   <exec_depend>control_msgs</exec_depend>
   <exec_depend>diagnostic_msgs</exec_depend>
   <exec_depend>unique_identifier_msgs</exec_depend>
