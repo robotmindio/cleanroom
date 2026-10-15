@@ -140,3 +140,32 @@ cup in the selected camera and a blue positive example for the scoped blue-cup
 deliverable. Camera coverage/source selection must be qualified before promoting
 a profile. Private images and detailed capture reports remain in the local ROS
 qualification directory, outside Git; only aggregate findings are recorded here.
+
+### Repositioning readiness and recovery findings
+
+The requested backward repositioning exposed a broken LAN control route. The
+existing compute-service installer now selects the reachable tailnet address
+and the active release workspace (`lekiwi_ws/current`). Selecting the parent
+workspace initially loaded its obsolete simulation installation; this was
+corrected before sending any motion command. Real driver feedback, wheel
+odometry and all three camera streams were then observed. The relayed connection
+still produced intermittent stale-feedback faults and is not qualified for motion.
+
+Base permission remained denied because the measured shoulder lift was about
+0.037 rad outside the accepted travel-stow reference (0.020 rad tolerance).
+MoveIt planned a bounded correction, but the motor host rejected execution:
+its saved August calibration differs from compute's September SO-101 mapping.
+Joint feedback showed no correction, and no base command was sent. Neither
+calibration was overwritten. Restarting the motor service cuts torque, so
+physical arm support must be confirmed before that recovery step. The collision
+monitor was also not active while navigation waited for map readiness.
+
+Add a **P0 split-runtime readiness epic** ahead of moving acceptance: establish
+the authoritative measured arm mapping on both computers, check calibration
+agreement before admitting trajectories, preserve active-release workspace
+selection during service recovery, and qualify a connection that continuously
+meets existing freshness limits. Resolve collision-monitor availability for
+guarded manual positioning when map initialization is pending. Acceptance needs
+fresh actual feedback, confirmed travel stow, active collision protection and a
+measured bounded reposition followed by a verified stop. These findings do not
+justify widening tolerances, disabling interlocks or changing goal policy.
