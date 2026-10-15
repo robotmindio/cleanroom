@@ -105,3 +105,13 @@ processing times. Exact duplicate detection does not establish independence
 between adjacent video frames; scene setups and split provenance still require
 review. Dataset-integrity regressions use synthetic unit fixtures and do not
 count toward the real recognition corpus.
+
+
+The follow-up observation/evaluation suite passes **37 tests**; targeted Ruff
+and repository-configured ament_flake8 checks pass. On the inspected live ROS
+graph, the existing task submit/get/cancel services are present, while the new
+observation and navigation-accounting services are absent. Fiber PR #5402 has
+merged and ROS PR #80 remains open. Source merge status does not establish a
+compatible deployed consumer. The stationary canary must follow recognition
+acceptance and the compatible ROS/Fiber release, with no ad-hoc production
+feature enablement used to bypass these gates.
