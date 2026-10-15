@@ -10,6 +10,7 @@ import sys
 import time
 
 import cv2
+import numpy as np
 from cv_bridge import CvBridge
 from builtin_interfaces.msg import Time
 from std_msgs.msg import Header
@@ -55,19 +56,20 @@ def interval(successes, total):
     return [max(0, centre - margin), min(1, centre + margin)]
 
 
-def evaluate(manifest, model_path):
+def load_scenes(manifest):
     path = Path(manifest)
     if path.stat().st_size > 1024 * 1024:
         raise ValueError('manifest exceeds 1 MiB')
-    scenes = json.loads(path.read_text())
+    manifest_bytes = path.read_bytes()
+    scenes = json.loads(manifest_bytes)
     if not isinstance(scenes, list) or not scenes or len(scenes) > 10000:
         raise ValueError('manifest requires 1..10000 scenes')
-    seen, heldout = set(), []
+    seen, image_hashes, pixel_hashes, heldout = set(), {}, {}, []
     for scene in scenes:
         if not isinstance(scene, dict) or set(scene) != {'scene_id', 'split', 'image', 'cups'}:
             raise ValueError('each scene requires scene_id, split, image and cups')
         identifier = scene['scene_id']
-        if not isinstance(identifier, str) or not identifier or identifier in seen:
+        if not isinstance(identifier, str) or not 1 <= len(identifier) <= 128 or identifier in seen:
             raise ValueError('scene IDs must be unique; split by scene, not adjacent video frames')
         seen.add(identifier)
         if scene['split'] not in ('development', 'heldout') or not isinstance(scene['image'], str):
@@ -82,29 +84,48 @@ def evaluate(manifest, model_path):
                     any(type(value) not in (int, float) or not math.isfinite(value) for value in box)
                     or min(box[:2]) < 0 or min(box[2:]) <= 0):
                 raise ValueError('invalid labeled cup box')
+        image_path = Path(scene['image'])
+        if not image_path.is_absolute():
+            image_path = path.parent / image_path
+        if image_path.stat().st_size > 8 * 1024**2:
+            raise ValueError('evaluation image exceeds 8 MiB')
+        content = image_path.read_bytes()
+        digest = hashlib.sha256(content).hexdigest()
+        pixels = cv2.imdecode(np.frombuffer(content, np.uint8), cv2.IMREAD_COLOR)
+        if pixels is None or pixels.shape[0] > 1080 or pixels.shape[1] > 1920:
+            raise ValueError('evaluation image unreadable or exceeds 1920x1080')
+        pixel_digest = hashlib.sha256(str(pixels.shape).encode() + pixels.tobytes()).hexdigest()
+        prior = image_hashes.get(digest) or pixel_hashes.get(pixel_digest)
+        if prior:
+            raise ValueError(f'duplicate image content in scenes {prior!r} and {identifier!r}; '
+                             'scene IDs cannot make repeated captures independent')
+        image_hashes[digest] = pixel_hashes[pixel_digest] = identifier
+        for cup in scene['cups']:
+            x, y, w, h = cup['bbox']
+            if x + w > pixels.shape[1] or y + h > pixels.shape[0]:
+                raise ValueError('labeled box exceeds its image')
         if scene['split'] == 'heldout':
-            heldout.append(scene)
+            heldout.append((scene, image_path, digest))
+    if not heldout:
+        raise ValueError('manifest requires heldout scenes')
+    return hashlib.sha256(manifest_bytes).hexdigest(), heldout
+
+
+def evaluate(manifest, model_path):
+    manifest_hash, heldout = load_scenes(manifest)
     model_path = Path(model_path).expanduser()
     with model_path.open('rb') as stream:
         if hashlib.file_digest(stream, 'sha256').hexdigest() != MODEL_SHA256:
             raise ValueError('evaluation model hash differs from the pinned artifact')
     cv2.setNumThreads(2)
     model, bridge = YoloX(str(model_path), confThreshold=.5), CvBridge()
-    totals, durations, hashes = [0, 0, 0], [], []
+    totals, durations, hashes, results = [0, 0, 0], [], [], []
     positive = negative = ambiguous = 0
-    for sequence, scene in enumerate(heldout, 1):
-        image_path = Path(scene['image'])
-        if not image_path.is_absolute():
-            image_path = path.parent / image_path
-        if image_path.stat().st_size > 8 * 1024**2:
-            raise ValueError('evaluation image exceeds 8 MiB')
-        pixels = cv2.imread(str(image_path))
-        if pixels is None or pixels.shape[0] > 1080 or pixels.shape[1] > 1920:
-            raise ValueError('evaluation image unreadable or exceeds 1920x1080')
-        for cup in scene['cups']:
-            x, y, w, h = cup['bbox']
-            if x + w > pixels.shape[1] or y + h > pixels.shape[0]:
-                raise ValueError('labeled box exceeds its image')
+    for sequence, (scene, image_path, digest) in enumerate(heldout, 1):
+        content = image_path.read_bytes()
+        if hashlib.sha256(content).hexdigest() != digest:
+            raise ValueError('evaluation image changed after dataset validation')
+        pixels = cv2.imdecode(np.frombuffer(content, np.uint8), cv2.IMREAD_COLOR)
         header = Header(stamp=Time(sec=sequence), frame_id='offline_camera')
         start = time.monotonic()
         found = detect(model, pixels, header)
@@ -117,8 +138,12 @@ def evaluate(manifest, model_path):
         positive += bool(expected)
         negative += not expected
         ambiguous += len(expected) > 1
-        totals = [a + b for a, b in zip(totals, counts(predictions, expected))]
-        hashes.append(hashlib.sha256(image_path.read_bytes()).hexdigest())
+        matched = counts(predictions, expected)
+        totals = [a + b for a, b in zip(totals, matched)]
+        results.append({'scene_id': scene['scene_id'], 'tp': matched[0], 'fp': matched[1],
+                        'fn': matched[2], 'predictions': predictions, 'expected': expected,
+                        'processing_sec': durations[-1]})
+        hashes.append(digest)
     tp, fp, fn = totals
     precision, recall = tp / (tp + fp) if tp + fp else 0, tp / (tp + fn) if tp + fn else 0
     p95 = sorted(durations)[max(0, math.ceil(.95 * len(durations)) - 1)] if durations else None
@@ -126,8 +151,8 @@ def evaluate(manifest, model_path):
              'negative_scenes': negative >= 20, 'ambiguous_scenes': ambiguous >= 10,
              'precision': precision >= .98, 'recall': recall >= .9, 'latency': p95 is not None and p95 <= 1.5}
     return {'schema': 1, 'passed': all(gates.values()), 'gates': gates, 'model_sha256': MODEL_SHA256,
-            'manifest_sha256': hashlib.sha256(path.read_bytes()).hexdigest(), 'image_hashes': hashes,
-            'opencv_version': cv2.__version__, 'heldout_scenes': len(heldout), 'tp': tp, 'fp': fp, 'fn': fn,
+            'manifest_sha256': manifest_hash, 'image_hashes': hashes,
+            'scenes': results, 'opencv_version': cv2.__version__, 'heldout_scenes': len(heldout), 'tp': tp, 'fp': fp, 'fn': fn,
             'precision': precision, 'recall': recall, 'precision_95_ci': interval(tp, tp + fp),
             'recall_95_ci': interval(tp, tp + fn), 'processing_p95_sec': p95,
             'confidence_threshold': .5, 'blue_fraction_threshold': .35,

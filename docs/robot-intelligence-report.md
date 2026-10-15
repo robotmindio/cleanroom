@@ -80,3 +80,28 @@ held-out dataset, measured calibration and attended/deployed acceptance evidence
 were unavailable. Promotion remains disabled until those specific epics pass.
 See [object observations](object-observations.md) and the adjacent Fiber
 `fiber-core/docs/ROBOT-GOALS.md` for runtime contracts and deployment order.
+
+
+## Recognition qualification follow-up — 2026-10-15
+
+The live Astra RGB topic has a publisher and supplied a fresh capture. A bounded
+read-only probe using the pinned CPU model processed one live capture in
+approximately **0.746 seconds**; its age at receipt was **0.170 seconds**.
+This checks the actual input/inference path. It is one sample, is not p95 latency,
+and provides no recognition accuracy estimate without ground-truth labels.
+No robot motion, live perception enablement or goal-policy promotion occurred.
+
+No labeled held-out scene manifest was found in the inspected project and ROS
+artifact directories. Recognition acceptance therefore remains open. The next
+required input is a permitted labeled dataset, or physically arranged stationary
+scenes for capture and independent labeling: single blue cup, no blue cup,
+multiple blue cups and representative distractors/lighting/viewpoints.
+
+The evaluator now rejects repeated image bytes and identical decoded pixels
+across both dataset splits, validates development-set image/box boundaries too,
+pins the evaluated manifest/image content and rejects image changes during a
+run. Reports include per-scene predictions, reference boxes, error counts and
+processing times. Exact duplicate detection does not establish independence
+between adjacent video frames; scene setups and split provenance still require
+review. Dataset-integrity regressions use synthetic unit fixtures and do not
+count toward the real recognition corpus.

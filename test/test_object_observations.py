@@ -207,11 +207,17 @@ def test_model_installer_rejects_existing_unpinned_artifact(tmp_path):
         module.install(tmp_path)
 
 
-def test_evaluation_matches_each_target_once_and_reports_uncertainty():
+@pytest.fixture
+def evaluator():
     source = Path(__file__).parents[1] / 'scripts/evaluate-object-recognition.py'
     spec = importlib.util.spec_from_file_location('evaluate_object_recognition', source)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    return module
+
+
+def test_evaluation_matches_each_target_once_and_reports_uncertainty(evaluator):
+    module = evaluator
     box = [10, 10, 10, 10]
     assert module.counts([box, box], [box]) == (1, 1, 0)
     assert module.counts([], [box]) == (0, 0, 1)
@@ -256,3 +262,61 @@ def test_pin_is_atomic_and_cannot_evict_reserved_evidence(tmp_path):
         store.put(second, jpeg2, now=102)
     assert store.evidence(first['id'], now=102)[0] == jpeg
     store.close()
+
+
+@pytest.mark.parametrize('split,extension', [('heldout', '.png'), ('development', '.bmp')])
+def test_evaluation_rejects_duplicate_content_with_new_scene_ids(tmp_path, evaluator, split, extension):
+    pixels = np.full((40, 60, 3), 90, np.uint8)
+    cv2.imwrite(str(tmp_path / 'one.png'), pixels)
+    cv2.imwrite(str(tmp_path / ('two' + extension)), pixels)
+    manifest = tmp_path / 'scenes.json'
+    manifest.write_text(json.dumps([
+        {'scene_id': 'first', 'split': 'heldout', 'image': 'one.png', 'cups': []},
+        {'scene_id': 'second', 'split': split, 'image': 'two' + extension, 'cups': []}]))
+    with pytest.raises(ValueError, match='duplicate image content'):
+        evaluator.load_scenes(manifest)
+
+
+def test_evaluation_validates_development_labels_before_inference(tmp_path, evaluator):
+    cv2.imwrite(str(tmp_path / 'one.png'), np.zeros((40, 60, 3), np.uint8))
+    manifest = tmp_path / 'scenes.json'
+    manifest.write_text(json.dumps([{'scene_id': 'development', 'split': 'development',
+        'image': 'one.png', 'cups': [{'bbox': [50, 0, 20, 10], 'blue': True}]}]))
+    with pytest.raises(ValueError, match='exceeds its image'):
+        evaluator.load_scenes(manifest)
+
+
+def test_evaluation_reports_failed_scene_and_keeps_small_corpus_unqualified(tmp_path, evaluator, monkeypatch):
+    import hashlib
+    pixels = np.zeros((40, 60, 3), np.uint8)
+    cv2.imwrite(str(tmp_path / 'one.png'), pixels)
+    manifest = tmp_path / 'scenes.json'
+    manifest.write_text(json.dumps([{'scene_id': 'test-fixture', 'split': 'heldout',
+        'image': 'one.png', 'cups': [{'bbox': [10, 10, 20, 20], 'blue': True}]}]))
+    model = tmp_path / 'fixture.onnx'
+    model.write_bytes(b'fixture')
+    monkeypatch.setattr(evaluator, 'MODEL_SHA256', hashlib.sha256(b'fixture').hexdigest())
+    monkeypatch.setattr(evaluator, 'YoloX', lambda *args, **kwargs: SimpleNamespace(infer=lambda image: []))
+    result = evaluator.evaluate(manifest, model)
+    assert not result['passed'] and not result['gates']['heldout_scenes']
+    assert result['fn'] == 1 and result['scenes'][0]['scene_id'] == 'test-fixture'
+    assert result['scenes'][0]['fn'] == 1 and result['scenes'][0]['predictions'] == []
+    assert result['manifest_sha256'] == hashlib.sha256(manifest.read_bytes()).hexdigest()
+
+
+def test_evaluation_rejects_images_changed_after_preflight(tmp_path, evaluator, monkeypatch):
+    import hashlib
+    image = tmp_path / 'one.png'
+    cv2.imwrite(str(image), np.zeros((40, 60, 3), np.uint8))
+    manifest = tmp_path / 'scenes.json'
+    manifest.write_text(json.dumps([{'scene_id': 'test-fixture', 'split': 'heldout',
+        'image': 'one.png', 'cups': []}]))
+    model = tmp_path / 'fixture.onnx'
+    model.write_bytes(b'fixture')
+    monkeypatch.setattr(evaluator, 'MODEL_SHA256', hashlib.sha256(b'fixture').hexdigest())
+    def change_image(*args, **kwargs):
+        cv2.imwrite(str(image), np.full((40, 60, 3), 255, np.uint8))
+        return SimpleNamespace(infer=lambda pixels: [])
+    monkeypatch.setattr(evaluator, 'YoloX', change_image)
+    with pytest.raises(ValueError, match='changed after dataset validation'):
+        evaluator.evaluate(manifest, model)

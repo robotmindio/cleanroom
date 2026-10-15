@@ -2,9 +2,10 @@
 
 This is the ROS foundation for implementation slices 0–1. It detects cup
 candidates and measures the fraction of blue pixels in each candidate's
-interior region. It does not identify a permanent object, resolve a user goal,
-authorize motion. Calibrated metric results are optional, as described below. Multiple cups remain separate
-candidates; an empty result means no detector candidates in that capture.
+interior region. The ROS collector does not identify a permanent object, resolve
+a user goal or authorize motion. Calibrated metric results are optional, as
+described below. Multiple cups remain separate candidates; an empty result
+means no detector candidates in that capture.
 
 ## Install and launch
 
@@ -75,10 +76,9 @@ process lock prevents competing writers.
 Retention evicts oldest observations at seven days, 100,000 records or the
 configured payload quota. SQLite page allocation is additionally bounded by
 `max_bytes`; transaction journals can temporarily add disk use. Evidence that
-has been evicted returns an explicit not-found/expired error. These records are
-not yet pinned by Fiber goals; slice 2 must implement pinning/admission before
-using them as durable goal-completion evidence. Current historical observations
-remain immutable while retained.
+has been evicted returns an explicit not-found/expired error. These records can be
+pinned by admitted Fiber goals through the pin service described below.
+Unpinned historical observations remain immutable while retained.
 
 ## Recorded evaluation
 
@@ -103,6 +103,15 @@ scene setups, split before tuning. Images stay outside Git:
 
 Boxes are `[x,y,width,height]` in original pixels. Label every visible cup and
 its blue attribute, including distractors and ambiguous multiple matches.
+
+The evaluator validates images and boxes in both splits before inference. It
+rejects repeated file content and identical decoded pixels, including copies
+with different filenames or lossless encodings. This prevents exact-image
+leakage between development and held-out sets. It cannot establish independence
+between adjacent video frames: use separately arranged scene setups and split
+before tuning. Each report includes per-scene predictions, expected blue-cup
+boxes, error counts and processing time so failures can be inspected. An image
+changed after preflight invalidates the evaluation.
 
 ```bash
 source scripts/setup.bash
