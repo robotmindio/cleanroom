@@ -169,3 +169,32 @@ guarded manual positioning when map initialization is pending. Acceptance needs
 fresh actual feedback, confirmed travel stow, active collision protection and a
 measured bounded reposition followed by a verified stop. These findings do not
 justify widening tolerances, disabling interlocks or changing goal policy.
+
+
+### Bounded physical repositioning follow-up
+
+The saved compute SO-101 arm mapping was validated with the existing calibration
+reader, copied atomically to the stopped motor host with its previous mapping
+backed up, and read back for agreement. The motor service restarted successfully.
+This synchronizes an existing mapping; it is not a new physical calibration.
+MoveIt then planned and executed the small travel-stow correction successfully;
+measured shoulder lift reached -1.7952 rad against the -1.7967 rad reference.
+
+A finite backward command through `/cmd_vel_manual`, the existing mux and Nav2
+collision monitor produced **0.0380 m backward wheel-odometry displacement**.
+The client required fresh driver/permission/scan/odometry feedback, an active
+collision monitor, transformed rear clearance and bounded distance/heading.
+It paused on stale inputs, sent zeros afterward and confirmed fresh zero wheel
+velocity. Relayed-network delays remain an operational limitation; this one
+positioning operation does not qualify moving search or stopping performance.
+
+Fresh post-stop frames arrived from all three cameras with source ages
+0.097–0.138 s. At the unchanged 0.50 confidence threshold, the pinned model
+returned no cups (CPU inference 0.435–0.603 s per frame). Visual inspection showed
+a table leg ahead and no cup in these views. These latest frames differ from the
+earlier cup scene; no current cup finding or recognition success is claimed.
+
+A subsequent bounded viewing-angle check turned approximately **4.25°** according
+to wheel odometry, with 2.7 mm translation, then stopped at its deadline as
+freshness/clearance gates interrupted further motion. Its requested 14.3° view
+was not reached. This partial check is not a completed object search.
