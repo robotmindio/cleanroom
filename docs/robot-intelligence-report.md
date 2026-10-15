@@ -115,3 +115,28 @@ merged and ROS PR #80 remains open. Source merge status does not establish a
 compatible deployed consumer. The stationary canary must follow recognition
 acceptance and the compatible ROS/Fiber release, with no ad-hoc production
 feature enablement used to bypass these gates.
+
+
+### User-arranged cup visibility trial
+
+A user-arranged cup was inspected while the robot remained stationary. Three
+fresh 640×480 Astra captures produced zero cup detections; visual inspection
+showed that the cup was outside that camera's view. The front camera (320×240)
+showed a transparent cup close enough to crop its rim/base; the wrist camera
+(352×288) showed a partial view. This establishes a camera-coverage limitation
+for the current Astra-only perception default, not evidence that the object was
+absent from the robot's surroundings.
+
+The pinned model also produced zero accepted cup detections on the saved front
+and wrist views at the unchanged 0.50 threshold. A separate diagnostic pass on
+the front image scored cup at 0.127 and vase at 0.407. These rejected scores do
+not establish a reliable cup classification. RGB conversion and letterboxing
+were checked against the pinned upstream OpenCV Zoo demo; no preprocessing
+mismatch was found. No runtime threshold or camera selection was changed.
+
+This is one scene with correlated captures, not an independent held-out corpus.
+Its color ground truth remains unconfirmed. The next trial needs a fully visible
+cup in the selected camera and a blue positive example for the scoped blue-cup
+deliverable. Camera coverage/source selection must be qualified before promoting
+a profile. Private images and detailed capture reports remain in the local ROS
+qualification directory, outside Git; only aggregate findings are recorded here.
