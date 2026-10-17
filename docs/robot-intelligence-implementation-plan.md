@@ -5,6 +5,14 @@ Proposed 2026-10-14. This is a delivery plan for E9–E14 in
 read-only inspection of the adjacent Fiber source. It proposes APIs, policies
 and thresholds; none is installed or physically accepted by this document.
 
+Implementation status: software for slices 0–4 is implemented across cleanroom
+and the adjacent Fiber repository, using existing ROS navigation, camera
+registration, TF and Fiber governance. See the [implementation report](robot-intelligence-report.md)
+for delivered contracts, verification and remaining acceptance epics.
+Recognition accuracy, measured metric calibration, deployed canaries and attended
+moving-search acceptance remain open. Both perception and robot profiles are
+disabled by default. Slice 5 remains the explicitly separate expansion backlog.
+
 ## First deliverable
 
 Deliver **“Find the blue cup and show me where it is” from a stationary robot**.

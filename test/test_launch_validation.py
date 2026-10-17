@@ -365,3 +365,12 @@ def test_the_map_bundle_is_validated_once_and_returned(monkeypatch):
     assert validate_launch_arguments(valid_arguments(static_map="true")) == "bundle"
     assert calls == [("/tmp/not-used-without-rmf.yaml", True)]
     assert validate_launch_arguments(valid_arguments()) is None
+
+
+def test_perception_is_explicit_and_reuses_camera_topics():
+    description = resolve_bringup(profile='split', start_object_perception='true')
+    collector = find_node(description, name='object_observations')
+    detector = find_node(description, name='object_detector')
+    assert collector['parameters']['camera_ids'] == ['front']
+    assert detector['parameters']['camera_ids'] == ['front']
+    assert collector['parameters']['model_name'] == detector['parameters']['model_name']

@@ -1,0 +1,6 @@
+# Bounded query: after_sequence+limit, or observation_ids+limit.
+string request_json
+---
+bool success
+string detail
+string response_json

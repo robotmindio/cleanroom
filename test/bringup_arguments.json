@@ -181,6 +181,13 @@
   "choices": null,
   "default": "false"
  },
+ "start_object_perception": {
+  "choices": [
+   "true",
+   "false"
+  ],
+  "default": "false"
+ },
  "start_rmf": {
   "choices": null,
   "default": "false"
