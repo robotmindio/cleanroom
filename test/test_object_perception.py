@@ -169,3 +169,20 @@ def test_cli_uses_the_pinned_private_runtime(monkeypatch, tmp_path):
     assert calls[0][2]['PYTHONNOUSERSITE'] == '1'
     object_recognition.use_model_runtime('yolox')
     assert len(calls) == 1
+
+
+def test_diagnostics_reads_clock_before_frame_lock_to_avoid_jump_deadlock():
+    from rclpy.time import Time as ClockTime
+    from lekiwi_rmf.object_detector import ObjectDetector
+
+    lock, published = threading.Lock(), []
+    def now():
+        assert not lock.locked()
+        return ClockTime(nanoseconds=100000000000)
+    state = SimpleNamespace(get_clock=lambda: SimpleNamespace(now=now), _frame_lock=lock,
+                            _stats={'front': {'reason': '', 'published_stamp': 0}},
+                            _durations={'front': []}, _detector=SimpleNamespace(sha256='a' * 64),
+                            _bindings={'front': {'sha256': 'b' * 64}}, _last_stamp={},
+                            _frames={}, _age=2., _diagnostics=SimpleNamespace(publish=published.append))
+    ObjectDetector._health(state)
+    assert published[0].status[0].message == 'observation output stale'

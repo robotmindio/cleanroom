@@ -57,6 +57,11 @@ class ObjectObservations(Node):
         self._motion = ObservationMotion()
         self.create_subscription(Odometry, '/wheel/odometry', self._motion.odom, qos_profile_sensor_data)
         self.create_subscription(JointState, '/joint_states', self._motion.joint, qos_profile_sensor_data)
+        self._age = self.get_parameter('max_source_age_sec').value
+        if not 0 < self._age <= 10:
+            raise ValueError('max_source_age_sec must be within (0,10]')
+        # Retain the tracked 30-Hz depth stream throughout the inference freshness window.
+        cache_size = math.ceil(self._age * 30) + 4
         self._streams = {}
         for name, binding in self._bindings.items():
             geometry = ObjectGeometry(binding['calibration_file'])
@@ -68,16 +73,13 @@ class ObjectObservations(Node):
             stream = {'last': 0., 'stamp': 0, 'reason': 'waiting for synchronized image/detections',
                       'geometry': geometry, 'depth': None, 'info': None}
             if binding['depth_topic']:
-                for key, kind, topic, size in [('depth', Image, binding['depth_topic'], 16),
-                                               ('info', CameraInfo, binding['camera_info_topic'], 64)]:
+                for key, kind, topic, size in [('depth', Image, binding['depth_topic'], cache_size),
+                                               ('info', CameraInfo, binding['camera_info_topic'], cache_size)]:
                     subscriber = message_filters.Subscriber(self, kind, topic, qos_profile=qos_profile_sensor_data)
                     stream[key] = message_filters.Cache(subscriber, size)
             self._streams[name] = stream
-        self._age = self.get_parameter('max_source_age_sec').value
         if not valid_id(self._model):
             raise ValueError('configured model SHA-256 and camera identity are required')
-        if not 0 < self._age <= 10:
-            raise ValueError('max_source_age_sec must be within (0,10]')
         self._store = ObservationStore(self.get_parameter('database_path').value,
             max_records=self.get_parameter('max_records').value, max_bytes=self.get_parameter('max_bytes').value,
             retention_sec=self.get_parameter('retention_sec').value)

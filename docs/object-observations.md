@@ -78,7 +78,9 @@ after image encoding and geometry work.
 `/diagnostics` exposes per-camera received/published/rejected/overwritten counts,
 source/output age, inference duration and rolling p95, pending frames and the
 operating-point identities. Query/status expose each camera's ingestion age and
-readiness. A stale or overloaded pipeline reports unavailability rather than
+readiness. ROS launch supervises process shutdown; under severe CPU/memory pressure an
+in-flight Torch operation may require its existing termination escalation.
+A stale or overloaded pipeline reports unavailability rather than
 pretending that an empty historical result is current.
 
 Each collected observation has a `stationary` flag derived from read-only
@@ -195,7 +197,8 @@ Metric mode requires a reviewed schema-1 calibration marked `validated` and
 `depth_registered`, matching camera/frame, measured intrinsics, distortion,
 raster correspondence and dimensions. Uncertainty limits remain 0.10 m camera,
 0.20 m map and 0.02 s clock; depth/CameraInfo must match capture within 50 ms.
-Depth must be actual registered 16-bit surface depth, with accepted range
+The ROS depth/CameraInfo caches cover the configured inference-age window at
+the tracked 30-Hz depth rate. Depth must be actual registered 16-bit surface depth, with accepted range
 0.55–3.0 m. A floor projection cannot substitute for the object's surface.
 
 Calibration `sampling: blue` preserves the existing blue-surface behavior.

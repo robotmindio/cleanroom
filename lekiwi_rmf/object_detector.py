@@ -176,14 +176,16 @@ class ObjectDetector(Node):
 
     def _health(self):
         message = DiagnosticArray()
-        message.header.stamp = self.get_clock().now().to_msg()
+        now = self.get_clock().now()
+        message.header.stamp = now.to_msg()
+        stamp_now = now.nanoseconds
         with self._frame_lock:
             for camera, stats in self._stats.items():
                 durations = sorted(self._durations[camera])
                 p95 = durations[max(0, math.ceil(.95 * len(durations)) - 1)] if durations else None
                 values = {**stats, 'processing_p95_sec': p95, 'model_sha256': self._detector.sha256, 'camera_sha256': self._bindings[camera]['sha256'],
-                          'capture_age_sec': (self.get_clock().now().nanoseconds - self._last_stamp.get(camera, 0)) / 1e9,
-                          'output_age_sec': (self.get_clock().now().nanoseconds - stats['published_stamp']) / 1e9,
+                          'capture_age_sec': (stamp_now - self._last_stamp.get(camera, 0)) / 1e9,
+                          'output_age_sec': (stamp_now - stats['published_stamp']) / 1e9,
                           'pending_frames': int(camera in self._frames)}
                 status = DiagnosticStatus(name='lekiwi/perception/' + camera,
                     hardware_id=camera, level=DiagnosticStatus.WARN if stats['reason'] or not 0 <= values['output_age_sec'] <= self._age else DiagnosticStatus.OK,

@@ -141,3 +141,28 @@ def test_multiple_camera_readiness_cannot_mask_wrong_or_missing_source(tmp_path)
     finally:
         collector.destroy_node()
         context.try_shutdown()
+
+
+def test_depth_cache_retains_capture_until_inference_freshness_deadline(tmp_path):
+    from builtin_interfaces.msg import Time as Stamp
+    from rclpy.time import Time
+    from sensor_msgs.msg import Image
+
+    context = Context()
+    rclpy.init(context=context)
+    collector = ObjectObservations(context=context, parameter_overrides=[
+        Parameter('database_path', value=str(tmp_path / 'depth-cache.db')),
+        Parameter('model_sha256', value=MODEL_SHA256), Parameter('camera_ids', value=['astra_color']),
+        Parameter('max_source_age_sec', value=3.)])
+    try:
+        cache = collector._streams['astra_color']['depth']
+        for index in range(91):
+            image = Image()
+            image.header.stamp = Stamp(sec=100 + index // 30, nanosec=(index % 30) * 1000000000 // 30)
+            cache.add(image)
+        captured = Time.from_msg(Stamp(sec=100))
+        assert cache.getInterval(captured, captured)
+        assert len(cache.cache_msgs) <= 94
+    finally:
+        collector.destroy_node()
+        context.try_shutdown()

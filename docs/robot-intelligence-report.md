@@ -270,7 +270,7 @@ does not establish a grasp target or prove absence outside inspected views.
 
 ### Final software verification
 
-The compatible ROS package builds. **198 targeted ROS tests pass**, including
+The compatible ROS package builds. **200 targeted ROS tests pass**, including
 perception, immutable storage/services, camera/geometry boundaries, launch
 validation, all bringup snapshots and service installation. The Fiber change
 passes **27 robot tests**, strict typing on all five robot modules, **three UI
@@ -288,3 +288,13 @@ latency benchmark or a real-goal canary. Simulated records cannot satisfy real
 goals. No robot motion or production deployment occurred in this robustness
 implementation. Private raw captures, bag, labels and result reports are retained;
 disposable session scripts were removed.
+
+Final lifecycle checks also received twelve diagnostics updates and four evidence
+events across repeated clock resets on isolated domain 211. A regression prevents
+diagnostics from taking the ROS clock lock while holding the frame lock. Under
+this overloaded host, detector shutdown still required the
+existing ROS launch SIGKILL escalation after SIGINT/SIGTERM; clean detector exit
+under deployed resource allocation remains part of lifecycle acceptance. The
+collector exited cleanly. A further regression retains 30-Hz Astra depth and
+CameraInfo across the full allowed inference-age window, preventing valid metric
+samples from being evicted before delayed detections arrive.
