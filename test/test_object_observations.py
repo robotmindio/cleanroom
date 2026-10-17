@@ -14,9 +14,12 @@ from std_msgs.msg import Header
 from builtin_interfaces.msg import Time
 from vision_msgs.msg import Detection2D, Detection2DArray, ObjectHypothesisWithPose
 
-from lekiwi_rmf.object_model import MODEL_SHA256
+from lekiwi_rmf.object_recognition import recognition_identity, model_spec
+
 from lekiwi_rmf.object_observations import ObservationStore, observation, query_parameters
 
+
+MODEL_SHA256 = recognition_identity('yolox')[0]
 
 def capture(count=1, stamp=1, blue=True):
     pixels = np.zeros((40, 60, 3), np.uint8)
@@ -168,8 +171,8 @@ def test_oversized_capture_does_not_evict_existing_evidence(tmp_path):
 def test_recognition_uses_source_coordinates_and_keeps_different_cups():
     from lekiwi_rmf.object_detector import detect
 
-    recognizer = SimpleNamespace(infer=lambda _: np.array([[64, 64, 128, 128, .9, 41],
-                                                           [320, 64, 64, 64, .8, 41],
+    recognizer = SimpleNamespace(predict=lambda _: np.array([[32, 32, 64, 64, .9, 41],
+                                                           [160, 32, 32, 32, .8, 41],
                                                            [0, 0, 50, 50, .9, 0]]))
     result = detect(recognizer, np.zeros((320, 320, 3), np.uint8), Header())
     assert len(result.detections) == 2
@@ -196,13 +199,12 @@ def test_nms_fallback_preserves_class_aware_suppression(monkeypatch):
 
 
 def test_model_installer_rejects_existing_unpinned_artifact(tmp_path):
-    from lekiwi_rmf.object_model import MODEL_NAME
 
     source = Path(__file__).parents[1] / 'scripts/install-object-model.py'
     spec = importlib.util.spec_from_file_location('install_object_model', source)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    (tmp_path / MODEL_NAME).write_bytes(b'not a model')
+    (tmp_path / next(iter(model_spec('yolox')['files']))).write_bytes(b'not a model')
     with pytest.raises(ValueError, match='wrong hash'):
         module.install(tmp_path)
 
@@ -295,17 +297,16 @@ def test_evaluation_reports_failed_scene_and_keeps_small_corpus_unqualified(tmp_
         'image': 'one.png', 'cups': [{'bbox': [10, 10, 20, 20], 'blue': True}]}]))
     model = tmp_path / 'fixture.onnx'
     model.write_bytes(b'fixture')
-    monkeypatch.setattr(evaluator, 'MODEL_SHA256', hashlib.sha256(b'fixture').hexdigest())
-    monkeypatch.setattr(evaluator, 'YoloX', lambda *args, **kwargs: SimpleNamespace(infer=lambda image: []))
+    monkeypatch.setattr(evaluator, 'Recognizer', lambda *args: SimpleNamespace(
+        predict=lambda image: [], sha256=MODEL_SHA256, identity={}))
     result = evaluator.evaluate(manifest, model)
     assert not result['passed'] and not result['gates']['heldout_scenes']
-    assert result['fn'] == 1 and result['scenes'][0]['scene_id'] == 'test-fixture'
-    assert result['scenes'][0]['fn'] == 1 and result['scenes'][0]['predictions'] == []
+    assert result['metrics']['cup']['fn'] == 1 and result['scenes'][0]['scene_id'] == 'test-fixture'
+    assert result['scenes'][0]['cup'] == (0, 0, 1) and result['scenes'][0]['predictions'] == []
     assert result['manifest_sha256'] == hashlib.sha256(manifest.read_bytes()).hexdigest()
 
 
 def test_evaluation_rejects_images_changed_after_preflight(tmp_path, evaluator, monkeypatch):
-    import hashlib
     image = tmp_path / 'one.png'
     cv2.imwrite(str(image), np.zeros((40, 60, 3), np.uint8))
     manifest = tmp_path / 'scenes.json'
@@ -313,10 +314,48 @@ def test_evaluation_rejects_images_changed_after_preflight(tmp_path, evaluator, 
         'image': 'one.png', 'cups': []}]))
     model = tmp_path / 'fixture.onnx'
     model.write_bytes(b'fixture')
-    monkeypatch.setattr(evaluator, 'MODEL_SHA256', hashlib.sha256(b'fixture').hexdigest())
     def change_image(*args, **kwargs):
         cv2.imwrite(str(image), np.full((40, 60, 3), 255, np.uint8))
-        return SimpleNamespace(infer=lambda pixels: [])
-    monkeypatch.setattr(evaluator, 'YoloX', change_image)
+        return SimpleNamespace(predict=lambda pixels: [], sha256=MODEL_SHA256, identity={})
+    monkeypatch.setattr(evaluator, 'Recognizer', change_image)
     with pytest.raises(ValueError, match='changed after dataset validation'):
         evaluator.evaluate(manifest, model)
+
+
+def test_nonblue_mug_miss_is_not_hidden_by_blue_goal_metrics(evaluator):
+    cups = [{'bbox': [10, 10, 20, 20], 'blue': False}]
+    result = evaluator.scene_metrics([], cups, .35)
+    assert result['cup'] == (0, 0, 1)
+    assert result['blue_goal'] == (0, 0, 0)
+    detection = {'bbox': cups[0]['bbox'], 'blue_fraction': .5}
+    result = evaluator.scene_metrics([detection], cups, .35)
+    assert result['cup'] == (1, 0, 0)
+    assert result['blue_attribute'] == [0, 1, 0, 0]
+    assert result['goal_outcomes']['blue']['false_verified']
+
+
+def test_evaluation_rejects_related_views_crossing_splits(tmp_path, evaluator):
+    scenes = []
+    for index, split in enumerate(['development', 'heldout']):
+        name = f'{index}.png'
+        cv2.imwrite(str(tmp_path / name), np.full((40, 60, 3), index, np.uint8))
+        scenes.append({'scene_id': str(index), 'scene_group': 'same-arrangement',
+                       'split': split, 'image': name, 'cups': []})
+    manifest = tmp_path / 'scenes.json'
+    manifest.write_text(json.dumps(scenes))
+    with pytest.raises(ValueError, match='group crosses'):
+        evaluator.load_scenes(manifest)
+
+
+def test_ambiguous_scene_cannot_become_verified_by_missing_one_cup(evaluator):
+    cups = [{'bbox': [0, 0, 10, 10], 'blue': True}, {'bbox': [20, 0, 10, 10], 'blue': True}]
+    result = evaluator.scene_metrics([{'bbox': cups[0]['bbox'], 'blue_fraction': 1}], cups, .35)
+    assert result['goal_outcomes']['blue']['false_verified'] and not result['goal_outcomes']['blue']['correct']
+    assert result['cup'] == (1, 0, 1)
+
+
+def test_ambiguous_nonblue_cup_goal_is_scored_independently(evaluator):
+    cups = [{'bbox': [0, 0, 10, 10], 'blue': False}, {'bbox': [20, 0, 10, 10], 'blue': False}]
+    result = evaluator.scene_metrics([{'bbox': cups[0]['bbox'], 'blue_fraction': 0}], cups, .35)
+    assert result['goal_outcomes']['cup']['false_verified']
+    assert not result['goal_outcomes']['blue']['false_verified']

@@ -101,10 +101,6 @@
   "choices": null,
   "default": "$(share lekiwi_rmf)/maps/bundles/cleanroom-development.yaml"
  },
- "object_calibration_file": {
-  "choices": null,
-  "default": ""
- },
  "profile": {
   "choices": [
    "sim",

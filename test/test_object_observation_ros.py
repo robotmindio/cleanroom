@@ -14,11 +14,14 @@ from sensor_msgs.msg import Image
 from std_srvs.srv import Trigger
 from vision_msgs.msg import Detection2DArray
 
-from lekiwi_rmf.object_model import MODEL_SHA256
+from lekiwi_rmf.object_recognition import recognition_identity
+
 from lekiwi_rmf.object_observation_node import ObjectObservations
 from lekiwi_rmf.srv import GetObservationEvidence, PinObservationEvidence, QueryObservations
 from test_object_observations import capture
 
+
+MODEL_SHA256 = recognition_identity('yolox')[0]
 
 def wait(predicate):
     deadline = time.monotonic() + 5
@@ -31,12 +34,18 @@ def wait(predicate):
 def test_synchronized_capture_query_evidence_and_stale_stream(tmp_path):
     context = Context()
     rclpy.init(context=context)
+    import yaml
+    bindings = tmp_path / 'cameras.yaml'
+    bindings.write_text(yaml.safe_dump({'astra_color': {
+        'mount': 'base', 'image_topic': '/camera/test/image', 'optical_frame': 'camera_optical',
+        'camera_info_topic': '/camera/test/info', 'depth_topic': '', 'calibration_file': ''}}))
     collector = ObjectObservations(context=context, parameter_overrides=[
         Parameter('database_path', value=str(tmp_path / 'observations.db')),
-        Parameter('model_sha256', value=MODEL_SHA256), Parameter('max_source_age_sec', value=1.0)])
+        Parameter('model_sha256', value=MODEL_SHA256), Parameter('camera_ids', value=['astra_color']),
+        Parameter('camera_profiles_file', value=str(bindings)), Parameter('max_source_age_sec', value=1.0)])
     peer = Node('observation_peer', context=context)
-    images = peer.create_publisher(Image, 'image', 1)
-    detections = peer.create_publisher(Detection2DArray, 'detections', 1)
+    images = peer.create_publisher(Image, '/robot/perception/astra_color/source_image', 1)
+    detections = peer.create_publisher(Detection2DArray, '/robot/perception/astra_color/detections', 1)
     query = peer.create_client(QueryObservations, '/robot/observations/query')
     evidence = peer.create_client(GetObservationEvidence, '/robot/observations/evidence')
     pin = peer.create_client(PinObservationEvidence, '/robot/observations/pin')
@@ -90,4 +99,45 @@ def test_synchronized_capture_query_evidence_and_stale_stream(tmp_path):
         thread.join(timeout=5)
         collector.destroy_node()
         peer.destroy_node()
+        context.try_shutdown()
+
+
+def test_multiple_camera_readiness_cannot_mask_wrong_or_missing_source(tmp_path):
+    import yaml
+    bindings = tmp_path / 'cameras.yaml'
+    bindings.write_text(yaml.safe_dump({name: {
+        'mount': 'arm' if name == 'wrist' else 'base', 'image_topic': f'/camera/{name}/image', 'optical_frame': name + '_optical',
+        'camera_info_topic': f'/camera/{name}/info', 'depth_topic': '', 'calibration_file': ''}
+        for name in ['front', 'wrist']}))
+    context = Context()
+    rclpy.init(context=context)
+    collector = ObjectObservations(context=context, parameter_overrides=[
+        Parameter('database_path', value=str(tmp_path / 'multiple.db')),
+        Parameter('model_sha256', value=MODEL_SHA256), Parameter('camera_ids', value=['front', 'wrist']),
+        Parameter('camera_profiles_file', value=str(bindings))])
+    def ingest(camera, frame):
+        image, found = capture()
+        image.header.frame_id = frame
+        image.header.stamp = collector.get_clock().now().to_msg()
+        found.header = image.header
+        for item in found.detections:
+            item.header = image.header
+        collector._capture(image, found, camera)
+    try:
+        ingest('front', 'front_optical')
+        state = collector._readiness()
+        assert state['front']['ready'] and not state['wrist']['ready']
+        ingest('wrist', 'front_optical')
+        assert not collector._readiness()['wrist']['ready']
+        ingest('wrist', 'wrist_optical')
+        assert collector._status(None, Trigger.Response()).success
+        records = collector._store.query('{}')['observations']
+        assert {record['camera_id'] for record in records} == {'front', 'wrist'}
+        assert all(not record['stationary'] for record in records)
+        collector._streams['wrist']['last'] -= 3
+        assert collector._readiness()['wrist']['reason'] == 'observation stream stale'
+        assert not collector._status(None, Trigger.Response()).success
+        assert collector._readiness()['front']['ready']
+    finally:
+        collector.destroy_node()
         context.try_shutdown()

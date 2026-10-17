@@ -1,195 +1,223 @@
-# Stationary object observations
+# Object perception and evidence
 
-This is the ROS foundation for implementation slices 0–1. It detects cup
-candidates and measures the fraction of blue pixels in each candidate's
-interior region. The ROS collector does not identify a permanent object, resolve
-a user goal or authorize motion. Calibrated metric results are optional, as
-described below. Multiple cups remain separate candidates; an empty result
-means no detector candidates in that capture.
+Perception publishes bounded cup candidates and immutable image evidence. It
+cannot authorize motion or complete a goal. Fiber's existing verifier owns goal
+completion. Image recognition, color classification, metric grounding and moving
+search have separate qualification gates.
 
-## Install and launch
-
-Build the ROS package using the repository build procedure, then install the
-one pinned model and start perception alongside the existing camera stack:
+## Install and describe the operating point
 
 ```bash
 scripts/install-object-model.py
+scripts/object-perception.sh --describe
 scripts/object-perception.sh
 ```
 
-The installer verifies the exact upstream model size and SHA-256 and preserves
-an existing verified copy. It never downloads weights during ROS startup or
-installs a different OpenCV/NumPy. All parameters live in
-`config/object_perception.yaml`; perception is explicitly started and has no
-motor publisher, service or action client. Model artifacts stay outside Git.
+The installer follows the model selected in `config/object_perception.yaml`.
+Artifacts are pinned by upstream revision, file size and SHA-256 in
+`config/recognition_models.yaml`. Startup verifies every file and never downloads
+weights. RT-DETR and Grounding DINO use a separate CPU environment under
+`~/.ros/lekiwi/perception-venv`; the installer creates it with tracked package
+requirements and a compatible CPU Torch/Torchvision pair. ROS and motor-driver
+Python installations are not modified. Models remain outside Git.
 
-The recognition node reuses the Apache-licensed
-[OpenCV Zoo YOLOX implementation](https://github.com/opencv/opencv_zoo/tree/47534e27c9851bb1128ccc0102f1145e27f23f98/models/object_detection_yolox).
-Its CPU backend is a baseline to evaluate, not a claimed site-qualified model.
-The vendored wrapper includes a compatibility fix for OpenCV versions without
-batched nonmaximum suppression; it still suppresses boxes separately by class.
+The current **development** operating point is RT-DETRv2-R18 at 384×384 and a
+0.50 score threshold. It detected the three retained patterned-mug frames at
+0.693–0.706, where YOLOX missed them. Warm processing was approximately 0.89 s;
+the first measured frame took 6.76 s. This one scene establishes a reproducible
+improvement, not site qualification. Production start remains disabled in
+`config/object_perception_deployment.yaml`.
 
-## ROS interfaces
+`model_sha256` now identifies the complete recognition operating point: pinned
+artifacts, backend, input size/prompt, threshold, preprocessing revision and
+actual runtime package versions. It is not just the weight-file hash. Model,
+threshold or runtime changes require a new admitted profile identity. The
+`--describe` output supplies the exact model and camera identities to put in a
+reviewed Fiber profile. Old weight-only profiles must not be reused.
+
+The fixed comparison choices are `yolox`, `rtdetr_v2_r18` and
+`grounding_dino_tiny`. Install an alternative with `--name NAME`. The latter is
+an offline open-vocabulary diagnostic with a frozen `a cup. a mug.` prompt;
+its scores are not interchangeable with closed-vocabulary detector scores. No
+model cascade or language-model completion authority is introduced. The
+vendored YOLOX implementation lives directly in the Python package; its
+upstream license/provenance remain in `thirdparty/opencv_yolox/`.
+
+## Camera binding and coverage
+
+`config/object_cameras.yaml` binds each camera ID to its source topic, optical
+frame, mount, CameraInfo, registered depth and optional measured calibration.
+`config/object_perception_deployment.yaml` selects the required camera IDs.
+The default is `front`; front and wrist are image-only. Astra's registered depth
+belongs to Astra. Changing an image topic cannot silently inherit Astra identity
+or depth. Calibration paths must be relative tracked files. Aliased image
+sources, duplicate optical frames and calibration identity mismatches fail at
+startup; runtime captures with the wrong frame are rejected.
+
+`camera_sha256` fingerprints the binding and calibration content. Changing a
+binding requires a new matching Fiber profile even if its camera ID is unchanged.
+
+One recognizer fairly schedules the newest pending capture of each selected
+camera. One collector owns the database and global services. All selected
+streams are required: a healthy camera cannot mask a missing required camera.
+Select additional cameras only after their coverage and aggregate processing
+budget are qualified; the two-Hz setting is a total inference limit, not two Hz
+per camera. Do not increase front resolution without measuring optical quality,
+transport, processing latency and the camera's corresponding calibration.
+
+## Freshness and stationary evidence
+
+Sensor-compatible KEEP_LAST depth one, separate ROS callback groups and a
+two-thread executor let receipt continue while one inference runs. At most one
+frame per camera and one inference are pending. Newer frames replace pending
+ones; they do not create a processing backlog. Both start and completion check
+capture freshness, with the existing two-second limit. Clock changes clear
+pending captures and invalidate in-flight results. The collector rechecks age
+after image encoding and geometry work.
+
+`/diagnostics` exposes per-camera received/published/rejected/overwritten counts,
+source/output age, inference duration and rolling p95, pending frames and the
+operating-point identities. Query/status expose each camera's ingestion age and
+readiness. A stale or overloaded pipeline reports unavailability rather than
+pretending that an empty historical result is current.
+
+Each collected observation has a `stationary` flag derived from read-only
+`/wheel/odometry` feedback at capture time. The preceding window must cover at
+least 0.25 s without gaps over 0.15 s, ending within 0.10 s of capture. Speed must
+remain within 0.01 m/s and 0.03 rad/s, displacement within 5 mm and yaw change
+within 0.02 rad. Arm-mounted cameras additionally require complete joint feedback
+stable within 0.01 rad. Missing, malformed or stale feedback makes the flag false.
+This does not change torque, arming or any motion state.
+
+Moving observations remain useful search candidates. They cannot complete a
+goal: the verifier requires two stationary, fresh, distinct captures of the same
+unambiguous candidate within the admitted confirmation window (at most two
+seconds), with matching camera/frame/dimensions, consistent boxes and compatible
+metric positions when requested. It re-reads authoritative records and pinned
+JPEG hashes before its existing atomic completion transaction. Repeated frames
+do not make systematic recognition errors independent.
+
+## ROS contracts
 
 | Interface | Contract |
 | --- | --- |
-| `/robot/perception/detections` | Standard `vision_msgs/Detection2DArray`, original capture header; axis-aligned boxes in source pixels and class confidence. Detection track IDs remain empty because no persistent tracker exists. |
-| `/robot/perception/source_image` | Canonical `sensor_msgs/Image`, exactly the same capture header; original pixels without overlays. |
-| `/robot/observations/events` | Small String JSON containing schema, immutable observation ID and persisted sequence. A wake-up hint; query is authoritative. |
-| `/robot/observations/query` | `QueryObservations`: bounded JSON cursor/ID query; metadata only, including `stream_ready`, database epoch and cursor-gap indication. |
-| `/robot/observations/evidence` | `GetObservationEvidence`: ID-only lookup returning JPEG MIME type, SHA-256 and at most 512 KiB base64. No filesystem path accepted. |
-| `/robot/observations/status` | `std_srvs/Trigger`: success requires fresh synchronized captures and a healthy latest ingestion. Historical records never establish live readiness. |
+| `/robot/perception/<camera>/detections` | `vision_msgs/Detection2DArray`, original capture header, source-pixel boxes. Persistent track IDs stay empty. |
+| `/robot/perception/<camera>/source_image` | Canonical BGR image, exact same capture header and no overlays. |
+| `/robot/observations/events` | Schema, immutable observation ID and sequence; a wake-up hint, not authority. |
+| `/robot/observations/query` | Bounded cursor/ID metadata query, `streams`, aggregate `stream_ready`, epoch and cursor-gap state. |
+| `/robot/observations/evidence` | ID-only JPEG lookup with SHA-256; no filesystem path accepted. |
+| `/robot/observations/pin` | Idempotent goal-owned evidence reservation within existing quotas. |
+| `/robot/observations/status` | Requires all configured camera streams to be fresh and healthy. |
 
-The collector uses ROS `message_filters.TimeSynchronizer`, matching the source
-image and standard detections by their exact stamps. It is reusable with another
-ROS detector: remap its `image` and `detections` inputs and configure the actual
-model hash/camera ID. No detector-specific code is in the collector or store.
-Freshness is checked against the capture stamp at ingestion and status time.
-The existing `/robot/capabilities` catalog advertises these read interfaces;
-its observation `available` field means service discovery, while the status
-service and query `stream_ready` field establish capture freshness.
+The collector uses ROS `message_filters.TimeSynchronizer` for exact image and
+detection stamps. A standard ROS detector can replace the recognizer without
+replacing storage, services or Fiber. Its source binding and model identity must
+be configured truthfully.
 
-Example query:
+Queries accept `{"after_sequence":0,"limit":20}`. Subsequent cursors include the
+returned `epoch`; a new database requires restarting from its head. ID queries
+use `{"observation_ids":["<64 lowercase hex characters>"],"limit":20}`. Inputs
+are capped at 4 KiB, metadata at 64 KiB, and evidence at 384 KiB before base64.
+`latest_sequence` is a live-consumer admission head; `next_sequence` paginates
+history and does not prove freshness.
 
-```json
-{"after_sequence":0,"limit":20}
-```
+The capture ID hashes camera/frame/stamp. Same-content replay is idempotent;
+different content for the same capture fails explicitly. Metadata and JPEG are
+one private SQLite transaction. A process lock prevents competing writers.
+Journals are separated by ROS domain and simulated-time mode. Retention is
+bounded by seven days, 100,000 records and the configured storage quota. Pins
+preserve admitted evidence until their bounded expiry; quota pressure cannot
+silently evict pinned evidence. Expired or corrupt evidence cannot verify a goal.
 
-Subsequent queries carry the returned `epoch` and `next_sequence` as
-`after_sequence`. A changed epoch requires a new initial query. ID queries use
-`{"observation_ids":["<64 lowercase hex characters>"],"limit":20}` instead of
-a cursor. Inputs are capped at 4 KiB; metadata responses at 64 KiB. The format
-preserves all candidate boxes, scores and `blue_fraction`; that fraction is a
-fixed HSV measurement, not a calibrated recognition probability.
-`latest_sequence` reports the persisted head so a new live consumer can begin
-there without reading all historical pages. Historical pagination uses
-`next_sequence`; it is distinct from a freshness or completion check.
+## Independent evaluation
 
-Every observation declares `grounding: image_only`, `position: null`, source
-stamp/frame, camera ID, model hash, dimensions and evidence hash. The capture
-identity hashes camera/frame/stamp. A replay returns the existing sequence;
-different content under the same capture identity is rejected. Metadata and
-JPEG are written in one private SQLite transaction, avoiding file/DB orphan
-races. Journals are partitioned by ROS domain and simulated-time mode, and a
-process lock prevents competing writers.
+Use `ros2 bag record --topics` for permitted camera input and read-only odometry
+and joint feedback. Replay only on an **isolated ROS domain**, using
+`ros2 bag play --clock` and `scripts/object-perception.sh use_sim_time:=true`.
+Do not record command topics or replay a bag into the live robot graph.
+Simulated-time records cannot satisfy real-robot goals.
 
-Retention evicts oldest observations at seven days, 100,000 records or the
-configured payload quota. SQLite page allocation is additionally bounded by
-`max_bytes`; transaction journals can temporarily add disk use. Evidence that
-has been evicted returns an explicit not-found/expired error. These records can be
-pinned by admitted Fiber goals through the pin service described below.
-Unpinned historical observations remain immutable while retained.
-
-## Recorded evaluation
-
-Use existing ROS tooling to record camera input for replay on an **isolated ROS
-domain**, with no motor/control topics in the recording. Use `ros2 bag record`
-and `ros2 bag play`; do not create another recorder or replay framework. Select
-the original RGB topic; perception consumes standard images and detections.
-For simulated-time playback start the perception script with
-`use_sim_time:=true` and play with the rosbag clock. Never replay a sensor bag
-into the live robot graph.
-
-For held-out recognition evaluation, prepare a local manifest of independent
-scene setups, split before tuning. Images stay outside Git:
+Prepare a private manifest; images stay outside Git:
 
 ```json
 [
-  {"scene_id":"setup-001","split":"heldout","image":"frames/setup-001.jpg",
-   "cups":[{"bbox":[120,80,60,100],"blue":true}]},
-  {"scene_id":"setup-002","split":"development","image":"frames/setup-002.jpg","cups":[]}
+  {"scene_id":"view-001","scene_group":"arrangement-session-001",
+   "split":"development","image":"frames/mug.jpg",
+   "cups":[{"bbox":[42,89,185,144],"blue":false}]},
+  {"scene_id":"view-002","scene_group":"arrangement-session-002",
+   "split":"heldout","image":"frames/negative.jpg","cups":[]}
 ]
 ```
 
-Boxes are `[x,y,width,height]` in original pixels. Label every visible cup and
-its blue attribute, including distractors and ambiguous multiple matches.
-
-The evaluator validates images and boxes in both splits before inference. It
-rejects repeated file content and identical decoded pixels, including copies
-with different filenames or lossless encodings. This prevents exact-image
-leakage between development and held-out sets. It cannot establish independence
-between adjacent video frames: use separately arranged scene setups and split
-before tuning. Each report includes per-scene predictions, expected blue-cup
-boxes, error counts and processing time so failures can be inspected. An image
-changed after preflight invalidates the evaluation.
+Label every visible cup. Keep adjacent frames, crops and alternate cameras from
+the same arrangement/session in the same scene group and split. The loader
+validates both splits, rejects group leakage, repeated bytes and identical
+decoded pixels, and checks that images did not change after preflight. Group
+names cannot themselves establish physical independence; review provenance.
 
 ```bash
 source scripts/setup.bash
 scripts/evaluate-object-recognition.py /path/to/scenes.json \
-  --output "$HOME/.ros/lekiwi/recognition-evaluation.json"
+  --model-name rtdetr_v2_r18 --output /path/to/report.json
 ```
 
-The evaluator shares production inference and color measurements. It rejects
-duplicate scene IDs and invalid boxes, verifies model hashes, matches labeled
-targets once at IoU ≥0.5, and records true/false positives, misses, confidence
-intervals, processing latency and artifact hashes. Exit zero requires all
-proposed initial gates: at least 80 held-out scenes (20 positive, 20 negative,
-10 ambiguous), precision ≥98%, recall ≥90%, and p95 processing ≤1.5 seconds.
-The ≥0.35 blue-fraction decision is an initial evaluation threshold to validate
-on the development split. This benchmark cannot qualify metric position or
-physical task success, and synthetic ROS fixtures do not establish its accuracy.
+`--split development`, `--confidence` and `--blue-fraction` support operating-point
+selection before held-out evaluation. Freeze the selected values before opening
+the held-out results. Reusing a held-out set to tune a model invalidates it.
+Non-OpenCV models automatically run in the installed perception environment.
 
-## Next gate
+Schema 2 reports **all-cup detection**, **blue-attribute errors on matched cups**,
+**blue-goal detection** and separate **generic-cup/blue false unique-target successes**, with
+per-image boxes, hashes, timings and scene-group confidence bounds. Missing the
+cream mug counts as a cup false negative even though it is not a blue cup. A
+single detected blue cup in a truly ambiguous scene counts as a false verified
+outcome, not a successful unique-object request.
 
-The package build, 138 selected unit/ROS/release/qualification tests, isolated
-CTest registration, and repository Python/shell checks passed during development.
-A saved Astra image also passed the complete pinned-model ROS replay on domain
-232; five local inference runs took 0.37–0.45 seconds on this workstation. This
-checks execution only and is not the recorded-scene accuracy evaluation.
+`screening_passed` requires at least 80 held-out groups, 20 positive, 20 negative
+and 10 ambiguous groups, sufficient matched blue and nonblue examples, measured
+precision ≥98%, recall ≥90%, zero observed false unique successes and p95
+processing ≤1.5 s. `passed` additionally requires the lower 95% scene-group Wilson
+bounds to meet the precision/recall targets for class, attribute and blue-goal
+metrics. Correlated frames or objects do not add independent confidence trials.
+Eighty scenes are an initial screen, not proof of 98% operational precision.
+Development-only or insufficient datasets produce a report and exit nonzero.
 
-The software foundation has unit and isolated ROS service tests. The controlled
-recorded-scene corpus and accuracy acceptance are outstanding; a single existing
-camera image can check inference execution but cannot close that gate. Complete
-this evaluation before implementing Fiber goal completion or moving search.
-Metric grounding follows measured calibration/time/frame acceptance. See the
-[implementation plan](robot-intelligence-implementation-plan.md).
+## Color, geometry and completion scope
 
-## Goal evidence and metric grounding
+`blue_fraction` is a fixed HSV measurement of the interior 20–80% of a detected
+box. It is not calibrated probability and deliberately excludes much of a rim.
+A cream mug with a blue rim is a cup positive, not automatically a blue-cup
+positive. The API supports `color: null` for an unrestricted cup request only
+when the frozen profile explicitly enables `allow_any_color`. The UI exposes
+this distinction; omitted color retains the existing blue-cup request.
 
-The completed Fiber consumer lives in `fiber-core`'s company plugin, under
-`robot/`, with the authenticated `/robot` API and Fiber UI `/robot` page. See
-[implementation report](robot-intelligence-report.md) for deployment order.
-Generic goal APIs cannot complete a robot-owned goal; the verifier re-reads ROS
-metadata, requires two fresh distinct unambiguous captures, checks pinned JPEG
-hashes and atomically commits the result with the goal status.
+Metric mode requires a reviewed schema-1 calibration marked `validated` and
+`depth_registered`, matching camera/frame, measured intrinsics, distortion,
+raster correspondence and dimensions. Uncertainty limits remain 0.10 m camera,
+0.20 m map and 0.02 s clock; depth/CameraInfo must match capture within 50 ms.
+Depth must be actual registered 16-bit surface depth, with accepted range
+0.55–3.0 m. A floor projection cannot substitute for the object's surface.
 
-`/robot/observations/pin` accepts `PinObservationEvidence` JSON with a stable
-`request_id` and 1–20 immutable `observation_ids`. Repeating the same request is
-idempotent; changing its IDs fails. Pins reserve evidence within existing
-storage quotas for the configured retention interval. Quota pressure rejects
-new captures instead of evicting reserved evidence. An ID query with
-`pin_request_id` returns the actual reservation expirations. Expired pins are
-pruned; no pin can request an arbitrary path or extend retention indefinitely.
+Calibration `sampling: blue` preserves the existing blue-surface behavior.
+Explicitly measured `sampling: box_interior` supports nonblue cups using a
+robust depth cluster; dispersed samples or insufficient consensus remain
+image-only. It estimates a visible surface, not object center or grasp readiness.
+Front/wrist have no registered-depth binding and cannot silently return metric
+positions. Map results additionally require capture-time TF and compatible
+approved map identity/epoch. Never copy synthetic test calibration onto hardware.
 
-Perception is integrated into bringup. `config/object_perception_deployment.yaml`
-sets its release default, disabled initially. Its calibration path is relative
-to the tracked package config directory; an empty path produces image results.
-The existing install/deploy scripts consume these defaults through bringup.
-The standalone perception wrapper remains useful for replay and diagnostics.
+## Release order and remaining physical gates
 
-Metric mode requires a reviewed measured YAML/JSON calibration, schema 1,
-`validated: true`, `depth_registered: true`, `camera_id`, `optical_frame`,
-`rgb_size`/`depth_size`, measured `rgb_k` (9 values), `rgb_p` (12), `rgb_r` (9),
-`rgb_d` (distortion), and `rgb_to_depth` (3×3 raster correspondence). Registration
-is provided by the existing Astra ROS driver (`depth_registration: true`), not
-inferred from a homography between different optical viewpoints. Include
-measured `camera_uncertainty_m`, `map_uncertainty_m` and `clock_uncertainty_sec`.
-Their gates are 0.10 m, 0.20 m and 0.02 s respectively. Do not copy synthetic
-unit-test calibration values onto hardware.
+Build and deploy the compatible ROS producer first, install the selected model
+runtime, then deploy Fiber's matching verifier and reviewed profile. The profile
+must freeze `camera_sha256`, the full `model_sha256`, color permissions,
+confirmation window and policy revision. Old records without stationary/binding
+proof remain history and cannot complete a new goal.
 
-The collector matches depth and CameraInfo within 50 ms, checks dimensions,
-frame identity and all measured intrinsics, and uses `image_geometry` to project
-a robust registered depth sample from blue pixels. Accepted depths are
-0.55–3.0 m. The result estimates a **visible surface**, with uncertainty; it is
-not a grasp pose or permanent object identity. Missing or incompatible geometry
-leaves the image observation intact. Map positions require capture-time TF and
-a capture after the current approved map epoch began. Historical TF failure
-leaves a camera position with an explicit map-unavailable reason.
-
-`/robot/map_context` publishes the validated map-manifest hash, epoch and
-activation time. `/robot/navigation/odometry` provides a read-only cumulative
-travel counter and epoch. Stale samples, gaps and resets invalidate travel
-accounting. Optional navigation `deadline_unix_sec` and `max_travel_m` bounds
-are persisted by the existing task gateway and enforced locally. They cancel
-only the admitted owned task, retain pending termination status, and preserve
-existing safety/ownership handling and deployment re-arm behavior.
+The software and retained-mug regression do not replace independent held-out
+qualification, measured geometry, the stationary physical canary matrix or
+moving-search acceptance. Keep promotion disabled until the applicable stage
+passes. Outcomes distinguish verified, ambiguous, unverifiable and not found
+within inspected views; a detector miss never proves global absence. Existing
+Nav2 safeguards, evidence authority, scoped approvals and deployment re-arm
+behavior remain in force.

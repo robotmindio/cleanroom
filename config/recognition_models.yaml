@@ -1,0 +1,50 @@
+# Immutable upstream artifacts; startup is offline and verifies every file.
+yolox:
+  backend: yolox
+  prompt: ''
+  base_url: https://media.githubusercontent.com/media/opencv/opencv_zoo/47534e27c9851bb1128ccc0102f1145e27f23f98/models/object_detection_yolox
+  files:
+    object_detection_yolox_2022nov.onnx:
+      sha256: c5c2d13e59ae883e6af3b45daea64af4833a4951c92d116ec270d9ddbe998063
+      size: 35858002
+rtdetr_v2_r18:
+  backend: rtdetr_v2
+  input_size: 384
+  prompt: ''
+  base_url: https://huggingface.co/PekingU/rtdetr_v2_r18vd/resolve/5650961749fa93567c0d46fc7f43ea4f9e914107
+  files:
+    model.safetensors:
+      sha256: d18309d0d7ea57048138885c4c6ecfcb1e24506fc6153b94ad484f8ab62c7115
+      size: 80904640
+    config.json:
+      sha256: ed051ec77cb41c5d9d5e3af21a979b1e890599dfd68434d7636ff82ded4c1527
+      size: 5437
+    preprocessor_config.json:
+      sha256: cd38cd59999e7a95d68e487fbe5132df3d4e5c32a0836add57e6126ba0c4eaf1
+      size: 444
+grounding_dino_tiny:
+  backend: grounding_dino
+  prompt: 'a cup. a mug.'
+  base_url: https://huggingface.co/IDEA-Research/grounding-dino-tiny/resolve/a2bb814dd30d776dcf7e30523b00659f4f141c71
+  files:
+    model.safetensors:
+      sha256: 1a2412ef99bd74bcd3c2a246fa1e48581f8889a1300c9051974741314fc042f3
+      size: 689359096
+    config.json:
+      sha256: eec82c5ab66e16df12a9a212e68ac011779927c2536cf9078658e35d85f0c67a
+      size: 1644
+    preprocessor_config.json:
+      sha256: 8454179ba95e2ad22947835aad7b45862a601fc0055ab88bf1ee70892d3aea60
+      size: 457
+    special_tokens_map.json:
+      sha256: b6d346be366a7d1d48332dbc9fdf3bf8960b5d879522b7799ddba59e76237ee3
+      size: 125
+    tokenizer.json:
+      sha256: d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66
+      size: 711396
+    tokenizer_config.json:
+      sha256: d40ab645b68211910b9170d22433d43186a6ec8ee6fd10ba170524b25bf4fb56
+      size: 1237
+    vocab.txt:
+      sha256: 07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3
+      size: 231508

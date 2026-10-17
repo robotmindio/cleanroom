@@ -1,12 +1,13 @@
+/**:
+  ros__parameters:
+    model_name: rtdetr_v2_r18
+    confidence_threshold: 0.5
 object_detector:
   ros__parameters:
-    confidence_threshold: 0.5
     max_rate_hz: 2.0
     max_source_age_sec: 2.0
 object_observations:
   ros__parameters:
-    camera_id: astra_color
-    model_sha256: c5c2d13e59ae883e6af3b45daea64af4833a4951c92d116ec270d9ddbe998063
     max_source_age_sec: 2.0
     max_records: 100000
     max_bytes: 2147483648

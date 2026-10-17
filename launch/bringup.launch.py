@@ -354,7 +354,7 @@ def _stack(context):
             ),
         ])
     actions.extend(_include(launch_file("object_perception.launch.py"), flag("start_object_perception"),
-        use_sim_time=use_sim_time, calibration_file=LaunchConfiguration("object_calibration_file")))
+        use_sim_time=use_sim_time))
     actions.extend([
         *_include(launch_file("slam.launch.py"), topology.visual_slam, navigation_params_file=params_file),
         *gated(
@@ -412,12 +412,11 @@ def generate_launch_description():
     package = FindPackageShare("lekiwi_rmf")
     config = Path(get_package_share_directory("lekiwi_rmf")) / "config"
     perception = yaml.safe_load((config / 'object_perception_deployment.yaml').read_text())
-    if (not isinstance(perception, dict) or set(perception) != {'start', 'calibration_file'}
-            or type(perception['start']) is not bool or not isinstance(perception['calibration_file'], str)):
+    if (not isinstance(perception, dict) or set(perception) != {'start', 'cameras'}
+            or type(perception['start']) is not bool or not isinstance(perception['cameras'], list)):
         raise ValueError('invalid tracked object perception deployment settings')
-    calibration = perception['calibration_file']
-    if calibration and (Path(calibration).is_absolute() or '..' in Path(calibration).parts):
-        raise ValueError('object calibration must be within the tracked config directory')
+    from lekiwi_rmf.object_cameras import camera_bindings
+    camera_bindings(perception['cameras'])
     test_linear, test_angular = load_base_speed_limits(config / "nav2_params.yaml")
     # robot_explorer's tracked quota is the default for the overridable arguments.
     mapping_quota = yaml.safe_load((config / "exploration.yaml").read_text())["robot_explorer"]["ros__parameters"]
@@ -479,7 +478,6 @@ def generate_launch_description():
             # The Astra Pro is an additional third camera. Existing front and
             # wrist V4L2 cameras continue to publish unchanged.
             DeclareLaunchArgument("start_object_perception", default_value=str(perception["start"]).lower(), choices=["true", "false"]),
-            DeclareLaunchArgument("object_calibration_file", default_value=str(config / calibration) if calibration else ""),
             DeclareLaunchArgument("publish_astra", default_value="true", choices=["true", "false"]),
             # A serial is deliberately read from this tracked deployment file,
             # not an environment variable or a one-off launch command. An

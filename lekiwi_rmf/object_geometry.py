@@ -54,6 +54,8 @@ class ObjectGeometry:
                     raise ValueError(f'invalid calibration {name}')
             if not value.get('optical_frame') or not value.get('camera_id'):
                 raise ValueError('calibration requires camera/frame identity')
+            if value.get('sampling', 'blue') not in ('blue', 'box_interior'):
+                raise ValueError('calibration sampling must be blue or box_interior')
             self.calibration, self.sha256 = value, hashlib.sha256(content).hexdigest()
 
     def ground(self, record, image, depth, info, transforms, map_context):
@@ -79,7 +81,8 @@ class ObjectGeometry:
             x, y, w, h = item['bbox']
             left, top = int(x+w*.2), int(y+h*.2)
             right, bottom = max(left+1,int(x+w*.8)), max(top+1,int(y+h*.8))
-            mask = blue_mask(pixels[top:bottom, left:right])
+            mask = (blue_mask(pixels[top:bottom, left:right]) if value.get('sampling', 'blue') == 'blue'
+                    else np.full((bottom - top, right - left), 255, dtype=np.uint8))
             rows, columns = np.nonzero(mask)
             if len(rows) < 10:
                 continue
@@ -99,7 +102,8 @@ class ObjectGeometry:
             median = float(np.median(samples))
             spread = float(np.median(np.abs(samples-median)))*1.4826
             uncertainty = value['camera_uncertainty_m'] + 3*spread
-            if uncertainty > .1:
+            coherent = np.abs(samples - median) <= max(.01, 3 * spread)
+            if uncertainty > .1 or np.count_nonzero(coherent) < max(10, math.ceil(.6 * len(samples))):
                 continue
             pixel = camera.rectifyPoint((float(np.median(rgb[0])), float(np.median(rgb[1]))))
             ray = camera.projectPixelTo3dRay(pixel)

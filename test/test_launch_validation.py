@@ -371,5 +371,6 @@ def test_perception_is_explicit_and_reuses_camera_topics():
     description = resolve_bringup(profile='split', start_object_perception='true')
     collector = find_node(description, name='object_observations')
     detector = find_node(description, name='object_detector')
-    assert collector['parameters']['calibration_file'] == ''
-    assert ['image', '/camera/astra/color/image_raw'] in detector['remappings']
+    assert collector['parameters']['camera_ids'] == ['front']
+    assert detector['parameters']['camera_ids'] == ['front']
+    assert collector['parameters']['model_name'] == detector['parameters']['model_name']

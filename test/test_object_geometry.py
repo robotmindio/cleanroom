@@ -11,6 +11,7 @@ from sensor_msgs.msg import CameraInfo
 
 from lekiwi_rmf.navigation_distance import NavigationDistance
 from lekiwi_rmf.object_geometry import ObjectGeometry
+from lekiwi_rmf.object_observations import observation
 from test_object_observations import capture, document
 
 
@@ -119,3 +120,20 @@ def test_map_grounding_requires_current_epoch_and_capture_time_transform(tmp_pat
     missing, _ = document(stamp=2)
     geometry.ground(missing, image, depth, info, Missing(), context)
     assert missing['detections'][0]['position']['map_unavailable_reason'] == 'historical_transform_unavailable'
+
+
+def test_nonblue_geometry_requires_explicit_validated_interior_sampling(tmp_path):
+    value, path = calibration(tmp_path)
+    image, found = capture(blue=False)
+    record, _ = observation(
+        image, found, 'a' * 64, 'astra_color')
+    depth = CvBridge().cv2_to_imgmsg(np.full((40, 60), 1000, dtype=np.uint16), '16UC1')
+    depth.header = image.header
+    info = CameraInfo(header=image.header, width=60, height=40, k=value['rgb_k'], p=value['rgb_p'],
+                      r=value['rgb_r'], d=value['rgb_d'])
+    ObjectGeometry(path).ground(record, image, depth, info, None, {'ready': False})
+    assert 'position' not in record['detections'][0]
+    value['sampling'] = 'box_interior'
+    path.write_text(json.dumps(value))
+    ObjectGeometry(path).ground(record, image, depth, info, None, {'ready': False})
+    assert record['detections'][0]['position']['xyz'][2] == 1.

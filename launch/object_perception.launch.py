@@ -1,26 +1,39 @@
-"""Stationary image observations, using a standard ROS detection boundary."""
+"""One recognizer and one evidence service with explicitly bound camera sources."""
 
-from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
-from pathlib import Path
+import yaml
+
+from lekiwi_rmf.object_cameras import camera_bindings, config_directory
+from lekiwi_rmf.object_recognition import model_runtime
+
+
+def nodes(context):
+    cameras = LaunchConfiguration('cameras').perform(context).split(',')
+    camera_bindings(cameras)
+    config = config_directory() / 'object_perception.yaml'
+    settings = yaml.safe_load(config.read_text())['/**']['ros__parameters']
+    environment, prefix = {}, ''
+    if settings['model_name'] != 'yolox':
+        prefix = str(model_runtime(settings['model_name']))
+        environment = {'PYTHONNOUSERSITE': '1'}
+    shared = {'use_sim_time': ParameterValue(LaunchConfiguration('use_sim_time'), value_type=bool),
+              'camera_ids': cameras}
+    return [
+        Node(package='lekiwi_rmf', executable='object_detector', name='object_detector',
+             parameters=[str(config), shared], additional_env=environment, prefix=prefix, output='screen'),
+        Node(package='lekiwi_rmf', executable='object_observations', name='object_observations',
+             parameters=[str(config), shared], additional_env=environment, prefix=prefix, output='screen'),
+    ]
 
 
 def generate_launch_description():
-    config = str(Path(get_package_share_directory('lekiwi_rmf')) / 'config/object_perception.yaml')
-    clock = {'use_sim_time': ParameterValue(LaunchConfiguration('use_sim_time'), value_type=bool)}
+    deployment = yaml.safe_load((config_directory() / 'object_perception_deployment.yaml').read_text())
     return LaunchDescription([
         DeclareLaunchArgument('use_sim_time', default_value='false'),
-        DeclareLaunchArgument('image_topic', default_value='/camera/astra/color/image_raw'),
-        DeclareLaunchArgument('calibration_file', default_value=''),
-        Node(package='lekiwi_rmf', executable='object_detector', name='object_detector',
-             parameters=[config, clock], remappings=[('image', LaunchConfiguration('image_topic')),
-                ('source_image', '/robot/perception/source_image'), ('detections', '/robot/perception/detections')], output='screen'),
-        Node(package='lekiwi_rmf', executable='object_observations', name='object_observations',
-             parameters=[config, clock, {'calibration_file': LaunchConfiguration('calibration_file')}],
-             remappings=[('image', '/robot/perception/source_image'), ('detections', '/robot/perception/detections'),
-                         ('depth', '/camera/astra/depth/image_raw'), ('camera_info', '/camera/astra/color/camera_info')], output='screen'),
+        DeclareLaunchArgument('cameras', default_value=','.join(deployment['cameras'])),
+        OpaqueFunction(function=nodes),
     ])

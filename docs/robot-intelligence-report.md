@@ -44,7 +44,7 @@ existing owned work reconciles rather than being forgotten or resubmitted.
 
 | Priority / epic | Concrete remaining work | Definition of done / owner |
 | --- | --- | --- |
-| P0 — E9 recognition qualification | Collect permitted held-out single, negative and ambiguous cup scenes across approved lighting/viewpoints; run the shipped evaluator against the pinned release. | Proposed ≥80 held-out scenes, ≥20 positives, ≥20 negatives, ≥10 ambiguous; precision ≥98%, recall ≥90%, p95 ≤1.5 s. Perception/site owner accepts statistical report and known limits. |
+| P0 — E9 recognition qualification | Collect permitted held-out single, negative and ambiguous cup scenes across approved lighting/viewpoints; run the shipped evaluator against the pinned release. | At least 80 independent held-out scene groups for screening, ≥20 positives, ≥20 negatives, ≥10 ambiguous; precision ≥98%, recall ≥90%, p95 ≤1.5 s. Qualification additionally requires lower 95% scene-group confidence bounds to meet the precision/recall targets, with zero false unique successes for both generic and blue cups. Perception/site owner accepts statistical report and known limits. |
 | P0 — E4 metric qualification | Measure RGB/depth registration, intrinsics, optical transform, clock error and camera/map uncertainty with independent references; commit the reviewed calibration and hashes. | Proposed camera error ≤0.10 m, map error ≤0.20 m and clock uncertainty ≤0.02 s; invalid geometry never yields a metric success. Calibration/site owner. |
 | P0 — E10/E11/E14 stationary release | Bind the actual Fiber tenant/robot/private connector, promote disabled perception/profile via the release process, check authenticated UI evidence, duplicate/reconnect/restart/cancel canaries and retention policy. | Repeatable stationary goal with inspectable authoritative evidence; unauthorized or fabricated evidence cannot close it; deployment identities recorded. Fiber/release/product owners. |
 | P0 — E1/E2/E4/E7/E8/E12/E13 moving acceptance | Qualify the chosen map and 3–5 surveyed views; run attended blocked-route, stale perception, map/odom reset, restart, approval timeout and cancellation trials with independent power stop. | Correct scoped findings; bounded measured travel/time; native termination proof and unchanged local safeguards across the scenario matrix. Robot/site/release owners. |
@@ -233,3 +233,58 @@ front/wrist coverage needed for near objects, and measure latency in the actual
 service resource allocation. The isolated mug score does not justify lowering
 the production gate. The physical viewpoint stage is complete for this scene;
 recognition acceptance and compatible stationary goal deployment remain open.
+
+
+## Robustness implementation — 2026-10-17
+
+All five software stages from the recognition review are implemented. The model
+comparison selected RT-DETRv2-R18 at 384×384 / 0.50 as the development operating
+point. In all three retained mug frames it detected the cup at 0.693–0.706;
+YOLOX at 0.50 detected none. Warm CPU processing was about 0.89 s; the first
+measured frame took 6.76 s. RT-DETR 640 and Grounding DINO exceeded the latency
+budget; NanoDet missed this mug. These are development comparisons of one scene,
+not independent acceptance samples or a reason to promote the model.
+
+| Stage | Complete software | Evidence still required |
+| --- | --- | --- |
+| Evaluation | Separate generic-cup detection, blue-attribute and generic/blue unique-goal outcomes; grouped splits, duplicate protection, screening and confidence-bound qualification. | Independent, provenance-reviewed held-out scene groups across lighting, negative and ambiguous cases. |
+| Operating point and camera contract | Pinned artifacts and isolated CPU runtime; full operating-point identities; explicit front/wrist/Astra sources, frames and calibration fingerprints. Obsolete weight-only constants and duplicate package installation removed. | Per-camera coverage and latency under the deployed resource allocation. |
+| Bounded fresh inference | Standard ROS messages, latest-only per-camera inputs, fair scheduling, separate receipt/inference callbacks, capture/completion freshness, clock-reset invalidation, diagnostics. | Sustained deployed load, camera failures and overload acceptance. |
+| Stationary goal verification | Capture-time odometry and wrist-joint proof; same-candidate confirmation within two seconds; authoritative camera/model/evidence checks. Generic cups require explicit profile opt-in; blue remains the default. | Compatible ROS/Fiber tenant canaries and the stationary physical acceptance matrix. |
+| Multi-camera and geometry | One store/API, per-camera required readiness, correctly bound depth and opt-in robust generic-cup surface sampling. | Independent measured calibration, metric error bounds and surveyed moving-search trials. |
+
+The compatible producer must precede the consumer rollout. Profiles freeze the
+new camera and full model fingerprints, color permission, confirmation window
+and policy revision. Legacy observations without stationary/binding proof stay
+historical. Explicitly revoke incompatible admitted policy revisions. The
+software changes preserve existing goal ownership, atomic completion, scoped
+authority, Nav2 safeguards and deployment re-arm; no autonomous motion-state
+policy was added. Production perception and example profiles remain disabled.
+
+The remaining epics are qualification and rollout: **P0 independent recognition
+qualification**, **P0 stationary tenant release**, **P0 physical metric
+calibration**, then **P0 attended moving-search acceptance**. Expanded vocabulary,
+approach and manipulation remain separate product capabilities. Complete each
+applicable acceptance gate before promoting its stage; image-only recognition
+does not establish a grasp target or prove absence outside inspected views.
+
+### Final software verification
+
+The compatible ROS package builds. **198 targeted ROS tests pass**, including
+perception, immutable storage/services, camera/geometry boundaries, launch
+validation, all bringup snapshots and service installation. The Fiber change
+passes **27 robot tests**, strict typing on all five robot modules, **three UI
+tests**, TypeScript and targeted ESLint. Scoped Ruff and shell checks pass.
+
+A standard ROS bag of front image/CameraInfo and read-only joint/odometry input
+was replayed through the installed detector and collector on isolated domain
+210. The real query service returned cup observations with the expected full
+model/camera fingerprints and capture-time stationary proof. An evidence-service
+JPEG matched both its returned and immutable metadata SHA-256. The status service
+returned unavailable after playback stopped, including with the simulation clock
+paused. Repeated playback exercises clock resets. Freshness rejections under
+workstation load remain visible; the replay is an integration check, not a
+latency benchmark or a real-goal canary. Simulated records cannot satisfy real
+goals. No robot motion or production deployment occurred in this robustness
+implementation. Private raw captures, bag, labels and result reports are retained;
+disposable session scripts were removed.

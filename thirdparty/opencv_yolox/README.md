@@ -1,9 +1,9 @@
 # OpenCV Zoo YOLOX
 
-`yolox.py` is from OpenCV Zoo commit
+`lekiwi_rmf/opencv_yolox.py` is from OpenCV Zoo commit
 `47534e27c9851bb1128ccc0102f1145e27f23f98`,
 `models/object_detection_yolox/yolox.py`, under the included Apache 2.0 license.
-The wrapper is installed as `lekiwi_rmf.opencv_yolox`; no extra inference package
+The wrapper lives directly in the Python package; no extra inference package
 or NumPy upgrade is needed. The model installer downloads the exact 35,858,002
 byte ONNX artifact and verifies its Git LFS SHA-256. Weights stay outside Git.
 

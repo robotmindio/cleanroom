@@ -1,4 +1,4 @@
-# Promote through the normal release after stationary recognition qualification.
+# Enable only after the selected camera/model operating point is qualified.
 start: false
-# Relative to this package's config directory; empty means image-only.
-calibration_file: ''
+# Start with one qualified image-only camera; all selected streams must be fresh.
+cameras: [front]
