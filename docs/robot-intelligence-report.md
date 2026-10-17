@@ -329,3 +329,27 @@ required lighting/exposure envelope and evaluate any proposed operating-point
 change against independent scenes. The compatible deployed Fiber goal journey
 also remains unverified. Software implementation is delivered; the real robot
 capability must not be described as complete or accepted.
+
+
+### Live retry — 2026-10-17 12:36–12:37 UTC
+
+Fresh-only querying after a newly recorded admission timestamp processed
+59 front-camera captures over 30 seconds. The source was brighter than the
+previous attempt (mean grayscale 19.80/255, 79.48% below 32/255), but the mug was
+partly cropped and shadowed and there were zero accepted cup detections.
+
+A second temporary producer canary selected the repository's front, wrist and
+Astra bindings. Four new captures per camera were collected after the retry
+head. All twelve observations carried stationary proof and all three streams
+reported ready, with source age at ingestion 0.55–0.73 seconds. Every camera
+returned zero cups at the unchanged operating point. The wrist evidence visibly
+shows the mug from above; Astra faces the furniture rather than the mug. Thus
+front lighting alone does not explain the recognition acceptance gap.
+
+The real evidence service supplied JPEGs matching each observation's immutable
+SHA-256. Reports and images remain private under
+`~/.ros/lekiwi/qualification/live-cup-retry-20261017T123615Z*` and
+`live-multicamera-retry-20261017T123728Z*`. No thresholds, preprocessing, policy
+or deployment defaults changed. No cup was verified and no Fiber goal was
+completed. The retry remains a failed recognition canary requiring development
+work and independent qualification; temporary producers were stopped.
