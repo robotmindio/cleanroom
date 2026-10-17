@@ -198,3 +198,38 @@ A subsequent bounded viewing-angle check turned approximately **4.25°** accordi
 to wheel odometry, with 2.7 mm translation, then stopped at its deadline as
 freshness/clearance gates interrupted further motion. Its requested 14.3° view
 was not reached. This partial check is not a completed object search.
+
+
+### Patterned-mug physical trial — 2026-10-17
+
+The user supplied a mug in the test environment. Initial live images showed a
+cream mushroom-patterned mug with a blue rim: cropped in front and visible from
+above in the wrist camera. The default Astra view faced elsewhere. Five guarded
+backward positioning steps accumulated **0.1993 m by wheel odometry**. Two small
+turns adjusted the front view. Each operation reached its bounded target and
+confirmed a stop; the final front images show the whole mug, handle and base.
+Final telemetry showed ARMED, travel stow, no supervisor faults, normal collision
+monitor state and zero wheel velocities. No thresholds or motion guards changed.
+
+The pinned recognizer returned **zero accepted cups in three final frames**,
+captured at least 0.5 s apart with receipt ages 0.031–0.058 s. Maximum cup anchor
+scores were **0.328, 0.297 and 0.301**, below the unchanged 0.50 gate. An earlier
+fully visible view reached 0.437, also rejected. The RGB conversion and
+letterboxing match the [pinned upstream demo](https://github.com/opencv/opencv_zoo/blob/47534e27c9851bb1128ccc0102f1145e27f23f98/models/object_detection_yolox/demo.py).
+This establishes a concrete false-negative case after resolving framing; it
+is not a successful detector finding or verifier-backed goal completion.
+
+Final saved-frame CPU inference took 1.096–1.985 s; earlier captures in this
+session took up to 4.375 s while workstation load was high. These are diagnostic
+measurements, not deployment p95 acceptance. Frames were processed by the shared
+`detect()` implementation in a probe; this does not demonstrate the deployed
+node's end-of-inference freshness gate. All images, hashes, exact source stamps,
+per-frame scores and bounded-motion reports remain in the private local ROS
+qualification directory. Adjacent frames and repositionings remain **one scene**.
+
+**Next E9 work:** retain this labeled development failure, compare recognizer
+and threshold choices against an independently held-out corpus, qualify the
+front/wrist coverage needed for near objects, and measure latency in the actual
+service resource allocation. The isolated mug score does not justify lowering
+the production gate. The physical viewpoint stage is complete for this scene;
+recognition acceptance and compatible stationary goal deployment remain open.
