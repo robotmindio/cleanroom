@@ -298,3 +298,34 @@ under deployed resource allocation remains part of lifecycle acceptance. The
 collector exited cleanly. A further regression retains 30-Hz Astra depth and
 CameraInfo across the full allowed inference-age window, preventing valid metric
 samples from being evicted before delayed detections arrive.
+
+
+### Live verification follow-up — 2026-10-17 12:27 UTC
+
+**Operational acceptance has not passed.** Earlier test/replay success did not
+establish the deployed robot-to-Fiber goal journey. The live graph was running
+the older release with no observation producer. A temporary read-only producer
+canary was launched using this repository's script and selected configuration,
+then stopped; production startup configuration remains disabled.
+
+The live query and evidence services worked: fresh front-camera observations,
+correct model/camera fingerprints, `ros_system_time`, stationary proof and
+matching JPEG SHA-256. However, visual review showed the mug in a very dark image
+and the detector returned **zero cups**. Mean grayscale was 2.55/255 and 99.89%
+of pixels were below 32/255. This is a retained live development failure, not a
+successful finding or proof of absence. No threshold/preprocessing change or
+verified goal completion is claimed. The raw evidence and metadata are private
+under `~/.ros/lekiwi/qualification/live-cup-verification-20261017.*`.
+
+The idle detector and a fresh active recorded-stream diagnostic run exited
+cleanly on SIGINT at the current lower host load. The prior forced-termination
+result remains valid for its heavy-load conditions; a general shutdown deadlock
+has not been established. Captured active stacks showed Torch convolution during
+inference. Neither normal-load shutdown nor successful unit tests resolve the
+heavy-load lifecycle acceptance gap. Diagnostic processes were stopped.
+
+The next recognition stage is to retain this dark-scene failure, qualify the
+required lighting/exposure envelope and evaluate any proposed operating-point
+change against independent scenes. The compatible deployed Fiber goal journey
+also remains unverified. Software implementation is delivered; the real robot
+capability must not be described as complete or accepted.
