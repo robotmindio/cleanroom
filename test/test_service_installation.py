@@ -709,6 +709,8 @@ def test_deploy_order_fails_closed_around_the_device_restart():
     start_host = deploy.index("start lekiwi-host.service", stop_host)
     start_stack = deploy.index("start lekiwi-stack.service", start_host)
     assert disarm < stop_stack < stop_host < start_host < start_stack
+    # Torque is cut only once fresh joint states show the arm resting in travel_stow.
+    assert deploy.index("scripts/check-travel-stow.py") < disarm
     stage_device = deploy.index('nice -n 10 bash -s -- device')
     stage_compute = deploy.index('nice -n 10 "$project_root/scripts/stage-release.sh" compute')
     verify = deploy.index('verify "$compute_release" "$target" compute', stage_compute)
