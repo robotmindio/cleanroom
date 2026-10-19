@@ -1,0 +1,35 @@
+# Find any native label of the perception profile in force. Observing requires base motion.
+string query
+# A zero radius searches mapped space inside the tracked motion bound around the start pose.
+float64 region_x
+float64 region_y
+float64 region_radius_m
+# Zero limits select the tracked defaults; positive limits may only reduce them.
+float64 max_duration_sec
+float64 max_travel_m
+# Fraction of searchable mapped cells with fresh negative evidence that ends the search.
+float64 target_coverage
+---
+# Complete means found, or the target coverage was reached without finding it.
+bool complete
+# found, coverage_reached, inaccessible, budget_exhausted, incapable, canceled or failed.
+string outcome
+string message
+bool found
+string[] evidence_ids
+float64 coverage_fraction
+float64 target_coverage
+float64 covered_area_m2
+float64 unobserved_area_m2
+uint32 viewpoints_visited
+uint32 viewpoints_unreachable
+float64 travel_m
+# Bounded JSON: negative evidence, unobserved space, plan revisions and perception identity.
+string report_json
+---
+string stage
+geometry_msgs/PoseStamped current_pose
+float64 coverage_fraction
+uint32 viewpoints_visited
+uint32 viewpoints_unreachable
+string[] evidence_ids

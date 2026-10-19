@@ -22,3 +22,30 @@ robot_explorer:
     # rtabmap_mapping_max_bytes/_seconds arguments default to these values.
     mapping_max_bytes: 17179869184
     mapping_max_seconds: 14400.0
+    # Active search (/robot/search) reuses this node's guarded Nav2 path and limits.
+    # Off until the object perception operating point is qualified on the robot.
+    allow_search: false
+    search_max_travel_m: 60.0
+    search_target_coverage: 0.9
+    # Evidence of absence: an object of this size must span this many pixels,
+    # the whole height band must be in view, and the camera must be stationary.
+    search_min_object_m: 0.08
+    search_min_object_px: 24.0
+    search_max_range_m: 4.0
+    search_min_height_m: 0.02
+    search_max_height_m: 0.3
+    # Objects move; older negative evidence is stale and searched again.
+    search_max_age_sec: 900.0
+    search_require_stationary: true
+    # Heuristic utility = expected newly resolved cells / (travel + overhead).
+    search_viewpoint_spacing_m: 0.5
+    search_headings: 12
+    search_max_candidates: 200
+    search_viewpoint_overhead_m: 1.0
+    search_min_gain_cells: 20.0
+    search_prior_weight: 20.0
+    # Replan when captures en route leave less than this share of the planned gain.
+    search_replan_fraction: 0.5
+    search_dwell_sec: 4.0
+    search_perception_timeout_sec: 4.0
+    search_capture_log: 2000
