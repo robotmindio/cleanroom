@@ -70,6 +70,9 @@
   <disable_collisions link1="wrist_collision_proxy" link2="gripper_collision_proxy" reason="Never"/>
   <!-- The RPi 5 stack is fixed to the chassis like these bodies. -->
   <disable_collisions link1="base_link" link2="rpi5_stack_collision_proxy" reason="Never"/>
+  <!-- The chassis guard rests on the top deck around these bolted sensors. -->
+  <disable_collisions link1="astra_camera_link" link2="base_link" reason="Never"/>
+  <disable_collisions link1="base_link" link2="lidar_collision_proxy" reason="Never"/>
   <disable_collisions link1="lidar_collision_proxy" link2="rpi5_stack_collision_proxy" reason="Never"/>
   <disable_collisions link1="arm_pedestal_collision_proxy" link2="rpi5_stack_collision_proxy" reason="Never"/>
   <disable_collisions link1="front_camera_collision_proxy" link2="rpi5_stack_collision_proxy" reason="Never"/>
