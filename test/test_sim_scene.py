@@ -123,7 +123,7 @@ class FakeRunner(Node):
             self.controller.poses['block'] = [x, y, .1, yaw]
         handle.succeed()
         # The runner always claims it finished; only ground truth says whether the block moved.
-        return RunSkill.Result(outcome='finished', result_json=json.dumps({'weights_sha256': self.weights}))
+        return RunSkill.Result(outcome='finished', result_json=json.dumps({'artifact_sha256': self.weights}))
 
 
 @pytest.fixture
@@ -138,7 +138,7 @@ def sim_world():
     executor.add_node(client)
     thread = threading.Thread(target=executor.spin, daemon=True)
     thread.start()
-    skill = SimpleNamespace(skill_id='learned', version=1, weights_sha256='a' * 64, status='experimental',
+    skill = SimpleNamespace(skill_id='learned', version=1, artifact_sha256='a' * 64, status='experimental',
                             max_duration_sec=5.0)
     predicate = sim_scene.sim_predicate('{"object": "block", "min_z": 0.05}', value)
     evaluator = evaluate.SimEvaluator(client, skill, predicate, controller, settle_sec=0.0, timeout_sec=5.0)

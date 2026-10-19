@@ -133,6 +133,10 @@ def test_receipt_keeps_latest_frame_while_inference_is_busy_and_expires_old_resu
         assert all(item.header != original for item in received)
         assert received[-1].header.stamp.sec >= latest.stamp.sec
         assert node._stats['front']['rejected'] >= 1
+        # The held frame's answer came back past max_source_age_sec: counted as late, never published.
+        budget = node._budget.summary()
+        assert budget['late'] >= 1 and budget['max_age_sec'] == .8
+        assert budget['stages']['inference']['p99_sec'] >= .8 and budget['stages']['queue']['count'] >= 1
     finally:
         release.set()
         executor.shutdown(timeout_sec=5)
@@ -174,6 +178,7 @@ def test_cli_uses_the_pinned_private_runtime(monkeypatch, tmp_path):
 
 def test_diagnostics_reads_clock_before_frame_lock_to_avoid_jump_deadlock():
     from rclpy.time import Time as ClockTime
+    from lekiwi_rmf.latency_budget import LatencyBudget
     from lekiwi_rmf.object_detector import ObjectDetector
 
     lock, published = threading.Lock(), []
@@ -184,9 +189,11 @@ def test_diagnostics_reads_clock_before_frame_lock_to_avoid_jump_deadlock():
                             _stats={'front': {'reason': '', 'published_stamp': 0}},
                             _durations={'front': []}, _detector=SimpleNamespace(sha256='a' * 64), _fallback=None,
                             _bindings={'front': {'sha256': 'b' * 64}}, _last_stamp={},
-                            _frames={}, _age=2., _diagnostics=SimpleNamespace(publish=published.append))
+                            _frames={}, _age=2., _diagnostics=SimpleNamespace(publish=published.append),
+                            _budget=LatencyBudget('perception', 2.))
     ObjectDetector._health(state)
     assert published[0].status[0].message == 'observation output stale'
+    assert published[0].status[-1].name == 'lekiwi/budget/perception'
 
 
 def test_operating_point_parameters_reject_runtime_changes_instead_of_silently_ignoring_them(monkeypatch):

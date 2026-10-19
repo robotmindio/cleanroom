@@ -20,7 +20,7 @@ from lekiwi_rmf import training
 from lekiwi_rmf.action import RunSkill
 from lekiwi_rmf.arm_trajectory import ARM_JOINTS
 from lekiwi_rmf.qualification import canonical_sha256, load_suites, stored_report
-from lekiwi_rmf.skills import load_registry
+from lekiwi_rmf.skills import artifact_digest, load_registry
 from lekiwi_rmf.srv import PinObservationEvidence, QueryObservations
 
 SCRIPTS = Path(__file__).parents[1] / 'scripts'
@@ -89,6 +89,7 @@ def test_local_training_freezes_the_dataset_and_pins_the_weights(tmp_path, fake_
     assert manifest['dataset']['action_names'] == ACTIONS and manifest['dataset']['cameras'] == ['front']
     assert manifest['dataset']['export']['action_topic'] == '/hardware/applied_command'
     assert manifest['checkpoint']['weights_sha256'] == hashlib.sha256(b'weights').hexdigest()
+    assert manifest['checkpoint']['artifact_sha256'] == artifact_digest(output / 'checkpoint')
     assert '--steps=5' in manifest['training']['lerobot_arguments']
     assert manifest['compute']['backend'] == 'local' and manifest['compute']['declared']['time_limit_min'] == 120.0
     assert manifest['compute']['within_declared'] and 'source_revision' in manifest['provenance']
@@ -176,8 +177,13 @@ def training_dir(tmp_path, weights=b'weights', action_names=ACTIONS, name='run')
     output = tmp_path / name
     (output / 'checkpoint').mkdir(parents=True)
     (output / 'checkpoint/model.safetensors').write_bytes(weights)
+    (output / 'checkpoint/config.json').write_text('{"type": "act"}')
+    (output / 'checkpoint/policy_preprocessor.json').write_text(
+        '{"steps": [{"registry_name": "normalizer_processor", "state_file": "normalizer.safetensors"}]}')
+    (output / 'checkpoint/normalizer.safetensors').write_bytes(b'stats')
     (output / 'manifest.json').write_text(json.dumps({
-        'kind': 'lekiwi_skill_training', 'checkpoint': {'weights_sha256': hashlib.sha256(weights).hexdigest()},
+        'kind': 'lekiwi_skill_training', 'checkpoint': {'weights_sha256': hashlib.sha256(weights).hexdigest(),
+                                                        'artifact_sha256': artifact_digest(output / 'checkpoint')},
         'dataset': {'action_names': action_names, 'cameras': ['front'], 'fps': 10}}))
     return output
 
@@ -221,6 +227,22 @@ def test_registration_installs_the_checkpoint_as_an_experimental_entry_that_load
     assert load_registry(registry_file, artifacts)['learned'].version == 2
 
 
+def test_a_training_manifest_without_the_artifact_digest_or_a_changed_checkpoint_is_refused(
+        tmp_path, registry_file, monkeypatch):
+    artifacts = tmp_path / 'skills'
+    training = training_dir(tmp_path)
+    manifest = json.loads((training / 'manifest.json').read_text())
+    del manifest['checkpoint']['artifact_sha256']
+    (training / 'manifest.json').write_text(json.dumps(manifest))
+    assert run_register(monkeypatch, registry_file, artifacts, 'learned', '--training', training, '--version', 1,
+                        '--description', 'x') == 1
+    changed = training_dir(tmp_path, name='changed')
+    (changed / 'checkpoint/policy_preprocessor.json').write_text('{"steps": []}')
+    assert run_register(monkeypatch, registry_file, artifacts, 'learned', '--training', changed, '--version', 1,
+                        '--description', 'x') == 1
+    assert not artifacts.exists() and registry_file.read_text() == HEADER + 'skills: {}\n'
+
+
 def test_host_unit_actions_are_refused_before_anything_is_installed(tmp_path, registry_file, monkeypatch):
     artifacts = tmp_path / 'skills'
     training = training_dir(tmp_path, action_names=['arm_gripper.pos', 'x.vel'])
@@ -239,7 +261,7 @@ def protocol(trials=20, label='cup', **changes):
 def report(skill, protocol_document=None, **changes):
     protocol_document = protocol_document or protocol()
     value = {'kind': 'lekiwi_skill_evaluation', 'schema': 2, 'passed': True, 'skill_id': 'learned',
-             'version': skill.version, 'weights_sha256': skill.weights_sha256, 'success_rate': 1.0,
+             'version': skill.version, 'artifact_sha256': skill.artifact_sha256, 'success_rate': 1.0,
              'wilson_interval': [.84, 1.0], 'domain': 'physical', 'promotable': True, 'protocol': protocol_document,
              'protocol_sha256': canonical_sha256(protocol_document), 'suite': None}
     value.update(changes)
@@ -252,18 +274,26 @@ def test_promotion_requires_a_passing_report_for_exactly_these_weights(tmp_path,
                         '--version', 1, '--description', 'x') == 0
     skill = load_registry(registry_file, artifacts)['learned']
     path = tmp_path / 'report.json'
-    for bad in ({'passed': False}, {'weights_sha256': 'b' * 64}, {'version': 2}, {'skill_id': 'other'}, {'kind': 'x'},
+    for bad in ({'passed': False}, {'artifact_sha256': 'b' * 64}, {'version': 2}, {'skill_id': 'other'}, {'kind': 'x'},
                 {'schema': 1}, {'domain': 'sim', 'promotable': False}, {'promotable': False}):
         path.write_text(json.dumps(report(skill, **bad)))
         assert run_register(monkeypatch, registry_file, artifacts, 'learned', '--promote', path) == 1
         assert load_registry(registry_file, artifacts)['learned'].status == 'experimental'
     path.write_text(json.dumps(report(skill)))
-    (skill.checkpoint / 'model.safetensors').write_bytes(b'tampered')
+    # Weights, configuration and normalization are all part of what was evaluated.
+    for name, original in (('model.safetensors', b'weights'), ('config.json', b'{"type": "act"}'),
+                           ('normalizer.safetensors', b'stats')):
+        (skill.checkpoint / name).write_bytes(b'{"tampered": 1}')
+        assert run_register(monkeypatch, registry_file, artifacts, 'learned', '--promote', path) == 1
+        (skill.checkpoint / name).write_bytes(original)
+    (skill.checkpoint / 'extra.safetensors').write_bytes(b'added')
     assert run_register(monkeypatch, registry_file, artifacts, 'learned', '--promote', path) == 1
-    (skill.checkpoint / 'model.safetensors').write_bytes(b'weights')
+    (skill.checkpoint / 'extra.safetensors').unlink()
     assert run_register(monkeypatch, registry_file, artifacts, 'learned', '--promote', path) == 0
     assert load_registry(registry_file, artifacts)['learned'].status == 'qualified'
-    assert list(skill.checkpoint.glob('evaluation-*.json')) and registry_file.read_text().startswith(HEADER)
+    assert (skill.checkpoint / 'evaluation-report.json').is_file() and registry_file.read_text().startswith(HEADER)
+    # Keeping the report beside the checkpoint leaves the artifact digest the runner verifies unchanged.
+    assert artifact_digest(skill.checkpoint) == skill.artifact_sha256
     # The first qualification stores its protocol as the skill's suite, with the report as baseline.
     suites = load_suites(registry_file.with_name('qualification_suites.yaml'))['skills']['learned']
     assert [suite['protocol_sha256'] for suite in suites] == [canonical_sha256(protocol())]
@@ -335,7 +365,7 @@ class FakeWorld(Node):
         if self.runner_changes_world:
             self.cup_present = True
         handle.succeed()
-        return RunSkill.Result(outcome='finished', result_json=json.dumps({'weights_sha256': self.weights}))
+        return RunSkill.Result(outcome='finished', result_json=json.dumps({'artifact_sha256': self.weights}))
 
     def capture(self):
         stamp = self.get_clock().now().nanoseconds
@@ -376,7 +406,7 @@ def world():
     executor.add_node(client)
     thread = threading.Thread(target=executor.spin, daemon=True)
     thread.start()
-    skill = SimpleNamespace(skill_id='learned', version=1, weights_sha256=weights, status='experimental',
+    skill = SimpleNamespace(skill_id='learned', version=1, artifact_sha256=weights, status='experimental',
                             max_duration_sec=5.0)
     predicate = evaluate.success_predicate('{"label": "cup", "min_observations": 2}')
     evaluator = evaluate.Evaluator(client, skill, predicate, observe_sec=.4, settle_sec=.1, timeout_sec=5.0)
@@ -417,7 +447,7 @@ def test_trials_that_cannot_be_judged_count_against_the_skill(world):
     assert result['successes'] == 0 and result['invalid'] == 1 and not result['passed']
     fake.cup_present, fake.weights = False, 'b' * 64
     result = evaluate.evaluate(evaluator, protocol(1), 'skill-eval-weights', log=lambda _line: None)
-    assert 'different weights' in result['trials'][0]['reason']
+    assert 'different checkpoint' in result['trials'][0]['reason']
 
 
 @pytest.mark.parametrize('acquisition', ['false', 'true'])

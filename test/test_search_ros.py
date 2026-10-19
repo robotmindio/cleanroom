@@ -214,6 +214,9 @@ def test_search_observes_outside_the_initial_view_and_reports_evidence(search_gr
     assert any(stage.startswith('searching: viewpoint') for stage in stages)
     # Every goal went through the guarded exploration behaviour tree.
     assert all(abs(pose.pose.position.x) < 2 for pose in peers.navigation_goals)
+    stages = explorer._budget.summary()['stages']
+    # A drive interrupted by evidence has no completed execution sample.
+    assert stages['planning']['count'] >= 1 and stages['execution']['count'] <= peers.nav_count
 
 
 def test_absent_label_ends_at_stated_coverage_without_claiming_absence(search_graph):

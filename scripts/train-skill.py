@@ -6,7 +6,8 @@ The output directory holds `checkpoint/` (the LeRobot pretrained model), `train.
 termination reason, written whatever the outcome) and, for a completed run only,
 `manifest.json`: the frozen dataset (every file with its SHA-256), the export
 parameters, the source revision, the exact training arguments, the declared and
-measured compute, and the weights digest that scripts/register-skill.py pins.
+measured compute, and the checkpoint's artifact digest (every file the runner loads) that
+scripts/register-skill.py pins.
 
 Backends: local (`--device cpu|cuda`, in the LeRobot environment from
 scripts/install-lerobot-export.sh) or `--cluster`, a one-pod Kubernetes Job on the
@@ -29,6 +30,7 @@ sys.path.insert(0, str(REPOSITORY))
 from lekiwi_rmf.training import (  # noqa: E402
     ClusterJob, RunRecord, TrainingError, add_cluster_arguments, check_cluster_arguments, cluster_failure, digest,
     files_digest, frozen_files, revision, tail, trainer_declaration, validate_config, write_json)
+from lekiwi_rmf.skills import artifact_digest  # noqa: E402
 
 TRAINER = 'lerobot_policy'
 LEROBOT = 'lerobot==0.4.1'
@@ -215,6 +217,7 @@ def main():
         weights = output / 'checkpoint/model.safetensors'
         if not weights.is_file():
             raise TrainingError('the checkpoint has no model.safetensors')
+        artifact = artifact_digest(output / 'checkpoint')
         loaded = None if args.skip_load_check else load_check(Path(args.python).expanduser(), output / 'checkpoint')
         peak = measured.get('peak_gpu_memory_mib')
         manifest = {
@@ -235,7 +238,8 @@ def main():
                 'within_declared': (measured['elapsed_sec'] <= args.time_limit_min * 60
                                     and (peak is None or peak <= args.gpu_memory_gib * 1024)),
             },
-            'checkpoint': {'path': 'checkpoint', 'weights_sha256': digest(weights), 'load_check': loaded},
+            'checkpoint': {'path': 'checkpoint', 'weights_sha256': digest(weights), 'artifact_sha256': artifact,
+                           'load_check': loaded},
         }
         write_json(output / 'manifest.json', manifest)
         record.finish('completed')
@@ -249,7 +253,7 @@ def main():
             record.finish('interrupted')
         print(f'{parser.prog}: interrupted; no manifest was written', file=sys.stderr)
         return 130
-    print(json.dumps({'output': str(output), 'weights_sha256': manifest['checkpoint']['weights_sha256'],
+    print(json.dumps({'output': str(output), 'artifact_sha256': manifest['checkpoint']['artifact_sha256'],
                       'compute': manifest['compute']['measured'], 'load_check': loaded}))
     return 0
 

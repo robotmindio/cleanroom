@@ -159,8 +159,8 @@ class SkillTrials:
         trial['runner'] = run
         if run['outcome'] == 'rejected':
             return {**trial, 'verdict': 'invalid', 'reason': run['detail']}
-        if run['result'] is not None and run['result'].get('weights_sha256') != self.skill.weights_sha256:
-            return {**trial, 'verdict': 'invalid', 'reason': 'the runner executed different weights than registered'}
+        if run['result'] is not None and run['result'].get('artifact_sha256') != self.skill.artifact_sha256:
+            return {**trial, 'verdict': 'invalid', 'reason': 'the runner executed a different checkpoint than registered'}
         return None
 
     def sleep_sim(self, seconds):
@@ -326,7 +326,7 @@ def evaluate(evaluator, protocol, evaluation_id, reset=None, log=print, suite=No
     return {
         'schema': 2, 'kind': 'lekiwi_skill_evaluation', 'evaluation_id': evaluation_id,
         'created_utc': datetime.datetime.now(datetime.UTC).isoformat(timespec='seconds'),
-        'skill_id': skill.skill_id, 'version': skill.version, 'weights_sha256': skill.weights_sha256,
+        'skill_id': skill.skill_id, 'version': skill.version, 'artifact_sha256': skill.artifact_sha256,
         'status_at_evaluation': skill.status, 'domain': evaluator.domain,
         # Only a physical evaluation can qualify a skill; a sim result is evidence of another domain.
         'promotable': evaluator.domain == 'physical',

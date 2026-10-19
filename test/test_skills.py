@@ -20,15 +20,16 @@ import yaml
 
 from lekiwi_rmf.action import RunSkill
 from lekiwi_rmf.arm_trajectory import ARM_JOINTS, JOINT_LIMITS
-from lekiwi_rmf.skills import arm_targets, catalog, load_registry, skill_parameters, verify_artifact
+from lekiwi_rmf.skills import arm_targets, artifact_digest, catalog, load_registry, skill_parameters, verify_artifact
 from lekiwi_rmf.task_gateway import task_goal
+from ros_test_utils import release_graph
 
 ACTIONS = [*ARM_JOINTS, 'base_x_vel', 'base_y_vel', 'base_yaw_rate']
 
 
 def entry(**changes):
     value = {'version': 1, 'description': 'push the object', 'status': 'qualified', 'kind': 'lerobot_policy',
-             'checkpoint': 'push/1', 'weights_sha256': 'a' * 64, 'action_names': ACTIONS, 'cameras': ['front'],
+             'checkpoint': 'push/1', 'artifact_sha256': 'a' * 64, 'action_names': ACTIONS, 'cameras': ['front'],
              'fps': 10, 'max_duration_sec': 2.0, 'max_joint_step_rad': .1,
              'parameters': {'force': {'type': 'number', 'min': 0, 'max': 1}}}
     value.update(changes)
@@ -47,7 +48,7 @@ def test_tracked_registry_is_valid_and_empty_until_a_skill_is_acquired():
 
 @pytest.mark.parametrize('change', [
     {'status': 'trusted'}, {'kind': 'script'}, {'checkpoint': '/etc/x'}, {'checkpoint': '../x'},
-    {'weights_sha256': 'A' * 64}, {'action_names': ['base_x_vel']}, {'action_names': ['elbow']},
+    {'artifact_sha256': 'A' * 64}, {'weights_sha256': 'a' * 64}, {'action_names': ['base_x_vel']}, {'action_names': ['elbow']},
     {'cameras': ['front', 'front']}, {'fps': 0}, {'max_duration_sec': 1000}, {'max_joint_step_rad': 1.0},
     {'parameters': {'Bad': {'type': 'number'}}}, {'parameters': {'x': {'type': 'object'}}}, {'extra': 1}])
 def test_malformed_entries_reject_the_whole_registry(tmp_path, change):
@@ -90,14 +91,98 @@ def test_arm_targets_are_rate_limited_kept_in_limits_and_ignore_base(tmp_path):
         arm_targets(skill, measured, np.zeros((1, 3)))
 
 
-def test_only_the_registered_weights_can_run(tmp_path):
-    weights = b'weights'
-    skill = registry(tmp_path, {'push': entry(weights_sha256=hashlib.sha256(weights).hexdigest())})['push']
-    skill.checkpoint.mkdir(parents=True)
-    (skill.checkpoint / 'model.safetensors').write_bytes(weights)
+def lerobot_checkpoint(tmp_path):
+    """A LeRobot-shaped checkpoint registered under the digest of exactly these files."""
+    directory = tmp_path / 'push/1'
+    directory.mkdir(parents=True)
+    directory.chmod(0o755)
+    files = {'model.safetensors': b'weights', 'config.json': json.dumps({'type': 'act', 'chunk_size': 10}).encode(),
+             'policy_preprocessor_step_3_normalizer_processor.safetensors': b'stats',
+             'policy_preprocessor.json': json.dumps({'name': 'policy_preprocessor', 'steps': [
+                 {'registry_name': 'normalizer_processor', 'config': {'eps': 1e-8},
+                  'state_file': 'policy_preprocessor_step_3_normalizer_processor.safetensors'}]}).encode()}
+    for name, data in files.items():
+        (directory / name).write_bytes(data)
+        (directory / name).chmod(0o644)
+    return registry(tmp_path, {'push': entry(artifact_sha256=artifact_digest(directory))})['push']
+
+
+def test_an_old_weights_only_entry_is_refused_rather_than_trusted(tmp_path):
+    old = entry()
+    old['weights_sha256'] = old.pop('artifact_sha256')
+    with pytest.raises(ValueError, match='re-register for artifact_sha256'):
+        registry(tmp_path, {'push': old})
+
+
+@pytest.mark.parametrize('change', [
+    lambda d: (d / 'model.safetensors').write_bytes(b'changed'),
+    lambda d: (d / 'config.json').write_text('{"type": "act", "chunk_size": 100}'),
+    lambda d: (d / 'policy_preprocessor_step_3_normalizer_processor.safetensors').write_bytes(b'other stats'),
+    lambda d: (d / 'policy_preprocessor.json').write_text('{"steps": []}'),
+    lambda d: (d / 'policy_postprocessor.json').write_text('{"steps": []}'),
+    lambda d: (d / 'policy_preprocessor_step_3_normalizer_processor.safetensors').unlink(),
+    lambda d: (d / 'config.json').rename(d / 'train_config.json')])
+def test_every_file_the_runner_loads_is_pinned(tmp_path, change):
+    skill = lerobot_checkpoint(tmp_path)
+    change(skill.checkpoint)
+    with pytest.raises(ValueError, match='artifact digest'):
+        verify_artifact(skill)
+
+
+def test_the_digest_is_a_sorted_manifest_and_provenance_records_are_outside_it(tmp_path):
+    skill = lerobot_checkpoint(tmp_path)
+    lines = ''.join(f'{hashlib.sha256((skill.checkpoint / name).read_bytes()).hexdigest()}  {name}\n'
+                    for name in sorted(path.name for path in skill.checkpoint.iterdir()))
+    assert skill.artifact_sha256 == hashlib.sha256(lines.encode()).hexdigest()
+    (skill.checkpoint / 'training-manifest.json').write_text('{"kind": "lekiwi_skill_training"}')
+    (skill.checkpoint / 'evaluation-report.json').write_text('{"passed": true}')
     assert verify_artifact(skill) == skill.checkpoint
-    (skill.checkpoint / 'model.safetensors').write_bytes(b'changed')
-    with pytest.raises(ValueError, match='digest'):
+    (skill.checkpoint / 'model.safetensors').unlink()
+    with pytest.raises(ValueError, match='no model.safetensors'):
+        verify_artifact(skill)
+
+
+def test_a_lerobot_checkpoint_of_safetensors_and_registered_processors_loads(tmp_path):
+    skill = lerobot_checkpoint(tmp_path)
+    assert verify_artifact(skill) == skill.checkpoint
+
+
+@pytest.mark.parametrize('name', ['pytorch_model.bin', 'model.pt', 'optimizer.pth', 'stats.pkl', 'last.ckpt',
+                                  'modeling_act.py', 'notes.txt'])
+def test_pickle_weights_and_code_files_are_refused(tmp_path, name):
+    skill = lerobot_checkpoint(tmp_path)
+    (skill.checkpoint / name).write_bytes(b'\x80\x04.')
+    with pytest.raises(ValueError, match='safetensors or JSON'):
+        verify_artifact(skill)
+
+
+@pytest.mark.parametrize('document', [
+    {'steps': [{'class': 'subprocess.Popen', 'config': {'args': ['true']}}]},
+    {'type': 'act', 'auto_map': {'AutoModel': 'modeling.Model'}},
+    {'model': {'_target_': 'os.system'}}, {'trust_remote_code': True}])
+def test_configurations_that_name_code_to_import_are_refused(tmp_path, document):
+    skill = lerobot_checkpoint(tmp_path)
+    (skill.checkpoint / 'policy_preprocessor.json').write_text(json.dumps(document))
+    with pytest.raises(ValueError, match='names code to import'):
+        verify_artifact(skill)
+
+
+def test_links_subdirectories_writable_and_malformed_checkpoints_are_refused(tmp_path):
+    skill = lerobot_checkpoint(tmp_path)
+    (skill.checkpoint / 'extra.json').symlink_to(skill.checkpoint / 'config.json')
+    with pytest.raises(ValueError, match='safetensors or JSON'):
+        verify_artifact(skill)
+    (skill.checkpoint / 'extra.json').unlink()
+    (skill.checkpoint / 'nested').mkdir()
+    with pytest.raises(ValueError, match='safetensors or JSON'):
+        verify_artifact(skill)
+    (skill.checkpoint / 'nested').rmdir()
+    (skill.checkpoint / 'config.json').chmod(0o666)
+    with pytest.raises(ValueError, match='writable'):
+        verify_artifact(skill)
+    (skill.checkpoint / 'config.json').chmod(0o644)
+    (skill.checkpoint / 'config.json').write_text('{"type": ')
+    with pytest.raises(ValueError, match='not valid JSON'):
         verify_artifact(skill)
 
 
@@ -111,6 +196,8 @@ def test_gateway_bounds_the_skill_request_shape_only():
 
 
 class FakePolicy:
+    delay = 0.
+
     def __init__(self, path):
         self.path, self.calls = path, 0
 
@@ -119,6 +206,7 @@ class FakePolicy:
 
     def chunk(self, state, images, task):
         self.calls += 1
+        time.sleep(self.delay)
         actions = np.zeros((2, len(ACTIONS)))
         actions[:, 0] = state[0] + .05
         return actions
@@ -147,13 +235,12 @@ class FakeArm(Node):
 def ros_runner(tmp_path):
     from lekiwi_rmf.skill_runner import SkillRunner
 
-    weights = b'weights'
-    skills = {'push': entry(weights_sha256=hashlib.sha256(weights).hexdigest(), cameras=[], max_duration_sec=.6),
-              'trial': entry(status='experimental', weights_sha256=hashlib.sha256(weights).hexdigest(), cameras=[])}
+    (tmp_path / 'push/1').mkdir(parents=True)
+    (tmp_path / 'push/1/model.safetensors').write_bytes(b'weights')
+    artifact = artifact_digest(tmp_path / 'push/1')
+    skills = {'push': entry(artifact_sha256=artifact, cameras=[], max_duration_sec=.6),
+              'trial': entry(status='experimental', artifact_sha256=artifact, cameras=[])}
     (tmp_path / 'skills.yaml').write_text(yaml.safe_dump({'skills': skills}))
-    for name in ('push/1',):
-        (tmp_path / name).mkdir(parents=True)
-        (tmp_path / name / 'model.safetensors').write_bytes(weights)
     context = Context()
     rclpy.init(context=context)
     runner = SkillRunner(policy_factory=FakePolicy, context=context, parameter_overrides=[
@@ -183,11 +270,8 @@ def ros_runner(tmp_path):
     finally:
         fresh.clear()
         arm.hold.set()
-        executor.shutdown(timeout_sec=5)
-        thread.join(5)
-        for node in (runner, arm, peer):
-            node.destroy_node()
-        context.try_shutdown()
+        publisher.join(5)
+        release_graph(executor=executor, thread=thread, waitables=(client,), nodes=(runner, arm, peer), context=context)
 
 
 def run(client, skill_id, parameters='{}', cancel_after=None):
@@ -255,6 +339,29 @@ def test_camera_frames_decode_to_rgb_without_cv_bridge():
     message.encoding = 'mono8'
     with pytest.raises(RuntimeError, match='encoding'):
         rgb_pixels(message)
+
+
+def test_a_chunk_computed_too_late_never_moves_the_arm(ros_runner, monkeypatch):
+    runner, arm, client, _ = ros_runner
+    # Longer than max_observation_age_sec (0.5 s) by itself: every chunk is history by the time it exists.
+    monkeypatch.setattr(FakePolicy, 'delay', .6)
+    result = run(client, 'push')
+    assert result.outcome == 'failed' and 'arrived after max_observation_age_sec' in result.detail
+    report = json.loads(result.result_json)
+    assert report['chunks_executed'] == 0 and report['late_chunks'] >= 1 and not arm.goals
+    summary = runner._budget.summary()
+    assert summary['late'] == report['late_chunks'] and summary['stages']['inference']['p50_sec'] >= .6
+    status = runner._budget.status()
+    assert status.name == 'lekiwi/budget/skill_control' and 'control age limit' in status.message
+
+
+def test_a_timely_run_reports_its_stage_percentiles(ros_runner):
+    runner, arm, client, _ = ros_runner
+    result = run(client, 'push')
+    assert result.outcome == 'finished' and json.loads(result.result_json)['late_chunks'] == 0
+    stages = runner._budget.summary()['stages']
+    assert stages['execution']['count'] == len(arm.goals) >= 1
+    assert stages['sensor_age']['count'] >= 1 and 0 <= stages['sensor_age']['p99_sec'] <= .5
 
 
 def test_loading_the_policy_does_not_consume_the_motion_budget(ros_runner, monkeypatch):
