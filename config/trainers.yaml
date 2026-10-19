@@ -1,0 +1,37 @@
+# Trainer contract (lekiwi_rmf/training.py): what each trainer accepts, needs and produces.
+# A run validates its configuration against `config`, records this declaration in run.json
+# with its termination reason, and only a completed run writes manifest.json.
+trainers:
+  lerobot_policy:
+    script: scripts/train-skill.py
+    model_types: [act]
+    modalities: [joint_state, rgb_camera]
+    data_format: lerobot dataset from scripts/export-lerobot.py (ROS units, applied command as action)
+    body: lekiwi arm joints and base commands named in config/robot_skills.yaml
+    config:
+      policy: {type: string, enum: [act]}
+      steps: {type: integer, min: 1}
+      batch_size: {type: integer, min: 1}
+      seed: {type: integer, min: 0}
+      num_workers: {type: integer, min: 0}
+    resources: {accelerator: cuda sm_60 or cpu, gpu_memory_gib: 4, time_limit_min: 120}
+    checkpoints: {resumable: false, kept: last}
+    outputs: [run.json, manifest.json, checkpoint/, train.log, compute.json]
+  rtdetr_detector:
+    script: scripts/train-recognizer.py
+    model_types: [rtdetr_v2]
+    modalities: [rgb_image]
+    data_format: lekiwi_perception_dataset from scripts/build-perception-dataset.py (evidence_jpeg_q80 inputs)
+    body: camera-agnostic; trained on the recognizer's model input, the stored evidence artifact
+    config:
+      steps: {type: integer, min: 1, max: 200000}
+      batch_size: {type: integer, min: 1, max: 64}
+      learning_rate: {type: number, min: 0.0000001, max: 0.01}
+      backbone_learning_rate: {type: number, min: 0, max: 0.01}
+      weight_decay: {type: number, min: 0, max: 1}
+      seed: {type: integer, min: 0}
+      checkpoint_every: {type: integer, min: 1}
+      horizontal_flip: {type: boolean}
+    resources: {accelerator: cuda sm_60 or cpu, gpu_memory_gib: 4, time_limit_min: 60}
+    checkpoints: {resumable: true, kept: latest}
+    outputs: [run.json, manifest.json, model/, metrics.jsonl, checkpoints/, train.log, compute.json]

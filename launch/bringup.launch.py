@@ -29,6 +29,7 @@ from lekiwi_rmf.launch_validation import (
     CHOICES, PROFILES, launch_topology, lidar_default_port, permission_timeout, validate_context)
 from lekiwi_rmf.motion_guards import load_base_speed_limits, load_base_test_profile
 from lekiwi_rmf.odometry import BASE_XY_SCALE, BASE_YAW_SCALE
+from lekiwi_rmf.sim_scene import SIM_WORLD, scene_bridge_arguments
 
 # The fleet adapter must read this robot's map->base_footprint TF and Nav2
 # actions. Those live on the primary ROS graph (domain 0); another domain
@@ -238,6 +239,11 @@ def _stack(context):
             }],
         ),
         *_include(launch_file("sim.launch.py"), sim),
+        # The acquisition protocol's experimental environment: ground-truth poses and entity services
+        # for task-scene resets (lekiwi_rmf/sim_scene.py), never started for normal operation.
+        *([Node(package="ros_gz_bridge", executable="parameter_bridge", name="sim_scene_bridge",
+                arguments=scene_bridge_arguments(SIM_WORLD), output="screen")]
+          if sim and flag("skill_acquisition") else []),
         *_include(launch_file("sensors.launch.py"), real),
     ]
     if real:

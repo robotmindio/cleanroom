@@ -22,8 +22,12 @@ Start with one of these:
 | Record a multimodal episode | `scripts/record-episode.py DIR --task TEXT` |
 | Export episodes to LeRobot | `scripts/install-lerobot-export.sh`, then `scripts/export-lerobot.py EPISODE... --root DATASET` |
 | Train a skill policy (local or `--cluster`) | `scripts/train-skill.py DATASET --output RUN` |
-| Register or promote a skill | `scripts/register-skill.py ID --training RUN --version N --description TEXT` or `--promote REPORT` |
-| Evaluate a skill against observations | `scripts/evaluate-skill.py ID --success JSON --output REPORT` |
+| Register or promote a skill | `scripts/register-skill.py ID --training RUN --version N --description TEXT` or `--promote REPORT...` |
+| Evaluate a skill (observations, a stored `--suite`, or a sim scene) | `scripts/evaluate-skill.py ID --success JSON --output REPORT [--sim-scene ID]` |
+| Generate scripted sim episodes | `scripts/sim-episodes.py --scene ID --program JSON --task TEXT --output DIR` |
+| Freeze taught/corrected views into a dataset | `scripts/build-perception-dataset.py ANNOTATIONS --output DATASET` |
+| Fine-tune a recognizer (local or `--cluster`) | `scripts/train-recognizer.py DATASET --output RUN [--resume]` |
+| Register or promote a recognizer | `scripts/register-recognizer.py NAME --training RUN` or `--promote REPORT [--regression REPORT]` |
 
 Configuration comes from `.env` (only `LEKIWI_ROBOT_HOST`,
 `LEKIWI_DISARM_ON_FAILURE` and `LEKIWI_WIFI_COUNTRY`) and from `LEKIWI_*`

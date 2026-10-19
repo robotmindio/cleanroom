@@ -66,7 +66,16 @@ def main():
     parser.add_argument('--cameras', default='front,wrist,astra')
     parser.add_argument('--duration', type=float, help='stop after this many seconds')
     parser.add_argument('--operator', default='', help='who supervised or intervened, if anyone')
+    parser.add_argument('--domain', choices=['physical', 'sim'], default='physical',
+                        help='sim marks an episode recorded in simulation; exports and reports keep the domain')
+    parser.add_argument('--context', type=Path, help='JSON describing how the episode was set up (for example a '
+                        'scripts/sim-episodes.py scene reset), stored in the manifest')
     args = parser.parse_args()
+    context = None
+    if args.context is not None:
+        if args.context.stat().st_size > 256 * 1024:
+            parser.error('context exceeds 256 KiB')
+        context = json.loads(args.context.read_text())
     cameras = [name for name in args.cameras.split(',') if name]
     if any(name not in CAMERA_TOPICS for name in cameras) or len(set(cameras)) != len(cameras):
         parser.error(f'cameras must be distinct names from {sorted(CAMERA_TOPICS)}')
@@ -79,7 +88,7 @@ def main():
     topics = STATE_TOPICS + [topic for name in cameras for topic in CAMERA_TOPICS[name]]
     manifest = {
         'schema': 1, 'kind': 'lekiwi_episode', 'status': 'recording', 'task': args.task.strip(),
-        'operator': args.operator, 'cameras': cameras, 'topics': topics,
+        'operator': args.operator, 'domain': args.domain, 'context': context, 'cameras': cameras, 'topics': topics,
         'started_at': datetime.datetime.now(datetime.UTC).isoformat(),
         'provenance': provenance(Path(__file__).resolve().parents[1]),
         'action_semantics': {

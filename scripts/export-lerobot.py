@@ -144,10 +144,14 @@ def main():
             image = frame.pop('image')
             dataset.add_frame({**frame, f'observation.images.{args.camera}': image, 'task': manifest['task']})
         dataset.save_episode()
+        # Episodes recorded before the domain field existed are physical recordings.
         report['episodes'].append({'source': str(directory), 'frames': len(exported), 'dropped_ticks': dropped,
                                    'task': manifest['task'], 'provenance': manifest['provenance'],
+                                   'domain': manifest.get('domain', 'physical'),
                                    'manifest_sha256': hashlib.sha256((directory / 'manifest.json').read_bytes()).hexdigest()})
     dataset.finalize()
+    # Simulated and physical demonstrations stay distinguishable in everything trained from this export.
+    report['domains'] = sorted({item['domain'] for item in report['episodes']})
     Path(args.root, 'export-report.json').write_text(json.dumps(report, indent=2, sort_keys=True) + '\n')
     print(json.dumps({'root': args.root, 'episodes': len(report['episodes']),
                       'frames': sum(item['frames'] for item in report['episodes'])}))

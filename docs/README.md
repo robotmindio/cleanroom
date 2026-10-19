@@ -10,7 +10,10 @@
 - [Object observations](object-observations.md): stationary recognition, standard
   ROS detections, persistent evidence services and held-out evaluation.
 - [Skill acquisition](skill-acquisition.md): train, register, evaluate and promote
-  learned skills; cluster training and the independent verifier.
+  learned skills; the trainer contract, cluster training, simulation scenes, the
+  independent verifier and regression suites.
+- [Perception training](perception-training.md): datasets of taught and corrected
+  views, recognizer fine-tuning, registration, and promotion without regression.
 - [Spatial memory](spatial-memory.md): map, revision, anchor and session
   identities, capture-time map poses and reprojection after SLAM optimization.
 - [Robot task contract](robot-tasks.md): managed admission, status, cancellation,

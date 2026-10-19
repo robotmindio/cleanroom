@@ -205,7 +205,7 @@ def evaluate(manifest, model_path=None, *, name='yolox', split='heldout', profil
     manifest_hash, heldout, labels, blue_labels = load_scenes(manifest, split)
     keys = goal_keys(labels, blue_labels)
     cv2.setNumThreads(2)
-    model, bridge = recognizer or Recognizer(name, model_path), CvBridge()
+    model, bridge = recognizer or Recognizer(name, model_path, allow_experimental=True), CvBridge()
     profile = profile or model.default_profile
     # An open recognizer is evaluated under its tracked default query unless a study fixes another.
     query = query or model.default_query
@@ -293,8 +293,8 @@ def evaluate(manifest, model_path=None, *, name='yolox', split='heldout', profil
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('manifest')
-    parser.add_argument('--model-name', default='yolox',
-                        choices=['yolox', 'rtdetr_v2_r18', 'grounding_dino_tiny', 'grounding_dino_tiny_gpu'])
+    parser.add_argument('--model-name', default='yolox', help='a config/recognition_models.yaml entry, '
+                        'including an experimental one registered by scripts/register-recognizer.py')
     parser.add_argument('--model-directory')
     parser.add_argument('--output', required=True)
     parser.add_argument('--split', choices=['development', 'heldout'], default='heldout')
@@ -304,7 +304,7 @@ def main():
     args = parser.parse_args()
     try:
         use_model_runtime(args.model_name)
-        model = Recognizer(args.model_name, args.model_directory)
+        model = Recognizer(args.model_name, args.model_directory, allow_experimental=True)
         profile = None
         if args.profile and args.profile_json:
             raise ValueError('choose --profile or --profile-json')

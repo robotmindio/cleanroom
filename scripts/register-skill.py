@@ -6,9 +6,14 @@ Registering copies the checkpoint of a scripts/train-skill.py directory to
 with the weights digest and `status: experimental`. The observation, camera and
 action contract comes from the training manifest, not from the operator.
 
-`--promote REPORT` sets `status: qualified` only when the scripts/evaluate-skill.py
-report passed and names this skill, version and weights digest, and the installed
-weights still hash to it. The whole registry is validated before it is replaced.
+`--promote REPORT [REPORT ...]` sets `status: qualified` only when every
+scripts/evaluate-skill.py report is a passing physical evaluation of this skill, version
+and weights digest, the installed weights still hash to it, and the reports cover every
+stored qualification suite of the skill (config/qualification_suites.yaml): a version
+that replaces a qualified one must pass what qualified its predecessor. A simulation
+report never promotes. The passing reports become the suites' new baselines (a first
+qualification stores its protocols as the suites). The whole registry is validated
+before it is replaced.
 """
 
 import argparse
@@ -22,7 +27,8 @@ import sys
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lekiwi_rmf.skills import SKILL_ID, load_registry
+from lekiwi_rmf.qualification import load_suites, save_suites, store_report  # noqa: E402
+from lekiwi_rmf.skills import SKILL_ID, load_registry  # noqa: E402
 
 REGISTRY = Path(__file__).resolve().parents[1] / 'config/robot_skills.yaml'
 ARTIFACTS = Path.home() / '.ros/lekiwi/skills'
@@ -120,35 +126,69 @@ def register(args):
 
 
 def promote(args):
-    report = json.loads(args.promote.read_text())
+    reports = [(path, json.loads(path.read_text())) for path in args.promote]
     header, document = read_registry(args.registry)
     entry = document['skills'].get(args.skill_id)
     if entry is None:
         raise RegistrationError(f'{args.skill_id} is not registered')
     skill = load_registry(args.registry, args.artifacts)[args.skill_id]
-    if report.get('kind') != 'lekiwi_skill_evaluation' or report.get('passed') is not True:
-        raise RegistrationError('the evaluation report did not pass')
-    if (report.get('skill_id'), report.get('version')) != (args.skill_id, entry['version']):
-        raise RegistrationError(f'the report evaluated {report.get("skill_id")} version {report.get("version")}, '
-                                f'not the registered version {entry["version"]}')
-    if report.get('weights_sha256') != entry['weights_sha256']:
-        raise RegistrationError('the report evaluated different weights than the registered entry')
+    for _, report in reports:
+        if report.get('kind') != 'lekiwi_skill_evaluation' or report.get('schema') != 2 or report.get('passed') is not True:
+            raise RegistrationError('every evaluation report must be a passing schema-2 report')
+        if report.get('domain') != 'physical' or report.get('promotable') is not True:
+            raise RegistrationError('a simulation result never qualifies a skill; evaluate it on the robot')
+        if (report.get('skill_id'), report.get('version')) != (args.skill_id, entry['version']):
+            raise RegistrationError(f'the report evaluated {report.get("skill_id")} version {report.get("version")}, '
+                                    f'not the registered version {entry["version"]}')
+        if report.get('weights_sha256') != entry['weights_sha256']:
+            raise RegistrationError('the report evaluated different weights than the registered entry')
     installed = skill.checkpoint / 'model.safetensors'
     if not installed.is_file() or digest(installed) != entry['weights_sha256']:
         raise RegistrationError(f'{installed} does not hold the registered weights')
+    suites = load_suites(args.suites)
+    stored = suites['skills'].get(args.skill_id, [])
+    by_protocol = {report['protocol_sha256']: path for path, report in reports}
+    missing = [suite['name'] for suite in stored if suite['protocol_sha256'] not in by_protocol]
+    if missing:
+        raise RegistrationError(f'version {entry["version"]} has not passed the stored suites {missing}; '
+                                'run scripts/evaluate-skill.py --suite NAME for each')
+    known = {suite['protocol_sha256'] for suite in stored}
+    updated = [{**suite, 'qualified_version': entry['version'],
+                'report_sha256': store_report(by_protocol[suite['protocol_sha256']], args.store)} for suite in stored]
+    names = {suite['name'] for suite in updated}
+    for path, report in reports:
+        if report['protocol_sha256'] in known:
+            continue
+        name = report.get('suite') or f'qualification-{report["protocol_sha256"][:8]}'
+        if name in names:
+            name = f'{name}-{report["protocol_sha256"][:8]}'
+        names.add(name)
+        known.add(report['protocol_sha256'])
+        updated.append({'name': name, 'protocol': report['protocol'], 'protocol_sha256': report['protocol_sha256'],
+                        'qualified_version': entry['version'], 'report_sha256': store_report(path, args.store)})
     entry['status'] = 'qualified'
     staged = staged_registry(args.registry, header, document, args.artifacts)
-    shutil.copy(args.promote, skill.checkpoint / 'evaluation-report.json')
+    suites['skills'][args.skill_id] = updated
+    try:
+        save_suites(args.suites, suites)
+    except BaseException:
+        staged.unlink()
+        raise
+    for path, report in reports:
+        shutil.copy(path, skill.checkpoint / f'evaluation-{report["protocol_sha256"][:12]}.json')
     os.replace(staged, args.registry)
+    first = reports[0][1]
     return {'skill_id': args.skill_id, 'version': entry['version'], 'status': 'qualified',
-            'success_rate': report.get('success_rate'), 'wilson_interval': report.get('wilson_interval')}
+            'suites': [suite['name'] for suite in updated], 'success_rate': first.get('success_rate'),
+            'wilson_interval': first.get('wilson_interval')}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('skill_id')
     parser.add_argument('--training', type=Path, help='scripts/train-skill.py output directory to register')
-    parser.add_argument('--promote', type=Path, metavar='REPORT', help='passing scripts/evaluate-skill.py report')
+    parser.add_argument('--promote', type=Path, nargs='+', metavar='REPORT',
+                        help='passing physical scripts/evaluate-skill.py reports, one per stored suite')
     parser.add_argument('--version', type=int)
     parser.add_argument('--description', default='')
     parser.add_argument('--max-duration-sec', type=float, default=30.0)
@@ -157,6 +197,8 @@ def main():
     parser.add_argument('--replace', action='store_true', help='supersede a registered entry with a new version')
     parser.add_argument('--registry', type=Path, default=REGISTRY)
     parser.add_argument('--artifacts', type=Path, default=ARTIFACTS)
+    parser.add_argument('--suites', type=Path, default=REGISTRY.with_name('qualification_suites.yaml'))
+    parser.add_argument('--store', type=Path, default=None, help='qualification report store')
     args = parser.parse_args()
     if not SKILL_ID.match(args.skill_id):
         parser.error('skill_id must match [a-z][a-z0-9_]{0,63}')
