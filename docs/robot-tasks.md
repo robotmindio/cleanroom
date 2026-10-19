@@ -86,7 +86,12 @@ schema other than 2 is refused with `schema_incompatible`, never reinterpreted.
 A capability whose effects are not reversible is refused through `SubmitTask`,
 because schema 1 reports an implementation that ran to its end as `succeeded`.
 Learned skills declare `effects` in `config/robot_skills.yaml`; an undeclared
-skill is irreversible.
+skill is irreversible. The `skill` entry also lists the `implementation_kinds`
+the runner executes (`lerobot_policy`), and each advertised skill carries its
+`kind`, `cameras` and the `resources` it uses, derived from its registry entry:
+arm joints give `arm`, base commands `base` and cameras `camera`. These are
+additive schema 1 fields. Admission still holds the capability's `resources`
+(the arm, and the base kept still) for every skill.
 
 | Service | Request | Result |
 | --- | --- | --- |

@@ -55,10 +55,17 @@ class Skill:
     parameters: dict
     effects: dict
 
+    def resources(self):
+        """What the implementation commands or reads: arm joints, base commands and cameras."""
+        used = {'arm': bool(set(self.action_names) & set(ARM_JOINTS)),
+                'base': bool(set(self.action_names) & set(BASE_COMMANDS)), 'camera': bool(self.cameras)}
+        return [name for name, held in used.items() if held]
+
     def catalog(self):
-        return {'skill_id': self.skill_id, 'version': self.version, 'status': self.status,
+        return {'skill_id': self.skill_id, 'version': self.version, 'status': self.status, 'kind': self.kind,
                 'description': self.description, 'parameters': self.parameters,
-                'max_duration_sec': self.max_duration_sec, 'effects': self.effects}
+                'max_duration_sec': self.max_duration_sec, 'effects': self.effects,
+                'resources': self.resources(), 'cameras': list(self.cameras)}
 
 
 def _skill(skill_id, value, artifacts):
