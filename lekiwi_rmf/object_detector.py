@@ -28,6 +28,8 @@ from lekiwi_rmf.srv import SetPerceptionQuery
 
 QUERY_SERVICE = '/robot/perception/set_query'
 PROFILE_TOPIC = '/robot/perception/profile'
+# The task gateway's exclusive-resource holders; a running search reserves the query.
+RESOURCE_TOPIC = '/robot/resources'
 
 
 def detect(detector, image, header, query=None):
@@ -132,7 +134,11 @@ class ObjectDetector(Node):
         self._profile = self.create_publisher(String, PROFILE_TOPIC,
                                               QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
         self._publish_profile()
+        self._query_holder = None
         self.create_service(SetPerceptionQuery, QUERY_SERVICE, self._set_query, callback_group=self._receipt_group)
+        self.create_subscription(String, RESOURCE_TOPIC, self._resources_message,
+                                 QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL),
+                                 callback_group=self._receipt_group)
         self._diagnostics = self.create_publisher(DiagnosticArray, '/diagnostics', 10)
         self.create_timer(1., self._health, callback_group=self._receipt_group)
         self.create_timer(1 / rate, self._infer, clock=Clock(clock_type=ClockType.STEADY_TIME),
@@ -153,12 +159,27 @@ class ObjectDetector(Node):
                 'query': query.document() if recognizer.open_vocabulary else None}
                 for role, recognizer in recognizers]}, ensure_ascii=False)))
 
+    def _resources_message(self, message):
+        try:
+            holder = json.loads(message.data)['resources']['perception_query']
+            if holder is not None and not isinstance(holder, dict):
+                raise TypeError('holder must be an object')
+        except (ValueError, KeyError, TypeError) as error:
+            # Fail closed: an unreadable reservation is treated as held.
+            self.get_logger().error(f'invalid resource state: {error}')
+            holder = {'task_id': 'unknown'}
+        with self._query_lock:
+            self._query_holder = holder
+
     def _set_query(self, request, response):
         with self._query_lock:
             current = self._query
             if current is not None:
                 response.revision, response.labels = current.revision, list(current.labels)
             try:
+                if self._query_holder is not None:
+                    raise ValueError(f'resource_busy: task {self._query_holder.get("task_id")} reserves the '
+                                     'perception query until it stops')
                 if current is None:
                     raise ValueError('the active recognizer has a closed vocabulary and cannot take a query')
                 if request.expected_revision and request.expected_revision != current.revision:

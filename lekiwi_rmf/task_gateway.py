@@ -5,6 +5,7 @@ import json
 import hashlib
 import math
 from pathlib import Path
+import re
 from queue import Empty, SimpleQueue
 import time
 import uuid
@@ -28,20 +29,44 @@ from unique_identifier_msgs.msg import UUID
 from lekiwi_rmf.action import Explore, RunSkill, Search
 from lekiwi_rmf.exploration import task_limits
 from lekiwi_rmf.exploration_owner_guard import owned_goal_id
-from lekiwi_rmf.srv import CancelTask, GetTask, SetPerceptionQuery, SubmitTask
+from lekiwi_rmf.srv import CancelTask, GetTask, SetPerceptionQuery, SubmitTask, TaskApi
 from lekiwi_rmf.perception_query import limits as query_limits
-from lekiwi_rmf.task_journal import TERMINAL, TaskJournal
+from lekiwi_rmf.task_journal import CAPABILITY_RESOURCES, TERMINAL, Refused, TaskJournal
 from lekiwi_rmf.navigation_pause import NavigationPause
 from lekiwi_rmf.navigation_observer import NavigationObserver, server_instance
 from lekiwi_rmf.navigation_distance import NavigationDistance
 from lekiwi_rmf.map_bundle import validate_map_bundle
-from lekiwi_rmf.skills import SKILL_ID, catalog, load_registry
+from lekiwi_rmf.arm_trajectory import ARM_JOINTS
+from lekiwi_rmf.skills import BASE_COMMANDS, SKILL_ID, UNDECLARED_EFFECTS, catalog, load_registry
 
 
 ACTIONS = {'navigate': ('/navigate_to_pose', NavigateToPose), 'explore': ('/robot/explore', Explore),
            'skill': ('/robot/skills/run', RunSkill), 'search': ('/robot/search', Search)}
 SEARCH_PARAMETERS = ('query', 'region', 'max_duration_sec', 'max_travel_m', 'target_coverage')
 SEARCH_LIMITS = ('max_duration_sec', 'max_travel_m')
+# Schema 1 is SubmitTask/GetTask/CancelTask; schema 2 is the TaskApi services below.
+API_SCHEMAS = (1, 2)
+TASK_API = {name: f'/robot/tasks/v2/{name}'
+            for name in ('validate', 'submit', 'status', 'events', 'cancel', 'transfer', 'compensate')}
+# Base motion creates no intended material change, and the base can drive back.
+EFFECTS = {name: {'reversibility': 'reversible', 'compensation': text} for name, text in (
+    ('navigate', 'Navigate back to the starting pose.'),
+    ('explore', 'Map growth is data; navigate back to the starting pose.'),
+    ('search', 'Observations are data; navigate back to the starting pose.'))}
+UNITS = {'navigate': {'x': 'm', 'y': 'm', 'yaw': 'rad', 'deadline_unix_sec': 's', 'max_travel_m': 'm'},
+         'explore': {'max_duration_sec': 's', 'max_radius_m': 'm'},
+         'search': {'region': 'm', 'max_duration_sec': 's', 'max_travel_m': 'm', 'target_coverage': 'fraction'},
+         'skill': {}}
+FRAMES = {'navigate': 'map', 'search': 'map'}
+# The joint and base-command mapping a plan was made for; a different body is refused, never guessed.
+BODY_PROFILE = 'lekiwi:' + hashlib.sha256(json.dumps([*ARM_JOINTS, *BASE_COMMANDS]).encode()).hexdigest()[:16]
+REFERENCE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$')
+TASK_ID = re.compile(r'^[A-Za-z0-9._-]{1,128}$')
+CHECKPOINT_FIELDS = {'summary', 'goal', 'interpretation', 'references', 'plan', 'remote_commands',
+                     'generations', 'resources', 'progress', 'pending_verifications'}
+COMPENSATION_INTENTS = {'restore': ('reversible',), 'repair': ('reversible', 'compensable'),
+                        'isolate': ('reversible', 'compensable', 'irreversible'),
+                        'record': ('reversible', 'compensable', 'irreversible')}
 
 
 def task_goal(capability, text):
@@ -150,6 +175,10 @@ class TaskGateway(Node):
         if type(self._timeout) not in (float, int) or not math.isfinite(self._timeout) or self._timeout <= 0:
             raise ValueError('navigation_timeout_sec must be positive and finite')
         self._journal = TaskJournal(self.get_parameter('database_path').value)
+        self._skill_effects = {skill['skill_id']: skill['effects'] for skill in self._skills}
+        # Dispatched tasks observed live by this process; recovered ones stay uncertain until then.
+        self._live = set()
+        self._resource_snapshot = None
         self._pending = {}
         self._replies = SimpleQueue()
         self._queried = {}
@@ -205,6 +234,15 @@ class TaskGateway(Node):
         self.create_service(GetTask, '/robot/tasks/get', self._get)
         self.create_service(CancelTask, '/robot/tasks/cancel', self._cancel)
         self.create_service(Trigger, '/robot/capabilities', self._capabilities)
+        for name, handler in (('validate', self._api_validate), ('submit', self._api_submit),
+                              ('status', self._api_status), ('events', self._api_events),
+                              ('cancel', self._api_cancel), ('transfer', self._api_transfer),
+                              ('compensate', self._api_compensate)):
+            self.create_service(TaskApi, TASK_API[name], self._api(handler))
+        # Holders of exclusive resources, for nodes that enforce them outside this gateway.
+        self._resources = self.create_publisher(String, '/robot/resources', latched)
+        self._publish_resources()
+        self.create_timer(0.2, self._publish_resources, clock=Clock(clock_type=ClockType.STEADY_TIME))
         self._observation_status = self.create_client(Trigger, '/robot/observations/status')
         # Only to report availability; clients call the detector's query service directly.
         self._perception_query = self.create_client(SetPerceptionQuery, '/robot/perception/set_query')
@@ -251,61 +289,366 @@ class TaskGateway(Node):
         self._unknown_cancels.pop(identifier, None)
         self._unknown_since.pop(identifier, None)
 
+    def _effects(self, capability, values):
+        if capability == 'skill':
+            return self._skill_effects.get(values.get('skill_id'), UNDECLARED_EFFECTS)
+        return EFFECTS[capability]
+
+    def _admit(self, task_id, capability, parameters_json, request=None, dry_run=False):
+        """Every admission check for SubmitTask (no request) and the negotiated API, before any dispatch.
+
+        Returns (row, summary): an existing row with no summary for an idempotent retry,
+        no row for a dry run, or the newly admitted row.
+        """
+        if not isinstance(task_id, str) or not TASK_ID.match(task_id):
+            raise Refused('invalid_request', 'task_id requires 1..128 ASCII letters, numbers, dots, hyphens or underscores')
+        try:
+            _, parameters = task_goal(capability, parameters_json)
+        except (ValueError, TypeError, OverflowError) as error:
+            raise Refused('invalid_request', str(error)) from error
+        values = json.loads(parameters)
+        effects = self._effects(capability, values)
+        if request is None and effects['reversibility'] != 'reversible':
+            # Schema 1 reports an implementation that finished as succeeded; with effects
+            # that cannot be undone a client must see execution and effect separately.
+            raise Refused('schema_incompatible', f'{capability} has {effects["reversibility"]} effects; '
+                          'submit it through the task API schema 2')
+        compensates = (request or {}).get('compensates') or {}
+        digest = hashlib.sha256(json.dumps(
+            {'capability': capability, 'parameters': values, 'goal': request.get('goal'),
+             'compensates': compensates.get('task_id', '')}, sort_keys=True).encode()).hexdigest() if request else ''
+        row = self._row(task_id)
+        if row is not None:
+            same = (row['digest'] == digest if row['digest'] and digest
+                    else (row['capability'], row['parameters']) == (capability, parameters))
+            if not same:
+                raise Refused('identity_conflict', 'task_id already has different parameters', task_id=task_id)
+            # A retry after a lost reply returns what was admitted; it never sends a second goal.
+            return row, None
+        if not self._enabled[capability]:
+            raise Refused('capability_unavailable', 'capability disabled by this deployment profile')
+        resources = CAPABILITY_RESOURCES[capability]
+        if request is not None:
+            self._check_request(capability, request, resources)
+        self._journal.require_free(resources)
+        if any(self._observed.values()) or self._children.busy():
+            raise Refused('resource_busy', 'another ROS navigation or exploration client has an active goal',
+                          holders=[{'resource': 'base', 'task_id': '', 'owner': 'external ROS client'}])
+        if not self._action_clients[capability].server_is_ready():
+            raise Refused('capability_unavailable', 'capability action server unavailable')
+        effective = None
+        if capability == 'navigate' and 'deadline_unix_sec' in values and not (
+                time.time() < values['deadline_unix_sec'] <= time.time() + 300):
+            raise Refused('precondition_failed', 'navigation deadline must be within the next 300 seconds')
+        if capability == 'navigate':
+            effective = {**values, 'yaw': values.get('yaw', 0.0), 'max_duration_sec': self._timeout}
+        elif (capability == 'explore' and self._exploration_defaults is not None
+              and not values.get('resume_task_id')):
+            duration, radius = task_limits(
+                values.get('max_duration_sec', 0.0), values.get('max_radius_m', 0.0),
+                self._exploration_defaults['max_duration_sec'], self._exploration_defaults['max_radius_m'])
+            effective = {'max_duration_sec': duration, 'max_radius_m': radius}
+            effective['revisit_known'] = values.get('revisit_known', False)
+            effective['resume_task_id'] = ''
+        elif capability == 'search' and self._search_defaults is not None:
+            effective = dict(values)
+            for name in SEARCH_LIMITS:
+                if values.get(name, 0.0) > self._search_defaults[name]:
+                    raise Refused('invalid_request', f'{name} exceeds the tracked limit {self._search_defaults[name]}')
+                effective[name] = values.get(name, 0.0) or self._search_defaults[name]
+            effective['target_coverage'] = values.get('target_coverage', 0.0) or self._search_defaults['target_coverage']
+        metadata = {'parameters': values, 'effective_parameters': effective}
+        if capability == 'navigate' and 'max_travel_m' in values:
+            meter = self._distance.status()
+            if not meter['ready']:
+                raise Refused('precondition_failed', 'bounded navigation requires fresh odometry')
+            metadata['odometry_origin'] = {'epoch': meter['epoch'], 'meters': meter['meters']}
+        if request is not None:
+            metadata['request'] = {key: request[key] for key in
+                                   ('goal', 'body_profile', 'frame', 'units', 'authority') if key in request}
+        summary = {'capability': capability, 'parameters': values, 'effective_parameters': effective,
+                   'resources': list(resources), 'effects': effects, 'body_profile': BODY_PROFILE, 'digest': digest}
+        if dry_run:
+            return None, summary
+        goal_id = bytes(owned_goal_id().uuid) if capability == 'navigate' else uuid.uuid4().bytes
+        row = self._journal.admit(task_id, capability, parameters, goal_id, result={'_task': metadata},
+                                  resources=resources, owner=(request or {}).get('owner', ''),
+                                  api_schema=2 if request is not None else 1, digest=digest,
+                                  compensates=compensates.get('task_id', ''))
+        self._publish_resources()
+        return row, summary
+
+    def _check_request(self, capability, request, resources):
+        """Refuse a plan made for another body, frame, unit system or resource set."""
+        body = request.get('body_profile')
+        if body is not None and body != BODY_PROFILE:
+            raise Refused('body_profile_mismatch', f'request is for body {body}; this robot is {BODY_PROFILE}')
+        frame = request.get('frame')
+        if frame is not None and frame != FRAMES.get(capability):
+            raise Refused('map_unaligned', f'{capability} takes {FRAMES.get(capability) or "no"} frame coordinates, '
+                          f'not {frame!r}')
+        if request.get('units', 'si') != 'si':
+            raise Refused('unit_mismatch', 'parameters are SI: metres, radians, seconds')
+        declared = request.get('resources')
+        if declared is not None and (len(set(declared)) != len(declared) or set(declared) != set(resources)):
+            raise Refused('resource_mismatch', f'{capability} uses exactly {sorted(resources)}')
+        compensates = request.get('compensates')
+        if compensates is not None:
+            original = self._journal.fence(compensates['task_id'], compensates['generation'], request['owner'],
+                                           reconciled=True)
+            plan = json.loads(original['compensation'] or 'null')
+            if plan is None or plan['status'] not in ('planned', 'in_progress'):
+                raise Refused('precondition_failed', 'that task has no open compensation plan')
+            steps = [step['capability'] for step in plan['plan']['steps']]
+            if capability not in steps or len(plan.get('tasks', {})) >= len(steps):
+                raise Refused('precondition_failed', 'the compensation plan has no remaining step for this capability')
+
     def _submit(self, request, response):
         try:
-            if not 1 <= len(request.task_id) <= 128 or any(c not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.' for c in request.task_id):
-                raise ValueError('task_id requires 1..128 ASCII letters, numbers, dots, hyphens or underscores')
-            _, parameters = task_goal(request.capability, request.parameters_json)
-            row = self._row(request.task_id)
-            if row is not None:
-                if (row['capability'], row['parameters']) != (request.capability, parameters):
-                    raise ValueError('task_id already has different parameters')
-            else:
-                if not self._enabled[request.capability]:
-                    raise ValueError('capability disabled by this deployment profile')
-                if self._active():
-                    raise ValueError('another managed task is active or its result is unconfirmed')
-                if any(self._observed.values()) or self._children.busy():
-                    raise ValueError('another ROS navigation or exploration client has an active goal')
-                if not self._action_clients[request.capability].server_is_ready():
-                    raise ValueError('capability action server unavailable')
-                goal_id = bytes(owned_goal_id().uuid) if request.capability == 'navigate' else uuid.uuid4().bytes
-                values = json.loads(parameters)
-                effective = None
-                if request.capability == 'navigate' and 'deadline_unix_sec' in values and not (
-                        time.time() < values['deadline_unix_sec'] <= time.time() + 300):
-                    raise ValueError('navigation deadline must be within the next 300 seconds')
-                if request.capability == 'navigate':
-                    effective = {**values, 'yaw': values.get('yaw', 0.0),
-                                 'max_duration_sec': self._timeout}
-                elif (request.capability == 'explore' and self._exploration_defaults is not None
-                      and not values.get('resume_task_id')):
-                    duration, radius = task_limits(
-                        values.get('max_duration_sec', 0.0), values.get('max_radius_m', 0.0),
-                        self._exploration_defaults['max_duration_sec'], self._exploration_defaults['max_radius_m'])
-                    effective = {'max_duration_sec': duration, 'max_radius_m': radius}
-                    effective['revisit_known'] = values.get('revisit_known', False)
-                    effective['resume_task_id'] = ''
-                elif request.capability == 'search' and self._search_defaults is not None:
-                    effective = dict(values)
-                    for name in SEARCH_LIMITS:
-                        if values.get(name, 0.0) > self._search_defaults[name]:
-                            raise ValueError(f'{name} exceeds the tracked limit {self._search_defaults[name]}')
-                        effective[name] = values.get(name, 0.0) or self._search_defaults[name]
-                    effective['target_coverage'] = values.get('target_coverage', 0.0) or self._search_defaults['target_coverage']
-                metadata = {'parameters': values, 'effective_parameters': effective}
-                if request.capability == 'navigate' and 'max_travel_m' in values:
-                    meter = self._distance.status()
-                    if not meter['ready']:
-                        raise ValueError('bounded navigation requires fresh odometry')
-                    metadata['odometry_origin'] = {'epoch': meter['epoch'], 'meters': meter['meters']}
-                self._journal.admit(request.task_id, request.capability, parameters, goal_id,
-                                    result={'_task': metadata})
-                row = self._row(request.task_id)
+            row, _ = self._admit(request.task_id, request.capability, request.parameters_json)
             response.accepted, response.state, response.detail = True, row['state'], row['detail']
         except (ValueError, TypeError, OverflowError) as error:
             response.accepted, response.state, response.detail = False, 'rejected', str(error)
         return response
+
+    def _api(self, handler):
+        """One negotiated wrapper: an unsupported schema or payload is refused, never reinterpreted."""
+        def call(request, response):
+            response.schema = 2
+            try:
+                if request.schema != 2:
+                    raise Refused('schema_incompatible', f'this service speaks schema 2; the gateway supports {list(API_SCHEMAS)}',
+                                  supported=list(API_SCHEMAS))
+                if len(request.request_json.encode()) > 32768:
+                    raise Refused('invalid_request', 'request exceeds 32768 bytes')
+                values = json.loads(request.request_json or '{}')
+                if not isinstance(values, dict):
+                    raise Refused('invalid_request', 'request must be a JSON object')
+                result = handler(values)
+                response.ok, response.response_json = True, json.dumps(result, allow_nan=False, sort_keys=True)
+            except Refused as error:
+                response.ok, response.error, response.detail = False, error.code, str(error)
+                response.response_json = json.dumps(error.data, allow_nan=False, sort_keys=True)
+            except (ValueError, TypeError, KeyError, OverflowError, RecursionError) as error:
+                response.ok, response.error, response.detail = False, 'invalid_request', str(error)
+            return response
+        return call
+
+    @staticmethod
+    def _envelope(values):
+        allowed = {'task_id', 'capability', 'parameters', 'owner', 'goal', 'body_profile', 'frame', 'units',
+                   'resources', 'authority', 'compensates'}
+        if set(values) - allowed:
+            raise Refused('invalid_request', f'unknown request fields {sorted(set(values) - allowed)}')
+        if values.get('capability') not in ACTIONS:
+            raise Refused('invalid_request', 'unsupported capability')
+        parameters = values.get('parameters', {})
+        if not isinstance(parameters, dict):
+            raise Refused('invalid_request', 'parameters must be an object')
+        owner = values.get('owner')
+        if not isinstance(owner, str) or not REFERENCE.match(owner):
+            raise Refused('invalid_request', 'owner requires a 1..128 character agent or worker reference')
+        authority = values.get('authority')
+        if authority is not None and (not isinstance(authority, str) or not REFERENCE.match(authority)):
+            raise Refused('invalid_request', 'authority is a policy or approval reference, never a credential')
+        goal = values.get('goal')
+        if goal is not None and (not isinstance(goal, dict) or set(goal) - {'id', 'revision'}
+                                 or not isinstance(goal.get('id'), str) or not REFERENCE.match(goal['id'])
+                                 or type(goal.get('revision', 0)) is not int or goal.get('revision', 0) < 0):
+            raise Refused('invalid_request', 'goal requires an id and an optional nonnegative integer revision')
+        compensates = values.get('compensates')
+        if compensates is not None and (not isinstance(compensates, dict) or set(compensates) != {'task_id', 'generation'}
+                                        or not isinstance(compensates['task_id'], str)
+                                        or type(compensates['generation']) is not int):
+            raise Refused('invalid_request', 'compensates requires the original task_id and generation')
+        if any(key in values and not isinstance(values[key], str) for key in ('body_profile', 'frame', 'units')):
+            raise Refused('invalid_request', 'body_profile, frame and units are strings')
+        resources = values.get('resources')
+        if resources is not None and (not isinstance(resources, list) or not all(isinstance(r, str) for r in resources)):
+            raise Refused('invalid_request', 'resources is a list of resource names')
+        return values.get('task_id'), values['capability'], json.dumps(parameters, allow_nan=False), values
+
+    def _api_validate(self, values):
+        row, summary = self._admit(*self._envelope(values), dry_run=True)
+        return {'valid': True, 'existing': self._view(row) if row is not None else None, 'request': summary}
+
+    def _api_submit(self, values):
+        row, summary = self._admit(*self._envelope(values))
+        return {'admitted': summary is not None, 'existing': summary is None, 'task': self._view(row)}
+
+    def _task_row(self, values):
+        identifier = values.get('task_id')
+        if not isinstance(identifier, str):
+            raise Refused('invalid_request', 'task_id must be a string')
+        generation = values.get('generation')
+        if generation is not None and type(generation) is not int:
+            raise Refused('invalid_request', 'generation must be an integer')
+        row = self._row(identifier)
+        if row is None:
+            raise Refused('not_found', 'task not found')
+        return row, generation
+
+    def _api_status(self, values):
+        row, generation = self._task_row(values)
+        if generation is not None:
+            # Reading the journal with its own generation is how a successor reconciles.
+            self._journal.reconcile(row['id'], generation)
+        return {'task': self._view(self._row(row['id']))}
+
+    def _api_events(self, values):
+        cursor, limit, identifier = values.get('cursor', 0), values.get('limit', 100), values.get('task_id', '')
+        if type(cursor) is not int or cursor < 0 or type(limit) is not int or not 1 <= limit <= 100:
+            raise Refused('invalid_request', 'cursor is a nonnegative integer and limit is 1..100')
+        if not isinstance(identifier, str):
+            raise Refused('invalid_request', 'task_id must be a string')
+        if identifier and values.get('generation') is not None:
+            row, generation = self._task_row(values)
+            self._journal.reconcile(row['id'], generation)
+        return self._journal.events_since(cursor, identifier, limit)
+
+    def _api_cancel(self, values):
+        identifier = values.get('task_id', '')
+        if not isinstance(identifier, str):
+            raise Refused('invalid_request', 'task_id must be a string')
+        requester = values.get('requester', '')
+        if requester and (not isinstance(requester, str) or not REFERENCE.match(requester)):
+            raise Refused('invalid_request', 'requester is a 1..128 character reference')
+        if not identifier:
+            active = self._active()
+            identifier = active[0]['id'] if active else ''
+        row, generation = self._task_row({**values, 'task_id': identifier})
+        if generation is not None:
+            # A fenced caller cannot stop work it no longer owns; an unfenced stop is always accepted.
+            self._journal.fence(row['id'], generation)
+        accepted = row['state'] not in TERMINAL
+        if accepted:
+            self._journal.request_cancel(row['id'], requester=requester or 'task_api')
+            self._update(row['id'], 'canceling', 'cancellation requested; awaiting terminal ROS result')
+        view = self._view(self._row(row['id']))
+        return {'accepted': accepted, 'receipt': view['cancel'], 'stop': view['stop'], 'task': view}
+
+    def _api_transfer(self, values):
+        if set(values) - {'task_id', 'generation', 'owner', 'new_owner', 'checkpoint'}:
+            raise Refused('invalid_request', 'transfer takes task_id, generation, owner, new_owner and checkpoint')
+        row, generation = self._task_row(values)
+        owner, successor, checkpoint = values.get('owner'), values.get('new_owner'), values.get('checkpoint')
+        if generation is None or not all(isinstance(value, str) and REFERENCE.match(value) for value in (owner, successor)):
+            raise Refused('invalid_request', 'transfer requires generation, owner and new_owner references')
+        if (not isinstance(checkpoint, dict) or set(checkpoint) - CHECKPOINT_FIELDS
+                or not isinstance(checkpoint.get('summary'), str) or not 1 <= len(checkpoint['summary']) <= 2000
+                or len(json.dumps(checkpoint, allow_nan=False)) > 16384):
+            raise Refused('invalid_request', f'checkpoint is at most 16 KiB of {sorted(CHECKPOINT_FIELDS)} '
+                          'with a readable summary; never credentials')
+        row = self._journal.transfer(row['id'], generation, owner, successor, checkpoint)
+        self._publish_resources()
+        return {'task': self._view(row), 'generation': row['generation'], 'previous_generation': generation}
+
+    def _api_compensate(self, values):
+        if set(values) - {'task_id', 'generation', 'owner', 'plan'}:
+            raise Refused('invalid_request', 'compensate takes task_id, generation, owner and plan')
+        row, generation = self._task_row(values)
+        plan = values.get('plan')
+        if generation is None or not isinstance(values.get('owner'), str):
+            raise Refused('invalid_request', 'compensate requires generation and owner')
+        if (not isinstance(plan, dict) or set(plan) - {'intent', 'steps', 'note'} or plan.get('intent') not in COMPENSATION_INTENTS
+                or not isinstance(plan.get('steps', []), list) or len(plan.get('steps', [])) > 8
+                or not isinstance(plan.get('note', ''), str) or len(plan.get('note', '')) > 2000):
+            raise Refused('invalid_request', f'plan has intent {sorted(COMPENSATION_INTENTS)}, at most 8 steps and a note')
+        steps = plan.get('steps', [])
+        for step in steps:
+            if not isinstance(step, dict) or set(step) != {'capability', 'parameters'} or step['capability'] not in ACTIONS:
+                raise Refused('invalid_request', 'each step is {capability, parameters}')
+            try:
+                task_goal(step['capability'], json.dumps(step['parameters'], allow_nan=False))
+            except (ValueError, TypeError) as error:
+                raise Refused('invalid_request', f'step {step["capability"]}: {error}') from error
+        if row['state'] not in TERMINAL:
+            raise Refused('precondition_failed', 'cancel the task and wait for its confirmed stop before compensating')
+        reversibility = self._effects(row['capability'], json.loads(row['parameters']))['reversibility']
+        if reversibility not in COMPENSATION_INTENTS[plan['intent']]:
+            raise Refused('irreversible_effect', f'a {reversibility} effect cannot be {plan["intent"]}d; '
+                          'stop, isolate and record it instead')
+        compensation = {'plan': {'intent': plan['intent'], 'steps': steps, 'note': plan.get('note', '')},
+                        'status': 'planned' if steps else 'recorded', 'recorded_at': time.time(),
+                        'reversibility': reversibility, 'automatic': False,
+                        # Compensation repairs state; it never achieves or replaces the original goal.
+                        'counts_as_goal_success': False,
+                        'material_rollback': reversibility == 'reversible' and plan['intent'] == 'restore',
+                        'original_state': row['state'], 'tasks': {}}
+        row = self._journal.record_compensation(row['id'], generation, values['owner'], compensation)
+        return {'task': self._view(row)}
+
+    def _view(self, row):
+        """Separate dimensions of one task: command phase, stop, effect evidence and goal verification."""
+        result = json.loads(row['result'])
+        metadata = result.get('_task', {})
+        state, identifier = row['state'], row['id']
+        terminal = state in TERMINAL
+        if not terminal and not row['dispatched']:
+            phase = 'admitted'
+        elif state == 'unknown':
+            phase = 'uncertain'
+        elif not terminal and row['navigation_stopped']:
+            # Its native attempt already ended; the journal holds the pause, not a live executor.
+            phase = 'paused'
+        elif not terminal and identifier in self._recovering and identifier not in self._live:
+            phase = 'uncertain'
+        elif state == 'paused':
+            phase = 'paused'
+        elif not terminal:
+            phase = 'running'
+        elif not row['dispatched']:
+            phase = 'not_started'
+        else:
+            phase = 'stopped' if state == 'canceled' else 'execution_finished'
+        outcome = None
+        if terminal:
+            outcome = 'unknown' if result.get('outcome_known') is False else state
+        if terminal:
+            stop = 'confirmed'
+        elif phase == 'uncertain':
+            stop = 'uncertain'
+        elif row['cancel_requested']:
+            stop = 'stopping'
+        else:
+            stop = 'not_requested'
+        effect = {'observed': False, 'verified_by_robot': False}
+        if row['capability'] == 'search' and result.get('found') and result.get('evidence_ids'):
+            effect.update(observed=True, kind='label_detected', evidence_ids=result['evidence_ids'])
+        elif row['capability'] == 'navigate' and state == 'succeeded':
+            effect.update(observed=True, kind='pose_reached', source='nav2')
+        effects = self._effects(row['capability'], json.loads(row['parameters']))
+        compensation = json.loads(row['compensation'] or 'null')
+        request = metadata.get('request', {})
+        receipt = json.loads(row['cancel_receipt'] or 'null')
+        if receipt is None and row['cancel_requested']:
+            receipt = {'receipt_id': None, 'task_id': identifier,
+                       'reason': 'deadline' if row['cancel_requested'] == 2 else 'requested'}
+        return {
+            'task_id': identifier, 'capability': row['capability'], 'state': state, 'detail': row['detail'],
+            'api_schema': row['api_schema'], 'owner': row['owner'], 'generation': row['generation'],
+            'reconciled': row['reconciled_generation'] == row['generation'],
+            'resources': json.loads(row['resources']), 'holding_resources': not terminal,
+            'execution': {'phase': phase, 'dispatched': bool(row['dispatched']), 'outcome': outcome},
+            'cancel': receipt, 'stop': stop, 'effect': effect,
+            # Only the authorized verifier can credit the goal; the robot never does.
+            'goal': {**request.get('goal', {}), 'verified': None, 'verifier': 'recuriant'},
+            'effects': effects, 'compensation': compensation,
+            'compensation_required': (terminal and bool(row['dispatched']) and state != 'succeeded'
+                                      and effects['reversibility'] != 'reversible' and compensation is None),
+            'compensates': row['compensates'] or None,
+            'checkpoint': json.loads(row['checkpoint'] or 'null'),
+            'parameters': metadata.get('parameters'), 'effective_parameters': metadata.get('effective_parameters'),
+            'times': self._journal.times(identifier), 'cursor': self._journal.last_event(identifier),
+            'journal_id': self._journal.journal_id,
+            'result': {key: value for key, value in result.items() if key != '_task'}}
+
+    def _publish_resources(self):
+        state = self._journal.resource_state()
+        if state != self._resource_snapshot:
+            self._resource_snapshot = state
+            self._resources.publish(String(data=json.dumps(
+                {'schema': 1, 'journal_id': self._journal.journal_id, 'resources': state}, sort_keys=True)))
 
     def _get(self, request, response):
         row = self._row(request.task_id)
@@ -322,7 +665,7 @@ class TaskGateway(Node):
             response.detail = 'task not found'
             return response
         if row['state'] not in TERMINAL:
-            self._journal.request_cancel(identifier)
+            self._journal.request_cancel(identifier, requester='CancelTask')
             self._update(identifier, 'canceling', 'cancellation requested; awaiting terminal ROS result')
         row = self._row(identifier)
         response.accepted, response.state, response.detail = True, row['state'], row['detail']
@@ -393,11 +736,37 @@ class TaskGateway(Node):
                                 'evidence_ids, coverage_fraction and a negative-evidence report; "not found" holds only '
                                 'for the covered cells. Zero/omitted limits use the tracked limits; positive limits may only reduce them.')}
 
+    @staticmethod
+    def _body_profile():
+        return {'id': BODY_PROFILE, 'arm_joints': list(ARM_JOINTS), 'base_commands': list(BASE_COMMANDS)}
+
+    def _contract(self, entry):
+        """Resources, units, frame and effects every capability declares, for planning and validation."""
+        name = entry['name']
+        entry = {**entry, 'resources': list(CAPABILITY_RESOURCES[name]), 'units': UNITS[name],
+                 'frame': FRAMES.get(name)}
+        if name == 'skill':
+            entry['skills'] = [{**skill, 'requires_schema': 1 if skill['effects']['reversibility'] == 'reversible' else 2}
+                               for skill in entry['skills']]
+            entry['effects'] = {'per_skill': True, 'undeclared': UNDECLARED_EFFECTS}
+            entry['requires_schema'] = 'per_skill'
+        else:
+            entry['effects'], entry['requires_schema'] = EFFECTS[name], 1
+        return entry
+
     def _capabilities(self, _request, response):
         response.success = True
         response.message = json.dumps({'schema': 1, 'capabilities': [
-            self._capability(name, client) for name, client in self._action_clients.items()],
+            self._contract(self._capability(name, client)) for name, client in self._action_clients.items()],
             'terminal_states': sorted(TERMINAL),
+            'task_api': {'schemas': list(API_SCHEMAS), 'type': 'lekiwi_rmf/srv/TaskApi', 'services': TASK_API,
+                         'body_profile': self._body_profile(), 'journal_id': self._journal.journal_id,
+                         'resources': self._journal.resource_state(), 'resource_topic': '/robot/resources',
+                         'description': ('Schema 2 separates admission, execution, stop and effect evidence; '
+                                         'grants a generation (fencing token) per owner; serializes tasks whose '
+                                         'resources overlap; returns cancel receipts; and replays journal events '
+                                         'from a cursor. Capabilities with requires_schema 2 are refused through '
+                                         'SubmitTask.')},
             'observations': {'available': self._observation_status.service_is_ready(),
                              'schema': 1, 'grounding': 'image_only',
                              'services': {'query': '/robot/observations/query',
@@ -434,7 +803,10 @@ class TaskGateway(Node):
 
     def _feedback(self, message):
         row = self._journal.goal(bytes(message.goal_id.uuid))
-        if row is None or row['state'] in TERMINAL or row['cancel_requested'] or row['navigation_stopped']:
+        if row is None or row['state'] in TERMINAL:
+            return
+        self._live.add(row['id'])
+        if row['cancel_requested'] or row['navigation_stopped']:
             return
         if row['id'] in self._pausing:
             return
@@ -447,6 +819,8 @@ class TaskGateway(Node):
         for status in message.status_list:
             row = self._journal.goal(bytes(status.goal_info.goal_id.uuid))
             if row is not None and row['state'] not in TERMINAL and not row['navigation_stopped']:
+                if status.status in (GoalStatus.STATUS_ACCEPTED, GoalStatus.STATUS_EXECUTING, GoalStatus.STATUS_CANCELING):
+                    self._live.add(row['id'])
                 if status.status in (4, 5, 6):
                     self._terminal_seen.setdefault(row['id'], time.monotonic())
                 self._lookup_result(row)
@@ -601,6 +975,8 @@ class TaskGateway(Node):
                 break
             kind, identifier, goal_id, server_id, future = reply
             if self._row(identifier)['goal_id'] != goal_id:
+                # A reply for a superseded attempt is recorded as evidence, never applied as state.
+                self._journal.event(identifier, 'late_reply', {'kind': kind, 'goal_id': bytes(goal_id).hex()})
                 continue
             if kind == 'accepted':
                 self._accepted(identifier, future)

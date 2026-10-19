@@ -255,3 +255,14 @@ def test_camera_frames_decode_to_rgb_without_cv_bridge():
     message.encoding = 'mono8'
     with pytest.raises(RuntimeError, match='encoding'):
         rgb_pixels(message)
+
+
+def test_effects_are_declared_or_conservatively_irreversible(tmp_path):
+    skills = registry(tmp_path, {'push': entry(), 'wave': entry(effects={
+        'reversibility': 'reversible', 'compensation': 'return the arm to its start pose'})})
+    assert skills['push'].effects['reversibility'] == 'irreversible'
+    assert catalog(skills)[1]['effects']['reversibility'] == 'reversible'
+    for effects in ({'reversibility': 'undoable', 'compensation': 'x'}, {'reversibility': 'reversible'},
+                    {'reversibility': 'reversible', 'compensation': ''}):
+        with pytest.raises(ValueError, match='effects'):
+            registry(tmp_path, {'push': entry(effects=effects)})
