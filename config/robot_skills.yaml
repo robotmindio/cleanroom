@@ -1,0 +1,6 @@
+# Skill implementations the skill runner may execute (lekiwi_rmf/skills.py validates every field).
+# Acquired by recording episodes, exporting, training and evaluating; never hand-written per task.
+# Artifacts live under ~/.ros/lekiwi/skills/<checkpoint>, pinned by weights_sha256.
+# status: experimental runs only with skill_runner allow_experimental (an acquisition protocol);
+# qualified requires a passing evaluation report.
+skills: {}

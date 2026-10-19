@@ -25,7 +25,7 @@ from std_msgs.msg import Bool, String
 from std_srvs.srv import Trigger
 from unique_identifier_msgs.msg import UUID
 
-from lekiwi_rmf.action import Explore, Search
+from lekiwi_rmf.action import Explore, RunSkill, Search
 from lekiwi_rmf.exploration import task_limits
 from lekiwi_rmf.exploration_owner_guard import owned_goal_id
 from lekiwi_rmf.srv import CancelTask, GetTask, SubmitTask
@@ -34,10 +34,11 @@ from lekiwi_rmf.navigation_pause import NavigationPause
 from lekiwi_rmf.navigation_observer import NavigationObserver, server_instance
 from lekiwi_rmf.navigation_distance import NavigationDistance
 from lekiwi_rmf.map_bundle import validate_map_bundle
+from lekiwi_rmf.skills import SKILL_ID, catalog, load_registry
 
 
 ACTIONS = {'navigate': ('/navigate_to_pose', NavigateToPose), 'explore': ('/robot/explore', Explore),
-           'search': ('/robot/search', Search)}
+           'skill': ('/robot/skills/run', RunSkill), 'search': ('/robot/search', Search)}
 SEARCH_PARAMETERS = ('query', 'region', 'max_duration_sec', 'max_travel_m', 'target_coverage')
 SEARCH_LIMITS = ('max_duration_sec', 'max_travel_m')
 
@@ -107,6 +108,13 @@ def task_goal(capability, text):
                            max_duration_sec=float(values.get('max_duration_sec', 0.0)),
                            max_travel_m=float(values.get('max_travel_m', 0.0)),
                            target_coverage=float(values.get('target_coverage', 0.0)))
+    elif capability == 'skill':
+        # The skill runner validates parameters against the registered skill; this only bounds the shape.
+        if set(values) - {'skill_id', 'parameters'} or not isinstance(values.get('skill_id'), str) \
+                or not SKILL_ID.match(values['skill_id']) or not isinstance(values.get('parameters', {}), dict):
+            raise ValueError('skill requires a registered skill_id and an optional parameters object')
+        goal = RunSkill.Goal(skill_id=values['skill_id'],
+                             parameters_json=json.dumps(values.get('parameters', {}), sort_keys=True, allow_nan=False))
     else:
         raise ValueError('unsupported capability')
     return goal, json.dumps(values, sort_keys=True, allow_nan=False)
@@ -123,12 +131,20 @@ class TaskGateway(Node):
         self.declare_parameter('navigation_timeout_sec', 180.0)
         self.declare_parameter('allow_navigation', True)
         self.declare_parameter('allow_exploration', True)
+        self.declare_parameter('allow_skills', False)
         # The explorer's tracked allow_search keeps the action server itself off by default.
         self.declare_parameter('allow_search', True)
         self.declare_parameter('map_bundle', '')
         self._enabled = {'navigate': self.get_parameter('allow_navigation').value,
                          'explore': self.get_parameter('allow_exploration').value,
+                         'skill': self.get_parameter('allow_skills').value,
                          'search': self.get_parameter('allow_search').value}
+        try:
+            # Experimental skills run only through an acquisition protocol, never a user task.
+            self._skills = catalog(load_registry())
+        except (OSError, ValueError) as error:
+            self.get_logger().error(f'skill registry unavailable: {error}')
+            self._enabled['skill'], self._skills = False, []
         self._timeout = self.get_parameter('navigation_timeout_sec').value
         if type(self._timeout) not in (float, int) or not math.isfinite(self._timeout) or self._timeout <= 0:
             raise ValueError('navigation_timeout_sec must be positive and finite')
@@ -356,6 +372,11 @@ class TaskGateway(Node):
                                     'Omitted/zero limits use the tracked robot limits; positive limits may only reduce them. '
                                     'Duration is active seconds, radius is metres around the starting pose. '
                                     'resume_task_id is a saved native exploration UUID and preserves its original bounds.')}
+        if name == 'skill':
+            return {**entry, 'parameters': ['skill_id', 'parameters'], 'required_parameters': ['skill_id'],
+                    'defaults': {'parameters': {}}, 'effective_defaults': {'parameters': {}}, 'skills': self._skills,
+                    'description': 'Run a registered skill implementation on the arm. Success means the implementation '
+                                   'finished, not that the world reached the goal; verify the effect independently.'}
         return {**entry, 'parameters': list(SEARCH_PARAMETERS), 'required_parameters': ['query'],
                 'defaults': {'region': None, 'max_duration_sec': 0.0, 'max_travel_m': 0.0, 'target_coverage': 0.0},
                 'effective_defaults': (dict(self._search_defaults, region=None)
@@ -463,7 +484,7 @@ class TaskGateway(Node):
         state = states[response.status]
         if state == 'succeeded' and (result.get('complete') is False or result.get('error_code', 0)):
             state = 'failed'
-        detail = result.get('message') or result.get('error_msg') or state
+        detail = result.get('message') or result.get('error_msg') or result.get('detail') or state
         if self._row(identifier)['cancel_requested'] == 2:
             state, detail = 'failed', f'navigation deadline reached; ROS terminal state: {state}'
         row = self._row(identifier)

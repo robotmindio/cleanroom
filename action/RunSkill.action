@@ -1,0 +1,16 @@
+# A registered skill implementation; config/robot_skills.yaml lists what may run.
+string skill_id
+# JSON object validated against the skill's declared parameters.
+string parameters_json
+---
+# finished: the implementation ran to its end. Whether the world reached the goal
+# is decided by an independent verifier, never by this result.
+# failed / canceled / rejected carry the reason in detail.
+string outcome
+string detail
+# JSON: skill version, weights digest, chunks executed, last applied targets.
+string result_json
+---
+string stage
+uint32 chunks_executed
+float64 elapsed_sec

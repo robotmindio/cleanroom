@@ -364,6 +364,8 @@ trap 'echo "$0: deployment failed; previous releases and bootstrap installation 
 
 log "Confirming torque-off and stopping the compute stack"
 ros_setup
+# Disarming cuts arm torque; anywhere but travel_stow the unpowered arm falls.
+python3 "$PROJECT_ROOT/scripts/check-travel-stow.py" || die "move the arm to travel_stow before deploying"
 disarm
 # Older installed units broadcast SIGINT and interrupt RTAB-Map's save when
 # launch forwards it again. Close their launcher before the first unit refresh.
