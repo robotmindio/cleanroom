@@ -90,12 +90,12 @@ class TaskJournal:
                     for capability, names in CAPABILITY_RESOURCES.items():
                         self._db.execute("""UPDATE tasks SET resources=? WHERE capability=?
                             AND state NOT IN ('succeeded','canceled','failed')""", (_json(list(names)), capability))
-                    self._db.execute('''CREATE TABLE events (
-                        seq INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL, kind TEXT NOT NULL,
-                        generation INTEGER NOT NULL, at REAL NOT NULL, data TEXT NOT NULL)''')
-                    self._db.execute('CREATE INDEX events_task ON events(task_id, seq)')
-                    self._db.execute('CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
-                    self._db.execute("INSERT INTO meta VALUES ('journal_id', ?)", (uuid.uuid4().hex,))
+                self._db.execute('''CREATE TABLE IF NOT EXISTS events (
+                    seq INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL, kind TEXT NOT NULL,
+                    generation INTEGER NOT NULL, at REAL NOT NULL, data TEXT NOT NULL)''')
+                self._db.execute('CREATE INDEX IF NOT EXISTS events_task ON events(task_id, seq)')
+                self._db.execute('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)')
+                self._db.execute("INSERT OR IGNORE INTO meta VALUES ('journal_id', ?)", (uuid.uuid4().hex,))
                 self._db.execute('CREATE INDEX IF NOT EXISTS tasks_goal_id ON tasks(goal_id)')
                 self._db.execute("CREATE INDEX IF NOT EXISTS tasks_active ON tasks(id) WHERE state NOT IN ('succeeded','canceled','failed')")
                 self._db.execute(f'PRAGMA user_version={SCHEMA}')
