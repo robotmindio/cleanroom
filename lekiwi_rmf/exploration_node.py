@@ -37,6 +37,7 @@ from unique_identifier_msgs.msg import UUID
 from lekiwi_rmf.action import Explore, Search
 from lekiwi_rmf.coverage_search import Profile, SearchSession, normalize_label, select_viewpoint, viewpoint_gain
 from lekiwi_rmf.exploration_owner_guard import owned_goal_id
+from lekiwi_rmf.latency_budget import LatencyBudget
 from lekiwi_rmf.exploration import (
     database_size, footprint_is_free, load_navigation_footprint, map_geometry, select_target, task_limits,
     with_body_free, load_task_checkpoint, save_task_checkpoint, task_time,
@@ -143,6 +144,8 @@ class RobotExplorer(Node):
         self.create_subscription(UUID, "/robot/explore/navigation_guarded", self._on_guard_ack, 10)
         self._owner_pub = self.create_publisher(UUID, "/robot/explore/navigation_owner", 10)
         self._diagnostics = self.create_publisher(DiagnosticArray, "/diagnostics", 10)
+        # Planning and driving times of explorer-owned goals; Nav2 keeps its own freshness gates.
+        self._budget = LatencyBudget("navigation")
         self.create_timer(0.2, self._owner_heartbeat, clock=Clock(clock_type=ClockType.STEADY_TIME))
         self._mapping_parameters = AsyncParameterClient(self, "/rtabmap", callback_group=self._group)
         self._mapping_client = self.create_client(Empty, "/rtabmap/set_mode_mapping", callback_group=self._group)
@@ -250,7 +253,7 @@ class RobotExplorer(Node):
                          KeyValue(key="busy", value=str(self._busy).lower()),
                          KeyValue(key="prerequisite_reason", value=self._readiness_reason(require_permission=False)),
                          KeyValue(key="last_rejection", value=self._rejection)]
-        message = DiagnosticArray(status=[status])
+        message = DiagnosticArray(status=[status, self._budget.status()])
         message.header.stamp = self.get_clock().now().to_msg()
         self._diagnostics.publish(message)
 
@@ -1000,6 +1003,7 @@ class RobotExplorer(Node):
 
     def _route(self, check, pose, destination, grid, center, radius):
         """Plan through known space; False when the destination is unreachable or its route is not clear."""
+        started = time.monotonic()
         plan = self._wait(self._planner.send_goal_async(ComputePathToPose.Goal(
             goal=destination, planner_id="ExploreKnown")), self.config["service_timeout_sec"], check)
         if not plan.accepted:
@@ -1008,6 +1012,7 @@ class RobotExplorer(Node):
             route = self._wait(plan.get_result_async(), self.config["service_timeout_sec"], check)
         finally:
             plan.cancel_goal_async()
+        self._budget.record("planning", time.monotonic() - started)
         if route.result.error_code == ComputePathToPose.Result.INVALID_PLANNER:
             raise RuntimeError("Nav2 planner plugin is invalid")
         if route.result.error_code == ComputePathToPose.Result.START_OCCUPIED:
@@ -1042,13 +1047,16 @@ class RobotExplorer(Node):
             self._stop_navigation()
             return None
         self._nav_result = self._nav_handle.get_result_async()
+        started = time.monotonic()
         try:
             navigation = self._wait(self._nav_result, self.config["navigation_timeout_sec"], check)
         except ResponseTimeout:
+            self._budget.record("execution", time.monotonic() - started)
             # A target Nav2 cannot reach in time is unreachable, not a fault.
             self._stop_navigation()
             check()
             return None
+        self._budget.record("execution", time.monotonic() - started)
         self._stop_navigation()
         if navigation.status == GoalStatus.STATUS_CANCELED:
             raise RuntimeError("Nav2 goal canceled or replaced by another client")

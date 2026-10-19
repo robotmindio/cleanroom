@@ -112,6 +112,7 @@ before using them; the robot runtime does not require it.
 - `render-model.py` renders the zero-pose calibration reference image.
 - `vendor-lekiwi-model.py` vendors the generated LeKiwi Xacro as the physical model.
 - `prune-ros-logs.sh` deletes stale ROS logs (run by `lekiwi-ros-logrotate.service`).
+- `robot-data.py audit|backup|restore|verify` applies the robot-local data classes of `config/data_retention.yaml`: permission audit, online backup of the journals and records with artifact manifests, and a restore that keeps replaced files, rebuilds indexes and reconciles observations with their evidence. See [operations budgets and data](../docs/operations.md).
 
 ## lib/
 

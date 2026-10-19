@@ -47,7 +47,12 @@ action chunk; `--skip-load-check` turns that off.
 ## Registration and promotion
 
 Registration copies the checkpoint to `~/.ros/lekiwi/skills/ID/N` and writes the
-entry with `weights_sha256` and `status: experimental`. Action names, cameras and
+entry with `artifact_sha256` and `status: experimental`. The artifact digest is the
+SHA-256 of the sorted `<sha256>  <name>` manifest of every file the runner loads:
+weights, policy configuration, processor configurations and their normalization
+tensors. Only the provenance records `training-manifest.json` and
+`evaluation-report.json` are outside it; LeRobot never opens them. A registry entry
+with the older `weights_sha256` field is refused. Action names, cameras and
 rate come from the training manifest, so a dataset exported in host units is
 refused. An installed version is never overwritten; superseding a registered
 version needs `--replace`. The registry is validated with the runner's loader
@@ -55,7 +60,7 @@ before the tracked file is replaced. Commit the registry change and deploy it wi
 the artifact present on the compute host.
 
 Promotion requires a report that passed and names the same skill, version and
-weights digest that are installed; the report is kept beside the artifact.
+artifact digest that are installed; the report is kept beside the artifact.
 
 ## Evaluation
 

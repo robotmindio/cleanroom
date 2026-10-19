@@ -7,6 +7,7 @@ import json
 import math
 import os
 import sys
+import time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
@@ -114,6 +115,22 @@ class RemoteProvider:
         return document
 
 
+def provider_timings(document):
+    """The provider's own decode/queue/inference/total split in seconds, or None when absent or inconsistent.
+
+    Only latency accounting uses it; a response is admitted or refused on its operating point alone.
+    """
+    timings = document.get('timings_ms') if isinstance(document, dict) else None
+    names = ('decode', 'queue', 'inference', 'total')
+    if not isinstance(timings, dict) or any(
+            type(timings.get(name)) not in (int, float) or not math.isfinite(timings[name]) or timings[name] < 0
+            for name in names):
+        return None
+    if timings['decode'] + timings['queue'] + timings['inference'] > timings['total'] + 1:
+        return None
+    return {name: timings[name] / 1000 for name in names}
+
+
 def verify_model(directory, spec):
     directory = Path(directory).expanduser()
     for name, expected in spec['files'].items():
@@ -168,6 +185,8 @@ class Recognizer:
         self.open_vocabulary = self.spec['backend'] in OPEN_BACKENDS
         self.default_query = make_query(self.spec['default_query']) if self.open_vocabulary else None
         self.labels = None
+        # Remote only: (round trip, provider timings) of the last answer, for the latency budget.
+        self.last_remote = None
         cv2.setNumThreads(2)
         if self.spec['backend'] in REMOTE_BACKENDS:
             self.directory = None
@@ -247,10 +266,13 @@ class Recognizer:
         labels = list(query.labels)
         expected = {'labels': labels, 'prompt': query.prompt,
                     'box_threshold': self.confidence, 'text_threshold': TEXT_THRESHOLD}
+        self.last_remote = None
+        sent = time.monotonic()
         response = self.model.infer({
             'model': self.spec['provider_model'], 'image': base64.b64encode(data).decode('ascii'),
             'labels': labels, 'box_threshold': self.confidence, 'text_threshold': TEXT_THRESHOLD,
             'deadline_ms': int(self.model.timeout * 1000)})
+        self.last_remote = time.monotonic() - sent, provider_timings(response)
         source = response.get('image')
         if (response.get('schema') != 1 or response.get('model') != self.spec['provider_model']
                 or response.get('model_sha256') != self.spec['provider_model_sha256']

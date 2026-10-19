@@ -3,12 +3,13 @@
 
 Registering copies the checkpoint of a scripts/train-skill.py directory to
 ~/.ros/lekiwi/skills/<id>/<version> and writes its config/robot_skills.yaml entry
-with the weights digest and `status: experimental`. The observation, camera and
+with the checkpoint's artifact digest (every file the runner loads, lekiwi_rmf.skills.artifact_digest)
+and `status: experimental`. The observation, camera and
 action contract comes from the training manifest, not from the operator.
 
 `--promote REPORT` sets `status: qualified` only when the scripts/evaluate-skill.py
-report passed and names this skill, version and weights digest, and the installed
-weights still hash to it. The whole registry is validated before it is replaced.
+report passed and names this skill, version and artifact digest, and the installed
+checkpoint still hashes to it. The whole registry is validated before it is replaced.
 """
 
 import argparse
@@ -22,7 +23,7 @@ import sys
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lekiwi_rmf.skills import SKILL_ID, load_registry
+from lekiwi_rmf.skills import SKILL_ID, artifact_digest, load_registry
 
 REGISTRY = Path(__file__).resolve().parents[1] / 'config/robot_skills.yaml'
 ARTIFACTS = Path.home() / '.ros/lekiwi/skills'
@@ -69,54 +70,62 @@ def contract(manifest):
     return {'action_names': names, 'cameras': dataset['cameras'], 'fps': dataset['fps']}
 
 
-def install(training, artifacts, skill_id, version, weights):
+def install(training, artifacts, skill_id, version, artifact):
     """Copy the checkpoint once; an existing version must be byte-identical, never replaced."""
     target = artifacts / skill_id / str(version)
     if target.exists():
-        installed = target / 'model.safetensors'
-        if not installed.is_file() or digest(installed) != weights:
-            raise RegistrationError(f'{target} already holds different weights; register a new version')
+        if installed_digest(target) != artifact:
+            raise RegistrationError(f'{target} already holds a different checkpoint; register a new version')
         return target
     target.parent.mkdir(parents=True, exist_ok=True)
     staging = target.with_name(f'.{version}.tmp')
     shutil.rmtree(staging, ignore_errors=True)
     shutil.copytree(training / 'checkpoint', staging)
     shutil.copy(training / 'manifest.json', staging / 'training-manifest.json')
-    if digest(staging / 'model.safetensors') != weights:
+    if installed_digest(staging) != artifact:
         shutil.rmtree(staging)
-        raise RegistrationError('copied weights do not match the training manifest')
+        raise RegistrationError('the copied checkpoint does not match the training manifest')
     os.replace(staging, target)
     return target
+
+
+def installed_digest(directory):
+    try:
+        return artifact_digest(directory)
+    except ValueError as error:
+        raise RegistrationError(f'{directory}: {error}') from error
 
 
 def register(args):
     manifest = json.loads((args.training / 'manifest.json').read_text())
     if manifest.get('kind') != 'lekiwi_skill_training':
         raise RegistrationError(f'{args.training}: not a scripts/train-skill.py directory')
-    weights = manifest['checkpoint']['weights_sha256']
-    if digest(args.training / 'checkpoint/model.safetensors') != weights:
+    artifact = manifest['checkpoint'].get('artifact_sha256')
+    if artifact is None:
+        raise RegistrationError('the training manifest has no artifact_sha256; train again with scripts/train-skill.py')
+    if installed_digest(args.training / 'checkpoint') != artifact:
         raise RegistrationError('the checkpoint changed after training')
     header, document = read_registry(args.registry)
     current = document['skills'].get(args.skill_id)
     if current is not None and current['version'] != args.version and not args.replace:
         raise RegistrationError(f'{args.skill_id} is registered as version {current["version"]} ({current["status"]}); '
                                 'pass --replace to supersede it')
-    if current is not None and current['version'] == args.version and current['weights_sha256'] != weights:
-        raise RegistrationError(f'{args.skill_id} version {args.version} is registered with different weights')
+    if current is not None and current['version'] == args.version and current.get('artifact_sha256') != artifact:
+        raise RegistrationError(f'{args.skill_id} version {args.version} is registered with a different checkpoint')
     entry = {'version': args.version, 'description': args.description, 'status': 'experimental',
-             'kind': 'lerobot_policy', 'checkpoint': f'{args.skill_id}/{args.version}', 'weights_sha256': weights,
+             'kind': 'lerobot_policy', 'checkpoint': f'{args.skill_id}/{args.version}', 'artifact_sha256': artifact,
              **contract(manifest), 'max_duration_sec': args.max_duration_sec,
              'max_joint_step_rad': args.max_joint_step_rad, 'parameters': args.parameters}
     document['skills'][args.skill_id] = entry
     staged = staged_registry(args.registry, header, document, args.artifacts)
     try:
-        target = install(args.training, args.artifacts, args.skill_id, args.version, weights)
+        target = install(args.training, args.artifacts, args.skill_id, args.version, artifact)
     except BaseException:
         staged.unlink()
         raise
     os.replace(staged, args.registry)
     return {'skill_id': args.skill_id, 'version': args.version, 'status': 'experimental',
-            'artifact': str(target), 'weights_sha256': weights}
+            'artifact': str(target), 'artifact_sha256': artifact}
 
 
 def promote(args):
@@ -131,11 +140,10 @@ def promote(args):
     if (report.get('skill_id'), report.get('version')) != (args.skill_id, entry['version']):
         raise RegistrationError(f'the report evaluated {report.get("skill_id")} version {report.get("version")}, '
                                 f'not the registered version {entry["version"]}')
-    if report.get('weights_sha256') != entry['weights_sha256']:
-        raise RegistrationError('the report evaluated different weights than the registered entry')
-    installed = skill.checkpoint / 'model.safetensors'
-    if not installed.is_file() or digest(installed) != entry['weights_sha256']:
-        raise RegistrationError(f'{installed} does not hold the registered weights')
+    if report.get('artifact_sha256') != entry['artifact_sha256']:
+        raise RegistrationError('the report evaluated a different checkpoint than the registered entry')
+    if installed_digest(skill.checkpoint) != entry['artifact_sha256']:
+        raise RegistrationError(f'{skill.checkpoint} does not hold the registered checkpoint')
     entry['status'] = 'qualified'
     staged = staged_registry(args.registry, header, document, args.artifacts)
     shutil.copy(args.promote, skill.checkpoint / 'evaluation-report.json')

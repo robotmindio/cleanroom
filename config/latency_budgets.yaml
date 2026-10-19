@@ -1,0 +1,36 @@
+# p95 budget, in seconds, of every latency stage an operation measures (lekiwi_rmf/latency_budget.py).
+# Each node publishes `lekiwi/budget/<operation>` on /diagnostics with the measured p50/p95/p99 of its
+# stages, WARN when a measured p95 exceeds its budget here or an answer missed the control age limit.
+#
+# These are not age gates. The age a result may have and still feed control is the operation's own
+# tracked freshness limit, reported as max_age_sec beside the percentiles:
+#   perception     object_detector max_source_age_sec (config/object_perception.yaml)
+#   skill_control  skill_runner max_observation_age_sec
+#   navigation     the explorer's service and navigation timeouts (config/exploration.yaml)
+#   task           the gateway's navigation_timeout_sec and each capability's own duration limits
+#
+# Budgets derive from those tracked limits and the measured GPU provider p95 (~0.9 s, see
+# perception_providers.yaml); replace them with measured p95 plus margin once the deployed diagnostics
+# have recorded normal load and controlled saturation. A budget never widens an age gate.
+operations:
+  # Camera stamp to detection publication, against max_source_age_sec = 2.0. The stages sum to 2.0, so
+  # a frame that is at budget in every stage is still fresh.
+  perception:
+    sensor_age: 0.3   # capture stamp to receipt by the detector
+    queue: 0.5        # receipt to inference start: one newest-frame slot per camera at max_rate_hz 2
+    inference: 0.9    # model time: the provider's reported compute, or local inference
+    network: 0.3      # remote round trip minus the provider's reported compute
+  # One action chunk, against max_observation_age_sec = 0.5: the observation plus the policy's inference
+  # must stay within that age before the chunk may move the arm.
+  skill_control:
+    sensor_age: 0.2   # oldest of the joint state and camera frames the chunk is computed from
+    inference: 0.3    # policy chunk computation
+    execution: 10.0   # FollowJointTrajectory goal sent to result, per chunk
+  # Explorer-owned navigation (explore and search viewpoints).
+  navigation:
+    planning: 3.0     # ComputePathToPose round trip, bounded by service_timeout_sec
+    execution: 180.0  # NavigateToPose goal to result, bounded by navigation_timeout_sec
+  # Managed tasks on /robot/tasks: admission to dispatch, then dispatch to the journaled terminal state.
+  task:
+    queue: 5.0
+    execution: 900.0  # the explorer's max_duration_sec; navigation's own limit is 180 s
