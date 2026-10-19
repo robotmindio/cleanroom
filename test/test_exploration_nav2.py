@@ -1,7 +1,6 @@
 """Load and execute the tracked exploration tree in the real Jazzy BT navigator."""
 
 from pathlib import Path
-import signal
 import subprocess
 import threading
 from concurrent.futures import Future
@@ -21,6 +20,7 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 
+from ros_test_utils import release_graph
 from lekiwi_rmf.action import Explore
 from lekiwi_rmf.exploration_node import RobotExplorer
 from lekiwi_rmf.exploration_owner_guard import ExplorationOwnerGuard
@@ -191,21 +191,9 @@ def test_real_nav2_tree_recovers_with_the_same_target_and_cancels_its_actions(tm
             peers.nav_mode = "fail"
             peers.permitted = False
             explorer._shutdown_requested.set()
-            wait(lambda: not explorer._busy, timeout=6)
-            process.send_signal(signal.SIGINT)
             try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=5)
-            finished.set_result(True)
-            thread.join(timeout=5)
-            assert not thread.is_alive()
-            assert executor.shutdown(timeout_sec=5)
-            controller.destroy()
-            for behavior in behaviors:
-                behavior.destroy()
-            client.destroy()
-            for node in (client_node, explorer, guard, peers):
-                node.destroy_node()
-            context.shutdown()
+                wait(lambda: not explorer._busy, timeout=6)
+            finally:
+                release_graph(executor=executor, thread=thread, finished=finished, processes=(process,),
+                              waitables=(controller, *behaviors, client),
+                              nodes=(client_node, explorer, guard, peers), context=context)

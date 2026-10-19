@@ -12,6 +12,7 @@ from geometry_msgs.msg import TransformStamped
 from nav_msgs.msg import Odometry
 import pytest
 import rclpy
+from ros_test_utils import release_graph
 from rclpy.action import ActionClient
 from rclpy.context import Context
 from rclpy.duration import Duration
@@ -180,13 +181,8 @@ def search_graph(tmp_path, request):
             wait(lambda: not explorer._busy, timeout=8)
             wait(lambda: not peers.nav_active)
         finally:
-            finished.set_result(True)
-            thread.join(timeout=5)
-            assert executor.shutdown(timeout_sec=5)
-            client.destroy()
-            for node in (client_node, explorer, guard, perception, peers):
-                node.destroy_node()
-            context.shutdown()
+            release_graph(executor=executor, thread=thread, finished=finished, waitables=(client,),
+                          nodes=(client_node, explorer, guard, perception, peers), context=context)
 
 
 def run(client, goal, timeout=60, feedback=None):

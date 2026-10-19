@@ -22,7 +22,7 @@ from lekiwi_rmf.object_cameras import camera_bindings
 from lekiwi_rmf.search_evidence import SearchEvidence
 from lekiwi_rmf.spatial_memory_node import SpatialMemory
 from lekiwi_rmf.srv import QueryObservations
-from test_spatial_memory_ros import graph, rtabmap_database, wait
+from test_spatial_memory_ros import graph, rtabmap_database, stop, wait
 
 MODEL = 'ab' * 32
 
@@ -106,12 +106,12 @@ def test_loop_closure_reprojects_the_capture_log(tmp_path):
         wait(lambda: evidence._target is not None)
         first = dict(evidence._target)
         # The cursor starts at the store's head, so captures are added after the first poll.
-        wait(lambda: evidence._cursor is not None, timeout=10)
+        wait(lambda: evidence._cursor is not None)
         camera = {'t': [2.1, 0.0, 0.3], 'q': [-0.5, 0.5, -0.5, 0.5]}
         store.add({'site_ref': 'home', 'map_ref': first['map_ref'], 'revision': first['revision'],
                    'localization_session': 'x', 'pose': camera}, now - 4)
         store.add(None, now - 3)  # An older record without a capture-time map pose.
-        wait(lambda: len(evidence.since(0)) == 2, timeout=10)
+        wait(lambda: len(evidence.since(0)) == 2)
         anchored, unanchored = (capture for _, capture in evidence.since(0))
         assert math.dist((anchored.pose.x, anchored.pose.y), (2.1, 0.0)) < 1e-6
         assert math.dist(anchored.detections[0].map_xyz, (3.1, 0.0, 0.3)) < 1e-6
@@ -122,7 +122,7 @@ def test_loop_closure_reprojects_the_capture_log(tmp_path):
 
         # Loop closure: node 2 moves 0.1 m in y; the anchored capture follows, the unanchored one leaves.
         graphs.publish(graph(now - 2, shift_y=0.05))
-        wait(lambda: evidence.generation > generation, timeout=10)
+        wait(lambda: evidence.generation > generation)
         _, revision, log = evidence.snapshot()
         assert revision != first['revision'] and len(log) == 1
         moved = log[0][1]
@@ -131,8 +131,4 @@ def test_loop_closure_reprojects_the_capture_log(tmp_path):
         assert math.dist(moved.detections[0].map_xyz, (3.1, 0.1, 0.3)) < 1e-6
         assert evidence.rejected['unanchored_after_revision'] == 1
     finally:
-        executor.shutdown()
-        for node in (spatial, store, host):
-            node.destroy_node()
-        rclpy.shutdown(context=context)
-        thread.join(timeout=5)
+        stop(executor, thread, (spatial, store, host), context)

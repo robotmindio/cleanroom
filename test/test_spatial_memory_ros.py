@@ -25,12 +25,14 @@ from lekiwi_rmf.object_observation_node import ObjectObservations
 from lekiwi_rmf.object_recognition import recognition_identity
 from lekiwi_rmf.spatial_memory_node import SpatialMemory, parse_request
 from lekiwi_rmf.srv import QueryObservations, QuerySpatial
+from ros_test_utils import release_graph
 from test_object_observations import capture
 
 MODEL_SHA256 = recognition_identity('yolox')[0]
 
 
-def wait(predicate, timeout=5):
+def wait(predicate, timeout=30):
+    # Generous: the coverage job runs every test in one loaded process.
     deadline = time.monotonic() + timeout
     while not predicate():
         if time.monotonic() >= deadline:
@@ -182,9 +184,39 @@ def test_graphs_become_revisions_and_observations_reproject(tmp_path):
         maps = spatial_call({'op': 'maps'})
         assert [entry['map_ref'] for entry in maps['maps']] == [first['map_ref']]
     finally:
-        executor.shutdown()
-        for node in (peer, spatial, collector):
-            node.destroy_node()
-        rclpy.shutdown(context=context)
-        thread.join(timeout=5)
+        stop(executor, thread, (peer, spatial, collector), context)
 
+
+def stop(executor, thread, nodes, context):
+    """Leave nothing on the domain for the next test in the same process."""
+    release_graph(executor=executor, thread=thread, nodes=nodes, context=context)
+
+
+def test_teardown_releases_everything_after_a_failing_step():
+    """A failing teardown step must not leave later nodes or the context alive for the next test."""
+    released = []
+
+    class Part:
+        def __init__(self, name, fails=False):
+            self.name, self.fails = name, fails
+
+        def destroy(self):
+            released.append(self.name)
+            if self.fails:
+                raise RuntimeError(f'{self.name} failed')
+
+        destroy_node = destroy
+
+    class Executor:
+        def shutdown(self, timeout_sec):
+            released.append('executor')
+            return False  # Reported, but teardown continues.
+
+    class Context:
+        def try_shutdown(self):
+            released.append('context')
+
+    with pytest.raises(AssertionError, match='executor did not shut down'):
+        release_graph(executor=Executor(), waitables=(Part('client', fails=True),),
+                      nodes=(Part('explorer', fails=True), Part('peers')), context=Context())
+    assert released == ['executor', 'client', 'explorer', 'peers', 'context']
