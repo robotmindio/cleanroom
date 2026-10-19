@@ -25,6 +25,8 @@ from test_object_observations import capture
 from test_remote_perception import label_info
 
 REMOTE = 'grounding_dino_tiny_gpu'
+# A closed fallback whose identity needs no torch metadata, so these tests run without the model runtime.
+FALLBACK = 'yolox'
 DEFAULT = make_query(['a cup', 'a mug'])
 
 
@@ -89,14 +91,14 @@ class Harness:
         bindings.write_text(yaml.safe_dump({'astra_color': {
             'mount': 'base', 'image_topic': '/camera/test/image', 'optical_frame': 'camera_optical',
             'camera_info_topic': '/camera/test/info', 'depth_topic': '', 'calibration_file': ''}}))
-        recognizers = {REMOTE: primary, 'rtdetr_v2_r18': fallback}
+        recognizers = {REMOTE: primary, FALLBACK: fallback}
         monkeypatch.setattr(object_detector, 'Recognizer', lambda name, *args: recognizers[name])
         self.context = Context()
         rclpy.init(context=self.context)
         shared = [Parameter('model_name', value=REMOTE), Parameter('camera_ids', value=['astra_color']),
                   Parameter('camera_profiles_file', value=str(bindings))]
         if fallback is not None:
-            shared.append(Parameter('fallback_model_name', value='rtdetr_v2_r18'))
+            shared.append(Parameter('fallback_model_name', value=FALLBACK))
         self.detector = object_detector.ObjectDetector(context=self.context, parameter_overrides=[
             *shared, Parameter('max_rate_hz', value=10.)])
         self.nodes = [self.detector]
@@ -153,7 +155,7 @@ def open_recognizer(predict):
 
 
 def closed_recognizer(predict):
-    return SimpleNamespace(predict=predict, sha256='b' * 64, name='rtdetr_v2_r18', default_query=None,
+    return SimpleNamespace(predict=predict, sha256='b' * 64, name=FALLBACK, default_query=None,
                            labels=['cup', 'spoon'], open_vocabulary=False)
 
 
@@ -213,7 +215,7 @@ def test_open_fallback_is_refused(monkeypatch):
     try:
         with pytest.raises(ValueError, match='closed-vocabulary'):
             object_detector.ObjectDetector(context=context, parameter_overrides=[
-                Parameter('model_name', value=REMOTE), Parameter('fallback_model_name', value='rtdetr_v2_r18')])
+                Parameter('model_name', value=REMOTE), Parameter('fallback_model_name', value=FALLBACK)])
     finally:
         context.try_shutdown()
 
@@ -267,7 +269,7 @@ def test_provider_down_serves_closed_fallback_without_claiming_the_query(monkeyp
             time.sleep(.1)
             assert time.monotonic() < deadline
         record = harness.records()[0]
-        assert record['model_sha256'] == recognition_identity('rtdetr_v2_r18', .5)[0]
+        assert record['model_sha256'] == recognition_identity(FALLBACK, .5)[0]
         assert record['vocabulary'] == 'closed' and 'query' not in record
         assert record['detections'][0]['label'] == 'spoon'
         assert not harness.queries  # No query is published for frames the fallback served.
