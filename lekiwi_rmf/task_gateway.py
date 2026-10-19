@@ -11,6 +11,7 @@ import uuid
 
 from action_msgs.msg import GoalStatus, GoalStatusArray
 from action_msgs.srv import CancelGoal
+from diagnostic_msgs.msg import DiagnosticArray
 from geometry_msgs.msg import PoseStamped
 from nav2_msgs.action import NavigateToPose
 from nav2_msgs.msg import CollisionMonitorState
@@ -28,6 +29,7 @@ from unique_identifier_msgs.msg import UUID
 from lekiwi_rmf.action import Explore, RunSkill, Search
 from lekiwi_rmf.exploration import task_limits
 from lekiwi_rmf.exploration_owner_guard import owned_goal_id
+from lekiwi_rmf.latency_budget import LatencyBudget
 from lekiwi_rmf.srv import CancelTask, GetTask, SetPerceptionQuery, SubmitTask
 from lekiwi_rmf.perception_query import limits as query_limits
 from lekiwi_rmf.task_journal import TERMINAL, TaskJournal
@@ -155,6 +157,8 @@ class TaskGateway(Node):
         self._queried = {}
         self._sent = set()
         self._started = {}
+        # Monotonic admission and dispatch times of tasks this process saw; a restart loses only samples.
+        self._budget, self._admitted_at, self._dispatched_at = LatencyBudget('task'), {}, {}
         self._recovering = {row['id'] for row in self._active() if row['dispatched']}
         self._observed = {capability: set() for capability in ACTIONS}
         self._terminal_seen = {}
@@ -211,7 +215,14 @@ class TaskGateway(Node):
         self._distance = NavigationDistance()
         self.create_subscription(Odometry, '/odom', self._distance.update, 1)
         self.create_service(Trigger, '/robot/navigation/odometry', self._odometry)
+        self._diagnostics = self.create_publisher(DiagnosticArray, '/diagnostics', 10)
+        self.create_timer(1.0, self._health, clock=Clock(clock_type=ClockType.STEADY_TIME))
         self.create_timer(0.2, self._tick, clock=Clock(clock_type=ClockType.STEADY_TIME))
+
+    def _health(self):
+        message = DiagnosticArray(status=[self._budget.status()])
+        message.header.stamp = self.get_clock().now().to_msg()
+        self._diagnostics.publish(message)
 
     def _active(self):
         return self._journal.active()
@@ -229,6 +240,10 @@ class TaskGateway(Node):
         row = self._row(identifier)
         self._events.publish(String(data=json.dumps(dict(row), default=lambda value: bytes(value).hex())))
         if state in TERMINAL:
+            dispatched = self._dispatched_at.pop(identifier, None)
+            self._admitted_at.pop(identifier, None)
+            if dispatched is not None:
+                self._budget.record('execution', time.monotonic() - dispatched)
             self._release_requests(identifier, row)
 
     def _release_requests(self, identifier, row):
@@ -301,6 +316,7 @@ class TaskGateway(Node):
                     metadata['odometry_origin'] = {'epoch': meter['epoch'], 'meters': meter['meters']}
                 self._journal.admit(request.task_id, request.capability, parameters, goal_id,
                                     result={'_task': metadata})
+                self._admitted_at[request.task_id] = time.monotonic()
                 row = self._row(request.task_id)
             response.accepted, response.state, response.detail = True, row['state'], row['detail']
         except (ValueError, TypeError, OverflowError) as error:
@@ -585,6 +601,10 @@ class TaskGateway(Node):
         self._journal.mark_dispatched(identifier, server_id)
         self._sent.add(identifier)
         self._started[identifier] = now
+        admitted = self._admitted_at.pop(identifier, None)
+        if admitted is not None:
+            self._budget.record('queue', now - admitted)
+        self._dispatched_at.setdefault(identifier, now)
         try:
             future = client.send_goal_async(goal, goal_uuid=goal_id)
         except Exception as error:

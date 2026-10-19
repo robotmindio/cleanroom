@@ -21,6 +21,7 @@ from sensor_msgs.msg import Image
 from std_msgs.msg import String
 from vision_msgs.msg import Detection2D, Detection2DArray, LabelInfo, ObjectHypothesisWithPose, VisionClass
 
+from lekiwi_rmf.latency_budget import LatencyBudget
 from lekiwi_rmf.object_recognition import ProviderUnavailable, Recognizer, reject_parameter_changes
 from lekiwi_rmf.object_cameras import camera_bindings
 from lekiwi_rmf.perception_query import make_query
@@ -112,6 +113,9 @@ class ObjectDetector(Node):
                               'inference_sec': 0., 'source_age_sec': 0., 'published_stamp': 0}
                        for name in self._bindings}
         self._durations = {name: deque(maxlen=128) for name in self._bindings}
+        # Stage percentiles across cameras; a detection older than max_source_age_sec never reaches control.
+        self._budget = LatencyBudget('perception', self._age)
+        self._received_at = {}
         self._outputs = {}
         self._receipt_group = MutuallyExclusiveCallbackGroup()
         self._inference_group = MutuallyExclusiveCallbackGroup()
@@ -194,6 +198,9 @@ class ObjectDetector(Node):
     def _receive(self, image, camera):
         stamp = image.header.stamp.sec * 10**9 + image.header.stamp.nanosec
         age = (self.get_clock().now().nanoseconds - stamp) / 1e9
+        if stamp > 0:
+            # Stale arrivals count too: under saturation they are the distribution that matters.
+            self._budget.record('sensor_age', age)
         if (image.header.frame_id != self._bindings[camera]['optical_frame'] or
                 not 0 < stamp or not 0 <= age <= self._age):
             self._reject(camera, 'camera binding or capture freshness mismatch')
@@ -211,6 +218,7 @@ class ObjectDetector(Node):
             self._stats[camera]['received'] += 1
             self._stats[camera]['overwritten'] += camera in self._frames
             self._frames[camera] = image
+            self._received_at[camera] = time.monotonic()
 
     def _infer(self):
         cameras = list(self._bindings)
@@ -220,6 +228,7 @@ class ObjectDetector(Node):
                 index = (self._next_camera + offset) % len(cameras)
                 camera = cameras[index]
                 image = self._frames.pop(camera, None)
+                received = self._received_at.pop(camera, None)
                 if image is not None:
                     self._next_camera = (index + 1) % len(cameras)
                     break
@@ -240,9 +249,10 @@ class ObjectDetector(Node):
             with self._frame_lock:
                 self._durations[camera].append(duration)
                 self._stats[camera].update(inference_sec=duration, source_age_sec=source_age)
+            self._record_stages(role, None if received is None else start - received, duration)
             if generation != self._generation:
                 raise ValueError('clock changed during inference')
-            if not 0 <= source_age <= self._age:
+            if not self._budget.fresh(source_age):
                 raise ValueError('recognition finished after source freshness expired')
             source = self._bridge.cv2_to_imgmsg(pixels, 'bgr8')
             source.header = image.header
@@ -262,6 +272,22 @@ class ObjectDetector(Node):
                 self._stats[camera]['reason'] = ''
         except (ValueError, RuntimeError, CvBridgeError, cv2.error) as error:
             self._reject(camera, str(error))
+
+    def _record_stages(self, role, queued, duration):
+        """One sample per stage per frame. A remote answer splits into the provider's queue (added to the
+        robot-side wait), its model time, and the network: the round trip the provider did not account for."""
+        recognizer = self._detector if role == 'primary' else self._fallback
+        remote = getattr(recognizer, 'last_remote', None)
+        timings = remote[1] if remote else None
+        if timings is None or timings['total'] > remote[0]:
+            if queued is not None:
+                self._budget.record('queue', queued)
+            self._budget.record('inference', duration)
+            return
+        if queued is not None:
+            self._budget.record('queue', queued + timings['decode'] + timings['queue'])
+        self._budget.record('inference', timings['inference'])
+        self._budget.record('network', remote[0] - timings['total'])
 
     def _recognize(self, camera, pixels, header, query):
         if self._fallback is None or time.monotonic() >= self._primary_retry_at:
@@ -303,6 +329,7 @@ class ObjectDetector(Node):
                                                 f'fallback recognition: {stats["primary_reason"]}' if degraded else 'recognition active'))
                 status.values = [KeyValue(key=key, value=json.dumps(value)) for key, value in values.items()]
                 message.status.append(status)
+        message.status.append(self._budget.status())
         self._diagnostics.publish(message)
 
 
