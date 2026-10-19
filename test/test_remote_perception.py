@@ -23,8 +23,9 @@ from std_msgs.msg import String
 from vision_msgs.msg import Detection2DArray, LabelInfo, VisionClass
 
 from lekiwi_rmf import object_recognition
+from lekiwi_rmf.latency_budget import LatencyBudget
 from lekiwi_rmf.object_recognition import (
-    ProviderUnavailable, Recognizer, model_spec, provider_endpoint, recognition_identity)
+    ProviderUnavailable, Recognizer, model_spec, provider_endpoint, provider_timings, recognition_identity)
 from lekiwi_rmf.perception_query import make_query
 from test_object_observations import capture
 
@@ -389,3 +390,34 @@ def test_observations_carry_the_identity_of_the_recognizer_that_served_the_frame
         collector.destroy_node()
         peer.destroy_node()
         context.try_shutdown()
+
+
+def test_provider_timings_are_read_only_when_complete_and_consistent(provider):
+    recognizer = Recognizer(REMOTE, None, .5)
+    recognizer.predict(frame(), DEFAULT)
+    round_trip, timings = recognizer.last_remote
+    assert timings == pytest.approx({'decode': .001, 'queue': 0., 'inference': .5, 'total': .501}) and round_trip > 0
+    for bad in [None, {}, {'timings_ms': {'decode': 1, 'queue': 0, 'inference': 5}},
+                {'timings_ms': {'decode': 1, 'queue': 0, 'inference': -5, 'total': 9}},
+                {'timings_ms': {'decode': 1, 'queue': 0, 'inference': 50, 'total': 9}},
+                {'timings_ms': {'decode': 1, 'queue': 0, 'inference': 5, 'total': float('nan')}}]:
+        assert provider_timings(bad) is None
+    # A response without timings is still admitted on its operating point; only the split is unknown.
+    provider.respond = lambda body: provider.admitted(body, timings_ms=None)
+    assert recognizer.predict(frame(), DEFAULT) and recognizer.last_remote[1] is None
+
+
+def test_remote_answers_split_into_queue_inference_and_network_stages():
+    from lekiwi_rmf.object_detector import ObjectDetector
+
+    def stages(remote, queued=.2, duration=.7):
+        state = SimpleNamespace(_detector=SimpleNamespace(last_remote=remote), _fallback=None,
+                                _budget=LatencyBudget('perception', 2.))
+        ObjectDetector._record_stages(state, 'primary', queued, duration)
+        return {stage: value['p50_sec'] for stage, value in state._budget.summary()['stages'].items()}
+
+    split = stages((.7, {'decode': .01, 'queue': .09, 'inference': .5, 'total': .6}))
+    assert split == pytest.approx({'sensor_age': None, 'queue': .3, 'inference': .5, 'network': .1})
+    # Without usable provider timings the whole call is inference and the network is not guessed.
+    for remote in (None, (.4, None), (.4, {'decode': 0., 'queue': 0., 'inference': .5, 'total': .5})):
+        assert stages(remote) == {'sensor_age': None, 'queue': .2, 'inference': .7, 'network': None}

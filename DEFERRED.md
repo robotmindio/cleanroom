@@ -282,3 +282,16 @@ a localization restart keeps the `map_ref` with a new session, a mapping restart
 that later closes a loop records a merge whose captures project into the
 surviving map, relinked anchors stay projectable, and the capture/graph race is
 measured. Tracked in [#91](https://github.com/robotmindio/cleanroom/issues/91).
+
+## Latency budgets and robot data restore
+
+Owner: robot integrator on the deployed revision.
+
+Done when `lekiwi/budget/*` diagnostics are recorded under normal load and
+controlled saturation (both base cameras at `max_rate_hz` with the GPU provider
+loaded, and a provider outage served by the fallback), the measured
+p50/p95/p99 are committed as evidence and replace the derived budgets in
+`config/latency_budgets.yaml`, and `scripts/robot-data.py backup`, `restore`
+and `verify` have run on the robot with its services stopped, reporting
+`healthy` and `visual_evidence: verified`.
+Tracked in [#102](https://github.com/robotmindio/cleanroom/issues/102).

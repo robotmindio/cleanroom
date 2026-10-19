@@ -201,8 +201,8 @@ class Evaluator:
         trial['runner'] = run
         if run['outcome'] == 'rejected':
             return {**trial, 'verdict': 'invalid', 'reason': run['detail']}
-        if run['result'] is not None and run['result'].get('weights_sha256') != self.skill.weights_sha256:
-            return {**trial, 'verdict': 'invalid', 'reason': 'the runner executed different weights than registered'}
+        if run['result'] is not None and run['result'].get('artifact_sha256') != self.skill.artifact_sha256:
+            return {**trial, 'verdict': 'invalid', 'reason': 'the runner executed a different checkpoint than registered'}
         ended = self.now()
         after_holds, after = judge(self.observe(ended + self.settle_sec, ended + self.settle_sec + self.observe_sec),
                                    self.predicate)
@@ -230,7 +230,7 @@ def evaluate(evaluator, args, evaluation_id, reset=None, log=print):
     return {
         'schema': 1, 'kind': 'lekiwi_skill_evaluation', 'evaluation_id': evaluation_id,
         'created_utc': datetime.datetime.now(datetime.UTC).isoformat(timespec='seconds'),
-        'skill_id': skill.skill_id, 'version': skill.version, 'weights_sha256': skill.weights_sha256,
+        'skill_id': skill.skill_id, 'version': skill.version, 'artifact_sha256': skill.artifact_sha256,
         'status_at_evaluation': skill.status, 'parameters': args.parameters, 'success_predicate': evaluator.predicate,
         'verifier': {'source': '/robot/observations/query', 'independent_of_runner': True,
                      'observe_sec': evaluator.observe_sec, 'settle_sec': evaluator.settle_sec},
