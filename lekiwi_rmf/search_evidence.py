@@ -185,8 +185,14 @@ class SearchEvidence:
         detections = detections_from_record(record, camera, map_id)
         if pose is None and not any(item.map_xyz for item in detections):
             return  # Without a pose a capture proves nothing about any cell.
+        query = record.get('query') if record.get('vocabulary') == 'open' else None
+        labels = query.get('labels') if isinstance(query, dict) else None
+        if record.get('vocabulary') == 'open' and (
+                not isinstance(labels, list) or not all(isinstance(label, str) for label in labels)):
+            self._reject('invalid_query')
+            return
         capture = Capture(record['id'], camera_id, record['model_sha256'], stamp, pose, camera,
-                          record.get('stationary') is True, detections)
+                          record.get('stationary') is True, detections, None if labels is None else tuple(labels))
         with self._lock:
             self._serial += 1
             self._captures.append((self._serial, capture))

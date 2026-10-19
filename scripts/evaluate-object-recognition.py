@@ -206,10 +206,11 @@ def evaluate(manifest, model_path=None, *, name='yolox', split='heldout', confid
         pixels = cv2.imdecode(np.frombuffer(content, np.uint8), cv2.IMREAD_COLOR)
         header = Header(stamp=Time(sec=sequence), frame_id='offline_camera')
         start = time.monotonic()
-        found = detect(model, pixels, header)
+        # An open recognizer is evaluated under its tracked default query, recorded with each result.
+        found = detect(model, pixels, header, model.default_query)
         image = bridge.cv2_to_imgmsg(pixels, 'bgr8')
         image.header = header
-        record, _ = observation(image, found, model.sha256, 'offline')
+        record, _ = observation(image, found, model.sha256, 'offline', model.default_query)
         durations.append(time.monotonic() - start)
         result = scene_metrics(record['detections'], scene['objects'], blue_threshold, labels, blue_labels)
         for key in keys:

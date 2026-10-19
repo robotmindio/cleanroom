@@ -14,8 +14,12 @@ running (`start_object_perception`).
 The detector publishes its operating points on the latched
 `/robot/perception/profile` topic: the camera bindings and, for the primary and
 any fallback recognizer, the model SHA-256, confidence threshold, label
-catalogue and whether it is open-vocabulary (prompted). Each stored frame keeps
-the SHA-256 of the recognizer that served it. A frame speaks only for labels in
+catalogue and whether it is open-vocabulary. An open-vocabulary primary's
+catalogue is the active query (see `object-observations.md`), and the topic
+republishes when it changes. Each stored frame keeps the SHA-256 of the
+recognizer that served it, and an open frame also keeps the query it ran under:
+it speaks only for labels that query asked for, and frames under another query
+are counted as `ignored_other_query`. A frame speaks only for labels in
 its own recognizer's catalogue: while the closed-set fallback serves, a label
 only the open-vocabulary primary can report gains no evidence of absence, and
 those frames are counted as ignored in the report. A cell has evidence of

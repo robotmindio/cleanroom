@@ -20,15 +20,17 @@ from rclpy.parameter import Parameter
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import Image
 from std_msgs.msg import String
-from vision_msgs.msg import Detection2DArray
+from vision_msgs.msg import Detection2DArray, LabelInfo, VisionClass
 
 from lekiwi_rmf import object_recognition
 from lekiwi_rmf.object_recognition import (
-    ProviderUnavailable, Recognizer, model_spec, prompt_labels, provider_endpoint, recognition_identity)
+    ProviderUnavailable, Recognizer, model_spec, provider_endpoint, recognition_identity)
+from lekiwi_rmf.perception_query import make_query
 from test_object_observations import capture
 
 REMOTE = 'grounding_dino_tiny_gpu'
 SPEC = model_spec(REMOTE)
+DEFAULT = make_query(SPEC['default_query'])
 
 
 class FakeProvider:
@@ -95,7 +97,7 @@ def frame():
 def test_remote_detections_use_source_pixels_shared_nms_and_lossless_input(provider):
     recognizer = Recognizer(REMOTE, None, .5)
     image = frame()
-    rows = recognizer.predict(image)
+    rows = recognizer.predict(image, DEFAULT)
     # The overlapping synonym collapses into the stronger phrase, exactly like the local Grounding DINO.
     assert rows == [[10.0, 12.0, 20.0, 28.0, .9, 'a cup'], [50.0, 5.0, 10.0, 15.0, .6, 'a mug']]
     path, body = provider.requests[0]
@@ -106,11 +108,30 @@ def test_remote_detections_use_source_pixels_shared_nms_and_lossless_input(provi
     assert np.array_equal(sent, image)
 
 
+def test_remote_provider_receives_the_requested_query_for_any_label(provider):
+    recognizer = Recognizer(REMOTE, None, .5)
+    provider.respond = lambda body: provider.admitted(body, detections=[
+        {'box': [1.0, 2.0, 11.0, 22.0], 'score': .8, 'label': 'phillips screwdriver'}])
+    query = make_query(['Phillips  Screwdriver', 'cable tie'])
+    assert recognizer.predict(frame(), query) == [[1.0, 2.0, 10.0, 20.0, .8, 'phillips screwdriver']]
+    body = provider.requests[-1][1]
+    assert body['labels'] == ['phillips screwdriver', 'cable tie']
+
+
+def test_open_recognizers_need_a_query_and_closed_ones_refuse_one(provider):
+    with pytest.raises(ValueError, match='needs a query'):
+        Recognizer(REMOTE, None, .5).predict(frame())
+    assert not provider.requests
+
+
 @pytest.mark.parametrize('perturb', [
     lambda provider, body: provider.admitted(body, model_sha256='0' * 64),
     lambda provider, body: provider.admitted(body, model='owlv2'),
     lambda provider, body: provider.admitted(body, schema=2),
     lambda provider, body: provider.admitted(body, effective={**provider.admitted(body)[1]['effective'], 'text_threshold': .3}),
+    # A provider that answered another query (cached, stale or rewritten) does not answer this frame's.
+    lambda provider, body: provider.admitted(body, effective={**provider.admitted(body)[1]['effective'], 'labels': ['a cup']}),
+    lambda provider, body: provider.admitted(body, effective={**provider.admitted(body)[1]['effective'], 'prompt': 'a cup.'}),
     lambda provider, body: provider.admitted(body, image={**provider.admitted(body)[1]['image'], 'sha256': '0' * 64}),
     lambda provider, body: provider.admitted(body, image={**provider.admitted(body)[1]['image'], 'width': 63}),
     lambda provider, body: provider.admitted(body, detections=[{'box': [1, 2, 3], 'score': .9, 'label': 'a cup'}]),
@@ -125,7 +146,7 @@ def test_remote_detections_use_source_pixels_shared_nms_and_lossless_input(provi
 def test_responses_outside_the_admitted_operating_point_are_unavailable(provider, perturb):
     provider.respond = lambda body: perturb(provider, body)
     with pytest.raises(ProviderUnavailable):
-        Recognizer(REMOTE, None, .5).predict(frame())
+        Recognizer(REMOTE, None, .5).predict(frame(), DEFAULT)
 
 
 def test_unreachable_and_slow_providers_are_unavailable(monkeypatch, provider):
@@ -134,11 +155,11 @@ def test_unreachable_and_slow_providers_are_unavailable(monkeypatch, provider):
         port = closed.getsockname()[1]
     monkeypatch.setattr(object_recognition, 'provider_endpoint', lambda name: (f'http://127.0.0.1:{port}', .5))
     with pytest.raises(ProviderUnavailable, match='unreachable'):
-        Recognizer(REMOTE, None, .5).predict(frame())
+        Recognizer(REMOTE, None, .5).predict(frame(), DEFAULT)
     monkeypatch.setattr(object_recognition, 'provider_endpoint', lambda name: (provider.url, .2))
     provider.respond = lambda body: time.sleep(.5) or provider.admitted(body)
     with pytest.raises(ProviderUnavailable, match='unreachable'):
-        Recognizer(REMOTE, None, .5).predict(frame())
+        Recognizer(REMOTE, None, .5).predict(frame(), DEFAULT)
 
 
 def test_remote_identity_pins_the_provider_hash_but_not_its_endpoint(monkeypatch):
@@ -147,6 +168,10 @@ def test_remote_identity_pins_the_provider_hash_but_not_its_endpoint(monkeypatch
     assert document['artifacts']['provider_model_sha256'] == SPEC['provider_model_sha256']
     assert 'tailb78697' not in json.dumps(document) and ':30610' not in json.dumps(document)
     assert identity != recognition_identity('grounding_dino_tiny_gpu', .4)[0]
+    # The query is per frame, not part of the model identity: the default only seeds it.
+    assert document['labels'] == 'query' and 'default_query' not in document['artifacts']
+    monkeypatch.setattr(object_recognition, 'model_spec', lambda name: {**SPEC, 'default_query': ['a spoon']})
+    assert recognition_identity(REMOTE, .5)[0] == identity
     changed = {**SPEC, 'provider_model_sha256': '0' * 64}
     monkeypatch.setattr(object_recognition, 'model_spec', lambda name: changed)
     assert recognition_identity(REMOTE, .5)[0] != identity
@@ -170,17 +195,15 @@ def test_provider_endpoints_fail_closed(monkeypatch, tmp_path, endpoint):
         provider_endpoint('gpu')
 
 
-def test_prompt_round_trips_through_provider_labels():
-    assert prompt_labels('a cup. a mug.') == ['a cup', 'a mug']
-    for prompt in ['a cup', 'a cup.a mug.', '.', 'a cup.  a mug.']:
-        with pytest.raises(ValueError):
-            prompt_labels(prompt)
-
-
 def test_runtime_follows_every_selected_recognizer():
     assert not object_recognition.needs_private_runtime(REMOTE, 'yolox')
     assert object_recognition.needs_private_runtime(REMOTE, 'rtdetr_v2_r18')
     assert object_recognition.selected_models({'model_name': REMOTE, 'fallback_model_name': ''}) == [REMOTE]
+
+
+def label_info(header, query, threshold=.5):
+    return LabelInfo(header=header, threshold=threshold, class_map=[
+        VisionClass(class_id=index, class_name=label) for index, label in enumerate(query.labels)])
 
 
 def wait(predicate, timeout=8):
@@ -196,7 +219,7 @@ def test_detector_serves_fallback_frames_on_fallback_topics_and_retries_primary_
 
     calls = {'primary': 0, 'fallback': 0}
 
-    def primary(image):
+    def primary(image, query):
         calls['primary'] += 1
         raise ProviderUnavailable('perception provider unreachable: refused')
 
@@ -205,10 +228,10 @@ def test_detector_serves_fallback_frames_on_fallback_topics_and_retries_primary_
         return [[10, 10, 20, 20, .9, 'cup']]
 
     recognizers = {'grounding_dino_tiny_gpu': SimpleNamespace(
-                       predict=primary, sha256='a' * 64, name='grounding_dino_tiny_gpu', labels=['a cup', 'a mug'],
-                       open_vocabulary=True),
+                       predict=primary, sha256='a' * 64, name='grounding_dino_tiny_gpu', labels=None,
+                       open_vocabulary=True, default_query=DEFAULT),
                    'rtdetr_v2_r18': SimpleNamespace(predict=fallback, sha256='b' * 64, name='rtdetr_v2_r18',
-                                                    labels=['cup', 'chair'], open_vocabulary=False)}
+                                                    labels=['cup', 'chair'], open_vocabulary=False, default_query=None)}
     monkeypatch.setattr(object_detector, 'Recognizer', lambda name, *args: recognizers[name])
     context = Context()
     rclpy.init(context=context)
@@ -251,7 +274,7 @@ def test_detector_serves_fallback_frames_on_fallback_topics_and_retries_primary_
         stats = node._stats['front']
         assert stats['served_by'] == 'fallback' and stats['fallback_published'] >= 3
         assert 'unreachable' in stats['primary_reason']
-        recognizers['grounding_dino_tiny_gpu'].predict = lambda image: [[1, 1, 5, 5, .8, 'a cup']]
+        recognizers['grounding_dino_tiny_gpu'].predict = lambda image, query: [[1, 1, 5, 5, .8, 'a cup']]
         node._primary_retry_at = 0.
         while not primary_out:
             send()
@@ -269,10 +292,11 @@ def test_detector_serves_fallback_frames_on_fallback_topics_and_retries_primary_
 def test_detector_without_fallback_rejects_unavailable_frames(monkeypatch):
     from lekiwi_rmf import object_detector
 
-    def unavailable(image):
+    def unavailable(image, query):
         raise ProviderUnavailable('perception provider returned HTTP 503')
 
-    monkeypatch.setattr(object_detector, 'Recognizer', lambda *args: SimpleNamespace(predict=unavailable, sha256='a' * 64, name='x', labels=['cup'], open_vocabulary=False))
+    monkeypatch.setattr(object_detector, 'Recognizer', lambda *args: SimpleNamespace(
+        predict=unavailable, sha256='a' * 64, name='x', labels=None, open_vocabulary=True, default_query=DEFAULT))
     context = Context()
     rclpy.init(context=context)
     node = object_detector.ObjectDetector(context=context)
@@ -292,7 +316,8 @@ def test_detector_without_fallback_rejects_unavailable_frames(monkeypatch):
 def test_fallback_must_differ_from_primary(monkeypatch):
     from lekiwi_rmf import object_detector
 
-    monkeypatch.setattr(object_detector, 'Recognizer', lambda *args: SimpleNamespace(predict=list, sha256='a' * 64, name='x', labels=['cup'], open_vocabulary=False))
+    monkeypatch.setattr(object_detector, 'Recognizer', lambda *args: SimpleNamespace(
+        predict=list, sha256='a' * 64, name='x', labels=['cup'], open_vocabulary=False, default_query=None))
     context = Context()
     rclpy.init(context=context)
     try:
@@ -312,18 +337,19 @@ def test_observations_carry_the_identity_of_the_recognizer_that_served_the_frame
     bindings.write_text(yaml.safe_dump({'astra_color': {
         'mount': 'base', 'image_topic': '/camera/test/image', 'optical_frame': 'camera_optical',
         'camera_info_topic': '/camera/test/info', 'depth_topic': '', 'calibration_file': ''}}))
-    primary = recognition_identity('yolox')[0]
-    fallback = recognition_identity(REMOTE, .5)[0]
+    primary = recognition_identity(REMOTE, .5)[0]
+    fallback = recognition_identity('yolox', .5)[0]
     context = Context()
     rclpy.init(context=context)
     collector = ObjectObservations(context=context, parameter_overrides=[
         Parameter('database_path', value=str(tmp_path / 'observations.db')),
-        Parameter('model_sha256', value=primary), Parameter('fallback_model_name', value=REMOTE),
+        Parameter('model_name', value=REMOTE), Parameter('fallback_model_name', value='yolox'),
         Parameter('camera_ids', value=['astra_color']), Parameter('camera_profiles_file', value=str(bindings))])
     peer = Node('identity_peer', context=context)
     publishers = {suffix: (peer.create_publisher(Image, f'/robot/perception/astra_color{suffix}/source_image', 1),
                            peer.create_publisher(Detection2DArray, f'/robot/perception/astra_color{suffix}/detections', 1))
                   for suffix in ('', '/fallback')}
+    queries = peer.create_publisher(LabelInfo, '/robot/perception/astra_color/query', 1)
     executor = SingleThreadedExecutor(context=context)
     executor.add_node(peer)
     executor.add_node(collector)
@@ -337,11 +363,14 @@ def test_observations_carry_the_identity_of_the_recognizer_that_served_the_frame
         for item in found.detections:
             item.header = image.header
         images, detections = publishers[suffix]
+        if not suffix:
+            queries.publish(label_info(image.header, DEFAULT))
         detections.publish(found)
         images.publish(image)
 
     try:
         wait(lambda: all(pub.get_subscription_count() == 1 for pair in publishers.values() for pub in pair))
+        wait(lambda: queries.get_subscription_count() == 1)
         publish('/fallback')
         wait(lambda: len(collector._store.query('{}')['observations']) == 1)
         time.sleep(.01)
@@ -350,6 +379,10 @@ def test_observations_carry_the_identity_of_the_recognizer_that_served_the_frame
         records = collector._store.query('{}')['observations']
         assert sorted(record['model_sha256'] for record in records) == sorted([primary, fallback])
         assert len({record['capture_id'] for record in records}) == 2
+        served = {record['model_sha256']: record for record in records}
+        assert served[primary]['vocabulary'] == 'open' and served[primary]['query'] == DEFAULT.document()
+        # The closed fallback never claims the open query it cannot express.
+        assert served[fallback]['vocabulary'] == 'closed' and 'query' not in served[fallback]
     finally:
         executor.shutdown(timeout_sec=5)
         thread.join(timeout=5)

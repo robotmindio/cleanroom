@@ -27,8 +27,8 @@ def free_grid(size=120):
 
 
 def capture(identifier='a' * 64, pose=Pose(0.0, 0.0, 0.2, 0.0, 0.0), detections=(), stamp=100.0,
-            model='m' * 64, stationary=True):
-    return Capture(identifier, 'front', model, stamp, pose, CAMERA, stationary, tuple(detections))
+            model='m' * 64, stationary=True, query=None):
+    return Capture(identifier, 'front', model, stamp, pose, CAMERA, stationary, tuple(detections), query)
 
 
 def cell_xy(flat, grid):
@@ -93,12 +93,22 @@ def test_negative_evidence_respects_model_motion_bearing_and_age():
     assert covered.any() and not np.any((bearings > 0.37) & (bearings < 0.48))
     assert np.any(np.abs(bearings) < 0.05)  # The chair's bearing still proves no cup there.
     assert (coverage.sighting > coverage.negative).any()
-    assert coverage.counts == {'captures': 3, 'negative_captures': 1, 'other_model': 1, 'moving': 1,
-                               'occluded_cells': 0}
+    assert coverage.counts == {'captures': 3, 'negative_captures': 1, 'other_model': 1, 'other_query': 0,
+                               'moving': 1, 'occluded_cells': 0}
     assert not coverage.covered(100 + PROFILE.max_age_sec + 1).any()
     # A later look without the cup refutes the earlier sighting there.
     coverage.add(capture(stamp=200.0), grid)
     assert not (coverage.sighting > coverage.negative).any()
+
+
+def test_open_inferences_count_only_for_labels_their_query_asked_for():
+    grid = free_grid()
+    coverage = QueryCoverage('screwdriver', ['m' * 64], PROFILE, grid.shape, RESOLUTION, ORIGIN)
+    # A frame that localized only cups says nothing about a screwdriver, though its model could have.
+    assert coverage.add(capture(query=('a cup', 'a mug')), grid) == []
+    assert not coverage.covered(100).any() and coverage.counts['other_query'] == 1
+    coverage.add(capture(query=('screwdriver',)), grid)
+    assert coverage.covered(100).any() and coverage.counts['negative_captures'] == 1
 
 
 def test_map_growth_keeps_world_aligned_coverage_and_raster_change_discards_it():

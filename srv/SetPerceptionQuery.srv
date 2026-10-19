@@ -1,0 +1,14 @@
+# Labels the open-vocabulary detector localizes from the next frame on. Labels are normalized
+# (NFKC, lower case, single spaces), de-duplicated in order and bounded; see /robot/capabilities.
+# Empty restores the tracked default query.
+string[] labels
+# Optimistic concurrency: when set, the change applies only while this revision is in force.
+string expected_revision
+---
+bool success
+string detail
+# The query in force after this call (unchanged on failure), and the one it replaced.
+string revision
+string[] labels
+string previous_revision
+string[] previous_labels
