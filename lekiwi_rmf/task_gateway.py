@@ -25,7 +25,7 @@ from std_msgs.msg import Bool, String
 from std_srvs.srv import Trigger
 from unique_identifier_msgs.msg import UUID
 
-from lekiwi_rmf.action import Explore
+from lekiwi_rmf.action import Explore, Search
 from lekiwi_rmf.exploration import task_limits
 from lekiwi_rmf.exploration_owner_guard import owned_goal_id
 from lekiwi_rmf.srv import CancelTask, GetTask, SubmitTask
@@ -36,7 +36,10 @@ from lekiwi_rmf.navigation_distance import NavigationDistance
 from lekiwi_rmf.map_bundle import validate_map_bundle
 
 
-ACTIONS = {'navigate': ('/navigate_to_pose', NavigateToPose), 'explore': ('/robot/explore', Explore)}
+ACTIONS = {'navigate': ('/navigate_to_pose', NavigateToPose), 'explore': ('/robot/explore', Explore),
+           'search': ('/robot/search', Search)}
+SEARCH_PARAMETERS = ('query', 'region', 'max_duration_sec', 'max_travel_m', 'target_coverage')
+SEARCH_LIMITS = ('max_duration_sec', 'max_travel_m')
 
 
 def task_goal(capability, text):
@@ -82,6 +85,28 @@ def task_goal(capability, text):
         goal = Explore.Goal(revisit_known=values.get('revisit_known', False),
                             max_duration_sec=float(values.get('max_duration_sec', 0.0)),
                             max_radius_m=float(values.get('max_radius_m', 0.0)), resume_task_id=resume)
+    elif capability == 'search':
+        if set(values) - set(SEARCH_PARAMETERS) or 'query' not in values:
+            raise ValueError('search requires query and accepts only region, max_duration_sec, max_travel_m, target_coverage')
+        query = values['query']
+        if not isinstance(query, str) or not 1 <= len(' '.join(query.split())) <= 128:
+            raise ValueError('search query must be a label of 1..128 characters')
+        for name in (*SEARCH_LIMITS, 'target_coverage'):
+            value = values.get(name, 0.0)
+            if type(value) not in (float, int) or not math.isfinite(value) or value < 0:
+                raise ValueError(f'{name} must be finite and nonnegative')
+        if values.get('target_coverage', 0.0) > 1:
+            raise ValueError('target_coverage must be within (0,1]')
+        region = values.get('region', {'x': 0.0, 'y': 0.0, 'radius_m': 0.0})
+        if (not isinstance(region, dict) or set(region) != {'x', 'y', 'radius_m'}
+                or any(type(v) not in (float, int) or not math.isfinite(v) for v in region.values())
+                or ('region' in values and region['radius_m'] <= 0)):
+            raise ValueError('region requires finite map-frame x, y and a positive radius_m')
+        goal = Search.Goal(query=query, region_x=float(region['x']), region_y=float(region['y']),
+                           region_radius_m=float(region['radius_m']),
+                           max_duration_sec=float(values.get('max_duration_sec', 0.0)),
+                           max_travel_m=float(values.get('max_travel_m', 0.0)),
+                           target_coverage=float(values.get('target_coverage', 0.0)))
     else:
         raise ValueError('unsupported capability')
     return goal, json.dumps(values, sort_keys=True, allow_nan=False)
@@ -98,9 +123,12 @@ class TaskGateway(Node):
         self.declare_parameter('navigation_timeout_sec', 180.0)
         self.declare_parameter('allow_navigation', True)
         self.declare_parameter('allow_exploration', True)
+        # The explorer's tracked allow_search keeps the action server itself off by default.
+        self.declare_parameter('allow_search', True)
         self.declare_parameter('map_bundle', '')
         self._enabled = {'navigate': self.get_parameter('allow_navigation').value,
-                         'explore': self.get_parameter('allow_exploration').value}
+                         'explore': self.get_parameter('allow_exploration').value,
+                         'search': self.get_parameter('allow_search').value}
         self._timeout = self.get_parameter('navigation_timeout_sec').value
         if type(self._timeout) not in (float, int) or not math.isfinite(self._timeout) or self._timeout <= 0:
             raise ValueError('navigation_timeout_sec must be positive and finite')
@@ -139,6 +167,8 @@ class TaskGateway(Node):
         self._map_publisher.publish(String(data=json.dumps(map_context)))
         self._exploration_defaults = None
         self.create_subscription(String, '/robot/explore/defaults', self._explore_defaults, latched)
+        self._search_defaults = None
+        self.create_subscription(String, '/robot/search/defaults', self._search_defaults_message, latched)
         self._owner = self.create_publisher(UUID, '/robot/explore/navigation_owner', 10)
         self.create_subscription(Bool, '/safety/base_motion_permitted',
                                  lambda msg: self._navigation.permission(msg.data, time.monotonic()), latched)
@@ -229,13 +259,21 @@ class TaskGateway(Node):
                 if request.capability == 'navigate':
                     effective = {**values, 'yaw': values.get('yaw', 0.0),
                                  'max_duration_sec': self._timeout}
-                elif self._exploration_defaults is not None and not values.get('resume_task_id'):
+                elif (request.capability == 'explore' and self._exploration_defaults is not None
+                      and not values.get('resume_task_id')):
                     duration, radius = task_limits(
                         values.get('max_duration_sec', 0.0), values.get('max_radius_m', 0.0),
                         self._exploration_defaults['max_duration_sec'], self._exploration_defaults['max_radius_m'])
                     effective = {'max_duration_sec': duration, 'max_radius_m': radius}
                     effective['revisit_known'] = values.get('revisit_known', False)
                     effective['resume_task_id'] = ''
+                elif request.capability == 'search' and self._search_defaults is not None:
+                    effective = dict(values)
+                    for name in SEARCH_LIMITS:
+                        if values.get(name, 0.0) > self._search_defaults[name]:
+                            raise ValueError(f'{name} exceeds the tracked limit {self._search_defaults[name]}')
+                        effective[name] = values.get(name, 0.0) or self._search_defaults[name]
+                    effective['target_coverage'] = values.get('target_coverage', 0.0) or self._search_defaults['target_coverage']
                 metadata = {'parameters': values, 'effective_parameters': effective}
                 if request.capability == 'navigate' and 'max_travel_m' in values:
                     meter = self._distance.status()
@@ -286,23 +324,55 @@ class TaskGateway(Node):
             return
         self._exploration_defaults = values
 
+    def _search_defaults_message(self, message):
+        try:
+            if len(message.data.encode()) > 4096:
+                raise ValueError('search defaults exceed 4096 bytes')
+            values = json.loads(message.data)
+            if (not isinstance(values, dict) or set(values) != {*SEARCH_LIMITS, 'target_coverage'}
+                    or any(type(value) not in (int, float) or not math.isfinite(value) or value <= 0
+                           for value in values.values()) or values['target_coverage'] > 1):
+                raise ValueError('invalid search defaults')
+        except (ValueError, TypeError, RecursionError, OverflowError):
+            self._search_defaults = None
+            self.get_logger().error('invalid search defaults contract')
+            return
+        self._search_defaults = values
+
+    def _capability(self, name, client):
+        entry = {'name': name, 'available': self._enabled[name] and client.server_is_ready()}
+        if name == 'navigate':
+            return {**entry, 'parameters': ['x', 'y', 'yaw', 'deadline_unix_sec', 'max_travel_m'],
+                    'required_parameters': ['x', 'y'], 'defaults': {'yaw': 0.0},
+                    'effective_defaults': {'yaw': 0.0, 'max_duration_sec': self._timeout},
+                    'description': 'Map-frame x, y; yaw in radians. Pauses preserve the active-time budget.'}
+        if name == 'explore':
+            return {**entry, 'parameters': ['revisit_known', 'max_duration_sec', 'max_radius_m', 'resume_task_id'],
+                    'required_parameters': [],
+                    'defaults': {'revisit_known': False, 'max_duration_sec': 0.0, 'max_radius_m': 0.0, 'resume_task_id': ''},
+                    'effective_defaults': ({**self._exploration_defaults, 'revisit_known': False, 'resume_task_id': ''}
+                                           if self._exploration_defaults is not None else None),
+                    'description': ('Omit parameters to explore unmapped space. revisit_known=true also revisits mapped space. '
+                                    'Omitted/zero limits use the tracked robot limits; positive limits may only reduce them. '
+                                    'Duration is active seconds, radius is metres around the starting pose. '
+                                    'resume_task_id is a saved native exploration UUID and preserves its original bounds.')}
+        return {**entry, 'parameters': list(SEARCH_PARAMETERS), 'required_parameters': ['query'],
+                'defaults': {'region': None, 'max_duration_sec': 0.0, 'max_travel_m': 0.0, 'target_coverage': 0.0},
+                'effective_defaults': (dict(self._search_defaults, region=None)
+                                       if self._search_defaults is not None else None),
+                'labels': '/robot/perception/profile',
+                'outcomes': ['found', 'coverage_reached', 'inaccessible', 'budget_exhausted', 'incapable', 'canceled', 'failed'],
+                'description': ('Moves the base between viewpoints chosen by expected information gain until the query '
+                                'label is detected, target_coverage of the searchable mapped region has fresh evidence '
+                                'of absence, or a budget ends. query is a native label of the perception profile; '
+                                'region {x, y, radius_m} is map-frame, default the tracked motion bound. Results carry '
+                                'evidence_ids, coverage_fraction and a negative-evidence report; "not found" holds only '
+                                'for the covered cells. Zero/omitted limits use the tracked limits; positive limits may only reduce them.')}
+
     def _capabilities(self, _request, response):
         response.success = True
         response.message = json.dumps({'schema': 1, 'capabilities': [
-            {'name': name, 'available': self._enabled[name] and client.server_is_ready(), 'parameters':
-             ['x', 'y', 'yaw', 'deadline_unix_sec', 'max_travel_m'] if name == 'navigate' else ['revisit_known', 'max_duration_sec', 'max_radius_m', 'resume_task_id'],
-             'required_parameters': ['x', 'y'] if name == 'navigate' else [],
-             'defaults': {'yaw': 0.0} if name == 'navigate' else {
-                 'revisit_known': False, 'max_duration_sec': 0.0, 'max_radius_m': 0.0, 'resume_task_id': ''},
-             'effective_defaults': {'yaw': 0.0, 'max_duration_sec': self._timeout} if name == 'navigate'
-             else ({**self._exploration_defaults, 'revisit_known': False, 'resume_task_id': ''}
-                   if self._exploration_defaults is not None else None),
-             'description': ('Map-frame x, y; yaw in radians. Pauses preserve the active-time budget.' if name == 'navigate'
-                             else 'Omit parameters to explore unmapped space. revisit_known=true also revisits mapped space. '
-                             'Omitted/zero limits use the tracked robot limits; positive limits may only reduce them. '
-                             'Duration is active seconds, radius is metres around the starting pose. '
-                             'resume_task_id is a saved native exploration UUID and preserves its original bounds.')}
-            for name, client in self._action_clients.items()],
+            self._capability(name, client) for name, client in self._action_clients.items()],
             'terminal_states': sorted(TERMINAL),
             'observations': {'available': self._observation_status.service_is_ready(),
                              'schema': 1, 'grounding': 'image_only',
@@ -464,7 +534,7 @@ class TaskGateway(Node):
         if not client.server_is_ready():
             return
         parameters = row['parameters']
-        if capability == 'explore':
+        if capability in ('explore', 'search'):
             effective = json.loads(row['result']).get('_task', {}).get('effective_parameters')
             if effective is not None:
                 parameters = json.dumps(effective, allow_nan=False)
