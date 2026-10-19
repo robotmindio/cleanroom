@@ -34,7 +34,7 @@ from lekiwi_rmf.navigation_pause import NavigationPause
 from lekiwi_rmf.navigation_observer import NavigationObserver, server_instance
 from lekiwi_rmf.navigation_distance import NavigationDistance
 from lekiwi_rmf.map_bundle import validate_map_bundle
-from lekiwi_rmf.skills import SKILL_ID, load_registry
+from lekiwi_rmf.skills import SKILL_ID, catalog, load_registry
 
 
 ACTIONS = {'navigate': ('/navigate_to_pose', NavigateToPose), 'explore': ('/robot/explore', Explore),
@@ -113,7 +113,8 @@ class TaskGateway(Node):
                          'explore': self.get_parameter('allow_exploration').value,
                          'skill': self.get_parameter('allow_skills').value}
         try:
-            self._skills = [skill.catalog() for skill in load_registry().values()]
+            # Experimental skills run only through an acquisition protocol, never a user task.
+            self._skills = catalog(load_registry())
         except (OSError, ValueError) as error:
             self.get_logger().error(f'skill registry unavailable: {error}')
             self._enabled['skill'], self._skills = False, []

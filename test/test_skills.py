@@ -20,7 +20,7 @@ import yaml
 
 from lekiwi_rmf.action import RunSkill
 from lekiwi_rmf.arm_trajectory import ARM_JOINTS, JOINT_LIMITS
-from lekiwi_rmf.skills import arm_targets, load_registry, skill_parameters, verify_artifact
+from lekiwi_rmf.skills import arm_targets, catalog, load_registry, skill_parameters, verify_artifact
 from lekiwi_rmf.task_gateway import task_goal
 
 ACTIONS = [*ARM_JOINTS, 'base_x_vel', 'base_y_vel', 'base_yaw_rate']
@@ -53,6 +53,12 @@ def test_tracked_registry_is_valid_and_empty_until_a_skill_is_acquired():
 def test_malformed_entries_reject_the_whole_registry(tmp_path, change):
     with pytest.raises(ValueError):
         registry(tmp_path, {'good': entry(), 'push': entry(**change)})
+
+
+def test_experimental_skills_are_offered_only_to_an_acquisition_protocol(tmp_path):
+    skills = registry(tmp_path, {'push': entry(), 'reach': entry(status='experimental')})
+    assert [skill['skill_id'] for skill in catalog(skills)] == ['push']
+    assert sorted(skill['skill_id'] for skill in catalog(skills, allow_experimental=True)) == ['push', 'reach']
 
 
 def test_parameters_follow_the_declared_contract(tmp_path):

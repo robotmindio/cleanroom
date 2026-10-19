@@ -25,7 +25,7 @@ from trajectory_msgs.msg import JointTrajectoryPoint
 from lekiwi_rmf.action import RunSkill
 from lekiwi_rmf.arm_trajectory import ARM_JOINTS
 from lekiwi_rmf.object_recognition import reject_parameter_changes
-from lekiwi_rmf.skills import arm_targets, load_registry, skill_parameters, verify_artifact
+from lekiwi_rmf.skills import arm_targets, catalog, load_registry, skill_parameters, verify_artifact
 
 CAMERA_TOPICS = {'front': '/camera/front/image_raw', 'wrist': '/camera/wrist/image_raw',
                  'astra': '/camera/astra/color/image_raw'}
@@ -99,8 +99,7 @@ class SkillRunner(Node):
                                     cancel_callback=lambda _goal: CancelResponse.ACCEPT, callback_group=group)
 
     def catalog(self):
-        return [skill.catalog() for skill in self._registry.values()
-                if skill.status == 'qualified' or self._experimental]
+        return catalog(self._registry, self._experimental)
 
     def _joint_state(self, message):
         with self._lock:

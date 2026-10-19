@@ -100,6 +100,11 @@ def load_registry(path=None, artifacts=None):
     return {skill_id: _skill(skill_id, value, artifacts) for skill_id, value in document['skills'].items()}
 
 
+def catalog(registry, allow_experimental=False):
+    """What may be requested: qualified skills, plus experimental ones only for an acquisition protocol."""
+    return [skill.catalog() for skill in registry.values() if skill.status == 'qualified' or allow_experimental]
+
+
 def verify_artifact(skill):
     """The implementation that runs is exactly the one that was evaluated."""
     weights = skill.checkpoint / 'model.safetensors'
