@@ -811,6 +811,9 @@ def test_missing_explorer_defaults_are_explicit_and_do_not_block_submission(syst
     catalog = json.loads(peers.gateway._capabilities(None, Trigger.Response()).message)
     assert catalog['observations']['services']['query'] == '/robot/observations/query'
     assert not catalog['observations']['available']
+    query = catalog['observations']['query']
+    assert query['service'] == '/robot/perception/set_query' and query['type'] == 'lekiwi_rmf/srv/SetPerceptionQuery'
+    assert not query['available'] and (query['max_labels'], query['max_label_chars']) == (16, 48)
     explore = next(item for item in catalog['capabilities'] if item['name'] == 'explore')
     assert explore['effective_defaults'] is None
     assert start().accepted
