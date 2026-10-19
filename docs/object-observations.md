@@ -15,7 +15,8 @@ scripts/object-perception.sh --describe
 scripts/object-perception.sh
 ```
 
-The installer follows the model selected in `config/object_perception.yaml`.
+The installer follows the local model selected in `config/object_perception.yaml`,
+which is the fallback when the primary is a remote provider.
 Artifacts are pinned by upstream revision, file size and SHA-256 in
 `config/recognition_models.yaml`. Startup verifies every file and never downloads
 weights. RT-DETR and Grounding DINO use a separate CPU environment under
@@ -56,6 +57,36 @@ restart. No
 model cascade or language-model completion authority is introduced. The
 vendored YOLOX implementation lives directly in the Python package; its
 upstream license/provenance remain in `thirdparty/opencv_yolox/`.
+
+## Remote GPU provider and local fallback
+
+`config/object_perception.yaml` selects `grounding_dino_tiny_gpu`: the same pinned
+Grounding DINO weights and frozen prompt as `grounding_dino_tiny`, served by
+RobotMind's `perception-provider` on the cluster GTX 1070. The endpoint lives in
+`config/perception_providers.yaml` (Tailscale address, 1.5 s timeout) and is not
+part of any identity. The recognizer sends lossless PNG pixels plus the prompt
+phrases and thresholds, and accepts a response only when it echoes the pinned
+`provider_model_sha256` (the provider's hash of its weight files, Torch/CUDA and
+transformers build, and GPU), the exact effective prompt and thresholds, and the
+SHA-256 and size of the image it was sent. Boxes then go through the same
+suppression as the local Grounding DINO. Measured on the cluster, GPU and CPU
+results for one image agreed to 1e-4 in score and 0.01 px.
+
+`fallback_model_name` (`rtdetr_v2_r18`) serves frames while the provider is
+unreachable, busy, not ready, too slow, or answering outside its pinned identity.
+After a failure, frames skip the primary for 10 s, so an outage costs one timeout
+per window. Fallback frames go to `/robot/perception/<camera>/fallback/...`, and
+the collector records them under the fallback's own `model_sha256`, so every
+observation names the recognizer that produced it. `--describe` prints both
+identities. A Fiber profile that admits both accepts either source; one that
+admits only the GPU identity ignores fallback observations. Diagnostics report
+`served_by`, `fallback_published` and the primary failure reason, and warn while
+the fallback is serving. A local CPU Grounding DINO is not a useful fallback:
+at 15–19 s per frame it cannot meet the 2 s freshness limit.
+
+A provider rebuild that changes Torch, CUDA, transformers or the GPU changes its
+hash. Until `provider_model_sha256` and the Fiber profile are updated together,
+the fallback serves every frame.
 
 ## Camera binding and coverage
 
@@ -119,6 +150,7 @@ do not make systematic recognition errors independent.
 | --- | --- |
 | `/robot/perception/<camera>/detections` | `vision_msgs/Detection2DArray`, original capture header, source-pixel boxes, native label as `class_id`, at most 20 by score. Persistent track IDs stay empty. |
 | `/robot/perception/<camera>/source_image` | Canonical BGR image, exact same capture header and no overlays. |
+| `/robot/perception/<camera>/fallback/{detections,source_image}` | The same contracts for frames the configured fallback recognizer served; recorded under its own `model_sha256`. |
 | `/robot/observations/events` | Schema, immutable observation ID and sequence; a wake-up hint, not authority. |
 | `/robot/observations/query` | Bounded cursor/ID metadata query, `streams`, aggregate `stream_ready`, epoch and cursor-gap state. |
 | `/robot/observations/evidence` | ID-only JPEG lookup with SHA-256; no filesystem path accepted. |

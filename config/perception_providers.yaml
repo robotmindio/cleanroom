@@ -1,0 +1,9 @@
+# Remote perception providers reachable from the robot computers. Endpoints are deliberately outside
+# every recognition identity: a provider must echo its pinned operating-point hash in each response.
+# robotmind_gpu is the RobotMind cluster's perception-provider (GTX 1070 on robotmind-web-001), published
+# on the Tailscale network by the NodePort in robotmind/perception-provider/charts. Tailscale's
+# WireGuard tunnel encrypts and authenticates the transport; the cluster accepts only tailnet sources.
+robotmind_gpu:
+  url: http://robotmind-web-001.tailb78697.ts.net:30610
+  # Covers the measured GPU p95 (~0.9 s) plus tailnet transfer of a lossless 640x480 frame.
+  timeout_sec: 1.5

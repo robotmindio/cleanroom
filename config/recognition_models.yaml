@@ -48,3 +48,13 @@ grounding_dino_tiny:
     vocab.txt:
       sha256: 07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3
       size: 231508
+# grounding_dino_tiny's pinned weight files (IDEA-Research/grounding-dino-tiny@a2bb814), served on the
+# RobotMind GPU perception provider. provider_model_sha256 is the provider's operating-point hash over
+# those file hashes, its Torch/CUDA/transformers build and the GPU; a response carrying any other hash
+# is not admitted, and the configured fallback serves the frame.
+grounding_dino_tiny_gpu:
+  backend: remote_grounding_dino
+  provider: robotmind_gpu
+  provider_model: grounding-dino-tiny
+  provider_model_sha256: 54f38a2f87dff6dba126ce8095a826b8a270cb235f08214b4687d7c93c40de0d
+  prompt: 'a cup. a mug.'

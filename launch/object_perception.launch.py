@@ -8,7 +8,7 @@ from launch_ros.parameter_descriptions import ParameterValue
 import yaml
 
 from lekiwi_rmf.object_cameras import camera_bindings, config_directory
-from lekiwi_rmf.object_recognition import model_runtime
+from lekiwi_rmf.object_recognition import model_runtime, needs_private_runtime, selected_models
 
 
 def nodes(context):
@@ -17,8 +17,9 @@ def nodes(context):
     config = config_directory() / 'object_perception.yaml'
     settings = yaml.safe_load(config.read_text())['/**']['ros__parameters']
     environment, prefix = {}, ''
-    if settings['model_name'] != 'yolox':
-        prefix = str(model_runtime(settings['model_name']))
+    models = selected_models(settings)
+    if needs_private_runtime(*models):
+        prefix = str(model_runtime(*models))
         environment = {'PYTHONNOUSERSITE': '1'}
     shared = {'use_sim_time': ParameterValue(LaunchConfiguration('use_sim_time'), value_type=bool),
               'camera_ids': cameras}
