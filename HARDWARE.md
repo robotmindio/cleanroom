@@ -329,17 +329,35 @@ supported interface for physical motion.
 
 ## 7. Record a dataset (optional)
 
-Needs the `core-scripts` extra and a Hugging Face write token:
+Record episodes from the running ROS stack; nothing here commands the robot:
 
 ```bash
-hf auth login --token $HUGGINGFACE_TOKEN --add-to-git-credential
-python ~/lerobot-src/examples/lekiwi/record.py
+source scripts/setup.bash
+scripts/record-episode.py ~/episodes/mug-001 --task "pick up the mug" --cameras front,wrist
 ```
 
-Adapt `remote_ip`, `repo_id`, `port`, and `task` inside the script. Datasets land
-in `~/.cache/huggingface/lerobot/{repo-id}`. The repository motor host sends
-no camera images, so datasets recorded against it contain motor state only;
-image recording is outside this repository's supported setup.
+Stop with Ctrl-C or `--duration SEC`. Each episode is an MCAP bag plus
+`manifest.json` (task, operator, cameras, start/stop and reason, file hashes,
+source/deployed revision, arm calibration, URDF and SRDF hashes). The bag keeps
+three action layers apart: `/cmd_vel_safe` (requested base twist),
+`/hardware/applied_action` (the exact host action after permission, limit and
+boundary gating, in host units) and `/joint_states` (measured joints). A
+supervisor marks an intervention by publishing on `/episode/intervention`
+(`std_msgs/String`).
+
+Export to a local LeRobot dataset from an isolated CPU environment:
+
+```bash
+scripts/install-lerobot-export.sh
+~/.ros/lekiwi/lerobot-venv/bin/python scripts/export-lerobot.py ~/episodes/mug-* --root ~/datasets/lekiwi
+```
+
+The exporter verifies each manifest's hashes, samples a fixed rate (`--fps`,
+default 10) with the latest message per stream, and drops (and counts in
+`export-report.json`) any tick where a stream is older than `--tolerance`
+(default 0.15 s). It never interpolates. Over the relayed tailnet link the front
+camera arrives near 1 Hz and joint states near 5 Hz, so learning-grade episodes
+need the direct LAN/Ethernet link.
 
 ## 8. Mount the LD06 lidar
 

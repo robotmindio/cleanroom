@@ -1455,3 +1455,33 @@ def test_qualification_caps_coupled_motion_and_retains_the_folded_hold():
     assert node.sent[-1]['x.vel']==node.sent[-1]['y.vel']==node.sent[-1]['theta.vel']==0.
     assert node.armed and node.sent[-1]['joint.pos']==10.
     assert stages==[{'base_test_stage':.30}]*3
+
+
+def test_the_exact_gated_host_action_is_published_for_recording():
+    node = control_loop_node(armed=True)
+    published = []
+    node.applied_action_pub = types.SimpleNamespace(publish=published.append)
+    node.observation_stamp = driver.rclpy.time.Time(nanoseconds=5).to_msg()
+    grant_fresh_arm_permission(node)
+    node.base_permission = driver.Lease(10_000_000_000, False, time.monotonic_ns())
+    node.command = types.SimpleNamespace(
+        linear=types.SimpleNamespace(x=0.5, y=0.0, z=0.0), angular=types.SimpleNamespace(x=0.0, y=0.0, z=0.3))
+    node._send_armed_command(_Stamp(), {"joint.pos": 3.0}, (0.0, 0.0, 0.0))
+    (message,) = published
+    applied = dict(zip(message.name, message.position))
+    # Base permission is withdrawn, so the recorded action is the zeroed one the host received.
+    assert applied == {**node.sent[-1]} == {"joint.pos": 3.0, "theta.vel": 0.0, "x.vel": 0.0, "y.vel": 0.0}
+    assert message.header.stamp.nanosec == 5
+
+
+def test_applied_action_is_not_published_when_the_send_fails():
+    node = control_loop_node(armed=True)
+    published = []
+    node.applied_action_pub = types.SimpleNamespace(publish=published.append)
+    node.observation_stamp = driver.rclpy.time.Time(nanoseconds=5).to_msg()
+    grant_fresh_arm_permission(node)
+    grant_fresh_base_permission(node)
+    node.robot.send_action = lambda _action: (_ for _ in ()).throw(RuntimeError("socket closed"))
+    node.record_link_loss = lambda _reason: None
+    node._send_armed_command(_Stamp(), {"joint.pos": 3.0}, (0.0, 0.0, 0.0))
+    assert published == []

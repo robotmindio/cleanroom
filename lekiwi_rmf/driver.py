@@ -181,6 +181,15 @@ def arm_joint_state(stamp, positions):
     return joints
 
 
+def applied_action_message(stamp, action):
+    """The exact host action after permission, limit and boundary gating, in host units."""
+    message = JointState()
+    message.header.stamp = stamp
+    message.name = sorted(action)
+    message.position = [float(action[name]) for name in message.name]
+    return message
+
+
 def diagnostics_message(stamp, statuses):
     """Republish validated motor-health statuses as ROS diagnostics."""
     message = DiagnosticArray()
@@ -573,6 +582,9 @@ class LeKiwiDriver(Node):
         self.odom_pub = self.create_publisher(Odometry, odom_topic, 10)
         self.joint_pub = self.create_publisher(JointState, "joint_states", 10)
         self.raw_joint_pub = self.create_publisher(JointState, "arm/raw_joint_states", 10)
+        # Recorded episodes need the command the motors actually received, not only
+        # the requested twist/trajectory or the measured joints.
+        self.applied_action_pub = self.create_publisher(JointState, "hardware/applied_action", 10)
         self.motor_health_pub = self.create_publisher(DiagnosticArray, "/hardware/diagnostics", 10)
         safety_qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.safety_pub = self.create_publisher(String, "safety/state", safety_qos)
@@ -628,6 +640,7 @@ class LeKiwiDriver(Node):
             setattr(self, field.name, getattr(settings, field.name))
         self.robot = robot
         self.torque = torque
+        self.applied_action_pub = None
         self.torque_lock = threading.Lock()
         # Serializes physical actuator transitions and command submission. Local
         # state uses a separate lock so callbacks remain responsive while ZeroMQ
@@ -1286,12 +1299,9 @@ class LeKiwiDriver(Node):
                         return
                     send_stop = self.stop_pending
                 if send_stop:
-                    self.robot.send_action({
-                        **self._hold_action(observation),
-                        "x.vel": 0.0,
-                        "y.vel": 0.0,
-                        "theta.vel": 0.0,
-                    })
+                    stop = {**self._hold_action(observation), "x.vel": 0.0, "y.vel": 0.0, "theta.vel": 0.0}
+                    self.robot.send_action(stop)
+                    self._publish_applied(stop)
                     with self.state_lock:
                         if not self.armed:
                             self.stop_pending = False
@@ -1371,6 +1381,7 @@ class LeKiwiDriver(Node):
                 self.robot.send_action(action, base_test_stage=self._base_test_stage)
             else:
                 self.robot.send_action(action)
+            self._publish_applied(action)
             if trajectory_ran or not arm_permitted:
                 with self.state_lock:
                     if self.armed:
@@ -1387,6 +1398,11 @@ class LeKiwiDriver(Node):
 
         self.publish_state(self.observation_stamp, observation, velocity)
         self.publish_safety()
+
+    def _publish_applied(self, action):
+        # Stamped with the observation the action was computed from, so recordings pair them.
+        if self.applied_action_pub is not None and self.observation_stamp is not None:
+            self.applied_action_pub.publish(applied_action_message(self.observation_stamp, action))
 
     def publish_state(self, stamp, observation, velocity):
         odom = odometry_message(
