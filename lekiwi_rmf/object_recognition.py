@@ -17,6 +17,7 @@ import numpy as np
 import yaml
 
 from lekiwi_rmf.object_cameras import config_directory
+from lekiwi_rmf.perception_query import make_query
 from lekiwi_rmf.opencv_yolox import YoloX
 
 # Native vocabulary of the pinned OpenCV Zoo YOLOX checkpoint, indexed by output class.
@@ -34,6 +35,8 @@ COCO_LABELS = (
 
 TORCH_BACKENDS = ('rtdetr_v2', 'grounding_dino')
 REMOTE_BACKENDS = ('remote_grounding_dino',)
+# Backends that localize the active query instead of a fixed native catalogue.
+OPEN_BACKENDS = ('grounding_dino', 'remote_grounding_dino')
 # Grounding DINO's phrase-to-token threshold; local and remote providers must agree on it.
 TEXT_THRESHOLD = .25
 MAX_RESPONSE_BYTES = 1024 * 1024
@@ -67,18 +70,14 @@ def provider_endpoint(name):
     return url.rstrip('/'), float(timeout)
 
 
-def prompt_labels(prompt):
-    """Grounding DINO's frozen prompt as the provider's label list; the provider rebuilds it verbatim."""
-    labels = [phrase.strip() for phrase in prompt.split('.') if phrase.strip()]
-    if not labels or '. '.join(labels) + '.' != prompt:
-        raise ValueError('remote prompt must be phrases written as "a. b."')
-    return labels
+def open_vocabulary(name):
+    return model_spec(name)['backend'] in OPEN_BACKENDS
 
 
 def suppress(rows, backend, confidence):
     # Synonymous prompt phrases can propose the same object twice, so prompts share one NMS group;
     # closed-vocabulary classes are suppressed per class so overlapping different objects survive.
-    groups = [''] * len(rows) if backend in ('grounding_dino', *REMOTE_BACKENDS) else [row[5] for row in rows]
+    groups = [''] * len(rows) if backend in OPEN_BACKENDS else [row[5] for row in rows]
     kept = []
     for group in dict.fromkeys(groups):
         indices = [i for i, value in enumerate(groups) if value == group]
@@ -134,8 +133,12 @@ def recognition_identity(name, confidence=.5):
     runtime = {'opencv': cv2.__version__, 'numpy': np.__version__}
     if spec['backend'] in TORCH_BACKENDS:
         runtime.update({package: importlib.metadata.version(package) for package in ['torch', 'torchvision', 'transformers', 'Pillow', 'safetensors', 'tokenizers']})
-    document = {'model': name, 'artifacts': spec, 'confidence_threshold': confidence,
-                'preprocessing_revision': 1, 'labels': 'native', 'runtime': runtime, 'device': 'cpu', 'threads': 2, 'interop_threads': 1}
+    # An open recognizer's labels are the per-frame query, recorded beside this identity in each observation;
+    # the startup default is not an operating point of the model.
+    artifacts = {key: value for key, value in spec.items() if key != 'default_query'}
+    document = {'model': name, 'artifacts': artifacts, 'confidence_threshold': confidence, 'preprocessing_revision': 1,
+                'labels': 'query' if spec['backend'] in OPEN_BACKENDS else 'native', 'runtime': runtime,
+                'device': 'cpu', 'threads': 2, 'interop_threads': 1}
     if spec['backend'] in REMOTE_BACKENDS:
         # The artifacts pin the provider's own operating-point hash (weights, Torch/CUDA, GPU), which every
         # response must echo; the local runtime only encodes lossless PNG. The endpoint is not identity.
@@ -160,14 +163,19 @@ class Recognizer:
         self.spec = model_spec(name)
         self.sha256, self.identity = recognition_identity(name, confidence)
         self.confidence = confidence
+        self.open = self.spec['backend'] in OPEN_BACKENDS
+        # Open recognizers report only the phrases of the query they ran; closed ones their native catalogue.
+        self.default_query = make_query(self.spec['default_query']) if self.open else None
+        self.labels = None
         cv2.setNumThreads(2)
         if self.spec['backend'] in REMOTE_BACKENDS:
-            self.directory, self.labels = None, prompt_labels(self.spec['prompt'])
+            self.directory = None
             self.model = RemoteProvider(*provider_endpoint(self.spec['provider']))
             return
         self.directory = verify_model(directory or Path.home() / '.ros/lekiwi/models' / name, self.spec)
         if self.spec['backend'] == 'yolox':
             self.model = YoloX(str(self.directory / next(iter(self.spec['files']))), confThreshold=confidence)
+            self.labels = list(COCO_LABELS)
         else:
             import torch
             from transformers import AutoProcessor, AutoModelForZeroShotObjectDetection
@@ -182,15 +190,20 @@ class Recognizer:
                     size={'height': self.spec['input_size'], 'width': self.spec['input_size']})
                 self.model = RTDetrV2ForObjectDetection.from_pretrained(
                     self.directory, local_files_only=True, use_safetensors=True).eval().to('cpu')
+                self.labels = [self.model.config.id2label[index] for index in sorted(self.model.config.id2label)]
             else:
                 self.processor = AutoProcessor.from_pretrained(self.directory, local_files_only=True)
                 self.model = AutoModelForZeroShotObjectDetection.from_pretrained(
                     self.directory, local_files_only=True, use_safetensors=True).eval().to('cpu')
 
-    def predict(self, image):
+    def predict(self, image, query=None):
+        """Open recognizers localize exactly `query`; closed ones cannot express a query and refuse one."""
+        if self.open != (query is not None):
+            raise ValueError('an open-vocabulary recognizer needs a query' if self.open else
+                             'a closed-vocabulary recognizer cannot answer a query')
         height, width = image.shape[:2]
         if self.spec['backend'] in REMOTE_BACKENDS:
-            return suppress(self._remote(image), self.spec['backend'], self.confidence)
+            return suppress(self._remote(image, query), self.spec['backend'], self.confidence)
         rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         if self.spec['backend'] == 'yolox':
             scale = min(640 / width, 640 / height)
@@ -205,7 +218,7 @@ class Recognizer:
         if self.spec['backend'] == 'rtdetr_v2':
             inputs = self.processor(images=pixels, return_tensors='pt')
         else:
-            inputs = self.processor(images=pixels, text=self.spec['prompt'], return_tensors='pt')
+            inputs = self.processor(images=pixels, text=query.prompt, return_tensors='pt')
         with self.torch.inference_mode():
             outputs = self.model(**inputs)
         if self.spec['backend'] == 'rtdetr_v2':
@@ -223,18 +236,19 @@ class Recognizer:
             rows.append([x0, y0, x1 - x0, y1 - y0, float(score), str(label)])
         return suppress(rows, self.spec['backend'], self.confidence)
 
-    def _remote(self, image):
-        """Lossless pixels out; a response counts only if it proves the admitted operating point."""
+    def _remote(self, image, query):
+        """Lossless pixels out; a response counts only if it proves the admitted operating point and query."""
         height, width = image.shape[:2]
         encoded, png = cv2.imencode('.png', image)
         if not encoded:
             raise ValueError('could not encode the capture for the perception provider')
         data = png.tobytes()
-        expected = {'labels': self.labels, 'prompt': self.spec['prompt'],
+        labels = list(query.labels)
+        expected = {'labels': labels, 'prompt': query.prompt,
                     'box_threshold': self.confidence, 'text_threshold': TEXT_THRESHOLD}
         response = self.model.infer({
             'model': self.spec['provider_model'], 'image': base64.b64encode(data).decode('ascii'),
-            'labels': self.labels, 'box_threshold': self.confidence, 'text_threshold': TEXT_THRESHOLD,
+            'labels': labels, 'box_threshold': self.confidence, 'text_threshold': TEXT_THRESHOLD,
             'deadline_ms': int(self.model.timeout * 1000)})
         source = response.get('image')
         if (response.get('schema') != 1 or response.get('model') != self.spec['provider_model']
@@ -287,7 +301,10 @@ def main():
     use_model_runtime(*selected_models(settings))
     identity, operating = recognition_identity(settings['model_name'], settings['confidence_threshold'])
     deployment = yaml.safe_load((config_directory() / 'object_perception_deployment.yaml').read_text())
-    described = {'model_sha256': identity, 'operating_point': operating}
+    described = {'model_sha256': identity, 'operating_point': operating,
+                 'vocabulary': 'open' if open_vocabulary(settings['model_name']) else 'closed'}
+    if open_vocabulary(settings['model_name']):
+        described['default_query'] = make_query(model_spec(settings['model_name'])['default_query']).document()
     if settings.get('fallback_model_name'):
         # Frames served by the fallback carry its own identity; an admitting profile lists both.
         fallback, fallback_operating = recognition_identity(settings['fallback_model_name'], settings['confidence_threshold'])

@@ -17,6 +17,7 @@ from vision_msgs.msg import Detection2D, Detection2DArray, ObjectHypothesisWithP
 from lekiwi_rmf.object_recognition import recognition_identity, model_spec
 
 from lekiwi_rmf.object_observations import ObservationStore, observation, query_parameters
+from lekiwi_rmf.perception_query import make_query
 
 
 MODEL_SHA256 = recognition_identity('yolox')[0]
@@ -268,7 +269,7 @@ def test_yolox_maps_every_output_class_to_its_native_coco_label():
     from lekiwi_rmf.object_recognition import COCO_LABELS, Recognizer
 
     recognizer = object.__new__(Recognizer)
-    recognizer.spec = {'backend': 'yolox'}
+    recognizer.spec, recognizer.open = {'backend': 'yolox'}, False
     recognizer.model = SimpleNamespace(infer=lambda _: np.array(
         [[0, 0, 64, 64, .9, index] for index in range(80)], dtype=np.float32))
     rows = recognizer.predict(np.zeros((320, 640, 3), np.uint8))
@@ -292,8 +293,11 @@ def test_transformer_nms_keeps_overlapping_classes_but_merges_synonymous_prompts
     class Inputs(dict):
         input_ids = None
 
+    texts = []
+
     class Processor:
         def __call__(self, **kwargs):
+            texts.append(kwargs.get('text'))
             return Inputs()
 
         def post_process_object_detection(self, *args, **kwargs):
@@ -302,12 +306,16 @@ def test_transformer_nms_keeps_overlapping_classes_but_merges_synonymous_prompts
         post_process_grounded_object_detection = post_process_object_detection
 
     recognizer = object.__new__(Recognizer)
-    recognizer.spec, recognizer.confidence = {'backend': backend, 'prompt': 'a cup. a mug.'}, .5
+    recognizer.spec, recognizer.confidence = {'backend': backend}, .5
+    recognizer.open = backend == 'grounding_dino'
+    query = make_query(['a cup', 'mug']) if recognizer.open else None
     recognizer.torch = SimpleNamespace(inference_mode=contextlib.nullcontext)
     recognizer.processor = Processor()
     recognizer.model = type('Model', (), {'__call__': lambda self, **kwargs: None,
                                           'config': SimpleNamespace(id2label=dict(enumerate(labels)))})()
-    assert [row[5] for row in recognizer.predict(np.zeros((40, 60, 3), np.uint8))] == kept
+    assert [row[5] for row in recognizer.predict(np.zeros((40, 60, 3), np.uint8), query)] == kept
+    # The local Grounding DINO localizes exactly the frame's query.
+    assert texts == ['a cup. mug.' if recognizer.open else None]
 
 
 def test_nms_fallback_preserves_class_aware_suppression(monkeypatch):
@@ -427,7 +435,7 @@ def test_evaluation_reports_failed_scene_and_keeps_small_corpus_unqualified(tmp_
     model = tmp_path / 'fixture.onnx'
     model.write_bytes(b'fixture')
     monkeypatch.setattr(evaluator, 'Recognizer', lambda *args: SimpleNamespace(
-        predict=lambda image: [], sha256=MODEL_SHA256, identity={}))
+        predict=lambda image: [], sha256=MODEL_SHA256, identity={}, default_query=None))
     result = evaluator.evaluate(manifest, model)
     assert not result['passed'] and not result['gates']['heldout_scenes']
     assert result['metrics']['cup']['fn'] == 1 and result['scenes'][0]['scene_id'] == 'test-fixture'

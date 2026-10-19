@@ -90,7 +90,7 @@ def test_receipt_keeps_latest_frame_while_inference_is_busy_and_expires_old_resu
             release.wait(5)
         active -= 1
         return [[10, 10, 20, 20, .9, 'cup']]
-    monkeypatch.setattr(object_detector, 'Recognizer', lambda *args: SimpleNamespace(predict=predict, sha256='a' * 64))
+    monkeypatch.setattr(object_detector, 'Recognizer', lambda *args: SimpleNamespace(predict=predict, sha256='a' * 64, default_query=None, labels=['cup']))
     context = Context()
     rclpy.init(context=context)
     node = object_detector.ObjectDetector(context=context, parameter_overrides=[
@@ -191,7 +191,7 @@ def test_diagnostics_reads_clock_before_frame_lock_to_avoid_jump_deadlock():
 def test_operating_point_parameters_reject_runtime_changes_instead_of_silently_ignoring_them(monkeypatch):
     from lekiwi_rmf import object_detector
 
-    monkeypatch.setattr(object_detector, 'Recognizer', lambda *args: SimpleNamespace(predict=list, sha256='a' * 64))
+    monkeypatch.setattr(object_detector, 'Recognizer', lambda *args: SimpleNamespace(predict=list, sha256='a' * 64, default_query=None, labels=[]))
     context = Context()
     rclpy.init(context=context)
     node = object_detector.ObjectDetector(context=context)

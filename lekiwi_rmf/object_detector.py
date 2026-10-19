@@ -10,7 +10,7 @@ from rclpy.clock import Clock, ClockType, JumpThreshold
 from rclpy.duration import Duration
 from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from collections import deque
@@ -18,17 +18,23 @@ import json
 import threading
 import time
 from sensor_msgs.msg import Image
-from vision_msgs.msg import Detection2D, Detection2DArray, ObjectHypothesisWithPose
+from std_msgs.msg import String
+from vision_msgs.msg import Detection2D, Detection2DArray, LabelInfo, ObjectHypothesisWithPose, VisionClass
 
 from lekiwi_rmf.object_recognition import ProviderUnavailable, Recognizer, reject_parameter_changes
 from lekiwi_rmf.object_cameras import camera_bindings
+from lekiwi_rmf.perception_query import make_query
+from lekiwi_rmf.srv import SetPerceptionQuery
+
+QUERY_SERVICE = '/robot/perception/set_query'
+PROFILE_TOPIC = '/robot/perception/profile'
 
 
-def detect(detector, image, header):
-    """Publish every native label; goal-specific class filtering belongs to the consumer."""
+def detect(detector, image, header, query=None):
+    """Publish every label the recognizer reports; goal-specific filtering belongs to the consumer."""
     height, width = image.shape[:2]
     result = Detection2DArray(header=header)
-    predictions = detector.predict(image)
+    predictions = detector.predict(image) if query is None else detector.predict(image, query)
     for x, y, w, h, score, label in predictions:
         if not all(math.isfinite(value) for value in (x, y, w, h, score)) or not 0 <= score <= 1:
             raise ValueError('recognizer returned invalid geometry or confidence')
@@ -85,6 +91,13 @@ class ObjectDetector(Node):
         if fallback == self.get_parameter('model_name').value:
             raise ValueError('fallback recognizer must differ from the primary recognizer')
         self._fallback = Recognizer(fallback, None, confidence) if fallback else None
+        if self._fallback is not None and self._fallback.default_query is not None:
+            raise ValueError('the fallback recognizer must be closed-vocabulary; it serves when the query cannot be')
+        self._confidence = confidence
+        # The active query is runtime state, not a parameter: it changes per goal, and every primary frame
+        # carries the snapshot it actually ran under, so a change mid-inference cannot relabel that frame.
+        self._query_lock = threading.Lock()
+        self._query = self._detector.default_query
         self._primary_retry_at = 0.
         self._bridge = CvBridge()
         self._frames, self._last_stamp = {}, {}
@@ -95,7 +108,7 @@ class ObjectDetector(Node):
             JumpThreshold(min_forward=None, min_backward=Duration(nanoseconds=-1), on_clock_change=True),
             post_callback=self._clock_reset)
         self._stats = {name: {'received': 0, 'published': 0, 'overwritten': 0, 'rejected': 0, 'fallback_published': 0,
-                              'reason': 'waiting for camera', 'primary_reason': '', 'served_by': '',
+                              'reason': 'waiting for camera', 'primary_reason': '', 'served_by': '', 'query_revision': '',
                               'inference_sec': 0., 'source_age_sec': 0., 'published_stamp': 0}
                        for name in self._bindings}
         self._durations = {name: deque(maxlen=128) for name in self._bindings}
@@ -104,18 +117,66 @@ class ObjectDetector(Node):
         self._inference_group = MutuallyExclusiveCallbackGroup()
         qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT)
         roles = {'primary': ''} | ({'fallback': '/fallback'} if self._fallback else {})
+        self._query_outputs = {}
         for name, binding in self._bindings.items():
             self._outputs[name] = {role: (
                 self.create_publisher(Image, binding['prefix'] + suffix + '/source_image', 1),
                 self.create_publisher(Detection2DArray, binding['prefix'] + suffix + '/detections', 1))
                 for role, suffix in roles.items()}
+            if self._query is not None:
+                # Stamped with the capture header, so the collector pairs each frame with its own query.
+                self._query_outputs[name] = self.create_publisher(LabelInfo, binding['prefix'] + '/query', 1)
             self.create_subscription(Image, binding['image_topic'],
                 lambda message, camera=name: self._receive(message, camera), qos,
                 callback_group=self._receipt_group)
+        # The operating point in force: consumers tie coverage and negative evidence to its model and query.
+        self._profile = self.create_publisher(String, PROFILE_TOPIC,
+                                              QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
+        self._publish_profile()
+        self.create_service(SetPerceptionQuery, QUERY_SERVICE, self._set_query, callback_group=self._receipt_group)
         self._diagnostics = self.create_publisher(DiagnosticArray, '/diagnostics', 10)
         self.create_timer(1., self._health, callback_group=self._receipt_group)
         self.create_timer(1 / rate, self._infer, clock=Clock(clock_type=ClockType.STEADY_TIME),
                           callback_group=self._inference_group)
+
+    def _publish_profile(self):
+        query = self._query
+        fallback = self._fallback
+        self._profile.publish(String(data=json.dumps({
+            'schema': 1, 'model_sha256': self._detector.sha256, 'model_name': self.get_parameter('model_name').value,
+            'confidence_threshold': self._confidence, 'vocabulary': 'closed' if query is None else 'open',
+            # The labels this instrument can report right now: the query in force, or the native catalogue.
+            'labels': list(self._detector.labels or []) if query is None else list(query.labels),
+            'query': None if query is None else query.document(),
+            'fallback': None if fallback is None else {
+                'model_sha256': fallback.sha256, 'model_name': self.get_parameter('fallback_model_name').value,
+                'vocabulary': 'closed', 'labels': list(fallback.labels or [])},
+            'cameras': {name: binding['sha256'] for name, binding in self._bindings.items()}},
+            ensure_ascii=False)))
+
+    def _set_query(self, request, response):
+        with self._query_lock:
+            current = self._query
+            if current is not None:
+                response.revision, response.labels = current.revision, list(current.labels)
+            try:
+                if current is None:
+                    raise ValueError('the active recognizer has a closed vocabulary and cannot take a query')
+                if request.expected_revision and request.expected_revision != current.revision:
+                    raise ValueError('the active query changed; read its revision and retry')
+                query = make_query(list(request.labels)) if request.labels else self._detector.default_query
+            except ValueError as error:
+                response.success, response.detail = False, str(error)
+                self.get_logger().warning(f'perception query rejected: {error}')
+                return response
+            self._query = query
+            response.success, response.detail = True, 'query applies from the next inference'
+            response.previous_revision, response.previous_labels = current.revision, list(current.labels)
+            response.revision, response.labels = query.revision, list(query.labels)
+            self._publish_profile()
+        if query != current:
+            self.get_logger().info(f'perception query {query.revision[:12]}: {", ".join(query.labels)}')
+        return response
 
     def _clock_reset(self, _jump):
         with self._frame_lock:
@@ -165,6 +226,8 @@ class ObjectDetector(Node):
                     break
             else:
                 return
+        with self._query_lock:
+            query = self._query
         stamp = image.header.stamp.sec * 10**9 + image.header.stamp.nanosec
         try:
             age = (self.get_clock().now().nanoseconds - stamp) / 1e9
@@ -172,7 +235,7 @@ class ObjectDetector(Node):
                 raise ValueError('recognition source expired before inference')
             pixels = self._bridge.imgmsg_to_cv2(image, 'bgr8')
             start = time.monotonic()
-            result, role = self._recognize(camera, pixels, image.header)
+            result, role = self._recognize(camera, pixels, image.header, query)
             duration = time.monotonic() - start
             source_age = (self.get_clock().now().nanoseconds - stamp) / 1e9
             with self._frame_lock:
@@ -185,6 +248,10 @@ class ObjectDetector(Node):
             source = self._bridge.cv2_to_imgmsg(pixels, 'bgr8')
             source.header = image.header
             image_pub, detection_pub = self._outputs[camera][role]
+            if role == 'primary' and query is not None:
+                self._query_outputs[camera].publish(LabelInfo(
+                    header=image.header, threshold=float(self._confidence),
+                    class_map=[VisionClass(class_id=index, class_name=label) for index, label in enumerate(query.labels)]))
             image_pub.publish(source)
             detection_pub.publish(result)
             with self._frame_lock:
@@ -192,14 +259,15 @@ class ObjectDetector(Node):
                 self._stats[camera]['fallback_published'] += role == 'fallback'
                 self._stats[camera]['served_by'] = role
                 self._stats[camera]['published_stamp'] = stamp
+                self._stats[camera]['query_revision'] = query.revision if role == 'primary' and query else ''
                 self._stats[camera]['reason'] = ''
         except (ValueError, RuntimeError, CvBridgeError, cv2.error) as error:
             self._reject(camera, str(error))
 
-    def _recognize(self, camera, pixels, header):
+    def _recognize(self, camera, pixels, header, query):
         if self._fallback is None or time.monotonic() >= self._primary_retry_at:
             try:
-                result = detect(self._detector, pixels, header)
+                result = detect(self._detector, pixels, header, query)
                 with self._frame_lock:
                     self._stats[camera]['primary_reason'] = ''
                 return result, 'primary'

@@ -11,6 +11,7 @@ import time
 import message_filters
 from cv_bridge import CvBridgeError
 import cv2
+import numpy as np
 import rclpy
 from rclpy.duration import Duration
 from rclpy.executors import ExternalShutdownException
@@ -23,13 +24,14 @@ from rclpy.qos import QoSProfile, DurabilityPolicy
 from tf2_ros import Buffer, TransformListener
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
-from vision_msgs.msg import Detection2DArray
+from vision_msgs.msg import Detection2DArray, LabelInfo
 
 from lekiwi_rmf.object_observations import ObservationStore, observation, valid_id
 from lekiwi_rmf.object_geometry import ObjectGeometry
 from lekiwi_rmf.object_cameras import camera_bindings
 from lekiwi_rmf.observation_motion import ObservationMotion
-from lekiwi_rmf.object_recognition import recognition_identity, reject_parameter_changes
+from lekiwi_rmf.object_recognition import open_vocabulary, recognition_identity, reject_parameter_changes
+from lekiwi_rmf.perception_query import recorded_query
 from lekiwi_rmf.srv import GetObservationEvidence, QueryObservations, PinObservationEvidence
 
 
@@ -54,11 +56,13 @@ class ObjectObservations(Node):
         confidence = self.get_parameter('confidence_threshold').value
         self._model = self.get_parameter('model_sha256').value or recognition_identity(
             self.get_parameter('model_name').value, confidence)[0]
-        # Each detector output topic is bound to exactly one recognizer identity.
-        self._roles = {'': self._model}
+        # Each detector output topic is bound to exactly one recognizer identity; an open recognizer's
+        # frames also carry the query they ran under on a third, exactly synchronized topic.
+        self._confidence = confidence
+        self._roles = {'': (self._model, open_vocabulary(self.get_parameter('model_name').value))}
         fallback = self.get_parameter('fallback_model_name').value
         if fallback:
-            self._roles['/fallback'] = recognition_identity(fallback, confidence)[0]
+            self._roles['/fallback'] = (recognition_identity(fallback, confidence)[0], open_vocabulary(fallback))
         self._transforms = Buffer()
         self._listener = TransformListener(self._transforms, self)
         self._map_context = {'ready': False}
@@ -88,7 +92,8 @@ class ObjectObservations(Node):
                     subscriber = message_filters.Subscriber(self, kind, topic, qos_profile=qos_profile_sensor_data)
                     stream[key] = message_filters.Cache(subscriber, size)
             self._streams[name] = stream
-        if not all(valid_id(model) for model in self._roles.values()) or len(set(self._roles.values())) != len(self._roles):
+        models = [model for model, _ in self._roles.values()]
+        if not all(valid_id(model) for model in models) or len(set(models)) != len(models):
             raise ValueError('configured model SHA-256 and camera identity are required')
         self._store = ObservationStore(self.get_parameter('database_path').value,
             max_records=self.get_parameter('max_records').value, max_bytes=self.get_parameter('max_bytes').value,
@@ -96,20 +101,34 @@ class ObjectObservations(Node):
         self._events = self.create_publisher(String, '/robot/observations/events', 10)
         self._synchronizers = []
         for name, binding in self._bindings.items():
-            for suffix, model in self._roles.items():
-                image = message_filters.Subscriber(self, Image, binding['prefix'] + suffix + '/source_image',
-                                                   qos_profile=qos_profile_sensor_data)
-                detections = message_filters.Subscriber(self, Detection2DArray, binding['prefix'] + suffix + '/detections',
-                                                        qos_profile=qos_profile_sensor_data)
-                sync = message_filters.TimeSynchronizer([image, detections], 2)
-                sync.registerCallback(lambda image, found, camera=name, model=model: self._capture(image, found, camera, model))
+            for suffix, (model, queried) in self._roles.items():
+                sources = [message_filters.Subscriber(self, Image, binding['prefix'] + suffix + '/source_image',
+                                                      qos_profile=qos_profile_sensor_data),
+                           message_filters.Subscriber(self, Detection2DArray, binding['prefix'] + suffix + '/detections',
+                                                      qos_profile=qos_profile_sensor_data)]
+                if queried:
+                    sources.append(message_filters.Subscriber(self, LabelInfo, binding['prefix'] + suffix + '/query',
+                                                              qos_profile=qos_profile_sensor_data))
+                sync = message_filters.TimeSynchronizer(sources, 2)
+                sync.registerCallback(lambda image, found, query=None, camera=name, model=model, queried=queried:
+                                      self._capture(image, found, camera, model, query if queried else None))
                 self._synchronizers.append(sync)
         self.create_service(QueryObservations, '/robot/observations/query', self._query)
         self.create_service(GetObservationEvidence, '/robot/observations/evidence', self._evidence)
         self.create_service(PinObservationEvidence, '/robot/observations/pin', self._pin)
         self.create_service(Trigger, '/robot/observations/status', self._status)
 
-    def _capture(self, image, detections, camera, model=None):
+    def _frame_query(self, image, label_info):
+        if label_info.header != image.header:
+            raise ValueError('frame query differs from the capture header')
+        # LabelInfo carries the threshold as float32.
+        if label_info.threshold != float(np.float32(self._confidence)):
+            raise ValueError('frame query threshold differs from the admitted operating point')
+        if [item.class_id for item in label_info.class_map] != list(range(len(label_info.class_map))):
+            raise ValueError('frame query classes are not in request order')
+        return recorded_query([item.class_name for item in label_info.class_map])
+
+    def _capture(self, image, detections, camera, model=None, label_info=None):
         stream = self._streams[camera]
         started = time.monotonic()
         stamp = image.header.stamp.sec * 10**9 + image.header.stamp.nanosec
@@ -119,7 +138,8 @@ class ObjectObservations(Node):
                 raise ValueError('capture timestamp is stale or in the future')
             if image.header.frame_id != self._bindings[camera]['optical_frame']:
                 raise ValueError('capture frame differs from tracked camera binding')
-            record, jpeg = observation(image, detections, model or self._model, camera)
+            query = None if label_info is None else self._frame_query(image, label_info)
+            record, jpeg = observation(image, detections, model or self._model, camera, query)
             record['camera_sha256'] = self._bindings[camera]['sha256']
             record['stationary'] = self._motion.stationary(stamp / 1e9, self._bindings[camera]['mount'] == 'arm')
             record['clock_domain'] = 'ros_sim_time' if self.get_parameter('use_sim_time').value else 'ros_system_time'
