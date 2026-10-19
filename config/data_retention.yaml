@@ -1,0 +1,54 @@
+# Robot-local data classes (lekiwi_rmf/robot_data.py validates this file; scripts/robot-data.py audits it,
+# backs the stores up and restores them). Durable history and canonical records belong to RobotMind
+# Knowledge; the robot keeps bounded working copies, its own journals and the artifacts it runs.
+#
+# retention names the tracked parameter that enforces it, so this file cannot drift from the owner.
+# mode is the most permissive the class's files and directories may be; scripts/robot-data.py audit
+# reports anything beyond it.
+classes:
+  transient_buffer:
+    holds: newest-frame queues and in-flight inference in RAM; unpinned selected captures in the observation store
+    store: observations
+    retention: {file: object_perception.yaml, node: object_observations, parameter: retention_sec}
+    expiry: >-
+      evicted by age, record count or byte quota, whichever comes first; a query for an evicted capture
+      answers evidence_expired and never relabels a newer image with the old observation ID
+    mode: '0600'
+  pinned_evidence:
+    holds: captures a goal or run pinned by request ID (the observation store's pins table)
+    store: observations
+    retention: {file: object_perception.yaml, node: object_observations, parameter: retention_sec}
+    expiry: >-
+      a pin expires retention_sec after it was made and its capture then ages out like any other;
+      pinned bytes may use at most half the quota, beyond that pinning fails explicitly
+    mode: '0600'
+  training_samples:
+    holds: recorded episodes (scripts/record-episode.py) and LeRobot exports (scripts/export-lerobot.py)
+    locations: [.ros/lekiwi/episodes]
+    retention: null
+    expiry: >-
+      never deleted automatically: an episode is staging for the cluster dataset and its operator removes
+      it after the export is acknowledged there
+    mode: '0700'
+  model_artifacts:
+    holds: pinned recognizers (.ros/lekiwi/models) and learned skill checkpoints (.ros/lekiwi/skills)
+    locations: [.ros/lekiwi/models, .ros/lekiwi/skills]
+    retention: null
+    expiry: >-
+      kept while config/recognition_models.yaml or config/robot_skills.yaml references the version; an
+      unreferenced version may be removed by its operator; nothing deletes a referenced artifact
+    # Public upstream weights may be readable; no other account may change what the robot runs (the
+    # owner's private group may, as the default umask leaves it; the skill runner refuses world-writable).
+    mode: '0775'
+# What a backup snapshots. SQLite stores are copied with SQLite's online backup, so a running node does
+# not tear the copy. Weights are excluded and listed by digest instead: they are reinstalled from their
+# pinned source (scripts/install-object-model.py, the skill registry). RTAB-Map's database keeps its own
+# archives (scripts/rtabmap-db-maintenance.py) and approved maps live in map bundles.
+stores:
+  task_journal: {path: '.ros/lekiwi_tasks{suffix}.sqlite3', kind: sqlite, lock: true}
+  observations: {path: '.ros/lekiwi/observations{suffix}.sqlite3', kind: sqlite, lock: true}
+  spatial_memory: {path: '.ros/lekiwi/spatial{suffix}.sqlite3', kind: sqlite, lock: false}
+  arm_calibration: {path: '.ros/lekiwi_arm_calibration.json', kind: file, lock: false}
+artifact_manifests:
+  models: .ros/lekiwi/models
+  skills: .ros/lekiwi/skills
