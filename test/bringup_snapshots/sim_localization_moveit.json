@@ -657,6 +657,26 @@
    "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
    "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
   },
+  "name": "skill_runner",
+  "namespace": "",
+  "node": "lekiwi_rmf/skill_runner",
+  "output": "screen",
+  "parameters": {
+   "allow_experimental": false,
+   "max_observation_age_sec": 0.5,
+   "use_sim_time": true
+  },
+  "remappings": [],
+  "respawn": true,
+  "respawn_delay": 2.0,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {
+   "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
+   "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
+  },
   "name": "slam_front_depth",
   "namespace": "",
   "node": "rtabmap_util/pointcloud_to_depthimage",
