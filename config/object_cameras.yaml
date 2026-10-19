@@ -1,0 +1,22 @@
+# Physical source bindings. Metric calibration is opt-in and must be measured.
+front:
+  mount: base
+  image_topic: /camera/front/image_raw
+  optical_frame: front_camera_optical_frame
+  camera_info_topic: /camera/front/camera_info
+  depth_topic: ''
+  calibration_file: ''
+wrist:
+  mount: arm
+  image_topic: /camera/wrist/image_raw
+  optical_frame: wrist_camera_optical_frame
+  camera_info_topic: /camera/wrist/camera_info
+  depth_topic: ''
+  calibration_file: ''
+astra_color:
+  mount: base
+  image_topic: /camera/astra/color/image_raw
+  optical_frame: astra_camera_optical_frame
+  camera_info_topic: /camera/astra/color/camera_info
+  depth_topic: /camera/astra/depth/image_raw
+  calibration_file: ''

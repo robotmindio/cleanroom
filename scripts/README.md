@@ -13,6 +13,9 @@ Start with one of these:
 | Drive with the keyboard | `scripts/teleop.sh` |
 | Start attended exploration | `scripts/explore.sh` |
 | Open RViz or camera views | `scripts/rviz.sh`, `scripts/cameras.sh` |
+| Install pinned cup-recognition weights | `scripts/install-object-model.py` |
+| Start perception beside the camera stack (normal bringup defaults are tracked in `config/object_perception_deployment.yaml`) | `scripts/object-perception.sh` |
+| Evaluate recorded labeled scenes | `scripts/evaluate-object-recognition.py MANIFEST --output REPORT` |
 
 Configuration comes from `.env` (only `LEKIWI_ROBOT_HOST`,
 `LEKIWI_DISARM_ON_FAILURE` and `LEKIWI_WIFI_COUNTRY`) and from `LEKIWI_*`

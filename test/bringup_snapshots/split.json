@@ -404,6 +404,7 @@
   "parameters": {
    "allow_exploration": true,
    "allow_navigation": true,
+   "map_bundle": "",
    "use_sim_time": false
   },
   "remappings": [],

@@ -1,0 +1,7 @@
+string observation_id
+---
+bool success
+string detail
+string mime_type
+string sha256
+string data_base64

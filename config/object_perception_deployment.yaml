@@ -1,0 +1,4 @@
+# Enable only after the selected camera/model operating point is qualified.
+start: false
+# Start with one qualified image-only camera; all selected streams must be fresh.
+cameras: [front]

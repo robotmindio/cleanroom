@@ -2,6 +2,7 @@
 """Durable admission and observation of existing ROS actions; never a motion controller."""
 
 import json
+import hashlib
 import math
 from pathlib import Path
 from queue import Empty, SimpleQueue
@@ -13,6 +14,7 @@ from action_msgs.srv import CancelGoal
 from geometry_msgs.msg import PoseStamped
 from nav2_msgs.action import NavigateToPose
 from nav2_msgs.msg import CollisionMonitorState
+from nav_msgs.msg import Odometry
 import rclpy
 from rclpy.action import ActionClient
 from rclpy.clock import Clock, ClockType
@@ -24,11 +26,14 @@ from std_srvs.srv import Trigger
 from unique_identifier_msgs.msg import UUID
 
 from lekiwi_rmf.action import Explore
+from lekiwi_rmf.exploration import task_limits
 from lekiwi_rmf.exploration_owner_guard import owned_goal_id
 from lekiwi_rmf.srv import CancelTask, GetTask, SubmitTask
 from lekiwi_rmf.task_journal import TERMINAL, TaskJournal
 from lekiwi_rmf.navigation_pause import NavigationPause
 from lekiwi_rmf.navigation_observer import NavigationObserver, server_instance
+from lekiwi_rmf.navigation_distance import NavigationDistance
+from lekiwi_rmf.map_bundle import validate_map_bundle
 
 
 ACTIONS = {'navigate': ('/navigate_to_pose', NavigateToPose), 'explore': ('/robot/explore', Explore)}
@@ -38,15 +43,22 @@ def task_goal(capability, text):
     """Keep untrusted commands finite, small and limited to the advertised fields."""
     if len(text.encode()) > 4096:
         raise ValueError('parameters exceed 4096 bytes')
-    values = json.loads(text)
+    try:
+        values = json.loads(text)
+    except RecursionError as error:
+        raise ValueError('parameters JSON is nested too deeply') from error
     if not isinstance(values, dict):
         raise ValueError('parameters must be an object')
     if capability == 'navigate':
-        if set(values) - {'x', 'y', 'yaw'} or not {'x', 'y'} <= values.keys():
+        if set(values) - {'x', 'y', 'yaw', 'deadline_unix_sec', 'max_travel_m'} or not {'x', 'y'} <= values.keys():
             raise ValueError('navigate requires x, y and optional yaw in map coordinates')
         for value in values.values():
             if type(value) not in (float, int) or not math.isfinite(value):
                 raise ValueError('navigation coordinates must be finite numbers')
+        if 'max_travel_m' in values and not 0 < values['max_travel_m'] <= 10:
+            raise ValueError('max_travel_m must be in (0,10]')
+        if 'deadline_unix_sec' in values and values['deadline_unix_sec'] <= 0:
+            raise ValueError('navigation deadline must be positive')
         pose = PoseStamped()
         pose.header.frame_id = 'map'
         pose.pose.position.x, pose.pose.position.y = float(values['x']), float(values['y'])
@@ -65,6 +77,8 @@ def task_goal(capability, text):
         resume = values.get('resume_task_id', '')
         if not isinstance(resume, str) or (resume and (len(resume) != 32 or any(c not in '0123456789abcdef' for c in resume))):
             raise ValueError('invalid exploration resume ID')
+        if resume and (values.get('max_duration_sec') or values.get('max_radius_m')):
+            raise ValueError('resumed exploration preserves its original duration and radius')
         goal = Explore.Goal(revisit_known=values.get('revisit_known', False),
                             max_duration_sec=float(values.get('max_duration_sec', 0.0)),
                             max_radius_m=float(values.get('max_radius_m', 0.0)), resume_task_id=resume)
@@ -84,6 +98,7 @@ class TaskGateway(Node):
         self.declare_parameter('navigation_timeout_sec', 180.0)
         self.declare_parameter('allow_navigation', True)
         self.declare_parameter('allow_exploration', True)
+        self.declare_parameter('map_bundle', '')
         self._enabled = {'navigate': self.get_parameter('allow_navigation').value,
                          'explore': self.get_parameter('allow_exploration').value}
         self._timeout = self.get_parameter('navigation_timeout_sec').value
@@ -114,6 +129,16 @@ class TaskGateway(Node):
         self._cancel_clients = {}
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self._events = self.create_publisher(String, '/robot/tasks/events', latched)
+        self._map_publisher = self.create_publisher(String, '/robot/map_context', latched)
+        bundle_path = self.get_parameter('map_bundle').value
+        map_context = {'ready': False}
+        if bundle_path:
+            validate_map_bundle(bundle_path)
+            map_context = {'ready': True, 'map_id': hashlib.sha256(Path(bundle_path).read_bytes()).hexdigest(),
+                           'epoch': uuid.uuid4().hex, 'started_at': self.get_clock().now().nanoseconds / 10**9}
+        self._map_publisher.publish(String(data=json.dumps(map_context)))
+        self._exploration_defaults = None
+        self.create_subscription(String, '/robot/explore/defaults', self._explore_defaults, latched)
         self._owner = self.create_publisher(UUID, '/robot/explore/navigation_owner', 10)
         self.create_subscription(Bool, '/safety/base_motion_permitted',
                                  lambda msg: self._navigation.permission(msg.data, time.monotonic()), latched)
@@ -133,6 +158,10 @@ class TaskGateway(Node):
         self.create_service(GetTask, '/robot/tasks/get', self._get)
         self.create_service(CancelTask, '/robot/tasks/cancel', self._cancel)
         self.create_service(Trigger, '/robot/capabilities', self._capabilities)
+        self._observation_status = self.create_client(Trigger, '/robot/observations/status')
+        self._distance = NavigationDistance()
+        self.create_subscription(Odometry, '/odom', self._distance.update, 1)
+        self.create_service(Trigger, '/robot/navigation/odometry', self._odometry)
         self.create_timer(0.2, self._tick, clock=Clock(clock_type=ClockType.STEADY_TIME))
 
     def _active(self):
@@ -142,6 +171,10 @@ class TaskGateway(Node):
         return self._journal.row(identifier)
 
     def _update(self, identifier, state, detail, result=None):
+        if result is not None:
+            metadata = json.loads(self._row(identifier)['result']).get('_task')
+            if metadata is not None:
+                result = {**result, '_task': metadata}
         if not self._journal.update(identifier, state, detail, result):
             return
         row = self._row(identifier)
@@ -188,7 +221,29 @@ class TaskGateway(Node):
                 if not self._action_clients[request.capability].server_is_ready():
                     raise ValueError('capability action server unavailable')
                 goal_id = bytes(owned_goal_id().uuid) if request.capability == 'navigate' else uuid.uuid4().bytes
-                self._journal.admit(request.task_id, request.capability, parameters, goal_id)
+                values = json.loads(parameters)
+                effective = None
+                if request.capability == 'navigate' and 'deadline_unix_sec' in values and not (
+                        time.time() < values['deadline_unix_sec'] <= time.time() + 300):
+                    raise ValueError('navigation deadline must be within the next 300 seconds')
+                if request.capability == 'navigate':
+                    effective = {**values, 'yaw': values.get('yaw', 0.0),
+                                 'max_duration_sec': self._timeout}
+                elif self._exploration_defaults is not None and not values.get('resume_task_id'):
+                    duration, radius = task_limits(
+                        values.get('max_duration_sec', 0.0), values.get('max_radius_m', 0.0),
+                        self._exploration_defaults['max_duration_sec'], self._exploration_defaults['max_radius_m'])
+                    effective = {'max_duration_sec': duration, 'max_radius_m': radius}
+                    effective['revisit_known'] = values.get('revisit_known', False)
+                    effective['resume_task_id'] = ''
+                metadata = {'parameters': values, 'effective_parameters': effective}
+                if request.capability == 'navigate' and 'max_travel_m' in values:
+                    meter = self._distance.status()
+                    if not meter['ready']:
+                        raise ValueError('bounded navigation requires fresh odometry')
+                    metadata['odometry_origin'] = {'epoch': meter['epoch'], 'meters': meter['meters']}
+                self._journal.admit(request.task_id, request.capability, parameters, goal_id,
+                                    result={'_task': metadata})
                 row = self._row(request.task_id)
             response.accepted, response.state, response.detail = True, row['state'], row['detail']
         except (ValueError, TypeError, OverflowError) as error:
@@ -216,18 +271,60 @@ class TaskGateway(Node):
         response.accepted, response.state, response.detail = True, row['state'], row['detail']
         return response
 
+    def _explore_defaults(self, message):
+        try:
+            if len(message.data.encode()) > 4096:
+                raise ValueError('exploration defaults exceed 4096 bytes')
+            values = json.loads(message.data)
+            if (not isinstance(values, dict) or set(values) != {'max_duration_sec', 'max_radius_m'}
+                    or any(type(value) not in (int, float) or not math.isfinite(value) or value <= 0
+                           for value in values.values())):
+                raise ValueError('invalid exploration defaults')
+        except (ValueError, TypeError, RecursionError, OverflowError):
+            self._exploration_defaults = None
+            self.get_logger().error('invalid exploration defaults contract')
+            return
+        self._exploration_defaults = values
+
     def _capabilities(self, _request, response):
         response.success = True
         response.message = json.dumps({'schema': 1, 'capabilities': [
             {'name': name, 'available': self._enabled[name] and client.server_is_ready(), 'parameters':
-             ['x', 'y', 'yaw'] if name == 'navigate' else ['revisit_known', 'max_duration_sec', 'max_radius_m', 'resume_task_id']}
+             ['x', 'y', 'yaw', 'deadline_unix_sec', 'max_travel_m'] if name == 'navigate' else ['revisit_known', 'max_duration_sec', 'max_radius_m', 'resume_task_id'],
+             'required_parameters': ['x', 'y'] if name == 'navigate' else [],
+             'defaults': {'yaw': 0.0} if name == 'navigate' else {
+                 'revisit_known': False, 'max_duration_sec': 0.0, 'max_radius_m': 0.0, 'resume_task_id': ''},
+             'effective_defaults': {'yaw': 0.0, 'max_duration_sec': self._timeout} if name == 'navigate'
+             else ({**self._exploration_defaults, 'revisit_known': False, 'resume_task_id': ''}
+                   if self._exploration_defaults is not None else None),
+             'description': ('Map-frame x, y; yaw in radians. Pauses preserve the active-time budget.' if name == 'navigate'
+                             else 'Omit parameters to explore unmapped space. revisit_known=true also revisits mapped space. '
+                             'Omitted/zero limits use the tracked robot limits; positive limits may only reduce them. '
+                             'Duration is active seconds, radius is metres around the starting pose. '
+                             'resume_task_id is a saved native exploration UUID and preserves its original bounds.')}
             for name, client in self._action_clients.items()],
+            'terminal_states': sorted(TERMINAL),
+            'observations': {'available': self._observation_status.service_is_ready(),
+                             'schema': 1, 'grounding': 'image_only',
+                             'services': {'query': '/robot/observations/query',
+                                          'evidence': '/robot/observations/evidence',
+                                          'pin': '/robot/observations/pin',
+                                          'status': '/robot/observations/status'},
+                             'events': '/robot/observations/events'},
+            'examples': [{'capability': 'explore', 'parameters': {}},
+                         {'capability': 'explore', 'parameters': {'revisit_known': True}}],
             'services': {'submit': '/robot/tasks/submit', 'get': '/robot/tasks/get', 'cancel': '/robot/tasks/cancel'},
             'events': '/robot/tasks/events'})
         return response
 
     def _guard_ready(self, message):
         self._guard = message.data, time.monotonic()
+
+    def _odometry(self, _request, response):
+        result = self._distance.status()
+        response.success = result['ready']
+        response.message = json.dumps(result, allow_nan=False)
+        return response
 
     def _guard_ack(self, message):
         self._ack = bytes(message.uuid), time.monotonic()
@@ -366,7 +463,12 @@ class TaskGateway(Node):
         client = self._action_clients[capability]
         if not client.server_is_ready():
             return
-        goal, _ = task_goal(capability, row['parameters'])
+        parameters = row['parameters']
+        if capability == 'explore':
+            effective = json.loads(row['result']).get('_task', {}).get('effective_parameters')
+            if effective is not None:
+                parameters = json.dumps(effective, allow_nan=False)
+        goal, _ = task_goal(capability, parameters)
         if capability == 'navigate':
             reason = self._navigation.reason(now)
             if reason:
@@ -405,6 +507,19 @@ class TaskGateway(Node):
         for row in self._active():
             identifier, capability = row['id'], row['capability']
             goal_id = UUID(uuid=list(row['goal_id']))
+            if capability == 'navigate' and not row['cancel_requested']:
+                metadata = json.loads(row['result']).get('_task', {})
+                limits = metadata.get('parameters', {})
+                expired = time.time() >= limits.get('deadline_unix_sec', math.inf)
+                origin = metadata.get('odometry_origin')
+                if origin:
+                    meter = self._distance.status()
+                    expired = expired or not meter['ready'] or meter['epoch'] != origin['epoch'] or (
+                        meter['meters'] - origin['meters'] >= max(0, limits['max_travel_m'] - .5))
+                if expired:
+                    self._journal.request_cancel(identifier, reason=2)
+                    self._update(identifier, 'canceling', 'bounded navigation budget or telemetry lost; awaiting terminal ROS result')
+                    row = self._row(identifier)
             if self._reconcile(row, now):
                 continue
             # Result calls wait through execution; only expire after observed termination.
