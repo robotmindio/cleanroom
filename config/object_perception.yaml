@@ -1,6 +1,9 @@
 /**:
   ros__parameters:
-    model_name: rtdetr_v2_r18
+    # Open-vocabulary Grounding DINO on the RobotMind GPU provider; while it is unreachable or answers
+    # outside its pinned identity, the local CPU RT-DETR serves frames under its own model_sha256.
+    model_name: grounding_dino_tiny_gpu
+    fallback_model_name: rtdetr_v2_r18
     confidence_threshold: 0.5
 object_detector:
   ros__parameters:

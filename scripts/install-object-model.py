@@ -12,7 +12,7 @@ import yaml
 from urllib.request import urlopen
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lekiwi_rmf.object_recognition import model_spec, verify_model
+from lekiwi_rmf.object_recognition import model_spec, selected_models, verify_model
 from lekiwi_rmf.object_cameras import config_directory
 
 
@@ -66,8 +66,12 @@ def install_runtime():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    selected = yaml.safe_load((config_directory() / 'object_perception.yaml').read_text())['/**']['ros__parameters']['model_name']
-    parser.add_argument('--name', default=selected, choices=['yolox', 'rtdetr_v2_r18', 'grounding_dino_tiny'])
+    settings = yaml.safe_load((config_directory() / 'object_perception.yaml').read_text())['/**']['ros__parameters']
+    installable = [name for name, spec in yaml.safe_load((config_directory() / 'recognition_models.yaml').read_text()).items()
+                   if 'base_url' in spec]
+    # A remote primary has nothing to install; the configured local fallback does.
+    selected = next((name for name in selected_models(settings) if name in installable), 'yolox')
+    parser.add_argument('--name', default=selected, choices=installable)
     parser.add_argument('--destination')
     args = parser.parse_args()
     destination = args.destination or str(Path.home() / '.ros/lekiwi/models' / args.name)

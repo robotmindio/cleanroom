@@ -190,6 +190,32 @@ def applied_action_message(stamp, action):
     return message
 
 
+BASE_COMMAND_NAMES = ("base_x_vel", "base_y_vel", "base_yaw_rate")
+
+
+def applied_command_message(stamp, action, goal, zero_positions, directions, xy_scale, yaw_scale):
+    """The applied command in ROS units: what a learned policy must be able to issue again.
+
+    Arm joints are URDF radians. While the host executes a trajectory it overrides the
+    hold positions in ``action``, so the joints that goal owns use its sample at the
+    host-reported elapsed time. The base is the gated twist in m/s and rad/s.
+    """
+    arm = joint_positions(action, zero_positions, directions)
+    if goal is not None and goal.names:
+        desired, _, _ = sample_trajectory(goal.names, goal.start_positions, goal.points, goal.host_elapsed)
+        arm.update({name: desired[name] for name in goal.names})
+    message = JointState()
+    message.header.stamp = stamp
+    message.name = [*ARM_JOINTS, *BASE_COMMAND_NAMES]
+    message.position = [
+        *(float(arm[name]) for name in ARM_JOINTS),
+        float(action["x.vel"]) * xy_scale,
+        float(action["y.vel"]) * xy_scale,
+        math.radians(float(action["theta.vel"])) * yaw_scale,
+    ]
+    return message
+
+
 def diagnostics_message(stamp, statuses):
     """Republish validated motor-health statuses as ROS diagnostics."""
     message = DiagnosticArray()
@@ -585,6 +611,7 @@ class LeKiwiDriver(Node):
         # Recorded episodes need the command the motors actually received, not only
         # the requested twist/trajectory or the measured joints.
         self.applied_action_pub = self.create_publisher(JointState, "hardware/applied_action", 10)
+        self.applied_command_pub = self.create_publisher(JointState, "hardware/applied_command", 10)
         self.motor_health_pub = self.create_publisher(DiagnosticArray, "/hardware/diagnostics", 10)
         safety_qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.safety_pub = self.create_publisher(String, "safety/state", safety_qos)
@@ -641,6 +668,7 @@ class LeKiwiDriver(Node):
         self.robot = robot
         self.torque = torque
         self.applied_action_pub = None
+        self.applied_command_pub = None
         self.torque_lock = threading.Lock()
         # Serializes physical actuator transitions and command submission. Local
         # state uses a separate lock so callbacks remain responsive while ZeroMQ
@@ -1381,7 +1409,9 @@ class LeKiwiDriver(Node):
                 self.robot.send_action(action, base_test_stage=self._base_test_stage)
             else:
                 self.robot.send_action(action)
-            self._publish_applied(action)
+            with self.trajectory_lock:
+                goal = self.trajectory if remote_goal is not None else None
+            self._publish_applied(action, goal)
             if trajectory_ran or not arm_permitted:
                 with self.state_lock:
                     if self.armed:
@@ -1399,10 +1429,15 @@ class LeKiwiDriver(Node):
         self.publish_state(self.observation_stamp, observation, velocity)
         self.publish_safety()
 
-    def _publish_applied(self, action):
+    def _publish_applied(self, action, goal=None):
         # Stamped with the observation the action was computed from, so recordings pair them.
-        if self.applied_action_pub is not None and self.observation_stamp is not None:
-            self.applied_action_pub.publish(applied_action_message(self.observation_stamp, action))
+        if self.applied_action_pub is None or self.observation_stamp is None:
+            return
+        self.applied_action_pub.publish(applied_action_message(self.observation_stamp, action))
+        if self.arm_calibrated and self.applied_command_pub is not None:
+            self.applied_command_pub.publish(applied_command_message(
+                self.observation_stamp, action, goal, self.arm_zero_positions, self.arm_directions,
+                self.xy_scale, self.yaw_scale))
 
     def publish_state(self, stamp, observation, velocity):
         odom = odometry_message(
