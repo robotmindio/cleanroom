@@ -9,6 +9,8 @@
   delivery phases for recognition, semantic state, goals, search and verification.
 - [Object observations](object-observations.md): stationary recognition, standard
   ROS detections, persistent evidence services and held-out evaluation.
+- [Skill acquisition](skill-acquisition.md): train, register, evaluate and promote
+  learned skills; cluster training and the independent verifier.
 - [Robot task contract](robot-tasks.md): managed admission, status, cancellation,
   live defaults and Fiber workflow responsibilities.
 - [Launch options](launch-options.md): `bringup.launch.py` arguments, arm
