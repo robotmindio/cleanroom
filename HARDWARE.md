@@ -339,9 +339,12 @@ scripts/record-episode.py ~/episodes/mug-001 --task "pick up the mug" --cameras 
 Stop with Ctrl-C or `--duration SEC`. Each episode is an MCAP bag plus
 `manifest.json` (task, operator, cameras, start/stop and reason, file hashes,
 source/deployed revision, arm calibration, URDF and SRDF hashes). The bag keeps
-three action layers apart: `/cmd_vel_safe` (requested base twist),
-`/hardware/applied_action` (the exact host action after permission, limit and
-boundary gating, in host units) and `/joint_states` (measured joints). A
+the action layers apart: `/cmd_vel_safe` (requested base twist),
+`/hardware/applied_action` (the exact host packet after permission, limit and
+boundary gating, in host units; while the host runs an arm trajectory its arm
+keys are the superseded hold), `/hardware/applied_command` (the applied command
+in ROS units: arm URDF radians, using the trajectory sample while one runs, and
+base m/s and rad/s) and `/joint_states` (measured joints). A
 supervisor marks an intervention by publishing on `/episode/intervention`
 (`std_msgs/String`).
 
@@ -352,7 +355,8 @@ scripts/install-lerobot-export.sh
 ~/.ros/lekiwi/lerobot-venv/bin/python scripts/export-lerobot.py ~/episodes/mug-* --root ~/datasets/lekiwi
 ```
 
-The exporter verifies each manifest's hashes, samples a fixed rate (`--fps`,
+The exporter uses `/hardware/applied_command` as the action (`--action-topic`)
+because a policy can issue it again. It verifies each manifest's hashes, samples a fixed rate (`--fps`,
 default 10) with the latest message per stream, and drops (and counts in
 `export-report.json`) any tick where a stream is older than `--tolerance`
 (default 0.15 s). It never interpolates. Over the relayed tailnet link the front

@@ -34,12 +34,12 @@ def verified_episode(directory):
     return manifest
 
 
-def read_streams(directory, camera):
+def read_streams(directory, camera, action_topic):
     """Header-stamped samples per stream, sorted; publish order is not trusted."""
     from mcap.reader import make_reader
     from mcap_ros2.decoder import DecoderFactory
 
-    wanted = {'/joint_states': 'state', '/hardware/applied_action': 'action',
+    wanted = {'/joint_states': 'state', action_topic: 'action',
               f'/camera/{camera}/image_raw': 'image', '/episode/intervention': 'intervention'}
     streams = {name: [] for name in wanted.values()}
     for path in sorted((directory / 'bag').glob('*.mcap')):
@@ -110,6 +110,8 @@ def main():
     parser.add_argument('--repo-id', default='local/lekiwi')
     parser.add_argument('--camera', default='front')
     parser.add_argument('--fps', type=int, default=10)
+    parser.add_argument('--action-topic', default='/hardware/applied_command',
+                        help='applied_command (ROS units, replayable) or applied_action (raw host packet)')
     parser.add_argument('--tolerance', type=float, default=.15, help='maximum stream age per tick, seconds')
     args = parser.parse_args()
     if not 1 <= args.fps <= 60 or not 0 < args.tolerance <= 1:
@@ -117,10 +119,11 @@ def main():
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
     dataset, report = None, {'schema': 1, 'fps': args.fps, 'tolerance_sec': args.tolerance,
-                             'camera': args.camera, 'interpolation': 'none', 'episodes': []}
+                             'camera': args.camera, 'action_topic': args.action_topic,
+                             'interpolation': 'none', 'episodes': []}
     for directory in map(Path, args.episodes):
         manifest = verified_episode(directory)
-        exported, action_names, dropped = frames(read_streams(directory, args.camera), args.fps, args.tolerance)
+        exported, action_names, dropped = frames(read_streams(directory, args.camera, args.action_topic), args.fps, args.tolerance)
         if not exported:
             raise ValueError(f'{directory}: no tick had every stream within tolerance')
         if dataset is None:
