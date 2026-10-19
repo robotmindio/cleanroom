@@ -32,16 +32,17 @@ improvement, not site qualification. Production start remains disabled in
 `config/object_perception_deployment.yaml`.
 
 `model_sha256` now identifies the complete recognition operating point: pinned
-artifacts, backend, input size/prompt, threshold, preprocessing revision, label
-output (`native`) and actual runtime package versions. It is not just the weight-file hash. Model,
+artifacts, backend, input size, threshold, preprocessing revision, label
+output (`native`, or `query` for open-vocabulary recognizers) and actual runtime
+package versions. It is not just the weight-file hash. Model,
 threshold or runtime changes require a new admitted profile identity. The
 `--describe` output supplies the exact model and camera identities to put in a
 reviewed Fiber profile. Old weight-only profiles must not be reused.
 
 The fixed comparison choices are `yolox`, `rtdetr_v2_r18` and
 `grounding_dino_tiny`. Install an alternative with `--name NAME`. The latter is
-an offline open-vocabulary diagnostic with a frozen `a cup. a mug.` prompt;
-its labels are the matched prompt phrases and its scores are not
+an offline open-vocabulary diagnostic that localizes the active query (below);
+its labels are the matched query phrases and its scores are not
 interchangeable with closed-vocabulary detector scores. YOLOX labels come from
 its 80 COCO classes and RT-DETR labels from the checkpoint's `id2label`.
 Closed-vocabulary detections are suppressed per class, so overlapping objects of
@@ -61,11 +62,11 @@ upstream license/provenance remain in `thirdparty/opencv_yolox/`.
 ## Remote GPU provider and local fallback
 
 `config/object_perception.yaml` selects `grounding_dino_tiny_gpu`: the same pinned
-Grounding DINO weights and frozen prompt as `grounding_dino_tiny`, served by
+Grounding DINO weights as `grounding_dino_tiny`, served by
 RobotMind's `perception-provider` on the cluster GTX 1070. The endpoint lives in
 `config/perception_providers.yaml` (Tailscale address, 1.5 s timeout) and is not
-part of any identity. The recognizer sends lossless PNG pixels plus the prompt
-phrases and thresholds, and accepts a response only when it echoes the pinned
+part of any identity. The recognizer sends lossless PNG pixels plus the frame's
+query phrases and thresholds, and accepts a response only when it echoes the pinned
 `provider_model_sha256` (the provider's hash of its weight files, Torch/CUDA and
 transformers build, and GPU), the exact effective prompt and thresholds, and the
 SHA-256 and size of the image it was sent. Boxes then go through the same
@@ -87,6 +88,40 @@ at 15–19 s per frame it cannot meet the 2 s freshness limit.
 A provider rebuild that changes Torch, CUDA, transformers or the GPU changes its
 hash. Until `provider_model_sha256` and the Fiber profile are updated together,
 the fallback serves every frame.
+
+## Open-vocabulary query
+
+An open-vocabulary recognizer localizes the **active query**, which is runtime
+state owned by the detector, not a parameter. Clients set it with
+`/robot/perception/set_query` (`lekiwi_rmf/srv/SetPerceptionQuery`):
+
+- Labels are NFKC-normalized, lower-cased and whitespace-collapsed, then
+  de-duplicated in order. A label may contain only letters, digits, spaces,
+  hyphens and apostrophes; `.` is Grounding DINO's phrase separator.
+- At most 16 labels of at most 48 characters, and a prompt (`a. b.`) of at most
+  254 characters, so Grounding DINO's 256-token text limit never truncates it.
+- Empty labels restore the tracked `default_query` from
+  `config/recognition_models.yaml`. The default is not part of `model_sha256`.
+- `expected_revision` applies the change only while that revision is in force,
+  so a client restoring its predecessor never clobbers a newer query.
+- The response returns the query in force and the one it replaced; a rejection
+  leaves the query unchanged and says why. Closed-vocabulary primaries reject
+  every query.
+
+The query's revision is the SHA-256 of its canonical labels. Each inference
+snapshots the query before it runs, and the primary's frame is published with a
+capture-stamped `vision_msgs/LabelInfo` on `/robot/perception/<camera>/query`.
+The collector synchronizes it exactly with the image and detections. A query
+change during inference therefore never relabels the frame that was already
+running. The observation records `vocabulary: open` and `query` (revision,
+labels, prompt), and its `id` is `sha256(capture_id:model_sha256:revision)`. The
+same capture under another query is a distinct inference, and replay rebuilds
+the exact prompt from the record. Fallback frames are recorded as
+`vocabulary: closed` without a query and keep the established
+`sha256(capture_id:model_sha256)` ID: they never claim to answer a query they
+cannot express. `/robot/perception/profile` republishes on every change, with
+the primary's `labels` equal to the query in force, and `/robot/capabilities`
+advertises the service and its bounds under `observations.query`.
 
 ## Camera binding and coverage
 

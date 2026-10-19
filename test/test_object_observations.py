@@ -269,7 +269,7 @@ def test_yolox_maps_every_output_class_to_its_native_coco_label():
     from lekiwi_rmf.object_recognition import COCO_LABELS, Recognizer
 
     recognizer = object.__new__(Recognizer)
-    recognizer.spec, recognizer.open = {'backend': 'yolox'}, False
+    recognizer.spec, recognizer.open_vocabulary = {'backend': 'yolox'}, False
     recognizer.model = SimpleNamespace(infer=lambda _: np.array(
         [[0, 0, 64, 64, .9, index] for index in range(80)], dtype=np.float32))
     rows = recognizer.predict(np.zeros((320, 640, 3), np.uint8))
@@ -307,15 +307,15 @@ def test_transformer_nms_keeps_overlapping_classes_but_merges_synonymous_prompts
 
     recognizer = object.__new__(Recognizer)
     recognizer.spec, recognizer.confidence = {'backend': backend}, .5
-    recognizer.open = backend == 'grounding_dino'
-    query = make_query(['a cup', 'mug']) if recognizer.open else None
+    recognizer.open_vocabulary = backend == 'grounding_dino'
+    query = make_query(['a cup', 'mug']) if recognizer.open_vocabulary else None
     recognizer.torch = SimpleNamespace(inference_mode=contextlib.nullcontext)
     recognizer.processor = Processor()
     recognizer.model = type('Model', (), {'__call__': lambda self, **kwargs: None,
                                           'config': SimpleNamespace(id2label=dict(enumerate(labels)))})()
     assert [row[5] for row in recognizer.predict(np.zeros((40, 60, 3), np.uint8), query)] == kept
     # The local Grounding DINO localizes exactly the frame's query.
-    assert texts == ['a cup. mug.' if recognizer.open else None]
+    assert texts == ['a cup. mug.' if recognizer.open_vocabulary else None]
 
 
 def test_nms_fallback_preserves_class_aware_suppression(monkeypatch):

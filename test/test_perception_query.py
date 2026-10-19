@@ -148,11 +148,13 @@ class Harness:
 
 
 def open_recognizer(predict):
-    return SimpleNamespace(predict=predict, sha256='a' * 64, default_query=DEFAULT, labels=None)
+    return SimpleNamespace(predict=predict, sha256='a' * 64, name=REMOTE, default_query=DEFAULT, labels=None,
+                           open_vocabulary=True)
 
 
 def closed_recognizer(predict):
-    return SimpleNamespace(predict=predict, sha256='b' * 64, default_query=None, labels=['cup', 'spoon'])
+    return SimpleNamespace(predict=predict, sha256='b' * 64, name='rtdetr_v2_r18', default_query=None,
+                           labels=['cup', 'spoon'], open_vocabulary=False)
 
 
 def test_query_service_validates_applies_and_restores_with_optimistic_revisions(monkeypatch, tmp_path):
@@ -160,14 +162,16 @@ def test_query_service_validates_applies_and_restores_with_optimistic_revisions(
                       closed_recognizer(lambda image: []))
     try:
         wait(lambda: harness.profiles)
-        assert harness.profiles[-1]['vocabulary'] == 'open' and harness.profiles[-1]['labels'] == ['a cup', 'a mug']
-        assert harness.profiles[-1]['fallback'] == {'model_sha256': 'b' * 64, 'model_name': 'rtdetr_v2_r18',
-                                                    'vocabulary': 'closed', 'labels': ['cup', 'spoon']}
+        primary, fallback = harness.profiles[-1]['recognizers']
+        assert primary['open_vocabulary'] and primary['labels'] == ['a cup', 'a mug']
+        assert primary['query'] == DEFAULT.document()
+        assert (fallback['model_sha256'], fallback['labels'], fallback['query']) == ('b' * 64, ['cup', 'spoon'], None)
         applied = harness.set_query(['Screwdriver', 'cable tie'])
         assert applied.success and applied.labels == ['screwdriver', 'cable tie']
         assert applied.previous_revision == DEFAULT.revision and applied.previous_labels == ['a cup', 'a mug']
-        wait(lambda: harness.profiles[-1]['query']['revision'] == applied.revision)
-        assert harness.profiles[-1]['labels'] == ['screwdriver', 'cable tie']
+        wait(lambda: harness.profiles[-1]['recognizers'][0]['query']['revision'] == applied.revision)
+        # Search and Fiber treat the queried labels as the ones the primary can report now.
+        assert harness.profiles[-1]['recognizers'][0]['labels'] == ['screwdriver', 'cable tie']
 
         rejected = harness.set_query(['a cup. a mug'])
         assert not rejected.success and 'letters' in rejected.detail
@@ -180,7 +184,7 @@ def test_query_service_validates_applies_and_restores_with_optimistic_revisions(
         assert not stale.success and 'changed' in stale.detail
         restored = harness.set_query([], expected=applied.revision)
         assert restored.success and restored.revision == DEFAULT.revision
-        wait(lambda: harness.profiles[-1]['query']['revision'] == DEFAULT.revision)
+        wait(lambda: harness.profiles[-1]['recognizers'][0]['query']['revision'] == DEFAULT.revision)
     finally:
         harness.close()
 

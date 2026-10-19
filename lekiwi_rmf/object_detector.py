@@ -129,7 +129,6 @@ class ObjectDetector(Node):
             self.create_subscription(Image, binding['image_topic'],
                 lambda message, camera=name: self._receive(message, camera), qos,
                 callback_group=self._receipt_group)
-        # The operating point in force: consumers tie coverage and negative evidence to its model and query.
         self._profile = self.create_publisher(String, PROFILE_TOPIC,
                                               QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
         self._publish_profile()
@@ -140,19 +139,19 @@ class ObjectDetector(Node):
                           callback_group=self._inference_group)
 
     def _publish_profile(self):
+        """The operating points in force. Each frame is stored under the model_sha256 that served it, so a
+        consumer credits a frame only for labels its own recognizer reported: the primary's labels are the
+        query in force, whose revision every open observation records; the fallback's its native catalogue."""
         query = self._query
-        fallback = self._fallback
+        recognizers = [('primary', self._detector)] + ([('fallback', self._fallback)] if self._fallback else [])
         self._profile.publish(String(data=json.dumps({
-            'schema': 1, 'model_sha256': self._detector.sha256, 'model_name': self.get_parameter('model_name').value,
-            'confidence_threshold': self._confidence, 'vocabulary': 'closed' if query is None else 'open',
-            # The labels this instrument can report right now: the query in force, or the native catalogue.
-            'labels': list(self._detector.labels or []) if query is None else list(query.labels),
-            'query': None if query is None else query.document(),
-            'fallback': None if fallback is None else {
-                'model_sha256': fallback.sha256, 'model_name': self.get_parameter('fallback_model_name').value,
-                'vocabulary': 'closed', 'labels': list(fallback.labels or [])},
-            'cameras': {name: binding['sha256'] for name, binding in self._bindings.items()}},
-            ensure_ascii=False)))
+            'schema': 1, 'cameras': {name: binding['sha256'] for name, binding in self._bindings.items()},
+            'recognizers': [{
+                'role': role, 'model_sha256': recognizer.sha256, 'model_name': recognizer.name,
+                'confidence_threshold': self._confidence, 'open_vocabulary': recognizer.open_vocabulary,
+                'labels': list(query.labels) if recognizer.open_vocabulary else list(recognizer.labels or []),
+                'query': query.document() if recognizer.open_vocabulary else None}
+                for role, recognizer in recognizers]}, ensure_ascii=False)))
 
     def _set_query(self, request, response):
         with self._query_lock:

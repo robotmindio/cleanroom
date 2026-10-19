@@ -20,7 +20,7 @@ from rclpy.node import Node
 from rclpy.parameter import Parameter
 from rclpy.qos import DurabilityPolicy, QoSProfile
 
-from lekiwi_rmf.action import Explore
+from lekiwi_rmf.action import Explore, Search
 from lekiwi_rmf.exploration_owner_guard import ExplorationOwnerGuard
 from lekiwi_rmf.srv import CancelTask, GetTask, SubmitTask
 from lekiwi_rmf.task_gateway import TaskGateway, task_goal
@@ -43,6 +43,11 @@ def wait(predicate, timeout=5):
     ('explore', '{"resume_task_id":"' + 'a' * 32 + '","max_radius_m":1}'),
     ('explore', '{"resume_task_id":"' + 'a' * 32 + '","max_duration_sec":1}'),
     ('explore', '[' * 1100 + '0' + ']' * 1100),
+    ('search', '{}'), ('search', '{"query":""}'), ('search', '{"query":"   "}'), ('search', '{"query":7}'),
+    ('search', '{"query":"' + 'x' * 129 + '"}'), ('search', '{"query":"a","max_travel_m":-1}'),
+    ('search', '{"query":"a","target_coverage":1.5}'), ('search', '{"query":"a","max_duration_sec":NaN}'),
+    ('search', '{"query":"a","region":{"x":0,"y":0}}'), ('search', '{"query":"a","region":{"x":0,"y":0,"radius_m":0}}'),
+    ('search', '{"query":"a","region":{"x":true,"y":0,"radius_m":1}}'), ('search', '{"query":"a","speed":1}'),
 ])
 def test_invalid_goal(capability, parameters):
     with pytest.raises(ValueError):
@@ -73,10 +78,14 @@ class Peers(Node):
         self.exploration = ActionServer(self, Explore, '/robot/explore', self.explore,
                                         goal_callback=self.accept, cancel_callback=lambda _: CancelResponse.ACCEPT,
                                         callback_group=group)
+        self.searching = ActionServer(self, Search, '/robot/search', self.search,
+                                      goal_callback=self.accept, cancel_callback=lambda _: CancelResponse.ACCEPT,
+                                      callback_group=group)
 
     def destroy_node(self):
         self.navigation.destroy()
         self.exploration.destroy()
+        self.searching.destroy()
         return super().destroy_node()
 
     def safety(self):
@@ -107,6 +116,14 @@ class Peers(Node):
 
     def navigate(self, goal):
         return self.execute(goal, NavigateToPose.Result(), lambda: NavigateToPose.Feedback(current_pose=PoseStamped()))
+
+    def search(self, goal):
+        found = not self.abort
+        return self.execute(goal, Search.Result(
+            complete=found, outcome='found' if found else 'budget_exhausted', found=found,
+            evidence_ids=['e' * 64] if found else [], coverage_fraction=0.25, target_coverage=0.9,
+            message='finished', report_json=json.dumps({'statement': 'bounded by coverage'})),
+            lambda: Search.Feedback(stage='searching: viewpoint 1 (front)', coverage_fraction=0.1))
 
     def explore(self, goal):
         return self.execute(goal, Explore.Result(complete=not self.abort, message='finished'),
@@ -215,12 +232,14 @@ def test_pause_is_observable_and_does_not_finish_task(system):
     wait(lambda: status().state == 'canceled')
 
 
-@pytest.mark.parametrize('capability', ['navigate', 'explore'])
+@pytest.mark.parametrize('capability', ['navigate', 'explore', 'search'])
 @pytest.mark.parametrize('abort', [False, True])
 def test_terminal_state_comes_from_ros_result(system, capability, abort):
     peers, start, status, _, _ = system
     peers.abort = abort
-    assert start(capability, '{"x":0,"y":0}' if capability == 'navigate' else '{}').accepted
+    parameters = {'navigate': '{"x":0,"y":0}', 'explore': '{}', 'search': '{"query":"any label"}'}[capability]
+    wait(lambda: peers.gateway._action_clients[capability].server_is_ready())
+    assert start(capability, parameters).accepted
     wait(lambda: len(peers.received) == 1)
     peers.finish = True
     wait(lambda: status().state in ('succeeded', 'failed'))
@@ -864,3 +883,73 @@ def test_travel_bound_requires_odometry_before_admission(system):
     _, start, _, _, _ = system
     response = start(capability='navigate', parameters='{"x":1,"y":0,"max_travel_m":1}')
     assert not response.accepted and 'odometry' in response.detail
+
+
+def test_search_goal_maps_query_region_and_budgets():
+    goal, parameters = task_goal('search', '{"query":" Any  Label ","region":{"x":1,"y":-2,"radius_m":1.5},'
+                                           '"max_duration_sec":30,"max_travel_m":4,"target_coverage":0.8}')
+    assert goal.query == ' Any  Label ' and (goal.region_x, goal.region_y, goal.region_radius_m) == (1.0, -2.0, 1.5)
+    assert (goal.max_duration_sec, goal.max_travel_m, goal.target_coverage) == (30.0, 4.0, 0.8)
+    default, _ = task_goal('search', '{"query":"x"}')
+    assert default.region_radius_m == default.max_duration_sec == default.max_travel_m == default.target_coverage == 0.0
+    assert json.loads(parameters)['region'] == {'x': 1, 'y': -2, 'radius_m': 1.5}
+
+
+def test_search_is_advertised_with_effective_limits_and_returns_coverage_evidence(system):
+    from std_msgs.msg import String
+
+    peers, start, status, _, _ = system
+    gateway = peers.gateway
+    catalog = json.loads(gateway._capabilities(None, Trigger.Response()).message)
+    search = next(item for item in catalog['capabilities'] if item['name'] == 'search')
+    assert search['required_parameters'] == ['query'] and search['effective_defaults'] is None
+    assert search['parameters'] == ['query', 'region', 'max_duration_sec', 'max_travel_m', 'target_coverage']
+    assert 'coverage_reached' in search['outcomes'] and search['labels'] == '/robot/perception/profile'
+    publisher = peers.create_publisher(String, '/robot/search/defaults',
+                                       QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
+    publisher.publish(String(data=json.dumps({'max_duration_sec': 60.0, 'max_travel_m': 20.0, 'target_coverage': 0.9})))
+    wait(lambda: gateway._search_defaults is not None)
+    wait(lambda: gateway._action_clients['search'].server_is_ready())
+    catalog = json.loads(gateway._capabilities(None, Trigger.Response()).message)
+    search = next(item for item in catalog['capabilities'] if item['name'] == 'search')
+    assert search['available'] and search['effective_defaults'] == {
+        'max_duration_sec': 60.0, 'max_travel_m': 20.0, 'target_coverage': 0.9, 'region': None}
+    rejected = start('search', '{"query":"any label","max_travel_m":21}', 'too-far')
+    assert not rejected.accepted and 'max_travel_m exceeds' in rejected.detail
+    assert start('search', '{"query":"any label","max_duration_sec":30}').accepted
+    wait(lambda: status().state == 'running')
+    assert status().detail.startswith('searching:')
+    assert peers.requests[-1].query == 'any label'
+    assert (peers.requests[-1].max_duration_sec, peers.requests[-1].max_travel_m,
+            peers.requests[-1].target_coverage) == (30.0, 20.0, 0.9)
+    peers.finish = True
+    wait(lambda: status().state == 'succeeded')
+    result = json.loads(status().result_json)
+    assert result['outcome'] == 'found' and result['evidence_ids'] == ['e' * 64]
+    assert result['coverage_fraction'] == 0.25 and json.loads(result['report_json'])
+
+
+def test_disabled_search_profile_rejects_admission(tmp_path):
+    context = Context()
+    rclpy.init(context=context)
+    gateway = TaskGateway(context=context, parameter_overrides=[
+        Parameter('database_path', value=str(tmp_path / 'tasks.sqlite3')), Parameter('allow_search', value=False)])
+    try:
+        response = gateway._submit(SubmitTask.Request(task_id='s', capability='search',
+                                                      parameters_json='{"query":"x"}'), SubmitTask.Response())
+        assert not response.accepted and 'disabled' in response.detail
+    finally:
+        gateway.destroy_node()
+        context.try_shutdown()
+
+
+@pytest.mark.parametrize('text', ['invalid', '{}', '{"max_duration_sec":60,"max_travel_m":20}',
+                                  '{"max_duration_sec":60,"max_travel_m":20,"target_coverage":1.5}',
+                                  '{"max_duration_sec":60,"max_travel_m":-1,"target_coverage":0.9}',
+                                  '{"max_duration_sec":true,"max_travel_m":20,"target_coverage":0.9}'])
+def test_invalid_search_defaults_are_not_advertised(system, text):
+    from std_msgs.msg import String
+
+    peers, _, _, _, _ = system
+    peers.gateway._search_defaults_message(String(data=text))
+    assert peers.gateway._search_defaults is None

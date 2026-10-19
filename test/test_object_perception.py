@@ -90,7 +90,7 @@ def test_receipt_keeps_latest_frame_while_inference_is_busy_and_expires_old_resu
             release.wait(5)
         active -= 1
         return [[10, 10, 20, 20, .9, 'cup']]
-    monkeypatch.setattr(object_detector, 'Recognizer', lambda *args: SimpleNamespace(predict=predict, sha256='a' * 64, default_query=None, labels=['cup']))
+    monkeypatch.setattr(object_detector, 'Recognizer', lambda *args: SimpleNamespace(predict=predict, sha256='a' * 64, name='yolox', labels=['cup'], open_vocabulary=False, default_query=None))
     context = Context()
     rclpy.init(context=context)
     node = object_detector.ObjectDetector(context=context, parameter_overrides=[
@@ -191,7 +191,7 @@ def test_diagnostics_reads_clock_before_frame_lock_to_avoid_jump_deadlock():
 def test_operating_point_parameters_reject_runtime_changes_instead_of_silently_ignoring_them(monkeypatch):
     from lekiwi_rmf import object_detector
 
-    monkeypatch.setattr(object_detector, 'Recognizer', lambda *args: SimpleNamespace(predict=list, sha256='a' * 64, default_query=None, labels=[]))
+    monkeypatch.setattr(object_detector, 'Recognizer', lambda *args: SimpleNamespace(predict=list, sha256='a' * 64, name='yolox', labels=['cup'], open_vocabulary=False, default_query=None))
     context = Context()
     rclpy.init(context=context)
     node = object_detector.ObjectDetector(context=context)
@@ -202,4 +202,37 @@ def test_operating_point_parameters_reject_runtime_changes_instead_of_silently_i
         assert node.set_parameters([Parameter('use_sim_time', value=False)])[0].successful
     finally:
         node.destroy_node()
+        context.try_shutdown()
+
+
+def test_operating_point_profile_is_latched_for_late_consumers(monkeypatch):
+    import json
+    from rclpy.qos import DurabilityPolicy, QoSProfile
+    from std_msgs.msg import String
+    from lekiwi_rmf import object_detector
+
+    monkeypatch.setattr(object_detector, 'Recognizer', lambda *args: SimpleNamespace(
+        predict=list, sha256='a' * 64, name='yolox', labels=['person', 'cup'], open_vocabulary=False, default_query=None))
+    context = Context()
+    rclpy.init(context=context)
+    node = object_detector.ObjectDetector(context=context)
+    peer = Node('profile_peer', context=context)
+    received = []
+    peer.create_subscription(String, '/robot/perception/profile', lambda msg: received.append(json.loads(msg.data)),
+                             QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
+    executor = MultiThreadedExecutor(num_threads=2, context=context)
+    executor.add_node(peer)
+    thread = threading.Thread(target=executor.spin, daemon=True)
+    thread.start()
+    try:
+        wait(lambda: received)
+        assert received[-1] == {'schema': 1, 'cameras': {'front': camera_bindings(['front'])['front']['sha256']},
+                                'recognizers': [{'role': 'primary', 'model_sha256': 'a' * 64, 'model_name': 'yolox',
+                                                 'confidence_threshold': .5, 'labels': ['person', 'cup'],
+                                                 'open_vocabulary': False, 'query': None}]}
+    finally:
+        executor.shutdown(timeout_sec=5)
+        thread.join(5)
+        node.destroy_node()
+        peer.destroy_node()
         context.try_shutdown()

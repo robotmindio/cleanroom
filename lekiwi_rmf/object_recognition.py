@@ -160,12 +160,13 @@ def reject_parameter_changes(node, names):
 
 class Recognizer:
     def __init__(self, name='yolox', directory=None, confidence=.5):
+        self.name = name
         self.spec = model_spec(name)
         self.sha256, self.identity = recognition_identity(name, confidence)
         self.confidence = confidence
-        self.open = self.spec['backend'] in OPEN_BACKENDS
         # Open recognizers report only the phrases of the query they ran; closed ones their native catalogue.
-        self.default_query = make_query(self.spec['default_query']) if self.open else None
+        self.open_vocabulary = self.spec['backend'] in OPEN_BACKENDS
+        self.default_query = make_query(self.spec['default_query']) if self.open_vocabulary else None
         self.labels = None
         cv2.setNumThreads(2)
         if self.spec['backend'] in REMOTE_BACKENDS:
@@ -198,8 +199,8 @@ class Recognizer:
 
     def predict(self, image, query=None):
         """Open recognizers localize exactly `query`; closed ones cannot express a query and refuse one."""
-        if self.open != (query is not None):
-            raise ValueError('an open-vocabulary recognizer needs a query' if self.open else
+        if self.open_vocabulary != (query is not None):
+            raise ValueError('an open-vocabulary recognizer needs a query' if self.open_vocabulary else
                              'a closed-vocabulary recognizer cannot answer a query')
         height, width = image.shape[:2]
         if self.spec['backend'] in REMOTE_BACKENDS:
