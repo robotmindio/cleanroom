@@ -52,7 +52,8 @@ def parse_profile(text):
         if (not isinstance(item, dict) or item.get('role') not in ('primary', 'fallback')
                 or not valid_id(item.get('model_sha256')) or type(item.get('open_vocabulary')) is not bool
                 or not isinstance(item.get('labels'), list) or len(item['labels']) > 4096
-                or any(not isinstance(label, str) or not 1 <= len(label) <= 128 for label in item['labels'])):
+                or any(not isinstance(label, str) or not 1 <= len(label) <= 128 for label in item['labels'])
+                or not isinstance(item.get('profile'), dict) or not valid_id(item['profile'].get('revision'))):
             raise ValueError('invalid perception recognizer')
     return value
 
@@ -71,9 +72,19 @@ def query_labels(record):
         return None
     query = record.get('query')
     labels = query.get('labels') if isinstance(query, dict) else None
+    # Matched learned concepts report their names, so a concept is a label this frame could answer.
+    concepts = query.get('concepts', []) if isinstance(query, dict) else []
+    if isinstance(labels, list) and isinstance(concepts, list):
+        labels = labels + [item.get('name') for item in concepts if isinstance(item, dict)]
     if not isinstance(labels, list) or not all(isinstance(label, str) for label in labels):
         raise ValueError('open-vocabulary frame without a valid query')
     return tuple(labels)
+
+
+def profile_revision(record):
+    """The proposal profile revision the frame ran under, or None when it records none."""
+    revision = (record.get('profile') or {}).get('revision')
+    return revision if valid_id(revision) else None
 
 
 class SearchEvidence:
@@ -368,7 +379,8 @@ class SearchEvidence:
             for index, (detection, point) in enumerate(zip(detections_from_record(record, camera), points)))
         stamp = record['stamp']['sec'] + record['stamp']['nanosec'] / 1e9
         return Capture(record['id'], record['camera_id'], record['model_sha256'], stamp, camera_pose, camera,
-                       record.get('stationary') is True, detections, query_labels(record))
+                       record.get('stationary') is True, detections, query_labels(record),
+                       profile_revision(record))
 
     def _tf_capture(self, record):
         """Fallback for a record without a capture-time map pose: TF at its stamp, unanchored."""
@@ -393,7 +405,8 @@ class SearchEvidence:
             return None  # Without a pose a capture proves nothing about any cell.
         self._reject('unanchored_capture')
         return Capture(record['id'], record['camera_id'], record['model_sha256'], stamp, pose, camera,
-                       record.get('stationary') is True, detections, query_labels(record))
+                       record.get('stationary') is True, detections, query_labels(record),
+                       profile_revision(record))
 
     def snapshot(self):
         """Log generation, its map revision and every capture, read together."""

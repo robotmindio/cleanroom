@@ -28,7 +28,7 @@ from unique_identifier_msgs.msg import UUID
 from lekiwi_rmf.action import Explore, RunSkill, Search
 from lekiwi_rmf.exploration import task_limits
 from lekiwi_rmf.exploration_owner_guard import owned_goal_id
-from lekiwi_rmf.srv import CancelTask, GetTask, SetPerceptionQuery, SubmitTask
+from lekiwi_rmf.srv import ApplyPerceptionProfile, CancelTask, GetTask, SetPerceptionQuery, SubmitTask
 from lekiwi_rmf.perception_query import limits as query_limits
 from lekiwi_rmf.task_journal import TERMINAL, TaskJournal
 from lekiwi_rmf.navigation_pause import NavigationPause
@@ -208,6 +208,7 @@ class TaskGateway(Node):
         self._observation_status = self.create_client(Trigger, '/robot/observations/status')
         # Only to report availability; clients call the detector's query service directly.
         self._perception_query = self.create_client(SetPerceptionQuery, '/robot/perception/set_query')
+        self._perception_profile = self.create_client(ApplyPerceptionProfile, '/robot/perception/apply_profile')
         self._distance = NavigationDistance()
         self.create_subscription(Odometry, '/odom', self._distance.update, 1)
         self.create_service(Trigger, '/robot/navigation/odometry', self._odometry)
@@ -413,7 +414,20 @@ class TaskGateway(Node):
                                        'profile': '/robot/perception/profile', **query_limits(),
                                        'description': 'Set the labels the detector localizes from the next frame. '
                                                       'Empty labels restore the default query; expected_revision '
-                                                      'applies the change only while that revision is in force.'}},
+                                                      'applies the change only while that revision is in force. '
+                                                      'part_of ties a label to its whole; concept_revisions add '
+                                                      'learned concepts matched by exemplar.'},
+                             # Thresholds, suppression, resolution and budget form a proposal profile per
+                             # recognizer; every observation records the revision it ran under.
+                             'proposal_profile': {
+                                 'available': self._perception_profile.service_is_ready(),
+                                 'service': '/robot/perception/apply_profile',
+                                 'type': 'lekiwi_rmf/srv/ApplyPerceptionProfile',
+                                 'profile': '/robot/perception/profile',
+                                 'description': 'Switch a recognizer to a tracked profile, an exact earlier revision, '
+                                                'or a candidate selected by a recorded calibration study. '
+                                                'expected_revision is required; the response reads back the '
+                                                'profile in force.'}},
             'examples': [{'capability': 'explore', 'parameters': {}},
                          {'capability': 'explore', 'parameters': {'revisit_known': True}}],
             'services': {'submit': '/robot/tasks/submit', 'get': '/robot/tasks/get', 'cancel': '/robot/tasks/cancel'},

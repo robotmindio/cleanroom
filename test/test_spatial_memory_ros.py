@@ -26,7 +26,8 @@ from lekiwi_rmf.object_recognition import recognition_identity
 from lekiwi_rmf.spatial_memory_node import SpatialMemory, parse_request
 from lekiwi_rmf.srv import QueryObservations, QuerySpatial
 from ros_test_utils import release_graph
-from test_object_observations import capture
+from test_object_observations import capture, operating_point
+from lekiwi_rmf.msg import PerceptionOperatingPoint
 
 MODEL_SHA256 = recognition_identity('yolox')[0]
 
@@ -97,6 +98,7 @@ def test_graphs_become_revisions_and_observations_reproject(tmp_path):
                              QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
     images = peer.create_publisher(Image, '/robot/perception/astra_color/source_image', 1)
     detections = peer.create_publisher(Detection2DArray, '/robot/perception/astra_color/detections', 1)
+    points = peer.create_publisher(PerceptionOperatingPoint, '/robot/perception/astra_color/operating_point', 1)
     spatial_query = peer.create_client(QuerySpatial, '/robot/spatial/query')
     observation_query = peer.create_client(QueryObservations, '/robot/observations/query')
     camera = TransformStamped()
@@ -142,6 +144,7 @@ def test_graphs_become_revisions_and_observations_reproject(tmp_path):
         for item in found.detections:
             item.header = image.header
         detections.publish(found)
+        points.publish(operating_point(image, count=1))
         images.publish(image)
         records = []
 
