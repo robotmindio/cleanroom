@@ -339,3 +339,15 @@ def test_a_timely_run_reports_its_stage_percentiles(ros_runner):
     stages = runner._budget.summary()['stages']
     assert stages['execution']['count'] == len(arm.goals) >= 1
     assert stages['sensor_age']['count'] >= 1 and 0 <= stages['sensor_age']['p99_sec'] <= .5
+
+
+def test_loading_the_policy_does_not_consume_the_motion_budget(ros_runner, monkeypatch):
+    runner, arm, client, _ = ros_runner
+    load = FakePolicy.__init__
+
+    def slow(self, path):
+        time.sleep(1.0)  # longer than the skill's 0.6 s motion limit
+        load(self, path)
+    monkeypatch.setattr(FakePolicy, '__init__', slow)
+    result = run(client, 'push')
+    assert result.outcome == 'finished' and json.loads(result.result_json)['chunks_executed'] >= 1

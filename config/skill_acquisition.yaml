@@ -1,0 +1,5 @@
+# Layered over config/skill_runner.yaml by bringup skill_acquisition:=true, for an
+# attended acquisition protocol (docs/skill-acquisition.md) that evaluates experimental skills.
+skill_runner:
+  ros__parameters:
+    allow_experimental: true
