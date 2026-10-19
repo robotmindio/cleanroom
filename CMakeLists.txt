@@ -5,10 +5,12 @@ find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_python REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME} "action/Explore.action" "action/RunSkill.action" "action/Search.action"
   "srv/SubmitTask.srv" "srv/GetTask.srv" "srv/CancelTask.srv"
   "srv/QueryObservations.srv" "srv/GetObservationEvidence.srv" "srv/PinObservationEvidence.srv"
-  "srv/SetPerceptionQuery.srv" DEPENDENCIES geometry_msgs)
+  "srv/SetPerceptionQuery.srv" "srv/ApplyPerceptionProfile.srv" "msg/PerceptionOperatingPoint.msg"
+  DEPENDENCIES geometry_msgs std_msgs)
 ament_export_dependencies(rosidl_default_runtime)
 option(LEKIWI_BUILD_COMPUTE "Build compute-only Gazebo and MoveIt plugins" ON)
 if(LEKIWI_BUILD_COMPUTE)
@@ -234,6 +236,8 @@ if(BUILD_TESTING)
     add_lekiwi_pytest(test_object_observation_ros)
     add_lekiwi_pytest(test_remote_perception)
     add_lekiwi_pytest(test_perception_query)
+    add_lekiwi_pytest(test_perception_profiles)
+    add_lekiwi_pytest(test_perception_learning)
     add_lekiwi_pytest(test_episode_export)
     add_lekiwi_pytest(test_skills)
     add_lekiwi_pytest(test_task_journal)

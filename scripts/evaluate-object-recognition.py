@@ -18,7 +18,12 @@ from std_msgs.msg import Header
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lekiwi_rmf.object_detector import detect
 from lekiwi_rmf.object_recognition import Recognizer, use_model_runtime
-from lekiwi_rmf.object_observations import observation
+from lekiwi_rmf.object_observations import artifact_pixels, capture_artifact, observation
+from lekiwi_rmf.perception_profiles import make_profile, tracked_profiles
+
+# Hard conditions the corpus must cover before its results describe them (spec T-15); the report lists
+# which are missing instead of implying coverage.
+HARD_CONDITIONS = ('dark', 'overhead', 'occlusion', 'transparent', 'reflective', 'blur', 'similar_instances')
 
 
 def overlap(left, right):
@@ -85,8 +90,13 @@ def load_scenes(manifest, split='heldout'):
     labels, blue_labels = set(), set()
     for scene in scenes:
         if (not isinstance(scene, dict) or not {'scene_id', 'split', 'image'} <= set(scene)
-                or set(scene) - {'scene_id', 'scene_group', 'split', 'image', 'objects', 'cups'}):
+                or set(scene) - {'scene_id', 'scene_group', 'split', 'image', 'objects', 'cups', 'conditions'}):
             raise ValueError('each scene requires scene_id, split, image and objects')
+        conditions = scene.get('conditions', [])
+        if (not isinstance(conditions, list) or len(conditions) > 8 or len(set(conditions)) != len(conditions)
+                or any(not isinstance(tag, str) or not 1 <= len(tag) <= 32
+                       or any(c not in 'abcdefghijklmnopqrstuvwxyz_' for c in tag) for tag in conditions)):
+            raise ValueError('conditions are up to 8 distinct lower-case tags')
         objects = scene_objects(scene)
         if 'cups' in scene:
             labels.add('cup')  # A legacy cup list declares cups labeled even when this scene has none.
@@ -187,14 +197,18 @@ def scene_metrics(detections, objects, blue_threshold, labels, blue_labels):
             'predictions': detections, 'expected': objects}
 
 
-def evaluate(manifest, model_path=None, *, name='yolox', split='heldout', confidence=.5, blue_threshold=.35):
-    if (split not in ('development', 'heldout') or not 0 < confidence <= 1
-            or not 0 <= blue_threshold <= 1):
+def evaluate(manifest, model_path=None, *, name='yolox', split='heldout', profile=None, blue_threshold=.35,
+             recognizer=None, query=None):
+    """Score one recognizer under one proposal profile; defaults to the tracked default profile."""
+    if split not in ('development', 'heldout') or not 0 <= blue_threshold <= 1:
         raise ValueError('invalid frozen evaluation operating point')
     manifest_hash, heldout, labels, blue_labels = load_scenes(manifest, split)
     keys = goal_keys(labels, blue_labels)
     cv2.setNumThreads(2)
-    model, bridge = Recognizer(name, model_path, confidence), CvBridge()
+    model, bridge = recognizer or Recognizer(name, model_path), CvBridge()
+    profile = profile or model.default_profile
+    # An open recognizer is evaluated under its tracked default query unless a study fixes another.
+    query = query or model.default_query
     totals, attribute = {key: [0, 0, 0] for key in keys}, [0, 0, 0, 0]
     durations, hashes, results = [], [], []
     groups = {key: {'positive': set(), 'negative': set(), 'ambiguous': set()} for key in keys}
@@ -206,11 +220,13 @@ def evaluate(manifest, model_path=None, *, name='yolox', split='heldout', confid
         pixels = cv2.imdecode(np.frombuffer(content, np.uint8), cv2.IMREAD_COLOR)
         header = Header(stamp=Time(sec=sequence), frame_id='offline_camera')
         start = time.monotonic()
-        # An open recognizer is evaluated under its tracked default query, recorded with each result.
-        found = detect(model, pixels, header, model.default_query)
+        # The same declared normalization as the robot: the recognizer consumes the evidence artifact.
+        artifact = capture_artifact(pixels)
+        found, extras, _ = detect(model, artifact_pixels(artifact), header, query, profile, artifact)
         image = bridge.cv2_to_imgmsg(pixels, 'bgr8')
         image.header = header
-        record, _ = observation(image, found, model.sha256, 'offline', model.default_query)
+        record, _ = observation(image, found, model.sha256, 'offline', query, profile=profile, extras=extras,
+                                input_sha256=hashlib.sha256(artifact).hexdigest())
         durations.append(time.monotonic() - start)
         result = scene_metrics(record['detections'], scene['objects'], blue_threshold, labels, blue_labels)
         for key in keys:
@@ -223,7 +239,8 @@ def evaluate(manifest, model_path=None, *, name='yolox', split='heldout', confid
             groups[key]['positive' if present else 'negative'].add(group)
             if present > 1:
                 groups[key]['ambiguous'].add(group)
-        results.append({'scene_id': scene['scene_id'], 'scene_group': group, **result,
+        results.append({'scene_id': scene['scene_id'], 'scene_group': group, 'conditions': scene.get('conditions', []),
+                        **result, 'abstentions': record['abstentions'], 'input_quality': record['input_quality'],
                         'processing_sec': durations[-1]})
         hashes.append(digest)
     measured = {key: metrics(value) for key, value in totals.items()}
@@ -259,11 +276,16 @@ def evaluate(manifest, model_path=None, *, name='yolox', split='heldout', confid
                                     for name in ['expected_unique', 'correct', 'false_verified']}
                               for key in keys},
             'unscored_predictions': sum(len(item['unscored_predictions']) for item in results),
-            'model_sha256': model.sha256, 'operating_point': model.identity,
+            'model_sha256': model.sha256, 'operating_point': model.identity, 'profile': profile.document(),
+            'query': query.document() if query is not None else None,
+            'conditions': {tag: sum(tag in item['conditions'] for item in results)
+                           for tag in sorted({tag for item in results for tag in item['conditions']} | set(HARD_CONDITIONS))},
+            'missing_hard_conditions': [tag for tag in HARD_CONDITIONS
+                                        if not any(tag in item['conditions'] for item in results)],
             'manifest_sha256': manifest_hash, 'image_hashes': hashes,
             'scenes': results, 'opencv_version': cv2.__version__, 'evaluated_images': len(heldout), 'split': split,
             'scene_groups': len(all_groups), 'processing_p95_sec': p95,
-            'confidence_threshold': confidence, 'blue_fraction_threshold': blue_threshold,
+            'blue_fraction_threshold': blue_threshold,
             'uncertainty_unit': 'scene_group',
             'scope': 'offline image recognition only; not metric or physical task acceptance'}
 
@@ -271,17 +293,30 @@ def evaluate(manifest, model_path=None, *, name='yolox', split='heldout', confid
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('manifest')
-    parser.add_argument('--model-name', default='yolox', choices=['yolox', 'rtdetr_v2_r18', 'grounding_dino_tiny'])
+    parser.add_argument('--model-name', default='yolox',
+                        choices=['yolox', 'rtdetr_v2_r18', 'grounding_dino_tiny', 'grounding_dino_tiny_gpu'])
     parser.add_argument('--model-directory')
     parser.add_argument('--output', required=True)
     parser.add_argument('--split', choices=['development', 'heldout'], default='heldout')
-    parser.add_argument('--confidence', type=float, default=.5)
+    parser.add_argument('--profile', default='', help='tracked profile name (config/perception_profiles.yaml)')
+    parser.add_argument('--profile-json', default='', help='complete candidate parameters as JSON')
     parser.add_argument('--blue-fraction', type=float, default=.35)
     args = parser.parse_args()
     try:
         use_model_runtime(args.model_name)
-        report = evaluate(args.manifest, args.model_directory, name=args.model_name, split=args.split,
-                          confidence=args.confidence, blue_threshold=args.blue_fraction)
+        model = Recognizer(args.model_name, args.model_directory)
+        profile = None
+        if args.profile and args.profile_json:
+            raise ValueError('choose --profile or --profile-json')
+        if args.profile:
+            tracked = tracked_profiles()[1][model.backend]
+            if args.profile not in tracked:
+                raise ValueError(f'{args.profile} is not a tracked {model.backend} profile')
+            profile = tracked[args.profile]
+        elif args.profile_json:
+            profile = make_profile(model.backend, json.loads(args.profile_json))
+        report = evaluate(args.manifest, name=args.model_name, split=args.split, profile=profile,
+                          blue_threshold=args.blue_fraction, recognizer=model)
     except (ValueError, OSError, RuntimeError, RecursionError, cv2.error) as error:
         report = {'schema': 3, 'passed': False, 'error': str(error)}
     output = Path(args.output).expanduser()

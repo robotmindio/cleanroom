@@ -17,6 +17,7 @@ RESOLUTION = 0.05
 ORIGIN = (-3.0, -3.0, 0.0)
 # 640x480 with a 60-degree horizontal field of view.
 CAMERA = camera_from_info([554.3, 0, 320, 0, 554.3, 240, 0, 0, 1], 640, 480)
+PROFILE_REVISION = 'e' * 64  # The proposal profile admitted with each model.
 PROFILE = Profile(min_object_m=0.08, min_object_px=24, max_range_m=3.0, min_height_m=0.02,
                   max_height_m=0.3, max_age_sec=600.0)
 FOOTPRINT, _, MARGIN = load_navigation_footprint(Path(__file__).parents[1] / 'config/nav2_params.yaml')
@@ -27,8 +28,8 @@ def free_grid(size=120):
 
 
 def capture(identifier='a' * 64, pose=Pose(0.0, 0.0, 0.2, 0.0, 0.0), detections=(), stamp=100.0,
-            model='m' * 64, stationary=True, query=None):
-    return Capture(identifier, 'front', model, stamp, pose, CAMERA, stationary, tuple(detections), query)
+            model='m' * 64, stationary=True, query=None, profile=PROFILE_REVISION):
+    return Capture(identifier, 'front', model, stamp, pose, CAMERA, stationary, tuple(detections), query, profile)
 
 
 def cell_xy(flat, grid):
@@ -78,7 +79,7 @@ def test_frustum_resolution_band_and_occlusion():
 
 def test_negative_evidence_respects_model_motion_bearing_and_age():
     grid = free_grid()
-    coverage = QueryCoverage('Cup', ['m' * 64], PROFILE, grid.shape, RESOLUTION, ORIGIN)
+    coverage = QueryCoverage('Cup', {'m' * 64: PROFILE_REVISION}, PROFILE, grid.shape, RESOLUTION, ORIGIN)
     assert coverage.add(capture(model='o' * 64), grid) == []
     assert not coverage.covered(100).any()
     coverage.add(capture(stationary=False), grid)
@@ -93,7 +94,7 @@ def test_negative_evidence_respects_model_motion_bearing_and_age():
     assert covered.any() and not np.any((bearings > 0.37) & (bearings < 0.48))
     assert np.any(np.abs(bearings) < 0.05)  # The chair's bearing still proves no cup there.
     assert (coverage.sighting > coverage.negative).any()
-    assert coverage.counts == {'captures': 3, 'negative_captures': 1, 'other_model': 1, 'other_query': 0,
+    assert coverage.counts == {'captures': 3, 'negative_captures': 1, 'other_model': 1, 'other_profile': 0, 'other_query': 0,
                                'moving': 1, 'occluded_cells': 0}
     assert not coverage.covered(100 + PROFILE.max_age_sec + 1).any()
     # A later look without the cup refutes the earlier sighting there.
@@ -103,7 +104,7 @@ def test_negative_evidence_respects_model_motion_bearing_and_age():
 
 def test_open_inferences_count_only_for_labels_their_query_asked_for():
     grid = free_grid()
-    coverage = QueryCoverage('screwdriver', ['m' * 64], PROFILE, grid.shape, RESOLUTION, ORIGIN)
+    coverage = QueryCoverage('screwdriver', {'m' * 64: PROFILE_REVISION}, PROFILE, grid.shape, RESOLUTION, ORIGIN)
     # A frame that localized only cups says nothing about a screwdriver, though its model could have.
     assert coverage.add(capture(query=('a cup', 'a mug')), grid) == []
     assert not coverage.covered(100).any() and coverage.counts['other_query'] == 1
@@ -113,7 +114,7 @@ def test_open_inferences_count_only_for_labels_their_query_asked_for():
 
 def test_map_growth_keeps_world_aligned_coverage_and_raster_change_discards_it():
     grid = free_grid()
-    coverage = QueryCoverage('cup', ['m' * 64], PROFILE, grid.shape, RESOLUTION, ORIGIN)
+    coverage = QueryCoverage('cup', {'m' * 64: PROFILE_REVISION}, PROFILE, grid.shape, RESOLUTION, ORIGIN)
     coverage.add(capture(), grid)
     before = {tuple(np.round(v, 6)) for v in zip(*cell_xy(np.flatnonzero(coverage.covered(100)), grid))}
     grown = (-4.0, -3.5, 0.0)
@@ -190,7 +191,7 @@ def test_unreachable_or_fully_observed_space_has_no_viewpoint():
 def session(labels=('cup', 'chair'), target=0.5):
     grid = free_grid(60)
     perception = {'cameras': {'front': 'c' * 64}, 'recognizers': [
-        {'role': 'primary', 'model_sha256': 'm' * 64, 'model_name': 'test', 'confidence_threshold': .5,
+        {'role': 'primary', 'model_sha256': 'm' * 64, 'model_name': 'test', 'profile': {'revision': PROFILE_REVISION},
          'labels': list(labels), 'open_vocabulary': False}]}
     origin = (-1.5, -1.5, 0.0)
     result = SearchSession('CUP', perception, PROFILE, (grid, RESOLUTION, origin), started=50.0, target=target,
@@ -233,7 +234,7 @@ def test_termination_found_coverage_and_incapable_with_honest_report():
 
 def test_new_coverage_en_route_refutes_the_planned_viewpoint():
     grid = free_grid()
-    coverage = QueryCoverage('cup', ['m' * 64], PROFILE, grid.shape, RESOLUTION, ORIGIN)
+    coverage = QueryCoverage('cup', {'m' * 64: PROFILE_REVISION}, PROFILE, grid.shape, RESOLUTION, ORIGIN)
     searchable, _ = searchable_mask(grid, RESOLUTION, ORIGIN, (0.0, 0.0), 2.5)
     plan = Viewpoint(0.5, 0.0, 0.0, 'front', 0.0, 0.5, 0.0)
     planned = viewpoint_gain(plan, coverage.weights(searchable, 100, 20.0), grid, RESOLUTION, ORIGIN, mount(), PROFILE)
@@ -245,13 +246,15 @@ def test_new_coverage_en_route_refutes_the_planned_viewpoint():
 
 def profile_text(**recognizer):
     import json
-    item = {'role': 'primary', 'model_sha256': 'a' * 64, 'labels': ['cup'], 'open_vocabulary': False, **recognizer}
+    item = {'role': 'primary', 'model_sha256': 'a' * 64, 'labels': ['cup'], 'open_vocabulary': False,
+            'profile': {'revision': PROFILE_REVISION}, **recognizer}
     return json.dumps({'schema': 1, 'cameras': {'front': 'c' * 64}, 'recognizers': [item]})
 
 
 @pytest.mark.parametrize('text', [
     'invalid', '[]', '{}', '{"schema":2}', profile_text(model_sha256='x'), profile_text(labels='cup'),
     profile_text(labels=['']), profile_text(role='backup'), profile_text(open_vocabulary=1),
+    profile_text(profile=None), profile_text(profile={'revision': 'short'}),
     '{"schema":1,"cameras":{},"recognizers":[]}', ' ' * 65537,
 ])
 def test_malformed_perception_profile_means_no_instrument(text):
@@ -266,15 +269,17 @@ def test_fallback_frames_never_cover_labels_only_the_primary_can_report():
     grid = free_grid(60)
     origin = (-1.5, -1.5, 0.0)
     perception = {'cameras': {'front': 'c' * 64}, 'recognizers': [
-        {'role': 'primary', 'model_sha256': 'p' * 64, 'labels': ['a cup', 'a mug'], 'open_vocabulary': True},
-        {'role': 'fallback', 'model_sha256': 'f' * 64, 'labels': ['chair', 'book'], 'open_vocabulary': False}]}
+        {'role': 'primary', 'model_sha256': 'p' * 64, 'labels': ['a cup', 'a mug'], 'open_vocabulary': True,
+         'profile': {'revision': PROFILE_REVISION}},
+        {'role': 'fallback', 'model_sha256': 'f' * 64, 'labels': ['chair', 'book'], 'open_vocabulary': False,
+         'profile': {'revision': PROFILE_REVISION}}]}
 
     def search(query):
         return SearchSession(query, perception, PROFILE, (grid, RESOLUTION, origin), started=50.0, target=0.5,
                              region=((0.0, 0.0), 1.5))
 
     primary_only = search('a mug')
-    assert primary_only.supported and primary_only.coverage.models == {'p' * 64}
+    assert primary_only.supported and primary_only.coverage.models == {'p' * 64: PROFILE_REVISION}
     primary_only.integrate(capture(model='f' * 64), grid)
     searchable, _ = primary_only.masks(grid)
     assert primary_only.fraction(searchable, 100) == 0.0
@@ -289,3 +294,15 @@ def test_fallback_frames_never_cover_labels_only_the_primary_can_report():
     fallback_only.integrate(capture(model='p' * 64), grid)
     assert fallback_only.fraction(searchable, 100) == 0.0
     assert not search('unicorn').supported
+
+
+def test_a_frame_under_another_profile_is_silent_not_negative_evidence():
+    """A profile change mid-search must not let frames under other thresholds claim this session's coverage."""
+    grid = free_grid()
+    coverage = QueryCoverage('cup', {'m' * 64: PROFILE_REVISION}, PROFILE, grid.shape, RESOLUTION, ORIGIN)
+    coverage.add(capture(profile='d' * 64), grid)
+    assert coverage.counts['other_profile'] == 1 and coverage.counts['negative_captures'] == 0
+    coverage.add(capture(), grid)
+    assert coverage.counts['negative_captures'] == 1
+    with pytest.raises(ValueError, match='profile revision'):
+        QueryCoverage('cup', ['m' * 64], PROFILE, grid.shape, RESOLUTION, ORIGIN)

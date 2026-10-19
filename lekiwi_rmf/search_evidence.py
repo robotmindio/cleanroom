@@ -39,7 +39,8 @@ def parse_profile(text):
         if (not isinstance(item, dict) or item.get('role') not in ('primary', 'fallback')
                 or not valid_id(item.get('model_sha256')) or type(item.get('open_vocabulary')) is not bool
                 or not isinstance(item.get('labels'), list) or len(item['labels']) > 4096
-                or any(not isinstance(label, str) or not 1 <= len(label) <= 128 for label in item['labels'])):
+                or any(not isinstance(label, str) or not 1 <= len(label) <= 128 for label in item['labels'])
+                or not isinstance(item.get('profile'), dict) or not valid_id(item['profile'].get('revision'))):
             raise ValueError('invalid perception recognizer')
     return value
 
@@ -187,12 +188,18 @@ class SearchEvidence:
             return  # Without a pose a capture proves nothing about any cell.
         query = record.get('query') if record.get('vocabulary') == 'open' else None
         labels = query.get('labels') if isinstance(query, dict) else None
+        # Matched learned concepts report their names, so a concept is a label this frame could answer.
+        concepts = query.get('concepts', []) if isinstance(query, dict) else []
+        if isinstance(labels, list) and isinstance(concepts, list):
+            labels = labels + [item.get('name') for item in concepts if isinstance(item, dict)]
         if record.get('vocabulary') == 'open' and (
                 not isinstance(labels, list) or not all(isinstance(label, str) for label in labels)):
             self._reject('invalid_query')
             return
+        profile_revision = (record.get('profile') or {}).get('revision')
         capture = Capture(record['id'], camera_id, record['model_sha256'], stamp, pose, camera,
-                          record.get('stationary') is True, detections, None if labels is None else tuple(labels))
+                          record.get('stationary') is True, detections, None if labels is None else tuple(labels),
+                          profile_revision if valid_id(profile_revision) else None)
         with self._lock:
             self._serial += 1
             self._captures.append((self._serial, capture))

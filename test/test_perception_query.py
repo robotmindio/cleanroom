@@ -3,7 +3,6 @@
 import json
 import threading
 import time
-from types import SimpleNamespace
 
 import pytest
 import rclpy
@@ -15,19 +14,20 @@ from rclpy.parameter import Parameter
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import Image
 from std_msgs.msg import String
-from vision_msgs.msg import LabelInfo
 
+from lekiwi_rmf.msg import PerceptionOperatingPoint
 from lekiwi_rmf.object_observations import observation
 from lekiwi_rmf.object_recognition import ProviderUnavailable, recognition_identity
+from lekiwi_rmf.perception_profiles import default_profile
 from lekiwi_rmf.perception_query import MAX_LABELS, make_query, normalize_label, recorded_query
-from lekiwi_rmf.srv import QueryObservations, SetPerceptionQuery
-from test_object_observations import capture
-from test_remote_perception import label_info
+from lekiwi_rmf.srv import ApplyPerceptionProfile, QueryObservations, SetPerceptionQuery
+from test_object_observations import capture, fake_recognizer, operating_point
 
 REMOTE = 'grounding_dino_tiny_gpu'
 # A closed fallback whose identity needs no torch metadata, so these tests run without the model runtime.
 FALLBACK = 'yolox'
 DEFAULT = make_query(['a cup', 'a mug'])
+OPEN_PROFILE = default_profile('remote_grounding_dino')
 
 
 def test_labels_are_normalized_deduplicated_and_ordered():
@@ -58,18 +58,18 @@ def test_a_recorded_query_must_already_be_canonical():
 
 
 def test_the_same_capture_under_another_query_is_another_inference():
-    model = recognition_identity(REMOTE, .5)[0]
-    cups, _ = observation(*capture(), model, 'astra_color', DEFAULT)
-    spoons, _ = observation(*capture(), model, 'astra_color', make_query(['spoon']))
-    closed, _ = observation(*capture(), model, 'astra_color')
+    model = recognition_identity(REMOTE)[0]
+    cups, _ = observation(*capture(), model, 'astra_color', DEFAULT, profile=OPEN_PROFILE)
+    spoons, _ = observation(*capture(), model, 'astra_color', make_query(['spoon']), profile=OPEN_PROFILE)
+    closed, _ = observation(*capture(), model, 'astra_color', profile=OPEN_PROFILE)
     assert cups['capture_id'] == spoons['capture_id'] == closed['capture_id']
     assert len({cups['id'], spoons['id'], closed['id']}) == 3
     assert cups['query'] == DEFAULT.document() and cups['vocabulary'] == 'open'
     assert spoons['query']['labels'] == ['spoon'] and spoons['query']['prompt'] == 'spoon.'
-    # Closed-vocabulary identity keeps its established derivation; it carries no query.
+    # A closed-vocabulary inference is identified by model and profile; it carries no query.
     assert closed['vocabulary'] == 'closed' and 'query' not in closed
     import hashlib
-    assert closed['id'] == hashlib.sha256(f"{closed['capture_id']}:{model}".encode()).hexdigest()
+    assert closed['id'] == hashlib.sha256(f"{closed['capture_id']}:{model}:{OPEN_PROFILE.revision}".encode()).hexdigest()
 
 
 def wait(predicate, timeout=8):
@@ -111,10 +111,12 @@ class Harness:
         self.nodes.append(self.peer)
         self.source = self.peer.create_publisher(Image, '/camera/test/image', 1)
         self.queries, self.profiles = [], []
-        self.peer.create_subscription(LabelInfo, '/robot/perception/astra_color/query', self.queries.append, 10)
+        self.peer.create_subscription(PerceptionOperatingPoint, '/robot/perception/astra_color/operating_point',
+                                      self.queries.append, 10)
         self.peer.create_subscription(String, '/robot/perception/profile', lambda message: self.profiles.append(
             json.loads(message.data)), QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
         self.client = self.peer.create_client(SetPerceptionQuery, '/robot/perception/set_query')
+        self.profile_client = self.peer.create_client(ApplyPerceptionProfile, '/robot/perception/apply_profile')
         self.observations = self.peer.create_client(QueryObservations, '/robot/observations/query')
         self.executor = MultiThreadedExecutor(num_threads=4, context=self.context)
         for node in self.nodes:
@@ -123,9 +125,14 @@ class Harness:
         self.thread.start()
         wait(lambda: self.source.get_subscription_count() >= 1 and self.client.service_is_ready())
 
-    def set_query(self, labels, expected=''):
-        future = self.client.call_async(SetPerceptionQuery.Request(labels=labels, expected_revision=expected))
+    def set_query(self, labels, expected='', **fields):
+        future = self.client.call_async(SetPerceptionQuery.Request(labels=labels, expected_revision=expected, **fields))
         wait(future.done)
+        return future.result()
+
+    def apply_profile(self, **fields):
+        future = self.profile_client.call_async(ApplyPerceptionProfile.Request(**fields))
+        wait(future.done, 15)
         return future.result()
 
     def send(self):
@@ -150,24 +157,25 @@ class Harness:
 
 
 def open_recognizer(predict):
-    return SimpleNamespace(predict=predict, sha256='a' * 64, name=REMOTE, default_query=DEFAULT, labels=None,
-                           open_vocabulary=True)
+    """`predict(image, query, profile, artifact)`, as the detector calls an open recognizer."""
+    return fake_recognizer(predict, 'remote_grounding_dino', sha256=recognition_identity(REMOTE)[0], name=REMOTE,
+                           default_query=DEFAULT, labels=None, open_vocabulary=True, supports_concepts=True)
 
 
 def closed_recognizer(predict):
-    return SimpleNamespace(predict=predict, sha256='b' * 64, name=FALLBACK, default_query=None,
-                           labels=['cup', 'spoon'], open_vocabulary=False)
+    return fake_recognizer(predict, 'yolox', sha256=recognition_identity(FALLBACK)[0], name=FALLBACK,
+                           labels=['cup', 'spoon'])
 
 
 def test_query_service_validates_applies_and_restores_with_optimistic_revisions(monkeypatch, tmp_path):
-    harness = Harness(monkeypatch, tmp_path, open_recognizer(lambda image, query: []),
-                      closed_recognizer(lambda image: []))
+    harness = Harness(monkeypatch, tmp_path, open_recognizer(lambda *_: []), closed_recognizer(lambda *_: []))
     try:
         wait(lambda: harness.profiles)
         primary, fallback = harness.profiles[-1]['recognizers']
         assert primary['open_vocabulary'] and primary['labels'] == ['a cup', 'a mug']
         assert primary['query'] == DEFAULT.document()
-        assert (fallback['model_sha256'], fallback['labels'], fallback['query']) == ('b' * 64, ['cup', 'spoon'], None)
+        assert (fallback['model_sha256'], fallback['labels'], fallback['query']) == (
+            recognition_identity(FALLBACK)[0], ['cup', 'spoon'], None)
         applied = harness.set_query(['Screwdriver', 'cable tie'])
         assert applied.success and applied.labels == ['screwdriver', 'cable tie']
         assert applied.previous_revision == DEFAULT.revision and applied.previous_labels == ['a cup', 'a mug']
@@ -194,7 +202,7 @@ def test_query_service_validates_applies_and_restores_with_optimistic_revisions(
 def test_closed_primary_rejects_queries(monkeypatch, tmp_path):
     from lekiwi_rmf import object_detector
 
-    monkeypatch.setattr(object_detector, 'Recognizer', lambda *args: closed_recognizer(list))
+    monkeypatch.setattr(object_detector, 'Recognizer', lambda *args: closed_recognizer(lambda *_: []))
     context = Context()
     rclpy.init(context=context)
     node = object_detector.ObjectDetector(context=context)
@@ -209,7 +217,7 @@ def test_closed_primary_rejects_queries(monkeypatch, tmp_path):
 def test_open_fallback_is_refused(monkeypatch):
     from lekiwi_rmf import object_detector
 
-    monkeypatch.setattr(object_detector, 'Recognizer', lambda name, *args: open_recognizer(list))
+    monkeypatch.setattr(object_detector, 'Recognizer', lambda name, *args: open_recognizer(lambda *_: []))
     context = Context()
     rclpy.init(context=context)
     try:
@@ -223,7 +231,7 @@ def test_open_fallback_is_refused(monkeypatch):
 def test_a_query_change_during_inference_keeps_that_frame_under_its_own_query(monkeypatch, tmp_path):
     entered, release, seen = threading.Event(), threading.Event(), []
 
-    def predict(image, query):
+    def predict(image, query, *_):
         seen.append(query)
         if len(seen) == 1:
             entered.set()
@@ -255,11 +263,11 @@ def test_a_query_change_during_inference_keeps_that_frame_under_its_own_query(mo
 
 
 def test_provider_down_serves_closed_fallback_without_claiming_the_query(monkeypatch, tmp_path):
-    def unavailable(image, query):
+    def unavailable(image, query, *_):
         raise ProviderUnavailable('perception provider unreachable: refused')
 
     harness = Harness(monkeypatch, tmp_path, open_recognizer(unavailable),
-                      closed_recognizer(lambda image: [[10, 10, 20, 20, .9, 'spoon']]), collector=True)
+                      closed_recognizer(lambda *_: [[10, 10, 20, 20, .9, 'spoon']]), collector=True)
     try:
         assert harness.set_query(['spoon']).success
         wait(harness.observations.service_is_ready)
@@ -269,16 +277,17 @@ def test_provider_down_serves_closed_fallback_without_claiming_the_query(monkeyp
             time.sleep(.1)
             assert time.monotonic() < deadline
         record = harness.records()[0]
-        assert record['model_sha256'] == recognition_identity(FALLBACK, .5)[0]
+        assert record['model_sha256'] == recognition_identity(FALLBACK)[0]
         assert record['vocabulary'] == 'closed' and 'query' not in record
         assert record['detections'][0]['label'] == 'spoon'
-        assert not harness.queries  # No query is published for frames the fallback served.
+        assert record['degraded']['reason'] == 'provider_unavailable'
+        assert not harness.queries  # No primary operating point is published for frames the fallback served.
         assert harness.detector._stats['astra_color']['served_by'] == 'fallback'
     finally:
         harness.close()
 
 
-def test_collector_rejects_a_frame_query_outside_the_operating_point(monkeypatch, tmp_path):
+def test_collector_rejects_a_frame_operating_point_it_cannot_prove(monkeypatch, tmp_path):
     from lekiwi_rmf.object_observation_node import ObjectObservations
 
     yaml_path = tmp_path / 'cameras.yaml'
@@ -290,19 +299,24 @@ def test_collector_rejects_a_frame_query_outside_the_operating_point(monkeypatch
     node = ObjectObservations(context=context, parameter_overrides=[
         Parameter('database_path', value=str(tmp_path / 'observations.db')), Parameter('model_name', value=REMOTE),
         Parameter('camera_ids', value=['astra_color']), Parameter('camera_profiles_file', value=str(yaml_path))])
+    model, role = recognition_identity(REMOTE)[0], node._roles['']
     try:
         image, _ = capture()
-        assert node._frame_query(image, label_info(image.header, DEFAULT)) == DEFAULT
+        query, profile = node._operating_point(image, operating_point(image, model, OPEN_PROFILE, DEFAULT), role)[:2]
+        assert query == DEFAULT and profile == OPEN_PROFILE
         other, _ = capture(stamp=2)
-        for info, reason in [(label_info(other.header, DEFAULT), 'header'),
-                             (label_info(image.header, DEFAULT, threshold=.4), 'threshold'),
-                             (label_info(image.header, SimpleNamespace(labels=('A Cup',))), 'canonical')]:
+        tampered = OPEN_PROFILE.document() | {'revision': '0' * 64}
+        for point, reason in [
+                (operating_point(other, model, OPEN_PROFILE, DEFAULT), 'header'),
+                (operating_point(image, 'b' * 64, OPEN_PROFILE, DEFAULT), 'another recognizer'),
+                (operating_point(image, model, OPEN_PROFILE, DEFAULT, profile_json=json.dumps(tampered)), 'revision'),
+                (operating_point(image, model, default_profile('yolox'), DEFAULT), 'proposal profile of this'),
+                (operating_point(image, model, OPEN_PROFILE, None), 'vocabulary'),
+                (operating_point(image, model, OPEN_PROFILE, DEFAULT,
+                                 query_json=json.dumps({'labels': ['A Cup']})), 'canonical'),
+                (operating_point(image, model, OPEN_PROFILE, DEFAULT, input_sha256=''), 'digest')]:
             with pytest.raises(ValueError, match=reason):
-                node._frame_query(image, info)
-        shuffled = label_info(image.header, DEFAULT)
-        shuffled.class_map[0].class_id = 5
-        with pytest.raises(ValueError, match='order'):
-            node._frame_query(image, shuffled)
+                node._operating_point(image, point, role)
     finally:
         node.destroy_node()
         context.try_shutdown()

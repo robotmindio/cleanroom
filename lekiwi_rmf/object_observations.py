@@ -53,10 +53,140 @@ def blue_mask(pixels):
     return cv2.inRange(cv2.cvtColor(pixels, cv2.COLOR_BGR2HSV), (90, 60, 40), (130, 255, 255))
 
 
-def observation(image, detections, model_sha256, camera_id, query=None):
+EVIDENCE_QUALITY = 80
+MAX_EVIDENCE_BYTES = 384 * 1024
+
+
+def capture_artifact(pixels):
+    """The frame's stored capture: a JPEG that is both the evidence and the recognizer's input.
+
+    libjpeg is deterministic for the same pixels and parameters, so the detector and the collector
+    encode the same bytes; every recognizer consumes the decoded artifact, which makes each stored
+    observation replayable byte-exact (lekiwi_rmf/perception_replay.py).
+    """
+    ok, encoded = cv2.imencode('.jpg', pixels, [cv2.IMWRITE_JPEG_QUALITY, EVIDENCE_QUALITY])
+    if not ok:
+        raise RuntimeError('capture JPEG encoding failed')
+    data = encoded.tobytes()
+    if len(data) > MAX_EVIDENCE_BYTES:
+        raise ValueError('encoded evidence exceeds 384 KiB')
+    return data
+
+
+def artifact_pixels(data):
+    pixels = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+    if pixels is None:
+        raise ValueError('capture artifact cannot be decoded')
+    return pixels
+
+
+# DEBT: input-quality limits are engineering defaults, not measured on the robot's cameras; calibrate them
+# with the hard-condition corpus (cleanroom#98) before an abstention reason gates a decision.
+DARK_LUMA, BRIGHT_LUMA, BLUR_VARIANCE = 40., 225., 30.
+NEXT_REQUIREMENT = {
+    'no_candidate': 'another_viewpoint_or_memory_query',
+    'dark': 'more_light_or_another_camera',
+    'overexposed': 'less_glare_or_another_viewpoint',
+    'blurred': 'hold_still_and_recapture',
+    'geometry_unavailable': 'depth_observation',
+    'provider_unavailable': 'retry_primary_provider',
+}
+
+
+def input_quality(pixels):
+    gray = cv2.cvtColor(pixels, cv2.COLOR_BGR2GRAY)
+    luma, sharpness = float(gray.mean()), float(cv2.Laplacian(gray, cv2.CV_64F).var())
+    flags = [flag for flag, bad in [('dark', luma < DARK_LUMA), ('overexposed', luma > BRIGHT_LUMA),
+                                    ('blurred', sharpness < BLUR_VARIANCE)] if bad]
+    return {'mean_luma': round(luma, 2), 'sharpness': round(sharpness, 2), 'flags': flags}
+
+
+def assign_parts(results, query):
+    """A declared part is tied to the most specific detection of its whole that contains it, never guessed."""
+    wholes = dict(query.parts) if query is not None else {}
+    for item in results:
+        whole = wholes.get(item['label'])
+        if whole is None:
+            continue
+        x, y, w, h = item['bbox']
+        best = None
+        for index, other in enumerate(results):
+            if other['label'] != whole:
+                continue
+            ox, oy, ow, oh = other['bbox']
+            inside = max(0., min(x + w, ox + ow) - max(x, ox)) * max(0., min(y + h, oy + oh) - max(y, oy)) / (w * h)
+            if inside >= .8 and (best is None or ow * oh < best[2]):
+                best = (index, inside, ow * oh)
+        item['part_of'] = None if best is None else {'index': best[0], 'label': whole, 'containment': round(best[1], 4)}
+        if best is None:
+            item['part_status'] = 'no_referent'
+
+
+def abstentions(record, query):
+    """Typed reasons this frame cannot answer part of its query, each with the information that would.
+
+    A closed record answers only its native catalogue and abstains on nothing; a frame the fallback served
+    because the primary was unavailable says so instead of answering the query.
+    """
+    result = []
+    degraded = record.get('degraded')
+    if degraded:
+        result.append({'label': None, 'reason': 'provider_unavailable', 'detail': degraded['detail'],
+                       'next_requirement': NEXT_REQUIREMENT['provider_unavailable']})
+    if query is not None:
+        found = {item['label'] for item in record['detections']}
+        flags = record['input_quality']['flags']
+        for label in query.reportable:
+            if label not in found:
+                reason = 'low_quality_input' if flags else 'no_candidate'
+                result.append({'label': label, 'reason': reason, 'detail': ','.join(flags),
+                               'next_requirement': NEXT_REQUIREMENT[flags[0] if flags else 'no_candidate']})
+    for index, item in enumerate(record['detections']):
+        if item.get('geometry_unavailable'):
+            result.append({'label': item['label'], 'detection': index, 'reason': 'geometry_unavailable',
+                           'detail': item['geometry_unavailable'], 'next_requirement': NEXT_REQUIREMENT['geometry_unavailable']})
+    record['abstentions'] = result
+    return result
+
+
+def detection_extras(extras, count, query):
+    """Per-detection evidence the detector attached: suppressed alternatives and concept matches."""
+    extras = extras if extras is not None else [{}] * count
+    if not isinstance(extras, list) or len(extras) != count:
+        raise ValueError('detection evidence does not align with the detections')
+    revisions = {concept.revision: concept.name for concept in (query.concepts if query is not None else ())}
+    for item in extras:
+        if not isinstance(item, dict) or set(item) - {'alternatives', 'concept'}:
+            raise ValueError('invalid detection evidence')
+        alternatives = item.get('alternatives', [])
+        if (not isinstance(alternatives, list) or len(alternatives) > 4 or any(
+                not isinstance(other, dict) or set(other) != {'label', 'score'} or not isinstance(other['label'], str)
+                or not 1 <= len(other['label']) <= 128 or type(other['score']) not in (int, float)
+                or not 0 <= other['score'] <= 1 for other in alternatives)):
+            raise ValueError('invalid suppressed alternatives')
+        concept = item.get('concept')
+        if concept is not None and (not isinstance(concept, dict) or revisions.get(concept.get('revision')) != concept.get('name')):
+            raise ValueError('concept match outside the frame query')
+    return extras
+
+
+def inference_id(capture_id, model_sha256, profile, query=None):
+    """One capture may be recognized under several operating points; each inference is its own observation.
+
+    The profile and an open recognizer's query are part of the operating point, so the same capture under
+    another profile or query is another inference with another ID, and a replay under the same operating
+    point has the original's ID.
+    """
+    inference = f'{model_sha256}:{profile.revision}' + ('' if query is None else f':{query.revision}')
+    return hashlib.sha256(f'{capture_id}:{inference}'.encode()).hexdigest()
+
+
+def observation(image, detections, model_sha256, camera_id, query=None, *, profile, extras=None, run=None,
+                degraded=None, input_sha256=None):
     """Use an exact synchronized ROS image/detection pair; preserve all candidates.
 
-    `query` is the open-vocabulary Query the frame ran under, or None for a closed native catalogue.
+    `query` is the open-vocabulary Query the frame ran under, or None for a closed native catalogue;
+    `profile` is the proposal profile that turned the model output into these detections.
     """
     if (image.header != detections.header or not image.header.frame_id
             or image.header.stamp.sec < 0 or not 0 <= image.header.stamp.nanosec < 10**9
@@ -72,12 +202,13 @@ def observation(image, detections, model_sha256, camera_id, query=None):
         raise ValueError('image stride or payload does not match its dimensions')
     if len(detections.detections) > 20:
         raise ValueError('more than 20 detections in one capture')
+    extras = detection_extras(extras, len(detections.detections), query)
     pixels = np.frombuffer(bytes(image.data), dtype=np.uint8).reshape(image.height, image.step)
     pixels = pixels[:, :image.width * 3].reshape(image.height, image.width, 3)
     if image.encoding == 'rgb8':
         pixels = cv2.cvtColor(pixels, cv2.COLOR_RGB2BGR)
     results = []
-    for detection in detections.detections:
+    for detection, extra in zip(detections.detections, extras):
         if detection.header != image.header or len(detection.results) != 1:
             raise ValueError('each detection requires the source header and one class hypothesis')
         hypothesis = detection.results[0].hypothesis
@@ -98,29 +229,30 @@ def observation(image, detections, model_sha256, camera_id, query=None):
         right, bottom = max(left + 1, int(x + w * .8)), max(top + 1, int(y + h * .8))
         blue = blue_mask(pixels[top:bottom, left:right])
         results.append({'label': label, 'score': score, 'bbox': [x, y, w, h],
-                        'blue_fraction': float(np.count_nonzero(blue) / blue.size)})
-    ok, encoded = cv2.imencode('.jpg', pixels, [cv2.IMWRITE_JPEG_QUALITY, 80])
-    if not ok:
-        raise RuntimeError('observation JPEG encoding failed')
-    evidence = encoded.tobytes()
-    if len(evidence) > 384 * 1024:
-        raise ValueError('encoded evidence exceeds 384 KiB')
+                        'blue_fraction': float(np.count_nonzero(blue) / blue.size), **extra})
+    assign_parts(results, query)
+    evidence = capture_artifact(pixels)
+    digest = hashlib.sha256(evidence).hexdigest()
     document = {'schema': 1, 'camera_id': camera_id, 'frame_id': image.header.frame_id,
                 'stamp': {'sec': image.header.stamp.sec, 'nanosec': image.header.stamp.nanosec},
                 'width': image.width, 'height': image.height, 'model_sha256': model_sha256,
                 'grounding': 'image_only', 'position': None, 'detections': results,
-                'evidence': {'sha256': hashlib.sha256(evidence).hexdigest(), 'size': len(evidence), 'format': 'image/jpeg'}}
+                # model_input: the recognizer consumed exactly these bytes, so replaying them reproduces it.
+                'evidence': {'sha256': digest, 'size': len(evidence), 'format': 'image/jpeg',
+                             'model_input': input_sha256 == digest},
+                'profile': profile.document(), 'input_quality': input_quality(pixels)}
+    if run is not None:
+        document['provider_run'] = run
+    if degraded is not None:
+        document['degraded'] = degraded
     # Closed records answer only their native catalogue, never an open query they cannot express.
     document['vocabulary'] = 'closed' if query is None else 'open'
     if query is not None:
         document['query'] = query.document()
     capture = json.dumps([camera_id, document['frame_id'], document['stamp']], sort_keys=True).encode()
     document['capture_id'] = hashlib.sha256(capture).hexdigest()
-    # One capture may be recognized under several operating points; each inference is its own observation.
-    # The query is part of an open recognizer's operating point, so the same capture under another query
-    # is another inference with another ID.
-    inference = model_sha256 if query is None else f'{model_sha256}:{query.revision}'
-    document['id'] = hashlib.sha256(f"{document['capture_id']}:{inference}".encode()).hexdigest()
+    document['id'] = inference_id(document['capture_id'], model_sha256, profile, query)
+    abstentions(document, query)
     return document, evidence
 
 

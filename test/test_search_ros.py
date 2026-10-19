@@ -33,6 +33,7 @@ from test_exploration_ros import RobotPeers, response, wait
 
 MODEL = 'b' * 64
 FALLBACK = 'f' * 64
+PROFILE_REVISION = 'e' * 64
 FX, WIDTH, HEIGHT = 554.3, 640, 480
 MOUNT = (0.1, 0.0, 0.2)
 
@@ -91,10 +92,10 @@ class Perception(Node):
         binding = camera_bindings(['front'])['front']
         self.create_publisher(String, '/robot/perception/profile', latched).publish(String(data=json.dumps({
             'schema': 1, 'cameras': {'front': binding['sha256']}, 'recognizers': [
-                {'role': 'primary', 'model_sha256': MODEL, 'model_name': 'fake_open', 'confidence_threshold': 0.5,
+                {'role': 'primary', 'model_sha256': MODEL, 'model_name': 'fake_open', 'profile': {'revision': PROFILE_REVISION},
                  'labels': list(labels), 'open_vocabulary': True},
                 {'role': 'fallback', 'model_sha256': FALLBACK, 'model_name': 'fake_closed',
-                 'confidence_threshold': 0.5, 'labels': ['chair'], 'open_vocabulary': False}]})))
+                 'profile': {'revision': PROFILE_REVISION}, 'labels': ['chair'], 'open_vocabulary': False}]})))
         self.info = self.create_publisher(CameraInfo, '/camera/front/camera_info', 10)
         self.create_service(QueryObservations, '/robot/observations/query', self.query)
         self.static = StaticTransformBroadcaster(self)
@@ -127,7 +128,8 @@ class Perception(Node):
             self.records.append({
                 'schema': 1, 'id': identity, 'sequence': sequence, 'camera_id': 'front',
                 'frame_id': 'front_camera_optical_frame', 'stamp': {'sec': stamp.sec, 'nanosec': stamp.nanosec},
-                'model_sha256': self.model, 'detections': detections, 'grounding': 'image_only',
+                'model_sha256': self.model, 'profile': {'revision': PROFILE_REVISION},
+                'detections': detections, 'grounding': 'image_only',
                 'stationary': self.stationary_while_moving or not self.peers.nav_active})
 
     def query(self, request, result):

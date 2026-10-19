@@ -11,7 +11,6 @@ import time
 import message_filters
 from cv_bridge import CvBridgeError
 import cv2
-import numpy as np
 import rclpy
 from rclpy.duration import Duration
 from rclpy.executors import ExternalShutdownException
@@ -24,15 +23,26 @@ from rclpy.qos import QoSProfile, DurabilityPolicy
 from tf2_ros import Buffer, TransformListener
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
-from vision_msgs.msg import Detection2DArray, LabelInfo
+from vision_msgs.msg import Detection2DArray
 
-from lekiwi_rmf.object_observations import ObservationStore, observation, valid_id
+from lekiwi_rmf.object_observations import ObservationStore, abstentions, observation, valid_id
 from lekiwi_rmf.object_geometry import ObjectGeometry
 from lekiwi_rmf.object_cameras import camera_bindings
 from lekiwi_rmf.observation_motion import ObservationMotion
-from lekiwi_rmf.object_recognition import open_vocabulary, recognition_identity, reject_parameter_changes
+from lekiwi_rmf.object_recognition import model_spec, open_vocabulary, recognition_identity, reject_parameter_changes
+from lekiwi_rmf.perception_profiles import recorded_profile
 from lekiwi_rmf.perception_query import recorded_query
+from lekiwi_rmf.msg import PerceptionOperatingPoint
 from lekiwi_rmf.srv import GetObservationEvidence, QueryObservations, PinObservationEvidence
+
+
+def bounded_json(text, name, limit=65536):
+    if len(text.encode()) > limit:
+        raise ValueError(f'frame {name} exceeds {limit} bytes')
+    try:
+        return json.loads(text)
+    except (ValueError, RecursionError) as error:
+        raise ValueError(f'frame {name} is not JSON') from error
 
 
 class ObjectObservations(Node):
@@ -49,20 +59,18 @@ class ObjectObservations(Node):
                                         self.get_parameter('camera_profiles_file').value or None)
         self.declare_parameter('model_name', 'yolox')
         self.declare_parameter('fallback_model_name', '')
-        self.declare_parameter('confidence_threshold', .5)
         reject_parameter_changes(self, ['database_path', 'camera_ids', 'camera_profiles_file', 'model_sha256',
                                         'max_source_age_sec', 'max_records', 'max_bytes', 'retention_sec',
-                                        'model_name', 'fallback_model_name', 'confidence_threshold'])
-        confidence = self.get_parameter('confidence_threshold').value
-        self._model = self.get_parameter('model_sha256').value or recognition_identity(
-            self.get_parameter('model_name').value, confidence)[0]
-        # Each detector output topic is bound to exactly one recognizer identity; an open recognizer's
-        # frames also carry the query they ran under on a third, exactly synchronized topic.
-        self._confidence = confidence
-        self._roles = {'': (self._model, open_vocabulary(self.get_parameter('model_name').value))}
+                                        'model_name', 'fallback_model_name'])
+        name = self.get_parameter('model_name').value
+        self._model = self.get_parameter('model_sha256').value or recognition_identity(name)[0]
+        # Each detector output topic is bound to exactly one recognizer identity; every frame carries the
+        # profile (and an open recognizer's query) it ran under on a third, exactly synchronized topic.
+        self._roles = {'': (self._model, open_vocabulary(name), model_spec(name)['backend'])}
         fallback = self.get_parameter('fallback_model_name').value
         if fallback:
-            self._roles['/fallback'] = (recognition_identity(fallback, confidence)[0], open_vocabulary(fallback))
+            self._roles['/fallback'] = (recognition_identity(fallback)[0], open_vocabulary(fallback),
+                                        model_spec(fallback)['backend'])
         self._transforms = Buffer()
         self._listener = TransformListener(self._transforms, self)
         self._map_context = {'ready': False}
@@ -92,7 +100,7 @@ class ObjectObservations(Node):
                     subscriber = message_filters.Subscriber(self, kind, topic, qos_profile=qos_profile_sensor_data)
                     stream[key] = message_filters.Cache(subscriber, size)
             self._streams[name] = stream
-        models = [model for model, _ in self._roles.values()]
+        models = [model for model, _, _ in self._roles.values()]
         if not all(valid_id(model) for model in models) or len(set(models)) != len(models):
             raise ValueError('configured model SHA-256 and camera identity are required')
         self._store = ObservationStore(self.get_parameter('database_path').value,
@@ -101,34 +109,46 @@ class ObjectObservations(Node):
         self._events = self.create_publisher(String, '/robot/observations/events', 10)
         self._synchronizers = []
         for name, binding in self._bindings.items():
-            for suffix, (model, queried) in self._roles.items():
+            for suffix, role in self._roles.items():
                 sources = [message_filters.Subscriber(self, Image, binding['prefix'] + suffix + '/source_image',
                                                       qos_profile=qos_profile_sensor_data),
                            message_filters.Subscriber(self, Detection2DArray, binding['prefix'] + suffix + '/detections',
+                                                      qos_profile=qos_profile_sensor_data),
+                           message_filters.Subscriber(self, PerceptionOperatingPoint,
+                                                      binding['prefix'] + suffix + '/operating_point',
                                                       qos_profile=qos_profile_sensor_data)]
-                if queried:
-                    sources.append(message_filters.Subscriber(self, LabelInfo, binding['prefix'] + suffix + '/query',
-                                                              qos_profile=qos_profile_sensor_data))
                 sync = message_filters.TimeSynchronizer(sources, 2)
-                sync.registerCallback(lambda image, found, query=None, camera=name, model=model, queried=queried:
-                                      self._capture(image, found, camera, model, query if queried else None))
+                sync.registerCallback(lambda image, found, point, camera=name, role=role:
+                                      self._capture(image, found, camera, role, point))
                 self._synchronizers.append(sync)
         self.create_service(QueryObservations, '/robot/observations/query', self._query)
         self.create_service(GetObservationEvidence, '/robot/observations/evidence', self._evidence)
         self.create_service(PinObservationEvidence, '/robot/observations/pin', self._pin)
         self.create_service(Trigger, '/robot/observations/status', self._status)
 
-    def _frame_query(self, image, label_info):
-        if label_info.header != image.header:
-            raise ValueError('frame query differs from the capture header')
-        # LabelInfo carries the threshold as float32.
-        if label_info.threshold != float(np.float32(self._confidence)):
-            raise ValueError('frame query threshold differs from the admitted operating point')
-        if [item.class_id for item in label_info.class_map] != list(range(len(label_info.class_map))):
-            raise ValueError('frame query classes are not in request order')
-        return recorded_query([item.class_name for item in label_info.class_map])
+    def _operating_point(self, image, point, role):
+        """The frame's own operating point, accepted only if it is the role's recognizer and canonical."""
+        model, queried, backend = role
+        if point.header != image.header:
+            raise ValueError('frame operating point differs from the capture header')
+        if point.model_sha256 != model:
+            raise ValueError('frame operating point names another recognizer')
+        profile = recorded_profile(bounded_json(point.profile_json, 'profile'), backend)
+        if queried != bool(point.query_json):
+            raise ValueError('frame query does not match the recognizer vocabulary')
+        query = recorded_query(bounded_json(point.query_json, 'query')) if queried else None
+        if not valid_id(point.input_sha256):
+            raise ValueError('frame operating point lacks its input artifact digest')
+        extras = bounded_json(point.detections_json or '[]', 'detection evidence')
+        run = bounded_json(point.run_json, 'provider run', 4096) if point.run_json else None
+        if run is not None and (not isinstance(run, dict) or set(run) - {'run_id', 'inference_id', 'proposals'}):
+            raise ValueError('frame provider run reference is malformed')
+        degraded = None
+        if point.degraded_reason:
+            degraded = {'reason': 'provider_unavailable', 'detail': point.degraded_reason[:512]}
+        return query, profile, extras, run, degraded, point.input_sha256
 
-    def _capture(self, image, detections, camera, model=None, label_info=None):
+    def _capture(self, image, detections, camera, role, point):
         stream = self._streams[camera]
         started = time.monotonic()
         stamp = image.header.stamp.sec * 10**9 + image.header.stamp.nanosec
@@ -138,8 +158,9 @@ class ObjectObservations(Node):
                 raise ValueError('capture timestamp is stale or in the future')
             if image.header.frame_id != self._bindings[camera]['optical_frame']:
                 raise ValueError('capture frame differs from tracked camera binding')
-            query = None if label_info is None else self._frame_query(image, label_info)
-            record, jpeg = observation(image, detections, model or self._model, camera, query)
+            query, profile, extras, run, degraded, input_sha256 = self._operating_point(image, point, role)
+            record, jpeg = observation(image, detections, role[0], camera, query, profile=profile, extras=extras,
+                                       run=run, degraded=degraded, input_sha256=input_sha256)
             record['camera_sha256'] = self._bindings[camera]['sha256']
             record['stationary'] = self._motion.stationary(stamp / 1e9, self._bindings[camera]['mount'] == 'arm')
             record['clock_domain'] = 'ros_sim_time' if self.get_parameter('use_sim_time').value else 'ros_system_time'
@@ -153,6 +174,7 @@ class ObjectObservations(Node):
                 return min(messages, key=lambda msg: abs((Time.from_msg(msg.header.stamp)-capture_time).nanoseconds)) if messages else None
             stream['geometry'].ground(record, image, nearest(stream['depth']), nearest(stream['info']),
                                   self._transforms, self._map_context)
+            abstentions(record, query)
             source_age = (self.get_clock().now().nanoseconds - stamp) / 1e9
             if not 0 <= source_age <= self._age:
                 raise ValueError('observation expired during ingestion')
