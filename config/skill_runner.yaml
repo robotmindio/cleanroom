@@ -1,0 +1,7 @@
+# lekiwi_rmf/skill_runner.py; the registry is config/robot_skills.yaml.
+skill_runner:
+  ros__parameters:
+    # Only qualified skills run. The acquisition protocol layers config/skill_acquisition.yaml
+    # (bringup skill_acquisition:=true) to evaluate experimental ones.
+    allow_experimental: false
+    max_observation_age_sec: 0.5

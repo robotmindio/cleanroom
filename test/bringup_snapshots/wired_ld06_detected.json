@@ -541,6 +541,23 @@
  {
   "arguments": [],
   "env": {},
+  "name": "skill_runner",
+  "namespace": "",
+  "node": "lekiwi_rmf/skill_runner",
+  "output": "screen",
+  "parameters": {
+   "allow_experimental": false,
+   "max_observation_age_sec": 0.5,
+   "use_sim_time": false
+  },
+  "remappings": [],
+  "respawn": true,
+  "respawn_delay": 2.0,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {},
   "name": "slam_astra_rgbd",
   "namespace": "",
   "node": "rtabmap_sync/rgbd_sync",

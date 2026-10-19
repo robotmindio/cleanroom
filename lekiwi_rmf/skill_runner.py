@@ -8,6 +8,9 @@ calibration or joint limits, and a finished run never claims the goal succeeded.
 """
 
 import json
+import os
+from pathlib import Path
+import sys
 import threading
 import time
 
@@ -27,6 +30,9 @@ from lekiwi_rmf.arm_trajectory import ARM_JOINTS
 from lekiwi_rmf.object_recognition import reject_parameter_changes
 from lekiwi_rmf.skills import arm_targets, catalog, load_registry, skill_parameters, verify_artifact
 
+# The LeRobot environment (scripts/install-lerobot-export.sh); ROS stays importable through PYTHONPATH.
+POLICY_RUNTIME = Path.home() / '.ros/lekiwi/lerobot-venv/bin/python'
+
 CAMERA_TOPICS = {'front': '/camera/front/image_raw', 'wrist': '/camera/wrist/image_raw',
                  'astra': '/camera/astra/color/image_raw'}
 
@@ -44,9 +50,13 @@ class LeRobotPolicy:
     """A trained LeRobot policy with its saved normalization, loaded from a verified checkpoint."""
 
     def __init__(self, path):
-        import torch
-        from lerobot.configs.policies import PreTrainedConfig
-        from lerobot.policies.factory import get_policy_class, make_pre_post_processors
+        try:
+            import torch
+            from lerobot.configs.policies import PreTrainedConfig
+            from lerobot.policies.factory import get_policy_class, make_pre_post_processors
+        except ImportError as error:
+            raise RuntimeError(f'LeRobot is not importable by {sys.executable}; '
+                               'run scripts/install-lerobot-export.sh') from error
         config = PreTrainedConfig.from_pretrained(path)
         self.torch = torch
         self.policy = get_policy_class(config.type).from_pretrained(path).eval()
@@ -220,7 +230,15 @@ class SkillRunner(Node):
         return result
 
 
+def use_policy_runtime():
+    """Re-exec in the LeRobot environment when it exists; torch loads only with the first policy."""
+    if POLICY_RUNTIME.is_file() and Path(sys.prefix) != POLICY_RUNTIME.parent.parent:
+        os.execve(POLICY_RUNTIME, [str(POLICY_RUNTIME), str(Path(sys.argv[0]).resolve()), *sys.argv[1:]],
+                  {**os.environ, 'PYTHONNOUSERSITE': '1'})
+
+
 def main(args=None):
+    use_policy_runtime()
     rclpy.init(args=args)
     node = None
     executor = MultiThreadedExecutor(num_threads=4)
