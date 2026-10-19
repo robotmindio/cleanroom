@@ -1485,3 +1485,33 @@ def test_applied_action_is_not_published_when_the_send_fails():
     node.record_link_loss = lambda _reason: None
     node._send_armed_command(_Stamp(), {"joint.pos": 3.0}, (0.0, 0.0, 0.0))
     assert published == []
+
+
+def _host_action(degrees=10.0, gripper=50.0, x=0.1, theta=30.0):
+    action = {f"{name}.pos": degrees for name in driver.ARM_JOINTS if name != "arm_gripper"}
+    return {**action, "arm_gripper.pos": gripper, "x.vel": x, "y.vel": 0.0, "theta.vel": theta}
+
+
+def test_applied_command_converts_hold_and_base_to_ros_units():
+    zeros = dict.fromkeys(driver.ARM_JOINTS, 0.0)
+    directions = dict.fromkeys(driver.ARM_JOINTS, 1.0)
+    message = driver.applied_command_message(
+        driver.rclpy.time.Time(nanoseconds=7).to_msg(), _host_action(), None, zeros, directions, 2.0, 0.5)
+    command = dict(zip(message.name, message.position))
+    assert command["arm_shoulder_pan"] == pytest.approx(math.radians(10.0))
+    assert command["base_x_vel"] == pytest.approx(0.2)
+    assert command["base_yaw_rate"] == pytest.approx(math.radians(30.0) * 0.5)
+    assert message.name[-3:] == ["base_x_vel", "base_y_vel", "base_yaw_rate"]
+
+
+def test_applied_command_uses_the_host_trajectory_sample_instead_of_the_stale_hold():
+    zeros = dict.fromkeys(driver.ARM_JOINTS, 0.0)
+    directions = dict.fromkeys(driver.ARM_JOINTS, 1.0)
+    point = types.SimpleNamespace(time=1.0, positions={"arm_elbow_flex": 1.0}, velocities=None, accelerations=None)
+    goal = driver.ArmGoal(host_id=1, host_session="s", start=0.0, names=("arm_elbow_flex",),
+                          start_positions={"arm_elbow_flex": 0.0}, points=[point], host_elapsed=1.0)
+    message = driver.applied_command_message(
+        driver.rclpy.time.Time(nanoseconds=7).to_msg(), _host_action(), goal, zeros, directions, 1.0, 1.0)
+    command = dict(zip(message.name, message.position))
+    assert command["arm_elbow_flex"] == pytest.approx(1.0)
+    assert command["arm_shoulder_pan"] == pytest.approx(math.radians(10.0))

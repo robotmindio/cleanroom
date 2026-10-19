@@ -19,7 +19,7 @@ import time
 
 # Requested motion, applied host action and measured state stay distinguishable.
 STATE_TOPICS = [
-    '/joint_states', '/arm/raw_joint_states', '/hardware/applied_action',
+    '/joint_states', '/arm/raw_joint_states', '/hardware/applied_action', '/hardware/applied_command',
     '/cmd_vel_safe', '/wheel/odometry', '/odom', '/tf', '/tf_static',
     '/safety/state', '/safety/arm_motion_permitted', '/safety/base_motion_permitted',
     '/safety/arm_stowed', '/episode/intervention',
@@ -83,7 +83,8 @@ def main():
         'started_at': datetime.datetime.now(datetime.UTC).isoformat(),
         'provenance': provenance(Path(__file__).resolve().parents[1]),
         'action_semantics': {
-            '/hardware/applied_action': 'exact host action after permission, limit and boundary gating; host units',
+            '/hardware/applied_action': 'exact host packet after gating, host units; during a host trajectory its arm keys are the superseded hold',
+            '/hardware/applied_command': 'applied command in ROS units: arm URDF radians (trajectory sample when one runs) and base m/s, rad/s',
             '/cmd_vel_safe': 'requested base twist after the collision monitor; not what the wheels received',
             '/joint_states': 'measured arm joints in URDF radians',
             '/episode/intervention': 'std_msgs/String marks published by a supervisor during the episode',
