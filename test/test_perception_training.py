@@ -227,7 +227,7 @@ def fake_training(tmp_path, dataset_root, heldout_authority='human', moved_label
     run = tmp_path / 'run'
     (run / 'model').mkdir(parents=True)
     base = yaml.safe_load((REPOSITORY / 'config/recognition_models.yaml').read_text())['rtdetr_v2_r18']
-    labels = [f'class{index}' for index in range(80)]
+    labels = [f'label{index}' for index in range(80)]
     if moved_label:
         labels[3] = 'moved'
     vocabulary = labels + ['checker card']
@@ -239,7 +239,7 @@ def fake_training(tmp_path, dataset_root, heldout_authority='human', moved_label
     manifest = {'kind': 'lekiwi_recognizer_training',
                 'artifact': {'path': 'model', 'spec': {'backend': 'rtdetr_v2', 'input_size': 384, 'prompt': '', 'files': files}},
                 'base': {'name': 'rtdetr_v2_r18', 'files': base['files']},
-                'vocabulary': {'labels': [f'class{index}' for index in range(80)] + ['checker card'], 'base_labels': 80,
+                'vocabulary': {'labels': [f'label{index}' for index in range(80)] + ['checker card'], 'base_labels': 80,
                                'new_labels': ['checker card']},
                 'dataset': {'root': str(dataset_root), 'dataset_id': 'cards', 'sha256': 'd' * 64, 'scenes_sha256': '5' * 64,
                             'heldout_authority': heldout_authority}}
