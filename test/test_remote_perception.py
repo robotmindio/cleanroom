@@ -17,7 +17,9 @@ from rclpy.context import Context
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.parameter import Parameter
+from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import Image
+from std_msgs.msg import String
 from vision_msgs.msg import Detection2DArray
 
 from lekiwi_rmf import object_recognition
@@ -202,8 +204,11 @@ def test_detector_serves_fallback_frames_on_fallback_topics_and_retries_primary_
         calls['fallback'] += 1
         return [[10, 10, 20, 20, .9, 'cup']]
 
-    recognizers = {'grounding_dino_tiny_gpu': SimpleNamespace(predict=primary, sha256='a' * 64),
-                   'rtdetr_v2_r18': SimpleNamespace(predict=fallback, sha256='b' * 64)}
+    recognizers = {'grounding_dino_tiny_gpu': SimpleNamespace(
+                       predict=primary, sha256='a' * 64, name='grounding_dino_tiny_gpu', labels=['a cup', 'a mug'],
+                       open_vocabulary=True),
+                   'rtdetr_v2_r18': SimpleNamespace(predict=fallback, sha256='b' * 64, name='rtdetr_v2_r18',
+                                                    labels=['cup', 'chair'], open_vocabulary=False)}
     monkeypatch.setattr(object_detector, 'Recognizer', lambda name, *args: recognizers[name])
     context = Context()
     rclpy.init(context=context)
@@ -211,6 +216,9 @@ def test_detector_serves_fallback_frames_on_fallback_topics_and_retries_primary_
         Parameter('model_name', value='grounding_dino_tiny_gpu'), Parameter('fallback_model_name', value='rtdetr_v2_r18'),
         Parameter('max_rate_hz', value=10.)])
     peer = Node('fallback_peer', context=context)
+    profiles = []
+    peer.create_subscription(String, '/robot/perception/profile', lambda msg: profiles.append(json.loads(msg.data)),
+                             QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
     source = peer.create_publisher(Image, '/camera/front/image_raw', 1)
     primary_out, fallback_out = [], []
     peer.create_subscription(Detection2DArray, '/robot/perception/front/detections', primary_out.append, 10)
@@ -228,7 +236,10 @@ def test_detector_serves_fallback_frames_on_fallback_topics_and_retries_primary_
         source.publish(image)
 
     try:
-        wait(lambda: source.get_subscription_count() == 1)
+        wait(lambda: source.get_subscription_count() == 1 and profiles)
+        # Fallback frames carry their own identity and closed catalogue; they never vouch for primary-only labels.
+        assert [(r['role'], r['model_sha256'], r['labels'], r['open_vocabulary']) for r in profiles[-1]['recognizers']] == [
+            ('primary', 'a' * 64, ['a cup', 'a mug'], True), ('fallback', 'b' * 64, ['cup', 'chair'], False)]
         deadline = time.monotonic() + 20
         while len(fallback_out) < 3:
             send()
@@ -261,7 +272,7 @@ def test_detector_without_fallback_rejects_unavailable_frames(monkeypatch):
     def unavailable(image):
         raise ProviderUnavailable('perception provider returned HTTP 503')
 
-    monkeypatch.setattr(object_detector, 'Recognizer', lambda *args: SimpleNamespace(predict=unavailable, sha256='a' * 64))
+    monkeypatch.setattr(object_detector, 'Recognizer', lambda *args: SimpleNamespace(predict=unavailable, sha256='a' * 64, name='x', labels=['cup'], open_vocabulary=False))
     context = Context()
     rclpy.init(context=context)
     node = object_detector.ObjectDetector(context=context)
@@ -281,7 +292,7 @@ def test_detector_without_fallback_rejects_unavailable_frames(monkeypatch):
 def test_fallback_must_differ_from_primary(monkeypatch):
     from lekiwi_rmf import object_detector
 
-    monkeypatch.setattr(object_detector, 'Recognizer', lambda *args: SimpleNamespace(predict=list, sha256='a' * 64))
+    monkeypatch.setattr(object_detector, 'Recognizer', lambda *args: SimpleNamespace(predict=list, sha256='a' * 64, name='x', labels=['cup'], open_vocabulary=False))
     context = Context()
     rclpy.init(context=context)
     try:

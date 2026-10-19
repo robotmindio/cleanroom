@@ -21,6 +21,8 @@
   mapping sequence.
 - [ROS and MCP exploration](exploration.md): explicit navigation tasks, progress,
   cancellation, revisits and persistent mapping quotas.
+- [Active search](active-search.md): per-query coverage, negative evidence,
+  information-gain viewpoints, replanning and honest termination reports.
 - [Safety inputs and motor health](safety.md): implementation status, current
   diagnostic behavior, and the physical validation process.
 - [Network security](../README.md#network-security): exposed ports and their

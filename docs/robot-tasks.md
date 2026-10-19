@@ -1,6 +1,6 @@
 # Robot task contract
 
-`robot_tasks` adapts the existing Nav2 and Explore actions. It owns no motors,
+`robot_tasks` adapts the existing Nav2, Explore and Search actions. It owns no motors,
 perception pipeline or workflow engine. Fiber remains the workflow/policy owner;
 ROS owns physical execution, collision checking and the local motion guards.
 
@@ -24,6 +24,15 @@ Direct legacy Nav2 clients retain their existing behavior.
 policy. Exploration's recoverable pauses do not finish the task or spend its
 active-time budget. Fixed-map/RMF profiles disable exploration; RMF profiles
 also disable managed navigation so the fleet remains the navigation owner.
+`search` accepts a required `query` (a native label of the detector profile
+published on `/robot/perception/profile`), an optional map-frame `region`
+`{x, y, radius_m}`, and `max_duration_sec`, `max_travel_m` and
+`target_coverage`; see [active search](active-search.md). It runs in the Explorer
+on the same guarded Nav2 path, so it is unavailable wherever exploration is, and
+`allow_search` in `config/exploration.yaml` keeps it off until the perception
+operating point is qualified. A search `succeeded` only when it found the label
+or reached its target coverage; budget, inaccessible space and missing
+instruments are `failed` with the outcome and an honest coverage report.
 
 States are `starting`, `running`, `paused`, `canceling`, `succeeded`, `canceled`,
 `failed` and `unknown`. Only `succeeded`, `canceled` and `failed` are terminal.
@@ -86,7 +95,7 @@ matching option). Never bind the unauthenticated bridge to a public
 interface. Fiber's integration URL must match the compute host's tailnet IP;
 its encrypted integration configuration is maintained through Fiber's API.
 
-This contract exposes navigation/exploration only. It does not qualify household
+This contract exposes navigation, exploration and observation by base motion only. It does not qualify household
 manipulation, docking, unrestricted unattended operation or learned skills.
 
 

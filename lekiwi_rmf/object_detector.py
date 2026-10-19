@@ -10,7 +10,7 @@ from rclpy.clock import Clock, ClockType, JumpThreshold
 from rclpy.duration import Duration
 from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from collections import deque
@@ -18,6 +18,7 @@ import json
 import threading
 import time
 from sensor_msgs.msg import Image
+from std_msgs.msg import String
 from vision_msgs.msg import Detection2D, Detection2DArray, ObjectHypothesisWithPose
 
 from lekiwi_rmf.object_recognition import ProviderUnavailable, Recognizer, reject_parameter_changes
@@ -112,6 +113,17 @@ class ObjectDetector(Node):
             self.create_subscription(Image, binding['image_topic'],
                 lambda message, camera=name: self._receive(message, camera), qos,
                 callback_group=self._receipt_group)
+        # The operating points in force. Each frame is stored under the model_sha256 that served it, so a
+        # consumer credits a frame only for labels in that recognizer's own catalogue.
+        self._profile = self.create_publisher(String, '/robot/perception/profile',
+                                              QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
+        recognizers = [('primary', self._detector)] + ([('fallback', self._fallback)] if self._fallback else [])
+        self._profile.publish(String(data=json.dumps({
+            'schema': 1, 'cameras': {name: binding['sha256'] for name, binding in self._bindings.items()},
+            'recognizers': [{'role': role, 'model_sha256': recognizer.sha256, 'model_name': recognizer.name,
+                             'confidence_threshold': confidence, 'labels': list(recognizer.labels),
+                             'open_vocabulary': recognizer.open_vocabulary}
+                            for role, recognizer in recognizers]})))
         self._diagnostics = self.create_publisher(DiagnosticArray, '/diagnostics', 10)
         self.create_timer(1., self._health, callback_group=self._receipt_group)
         self.create_timer(1 / rate, self._infer, clock=Clock(clock_type=ClockType.STEADY_TIME),
