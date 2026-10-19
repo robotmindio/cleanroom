@@ -113,6 +113,30 @@
     "arguments": [],
     "env": {
      "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
+     "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf",
+     "OPENBLAS_NUM_THREADS": "1"
+    },
+    "name": "spatial_memory",
+    "namespace": "",
+    "node": "lekiwi_rmf/spatial_memory",
+    "output": "screen",
+    "parameters": {
+     "max_revisions": 2000,
+     "observer_ref": "lekiwi",
+     "retention_sec": 604800.0,
+     "rtabmap_database": "$(env HOME)/.ros/lekiwi_rtabmap_sim.db",
+     "site_ref": "home",
+     "use_sim_time": true
+    },
+    "remappings": [],
+    "respawn": true,
+    "respawn_delay": 2.0,
+    "ros_arguments": []
+   },
+   {
+    "arguments": [],
+    "env": {
+     "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
      "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
     },
     "name": "rtabmap",

@@ -1,0 +1,13 @@
+spatial_memory:
+  ros__parameters:
+    # The physical place this robot maps. Every map, revision and anchor belongs to
+    # it; observations from another site never mix with this one's coordinates.
+    # Set it per deployment here; a store refuses to reopen under another site.
+    site_ref: home
+    # Producer identity in revisions and sessions; another observer of the same
+    # site uses its own reference and an alignment to this robot's map.
+    observer_ref: lekiwi
+    # Matches the observation store's retention: older captures no longer exist,
+    # so their capture revisions are not needed for reprojection.
+    retention_sec: 604800.0
+    max_revisions: 2000

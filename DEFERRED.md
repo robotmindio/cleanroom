@@ -260,3 +260,14 @@ artifacts:
   disarm and the `DISARMED -> LINK_LOST -> DISARMED` state sequence.
 - Wrist-roll travel, LAN endpoint reachability, RViz scaling and the installed
   driver.
+
+## Spatial memory qualification
+
+Owner: robot integrator with SLAM running at the deployment site.
+
+Done when a live or replayed RTAB-Map loop closure leaves an unmoved object at
+one place in the newest revision while its capture-revision coordinates differ,
+a localization restart keeps the `map_ref` with a new session, a mapping restart
+that later closes a loop records a merge whose captures project into the
+surviving map, relinked anchors stay projectable, and the capture/graph race is
+measured. Tracked in [#91](https://github.com/robotmindio/cleanroom/issues/91).
