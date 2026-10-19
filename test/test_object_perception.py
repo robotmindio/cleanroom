@@ -181,7 +181,7 @@ def test_diagnostics_reads_clock_before_frame_lock_to_avoid_jump_deadlock():
         return ClockTime(nanoseconds=100000000000)
     state = SimpleNamespace(get_clock=lambda: SimpleNamespace(now=now), _frame_lock=lock,
                             _stats={'front': {'reason': '', 'published_stamp': 0}},
-                            _durations={'front': []}, _detector=SimpleNamespace(sha256='a' * 64),
+                            _durations={'front': []}, _detector=SimpleNamespace(sha256='a' * 64), _fallback=None,
                             _bindings={'front': {'sha256': 'b' * 64}}, _last_stamp={},
                             _frames={}, _age=2., _diagnostics=SimpleNamespace(publish=published.append))
     ObjectDetector._health(state)
