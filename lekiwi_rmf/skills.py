@@ -23,6 +23,10 @@ STATUSES = ('experimental', 'qualified')
 BASE_COMMANDS = ('base_x_vel', 'base_y_vel', 'base_yaw_rate')
 CAMERAS = ('front', 'wrist', 'astra')
 PARAMETER_TYPES = {'number': (int, float), 'boolean': (bool,), 'string': (str,)}
+ARTIFACT_SUFFIXES = ('.safetensors', '.json')
+MAX_JSON_BYTES = 1024**2
+# Keys through which Hugging Face, LeRobot and Hydra-style configurations name code to import.
+IMPORT_KEYS = frozenset({'class', 'auto_map', '_target_', 'trust_remote_code', 'custom_pipeline'})
 
 
 @dataclass(frozen=True)
@@ -105,13 +109,48 @@ def catalog(registry, allow_experimental=False):
     return [skill.catalog() for skill in registry.values() if skill.status == 'qualified' or allow_experimental]
 
 
+def _import_keys(value):
+    if isinstance(value, dict):
+        return (set(value) & IMPORT_KEYS) | {key for item in value.values() for key in _import_keys(item)}
+    if isinstance(value, list):
+        return {key for item in value for key in _import_keys(item)}
+    return set()
+
+
 def verify_artifact(skill):
-    """The implementation that runs is exactly the one that was evaluated."""
-    weights = skill.checkpoint / 'model.safetensors'
+    """The implementation that runs is exactly the one that was evaluated, and loading it runs no code.
+
+    A checkpoint is data: tensors in safetensors and configuration in JSON. Pickle-based weights
+    (.bin, .pt, .pth, .ckpt, .pkl), Python files, links and subdirectories are refused, and no JSON
+    file may name a class to import: LeRobot imports a processor step's `class` path and instantiates
+    it with the step's config, which would run arbitrary installed code. Registered `registry_name`
+    steps resolve only to LeRobot's own processors.
+    """
+    directory = skill.checkpoint
+    if directory.is_symlink() or not directory.is_dir():
+        raise ValueError(f'{skill.skill_id}: checkpoint must be a real directory')
+    for path in sorted(directory.iterdir()):
+        if path.is_symlink() or not path.is_file() or path.suffix not in ARTIFACT_SUFFIXES:
+            raise ValueError(f'{skill.skill_id}: {path.name} is not a safetensors or JSON file')
+        if path.stat().st_mode & 0o002 or directory.stat().st_mode & 0o002:
+            raise ValueError(f'{skill.skill_id}: the checkpoint must not be world-writable')
+        if path.suffix == '.json':
+            if path.stat().st_size > MAX_JSON_BYTES:
+                raise ValueError(f'{skill.skill_id}: {path.name} exceeds {MAX_JSON_BYTES} bytes')
+            try:
+                keys = _import_keys(json.loads(path.read_text()))
+            except (RecursionError, UnicodeDecodeError, ValueError) as error:
+                raise ValueError(f'{skill.skill_id}: {path.name} is not valid JSON') from error
+            if keys:
+                raise ValueError(f'{skill.skill_id}: {path.name} names code to import ({", ".join(sorted(keys))})')
+    # DEBT: the registry pins model.safetensors only, so the JSON configuration and the processors'
+    # normalization tensors can change after evaluation without changing the digest; they cannot run code,
+    # but they can change the actions. Pin a manifest of every file once registration writes one (#101).
+    weights = directory / 'model.safetensors'
     with weights.open('rb') as stream:
         if hashlib.file_digest(stream, 'sha256').hexdigest() != skill.weights_sha256:
             raise ValueError(f'{skill.skill_id}: weights do not match the registered digest')
-    return skill.checkpoint
+    return directory
 
 
 def skill_parameters(skill, text):

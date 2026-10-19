@@ -8,10 +8,12 @@ calibration or joint limits, and a finished run never claims the goal succeeded.
 """
 
 import json
+import os
 import threading
 import time
 
 from control_msgs.action import FollowJointTrajectory
+from diagnostic_msgs.msg import DiagnosticArray
 import numpy as np
 import rclpy
 from rclpy.action import ActionClient, ActionServer, CancelResponse, GoalResponse
@@ -24,8 +26,12 @@ from trajectory_msgs.msg import JointTrajectoryPoint
 
 from lekiwi_rmf.action import RunSkill
 from lekiwi_rmf.arm_trajectory import ARM_JOINTS
+from lekiwi_rmf.latency_budget import LatencyBudget
 from lekiwi_rmf.object_recognition import reject_parameter_changes
 from lekiwi_rmf.skills import arm_targets, catalog, load_registry, skill_parameters, verify_artifact
+
+# Chunks in a row that may miss the control age limit before the run fails.
+MAX_CONSECUTIVE_LATE = 3
 
 CAMERA_TOPICS = {'front': '/camera/front/image_raw', 'wrist': '/camera/wrist/image_raw',
                  'astra': '/camera/astra/color/image_raw'}
@@ -44,12 +50,18 @@ class LeRobotPolicy:
     """A trained LeRobot policy with its saved normalization, loaded from a verified checkpoint."""
 
     def __init__(self, path):
+        # Everything the policy needs is in the verified checkpoint; nothing is fetched while loading it.
+        os.environ['HF_HUB_OFFLINE'] = '1'
         import torch
         from lerobot.configs.policies import PreTrainedConfig
         from lerobot.policies.factory import get_policy_class, make_pre_post_processors
         config = PreTrainedConfig.from_pretrained(path)
+        if getattr(config, 'pretrained_backbone_weights', None):
+            # The checkpoint's state dict replaces the backbone, so torchvision's download would only fetch
+            # unpinned weights from the network before they are overwritten.
+            config.pretrained_backbone_weights = None
         self.torch = torch
-        self.policy = get_policy_class(config.type).from_pretrained(path).eval()
+        self.policy = get_policy_class(config.type).from_pretrained(path, config=config).eval()
         self.pre, self.post = make_pre_post_processors(self.policy.config, pretrained_path=str(path))
         self.image_shapes = {name: tuple(feature.shape) for name, feature in self.policy.config.input_features.items()
                              if name.startswith('observation.images.')}
@@ -86,6 +98,8 @@ class SkillRunner(Node):
         if not 0 < self._max_age <= 2:
             raise ValueError('max_observation_age_sec must be in (0, 2]')
         self._policy_factory, self._policies = policy_factory, {}
+        # A chunk computed from an observation older than max_observation_age_sec never moves the arm.
+        self._budget = LatencyBudget('skill_control', self._max_age)
         self._lock, self._busy = threading.Lock(), False
         self._joints, self._images = None, {}
         group = ReentrantCallbackGroup()
@@ -97,6 +111,13 @@ class SkillRunner(Node):
                                  callback_group=group)
         self._server = ActionServer(self, RunSkill, '/robot/skills/run', self._execute, goal_callback=self._accept,
                                     cancel_callback=lambda _goal: CancelResponse.ACCEPT, callback_group=group)
+        self._diagnostics = self.create_publisher(DiagnosticArray, '/diagnostics', 10)
+        self.create_timer(1., self._health, callback_group=group)
+
+    def _health(self):
+        message = DiagnosticArray(status=[self._budget.status()])
+        message.header.stamp = self.get_clock().now().to_msg()
+        self._diagnostics.publish(message)
 
     def catalog(self):
         return catalog(self._registry, self._experimental)
@@ -130,11 +151,18 @@ class SkillRunner(Node):
             self._busy = True
         return GoalResponse.ACCEPT
 
+    @staticmethod
+    def _stamp(message):
+        return message.header.stamp.sec + message.header.stamp.nanosec * 1e-9
+
+    def _now(self):
+        return self.get_clock().now().nanoseconds * 1e-9
+
     def _age(self, message):
-        stamp = message.header.stamp.sec + message.header.stamp.nanosec * 1e-9
-        return self.get_clock().now().nanoseconds * 1e-9 - stamp
+        return self._now() - self._stamp(message)
 
     def _observation(self, skill):
+        """Measured joints, camera pixels and the stamp (s) of the oldest input they came from."""
         with self._lock:
             joints, images = self._joints, {camera: self._images.get(camera) for camera in skill.cameras}
         if joints is None or not 0 <= self._age(joints) <= self._max_age:
@@ -142,12 +170,14 @@ class SkillRunner(Node):
         measured = dict(zip(joints.name, joints.position))
         if set(ARM_JOINTS) - set(measured):
             raise RuntimeError('joint state lacks arm joints')
-        pixels = {}
+        pixels, oldest = {}, self._stamp(joints)
         for camera, message in images.items():
             if message is None or not 0 <= self._age(message) <= self._max_age:
                 raise RuntimeError(f'{camera} image is missing or stale')
             pixels[camera] = rgb_pixels(message)
-        return measured, pixels
+            oldest = min(oldest, self._stamp(message))
+        self._budget.record('sensor_age', self._now() - oldest)
+        return measured, pixels, oldest
 
     def _wait(self, future, timeout, goal_handle=None):
         deadline = time.monotonic() + timeout
@@ -167,6 +197,7 @@ class SkillRunner(Node):
             seconds = index / skill.fps
             point.time_from_start.sec, point.time_from_start.nanosec = int(seconds), int(seconds % 1 * 1e9)
             goal.trajectory.points.append(point)
+        sent = time.monotonic()
         handle = self._wait(self._arm.send_goal_async(goal), 5.0)
         if handle is None or not handle.accepted:
             raise RuntimeError('arm controller rejected the chunk (disarmed, no permission or invalid targets)')
@@ -174,12 +205,13 @@ class SkillRunner(Node):
         if result is None:
             self._wait(handle.cancel_goal_async(), 5.0)
             return False
+        self._budget.record('execution', time.monotonic() - sent)
         if result.result.error_code != FollowJointTrajectory.Result.SUCCESSFUL:
             raise RuntimeError(f'arm chunk failed: {result.result.error_string or result.result.error_code}')
         return True
 
     def _execute(self, goal_handle):
-        request, started, chunks = goal_handle.request, time.monotonic(), 0
+        request, started, chunks, late, consecutive = goal_handle.request, time.monotonic(), 0, 0, 0
         result, detail, last = RunSkill.Result(), '', None
         try:
             skill, parameters = self._admitted(request)
@@ -191,14 +223,26 @@ class SkillRunner(Node):
             while time.monotonic() - started < skill.max_duration_sec:
                 if goal_handle.is_cancel_requested:
                     raise InterruptedError
-                measured, images = self._observation(skill)
+                measured, images, observed = self._observation(skill)
+                computing = time.monotonic()
                 chunk = policy.chunk([measured[name] for name in ARM_JOINTS], images, task)
+                self._budget.record('inference', time.monotonic() - computing)
+                if not self._budget.fresh(self._now() - observed):
+                    # Too late for control: the arm has moved on since this observation. Observe again,
+                    # and stop when the policy cannot keep up instead of idling through the run.
+                    late, consecutive = late + 1, consecutive + 1
+                    if consecutive >= MAX_CONSECUTIVE_LATE:
+                        raise RuntimeError('policy chunks repeatedly arrived after max_observation_age_sec')
+                    continue
+                consecutive = 0
                 rows = arm_targets(skill, measured, chunk)
                 if not self._send_chunk(skill, rows, goal_handle):
                     raise InterruptedError
                 chunks, last = chunks + 1, rows[-1]
                 goal_handle.publish_feedback(RunSkill.Feedback(
                     stage='executing', chunks_executed=chunks, elapsed_sec=time.monotonic() - started))
+            if late and not chunks:
+                raise RuntimeError('every policy chunk arrived after max_observation_age_sec')
             result.outcome = 'finished'
             goal_handle.succeed()
         except InterruptedError:
@@ -215,7 +259,7 @@ class SkillRunner(Node):
         result.result_json = json.dumps({
             'skill_id': request.skill_id, 'version': skill.version if skill else None,
             'weights_sha256': skill.weights_sha256 if skill else None, 'chunks_executed': chunks,
-            'elapsed_sec': time.monotonic() - started, 'last_targets': last,
+            'elapsed_sec': time.monotonic() - started, 'last_targets': last, 'late_chunks': late,
             'verification': 'not performed by the runner'}, sort_keys=True)
         return result
 
