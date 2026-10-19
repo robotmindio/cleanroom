@@ -1,0 +1,6 @@
+# Bounded spatial query: current, maps, revision (anchor table page), anchor or project captures.
+string request_json
+---
+bool success
+string detail
+string response_json

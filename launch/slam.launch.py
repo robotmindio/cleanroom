@@ -103,6 +103,17 @@ def _slam(context):
         output="screen",
         respawn=True, respawn_delay=2.0,
     )
+    # Each optimized graph becomes a map revision; captures are anchored to its nodes.
+    spatial_memory = Node(
+        package="lekiwi_rmf", executable="spatial_memory", name="spatial_memory",
+        parameters=[PathJoinSubstitution([package, "config", "spatial_memory.yaml"]), {
+            "use_sim_time": topology.sim,
+            "rtabmap_database": database,
+        }],
+        additional_env={"OPENBLAS_NUM_THREADS": "1"},
+        output="screen",
+        respawn=True, respawn_delay=2.0,
+    )
     sensor_gate = Node(
         package="lekiwi_rmf", executable="readiness_gate", name="wait_for_slam_sensor",
         parameters=[{
@@ -112,7 +123,7 @@ def _slam(context):
         }],
         output="screen",
     )
-    actions.extend(gated(sensor_gate, "SLAM sensor", [rtabmap, robot_explorer]))
+    actions.extend(gated(sensor_gate, "SLAM sensor", [rtabmap, robot_explorer, spatial_memory]))
     if camera_on:
         # The front camera uses visible range returns. Astra uses its own
         # dense registered depth, sent losslessly from the device at 2 Hz.

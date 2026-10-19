@@ -440,6 +440,26 @@ class SearchSession:
             self.discarded_rebases += 1
             self.revise('map raster changed; earlier coverage discarded', [])
 
+    def reproject(self, captures, grid, revision):
+        """Rebuild coverage from the capture log after spatial memory moved it into a new map revision.
+
+        Sightings during the search keep their record; coverage and prior
+        sightings are recomputed, so evidence follows the corrected map instead
+        of staying at coordinates the optimization moved. Return True when a
+        reprojected capture found the label.
+        """
+        coverage = self.coverage
+        self.coverage = QueryCoverage(self.label, coverage.models, coverage.profile, coverage.negative.shape,
+                                      coverage.resolution, coverage.origin)
+        self.prior_sightings.clear()
+        self.prior_count = 0
+        known = {record['observation_id'] for record in self.found}
+        self.found = []
+        for capture in captures:
+            self.integrate(capture, grid)
+        self.revise(f'map revision {revision}: coverage reprojected from {len(captures)} anchored captures', [])
+        return any(record['observation_id'] not in known for record in self.found)
+
     def integrate(self, capture, grid):
         """Return True when this capture found the label during the search."""
         matches = self.coverage.add(capture, grid)

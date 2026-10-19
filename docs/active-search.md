@@ -39,8 +39,15 @@ A visit, a provider failure, a frame without pose, or a capture from another
 model proves nothing. An image box without depth is a bearing, so every cell
 along it remains a possible location. Coverage is a per-query grid bounded by
 the map's cell limit, built from a bounded log of posed captures
-(`search_capture_log`); old store records whose capture-time transform has
-expired contribute only metric map positions.
+(`search_capture_log`). A capture's pose is its recorded capture-time `map_pose`,
+projected by [spatial memory](spatial-memory.md) into the current map revision.
+A record without one falls back to TF while TF still holds its time.
+
+When SLAM revises the map, every anchored capture in the log is projected into
+the new revision and the query's coverage and prior sightings are rebuilt from
+them, so evidence moves with the corrected map. Captures without a recorded map
+pose cannot be placed in the new revision and leave the log
+(`unanchored_after_revision` in the rejection counts).
 
 ## Choosing viewpoints
 
@@ -83,7 +90,8 @@ searched. A sighting from before the search start is a prior, never a result.
 
 - Occlusion uses the 2D occupancy map at integration time. Objects above or
   below the lidar plane can be hidden by furniture the map does not contain.
-- A SLAM optimization replans but does not reproject earlier coverage.
+- Reprojection moves coverage with the graph node each capture was anchored to;
+  anchor-pose uncertainty is not added to the evidence.
 - Optical roll is ignored and travel cost is a straight line; Nav2 validates
   the real route.
 - Physical qualification on the robot is outstanding; tracked in

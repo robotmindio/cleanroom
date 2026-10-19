@@ -8,7 +8,7 @@ find_package(geometry_msgs REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME} "action/Explore.action" "action/RunSkill.action" "action/Search.action"
   "srv/SubmitTask.srv" "srv/GetTask.srv" "srv/CancelTask.srv"
   "srv/QueryObservations.srv" "srv/GetObservationEvidence.srv" "srv/PinObservationEvidence.srv"
-  "srv/SetPerceptionQuery.srv" DEPENDENCIES geometry_msgs)
+  "srv/QuerySpatial.srv" "srv/SetPerceptionQuery.srv" DEPENDENCIES geometry_msgs)
 ament_export_dependencies(rosidl_default_runtime)
 option(LEKIWI_BUILD_COMPUTE "Build compute-only Gazebo and MoveIt plugins" ON)
 if(LEKIWI_BUILD_COMPUTE)
@@ -46,6 +46,7 @@ install(PROGRAMS lekiwi_rmf/exploration_owner_guard.py DESTINATION lib/${PROJECT
 install(PROGRAMS lekiwi_rmf/task_gateway.py DESTINATION lib/${PROJECT_NAME} RENAME robot_tasks)
 install(PROGRAMS lekiwi_rmf/object_detector.py DESTINATION lib/${PROJECT_NAME} RENAME object_detector)
 install(PROGRAMS lekiwi_rmf/object_observation_node.py DESTINATION lib/${PROJECT_NAME} RENAME object_observations)
+install(PROGRAMS lekiwi_rmf/spatial_memory_node.py DESTINATION lib/${PROJECT_NAME} RENAME spatial_memory)
 install(PROGRAMS lekiwi_rmf/skill_runner.py DESTINATION lib/${PROJECT_NAME} RENAME skill_runner)
 install(DIRECTORY thirdparty/opencv_yolox DESTINATION share/${PROJECT_NAME}/thirdparty)
 # install(PROGRAMS) accepts a single RENAME value, so each renamed script gets its own call.
@@ -232,6 +233,9 @@ if(BUILD_TESTING)
     add_lekiwi_pytest(test_object_perception)
     add_lekiwi_pytest(test_object_geometry)
     add_lekiwi_pytest(test_object_observation_ros)
+    add_lekiwi_pytest(test_spatial_anchors)
+    add_lekiwi_pytest(test_spatial_memory_ros)
+    add_lekiwi_pytest(test_search_reprojection_ros)
     add_lekiwi_pytest(test_remote_perception)
     add_lekiwi_pytest(test_perception_query)
     add_lekiwi_pytest(test_episode_export)

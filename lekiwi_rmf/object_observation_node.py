@@ -2,6 +2,7 @@
 """Collect any standard ROS 2 detector's exactly synchronized image observations."""
 
 import base64
+from collections import deque
 import json
 import math
 from pathlib import Path
@@ -21,7 +22,7 @@ from sensor_msgs.msg import Image, CameraInfo, JointState
 from nav_msgs.msg import Odometry
 from rclpy.time import Time
 from rclpy.qos import QoSProfile, DurabilityPolicy
-from tf2_ros import Buffer, TransformListener
+from tf2_ros import Buffer, TransformException, TransformListener
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
 from vision_msgs.msg import Detection2DArray, LabelInfo
@@ -30,6 +31,7 @@ from lekiwi_rmf.object_observations import ObservationStore, observation, valid_
 from lekiwi_rmf.object_geometry import ObjectGeometry
 from lekiwi_rmf.object_cameras import camera_bindings
 from lekiwi_rmf.observation_motion import ObservationMotion
+from lekiwi_rmf.spatial_anchors import SCHEMA as SPATIAL_SCHEMA, Transform, valid_ref
 from lekiwi_rmf.object_recognition import open_vocabulary, recognition_identity, reject_parameter_changes
 from lekiwi_rmf.perception_query import recorded_query
 from lekiwi_rmf.srv import GetObservationEvidence, QueryObservations, PinObservationEvidence
@@ -67,6 +69,10 @@ class ObjectObservations(Node):
         self._listener = TransformListener(self._transforms, self)
         self._map_context = {'ready': False}
         self.create_subscription(String, '/robot/map_context', self._map,
+                                 QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
+        # Recent map revisions, so a capture takes the revision its TF was solved in, not a later one.
+        self._spatial = deque(maxlen=16)
+        self.create_subscription(String, '/robot/spatial/revision', self._spatial_revision,
                                  QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
         self._motion = ObservationMotion()
         self.create_subscription(Odometry, '/wheel/odometry', self._motion.odom, qos_profile_sensor_data)
@@ -153,6 +159,9 @@ class ObjectObservations(Node):
                 return min(messages, key=lambda msg: abs((Time.from_msg(msg.header.stamp)-capture_time).nanoseconds)) if messages else None
             stream['geometry'].ground(record, image, nearest(stream['depth']), nearest(stream['info']),
                                   self._transforms, self._map_context)
+            record['map_pose'], reason = self._map_pose(image.header)
+            if reason:
+                record['map_pose_unavailable_reason'] = reason
             source_age = (self.get_clock().now().nanoseconds - stamp) / 1e9
             if not 0 <= source_age <= self._age:
                 raise ValueError('observation expired during ingestion')
@@ -197,6 +206,44 @@ class ObjectObservations(Node):
             self._map_context = value
         except (ValueError, TypeError, RecursionError):
             self._map_context = {'ready': False, 'reason': 'invalid map context'}
+
+    def _spatial_revision(self, message):
+        try:
+            value = json.loads(message.data)
+            if (not isinstance(value, dict) or value.get('schema') != SPATIAL_SCHEMA
+                    or not all(valid_ref(value.get(key)) for key in ('site_ref', 'map_ref', 'revision'))
+                    or type(value.get('created_at_unix_sec')) not in (int, float)
+                    or not isinstance(value.get('session'), dict) or not valid_ref(value['session'].get('session'))):
+                raise ValueError('invalid spatial revision')
+        except (ValueError, TypeError, RecursionError):
+            self.get_logger().warning('spatial revision rejected', throttle_duration_sec=10)
+            return
+        if self._spatial and value['session']['session'] != self._spatial[-1]['session']['session']:
+            self._spatial.clear()  # A new localization session never inherits the old session's corrections.
+        self._spatial.append(value)
+
+    def _map_pose(self, header):
+        """Capture-time ``T_map_camera`` with the map revision it was solved in."""
+        stamp = header.stamp.sec + header.stamp.nanosec / 1e9
+        revisions = [value for value in self._spatial if value['created_at_unix_sec'] <= stamp]
+        if not revisions:
+            return None, 'no_map_revision_at_capture'
+        revision = revisions[-1]
+        if revision['session'].get('map_ref') is None:
+            return None, 'not_localized'
+        try:
+            transform = self._transforms.lookup_transform('map', header.frame_id, Time.from_msg(header.stamp))
+        except TransformException:
+            return None, 'historical_transform_unavailable'
+        t, q = transform.transform.translation, transform.transform.rotation
+        try:
+            pose = Transform.create([t.x, t.y, t.z], [q.x, q.y, q.z, q.w])
+        except ValueError:
+            return None, 'invalid_map_transform'
+        return {'schema': SPATIAL_SCHEMA, 'site_ref': revision['site_ref'], 'map_ref': revision['map_ref'],
+                'revision': revision['revision'], 'localization_session': revision['session']['session'],
+                'frame_id': 'map', 'child_frame_id': header.frame_id, 'pose': pose.to_dict(),
+                'source': 'tf_at_capture'}, ''
 
     def _query(self, request, response):
         try:
