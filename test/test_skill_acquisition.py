@@ -457,12 +457,6 @@ def test_bringup_admits_experimental_skills_only_for_acquisition(acquisition):
         runners = find_nodes(resolve_bringup(profile=profile, skill_acquisition=acquisition), name='skill_runner')
         assert len(runners) == 1 and runners[0]['respawn']
         assert runners[0]['parameters']['allow_experimental'] is (acquisition == 'true')
-    # Scene resets and ground truth exist only in simulation, and only for the acquisition protocol.
-    bridges = find_nodes(resolve_bringup(profile='sim', skill_acquisition=acquisition), name='sim_scene_bridge')
-    assert len(bridges) == (acquisition == 'true')
-    if bridges:
-        assert '/world/cleanroom/dynamic_pose/info@tf2_msgs/msg/TFMessage[gz.msgs.Pose_V' in bridges[0]['arguments']
-    assert not find_nodes(resolve_bringup(profile='split', skill_acquisition=acquisition), name='sim_scene_bridge')
 
 
 def test_runner_uses_the_policy_environment_without_importing_torch_at_startup(monkeypatch, tmp_path):

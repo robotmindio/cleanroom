@@ -5,6 +5,7 @@ import importlib.util
 import json
 import math
 from pathlib import Path
+import re
 import threading
 import time
 from types import SimpleNamespace
@@ -213,3 +214,95 @@ def test_the_simulated_arm_publishes_its_applied_command_in_ros_units():
         assert latest['arm_elbow_flex'] == pytest.approx(0.4) and latest['arm_shoulder_pan'] == 0.0
     finally:
         release_graph(executor=executor, thread=thread, nodes=(controller, peer), context=context)
+
+
+GZ_POSE = '''
+Requesting state for world [cleanroom]...
+
+Model: [7]
+  - Name: floor_block_block
+  - Pose [ XYZ (m) ] [ RPY (rad) ]:
+    [-3.700000 -2.510000 0.015000]
+    [0.000000 -0.000000 0.250000]
+'''
+
+
+def test_ground_truth_is_read_by_entity_name_from_gazebo():
+    assert sim_scene.parse_model_pose(GZ_POSE) == [-3.7, -2.51, 0.015, 0.25]
+    assert sim_scene.parse_model_pose('No model named <floor_block_block> was found') is None
+    with pytest.raises(ValueError, match='malformed'):
+        sim_scene.parse_model_pose(GZ_POSE.replace('0.015000', 'nan'))
+
+
+class FakeGazebo:
+    """The gz CLI against a world holding the robot and, once created, the scene's block."""
+
+    def __init__(self, scene_value):
+        self.scene, self.calls = scene_value, []
+        x, y, yaw = scene_value['robot']['start']
+        self.models = {'lekiwi_1': [x, y, 0.0, yaw]}
+
+    def __call__(self, command, **kwargs):
+        self.calls.append(command)
+        if command[1] == 'model':
+            pose = self.models.get(command[3])
+            text = 'No model named' if pose is None else GZ_POSE.replace('-3.700000 -2.510000 0.015000', ' '.join(
+                f'{value:.6f}' for value in pose[:3])).replace('0.250000', f'{pose[3]:.6f}')
+            return SimpleNamespace(returncode=0, stdout=text, stderr='')
+        request = command[command.index('--req') + 1]
+        name = 'floor_block_block'
+        pose = request.rsplit("'", 1)[-1]  # after the quoted SDF, if any
+        x, y, z, qz, qw = map(float, re.search(
+            r'x: ([-0-9.e]+), y: ([-0-9.e]+), z: ([-0-9.e]+)}.*z: ([-0-9.e]+), w: ([-0-9.e]+)}', pose).groups())
+        self.models[name] = [x, y, z, 2 * math.atan2(qz, qw)]
+        return SimpleNamespace(returncode=0, stdout='data: true\n', stderr='')
+
+
+class FakeArm(Node):
+    def __init__(self, context, joints):
+        from control_msgs.action import FollowJointTrajectory
+        super().__init__('fake_arm', context=context)
+        self.joints, self.goals = joints, []
+        ActionServer(self, FollowJointTrajectory, '/arm_controller/follow_joint_trajectory', self.execute)
+        self.publisher = self.create_publisher(JointState, '/joint_states', 10)
+        self.create_timer(.05, lambda: self.publisher.publish(JointState(
+            name=list(self.joints), position=list(self.joints.values()))))
+
+    def execute(self, handle):
+        from control_msgs.action import FollowJointTrajectory
+        trajectory = handle.request.trajectory
+        self.goals.append(list(trajectory.joint_names))
+        self.joints.update(zip(trajectory.joint_names, trajectory.points[-1].positions))
+        handle.succeed()
+        return FollowJointTrajectory.Result(error_code=0)
+
+
+def test_a_reset_puts_the_arm_at_its_start_and_places_objects_at_the_trials_poses():
+    value, _ = scene()
+    context = Context()
+    rclpy.init(context=context)
+    arm = FakeArm(context, dict.fromkeys(ARM_JOINTS, 0.0))
+    node = Node('scene_client', context=context)
+    executor = MultiThreadedExecutor(num_threads=3, context=context)
+    executor.add_node(arm)
+    executor.add_node(node)
+    thread = threading.Thread(target=executor.spin, daemon=True)
+    thread.start()
+    gazebo = FakeGazebo(value)
+    try:
+        controller = sim_scene.SceneController(node, {**value, 'settle_sec': 0.0}, run=gazebo)
+        controller.ready()
+        first = controller.reset(1)
+        assert first['confirmed'], first['reasons']
+        assert arm.goals and set(arm.goals[0]) == set(sim_scene.group_state('travel_stow'))
+        creates = [call for call in gazebo.calls if '/world/cleanroom/create' in call]
+        assert len(creates) == 1 and 'floor_block_block' in creates[0][creates[0].index('--req') + 1]
+        assert first['measured']['block'] == pytest.approx(first['commanded']['block'], abs=1e-5)
+        second = controller.reset(2)
+        assert second['confirmed'] and any('/world/cleanroom/set_pose' in call for call in gazebo.calls)
+        assert len([call for call in gazebo.calls if '/world/cleanroom/create' in call]) == 1  # spawned once
+        # A robot base that moved since the scene started is not reset; the trial cannot be confirmed.
+        gazebo.models['lekiwi_1'][0] += 0.3
+        assert not controller.reset(3)['confirmed']
+    finally:
+        release_graph(executor=executor, thread=thread, nodes=(arm, node), context=context)

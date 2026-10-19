@@ -2,11 +2,17 @@
 
 config/sim_scenes.yaml declares each scene. `trial_poses` derives every object's pose for a
 trial from the scene seed and the trial index alone, so trial N starts from the same state on
-every run. `SceneController` (one ROS node, the bridges bringup starts in sim with
-skill_acquisition:=true) spawns the scene objects once, then per reset moves the arm to its
-start state through /arm_controller/follow_joint_trajectory (the guarded path every arm motion
-uses), places the objects, waits for physics to settle and confirms objects, robot base and arm
-from the simulator's ground truth. `judge` evaluates a success predicate on that ground truth.
+every run. `SceneController` spawns the scene objects once, then per reset moves the arm to
+its start state through /arm_controller/follow_joint_trajectory (the guarded path every arm
+motion uses), places the objects, waits for physics to settle and confirms objects, robot base
+and arm from the simulator's ground truth. `judge` evaluates a success predicate on that
+ground truth.
+
+Ground truth and entity placement go through the `gz` command line against the running world
+(`gz model -m NAME -p` reads the physics pose of a model by name; `gz service` creates and
+places entities), from the caller's environment, which must reach the simulation's Gazebo
+transport (the same GZ_PARTITION, if one is set). The ROS bridge of the world's pose stream
+does not carry entity names, so it cannot identify objects.
 
 A simulator verifies only what it models: a predicate reads declared variables, and a scene
 that does not model one of them cannot verify that success (spec 20.4).
@@ -18,6 +24,7 @@ import math
 from pathlib import Path
 import random
 import re
+import subprocess
 import threading
 import time
 import xml.etree.ElementTree as ET
@@ -34,14 +41,6 @@ NAME = re.compile(r'^[a-z][a-z0-9_]{0,31}$')
 # A pose predicate reads rigid body poses and nothing else.
 PREDICATE_VARIABLES = {'rigid_geometry'}
 PREDICATE_FIELDS = {'object', 'region', 'min_z', 'max_z', 'min_displacement_m'}
-
-
-def scene_bridge_arguments(world):
-    """ros_gz_bridge arguments: dynamic poses as TF (child = entity name) and the entity services."""
-    return [f'/world/{world}/dynamic_pose/info@tf2_msgs/msg/TFMessage[gz.msgs.Pose_V',
-            f'/world/{world}/create@ros_gz_interfaces/srv/SpawnEntity',
-            f'/world/{world}/remove@ros_gz_interfaces/srv/DeleteEntity',
-            f'/world/{world}/set_pose@ros_gz_interfaces/srv/SetEntityPose']
 
 
 def _number(value, name, low=-math.inf, high=math.inf):
@@ -238,82 +237,73 @@ def confirm(scene, commanded, measured, robot, arm):
     return reasons
 
 
-class SceneController:
-    """Spawns, resets and reads one scene through the simulator bridges, from a caller's ROS node."""
+def parse_model_pose(text):
+    """[x, y, z, yaw] from `gz model -m NAME -p` output, or None when the model does not exist."""
+    match = re.search(r'Pose \[ XYZ \(m\) \] \[ RPY \(rad\) \]:\s*\[([^\]]*)\]\s*\[([^\]]*)\]', text)
+    if match is None:
+        return None
+    position, rotation = ([float(value) for value in group.split()] for group in match.groups())
+    if len(position) != 3 or len(rotation) != 3 or not all(map(math.isfinite, position + rotation)):
+        raise ValueError('gz reported a malformed pose')
+    return [*position, rotation[2]]
 
-    def __init__(self, node, scene, timeout=10.0):
+
+def pose_text(pose):
+    x, y, z, yaw = pose
+    return (f'position: {{x: {x!r}, y: {y!r}, z: {z!r}}} '
+            f'orientation: {{z: {math.sin(yaw / 2)!r}, w: {math.cos(yaw / 2)!r}}}')
+
+
+class SceneController:
+    """Spawns, resets and reads one scene of the running simulation, from a caller's ROS node."""
+
+    def __init__(self, node, scene, timeout=10.0, run=subprocess.run):
         from control_msgs.action import FollowJointTrajectory
         from rclpy.action import ActionClient
         from rclpy.qos import qos_profile_sensor_data
-        from ros_gz_interfaces.srv import SetEntityPose, SpawnEntity
         from sensor_msgs.msg import JointState
-        from tf2_msgs.msg import TFMessage
-        self.node, self.scene, self.timeout = node, scene, timeout
-        world = scene['world']
-        self.SpawnEntity, self.SetEntityPose, self.FollowJointTrajectory = SpawnEntity, SetEntityPose, FollowJointTrajectory
-        self.spawn = node.create_client(SpawnEntity, f'/world/{world}/create')
-        self.place = node.create_client(SetEntityPose, f'/world/{world}/set_pose')
+        self.node, self.scene, self.timeout, self._run = node, scene, timeout, run
+        self.FollowJointTrajectory = FollowJointTrajectory
         self.arm = ActionClient(node, FollowJointTrajectory, '/arm_controller/follow_joint_trajectory')
         self._lock = threading.Lock()
-        self._poses, self._joints, self._pose_time = {}, {}, None
-        node.create_subscription(TFMessage, f'/world/{world}/dynamic_pose/info', self._ground_truth, 10)
+        self._joints, self._joint_time = {}, None
         node.create_subscription(JointState, '/joint_states', self._joint_state, qos_profile_sensor_data)
-        self.spawned = False
-
-    def _ground_truth(self, message):
-        with self._lock:
-            for transform in message.transforms:
-                t, q = transform.transform.translation, transform.transform.rotation
-                self._poses[transform.child_frame_id] = [t.x, t.y, t.z, yaw_of((q.x, q.y, q.z, q.w))]
-            self._pose_time = time.monotonic()
 
     def _joint_state(self, message):
         with self._lock:
             self._joints.update(zip(message.name, message.position))
+            self._joint_time = time.monotonic()
 
-    def _wait(self, future, what, timeout=None):
-        deadline = time.monotonic() + (timeout or self.timeout)
-        while not future.done():
-            if time.monotonic() > deadline:
-                raise RuntimeError(f'{what} did not answer within {timeout or self.timeout:.0f} s')
-            time.sleep(.02)
-        return future.result()
+    def _gz(self, *arguments):
+        try:
+            completed = self._run(['gz', *arguments], capture_output=True, text=True, timeout=self.timeout, check=False)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise RuntimeError(f'gz {arguments[0]} failed: {error}') from error
+        if completed.returncode:
+            raise RuntimeError(f'gz {arguments[0]} failed: {completed.stderr.strip()[-500:]}')
+        return completed.stdout
+
+    def model_pose(self, name):
+        return parse_model_pose(self._gz('model', '-m', name, '-p'))
+
+    def _service(self, service, request_type, request):
+        reply = self._gz('service', '-s', f'/world/{self.scene["world"]}/{service}', '--reqtype', request_type,
+                         '--reptype', 'gz.msgs.Boolean', '--timeout', str(int(self.timeout * 1000)), '--req', request)
+        return re.search(r'data:\s*true', reply) is not None
 
     def ready(self):
-        for client, what in ((self.spawn, 'entity creation'), (self.place, 'entity placement')):
-            if not client.wait_for_service(timeout_sec=self.timeout):
-                raise RuntimeError(f'the simulator {what} service is unavailable; start the sim with skill_acquisition:=true')
+        if self.model_pose(self.scene['robot']['model']) is None:
+            raise RuntimeError(f'the simulation has no model {self.scene["robot"]["model"]}; is the sim running and '
+                               'reachable from this environment?')
         if not self.arm.wait_for_server(timeout_sec=self.timeout):
             raise RuntimeError('/arm_controller/follow_joint_trajectory is unavailable')
-        deadline = time.monotonic() + self.timeout
-        while self.ground_truth()[1] is None:
-            if time.monotonic() > deadline:
-                raise RuntimeError(f'no ground truth on /world/{self.scene["world"]}/dynamic_pose/info')
-            time.sleep(.05)
 
     def ground_truth(self):
         """Object poses by scene name, the robot base pose and the arm joints, read together."""
+        objects = {name: self.model_pose(entity_name(self.scene, name)) for name in self.scene['objects']}
+        robot = self.model_pose(self.scene['robot']['model'])
         with self._lock:
-            objects = {name: self._poses.get(entity_name(self.scene, name)) for name in self.scene['objects']}
-            return objects, self._poses.get(self.scene['robot']['model']), dict(self._joints), self._pose_time
-
-    def _pose_request(self, request, pose):
-        x, y, z, yaw = pose
-        request.position.x, request.position.y, request.position.z = float(x), float(y), float(z)
-        request.orientation.z, request.orientation.w = math.sin(yaw / 2), math.cos(yaw / 2)
-
-    def _spawn_missing(self, poses):
-        present = self.ground_truth()[0]
-        for name, pose in poses.items():
-            if present.get(name) is not None:
-                continue
-            request = self.SpawnEntity.Request()
-            request.entity_factory.name = entity_name(self.scene, name)
-            request.entity_factory.allow_renaming = False
-            request.entity_factory.sdf = object_sdf(self.scene, name)
-            self._pose_request(request.entity_factory.pose, pose)
-            if not self._wait(self.spawn.call_async(request), f'spawning {name}').success:
-                raise RuntimeError(f'the simulator refused to spawn {name}')
+            return objects, robot, dict(self._joints), time.monotonic()
 
     def _arm_to_start(self):
         from trajectory_msgs.msg import JointTrajectoryPoint
@@ -329,6 +319,14 @@ class SceneController:
         result = self._wait(handle.get_result_async(), 'the start-state trajectory', 30.0)
         return None if result.result.error_code == 0 else f'start-state trajectory failed: {result.result.error_string}'
 
+    def _wait(self, future, what, timeout=None):
+        deadline = time.monotonic() + (timeout or self.timeout)
+        while not future.done():
+            if time.monotonic() > deadline:
+                raise RuntimeError(f'{what} did not answer within {timeout or self.timeout:.0f} s')
+            time.sleep(.02)
+        return future.result()
+
     def reset(self, trial):
         """Arm to start, objects to the trial's poses, settle, then confirm everything from ground truth."""
         commanded = trial_poses(self.scene, trial)
@@ -336,19 +334,26 @@ class SceneController:
         arm_failure = self._arm_to_start()
         if arm_failure:
             reasons.append(arm_failure)
-        self._spawn_missing(commanded)
         for name, pose in commanded.items():
-            request = self.SetEntityPose.Request()
-            request.entity.name = entity_name(self.scene, name)
-            request.entity.type = request.entity.MODEL
-            self._pose_request(request.pose, pose)
-            if not self._wait(self.place.call_async(request), f'placing {name}').success:
+            entity = entity_name(self.scene, name)
+            if self.model_pose(entity) is None:
+                sdf = object_sdf(self.scene, name)
+                if not self._service('create', 'gz.msgs.EntityFactory', f"sdf: '{sdf}' pose: {{{pose_text(pose)}}}"):
+                    reasons.append(f'the simulator refused to spawn {name}')
+            elif not self._service('set_pose', 'gz.msgs.Pose', f"name: '{entity}' {pose_text(pose)}"):
                 reasons.append(f'the simulator refused to place {name}')
         settled = self.node.get_clock().now().nanoseconds + int(self.scene['settle_sec'] * 1e9)
         deadline = time.monotonic() + self.scene['settle_sec'] * 20 + self.timeout
         while self.node.get_clock().now().nanoseconds < settled:  # simulation time, which may run slower
             if time.monotonic() > deadline:
                 raise RuntimeError('simulation time is not advancing')
+            time.sleep(.02)
+        # The arm is judged from a joint state measured after settling, never from one before the motion.
+        settled_at = time.monotonic()
+        while (self._joint_time or 0) <= settled_at:
+            if time.monotonic() > settled_at + self.timeout:
+                reasons.append('no fresh /joint_states after the reset')
+                break
             time.sleep(.02)
         measured, robot, joints, _ = self.ground_truth()
         reasons += confirm(self.scene, commanded, measured, robot, joints)
