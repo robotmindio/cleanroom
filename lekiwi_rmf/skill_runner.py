@@ -33,6 +33,8 @@ from lekiwi_rmf.skills import arm_targets, catalog, load_registry, skill_paramet
 # The LeRobot environment (scripts/install-lerobot-export.sh); ROS stays importable through PYTHONPATH.
 POLICY_RUNTIME = Path.home() / '.ros/lekiwi/lerobot-venv/bin/python'
 
+CPU_PROCESSORS = {'device_processor': {'device': 'cpu'}}
+
 CAMERA_TOPICS = {'front': '/camera/front/image_raw', 'wrist': '/camera/wrist/image_raw',
                  'astra': '/camera/astra/color/image_raw'}
 
@@ -57,10 +59,14 @@ class LeRobotPolicy:
         except ImportError as error:
             raise RuntimeError(f'LeRobot is not importable by {sys.executable}; '
                                'run scripts/install-lerobot-export.sh') from error
+        # Checkpoints record the training device (cuda on the cluster); the compute host runs on CPU.
         config = PreTrainedConfig.from_pretrained(path)
+        config.device = 'cpu'
         self.torch = torch
-        self.policy = get_policy_class(config.type).from_pretrained(path).eval()
-        self.pre, self.post = make_pre_post_processors(self.policy.config, pretrained_path=str(path))
+        self.policy = get_policy_class(config.type).from_pretrained(path, config=config).eval()
+        self.pre, self.post = make_pre_post_processors(
+            self.policy.config, pretrained_path=str(path), preprocessor_overrides=CPU_PROCESSORS,
+            postprocessor_overrides=CPU_PROCESSORS)
         self.image_shapes = {name: tuple(feature.shape) for name, feature in self.policy.config.input_features.items()
                              if name.startswith('observation.images.')}
 

@@ -55,7 +55,8 @@ if torch.cuda.is_available():
 open(compute_path, 'w').write(json.dumps(compute))
 '''
 
-# Proves the returned checkpoint loads the way lekiwi_rmf/skill_runner.py loads it and produces a chunk.
+# Proves the returned checkpoint loads the way lekiwi_rmf/skill_runner.py LeRobotPolicy loads it (on CPU)
+# and produces a chunk; keep the two in step.
 LOAD_CHECK = r'''
 import json, sys
 import torch
@@ -65,7 +66,10 @@ path = sys.argv[1]
 config = PreTrainedConfig.from_pretrained(path)
 config.device = 'cpu'
 policy = get_policy_class(config.type).from_pretrained(path, config=config).eval()
-pre, post = make_pre_post_processors(policy.config, pretrained_path=path)
+# Same CPU overrides as LeRobotPolicy: a cuda-trained checkpoint must run on the CPU compute host.
+cpu = {'device_processor': {'device': 'cpu'}}
+pre, post = make_pre_post_processors(policy.config, pretrained_path=path, preprocessor_overrides=cpu,
+                                     postprocessor_overrides=cpu)
 observation = {name: torch.zeros(feature.shape) for name, feature in policy.config.input_features.items()}
 with torch.inference_mode():
     chunk = post(policy.predict_action_chunk(pre({**observation, 'task': ''})))
@@ -301,7 +305,7 @@ class Cluster:
             code = self.wait(time.monotonic() + (self.args.slot_wait_min + self.args.time_limit_min) * 60 + 1800)
             result = Path(staging) / 'result'
             self.rsync(f'{self.host}:{self.directory}/result/', f'{result}/')
-            for name in ('train.log', 'pip.log'):
+            for name in ('train.log', 'pip.log', 'compute.json'):
                 if (result / name).is_file():
                     shutil.copy(result / name, output / name)
             if code:
