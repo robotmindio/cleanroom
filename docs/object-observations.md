@@ -234,6 +234,11 @@ Front/wrist have no registered-depth binding and cannot silently return metric
 positions. Map results additionally require capture-time TF and compatible
 approved map identity/epoch. Never copy synthetic test calibration onto hardware.
 
+Every observation also records `map_pose`, the capture-time camera pose with
+the site, map, revision and localization session it was solved in, or
+`map_pose_unavailable_reason`. [Spatial memory](spatial-memory.md) anchors and
+reprojects it after SLAM revises the map.
+
 ## Release order and remaining physical gates
 
 Build and deploy the compatible ROS producer first, install the selected model
