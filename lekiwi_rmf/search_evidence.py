@@ -61,6 +61,21 @@ def models(profile):
     return {item['model_sha256'] for item in profile['recognizers']}
 
 
+def query_labels(record):
+    """The labels an open-vocabulary frame was asked for; None for a closed catalogue frame.
+
+    A frame counts as evidence only for labels its own query asked for, whichever
+    way its pose was obtained.
+    """
+    if record.get('vocabulary') != 'open':
+        return None
+    query = record.get('query')
+    labels = query.get('labels') if isinstance(query, dict) else None
+    if not isinstance(labels, list) or not all(isinstance(label, str) for label in labels):
+        raise ValueError('open-vocabulary frame without a valid query')
+    return tuple(labels)
+
+
 class SearchEvidence:
     """Bounded log of captures with their map pose; the log is the search's only memory."""
 
@@ -295,6 +310,11 @@ class SearchEvidence:
         if binding is None or record.get('frame_id') != binding['optical_frame']:
             self._reject('no_intrinsics_or_binding')
             return None
+        try:
+            query_labels(record)
+        except ValueError:
+            self._reject('invalid_query')
+            return None
         points = []
         for item in record.get('detections', []):
             position = item.get('position') or {}
@@ -348,7 +368,7 @@ class SearchEvidence:
             for index, (detection, point) in enumerate(zip(detections_from_record(record, camera), points)))
         stamp = record['stamp']['sec'] + record['stamp']['nanosec'] / 1e9
         return Capture(record['id'], record['camera_id'], record['model_sha256'], stamp, camera_pose, camera,
-                       record.get('stationary') is True, detections)
+                       record.get('stationary') is True, detections, query_labels(record))
 
     def _tf_capture(self, record):
         """Fallback for a record without a capture-time map pose: TF at its stamp, unanchored."""
@@ -373,7 +393,7 @@ class SearchEvidence:
             return None  # Without a pose a capture proves nothing about any cell.
         self._reject('unanchored_capture')
         return Capture(record['id'], record['camera_id'], record['model_sha256'], stamp, pose, camera,
-                       record.get('stationary') is True, detections)
+                       record.get('stationary') is True, detections, query_labels(record))
 
     def snapshot(self):
         """Log generation, its map revision and every capture, read together."""

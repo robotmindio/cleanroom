@@ -53,8 +53,11 @@ def blue_mask(pixels):
     return cv2.inRange(cv2.cvtColor(pixels, cv2.COLOR_BGR2HSV), (90, 60, 40), (130, 255, 255))
 
 
-def observation(image, detections, model_sha256, camera_id):
-    """Use an exact synchronized ROS image/detection pair; preserve all candidates."""
+def observation(image, detections, model_sha256, camera_id, query=None):
+    """Use an exact synchronized ROS image/detection pair; preserve all candidates.
+
+    `query` is the open-vocabulary Query the frame ran under, or None for a closed native catalogue.
+    """
     if (image.header != detections.header or not image.header.frame_id
             or image.header.stamp.sec < 0 or not 0 <= image.header.stamp.nanosec < 10**9
             or image.header.stamp.sec == image.header.stamp.nanosec == 0):
@@ -107,10 +110,17 @@ def observation(image, detections, model_sha256, camera_id):
                 'width': image.width, 'height': image.height, 'model_sha256': model_sha256,
                 'grounding': 'image_only', 'position': None, 'detections': results,
                 'evidence': {'sha256': hashlib.sha256(evidence).hexdigest(), 'size': len(evidence), 'format': 'image/jpeg'}}
+    # Closed records answer only their native catalogue, never an open query they cannot express.
+    document['vocabulary'] = 'closed' if query is None else 'open'
+    if query is not None:
+        document['query'] = query.document()
     capture = json.dumps([camera_id, document['frame_id'], document['stamp']], sort_keys=True).encode()
     document['capture_id'] = hashlib.sha256(capture).hexdigest()
     # One capture may be recognized under several operating points; each inference is its own observation.
-    document['id'] = hashlib.sha256(f"{document['capture_id']}:{model_sha256}".encode()).hexdigest()
+    # The query is part of an open recognizer's operating point, so the same capture under another query
+    # is another inference with another ID.
+    inference = model_sha256 if query is None else f'{model_sha256}:{query.revision}'
+    document['id'] = hashlib.sha256(f"{document['capture_id']}:{inference}".encode()).hexdigest()
     return document, evidence
 
 

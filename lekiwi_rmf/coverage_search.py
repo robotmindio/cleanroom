@@ -110,6 +110,8 @@ class Capture:
     camera: Camera
     stationary: bool
     detections: tuple
+    # The labels an open-vocabulary inference was asked for; None for a closed native catalogue.
+    query_labels: tuple | None = None
 
 
 def detections_from_record(record, camera, map_id=None):
@@ -199,7 +201,7 @@ class QueryCoverage:
         self.contributors = deque(maxlen=REPORT_ITEMS)
         self.viewpoints = deque(maxlen=REPORT_ITEMS)
         self.cameras = set()
-        self.counts = {'captures': 0, 'negative_captures': 0, 'other_model': 0, 'moving': 0, 'occluded_cells': 0}
+        self.counts = {'captures': 0, 'negative_captures': 0, 'other_model': 0, 'other_query': 0, 'moving': 0, 'occluded_cells': 0}
         self.by_model = {}
         self.span = [math.inf, -math.inf]
 
@@ -231,6 +233,10 @@ class QueryCoverage:
         if capture.model_sha256 not in self.models:
             # A frame from a recognizer whose catalogue lacks the label is silent about it, not negative.
             self.counts['other_model'] += 1
+            return []
+        if capture.query_labels is not None and self.label not in capture.query_labels:
+            # An open inference that was not asked for this label is equally silent about it.
+            self.counts['other_query'] += 1
             return []
         if capture.pose is None:
             flat, azimuths, occluded = np.empty(0, np.int64), np.empty(0), 0
@@ -535,6 +541,7 @@ class SearchSession:
                                   'first_stamp': span[0], 'last_stamp': span[1],
                                   'captures_considered': self.coverage.counts['captures'],
                                   'ignored_unable_model': self.coverage.counts['other_model'],
+                                  'ignored_other_query': self.coverage.counts['other_query'],
                                   'rejected_moving': self.coverage.counts['moving'],
                                   'occluded_cells_observed_behind_obstacles': self.coverage.counts['occluded_cells']},
             'found': {'evidence_ids': self.evidence_ids(), 'observations': self.found},

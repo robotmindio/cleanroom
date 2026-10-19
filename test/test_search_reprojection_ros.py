@@ -38,7 +38,7 @@ class Store(Node):
         self.create_publisher(String, '/robot/perception/profile', latched).publish(String(data=json.dumps({
             'schema': 1, 'cameras': {'front': self.binding['sha256']}, 'recognizers': [
                 {'role': 'primary', 'model_sha256': MODEL, 'model_name': 'fake', 'confidence_threshold': .5,
-                 'labels': ['cup'], 'open_vocabulary': False}]})))
+                 'labels': ['cup'], 'open_vocabulary': True}]})))
         self.info = self.create_publisher(CameraInfo, self.binding['camera_info_topic'], 10)
         self.create_service(QueryObservations, '/robot/observations/query', self.query)
         self.create_timer(0.2, self.publish_info)
@@ -49,7 +49,7 @@ class Store(Node):
         info.k = [554.3, 0.0, 320.0, 0.0, 554.3, 240.0, 0.0, 0.0, 1.0]
         self.info.publish(info)
 
-    def add(self, map_pose, stamp):
+    def add(self, map_pose, stamp, query=('cup', 'mug')):
         with self.lock:
             sequence = len(self.records) + 1
             self.records.append({
@@ -57,6 +57,7 @@ class Store(Node):
                 'camera_id': 'front', 'frame_id': self.binding['optical_frame'],
                 'stamp': {'sec': stamp, 'nanosec': 0}, 'model_sha256': MODEL, 'stationary': True,
                 'grounding': 'camera_position', 'map_pose': map_pose,
+                'vocabulary': 'open', 'query': {'labels': list(query)},
                 'detections': [{'label': 'cup', 'score': 0.9, 'bbox': [300.0, 200.0, 40.0, 40.0], 'position': {
                     'mode': 'camera', 'xyz': [0.0, 0.0, 1.0], 'frame_id': self.binding['optical_frame'],
                     'uncertainty_m': 0.02}}]})
@@ -115,6 +116,8 @@ def test_loop_closure_reprojects_the_capture_log(tmp_path):
         assert math.dist((anchored.pose.x, anchored.pose.y), (2.1, 0.0)) < 1e-6
         assert math.dist(anchored.detections[0].map_xyz, (3.1, 0.0, 0.3)) < 1e-6
         assert evidence.rejected.get('unanchored_capture') == 1 and unanchored.pose.x == 1.0
+        # Both pose paths keep the labels the frame's own query asked for.
+        assert anchored.query_labels == unanchored.query_labels == ('cup', 'mug')
         generation = evidence.generation
 
         # Loop closure: node 2 moves 0.1 m in y; the anchored capture follows, the unanchored one leaves.
@@ -123,7 +126,7 @@ def test_loop_closure_reprojects_the_capture_log(tmp_path):
         _, revision, log = evidence.snapshot()
         assert revision != first['revision'] and len(log) == 1
         moved = log[0][1]
-        assert moved.observation_id == anchored.observation_id
+        assert moved.observation_id == anchored.observation_id and moved.query_labels == ('cup', 'mug')
         assert math.dist((moved.pose.x, moved.pose.y), (2.1, 0.1)) < 1e-6
         assert math.dist(moved.detections[0].map_xyz, (3.1, 0.1, 0.3)) < 1e-6
         assert evidence.rejected['unanchored_after_revision'] == 1

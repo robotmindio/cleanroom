@@ -250,9 +250,15 @@ def test_evidence_en_route_cancels_and_replans_the_viewpoint(search_graph):
     assert handle.accepted
     wait(lambda: peers.nav_active, timeout=15)
     planned = peers.navigation_goals[-1].pose
-    # Reach the planned view early, as if driving there; its captures cover the planned gain.
-    peers.position = (planned.position.x, planned.position.y)
+    # Drive smoothly to the planned view; its captures then cover the planned gain before arrival.
+    # A teleport would jump odometry, pause the search and cancel for that reason instead.
     peers.yaw = 2 * math.atan2(planned.orientation.z, planned.orientation.w)
+    start = peers.position
+    steps = max(1, math.ceil(math.dist(start, (planned.position.x, planned.position.y)) / 0.02))
+    for step in range(1, steps + 1):
+        peers.position = (start[0] + (planned.position.x - start[0]) * step / steps,
+                          start[1] + (planned.position.y - start[1]) * step / steps)
+        time.sleep(0.02)
     wait(lambda: peers.nav_canceled >= 1, timeout=15)
     wait(lambda: peers.nav_count >= 2, timeout=15)
     response(handle.cancel_goal_async())
