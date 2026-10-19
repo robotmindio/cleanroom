@@ -10,7 +10,7 @@ from rclpy.clock import Clock, ClockType, JumpThreshold
 from rclpy.duration import Duration
 from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from collections import deque
@@ -18,6 +18,7 @@ import json
 import threading
 import time
 from sensor_msgs.msg import Image
+from std_msgs.msg import String
 from vision_msgs.msg import Detection2D, Detection2DArray, ObjectHypothesisWithPose
 
 from lekiwi_rmf.object_recognition import Recognizer, reject_parameter_changes
@@ -96,6 +97,13 @@ class ObjectDetector(Node):
             self.create_subscription(Image, binding['image_topic'],
                 lambda message, camera=name: self._receive(message, camera), qos,
                 callback_group=self._receipt_group)
+        # The operating point in force: consumers tie negative evidence to this model and catalogue.
+        self._profile = self.create_publisher(String, '/robot/perception/profile',
+                                              QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
+        self._profile.publish(String(data=json.dumps({
+            'schema': 1, 'model_sha256': self._detector.sha256, 'model_name': self.get_parameter('model_name').value,
+            'confidence_threshold': confidence, 'labels': list(self._detector.labels),
+            'cameras': {name: binding['sha256'] for name, binding in self._bindings.items()}})))
         self._diagnostics = self.create_publisher(DiagnosticArray, '/diagnostics', 10)
         self.create_timer(1., self._health, callback_group=self._receipt_group)
         self.create_timer(1 / rate, self._infer, clock=Clock(clock_type=ClockType.STEADY_TIME),

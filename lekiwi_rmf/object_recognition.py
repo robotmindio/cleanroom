@@ -79,6 +79,7 @@ class Recognizer:
         cv2.setNumThreads(2)
         if self.spec['backend'] == 'yolox':
             self.model = YoloX(str(self.directory / next(iter(self.spec['files']))), confThreshold=confidence)
+            self.labels = list(COCO_LABELS)
         else:
             import torch
             from transformers import AutoProcessor, AutoModelForZeroShotObjectDetection
@@ -93,10 +94,13 @@ class Recognizer:
                     size={'height': self.spec['input_size'], 'width': self.spec['input_size']})
                 self.model = RTDetrV2ForObjectDetection.from_pretrained(
                     self.directory, local_files_only=True, use_safetensors=True).eval().to('cpu')
+                self.labels = [self.model.config.id2label[index] for index in sorted(self.model.config.id2label)]
             else:
                 self.processor = AutoProcessor.from_pretrained(self.directory, local_files_only=True)
                 self.model = AutoModelForZeroShotObjectDetection.from_pretrained(
                     self.directory, local_files_only=True, use_safetensors=True).eval().to('cpu')
+                # A prompted detector can only report its prompt phrases.
+                self.labels = [phrase.strip() for phrase in self.spec['prompt'].split('.') if phrase.strip()]
 
     def predict(self, image):
         height, width = image.shape[:2]
