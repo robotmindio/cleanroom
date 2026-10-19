@@ -157,7 +157,10 @@ def reject_parameter_changes(node, names):
 
 class Recognizer:
     def __init__(self, name='yolox', directory=None, confidence=.5):
+        self.name = name
         self.spec = model_spec(name)
+        # A prompted detector reports only its prompt phrases; a closed-set one only its native classes.
+        self.open_vocabulary = self.spec['backend'] in ('grounding_dino', *REMOTE_BACKENDS)
         self.sha256, self.identity = recognition_identity(name, confidence)
         self.confidence = confidence
         cv2.setNumThreads(2)
@@ -168,6 +171,7 @@ class Recognizer:
         self.directory = verify_model(directory or Path.home() / '.ros/lekiwi/models' / name, self.spec)
         if self.spec['backend'] == 'yolox':
             self.model = YoloX(str(self.directory / next(iter(self.spec['files']))), confThreshold=confidence)
+            self.labels = list(COCO_LABELS)
         else:
             import torch
             from transformers import AutoProcessor, AutoModelForZeroShotObjectDetection
@@ -182,10 +186,13 @@ class Recognizer:
                     size={'height': self.spec['input_size'], 'width': self.spec['input_size']})
                 self.model = RTDetrV2ForObjectDetection.from_pretrained(
                     self.directory, local_files_only=True, use_safetensors=True).eval().to('cpu')
+                self.labels = [self.model.config.id2label[index] for index in sorted(self.model.config.id2label)]
             else:
                 self.processor = AutoProcessor.from_pretrained(self.directory, local_files_only=True)
                 self.model = AutoModelForZeroShotObjectDetection.from_pretrained(
                     self.directory, local_files_only=True, use_safetensors=True).eval().to('cpu')
+                # A prompted detector can only report its prompt phrases.
+                self.labels = [phrase.strip() for phrase in self.spec['prompt'].split('.') if phrase.strip()]
 
     def predict(self, image):
         height, width = image.shape[:2]

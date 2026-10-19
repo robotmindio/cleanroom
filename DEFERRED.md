@@ -261,6 +261,17 @@ artifacts:
 - Wrist-roll travel, LAN endpoint reachability, RViz scaling and the installed
   driver.
 
+## Active search qualification
+
+Owner: robot integrator with object perception enabled at the deployment site.
+
+Done when a live `/robot/search` run finds a placed object outside the initial
+view, an absent-object run's reported covered cells match a site check of what
+the cameras saw, the evidence-of-absence criteria come from measured detector
+recall, occlusion uses 3D scene geometry and coverage is reprojected on SLAM
+optimization; only then set `allow_search: true` in `config/exploration.yaml`.
+Tracked in [#88](https://github.com/robotmindio/cleanroom/issues/88).
+
 ## Spatial memory qualification
 
 Owner: robot integrator with SLAM running at the deployment site.

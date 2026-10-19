@@ -5,7 +5,7 @@ find_package(ament_cmake REQUIRED)
 find_package(ament_cmake_python REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(geometry_msgs REQUIRED)
-rosidl_generate_interfaces(${PROJECT_NAME} "action/Explore.action" "action/RunSkill.action"
+rosidl_generate_interfaces(${PROJECT_NAME} "action/Explore.action" "action/RunSkill.action" "action/Search.action"
   "srv/SubmitTask.srv" "srv/GetTask.srv" "srv/CancelTask.srv"
   "srv/QueryObservations.srv" "srv/GetObservationEvidence.srv" "srv/PinObservationEvidence.srv"
   "srv/QuerySpatial.srv" DEPENDENCIES geometry_msgs)
@@ -154,7 +154,8 @@ if(BUILD_TESTING)
     set(timeout_args)
     # Expanded exploration action and restart matrices exceed one minute.
     if(name STREQUAL "test_exploration_owner_guard" OR name STREQUAL "test_exploration_recovery"
-        OR name STREQUAL "test_exploration_ros" OR name STREQUAL "test_task_gateway")
+        OR name STREQUAL "test_exploration_ros" OR name STREQUAL "test_task_gateway"
+        OR name STREQUAL "test_search_ros")
       set(timeout_args TIMEOUT 120)
     endif()
     ament_add_ros_isolated_pytest_test(${name} test/${name}.py ${timeout_args} ENV "${test_launch_environment}")
@@ -242,6 +243,8 @@ if(BUILD_TESTING)
     add_lekiwi_pytest(test_navigation_observer)
     add_lekiwi_pytest(test_exploration_nav2)
     add_lekiwi_pytest(test_exploration_planner)
+    add_lekiwi_pytest(test_coverage_search)
+    add_lekiwi_pytest(test_search_ros)
     add_lekiwi_pytest(test_rmf_owner_guard)
     add_lekiwi_pytest(test_moveit_shutdown_probe)
     add_lekiwi_pytest(test_moveit_reload)
