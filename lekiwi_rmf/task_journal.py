@@ -53,6 +53,14 @@ class TaskJournal:
             version = self._db.execute('PRAGMA user_version').fetchone()[0]
             if version not in range(SCHEMA + 1):
                 raise RuntimeError('unsupported task journal version')
+            if 0 < version < SCHEMA:
+                # Earlier releases refuse a newer journal; keep a consistent copy so a rollback can restore it.
+                backup = sqlite3.connect(f'{path}.v{version}.bak')
+                try:
+                    self._db.backup(backup)
+                finally:
+                    backup.close()
+                Path(f'{path}.v{version}.bak').chmod(0o600)
             with self._db:
                 self._db.execute('BEGIN')
                 self._db.execute('''CREATE TABLE IF NOT EXISTS tasks (

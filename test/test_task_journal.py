@@ -187,6 +187,22 @@ def test_schema_4_active_task_keeps_its_resources_after_migration(tmp_path):
         journal.close()
 
 
+def test_migration_keeps_a_restorable_copy_of_the_older_journal(tmp_path):
+    path = tmp_path / 'tasks.db'
+    schema_4(path, [('live', 'search', 'running')])
+    TaskJournal(path).close()
+    backup = sqlite3.connect(tmp_path / 'tasks.db.v4.bak')
+    try:
+        assert backup.execute('PRAGMA user_version').fetchone()[0] == 4
+        assert backup.execute('SELECT id, state FROM tasks').fetchall() == [('live', 'running')]
+    finally:
+        backup.close()
+    assert (tmp_path / 'tasks.db.v4.bak').stat().st_mode & 0o777 == 0o600
+    # A fresh journal has nothing to roll back to.
+    TaskJournal(tmp_path / 'fresh.db').close()
+    assert not list(tmp_path.glob('fresh.db.v*.bak'))
+
+
 def test_uncertain_holder_is_reported_as_uncertain_not_busy(tmp_path):
     path = tmp_path / 'tasks.db'
     schema_4(path, [('lost', 'navigate', 'unknown')])
