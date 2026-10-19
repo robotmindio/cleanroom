@@ -18,7 +18,7 @@ from geometry_msgs.msg import PoseStamped
 from nav2_msgs.action import ComputePathToPose, FollowPath, NavigateToPose
 from nav2_msgs.msg import CollisionMonitorState
 from nav2_msgs.srv import GetCostmap
-from nav_msgs.msg import MapMetaData, OccupancyGrid
+from nav_msgs.msg import MapMetaData, OccupancyGrid, Odometry
 import rclpy
 from rclpy.action import ActionClient, ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
@@ -34,12 +34,15 @@ from std_srvs.srv import Empty
 from tf2_ros import Buffer, TransformException, TransformListener
 from unique_identifier_msgs.msg import UUID
 
-from lekiwi_rmf.action import Explore
+from lekiwi_rmf.action import Explore, Search
+from lekiwi_rmf.coverage_search import Profile, SearchSession, normalize_label, select_viewpoint, viewpoint_gain
 from lekiwi_rmf.exploration_owner_guard import owned_goal_id
 from lekiwi_rmf.exploration import (
     database_size, footprint_is_free, load_navigation_footprint, map_geometry, select_target, task_limits,
     with_body_free, load_task_checkpoint, save_task_checkpoint, task_time,
 )
+from lekiwi_rmf.navigation_distance import NavigationDistance
+from lekiwi_rmf.search_evidence import SearchEvidence
 
 
 class Paused(RuntimeError):
@@ -48,6 +51,22 @@ class Paused(RuntimeError):
 
 class ResponseTimeout(Paused):
     """A ROS peer did not answer before its deadline."""
+
+
+class Replan(Exception):
+    """New evidence or a map revision invalidated the viewpoint being driven to."""
+
+    def __init__(self, reason, evidence=()):
+        super().__init__(reason)
+        self.evidence = list(evidence)
+
+
+class SearchEnded(Exception):
+    """A search termination condition: found, or a time/travel budget reached."""
+
+    def __init__(self, outcome, message):
+        super().__init__(message)
+        self.outcome = outcome
 
 
 class RobotExplorer(Node):
@@ -115,7 +134,8 @@ class RobotExplorer(Node):
             self.create_subscription(Bool, f"/safety/{topic}",
                                      lambda msg, name=topic: self._record(name, msg.data), latched)
         self.create_subscription(DiagnosticArray, "/diagnostics", self._on_safety_status, 10)
-        self.create_subscription(Info, "/info", lambda msg: self._record("slam", msg.header), 1)
+        self._map_revision = 0
+        self.create_subscription(Info, "/info", self._on_slam, 1)
         self.create_subscription(Bool, "/robot/explore/navigation_guard_ready",
                                  lambda msg: self._record("navigation_guard", msg.data), 1)
         self.create_subscription(CollisionMonitorState, "/collision_monitor_state",
@@ -134,12 +154,33 @@ class RobotExplorer(Node):
             self, Explore, "/robot/explore", self._execute, goal_callback=self._accept,
             cancel_callback=lambda _goal: CancelResponse.ACCEPT, callback_group=self._group,
         )
+        self._evidence = self._search_action = None
+        if not 0 < self.config["search_target_coverage"] <= 1:
+            raise ValueError("search_target_coverage must be within (0, 1]")
+        if self.config["search_min_height_m"] >= self.config["search_max_height_m"]:
+            raise ValueError("search height band must be increasing")
+        if self.config["allow_exploration"] and self.config["allow_search"]:
+            # Search observes by moving the base, so it shares exploration's guarded Nav2 path and limits.
+            self._evidence = SearchEvidence(self, self._tf, self._group, self.config["search_capture_log"])
+            self._odometry = NavigationDistance()
+            self.create_subscription(Odometry, "/odom", self._odometry.update, 1)
+            self.create_publisher(String, "/robot/search/defaults", QoSProfile(
+                depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)).publish(String(data=json.dumps({
+                    "max_duration_sec": self.config["max_duration_sec"],
+                    "max_travel_m": self.config["search_max_travel_m"],
+                    "target_coverage": self.config["search_target_coverage"]})))
+            self._search_action = ActionServer(
+                self, Search, "/robot/search", self._execute_search, goal_callback=self._accept_search,
+                cancel_callback=lambda _goal: CancelResponse.ACCEPT, callback_group=self._group,
+            )
         # Wall time quotas remain effective even if simulation time stops.
         self._timer = self.create_timer(0.25, self._monitor, clock=Clock(clock_type=ClockType.STEADY_TIME))
 
     def destroy_node(self):
         # rclpy Node.destroy_node does not destroy action waitables.
         self._action.destroy()
+        if self._search_action is not None:
+            self._search_action.destroy()
         self._navigation.destroy()
         self._planner.destroy()
         return super().destroy_node()
@@ -151,6 +192,13 @@ class RobotExplorer(Node):
             self._collision_clear_after = now + 1.0
             self._collision_stop_name = value.polygon_name
         self._inputs[name] = (value, now)
+
+    def _on_slam(self, message):
+        self._record("slam", message.header)
+        if message.loop_closure_id or message.proximity_detection_id:
+            # An optimized graph moves earlier map coordinates; plans built on them are revalidated.
+            # DEBT: search coverage is not reprojected onto the optimized graph, so it can drift (#88).
+            self._map_revision += 1
 
     def _on_safety_status(self, message):
         for status in message.status:
@@ -398,7 +446,7 @@ class RobotExplorer(Node):
             maximum_radius=self.config["max_radius_m"], region_margin=self._region_margin,
             maximum_points=self.config["max_map_cells"])
 
-    def _readiness_reason(self, require_permission=True):
+    def _readiness_reason(self, require_permission=True, mapping_quota=True):
         try:
             if self._shutdown_requested.is_set():
                 return "exploration server is shutting down"
@@ -413,20 +461,23 @@ class RobotExplorer(Node):
                 return "Nav2 or mapping services are unavailable"
             if self._nav_uncertain:
                 return "previous navigation stop is unconfirmed"
+            if not mapping_quota:
+                return ""
             if self._freeze_unconfirmed or (self._freeze_future is not None and not self._freeze_future.done()):
                 return "waiting for mapping quota freeze to finish"
             return self._quota_limit(time.monotonic())
         except (RuntimeError, OSError, TransformException) as error:
             return str(error)
 
-    def _checkpoint(self, goal, deadline, center, radius):
+    def _checkpoint(self, goal, deadline, center, radius, mapping_quota=True):
         if self._shutdown_requested.is_set():
             raise RuntimeError("exploration server is shutting down")
         if goal.is_cancel_requested:
             raise InterruptedError("exploration canceled")
         if task_time() >= deadline:
             raise TimeoutError("exploration duration reached")
-        reason = self._quota_reason or self._quota_limit(time.monotonic())
+        # Searching a known map does not grow it; the idle quota guard still freezes RTAB-Map.
+        reason = (self._quota_reason or self._quota_limit(time.monotonic())) if mapping_quota else ""
         if reason:
             raise RuntimeError(reason)
         self._healthy()
@@ -512,7 +563,7 @@ class RobotExplorer(Node):
         finally:
             self._nav_request = self._nav_handle = self._nav_result = None
 
-    def _pause(self, goal, check, reason, progress):
+    def _pause(self, goal, check, reason, progress, feedback=Explore.Feedback):
         """Hold the robot still until every input recovers.
 
         Only the task's own end conditions (cancel, quota, region,
@@ -521,7 +572,7 @@ class RobotExplorer(Node):
         self._stop_navigation()
         self.get_logger().warning(f"exploration paused: {reason}")
         self._stage = f"paused: {reason}"
-        goal.publish_feedback(Explore.Feedback(stage=self._stage, **progress()))
+        goal.publish_feedback(feedback(stage=self._stage, **progress()))
         while True:
             try:
                 check()
@@ -530,7 +581,7 @@ class RobotExplorer(Node):
                 stage = f"paused: {current}"
                 if stage != self._stage:
                     self._stage = stage
-                    goal.publish_feedback(Explore.Feedback(stage=stage, **progress()))
+                    goal.publish_feedback(feedback(stage=stage, **progress()))
                 time.sleep(0.2)
         self.get_logger().info("exploration resumed")
 
@@ -647,9 +698,255 @@ class RobotExplorer(Node):
                 self._stage = "idle"
         return result
 
-    def _explore_step(self, goal, check, center, radius, visited, blocked, result):
-        """Plan and drive to one target; return False when no target remains."""
-        pose = check()
+    def _search_profile(self):
+        c = self.config
+        return Profile(min_object_m=c["search_min_object_m"], min_object_px=c["search_min_object_px"],
+                       max_range_m=c["search_max_range_m"], min_height_m=c["search_min_height_m"],
+                       max_height_m=c["search_max_height_m"], max_age_sec=c["search_max_age_sec"],
+                       require_stationary=c["search_require_stationary"])
+
+    def _search_limits(self, request):
+        """Validate untrusted goal fields; zero selects a tracked default and larger limits are refused."""
+        label = normalize_label(request.query)
+        if not 1 <= len(label) <= 128:
+            raise ValueError("search query must be a label of 1..128 characters")
+        duration, radius = task_limits(request.max_duration_sec, 0.0, self.config["max_duration_sec"],
+                                       self.config["max_radius_m"])
+        travel, maximum = request.max_travel_m, self.config["search_max_travel_m"]
+        if not math.isfinite(travel) or not 0 <= travel <= maximum:
+            raise ValueError(f"max_travel_m must be zero or within (0, {maximum}]")
+        target = request.target_coverage
+        if not math.isfinite(target) or not 0 <= target <= 1:
+            raise ValueError("target_coverage must be zero or within (0, 1]")
+        region = (request.region_x, request.region_y, request.region_radius_m)
+        if not all(math.isfinite(v) for v in region) or not 0 <= region[2] <= 2 * self.config["max_radius_m"]:
+            raise ValueError("search region must be finite with a radius up to twice max_radius_m")
+        return label, duration, radius, travel or maximum, target or self.config["search_target_coverage"]
+
+    def _accept_search(self, request):
+        try:
+            if self._shutdown_requested.is_set():
+                raise RuntimeError("exploration server is shutting down")
+            self._search_limits(request)
+            with self._lock:
+                reason = self._readiness_reason(mapping_quota=False)
+                if reason:
+                    raise RuntimeError(reason)
+                if self._busy or self._nav_uncertain:
+                    raise RuntimeError("another goal is active or its navigation stop is unconfirmed")
+                self._busy = True
+                self._rejection = ""
+                self._stage = "starting"
+            return GoalResponse.ACCEPT
+        except (RuntimeError, ValueError, OSError, TransformException) as error:
+            self._rejection = str(error)
+            self.get_logger().warning(f"search rejected: {error}")
+            return GoalResponse.REJECT
+
+    def _execute_search(self, goal):
+        """Choose viewpoints by information gain and observe until found, covered or out of budget."""
+        result = Search.Result(outcome="failed")
+        config, profile = self.config, self._search_profile()
+        session, visited, blocked, unproductive = None, [], [], []
+        state = {"serial": 0, "plan": None, "dwell": None, "revision": self._map_revision,
+                 "reason": "initial plan", "evidence": []}
+        odometry = {"epoch": None, "base": 0.0, "last": 0.0, "before": 0.0}
+        started_task = task_time()
+
+        def now():
+            return self.get_clock().now().nanoseconds / 1e9
+
+        def progress():
+            fraction = session.fraction(session.masks(self._map[0])[0], now()) if session and self._map else 0.0
+            return {"coverage_fraction": fraction, "viewpoints_visited": len(visited),
+                    "viewpoints_unreachable": len(blocked), "evidence_ids": session.evidence_ids() if session else []}
+
+        def travelled():
+            meter = self._odometry.status()
+            if not meter["ready"]:
+                raise Paused(f"odometry unavailable for the travel budget: {meter['reason']}")
+            if meter["epoch"] != odometry["epoch"]:
+                # A reset odometry epoch loses at most the motion within one sample gap.
+                if odometry["epoch"] is not None:
+                    odometry["before"] += odometry["last"] - odometry["base"]
+                odometry.update(epoch=meter["epoch"], base=meter["meters"])
+            odometry["last"] = meter["meters"]
+            return odometry["before"] + odometry["last"] - odometry["base"]
+
+        def weights():
+            searchable, _ = session.masks(self._map[0])
+            return session.coverage.weights(searchable, now(), config["search_prior_weight"])
+
+        def integrate():
+            if self._map is None:
+                return []
+            session.rebase(self._map)
+            fresh = self._evidence.since(state["serial"])
+            for serial, capture in fresh:
+                state["serial"] = serial
+                if session.integrate(capture, self._map[0]):
+                    raise SearchEnded("found", f'found "{session.label}"; see evidence_ids')
+                dwell = state["dwell"]
+                if (dwell and capture.camera_id == dwell[0] and capture.stamp >= dwell[1]
+                        and capture.stationary and capture.pose is not None):
+                    state["dwell"] = None
+            return fresh
+
+        def check():
+            current = self._checkpoint(goal, deadline, center, radius, mapping_quota=False)
+            result.travel_m = travelled()
+            if result.travel_m >= travel_limit:
+                raise SearchEnded("budget_exhausted", "search travel budget reached")
+            if not self._evidence.fresh(config["search_perception_timeout_sec"]):
+                raise Paused("perception observations are stale")
+            fresh = integrate()
+            plan = state["plan"]
+            if state["revision"] != self._map_revision:
+                state["revision"] = self._map_revision
+                if plan is not None:
+                    raise Replan("map revised by SLAM optimization; planned view revalidated")
+            if fresh and plan is not None:
+                viewpoint, mount = plan
+                remaining = viewpoint_gain(viewpoint, weights(), *self._map, mount, profile)
+                if remaining < max(config["search_min_gain_cells"], config["search_replan_fraction"] * viewpoint.gain):
+                    raise Replan("new observations already covered the planned view",
+                                 [capture.observation_id for _, capture in fresh])
+            return current
+
+        try:
+            label, duration, radius, travel_limit, target = self._search_limits(goal.request)
+            result.target_coverage = target
+            pose = self._pose()
+            center = (pose.pose.position.x, pose.pose.position.y)
+            deadline = started_task + duration
+            request = goal.request
+            region = (((request.region_x, request.region_y), request.region_radius_m)
+                      if request.region_radius_m > 0 else (center, radius))
+            session = SearchSession(label, self._evidence.profile, profile, self._map, started=now(),
+                                    target=target, region=region)
+            if not session.supported:
+                raise SearchEnded("incapable", self._evidence.profile_reason
+                                  or f'"{label}" is not a label of the perception profile in force')
+            if not self._evidence.fresh(config["search_perception_timeout_sec"]):
+                raise SearchEnded("incapable", "no fresh perception observations; the instrument is not observing")
+            integrate()  # Retained captures: recent evidence of absence and prior sightings shape the first plan.
+            while True:
+                try:
+                    pose = check()
+                    searchable, _ = session.masks(self._map[0])
+                    outcome = session.outcome(searchable, now())
+                    if outcome:
+                        raise SearchEnded(outcome, "target coverage reached without finding the label")
+                    mounts = {mount.camera_id: mount for mount in self._evidence.mounts()}
+                    if not mounts:
+                        raise SearchEnded("incapable", "no base camera has intrinsics and a mount transform")
+                    grid = self._navigation_grid(check, pose)
+                    position = (pose.pose.position.x, pose.pose.position.y)
+                    viewpoint = select_viewpoint(
+                        weights(), *grid, position, center, radius, list(mounts.values()), profile,
+                        clearance=config["clearance_m"], footprint=self._footprint, region_margin=self._region_margin,
+                        free_threshold=config["free_threshold"], spacing=config["search_viewpoint_spacing_m"],
+                        headings=config["search_headings"], max_candidates=config["search_max_candidates"],
+                        overhead_m=config["search_viewpoint_overhead_m"], min_gain=config["search_min_gain_cells"],
+                        excluded=blocked + unproductive)
+                    if viewpoint is None:
+                        raise SearchEnded("inaccessible", "no reachable viewpoint observes the remaining unobserved space")
+                    session.revise(state["reason"], state["evidence"], viewpoint)
+                    state["reason"], state["evidence"] = "previous viewpoint observed", []
+                    state["plan"] = (viewpoint, mounts[viewpoint.camera_id])
+                    point = (viewpoint.x, viewpoint.y)
+                    destination = self._destination(viewpoint.x, viewpoint.y, viewpoint.yaw)
+                    stage = f"searching: viewpoint {session.revision_count} ({viewpoint.camera_id})"
+                    goal.publish_feedback(Search.Feedback(stage=stage, current_pose=pose, **progress()))
+                    if not self._route(check, pose, destination, grid, center, radius):
+                        state["plan"], state["reason"] = None, "previous viewpoint unreachable"
+                        blocked.append(point)
+                        continue
+                    reached = self._drive(check, destination, stage, lambda current: goal.publish_feedback(
+                        Search.Feedback(stage=stage, current_pose=current, **progress())))
+                    state["plan"] = None
+                    if not reached:
+                        state["reason"] = "previous viewpoint unreachable"
+                        blocked.append(point)
+                        continue
+                    visited.append(point)
+                    # Coverage needs a stationary capture taken at the viewpoint, not the arrival itself.
+                    state["dwell"] = (viewpoint.camera_id, now())
+                    self._stage = "searching: observing"
+                    until = time.monotonic() + config["search_dwell_sec"]
+                    while state["dwell"] is not None and time.monotonic() < until:
+                        check()
+                        time.sleep(0.05)
+                    if state["dwell"] is not None:
+                        # Never retry a view that produced no usable capture; it would spin until the budget.
+                        unproductive.append(point)
+                        state["reason"] = "previous viewpoint yielded no stationary capture"
+                    state["dwell"] = None
+                except Replan as change:
+                    self._stop_navigation()
+                    state["plan"], state["reason"], state["evidence"] = None, str(change), change.evidence
+                except Paused as reason:
+                    state["plan"] = state["dwell"] = None
+                    state["reason"] = f"resumed after pause: {reason}"
+                    paused_at = task_time()
+
+                    def paused_check():
+                        nonlocal deadline, paused_at
+                        current = task_time()
+                        deadline += current - paused_at
+                        paused_at = current
+                        return check()
+
+                    self._pause(goal, paused_check, reason, progress, Search.Feedback)
+        except SearchEnded as end:
+            result.outcome, result.message = end.outcome, str(end)
+        except TimeoutError:
+            result.outcome, result.message = "budget_exhausted", "search duration reached"
+        except InterruptedError:
+            result.outcome, result.message = "canceled", "search canceled"
+        except Exception as error:
+            result.outcome, result.message = "failed", str(error)
+        finally:
+            try:
+                self._stop_navigation()
+            except Exception as error:
+                result.outcome, result.message = "failed", f"{result.message}; cleanup failed: {error}"
+                self.get_logger().error(result.message)
+            if session is not None and self._map is not None:
+                try:
+                    session.rebase(self._map)
+                    report = session.report(result.outcome, self._map[0], now(), {
+                        "viewpoints_visited": len(visited), "viewpoints_unreachable": len(blocked),
+                        "viewpoints_without_stationary_capture": len(unproductive),
+                        "travel_m": round(result.travel_m, 3), "elapsed_sec": round(task_time() - started_task, 3)})
+                    coverage = report["coverage"]
+                    result.coverage_fraction = coverage["fraction"]
+                    result.covered_area_m2 = coverage["covered_area_m2"]
+                    result.unobserved_area_m2 = coverage["unobserved_area_m2"]
+                    result.evidence_ids = session.evidence_ids()
+                    result.report_json = json.dumps(report, allow_nan=False)
+                    result.message = f"{result.message}. {report['statement']}"
+                except Exception as error:
+                    self.get_logger().error(f"search report failed: {error}")
+            result.found = result.outcome == "found"
+            result.viewpoints_visited, result.viewpoints_unreachable = len(visited), len(blocked)
+            if self._nav_uncertain:
+                result.message += "; navigation stop unconfirmed; further navigation refused"
+            result.complete = result.outcome in ("found", "coverage_reached") and not self._nav_uncertain
+            self.get_logger().info(f"search ended: {result.outcome}: {result.message}")
+            if goal.is_cancel_requested and not self._nav_uncertain:
+                goal.canceled()
+            elif result.complete:
+                goal.succeed()
+            else:
+                goal.abort()
+            with self._lock:
+                self._busy = False
+                self._stage = "idle"
+        return result
+
+    def _navigation_grid(self, check, pose):
+        """The SLAM map with live costmap obstacles and the robot's own body cleared."""
         q = pose.pose.orientation
         grid, resolution, origin = self._map
         request = self._costmap.call_async(GetCostmap.Request())
@@ -680,33 +977,23 @@ class RobotExplorer(Node):
             raise Paused("navigation and SLAM maps are not aligned yet")
         grid = np.where((live < 0) | (live == 100), live, grid)
         # Cells under the robot's own body are free: it is standing there.
-        grid = (with_body_free(grid, resolution, origin, (pose.pose.position.x, pose.pose.position.y),
+        return (with_body_free(grid, resolution, origin, (pose.pose.position.x, pose.pose.position.y),
                                2 * math.atan2(q.z, q.w), self._footprint), resolution, origin)
-        target, stage, result.mapped_area_m2 = select_target(
-            *grid, (pose.pose.position.x, pose.pose.position.y), center, radius, visited, blocked,
-            clearance=self.config["clearance_m"], footprint=self._footprint, region_margin=self._region_margin,
-            observation_distance=self.config["observation_distance_m"],
-            spacing=self.config["target_spacing_m"], revisit_spacing=self.config["revisit_spacing_m"],
-            free_threshold=self.config["free_threshold"], revisit=goal.request.revisit_known,
-        )
-        if target is None:
-            result.complete = not blocked
-            result.message = "no further reachable observation targets" if not blocked else "remaining targets failed navigation"
-            return False
+
+    def _destination(self, x, y, yaw):
         destination = PoseStamped()
         destination.header.frame_id = "map"
         destination.header.stamp = self.get_clock().now().to_msg()
-        destination.pose.position.x, destination.pose.position.y = target
-        yaw = math.atan2(target[1] - pose.pose.position.y, target[0] - pose.pose.position.x)
+        destination.pose.position.x, destination.pose.position.y = x, y
         destination.pose.orientation.z, destination.pose.orientation.w = math.sin(yaw / 2), math.cos(yaw / 2)
-        feedback = Explore.Feedback(stage=stage, current_pose=pose, visited_targets=len(visited),
-                                    unreachable_targets=len(blocked), mapped_area_m2=result.mapped_area_m2)
-        goal.publish_feedback(feedback)
+        return destination
+
+    def _route(self, check, pose, destination, grid, center, radius):
+        """Plan through known space; False when the destination is unreachable or its route is not clear."""
         plan = self._wait(self._planner.send_goal_async(ComputePathToPose.Goal(
             goal=destination, planner_id="ExploreKnown")), self.config["service_timeout_sec"], check)
         if not plan.accepted:
-            blocked.append(target)
-            return True
+            return False
         try:
             route = self._wait(plan.get_result_async(), self.config["service_timeout_sec"], check)
         finally:
@@ -722,11 +1009,11 @@ class RobotExplorer(Node):
             raise Paused("navigation starting footprint is occupied")
         if (route.status != GoalStatus.STATUS_SUCCEEDED or route.result.error_code
                 or route.result.path.header.frame_id != "map" or not route.result.path.poses):
-            blocked.append(target)
-            return True
-        if not self._route_clear(route.result.path.poses, pose, grid, center, radius):
-            blocked.append(target)
-            return True
+            return False
+        return self._route_clear(route.result.path.poses, pose, grid, center, radius)
+
+    def _drive(self, check, destination, stage, feedback):
+        """Drive one guarded Nav2 goal: whether Nav2 reached it, or None if it never ran to a result."""
         self._owned_id = owned_goal_id()
         until = time.monotonic() + self.config["service_timeout_sec"]
         while (self._guard_ack is None or self._guard_ack[0] != bytes(self._owned_id.uuid)
@@ -739,15 +1026,11 @@ class RobotExplorer(Node):
         self._stage = stage
         self._nav_request = self._navigation.send_goal_async(NavigateToPose.Goal(
             pose=destination, behavior_tree=self.config["navigation_tree"]),
-            goal_uuid=self._owned_id,
-            feedback_callback=lambda _msg: goal.publish_feedback(Explore.Feedback(
-                stage=stage, current_pose=_msg.feedback.current_pose, visited_targets=len(visited),
-                unreachable_targets=len(blocked), mapped_area_m2=result.mapped_area_m2)))
+            goal_uuid=self._owned_id, feedback_callback=lambda message: feedback(message.feedback.current_pose))
         self._nav_handle = self._wait(self._nav_request, self.config["service_timeout_sec"], check)
         if not self._nav_handle.accepted:
-            blocked.append(target)
             self._stop_navigation()
-            return True
+            return None
         self._nav_result = self._nav_handle.get_result_async()
         try:
             navigation = self._wait(self._nav_result, self.config["navigation_timeout_sec"], check)
@@ -755,15 +1038,44 @@ class RobotExplorer(Node):
             # A target Nav2 cannot reach in time is unreachable, not a fault.
             self._stop_navigation()
             check()
-            blocked.append(target)
-            return True
+            return None
         self._stop_navigation()
         if navigation.status == GoalStatus.STATUS_CANCELED:
             raise RuntimeError("Nav2 goal canceled or replaced by another client")
         check()
         if navigation.result.error_code == FollowPath.Result.INVALID_CONTROLLER:
             raise RuntimeError("Nav2 controller plugin is invalid")
-        (visited if navigation.status == GoalStatus.STATUS_SUCCEEDED else blocked).append(target)
+        return navigation.status == GoalStatus.STATUS_SUCCEEDED
+
+    def _explore_step(self, goal, check, center, radius, visited, blocked, result):
+        """Plan and drive to one target; return False when no target remains."""
+        pose = check()
+        grid = self._navigation_grid(check, pose)
+        target, stage, result.mapped_area_m2 = select_target(
+            *grid, (pose.pose.position.x, pose.pose.position.y), center, radius, visited, blocked,
+            clearance=self.config["clearance_m"], footprint=self._footprint, region_margin=self._region_margin,
+            observation_distance=self.config["observation_distance_m"],
+            spacing=self.config["target_spacing_m"], revisit_spacing=self.config["revisit_spacing_m"],
+            free_threshold=self.config["free_threshold"], revisit=goal.request.revisit_known,
+        )
+        if target is None:
+            result.complete = not blocked
+            result.message = "no further reachable observation targets" if not blocked else "remaining targets failed navigation"
+            return False
+        yaw = math.atan2(target[1] - pose.pose.position.y, target[0] - pose.pose.position.x)
+        destination = self._destination(*target, yaw)
+        feedback = Explore.Feedback(stage=stage, current_pose=pose, visited_targets=len(visited),
+                                    unreachable_targets=len(blocked), mapped_area_m2=result.mapped_area_m2)
+        goal.publish_feedback(feedback)
+        if not self._route(check, pose, destination, grid, center, radius):
+            blocked.append(target)
+            return True
+        reached = self._drive(check, destination, stage, lambda current: goal.publish_feedback(Explore.Feedback(
+            stage=stage, current_pose=current, visited_targets=len(visited),
+            unreachable_targets=len(blocked), mapped_area_m2=result.mapped_area_m2)))
+        (visited if reached else blocked).append(target)
+        if reached is None:
+            return True
         until = time.monotonic() + self.config["settle_sec"]
         while time.monotonic() < until:
             check()
