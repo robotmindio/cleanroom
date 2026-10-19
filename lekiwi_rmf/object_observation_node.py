@@ -29,7 +29,7 @@ from lekiwi_rmf.object_observations import ObservationStore, observation, valid_
 from lekiwi_rmf.object_geometry import ObjectGeometry
 from lekiwi_rmf.object_cameras import camera_bindings
 from lekiwi_rmf.observation_motion import ObservationMotion
-from lekiwi_rmf.object_recognition import recognition_identity
+from lekiwi_rmf.object_recognition import recognition_identity, reject_parameter_changes
 from lekiwi_rmf.srv import GetObservationEvidence, QueryObservations, PinObservationEvidence
 
 
@@ -47,6 +47,9 @@ class ObjectObservations(Node):
                                         self.get_parameter('camera_profiles_file').value or None)
         self.declare_parameter('model_name', 'yolox')
         self.declare_parameter('confidence_threshold', .5)
+        reject_parameter_changes(self, ['database_path', 'camera_ids', 'camera_profiles_file', 'model_sha256',
+                                        'max_source_age_sec', 'max_records', 'max_bytes', 'retention_sec',
+                                        'model_name', 'confidence_threshold'])
         self._model = self.get_parameter('model_sha256').value or recognition_identity(
             self.get_parameter('model_name').value, self.get_parameter('confidence_threshold').value)[0]
         self._transforms = Buffer()

@@ -22,7 +22,8 @@ def calibration(tmp_path):
               'rgb_p': [100., 0., 30., 0., 0., 100., 20., 0., 0., 0., 1., 0.],
               'rgb_r': [1., 0., 0., 0., 1., 0., 0., 0., 1.], 'rgb_d': [0.] * 5,
               'rgb_to_depth': [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
-              'camera_uncertainty_m': .03, 'map_uncertainty_m': .05, 'clock_uncertainty_sec': .01}
+              'camera_uncertainty_m': .03, 'map_uncertainty_m': .05, 'clock_uncertainty_sec': .01,
+              'depth_range_m': [.55, 3.]}
     path = tmp_path / 'calibration.json'
     path.write_text(json.dumps(values))
     return values, path
@@ -122,18 +123,28 @@ def test_map_grounding_requires_current_epoch_and_capture_time_transform(tmp_pat
     assert missing['detections'][0]['position']['map_unavailable_reason'] == 'historical_transform_unavailable'
 
 
-def test_nonblue_geometry_requires_explicit_validated_interior_sampling(tmp_path):
+def test_geometry_does_not_depend_on_object_color_and_uses_measured_depth_range(tmp_path):
     value, path = calibration(tmp_path)
     image, found = capture(blue=False)
-    record, _ = observation(
-        image, found, 'a' * 64, 'astra_color')
+    record, _ = observation(image, found, 'a' * 64, 'astra_color')
     depth = CvBridge().cv2_to_imgmsg(np.full((40, 60), 1000, dtype=np.uint16), '16UC1')
     depth.header = image.header
     info = CameraInfo(header=image.header, width=60, height=40, k=value['rgb_k'], p=value['rgb_p'],
                       r=value['rgb_r'], d=value['rgb_d'])
     ObjectGeometry(path).ground(record, image, depth, info, None, {'ready': False})
-    assert 'position' not in record['detections'][0]
-    value['sampling'] = 'box_interior'
-    path.write_text(json.dumps(value))
-    ObjectGeometry(path).ground(record, image, depth, info, None, {'ready': False})
     assert record['detections'][0]['position']['xyz'][2] == 1.
+    value['depth_range_m'] = [1.5, 3.]
+    path.write_text(json.dumps(value))
+    record, _ = observation(image, found, 'a' * 64, 'astra_color')
+    ObjectGeometry(path).ground(record, image, depth, info, None, {'ready': False})
+    assert 'position' not in record['detections'][0]
+
+
+@pytest.mark.parametrize('change', [{'sampling': 'blue'}, {'depth_range_m': None}, {'depth_range_m': [3., 1.]},
+                                    {'depth_range_m': [0, 3.]}, {'depth_range_m': [.5, 30.]}])
+def test_calibration_rejects_color_sampling_and_unmeasured_depth_range(tmp_path, change):
+    value, path = calibration(tmp_path)
+    value.update(change)
+    path.write_text(json.dumps(value))
+    with pytest.raises(ValueError):
+        ObjectGeometry(str(path))

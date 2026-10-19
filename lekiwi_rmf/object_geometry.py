@@ -13,8 +13,6 @@ from tf2_geometry_msgs import do_transform_point
 from tf2_ros import TransformException
 import yaml
 
-from lekiwi_rmf.object_observations import blue_mask
-
 
 class ObjectGeometry:
     def __init__(self, calibration_file):
@@ -54,8 +52,12 @@ class ObjectGeometry:
                     raise ValueError(f'invalid calibration {name}')
             if not value.get('optical_frame') or not value.get('camera_id'):
                 raise ValueError('calibration requires camera/frame identity')
-            if value.get('sampling', 'blue') not in ('blue', 'box_interior'):
-                raise ValueError('calibration sampling must be blue or box_interior')
+            if value.get('sampling', 'box_interior') != 'box_interior':
+                raise ValueError('geometry samples the box interior of any object; color sampling was removed')
+            limits = value.get('depth_range_m')
+            if (not isinstance(limits, list) or len(limits) != 2 or any(type(v) not in (int, float) for v in limits)
+                    or not 0 < limits[0] < limits[1] <= 20):
+                raise ValueError('calibration requires the measured valid depth_range_m [min, max]')
             self.calibration, self.sha256 = value, hashlib.sha256(content).hexdigest()
 
     def ground(self, record, image, depth, info, transforms, map_context):
@@ -72,7 +74,6 @@ class ObjectGeometry:
                 list(info.r) != value['rgb_r'] or list(info.d) != value['rgb_d'] or [info.width, info.height] != value['rgb_size'] or
                 depth.encoding != '16UC1' or depth.step < depth.width * 2 or len(depth.data) != depth.step * depth.height):
             return
-        pixels = self.bridge.imgmsg_to_cv2(image, 'bgr8')
         depths = self.bridge.imgmsg_to_cv2(depth, 'passthrough')
         camera = PinholeCameraModel()
         camera.fromCameraInfo(info)
@@ -81,9 +82,8 @@ class ObjectGeometry:
             x, y, w, h = item['bbox']
             left, top = int(x+w*.2), int(y+h*.2)
             right, bottom = max(left+1,int(x+w*.8)), max(top+1,int(y+h*.8))
-            mask = (blue_mask(pixels[top:bottom, left:right]) if value.get('sampling', 'blue') == 'blue'
-                    else np.full((bottom - top, right - left), 255, dtype=np.uint8))
-            rows, columns = np.nonzero(mask)
+            # The box interior limits background without assuming any object color.
+            rows, columns = (axis.ravel() for axis in np.indices((bottom - top, right - left)))
             if len(rows) < 10:
                 continue
             step = max(1, math.ceil(len(rows)/1000))
@@ -96,7 +96,7 @@ class ObjectGeometry:
             u, v = np.rint(mapped[0]/mapped[2]).astype(int), np.rint(mapped[1]/mapped[2]).astype(int)
             valid = (u>=0)&(v>=0)&(u<depth.width)&(v<depth.height)
             samples = depths[v[valid], u[valid]].astype(float)*.001
-            samples = samples[(samples >= .55)&(samples <= 3.0)]
+            samples = samples[(samples >= value['depth_range_m'][0])&(samples <= value['depth_range_m'][1])]
             if len(samples) < 10:
                 continue
             median = float(np.median(samples))

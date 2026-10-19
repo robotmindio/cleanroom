@@ -5,7 +5,6 @@ import importlib.metadata
 import json
 import os
 import sys
-import re
 from pathlib import Path
 
 import cv2
@@ -14,6 +13,18 @@ import yaml
 
 from lekiwi_rmf.object_cameras import config_directory
 from lekiwi_rmf.opencv_yolox import YoloX
+
+# Native vocabulary of the pinned OpenCV Zoo YOLOX checkpoint, indexed by output class.
+COCO_LABELS = (
+    'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat', 'traffic light',
+    'fire hydrant', 'stop sign', 'parking meter', 'bench', 'bird', 'cat', 'dog', 'horse', 'sheep', 'cow',
+    'elephant', 'bear', 'zebra', 'giraffe', 'backpack', 'umbrella', 'handbag', 'tie', 'suitcase', 'frisbee',
+    'skis', 'snowboard', 'sports ball', 'kite', 'baseball bat', 'baseball glove', 'skateboard', 'surfboard',
+    'tennis racket', 'bottle', 'wine glass', 'cup', 'fork', 'knife', 'spoon', 'bowl', 'banana', 'apple',
+    'sandwich', 'orange', 'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake', 'chair', 'couch',
+    'potted plant', 'bed', 'dining table', 'toilet', 'tv', 'laptop', 'mouse', 'remote', 'keyboard',
+    'cell phone', 'microwave', 'oven', 'toaster', 'sink', 'refrigerator', 'book', 'clock', 'vase',
+    'scissors', 'teddy bear', 'hair drier', 'toothbrush')
 
 
 def model_spec(name):
@@ -43,9 +54,20 @@ def recognition_identity(name, confidence=.5):
     if spec['backend'] != 'yolox':
         runtime.update({package: importlib.metadata.version(package) for package in ['torch', 'torchvision', 'transformers', 'Pillow', 'safetensors', 'tokenizers']})
     document = {'model': name, 'artifacts': spec, 'confidence_threshold': confidence,
-                'preprocessing_revision': 1, 'runtime': runtime, 'device': 'cpu', 'threads': 2, 'interop_threads': 1}
+                'preprocessing_revision': 1, 'labels': 'native', 'runtime': runtime, 'device': 'cpu', 'threads': 2, 'interop_threads': 1}
     identity = hashlib.sha256(json.dumps(document, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
     return identity, document
+
+
+def reject_parameter_changes(node, names):
+    """Startup values form the admitted operating point; a silent no-op change would misreport it."""
+    from rcl_interfaces.msg import SetParametersResult
+
+    def reject(parameters):
+        changed = sorted({parameter.name for parameter in parameters} & set(names))
+        return SetParametersResult(successful=not changed, reason=(
+            f'{", ".join(changed)} fixed at startup; change the tracked configuration and restart' if changed else ''))
+    node.add_on_set_parameters_callback(reject)
 
 
 class Recognizer:
@@ -85,8 +107,8 @@ class Recognizer:
             padded = np.full((640, 640, 3), 114.0, dtype=np.float32)
             padded[:resized.shape[0], :resized.shape[1]] = resized
             predictions = self.model.infer(padded)
-            return [[x / scale, y / scale, w / scale, h / scale, score, 41]
-                    for x, y, w, h, score, label in predictions if int(label) == 41]
+            return [[x / scale, y / scale, w / scale, h / scale, score, COCO_LABELS[int(label)]]
+                    for x, y, w, h, score, label in predictions]
         from PIL import Image
         pixels = Image.fromarray(rgb)
         if self.spec['backend'] == 'rtdetr_v2':
@@ -106,15 +128,17 @@ class Recognizer:
             labels = result['text_labels']
         rows = []
         for label, box, score in zip(labels, result['boxes'], result['scores']):
-            if not any(word in re.findall(r'[a-z]+', str(label).lower()) for word in ['cup', 'mug']):
-                continue
             x0, y0, x1, y1 = box.tolist()
-            rows.append([x0, y0, x1 - x0, y1 - y0, float(score), 41])
-        # Synonymous open-vocabulary prompts can propose the same cup twice.
-        if rows:
-            selected = cv2.dnn.NMSBoxes([r[:4] for r in rows], [r[4] for r in rows], self.confidence, .5)
-            rows = [rows[int(index)] for index in np.asarray(selected).reshape(-1)]
-        return rows
+            rows.append([x0, y0, x1 - x0, y1 - y0, float(score), str(label)])
+        # Synonymous prompt phrases can propose the same object twice, so prompts share one NMS group;
+        # closed-vocabulary classes are suppressed per class so overlapping different objects survive.
+        groups = [''] * len(rows) if self.spec['backend'] == 'grounding_dino' else [row[5] for row in rows]
+        kept = []
+        for group in dict.fromkeys(groups):
+            indices = [i for i, value in enumerate(groups) if value == group]
+            selected = cv2.dnn.NMSBoxes([rows[i][:4] for i in indices], [rows[i][4] for i in indices], self.confidence, .5)
+            kept.extend(indices[int(index)] for index in np.asarray(selected).reshape(-1))
+        return [rows[i] for i in sorted(kept)]
 
 
 def model_runtime(name):

@@ -89,7 +89,7 @@ def test_receipt_keeps_latest_frame_while_inference_is_busy_and_expires_old_resu
             entered.set()
             release.wait(5)
         active -= 1
-        return [[10, 10, 20, 20, .9, 41]]
+        return [[10, 10, 20, 20, .9, 'cup']]
     monkeypatch.setattr(object_detector, 'Recognizer', lambda *args: SimpleNamespace(predict=predict, sha256='a' * 64))
     context = Context()
     rclpy.init(context=context)
@@ -186,3 +186,20 @@ def test_diagnostics_reads_clock_before_frame_lock_to_avoid_jump_deadlock():
                             _frames={}, _age=2., _diagnostics=SimpleNamespace(publish=published.append))
     ObjectDetector._health(state)
     assert published[0].status[0].message == 'observation output stale'
+
+
+def test_operating_point_parameters_reject_runtime_changes_instead_of_silently_ignoring_them(monkeypatch):
+    from lekiwi_rmf import object_detector
+
+    monkeypatch.setattr(object_detector, 'Recognizer', lambda *args: SimpleNamespace(predict=list, sha256='a' * 64))
+    context = Context()
+    rclpy.init(context=context)
+    node = object_detector.ObjectDetector(context=context)
+    try:
+        result, = node.set_parameters([Parameter('confidence_threshold', value=.3)])
+        assert not result.successful and 'confidence_threshold' in result.reason
+        assert node.get_parameter('confidence_threshold').value == .5
+        assert node.set_parameters([Parameter('use_sim_time', value=False)])[0].successful
+    finally:
+        node.destroy_node()
+        context.try_shutdown()

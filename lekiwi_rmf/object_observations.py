@@ -89,7 +89,8 @@ def observation(image, detections, model_sha256, camera_id):
         x, y, w, h = cx - box.size_x / 2, cy - box.size_y / 2, box.size_x, box.size_y
         if w <= 0 or h <= 0 or x < -1e-6 or y < -1e-6 or x + w > image.width + 1e-6 or y + h > image.height + 1e-6:
             raise ValueError('detection is outside the source image')
-        # An interior sample reduces background; this attribute is not calibrated probability.
+        # DEBT: blue_fraction is a color attribute Fiber's cup/blue FindRequest still requires; drop it once that
+        # consumer matches attributes by query. An interior sample reduces background; it is not a probability.
         left, top = int(x + w * .2), int(y + h * .2)
         right, bottom = max(left + 1, int(x + w * .8)), max(top + 1, int(y + h * .8))
         blue = blue_mask(pixels[top:bottom, left:right])
@@ -107,7 +108,9 @@ def observation(image, detections, model_sha256, camera_id):
                 'grounding': 'image_only', 'position': None, 'detections': results,
                 'evidence': {'sha256': hashlib.sha256(evidence).hexdigest(), 'size': len(evidence), 'format': 'image/jpeg'}}
     capture = json.dumps([camera_id, document['frame_id'], document['stamp']], sort_keys=True).encode()
-    document['id'] = hashlib.sha256(capture).hexdigest()
+    document['capture_id'] = hashlib.sha256(capture).hexdigest()
+    # One capture may be recognized under several operating points; each inference is its own observation.
+    document['id'] = hashlib.sha256(f"{document['capture_id']}:{model_sha256}".encode()).hexdigest()
     return document, evidence
 
 

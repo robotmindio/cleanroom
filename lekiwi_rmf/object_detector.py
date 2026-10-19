@@ -20,20 +20,20 @@ import time
 from sensor_msgs.msg import Image
 from vision_msgs.msg import Detection2D, Detection2DArray, ObjectHypothesisWithPose
 
-from lekiwi_rmf.object_recognition import Recognizer
+from lekiwi_rmf.object_recognition import Recognizer, reject_parameter_changes
 from lekiwi_rmf.object_cameras import camera_bindings
 
 
 def detect(detector, image, header):
-    """Reuse upstream preprocessing/output; this initial vocabulary is cup only."""
+    """Publish every native label; goal-specific class filtering belongs to the consumer."""
     height, width = image.shape[:2]
     result = Detection2DArray(header=header)
     predictions = detector.predict(image)
     for x, y, w, h, score, label in predictions:
-        if not all(math.isfinite(value) for value in (x, y, w, h, score, label)) or not 0 <= score <= 1:
+        if not all(math.isfinite(value) for value in (x, y, w, h, score)) or not 0 <= score <= 1:
             raise ValueError('recognizer returned invalid geometry or confidence')
-        if int(label) != 41:
-            continue
+        if not isinstance(label, str) or not 1 <= len(label) <= 128:
+            raise ValueError('recognizer returned an invalid native label')
         x0, y0 = max(0.0, float(x)), max(0.0, float(y))
         x1, y1 = min(float(width), float(x + w)), min(float(height), float(y + h))
         if x1 <= x0 or y1 <= y0:
@@ -42,11 +42,13 @@ def detect(detector, image, header):
         detection.bbox.center.position.x, detection.bbox.center.position.y = (x0 + x1) / 2, (y0 + y1) / 2
         detection.bbox.size_x, detection.bbox.size_y = x1 - x0, y1 - y0
         hypothesis = ObjectHypothesisWithPose()
-        hypothesis.hypothesis.class_id, hypothesis.hypothesis.score = 'cup', float(score)
+        hypothesis.hypothesis.class_id, hypothesis.hypothesis.score = label, float(score)
         detection.results = [hypothesis]
         result.detections.append(detection)
-    if len(result.detections) > 20:
-        raise ValueError('more than 20 cups in one source frame')
+    # DEBT: the observation and Fiber contracts cap a capture at 20 detections, so a cluttered frame keeps
+    # its 20 highest scores and lower-scored objects are absent; raise the cap with both contracts together.
+    result.detections.sort(key=lambda item: item.results[0].hypothesis.score, reverse=True)
+    del result.detections[20:]
     return result
 
 
@@ -60,6 +62,8 @@ class ObjectDetector(Node):
         self.declare_parameter('confidence_threshold', .5)
         self.declare_parameter('max_rate_hz', 2.0)
         self.declare_parameter('max_source_age_sec', 2.0)
+        reject_parameter_changes(self, ['model_name', 'model_directory', 'camera_ids', 'camera_profiles_file',
+                                        'confidence_threshold', 'max_rate_hz', 'max_source_age_sec'])
         confidence = self.get_parameter('confidence_threshold').value
         rate = self.get_parameter('max_rate_hz').value
         self._age = self.get_parameter('max_source_age_sec').value

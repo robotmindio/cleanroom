@@ -1,7 +1,9 @@
 # Object perception and evidence
 
-Perception publishes bounded cup candidates and immutable image evidence. It
-cannot authorize motion or complete a goal. Fiber's existing verifier owns goal
+Perception publishes bounded candidates for every native class of the selected
+checkpoint, plus immutable image evidence. Goal-specific class filtering (for
+example Fiber's cup request) belongs to the consumer. Perception cannot
+authorize motion or complete a goal. Fiber's existing verifier owns goal
 completion. Image recognition, color classification, metric grounding and moving
 search have separate qualification gates.
 
@@ -29,8 +31,8 @@ improvement, not site qualification. Production start remains disabled in
 `config/object_perception_deployment.yaml`.
 
 `model_sha256` now identifies the complete recognition operating point: pinned
-artifacts, backend, input size/prompt, threshold, preprocessing revision and
-actual runtime package versions. It is not just the weight-file hash. Model,
+artifacts, backend, input size/prompt, threshold, preprocessing revision, label
+output (`native`) and actual runtime package versions. It is not just the weight-file hash. Model,
 threshold or runtime changes require a new admitted profile identity. The
 `--describe` output supplies the exact model and camera identities to put in a
 reviewed Fiber profile. Old weight-only profiles must not be reused.
@@ -38,7 +40,19 @@ reviewed Fiber profile. Old weight-only profiles must not be reused.
 The fixed comparison choices are `yolox`, `rtdetr_v2_r18` and
 `grounding_dino_tiny`. Install an alternative with `--name NAME`. The latter is
 an offline open-vocabulary diagnostic with a frozen `a cup. a mug.` prompt;
-its scores are not interchangeable with closed-vocabulary detector scores. No
+its labels are the matched prompt phrases and its scores are not
+interchangeable with closed-vocabulary detector scores. YOLOX labels come from
+its 80 COCO classes and RT-DETR labels from the checkpoint's `id2label`.
+Closed-vocabulary detections are suppressed per class, so overlapping objects of
+different classes both survive; Grounding DINO prompt phrases share one
+suppression group because synonymous phrases propose the same object. A frame
+keeps its 20 highest-scoring detections; lower-scored objects in a more
+cluttered frame are absent from that observation.
+
+Perception parameters are fixed at startup because they form the admitted
+operating point. A runtime `ros2 param set` on them is rejected with a reason
+instead of succeeding without effect; change the tracked configuration and
+restart. No
 model cascade or language-model completion authority is introduced. The
 vendored YOLOX implementation lives directly in the Python package; its
 upstream license/provenance remain in `thirdparty/opencv_yolox/`.
@@ -103,7 +117,7 @@ do not make systematic recognition errors independent.
 
 | Interface | Contract |
 | --- | --- |
-| `/robot/perception/<camera>/detections` | `vision_msgs/Detection2DArray`, original capture header, source-pixel boxes. Persistent track IDs stay empty. |
+| `/robot/perception/<camera>/detections` | `vision_msgs/Detection2DArray`, original capture header, source-pixel boxes, native label as `class_id`, at most 20 by score. Persistent track IDs stay empty. |
 | `/robot/perception/<camera>/source_image` | Canonical BGR image, exact same capture header and no overlays. |
 | `/robot/observations/events` | Schema, immutable observation ID and sequence; a wake-up hint, not authority. |
 | `/robot/observations/query` | Bounded cursor/ID metadata query, `streams`, aggregate `stream_ready`, epoch and cursor-gap state. |
@@ -123,8 +137,10 @@ are capped at 4 KiB, metadata at 64 KiB, and evidence at 384 KiB before base64.
 `latest_sequence` is a live-consumer admission head; `next_sequence` paginates
 history and does not prove freshness.
 
-The capture ID hashes camera/frame/stamp. Same-content replay is idempotent;
-different content for the same capture fails explicitly. Metadata and JPEG are
+`capture_id` hashes camera/frame/stamp. The observation `id` hashes the capture
+ID with `model_sha256`, so one capture recognized under two operating points
+yields two coexisting observations. Same-content replay is idempotent; different
+content for the same observation ID fails explicitly. Metadata and JPEG are
 one private SQLite transaction. A process lock prevents competing writers.
 Journals are separated by ROS domain and simulated-time mode. Retention is
 bounded by seven days, 100,000 records and the configured storage quota. Pins
@@ -145,13 +161,19 @@ Prepare a private manifest; images stay outside Git:
 [
   {"scene_id":"view-001","scene_group":"arrangement-session-001",
    "split":"development","image":"frames/mug.jpg",
-   "cups":[{"bbox":[42,89,185,144],"blue":false}]},
+   "objects":[{"label":"cup","bbox":[42,89,185,144],"blue":false},
+              {"label":"bowl","bbox":[300,120,90,60]}]},
   {"scene_id":"view-002","scene_group":"arrangement-session-002",
-   "split":"heldout","image":"frames/negative.jpg","cups":[]}
+   "split":"heldout","image":"frames/negative.jpg","objects":[]}
 ]
 ```
 
-Label every visible cup. Keep adjacent frames, crops and alternate cameras from
+Labels are the detector's native labels. The manifest's vocabulary is every
+label it uses, so label every visible instance of every vocabulary class in
+every scene: absence is scored as a true negative. Predictions of classes
+outside the vocabulary are reported as `unscored_predictions`, not false
+positives. `blue` is optional per object. Earlier manifests with
+`"cups":[{"bbox":…,"blue":…}]` remain valid and declare the label `cup`. Keep adjacent frames, crops and alternate cameras from
 the same arrangement/session in the same scene group and split. The loader
 validates both splits, rejects group leakage, repeated bytes and identical
 decoded pixels, and checks that images did not change after preflight. Group
@@ -168,26 +190,29 @@ selection before held-out evaluation. Freeze the selected values before opening
 the held-out results. Reusing a held-out set to tune a model invalidates it.
 Non-OpenCV models automatically run in the installed perception environment.
 
-Schema 2 reports **all-cup detection**, **blue-attribute errors on matched cups**,
-**blue-goal detection** and separate **generic-cup/blue false unique-target successes**, with
+Schema 3 reports, per vocabulary label, **class detection** and **false
+unique-target successes**; for labels with `blue` annotations it adds
+**blue-attribute errors on matched objects** and a **`blue <label>` goal**, with
 per-image boxes, hashes, timings and scene-group confidence bounds. Missing the
 cream mug counts as a cup false negative even though it is not a blue cup. A
 single detected blue cup in a truly ambiguous scene counts as a false verified
 outcome, not a successful unique-object request.
 
-`screening_passed` requires at least 80 held-out groups, 20 positive, 20 negative
-and 10 ambiguous groups, sufficient matched blue and nonblue examples, measured
+`screening_passed` requires at least 80 held-out groups and, per goal, 20
+positive, 20 negative and 10 ambiguous groups, sufficient matched blue and
+nonblue examples when blue is annotated, measured
 precision ≥98%, recall ≥90%, zero observed false unique successes and p95
 processing ≤1.5 s. `passed` additionally requires the lower 95% scene-group Wilson
-bounds to meet the precision/recall targets for class, attribute and blue-goal
-metrics. Correlated frames or objects do not add independent confidence trials.
+bounds to meet the precision/recall targets for every class and blue-goal
+metric. Correlated frames or objects do not add independent confidence trials.
 Eighty scenes are an initial screen, not proof of 98% operational precision.
 Development-only or insufficient datasets produce a report and exit nonzero.
 
 ## Color, geometry and completion scope
 
 `blue_fraction` is a fixed HSV measurement of the interior 20–80% of a detected
-box. It is not calibrated probability and deliberately excludes much of a rim.
+box, kept because Fiber's current cup/blue request requires it. It is an
+attribute of the observation only; geometry does not use it. It is not calibrated probability and deliberately excludes much of a rim.
 A cream mug with a blue rim is a cup positive, not automatically a blue-cup
 positive. The API supports `color: null` for an unrestricted cup request only
 when the frozen profile explicitly enables `allow_any_color`. The UI exposes
@@ -198,13 +223,13 @@ Metric mode requires a reviewed schema-1 calibration marked `validated` and
 raster correspondence and dimensions. Uncertainty limits remain 0.10 m camera,
 0.20 m map and 0.02 s clock; depth/CameraInfo must match capture within 50 ms.
 The ROS depth/CameraInfo caches cover the configured inference-age window at
-the tracked 30-Hz depth rate. Depth must be actual registered 16-bit surface depth, with accepted range
-0.55–3.0 m. A floor projection cannot substitute for the object's surface.
+the tracked 30-Hz depth rate. Depth must be actual registered 16-bit surface
+depth within the calibration's measured `depth_range_m: [min, max]` (Astra:
+0.55–3.0 m). A floor projection cannot substitute for the object's surface.
 
-Calibration `sampling: blue` preserves the existing blue-surface behavior.
-Explicitly measured `sampling: box_interior` supports nonblue cups using a
-robust depth cluster; dispersed samples or insufficient consensus remain
-image-only. It estimates a visible surface, not object center or grasp readiness.
+Geometry samples the interior 20–80% of the box for any object, independent of
+color, and keeps a robust depth cluster; dispersed samples or insufficient
+consensus remain image-only. Calibrations with `sampling: blue` are rejected. It estimates a visible surface, not object center or grasp readiness.
 Front/wrist have no registered-depth binding and cannot silently return metric
 positions. Map results additionally require capture-time TF and compatible
 approved map identity/epoch. Never copy synthetic test calibration onto hardware.

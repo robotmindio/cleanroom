@@ -1,9 +1,9 @@
 import numpy as np
 import cv2
-# Modified: retain class-aware NMS on Ubuntu OpenCV without NMSBoxesBatched.
+# Modified: retain class-aware NMS on Ubuntu OpenCV without NMSBoxesBatched; drop the unused objThreshold.
 
 class YoloX:
-    def __init__(self, modelPath, confThreshold=0.35, nmsThreshold=0.5, objThreshold=0.5, backendId=0, targetId=0):
+    def __init__(self, modelPath, confThreshold=0.35, nmsThreshold=0.5, backendId=0, targetId=0):
         self.num_classes = 80
         self.net = cv2.dnn.readNet(modelPath)
         self.input_size = (640, 640)
@@ -12,7 +12,6 @@ class YoloX:
         self.strides = [8, 16, 32]
         self.confThreshold = confThreshold
         self.nmsThreshold = nmsThreshold
-        self.objThreshold = objThreshold
         self.backendId = backendId
         self.targetId = targetId
         self.net.setPreferableBackend(self.backendId)

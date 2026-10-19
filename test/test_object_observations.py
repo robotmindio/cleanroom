@@ -52,6 +52,26 @@ def test_contract_preserves_no_match_single_and_ambiguous_candidates(count):
     assert all(item['blue_fraction'] == 1 for item in record['detections'])
 
 
+def test_each_operating_point_on_one_capture_is_a_distinct_observation(tmp_path):
+    first, jpeg = observation(*capture(), MODEL_SHA256, 'astra_color')
+    second, _ = observation(*capture(), 'b' * 64, 'astra_color')
+    assert first['capture_id'] == second['capture_id'] and first['id'] != second['id']
+    store = ObservationStore(tmp_path / 'store.db')
+    try:
+        store.put(first, jpeg)
+        store.put(second, jpeg)
+        assert {item['id'] for item in store.query('{"limit":5}')['observations']} == {first['id'], second['id']}
+        with pytest.raises(ValueError, match='different content'):
+            store.put({**first, 'detections': []}, jpeg)
+    finally:
+        store.close()
+
+
+def test_operating_point_identity_records_native_label_output():
+    _, document = recognition_identity('yolox')
+    assert document['labels'] == 'native'
+
+
 def test_color_measurement_does_not_label_red_as_blue():
     record, _ = observation(*capture(blue=False), MODEL_SHA256, 'astra_color')
     assert record['detections'][0]['blue_fraction'] == 0
@@ -168,17 +188,79 @@ def test_oversized_capture_does_not_evict_existing_evidence(tmp_path):
         store.close()
 
 
-def test_recognition_uses_source_coordinates_and_keeps_different_cups():
+def test_recognition_publishes_every_native_label_in_source_coordinates():
     from lekiwi_rmf.object_detector import detect
 
-    recognizer = SimpleNamespace(predict=lambda _: np.array([[32, 32, 64, 64, .9, 41],
-                                                           [160, 32, 32, 32, .8, 41],
-                                                           [0, 0, 50, 50, .9, 0]]))
+    recognizer = SimpleNamespace(predict=lambda _: [[32, 32, 64, 64, .9, 'cup'],
+                                                   [160, 32, 32, 32, .8, 'cup'],
+                                                   [0, 0, 50, 50, .7, 'potted plant']])
     result = detect(recognizer, np.zeros((320, 320, 3), np.uint8), Header())
-    assert len(result.detections) == 2
+    assert [item.results[0].hypothesis.class_id for item in result.detections] == ['cup', 'cup', 'potted plant']
     assert result.detections[0].bbox.size_x == 64
-    assert result.detections[0].results[0].hypothesis.class_id == 'cup'
     assert all(not item.id for item in result.detections)
+
+
+def test_cluttered_frame_keeps_the_highest_scores_instead_of_dropping_the_capture():
+    from lekiwi_rmf.object_detector import detect
+
+    rows = [[index, 0, 10, 10, index / 30, f'class {index}'] for index in range(1, 26)]
+    result = detect(SimpleNamespace(predict=lambda _: rows), np.zeros((40, 60, 3), np.uint8), Header())
+    scores = [item.results[0].hypothesis.score for item in result.detections]
+    assert len(scores) == 20 and scores == sorted(scores, reverse=True) and min(scores) == 6 / 30
+
+
+@pytest.mark.parametrize('label', ['', 41, 'x' * 129])
+def test_recognition_rejects_missing_or_numeric_labels(label):
+    from lekiwi_rmf.object_detector import detect
+
+    with pytest.raises(ValueError, match='native label'):
+        detect(SimpleNamespace(predict=lambda _: [[0, 0, 10, 10, .9, label]]), np.zeros((40, 60, 3), np.uint8), Header())
+
+
+def test_yolox_maps_every_output_class_to_its_native_coco_label():
+    from lekiwi_rmf.object_recognition import COCO_LABELS, Recognizer
+
+    recognizer = object.__new__(Recognizer)
+    recognizer.spec = {'backend': 'yolox'}
+    recognizer.model = SimpleNamespace(infer=lambda _: np.array(
+        [[0, 0, 64, 64, .9, index] for index in range(80)], dtype=np.float32))
+    rows = recognizer.predict(np.zeros((320, 640, 3), np.uint8))
+    assert len(COCO_LABELS) == 80 and len(set(COCO_LABELS)) == 80
+    assert [row[5] for row in rows] == list(COCO_LABELS) and COCO_LABELS[41] == 'cup'
+    assert rows[0][2] == 64 / (640 / 640)
+
+
+@pytest.mark.parametrize('backend,labels,kept', [
+    ('rtdetr_v2', ['cup', 'bowl'], ['cup', 'bowl']), ('rtdetr_v2', ['cup', 'cup'], ['cup']),
+    ('grounding_dino', ['a cup', 'mug'], ['a cup'])])
+def test_transformer_nms_keeps_overlapping_classes_but_merges_synonymous_prompts(monkeypatch, backend, labels, kept):
+    import contextlib
+    import sys
+    from lekiwi_rmf.object_recognition import Recognizer
+
+    monkeypatch.setitem(sys.modules, 'PIL', SimpleNamespace(Image=SimpleNamespace(fromarray=lambda pixels: pixels)))
+    result = {'boxes': np.array([[0., 0., 20., 20.], [1., 1., 20., 20.]]), 'scores': [.9, .8],
+              'labels': [0, 1 if labels[1] != labels[0] else 0], 'text_labels': labels}
+
+    class Inputs(dict):
+        input_ids = None
+
+    class Processor:
+        def __call__(self, **kwargs):
+            return Inputs()
+
+        def post_process_object_detection(self, *args, **kwargs):
+            return [result]
+
+        post_process_grounded_object_detection = post_process_object_detection
+
+    recognizer = object.__new__(Recognizer)
+    recognizer.spec, recognizer.confidence = {'backend': backend, 'prompt': 'a cup. a mug.'}, .5
+    recognizer.torch = SimpleNamespace(inference_mode=contextlib.nullcontext)
+    recognizer.processor = Processor()
+    recognizer.model = type('Model', (), {'__call__': lambda self, **kwargs: None,
+                                          'config': SimpleNamespace(id2label=dict(enumerate(labels)))})()
+    assert [row[5] for row in recognizer.predict(np.zeros((40, 60, 3), np.uint8))] == kept
 
 
 def test_nms_fallback_preserves_class_aware_suppression(monkeypatch):
@@ -302,7 +384,8 @@ def test_evaluation_reports_failed_scene_and_keeps_small_corpus_unqualified(tmp_
     result = evaluator.evaluate(manifest, model)
     assert not result['passed'] and not result['gates']['heldout_scenes']
     assert result['metrics']['cup']['fn'] == 1 and result['scenes'][0]['scene_id'] == 'test-fixture'
-    assert result['scenes'][0]['cup'] == (0, 0, 1) and result['scenes'][0]['predictions'] == []
+    assert result['scenes'][0]['goals']['cup'] == (0, 0, 1) and result['scenes'][0]['predictions'] == []
+    assert result['labels'] == ['cup'] and result['blue_labels'] == ['cup'] and result['schema'] == 3
     assert result['manifest_sha256'] == hashlib.sha256(manifest.read_bytes()).hexdigest()
 
 
@@ -322,16 +405,20 @@ def test_evaluation_rejects_images_changed_after_preflight(tmp_path, evaluator, 
         evaluator.evaluate(manifest, model)
 
 
+def cups(*boxes, blue):
+    return [{'label': 'cup', 'bbox': box, 'blue': blue} for box in boxes]
+
+
 def test_nonblue_mug_miss_is_not_hidden_by_blue_goal_metrics(evaluator):
-    cups = [{'bbox': [10, 10, 20, 20], 'blue': False}]
-    result = evaluator.scene_metrics([], cups, .35)
-    assert result['cup'] == (0, 0, 1)
-    assert result['blue_goal'] == (0, 0, 0)
-    detection = {'bbox': cups[0]['bbox'], 'blue_fraction': .5}
-    result = evaluator.scene_metrics([detection], cups, .35)
-    assert result['cup'] == (1, 0, 0)
+    expected = cups([10, 10, 20, 20], blue=False)
+    result = evaluator.scene_metrics([], expected, .35, ['cup'], ['cup'])
+    assert result['goals']['cup'] == (0, 0, 1)
+    assert result['goals']['blue cup'] == (0, 0, 0)
+    detection = {'label': 'cup', 'bbox': expected[0]['bbox'], 'blue_fraction': .5}
+    result = evaluator.scene_metrics([detection], expected, .35, ['cup'], ['cup'])
+    assert result['goals']['cup'] == (1, 0, 0)
     assert result['blue_attribute'] == [0, 1, 0, 0]
-    assert result['goal_outcomes']['blue']['false_verified']
+    assert result['goal_outcomes']['blue cup']['false_verified']
 
 
 def test_evaluation_rejects_related_views_crossing_splits(tmp_path, evaluator):
@@ -348,14 +435,45 @@ def test_evaluation_rejects_related_views_crossing_splits(tmp_path, evaluator):
 
 
 def test_ambiguous_scene_cannot_become_verified_by_missing_one_cup(evaluator):
-    cups = [{'bbox': [0, 0, 10, 10], 'blue': True}, {'bbox': [20, 0, 10, 10], 'blue': True}]
-    result = evaluator.scene_metrics([{'bbox': cups[0]['bbox'], 'blue_fraction': 1}], cups, .35)
-    assert result['goal_outcomes']['blue']['false_verified'] and not result['goal_outcomes']['blue']['correct']
-    assert result['cup'] == (1, 0, 1)
+    expected = cups([0, 0, 10, 10], [20, 0, 10, 10], blue=True)
+    result = evaluator.scene_metrics([{'label': 'cup', 'bbox': expected[0]['bbox'], 'blue_fraction': 1}],
+                                     expected, .35, ['cup'], ['cup'])
+    assert result['goal_outcomes']['blue cup']['false_verified'] and not result['goal_outcomes']['blue cup']['correct']
+    assert result['goals']['cup'] == (1, 0, 1)
 
 
 def test_ambiguous_nonblue_cup_goal_is_scored_independently(evaluator):
-    cups = [{'bbox': [0, 0, 10, 10], 'blue': False}, {'bbox': [20, 0, 10, 10], 'blue': False}]
-    result = evaluator.scene_metrics([{'bbox': cups[0]['bbox'], 'blue_fraction': 0}], cups, .35)
+    expected = cups([0, 0, 10, 10], [20, 0, 10, 10], blue=False)
+    result = evaluator.scene_metrics([{'label': 'cup', 'bbox': expected[0]['bbox'], 'blue_fraction': 0}],
+                                     expected, .35, ['cup'], ['cup'])
     assert result['goal_outcomes']['cup']['false_verified']
-    assert not result['goal_outcomes']['blue']['false_verified']
+    assert not result['goal_outcomes']['blue cup']['false_verified']
+
+
+def test_classes_are_scored_separately_and_unlabeled_classes_are_not_false_positives(evaluator):
+    box = [0, 0, 10, 10]
+    objects = [{'label': 'cup', 'bbox': box}, {'label': 'bowl', 'bbox': [20, 0, 10, 10]}]
+    detections = [{'label': 'bowl', 'bbox': box, 'blue_fraction': 0},
+                  {'label': 'vase', 'bbox': [40, 0, 10, 10], 'blue_fraction': 0}]
+    result = evaluator.scene_metrics(detections, objects, .35, ['bowl', 'cup'], [])
+    assert result['goals'] == {'bowl': (0, 1, 1), 'cup': (0, 0, 1)}
+    assert [item['label'] for item in result['unscored_predictions']] == ['vase']
+    assert 'blue cup' not in result['goals']
+
+
+def test_multiclass_manifest_defines_vocabulary_and_keeps_legacy_cups(tmp_path, evaluator):
+    for name, value in [('one.png', 0), ('two.png', 255)]:
+        cv2.imwrite(str(tmp_path / name), np.full((40, 60, 3), value, np.uint8))
+    manifest = tmp_path / 'scenes.json'
+    manifest.write_text(json.dumps([
+        {'scene_id': 'one', 'split': 'heldout', 'image': 'one.png', 'cups': [{'bbox': [0, 0, 5, 5], 'blue': True}]},
+        {'scene_id': 'two', 'split': 'heldout', 'image': 'two.png',
+         'objects': [{'label': 'potted plant', 'bbox': [0, 0, 5, 5]}]}]))
+    _, selected, labels, blue_labels = evaluator.load_scenes(manifest)
+    assert labels == ['cup', 'potted plant'] and blue_labels == ['cup']
+    assert selected[0][0]['objects'] == [{'label': 'cup', 'bbox': [0, 0, 5, 5], 'blue': True}]
+    for bad in [{'cups': [], 'objects': []}, {}, {'objects': [{'bbox': [0, 0, 5, 5]}]},
+                {'objects': [{'label': 'cup', 'bbox': [0, 0, 5, 5], 'blue': 'yes'}]}]:
+        manifest.write_text(json.dumps([{'scene_id': 'one', 'split': 'heldout', 'image': 'one.png', **bad}]))
+        with pytest.raises(ValueError):
+            evaluator.load_scenes(manifest)
