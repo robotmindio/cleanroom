@@ -4,6 +4,7 @@ import copy
 import importlib.util
 import json
 from pathlib import Path
+import threading
 from types import SimpleNamespace
 
 import cv2
@@ -64,6 +65,31 @@ def test_each_operating_point_on_one_capture_is_a_distinct_observation(tmp_path)
         assert {item['id'] for item in store.query('{"limit":5}')['observations']} == {first['id'], second['id']}
         with pytest.raises(ValueError, match='different content'):
             store.put({**first, 'detections': []}, jpeg)
+    finally:
+        store.close()
+
+
+def test_store_serves_queries_while_another_thread_writes(tmp_path):
+    # A node's executor writes while services and tests read; one shared sqlite3 connection must not race.
+    store = ObservationStore(tmp_path / 'store.db')
+    records = [document(stamp=stamp) for stamp in range(1, 201)]
+    errors = []
+
+    def write():
+        try:
+            for record, jpeg in records:
+                store.put(record, jpeg)
+        except Exception as error:  # noqa: BLE001 - surfaced by the assertion below
+            errors.append(error)
+
+    writer = threading.Thread(target=write)
+    try:
+        writer.start()
+        while writer.is_alive():
+            store.query('{"limit":50}')
+        writer.join()
+        assert not errors
+        assert store.query('{"limit":1}')['latest_sequence'] == len(records)
     finally:
         store.close()
 
