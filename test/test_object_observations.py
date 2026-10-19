@@ -150,6 +150,53 @@ def test_retention_reports_cursor_gap_and_evidence_expiration(tmp_path):
         store.close()
 
 
+def test_pinned_survivor_does_not_hide_evicted_records_from_cursor(tmp_path):
+    store = ObservationStore(tmp_path / 'store.db', max_records=5)
+    try:
+        first, _ = document(stamp=1)
+        store.put(*document(stamp=1), now=100)
+        store.pin(json.dumps({'request_id': 'goal', 'observation_ids': [first['id']]}), now=100)
+        for stamp in range(2, 6):
+            store.put(*document(stamp=stamp), now=100)
+        cursor = json.dumps({'after_sequence': 5, 'epoch': store.epoch})
+        assert not store.query(cursor, now=100)['cursor_gap']
+        for stamp in range(6, 21):
+            store.put(*document(stamp=stamp), now=100)
+        result = store.query(cursor, now=100)
+        assert result['cursor_gap'] and result['observations'][0]['sequence'] > 6
+    finally:
+        store.close()
+
+
+def test_full_database_file_evicts_instead_of_failing_every_capture(tmp_path):
+    rng = np.random.default_rng(0)
+    store = ObservationStore(tmp_path / 'store.db', max_bytes=8 * 1024**2)
+    try:
+        record, _ = document()
+        for index in range(300):
+            blob = rng.integers(0, 256, int(rng.integers(45000, 65000)), dtype=np.uint8).tobytes()
+            store.put({**record, 'id': f'{index:064x}'}, blob, now=100)
+        assert store.query('{"limit":1}', now=100)['latest_sequence'] == 300
+        assert (tmp_path / 'store.db').stat().st_size <= 8 * 1024**2 * 5 // 4
+    finally:
+        store.close()
+
+
+def test_pins_cannot_reserve_more_than_half_of_storage(tmp_path):
+    store = ObservationStore(tmp_path / 'store.db', max_bytes=65536 * 4)
+    try:
+        record, _ = document()
+        ids = [f'{index:064x}' for index in range(4)]
+        for identifier in ids:
+            store.put({**record, 'id': identifier}, bytes(60000), now=100)
+        store.pin(json.dumps({'request_id': 'one', 'observation_ids': ids[:2]}), now=100)
+        with pytest.raises(ValueError, match='half of the storage'):
+            store.pin(json.dumps({'request_id': 'two', 'observation_ids': ids[2:3]}), now=100)
+        store.put({**record, 'id': 'f' * 64}, bytes(60000), now=100)
+    finally:
+        store.close()
+
+
 def test_new_database_epoch_rejects_old_cursor(tmp_path):
     first, second = ObservationStore(tmp_path / 'one.db'), ObservationStore(tmp_path / 'two.db')
     try:

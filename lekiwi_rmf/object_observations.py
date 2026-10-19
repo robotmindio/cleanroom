@@ -148,10 +148,15 @@ class ObservationStore:
                 self._db.execute('CREATE TABLE IF NOT EXISTS metadata (epoch TEXT NOT NULL)')
                 if self._db.execute('SELECT epoch FROM metadata').fetchone() is None:
                     self._db.execute('INSERT INTO metadata VALUES (?)', (uuid.uuid4().hex,))
+                # Highest sequence ever deleted; pinned survivors make MIN(sequence) unable to reveal gaps.
+                self._db.execute('CREATE TABLE IF NOT EXISTS evicted (sequence INTEGER NOT NULL)')
+                if self._db.execute('SELECT sequence FROM evicted').fetchone() is None:
+                    self._db.execute('INSERT INTO evicted VALUES (0)')
                 self._db.execute('PRAGMA user_version=1')
             self.epoch = self._db.execute('SELECT epoch FROM metadata').fetchone()[0]
             page_size = self._db.execute('PRAGMA page_size').fetchone()[0]
-            self._db.execute(f'PRAGMA max_page_count={max_bytes // page_size}')
+            # Eviction counts payload bytes; page slack, indexes and pins need room above that quota.
+            self._db.execute(f'PRAGMA max_page_count={max_bytes * 5 // 4 // page_size}')
             self.max_bytes, self.max_records, self.retention_sec = max_bytes, max_records, retention_sec
         except BaseException:
             if hasattr(self, '_db'):
@@ -159,10 +164,20 @@ class ObservationStore:
             self._lock.close()
             raise
 
+    def _delete(self, where, parameters):
+        self._db.execute(f'UPDATE evicted SET sequence=MAX(sequence, COALESCE((SELECT MAX(sequence) FROM observations WHERE {where}), 0))',
+                         parameters)
+        self._db.execute(f'DELETE FROM observations WHERE {where}', parameters)
+
+    def _evict_oldest(self):
+        oldest = self._db.execute('SELECT MIN(sequence) FROM observations WHERE id NOT IN (SELECT observation_id FROM pins)').fetchone()[0]
+        if oldest is None:
+            raise ValueError('storage quota reserved by pinned evidence')
+        self._delete('sequence=?', (oldest,))
+
     def _prune(self, now):
         self._db.execute('DELETE FROM pins WHERE expires_at<?', (now,))
-        self._db.execute('DELETE FROM observations WHERE stored_at<? AND id NOT IN (SELECT observation_id FROM pins)',
-                         (now - self.retention_sec,))
+        self._delete('stored_at<? AND id NOT IN (SELECT observation_id FROM pins)', (now - self.retention_sec,))
 
     def pin(self, text, now=None):
         if len(text.encode()) > 4096:
@@ -189,6 +204,11 @@ class ObservationStore:
                 return
             if self._db.execute('SELECT COUNT(DISTINCT request_id) FROM pins').fetchone()[0] >= 1000:
                 raise ValueError('evidence pin request quota reached')
+            pinned = self._db.execute(
+                'SELECT COALESCE(SUM(bytes),0) FROM observations WHERE id IN (SELECT observation_id FROM pins) OR id IN (%s)'
+                % ','.join('?' for _ in ids), ids).fetchone()[0]
+            if pinned > self.max_bytes // 2:
+                raise ValueError('pinned evidence would exceed half of the storage quota')
             for identifier in ids:
                 if self._db.execute('SELECT 1 FROM observations WHERE id=?', (identifier,)).fetchone() is None:
                     raise ValueError('cannot pin missing or expired evidence')
@@ -211,13 +231,17 @@ class ObservationStore:
                 count, used = self._db.execute('SELECT COUNT(*),COALESCE(SUM(bytes),0) FROM observations INDEXED BY observations_size').fetchone()
                 if count < self.max_records and used + size <= self.max_bytes:
                     break
-                oldest = self._db.execute('SELECT MIN(sequence) FROM observations WHERE id NOT IN (SELECT observation_id FROM pins)').fetchone()[0]
-                if oldest is None:
-                    raise ValueError('storage quota reserved by pinned evidence')
-                self._db.execute('DELETE FROM observations WHERE sequence=?', (oldest,))
-            cursor = self._db.execute('INSERT INTO observations (id,stored_at,document,evidence,bytes) VALUES (?,?,?,?,?)',
-                                      (document['id'], now, text, evidence, size))
-            return cursor.lastrowid
+                self._evict_oldest()
+            while True:
+                try:
+                    cursor = self._db.execute('INSERT INTO observations (id,stored_at,document,evidence,bytes) VALUES (?,?,?,?,?)',
+                                              (document['id'], now, text, evidence, size))
+                    return cursor.lastrowid
+                except sqlite3.OperationalError as error:
+                    # The file cap can still be reached through page overhead; free space instead of failing forever.
+                    if 'full' not in str(error):
+                        raise
+                    self._evict_oldest()
 
     def query(self, text, now=None):
         cursor, ids, limit, epoch = query_parameters(text)
@@ -233,6 +257,7 @@ class ObservationStore:
             rows = self._db.execute(f'SELECT sequence,stored_at,document FROM observations WHERE id IN ({placeholders}) ORDER BY sequence LIMIT ?',
                                     (*ids, limit)).fetchall()
         first = self._db.execute('SELECT MIN(sequence) FROM observations').fetchone()[0]
+        evicted = self._db.execute('SELECT sequence FROM evicted').fetchone()[0]
         last = self._db.execute("SELECT seq FROM sqlite_sequence WHERE name='observations'").fetchone()
         records, size = [], 0
         for row in rows:
@@ -246,8 +271,8 @@ class ObservationStore:
         return {'schema': 1, 'epoch': self.epoch, 'observations': records, 'pins': pins,
                 'next_sequence': records[-1]['sequence'] if records else cursor,
                 'latest_sequence': last[0] if last is not None else 0,
-                'cursor_gap': bool(ids is None and cursor and
-                    ((first is not None and cursor < first - 1) or (first is None and last is not None and cursor < last[0])))}
+                'cursor_gap': bool(ids is None and cursor and (cursor < evicted or
+                    (first is not None and cursor < first - 1) or (first is None and last is not None and cursor < last[0])))}
 
     def evidence(self, identifier, now=None):
         if not valid_id(identifier):
