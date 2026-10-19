@@ -197,7 +197,7 @@ class RobotExplorer(Node):
         self._record("slam", message.header)
         if message.loop_closure_id or message.proximity_detection_id:
             # An optimized graph moves earlier map coordinates; plans built on them are revalidated.
-            # DEBT: search coverage is not reprojected onto the optimized graph, so it can drift (#88).
+            # Search coverage itself follows spatial memory's revisions (SearchEvidence.generation).
             self._map_revision += 1
 
     def _on_safety_status(self, message):
@@ -749,6 +749,7 @@ class RobotExplorer(Node):
         config, profile = self.config, self._search_profile()
         session, visited, blocked, unproductive = None, [], [], []
         state = {"serial": 0, "plan": None, "dwell": None, "revision": self._map_revision,
+                 "generation": self._evidence.generation,
                  "reason": "initial plan", "evidence": []}
         odometry = {"epoch": None, "base": 0.0, "last": 0.0, "before": 0.0}
         started_task = task_time()
@@ -781,6 +782,15 @@ class RobotExplorer(Node):
             if self._map is None:
                 return []
             session.rebase(self._map)
+            generation, revision, log = self._evidence.snapshot()
+            if generation != state["generation"]:
+                # SLAM revised the map: earlier evidence moves with it before new captures are added.
+                state["generation"] = generation
+                state["serial"] = log[-1][0] if log else state["serial"]
+                if session.reproject([capture for _, capture in log], self._map[0], revision):
+                    raise SearchEnded("found", f'found "{session.label}"; see evidence_ids')
+                if state["plan"] is not None:
+                    raise Replan("map revised by SLAM optimization; coverage reprojected")
             fresh = self._evidence.since(state["serial"])
             for serial, capture in fresh:
                 state["serial"] = serial

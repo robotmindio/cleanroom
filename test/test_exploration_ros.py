@@ -17,6 +17,7 @@ from nav2_msgs.srv import GetCostmap
 from nav_msgs.msg import OccupancyGrid, Path
 import pytest
 import rclpy
+from ros_test_utils import release_graph
 from rclpy.action import ActionClient, ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.context import Context
@@ -225,14 +226,8 @@ def graph(tmp_path):
             wait(lambda: not explorer._busy, timeout=6)
             wait(lambda: not peers.nav_active)
         finally:
-            finished.set_result(True)
-            thread.join(timeout=5)
-            assert not thread.is_alive()
-            assert executor.shutdown(timeout_sec=5)
-            client.destroy()
-            for node in (client_node, explorer, guard, peers):
-                node.destroy_node()
-            context.shutdown()
+            release_graph(executor=executor, thread=thread, finished=finished, waitables=(client,),
+                          nodes=(client_node, explorer, guard, peers), context=context)
 
 
 def start(graph, duration=TEST_TASK_DURATION, revisit=False):
