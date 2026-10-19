@@ -189,10 +189,10 @@ def searchable_mask(grid, resolution, origin, center, radius):
 
 
 class QueryCoverage:
-    """Per-label negative evidence under one model; memory is bounded by the map grid."""
+    """Per-label negative evidence from the models able to report it; memory is bounded by the map grid."""
 
-    def __init__(self, label, model_sha256, profile, shape, resolution, origin):
-        self.label, self.model_sha256, self.profile = normalize_label(label), model_sha256, profile
+    def __init__(self, label, models, profile, shape, resolution, origin):
+        self.label, self.models, self.profile = normalize_label(label), frozenset(models), profile
         self.resolution, self.origin = resolution, origin
         self.negative = np.full(shape, -np.inf)
         self.sighting = np.full(shape, -np.inf)
@@ -200,6 +200,7 @@ class QueryCoverage:
         self.viewpoints = deque(maxlen=REPORT_ITEMS)
         self.cameras = set()
         self.counts = {'captures': 0, 'negative_captures': 0, 'other_model': 0, 'moving': 0, 'occluded_cells': 0}
+        self.by_model = {}
         self.span = [math.inf, -math.inf]
 
     def rebase(self, shape, resolution, origin):
@@ -227,7 +228,8 @@ class QueryCoverage:
     def add(self, capture, grid):
         """Integrate one capture; return its detections of this label."""
         self.counts['captures'] += 1
-        if capture.model_sha256 != self.model_sha256:
+        if capture.model_sha256 not in self.models:
+            # A frame from a recognizer whose catalogue lacks the label is silent about it, not negative.
             self.counts['other_model'] += 1
             return []
         if capture.pose is None:
@@ -251,6 +253,7 @@ class QueryCoverage:
         if negative.size:
             self.negative.reshape(-1)[negative] = np.maximum(self.negative.reshape(-1)[negative], capture.stamp)
             self.counts['negative_captures'] += 1
+            self.by_model[capture.model_sha256] = self.by_model.get(capture.model_sha256, 0) + 1
             self.counts['occluded_cells'] += occluded
             self.contributors.append(capture.observation_id)
             self.cameras.add(capture.camera_id)
@@ -411,11 +414,12 @@ class SearchSession:
     def __init__(self, query, perception, profile, geometry, *, started, target, region):
         self.label = normalize_label(query)
         self.perception = perception or {}
-        labels = self.perception.get('labels')
-        self.supported = isinstance(labels, list) and self.label in {normalize_label(label) for label in labels}
+        self.recognizers = [{**item, 'label_supported': self.label in {normalize_label(label) for label in item['labels']}}
+                            for item in self.perception.get('recognizers', [])]
+        self.supported = any(item['label_supported'] for item in self.recognizers)
         grid, resolution, origin = geometry
-        self.coverage = QueryCoverage(self.label, self.perception.get('model_sha256', ''), profile,
-                                      grid.shape, resolution, origin)
+        self.coverage = QueryCoverage(self.label, [item['model_sha256'] for item in self.recognizers
+                                                   if item['label_supported']], profile, grid.shape, resolution, origin)
         self.started, self.target, self.region = started, target, region
         self.found = []
         self.prior_sightings = deque(maxlen=REPORT_ITEMS)
@@ -489,10 +493,10 @@ class SearchSession:
             'schema': 1, 'outcome': outcome, 'statement': statement(outcome, self.label, fraction, self.evidence_ids()),
             'query': {'label': self.label, 'region': {'x': self.region[0][0], 'y': self.region[0][1],
                                                       'radius_m': self.region[1]}},
-            'perception': {'model_sha256': self.coverage.model_sha256 or None,
-                           'model_name': self.perception.get('model_name'),
-                           'confidence_threshold': self.perception.get('confidence_threshold'),
-                           'label_supported': self.supported, 'cameras': self.perception.get('cameras', {})},
+            'perception': {'label_supported': self.supported, 'cameras': self.perception.get('cameras', {}),
+                           'recognizers': [{key: item.get(key) for key in (
+                               'role', 'model_sha256', 'model_name', 'confidence_threshold', 'open_vocabulary',
+                               'label_supported')} for item in self.recognizers]},
             'coverage': {'fraction': round(fraction, 4), 'target': self.target,
                          'searchable_cells': int(np.count_nonzero(searchable)), 'covered_cells': int(np.count_nonzero(covered)),
                          'resolution_m': self.coverage.resolution,
@@ -502,14 +506,15 @@ class SearchSession:
                          'unmapped_area_m2': round(float(np.count_nonzero(unmapped)) * area, 3),
                          'unobserved_regions': regions, 'unobserved_region_count': region_count,
                          'map_raster_resets': self.discarded_rebases},
-            'negative_evidence': {'label': self.label, 'model_sha256': self.coverage.model_sha256 or None,
+            'negative_evidence': {'label': self.label, 'model_sha256s': sorted(self.coverage.models),
+                                  'observations_by_model': dict(self.coverage.by_model),
                                   'criteria': self.coverage.profile.criteria(), 'cameras': sorted(self.coverage.cameras),
                                   'observation_count': self.coverage.counts['negative_captures'],
                                   'recent_observation_ids': list(self.coverage.contributors),
                                   'recent_viewpoints': list(self.coverage.viewpoints),
                                   'first_stamp': span[0], 'last_stamp': span[1],
                                   'captures_considered': self.coverage.counts['captures'],
-                                  'rejected_other_model': self.coverage.counts['other_model'],
+                                  'ignored_unable_model': self.coverage.counts['other_model'],
                                   'rejected_moving': self.coverage.counts['moving'],
                                   'occluded_cells_observed_behind_obstacles': self.coverage.counts['occluded_cells']},
             'found': {'evidence_ids': self.evidence_ids(), 'observations': self.found},

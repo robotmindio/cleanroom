@@ -78,7 +78,7 @@ def test_frustum_resolution_band_and_occlusion():
 
 def test_negative_evidence_respects_model_motion_bearing_and_age():
     grid = free_grid()
-    coverage = QueryCoverage('Cup', 'm' * 64, PROFILE, grid.shape, RESOLUTION, ORIGIN)
+    coverage = QueryCoverage('Cup', ['m' * 64], PROFILE, grid.shape, RESOLUTION, ORIGIN)
     assert coverage.add(capture(model='o' * 64), grid) == []
     assert not coverage.covered(100).any()
     coverage.add(capture(stationary=False), grid)
@@ -103,7 +103,7 @@ def test_negative_evidence_respects_model_motion_bearing_and_age():
 
 def test_map_growth_keeps_world_aligned_coverage_and_raster_change_discards_it():
     grid = free_grid()
-    coverage = QueryCoverage('cup', 'm' * 64, PROFILE, grid.shape, RESOLUTION, ORIGIN)
+    coverage = QueryCoverage('cup', ['m' * 64], PROFILE, grid.shape, RESOLUTION, ORIGIN)
     coverage.add(capture(), grid)
     before = {tuple(np.round(v, 6)) for v in zip(*cell_xy(np.flatnonzero(coverage.covered(100)), grid))}
     grown = (-4.0, -3.5, 0.0)
@@ -179,7 +179,9 @@ def test_unreachable_or_fully_observed_space_has_no_viewpoint():
 
 def session(labels=('cup', 'chair'), target=0.5):
     grid = free_grid(60)
-    perception = {'model_sha256': 'm' * 64, 'labels': list(labels), 'model_name': 'test', 'cameras': {'front': 'c' * 64}}
+    perception = {'cameras': {'front': 'c' * 64}, 'recognizers': [
+        {'role': 'primary', 'model_sha256': 'm' * 64, 'model_name': 'test', 'confidence_threshold': .5,
+         'labels': list(labels), 'open_vocabulary': False}]}
     origin = (-1.5, -1.5, 0.0)
     result = SearchSession('CUP', perception, PROFILE, (grid, RESOLUTION, origin), started=50.0, target=target,
                            region=((0.0, 0.0), 1.5))
@@ -210,7 +212,8 @@ def test_termination_found_coverage_and_incapable_with_honest_report():
     # The prior sighting's capture also proved absence everywhere off the cup's bearing.
     assert report['negative_evidence']['observation_count'] == 14
     assert len(report['negative_evidence']['recent_observation_ids']) == 14
-    assert report['negative_evidence']['model_sha256'] == 'm' * 64
+    assert report['negative_evidence']['model_sha256s'] == ['m' * 64]
+    assert report['negative_evidence']['observations_by_model'] == {'m' * 64: 14}
 
     found = search.integrate(capture(identifier='f' * 64, detections=[Detection('cup', 0.8, 0.1, 0.0)],
                                      stamp=120.0), grid)
@@ -220,7 +223,7 @@ def test_termination_found_coverage_and_incapable_with_honest_report():
 
 def test_new_coverage_en_route_refutes_the_planned_viewpoint():
     grid = free_grid()
-    coverage = QueryCoverage('cup', 'm' * 64, PROFILE, grid.shape, RESOLUTION, ORIGIN)
+    coverage = QueryCoverage('cup', ['m' * 64], PROFILE, grid.shape, RESOLUTION, ORIGIN)
     searchable, _ = searchable_mask(grid, RESOLUTION, ORIGIN, (0.0, 0.0), 2.5)
     plan = Viewpoint(0.5, 0.0, 0.0, 'front', 0.0, 0.5, 0.0)
     planned = viewpoint_gain(plan, coverage.weights(searchable, 100, 20.0), grid, RESOLUTION, ORIGIN, mount(), PROFILE)
@@ -230,15 +233,49 @@ def test_new_coverage_en_route_refutes_the_planned_viewpoint():
     assert remaining < 0.5 * planned
 
 
+def profile_text(**recognizer):
+    import json
+    item = {'role': 'primary', 'model_sha256': 'a' * 64, 'labels': ['cup'], 'open_vocabulary': False, **recognizer}
+    return json.dumps({'schema': 1, 'cameras': {'front': 'c' * 64}, 'recognizers': [item]})
+
+
 @pytest.mark.parametrize('text', [
-    'invalid', '[]', '{}', '{"schema":2}',
-    '{"schema":1,"model_sha256":"x","labels":["cup"],"cameras":{"front":"' + 'c' * 64 + '"}}',
-    '{"schema":1,"model_sha256":"' + 'a' * 64 + '","labels":"cup","cameras":{"front":"' + 'c' * 64 + '"}}',
-    '{"schema":1,"model_sha256":"' + 'a' * 64 + '","labels":[""],"cameras":{"front":"' + 'c' * 64 + '"}}',
-    '{"schema":1,"model_sha256":"' + 'a' * 64 + '","labels":["cup"],"cameras":{}}',
-    ' ' * 65537,
+    'invalid', '[]', '{}', '{"schema":2}', profile_text(model_sha256='x'), profile_text(labels='cup'),
+    profile_text(labels=['']), profile_text(role='backup'), profile_text(open_vocabulary=1),
+    '{"schema":1,"cameras":{},"recognizers":[]}', ' ' * 65537,
 ])
 def test_malformed_perception_profile_means_no_instrument(text):
     from lekiwi_rmf.search_evidence import parse_profile
     with pytest.raises((ValueError, RecursionError)):
         parse_profile(text)
+    parse_profile(profile_text())
+
+
+def test_fallback_frames_never_cover_labels_only_the_primary_can_report():
+    """An open-vocabulary primary and a closed-set fallback: each frame speaks only for its own catalogue."""
+    grid = free_grid(60)
+    origin = (-1.5, -1.5, 0.0)
+    perception = {'cameras': {'front': 'c' * 64}, 'recognizers': [
+        {'role': 'primary', 'model_sha256': 'p' * 64, 'labels': ['a cup', 'a mug'], 'open_vocabulary': True},
+        {'role': 'fallback', 'model_sha256': 'f' * 64, 'labels': ['chair', 'book'], 'open_vocabulary': False}]}
+
+    def search(query):
+        return SearchSession(query, perception, PROFILE, (grid, RESOLUTION, origin), started=50.0, target=0.5,
+                             region=((0.0, 0.0), 1.5))
+
+    primary_only = search('a mug')
+    assert primary_only.supported and primary_only.coverage.models == {'p' * 64}
+    primary_only.integrate(capture(model='f' * 64), grid)
+    searchable, _ = primary_only.masks(grid)
+    assert primary_only.fraction(searchable, 100) == 0.0
+    assert primary_only.coverage.counts['other_model'] == 1
+    primary_only.integrate(capture(model='p' * 64), grid)
+    assert primary_only.fraction(searchable, 100) > 0
+    report = primary_only.report(None, grid, 100, {})
+    assert [(r['role'], r['label_supported']) for r in report['perception']['recognizers']] == [
+        ('primary', True), ('fallback', False)]
+    assert report['negative_evidence']['observations_by_model'] == {'p' * 64: 1}
+    fallback_only = search('book')
+    fallback_only.integrate(capture(model='p' * 64), grid)
+    assert fallback_only.fraction(searchable, 100) == 0.0
+    assert not search('unicorn').supported

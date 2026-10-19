@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""OpenCV Zoo recognition adapted to standard ROS vision_msgs, on CPU."""
+"""Pinned recognition adapted to standard ROS vision_msgs, locally on CPU or through a remote provider."""
 
 import math
 
@@ -21,7 +21,7 @@ from sensor_msgs.msg import Image
 from std_msgs.msg import String
 from vision_msgs.msg import Detection2D, Detection2DArray, ObjectHypothesisWithPose
 
-from lekiwi_rmf.object_recognition import Recognizer, reject_parameter_changes
+from lekiwi_rmf.object_recognition import ProviderUnavailable, Recognizer, reject_parameter_changes
 from lekiwi_rmf.object_cameras import camera_bindings
 
 
@@ -53,17 +53,23 @@ def detect(detector, image, header):
     return result
 
 
+# How long frames go straight to the fallback after the primary provider failed, so an unreachable
+# provider costs one timeout per window instead of one per frame.
+PRIMARY_RETRY_SEC = 10.
+
+
 class ObjectDetector(Node):
     def __init__(self, **kwargs):
         super().__init__('object_detector', **kwargs)
         self.declare_parameter('model_name', 'yolox')
+        self.declare_parameter('fallback_model_name', '')
         self.declare_parameter('model_directory', '')
         self.declare_parameter('camera_ids', ['front'])
         self.declare_parameter('camera_profiles_file', '')
         self.declare_parameter('confidence_threshold', .5)
         self.declare_parameter('max_rate_hz', 2.0)
         self.declare_parameter('max_source_age_sec', 2.0)
-        reject_parameter_changes(self, ['model_name', 'model_directory', 'camera_ids', 'camera_profiles_file',
+        reject_parameter_changes(self, ['model_name', 'fallback_model_name', 'model_directory', 'camera_ids', 'camera_profiles_file',
                                         'confidence_threshold', 'max_rate_hz', 'max_source_age_sec'])
         confidence = self.get_parameter('confidence_threshold').value
         rate = self.get_parameter('max_rate_hz').value
@@ -74,6 +80,13 @@ class ObjectDetector(Node):
                                         self.get_parameter('camera_profiles_file').value or None)
         self._detector = Recognizer(self.get_parameter('model_name').value,
                                    self.get_parameter('model_directory').value or None, confidence)
+        # Frames the fallback serves are published on its own topics, so each observation keeps the
+        # identity of the recognizer that actually produced it.
+        fallback = self.get_parameter('fallback_model_name').value
+        if fallback == self.get_parameter('model_name').value:
+            raise ValueError('fallback recognizer must differ from the primary recognizer')
+        self._fallback = Recognizer(fallback, None, confidence) if fallback else None
+        self._primary_retry_at = 0.
         self._bridge = CvBridge()
         self._frames, self._last_stamp = {}, {}
         self._frame_lock = threading.Lock()
@@ -82,28 +95,35 @@ class ObjectDetector(Node):
         self._clock_jump = self.get_clock().create_jump_callback(
             JumpThreshold(min_forward=None, min_backward=Duration(nanoseconds=-1), on_clock_change=True),
             post_callback=self._clock_reset)
-        self._stats = {name: {'received': 0, 'published': 0, 'overwritten': 0, 'rejected': 0,
-                              'reason': 'waiting for camera', 'inference_sec': 0., 'source_age_sec': 0., 'published_stamp': 0}
+        self._stats = {name: {'received': 0, 'published': 0, 'overwritten': 0, 'rejected': 0, 'fallback_published': 0,
+                              'reason': 'waiting for camera', 'primary_reason': '', 'served_by': '',
+                              'inference_sec': 0., 'source_age_sec': 0., 'published_stamp': 0}
                        for name in self._bindings}
         self._durations = {name: deque(maxlen=128) for name in self._bindings}
         self._outputs = {}
         self._receipt_group = MutuallyExclusiveCallbackGroup()
         self._inference_group = MutuallyExclusiveCallbackGroup()
         qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT)
+        roles = {'primary': ''} | ({'fallback': '/fallback'} if self._fallback else {})
         for name, binding in self._bindings.items():
-            self._outputs[name] = (
-                self.create_publisher(Image, binding['prefix'] + '/source_image', 1),
-                self.create_publisher(Detection2DArray, binding['prefix'] + '/detections', 1))
+            self._outputs[name] = {role: (
+                self.create_publisher(Image, binding['prefix'] + suffix + '/source_image', 1),
+                self.create_publisher(Detection2DArray, binding['prefix'] + suffix + '/detections', 1))
+                for role, suffix in roles.items()}
             self.create_subscription(Image, binding['image_topic'],
                 lambda message, camera=name: self._receive(message, camera), qos,
                 callback_group=self._receipt_group)
-        # The operating point in force: consumers tie negative evidence to this model and catalogue.
+        # The operating points in force. Each frame is stored under the model_sha256 that served it, so a
+        # consumer credits a frame only for labels in that recognizer's own catalogue.
         self._profile = self.create_publisher(String, '/robot/perception/profile',
                                               QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
+        recognizers = [('primary', self._detector)] + ([('fallback', self._fallback)] if self._fallback else [])
         self._profile.publish(String(data=json.dumps({
-            'schema': 1, 'model_sha256': self._detector.sha256, 'model_name': self.get_parameter('model_name').value,
-            'confidence_threshold': confidence, 'labels': list(self._detector.labels),
-            'cameras': {name: binding['sha256'] for name, binding in self._bindings.items()}})))
+            'schema': 1, 'cameras': {name: binding['sha256'] for name, binding in self._bindings.items()},
+            'recognizers': [{'role': role, 'model_sha256': recognizer.sha256, 'model_name': recognizer.name,
+                             'confidence_threshold': confidence, 'labels': list(recognizer.labels),
+                             'open_vocabulary': recognizer.open_vocabulary}
+                            for role, recognizer in recognizers]})))
         self._diagnostics = self.create_publisher(DiagnosticArray, '/diagnostics', 10)
         self.create_timer(1., self._health, callback_group=self._receipt_group)
         self.create_timer(1 / rate, self._infer, clock=Clock(clock_type=ClockType.STEADY_TIME),
@@ -164,7 +184,7 @@ class ObjectDetector(Node):
                 raise ValueError('recognition source expired before inference')
             pixels = self._bridge.imgmsg_to_cv2(image, 'bgr8')
             start = time.monotonic()
-            result = detect(self._detector, pixels, image.header)
+            result, role = self._recognize(camera, pixels, image.header)
             duration = time.monotonic() - start
             source_age = (self.get_clock().now().nanoseconds - stamp) / 1e9
             with self._frame_lock:
@@ -176,15 +196,34 @@ class ObjectDetector(Node):
                 raise ValueError('recognition finished after source freshness expired')
             source = self._bridge.cv2_to_imgmsg(pixels, 'bgr8')
             source.header = image.header
-            image_pub, detection_pub = self._outputs[camera]
+            image_pub, detection_pub = self._outputs[camera][role]
             image_pub.publish(source)
             detection_pub.publish(result)
             with self._frame_lock:
                 self._stats[camera]['published'] += 1
+                self._stats[camera]['fallback_published'] += role == 'fallback'
+                self._stats[camera]['served_by'] = role
                 self._stats[camera]['published_stamp'] = stamp
                 self._stats[camera]['reason'] = ''
         except (ValueError, RuntimeError, CvBridgeError, cv2.error) as error:
             self._reject(camera, str(error))
+
+    def _recognize(self, camera, pixels, header):
+        if self._fallback is None or time.monotonic() >= self._primary_retry_at:
+            try:
+                result = detect(self._detector, pixels, header)
+                with self._frame_lock:
+                    self._stats[camera]['primary_reason'] = ''
+                return result, 'primary'
+            except ProviderUnavailable as error:
+                if self._fallback is None:
+                    raise
+                self._primary_retry_at = time.monotonic() + PRIMARY_RETRY_SEC
+                with self._frame_lock:
+                    self._stats[camera]['primary_reason'] = str(error)
+                self.get_logger().warning(f'{camera}: primary recognizer unavailable, serving fallback: {error}',
+                                          throttle_duration_sec=30)
+        return detect(self._fallback, pixels, header), 'fallback'
 
     def _health(self):
         message = DiagnosticArray()
@@ -195,13 +234,18 @@ class ObjectDetector(Node):
             for camera, stats in self._stats.items():
                 durations = sorted(self._durations[camera])
                 p95 = durations[max(0, math.ceil(.95 * len(durations)) - 1)] if durations else None
-                values = {**stats, 'processing_p95_sec': p95, 'model_sha256': self._detector.sha256, 'camera_sha256': self._bindings[camera]['sha256'],
+                values = {**stats, 'processing_p95_sec': p95, 'model_sha256': self._detector.sha256,
+                          'fallback_model_sha256': self._fallback.sha256 if self._fallback else '',
+                          'camera_sha256': self._bindings[camera]['sha256'],
                           'capture_age_sec': (stamp_now - self._last_stamp.get(camera, 0)) / 1e9,
                           'output_age_sec': (stamp_now - stats['published_stamp']) / 1e9,
                           'pending_frames': int(camera in self._frames)}
+                fresh = 0 <= values['output_age_sec'] <= self._age
+                degraded = stats.get('primary_reason') and stats.get('served_by') == 'fallback'
                 status = DiagnosticStatus(name='lekiwi/perception/' + camera,
-                    hardware_id=camera, level=DiagnosticStatus.WARN if stats['reason'] or not 0 <= values['output_age_sec'] <= self._age else DiagnosticStatus.OK,
-                    message=stats['reason'] or ('recognition active' if 0 <= values['output_age_sec'] <= self._age else 'observation output stale'))
+                    hardware_id=camera, level=DiagnosticStatus.WARN if stats['reason'] or not fresh or degraded else DiagnosticStatus.OK,
+                    message=stats['reason'] or ('observation output stale' if not fresh else
+                                                f'fallback recognition: {stats["primary_reason"]}' if degraded else 'recognition active'))
                 status.values = [KeyValue(key=key, value=json.dumps(value)) for key, value in values.items()]
                 message.status.append(status)
         self._diagnostics.publish(message)

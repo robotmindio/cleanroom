@@ -11,10 +11,16 @@ running (`start_object_perception`).
 
 ## What counts as searched
 
-The detector publishes its operating point on the latched
-`/robot/perception/profile` topic: model SHA-256, confidence threshold, native
-label catalogue and camera bindings. A cell has evidence of absence for a label
-only when a stored observation from that model:
+The detector publishes its operating points on the latched
+`/robot/perception/profile` topic: the camera bindings and, for the primary and
+any fallback recognizer, the model SHA-256, confidence threshold, label
+catalogue and whether it is open-vocabulary (prompted). Each stored frame keeps
+the SHA-256 of the recognizer that served it. A frame speaks only for labels in
+its own recognizer's catalogue: while the closed-set fallback serves, a label
+only the open-vocabulary primary can report gains no evidence of absence, and
+those frames are counted as ignored in the report. A cell has evidence of
+absence for a label only when a stored observation from a recognizer that can
+report it:
 
 - has a capture-time `map` pose for its optical frame and the camera's intrinsics;
 - was taken while the base (and, for the wrist camera, the arm) was stationary;

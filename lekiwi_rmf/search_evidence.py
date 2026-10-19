@@ -28,13 +28,24 @@ def parse_profile(text):
     if len(text.encode()) > 65536:
         raise ValueError('perception profile exceeds 64 KiB')
     value = json.loads(text)
-    if (not isinstance(value, dict) or value.get('schema') != 1 or not valid_id(value.get('model_sha256'))
-            or not isinstance(value.get('labels'), list) or len(value['labels']) > 4096
-            or any(not isinstance(label, str) or not 1 <= len(label) <= 128 for label in value['labels'])
+    recognizers = value.get('recognizers') if isinstance(value, dict) else None
+    if (not isinstance(value, dict) or value.get('schema') != 1
             or not isinstance(value.get('cameras'), dict) or not value['cameras']
-            or any(not valid_id(sha) for sha in value['cameras'].values())):
+            or any(not valid_id(sha) for sha in value['cameras'].values())
+            or not isinstance(recognizers, list) or not 1 <= len(recognizers) <= 4
+            or len({item.get('model_sha256') for item in recognizers if isinstance(item, dict)}) != len(recognizers)):
         raise ValueError('invalid perception profile')
+    for item in recognizers:
+        if (not isinstance(item, dict) or item.get('role') not in ('primary', 'fallback')
+                or not valid_id(item.get('model_sha256')) or type(item.get('open_vocabulary')) is not bool
+                or not isinstance(item.get('labels'), list) or len(item['labels']) > 4096
+                or any(not isinstance(label, str) or not 1 <= len(label) <= 128 for label in item['labels'])):
+            raise ValueError('invalid perception recognizer')
     return value
+
+
+def models(profile):
+    return {item['model_sha256'] for item in profile['recognizers']}
 
 
 class SearchEvidence:
@@ -74,7 +85,7 @@ class SearchEvidence:
             self._node.get_logger().error(self.profile_reason)
             return
         with self._lock:
-            if self.profile is not None and self.profile['model_sha256'] != profile['model_sha256']:
+            if self.profile is not None and models(self.profile) != models(profile):
                 self._captures.clear()  # Evidence under another operating point is not this instrument's.
             self.profile, self.profile_reason = profile, ''
             for name, binding in bindings.items():
@@ -151,7 +162,7 @@ class SearchEvidence:
     def _ingest(self, record):
         profile = self.profile
         camera_id = record.get('camera_id')
-        if profile is None or record.get('model_sha256') != profile['model_sha256']:
+        if profile is None or record.get('model_sha256') not in models(profile):
             self._reject('other_model')
             return
         with self._lock:

@@ -90,7 +90,7 @@ def test_receipt_keeps_latest_frame_while_inference_is_busy_and_expires_old_resu
             release.wait(5)
         active -= 1
         return [[10, 10, 20, 20, .9, 'cup']]
-    monkeypatch.setattr(object_detector, 'Recognizer', lambda *args: SimpleNamespace(predict=predict, sha256='a' * 64, labels=['cup']))
+    monkeypatch.setattr(object_detector, 'Recognizer', lambda *args: SimpleNamespace(predict=predict, sha256='a' * 64, name='yolox', labels=['cup'], open_vocabulary=False))
     context = Context()
     rclpy.init(context=context)
     node = object_detector.ObjectDetector(context=context, parameter_overrides=[
@@ -181,7 +181,7 @@ def test_diagnostics_reads_clock_before_frame_lock_to_avoid_jump_deadlock():
         return ClockTime(nanoseconds=100000000000)
     state = SimpleNamespace(get_clock=lambda: SimpleNamespace(now=now), _frame_lock=lock,
                             _stats={'front': {'reason': '', 'published_stamp': 0}},
-                            _durations={'front': []}, _detector=SimpleNamespace(sha256='a' * 64),
+                            _durations={'front': []}, _detector=SimpleNamespace(sha256='a' * 64), _fallback=None,
                             _bindings={'front': {'sha256': 'b' * 64}}, _last_stamp={},
                             _frames={}, _age=2., _diagnostics=SimpleNamespace(publish=published.append))
     ObjectDetector._health(state)
@@ -191,7 +191,7 @@ def test_diagnostics_reads_clock_before_frame_lock_to_avoid_jump_deadlock():
 def test_operating_point_parameters_reject_runtime_changes_instead_of_silently_ignoring_them(monkeypatch):
     from lekiwi_rmf import object_detector
 
-    monkeypatch.setattr(object_detector, 'Recognizer', lambda *args: SimpleNamespace(predict=list, sha256='a' * 64, labels=['cup']))
+    monkeypatch.setattr(object_detector, 'Recognizer', lambda *args: SimpleNamespace(predict=list, sha256='a' * 64, name='yolox', labels=['cup'], open_vocabulary=False))
     context = Context()
     rclpy.init(context=context)
     node = object_detector.ObjectDetector(context=context)
@@ -212,7 +212,7 @@ def test_operating_point_profile_is_latched_for_late_consumers(monkeypatch):
     from lekiwi_rmf import object_detector
 
     monkeypatch.setattr(object_detector, 'Recognizer', lambda *args: SimpleNamespace(
-        predict=list, sha256='a' * 64, labels=['person', 'cup']))
+        predict=list, sha256='a' * 64, name='yolox', labels=['person', 'cup'], open_vocabulary=False))
     context = Context()
     rclpy.init(context=context)
     node = object_detector.ObjectDetector(context=context)
@@ -226,9 +226,10 @@ def test_operating_point_profile_is_latched_for_late_consumers(monkeypatch):
     thread.start()
     try:
         wait(lambda: received)
-        assert received[-1] == {'schema': 1, 'model_sha256': 'a' * 64, 'model_name': 'yolox',
-                                'confidence_threshold': .5, 'labels': ['person', 'cup'],
-                                'cameras': {'front': camera_bindings(['front'])['front']['sha256']}}
+        assert received[-1] == {'schema': 1, 'cameras': {'front': camera_bindings(['front'])['front']['sha256']},
+                                'recognizers': [{'role': 'primary', 'model_sha256': 'a' * 64, 'model_name': 'yolox',
+                                                 'confidence_threshold': .5, 'labels': ['person', 'cup'],
+                                                 'open_vocabulary': False}]}
     finally:
         executor.shutdown(timeout_sec=5)
         thread.join(5)

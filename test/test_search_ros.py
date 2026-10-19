@@ -32,6 +32,7 @@ from lekiwi_rmf.srv import QueryObservations
 from test_exploration_ros import RobotPeers, response, wait
 
 MODEL = 'b' * 64
+FALLBACK = 'f' * 64
 FX, WIDTH, HEIGHT = 554.3, 640, 480
 MOUNT = (0.1, 0.0, 0.2)
 
@@ -83,13 +84,17 @@ class Perception(Node):
     def __init__(self, context, peers, labels=('chair', 'book', 'cup')):
         super().__init__('fake_perception', context=context)
         self.peers, self.target, self.stationary_while_moving = peers, None, False
+        self.model = MODEL  # The recognizer serving frames: the primary, or the fallback while it is down.
         self.records = []
         self.lock = threading.Lock()
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         binding = camera_bindings(['front'])['front']
         self.create_publisher(String, '/robot/perception/profile', latched).publish(String(data=json.dumps({
-            'schema': 1, 'model_sha256': MODEL, 'model_name': 'fake', 'confidence_threshold': 0.5,
-            'labels': list(labels), 'cameras': {'front': binding['sha256']}})))
+            'schema': 1, 'cameras': {'front': binding['sha256']}, 'recognizers': [
+                {'role': 'primary', 'model_sha256': MODEL, 'model_name': 'fake_open', 'confidence_threshold': 0.5,
+                 'labels': list(labels), 'open_vocabulary': True},
+                {'role': 'fallback', 'model_sha256': FALLBACK, 'model_name': 'fake_closed',
+                 'confidence_threshold': 0.5, 'labels': ['chair'], 'open_vocabulary': False}]})))
         self.info = self.create_publisher(CameraInfo, '/camera/front/camera_info', 10)
         self.create_service(QueryObservations, '/robot/observations/query', self.query)
         self.static = StaticTransformBroadcaster(self)
@@ -122,7 +127,7 @@ class Perception(Node):
             self.records.append({
                 'schema': 1, 'id': identity, 'sequence': sequence, 'camera_id': 'front',
                 'frame_id': 'front_camera_optical_frame', 'stamp': {'sec': stamp.sec, 'nanosec': stamp.nanosec},
-                'model_sha256': MODEL, 'detections': detections, 'grounding': 'image_only',
+                'model_sha256': self.model, 'detections': detections, 'grounding': 'image_only',
                 'stationary': self.stationary_while_moving or not self.peers.nav_active})
 
     def query(self, request, result):
@@ -204,7 +209,8 @@ def test_search_observes_outside_the_initial_view_and_reports_evidence(search_gr
     assert result.evidence_ids and peers.nav_count >= 1
     report = json.loads(result.report_json)
     assert report['found']['evidence_ids'] == list(result.evidence_ids)
-    assert report['perception']['model_sha256'] == MODEL and report['perception']['label_supported']
+    assert report['perception']['label_supported']
+    assert report['negative_evidence']['model_sha256s'] == [MODEL]
     assert report['negative_evidence']['observation_count'] > 0
     assert report['plan']['revision_count'] >= 1 and 'heuristic' in report['plan']['utility']
     assert any(stage.startswith('searching: viewpoint') for stage in stages)
@@ -292,3 +298,20 @@ def test_search_shares_the_explorer_busy_lock_and_validates_limits(search_graph)
     response(handle.cancel_goal_async())
     assert response(handle.get_result_async(), timeout=15).status == GoalStatus.STATUS_CANCELED
     assert not peers.nav_active
+
+
+def test_fallback_frames_never_cover_a_primary_only_label(search_graph):
+    """While only the closed-set fallback serves, a primary-only label gains no evidence of absence."""
+    peers, perception, _, client = search_graph
+    perception.model = FALLBACK
+    peers.nav_mode = 'success'
+    _, outcome = run(client, Search.Goal(query='cup', region_radius_m=1.2, target_coverage=0.6, max_duration_sec=8.0))
+    result = outcome.result
+    assert outcome.status == GoalStatus.STATUS_ABORTED, result.message
+    assert result.outcome in ('budget_exhausted', 'inaccessible') and result.coverage_fraction < 0.6
+    report = json.loads(result.report_json)
+    # Only primary frames retained from before the switch count; every fallback frame was ignored.
+    assert set(report['negative_evidence']['observations_by_model']) <= {MODEL}
+    assert report['negative_evidence']['ignored_unable_model'] >= 10
+    assert [(r['role'], r['label_supported']) for r in report['perception']['recognizers']] == [
+        ('primary', True), ('fallback', False)]
