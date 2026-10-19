@@ -197,8 +197,10 @@ class SkillRunner(Node):
             if policy is None:
                 policy = self._policies[skill.skill_id] = self._policy_factory(verify_artifact(skill))
             policy.reset()
+            # The duration limit bounds motion; loading the policy on first use must not consume it.
+            motion_started = time.monotonic()
             task = json.dumps({'skill': skill.skill_id, **parameters}, sort_keys=True)
-            while time.monotonic() - started < skill.max_duration_sec:
+            while time.monotonic() - motion_started < skill.max_duration_sec:
                 if goal_handle.is_cancel_requested:
                     raise InterruptedError
                 measured, images = self._observation(skill)

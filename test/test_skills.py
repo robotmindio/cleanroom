@@ -255,3 +255,15 @@ def test_camera_frames_decode_to_rgb_without_cv_bridge():
     message.encoding = 'mono8'
     with pytest.raises(RuntimeError, match='encoding'):
         rgb_pixels(message)
+
+
+def test_loading_the_policy_does_not_consume_the_motion_budget(ros_runner, monkeypatch):
+    runner, arm, client, _ = ros_runner
+    load = FakePolicy.__init__
+
+    def slow(self, path):
+        time.sleep(1.0)  # longer than the skill's 0.6 s motion limit
+        load(self, path)
+    monkeypatch.setattr(FakePolicy, '__init__', slow)
+    result = run(client, 'push')
+    assert result.outcome == 'finished' and json.loads(result.result_json)['chunks_executed'] >= 1
