@@ -4,7 +4,8 @@
 The output directory holds `checkpoint/` (the LeRobot pretrained model), `train.log`
 and `manifest.json`: the frozen dataset (every file with its SHA-256), the export
 parameters, the source revision, the exact training arguments, the declared and
-measured compute, and the weights digest that scripts/register-skill.py pins.
+measured compute, and the checkpoint's artifact digest (every file the runner loads) that
+scripts/register-skill.py pins.
 
 Backends: local (`--device cpu|cuda`, in the LeRobot environment from
 scripts/install-lerobot-export.sh) or `--cluster`, a one-pod Kubernetes Job on the
@@ -30,6 +31,9 @@ import tempfile
 import time
 
 REPOSITORY = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPOSITORY))
+from lekiwi_rmf.skills import artifact_digest  # noqa: E402
+
 LEROBOT = 'lerobot==0.4.1'
 # pytorch/pytorch:2.7.1-cuda12.6-cudnn9-runtime; its torch matches LeRobot 0.4.1's torch<2.8 pin.
 IMAGE = 'docker.io/pytorch/pytorch@sha256:2b59b1b91885677814f78be1f8df48a25d5dc952eb6580eaecfefca510f9afd3'
@@ -387,6 +391,7 @@ def main():
         weights = output / 'checkpoint/model.safetensors'
         if not weights.is_file():
             raise TrainingError('the checkpoint has no model.safetensors')
+        artifact = artifact_digest(output / 'checkpoint')
         loaded = None if args.skip_load_check else load_check(Path(args.python).expanduser(), output / 'checkpoint')
         peak = measured.get('peak_gpu_memory_mib')
         manifest = {
@@ -407,7 +412,8 @@ def main():
                 'within_declared': (measured['elapsed_sec'] <= args.time_limit_min * 60
                                     and (peak is None or peak <= args.gpu_memory_gib * 1024)),
             },
-            'checkpoint': {'path': 'checkpoint', 'weights_sha256': digest(weights), 'load_check': loaded},
+            'checkpoint': {'path': 'checkpoint', 'weights_sha256': digest(weights), 'artifact_sha256': artifact,
+                           'load_check': loaded},
         }
         temporary = output / 'manifest.json.tmp'
         temporary.write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n')
@@ -418,7 +424,7 @@ def main():
     except KeyboardInterrupt:
         print(f'{parser.prog}: interrupted; no manifest was written', file=sys.stderr)
         return 130
-    print(json.dumps({'output': str(output), 'weights_sha256': manifest['checkpoint']['weights_sha256'],
+    print(json.dumps({'output': str(output), 'artifact_sha256': manifest['checkpoint']['artifact_sha256'],
                       'compute': manifest['compute']['measured'], 'load_check': loaded}))
     return 0
 

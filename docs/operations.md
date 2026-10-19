@@ -67,11 +67,11 @@ hash. Skill checkpoints pass `skills.verify_artifact` before loading: only
 regular safetensors and JSON files, no links or subdirectories, not
 world-writable, no JSON key that names code to import (`class`, `auto_map`,
 `_target_`, `trust_remote_code`, `custom_pipeline`; LeRobot would import and
-instantiate a processor step's `class`), and `model.safetensors` matching the
-registered digest. The policy loads with the Hugging Face hub offline and
-without torchvision's backbone download. The registry does not yet pin the
-configuration and normalization files
-([#101](https://github.com/robotmindio/cleanroom/issues/101)).
+instantiate a processor step's `class`), and the checkpoint matching the
+registered `artifact_sha256`, a digest over every file the runner loads
+(weights, configuration, processors and normalization tensors). The policy
+loads with the Hugging Face hub offline and without torchvision's backbone
+download.
 
 ## Data classes, backup and restore
 

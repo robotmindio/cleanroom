@@ -275,7 +275,7 @@ class SkillRunner(Node):
         result.detail = detail
         result.result_json = json.dumps({
             'skill_id': request.skill_id, 'version': skill.version if skill else None,
-            'weights_sha256': skill.weights_sha256 if skill else None, 'chunks_executed': chunks,
+            'artifact_sha256': skill.artifact_sha256 if skill else None, 'chunks_executed': chunks,
             'elapsed_sec': time.monotonic() - started, 'last_targets': last, 'late_chunks': late,
             'verification': 'not performed by the runner'}, sort_keys=True)
         return result
