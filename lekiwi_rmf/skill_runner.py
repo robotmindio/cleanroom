@@ -8,6 +8,9 @@ calibration or joint limits, and a finished run never claims the goal succeeded.
 """
 
 import json
+import os
+from pathlib import Path
+import sys
 import threading
 import time
 
@@ -27,6 +30,11 @@ from lekiwi_rmf.arm_trajectory import ARM_JOINTS
 from lekiwi_rmf.object_recognition import reject_parameter_changes
 from lekiwi_rmf.skills import arm_targets, catalog, load_registry, skill_parameters, verify_artifact
 
+# The LeRobot environment (scripts/install-lerobot-export.sh); ROS stays importable through PYTHONPATH.
+POLICY_RUNTIME = Path.home() / '.ros/lekiwi/lerobot-venv/bin/python'
+
+CPU_PROCESSORS = {'device_processor': {'device': 'cpu'}}
+
 CAMERA_TOPICS = {'front': '/camera/front/image_raw', 'wrist': '/camera/wrist/image_raw',
                  'astra': '/camera/astra/color/image_raw'}
 
@@ -44,13 +52,21 @@ class LeRobotPolicy:
     """A trained LeRobot policy with its saved normalization, loaded from a verified checkpoint."""
 
     def __init__(self, path):
-        import torch
-        from lerobot.configs.policies import PreTrainedConfig
-        from lerobot.policies.factory import get_policy_class, make_pre_post_processors
+        try:
+            import torch
+            from lerobot.configs.policies import PreTrainedConfig
+            from lerobot.policies.factory import get_policy_class, make_pre_post_processors
+        except ImportError as error:
+            raise RuntimeError(f'LeRobot is not importable by {sys.executable}; '
+                               'run scripts/install-lerobot-export.sh') from error
+        # Checkpoints record the training device (cuda on the cluster); the compute host runs on CPU.
         config = PreTrainedConfig.from_pretrained(path)
+        config.device = 'cpu'
         self.torch = torch
-        self.policy = get_policy_class(config.type).from_pretrained(path).eval()
-        self.pre, self.post = make_pre_post_processors(self.policy.config, pretrained_path=str(path))
+        self.policy = get_policy_class(config.type).from_pretrained(path, config=config).eval()
+        self.pre, self.post = make_pre_post_processors(
+            self.policy.config, pretrained_path=str(path), preprocessor_overrides=CPU_PROCESSORS,
+            postprocessor_overrides=CPU_PROCESSORS)
         self.image_shapes = {name: tuple(feature.shape) for name, feature in self.policy.config.input_features.items()
                              if name.startswith('observation.images.')}
 
@@ -187,8 +203,10 @@ class SkillRunner(Node):
             if policy is None:
                 policy = self._policies[skill.skill_id] = self._policy_factory(verify_artifact(skill))
             policy.reset()
+            # The duration limit bounds motion; loading the policy on first use must not consume it.
+            motion_started = time.monotonic()
             task = json.dumps({'skill': skill.skill_id, **parameters}, sort_keys=True)
-            while time.monotonic() - started < skill.max_duration_sec:
+            while time.monotonic() - motion_started < skill.max_duration_sec:
                 if goal_handle.is_cancel_requested:
                     raise InterruptedError
                 measured, images = self._observation(skill)
@@ -220,7 +238,15 @@ class SkillRunner(Node):
         return result
 
 
+def use_policy_runtime():
+    """Re-exec in the LeRobot environment when it exists; torch loads only with the first policy."""
+    if POLICY_RUNTIME.is_file() and Path(sys.prefix) != POLICY_RUNTIME.parent.parent:
+        os.execve(POLICY_RUNTIME, [str(POLICY_RUNTIME), str(Path(sys.argv[0]).resolve()), *sys.argv[1:]],
+                  {**os.environ, 'PYTHONNOUSERSITE': '1'})
+
+
 def main(args=None):
+    use_policy_runtime()
     rclpy.init(args=args)
     node = None
     executor = MultiThreadedExecutor(num_threads=4)

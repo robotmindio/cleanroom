@@ -329,6 +329,15 @@ def _stack(context):
                          "allow_exploration": topology.visual_slam and not (topology.static_map or topology.start_rmf)}],
             output="screen", respawn=True, respawn_delay=2.0,
         ),
+        # Beside the arm trajectory action and the camera topics. Experimental skills run
+        # only when the acquisition protocol starts the stack with skill_acquisition:=true.
+        Node(
+            package="lekiwi_rmf", executable="skill_runner", name="skill_runner",
+            parameters=[config("skill_runner.yaml"),
+                        *([config("skill_acquisition.yaml")] if flag("skill_acquisition") else []),
+                        {"use_sim_time": sim}],
+            output="screen", respawn=True, respawn_delay=2.0,
+        ),
         Node(
             package="lekiwi_rmf", executable="exploration_owner_guard", name="exploration_owner_guard",
             output="screen", respawn=True, respawn_delay=2.0,
@@ -477,6 +486,7 @@ def generate_launch_description():
             ),
             # The Astra Pro is an additional third camera. Existing front and
             # wrist V4L2 cameras continue to publish unchanged.
+            DeclareLaunchArgument("skill_acquisition", default_value="false", choices=["true", "false"]),
             DeclareLaunchArgument("start_object_perception", default_value=str(perception["start"]).lower(), choices=["true", "false"]),
             DeclareLaunchArgument("publish_astra", default_value="true", choices=["true", "false"]),
             # A serial is deliberately read from this tracked deployment file,
