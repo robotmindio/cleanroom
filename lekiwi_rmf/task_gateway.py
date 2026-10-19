@@ -25,7 +25,7 @@ from std_msgs.msg import Bool, String
 from std_srvs.srv import Trigger
 from unique_identifier_msgs.msg import UUID
 
-from lekiwi_rmf.action import Explore
+from lekiwi_rmf.action import Explore, RunSkill
 from lekiwi_rmf.exploration import task_limits
 from lekiwi_rmf.exploration_owner_guard import owned_goal_id
 from lekiwi_rmf.srv import CancelTask, GetTask, SubmitTask
@@ -34,9 +34,11 @@ from lekiwi_rmf.navigation_pause import NavigationPause
 from lekiwi_rmf.navigation_observer import NavigationObserver, server_instance
 from lekiwi_rmf.navigation_distance import NavigationDistance
 from lekiwi_rmf.map_bundle import validate_map_bundle
+from lekiwi_rmf.skills import SKILL_ID, load_registry
 
 
-ACTIONS = {'navigate': ('/navigate_to_pose', NavigateToPose), 'explore': ('/robot/explore', Explore)}
+ACTIONS = {'navigate': ('/navigate_to_pose', NavigateToPose), 'explore': ('/robot/explore', Explore),
+           'skill': ('/robot/skills/run', RunSkill)}
 
 
 def task_goal(capability, text):
@@ -82,6 +84,13 @@ def task_goal(capability, text):
         goal = Explore.Goal(revisit_known=values.get('revisit_known', False),
                             max_duration_sec=float(values.get('max_duration_sec', 0.0)),
                             max_radius_m=float(values.get('max_radius_m', 0.0)), resume_task_id=resume)
+    elif capability == 'skill':
+        # The skill runner validates parameters against the registered skill; this only bounds the shape.
+        if set(values) - {'skill_id', 'parameters'} or not isinstance(values.get('skill_id'), str) \
+                or not SKILL_ID.match(values['skill_id']) or not isinstance(values.get('parameters', {}), dict):
+            raise ValueError('skill requires a registered skill_id and an optional parameters object')
+        goal = RunSkill.Goal(skill_id=values['skill_id'],
+                             parameters_json=json.dumps(values.get('parameters', {}), sort_keys=True, allow_nan=False))
     else:
         raise ValueError('unsupported capability')
     return goal, json.dumps(values, sort_keys=True, allow_nan=False)
@@ -98,9 +107,16 @@ class TaskGateway(Node):
         self.declare_parameter('navigation_timeout_sec', 180.0)
         self.declare_parameter('allow_navigation', True)
         self.declare_parameter('allow_exploration', True)
+        self.declare_parameter('allow_skills', False)
         self.declare_parameter('map_bundle', '')
         self._enabled = {'navigate': self.get_parameter('allow_navigation').value,
-                         'explore': self.get_parameter('allow_exploration').value}
+                         'explore': self.get_parameter('allow_exploration').value,
+                         'skill': self.get_parameter('allow_skills').value}
+        try:
+            self._skills = [skill.catalog() for skill in load_registry().values()]
+        except (OSError, ValueError) as error:
+            self.get_logger().error(f'skill registry unavailable: {error}')
+            self._enabled['skill'], self._skills = False, []
         self._timeout = self.get_parameter('navigation_timeout_sec').value
         if type(self._timeout) not in (float, int) or not math.isfinite(self._timeout) or self._timeout <= 0:
             raise ValueError('navigation_timeout_sec must be positive and finite')
@@ -286,23 +302,32 @@ class TaskGateway(Node):
             return
         self._exploration_defaults = values
 
+    def _capability(self, name, client):
+        entry = {'name': name, 'available': self._enabled[name] and client.server_is_ready()}
+        if name == 'navigate':
+            return {**entry, 'parameters': ['x', 'y', 'yaw', 'deadline_unix_sec', 'max_travel_m'],
+                    'required_parameters': ['x', 'y'], 'defaults': {'yaw': 0.0},
+                    'effective_defaults': {'yaw': 0.0, 'max_duration_sec': self._timeout},
+                    'description': 'Map-frame x, y; yaw in radians. Pauses preserve the active-time budget.'}
+        if name == 'explore':
+            return {**entry, 'parameters': ['revisit_known', 'max_duration_sec', 'max_radius_m', 'resume_task_id'],
+                    'required_parameters': [],
+                    'defaults': {'revisit_known': False, 'max_duration_sec': 0.0, 'max_radius_m': 0.0, 'resume_task_id': ''},
+                    'effective_defaults': ({**self._exploration_defaults, 'revisit_known': False, 'resume_task_id': ''}
+                                           if self._exploration_defaults is not None else None),
+                    'description': 'Omit parameters to explore unmapped space. revisit_known=true also revisits mapped space. '
+                                   'Omitted/zero limits use the tracked robot limits; positive limits may only reduce them. '
+                                   'Duration is active seconds, radius is metres around the starting pose. '
+                                   'resume_task_id is a saved native exploration UUID and preserves its original bounds.'}
+        return {**entry, 'parameters': ['skill_id', 'parameters'], 'required_parameters': ['skill_id'],
+                'defaults': {'parameters': {}}, 'effective_defaults': {'parameters': {}}, 'skills': self._skills,
+                'description': 'Run a registered skill implementation on the arm. Success means the implementation '
+                               'finished, not that the world reached the goal; verify the effect independently.'}
+
     def _capabilities(self, _request, response):
         response.success = True
         response.message = json.dumps({'schema': 1, 'capabilities': [
-            {'name': name, 'available': self._enabled[name] and client.server_is_ready(), 'parameters':
-             ['x', 'y', 'yaw', 'deadline_unix_sec', 'max_travel_m'] if name == 'navigate' else ['revisit_known', 'max_duration_sec', 'max_radius_m', 'resume_task_id'],
-             'required_parameters': ['x', 'y'] if name == 'navigate' else [],
-             'defaults': {'yaw': 0.0} if name == 'navigate' else {
-                 'revisit_known': False, 'max_duration_sec': 0.0, 'max_radius_m': 0.0, 'resume_task_id': ''},
-             'effective_defaults': {'yaw': 0.0, 'max_duration_sec': self._timeout} if name == 'navigate'
-             else ({**self._exploration_defaults, 'revisit_known': False, 'resume_task_id': ''}
-                   if self._exploration_defaults is not None else None),
-             'description': ('Map-frame x, y; yaw in radians. Pauses preserve the active-time budget.' if name == 'navigate'
-                             else 'Omit parameters to explore unmapped space. revisit_known=true also revisits mapped space. '
-                             'Omitted/zero limits use the tracked robot limits; positive limits may only reduce them. '
-                             'Duration is active seconds, radius is metres around the starting pose. '
-                             'resume_task_id is a saved native exploration UUID and preserves its original bounds.')}
-            for name, client in self._action_clients.items()],
+            self._capability(name, client) for name, client in self._action_clients.items()],
             'terminal_states': sorted(TERMINAL),
             'observations': {'available': self._observation_status.service_is_ready(),
                              'schema': 1, 'grounding': 'image_only',
@@ -393,7 +418,7 @@ class TaskGateway(Node):
         state = states[response.status]
         if state == 'succeeded' and (result.get('complete') is False or result.get('error_code', 0)):
             state = 'failed'
-        detail = result.get('message') or result.get('error_msg') or state
+        detail = result.get('message') or result.get('error_msg') or result.get('detail') or state
         if self._row(identifier)['cancel_requested'] == 2:
             state, detail = 'failed', f'navigation deadline reached; ROS terminal state: {state}'
         row = self._row(identifier)

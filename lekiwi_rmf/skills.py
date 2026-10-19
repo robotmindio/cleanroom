@@ -1,0 +1,152 @@
+"""Registered skill implementations: a tracked contract, independent of ROS and of any one task.
+
+A skill is data: an identity, a version, an implementation artifact pinned by
+digest, the observations and action space it was trained on, and limits. Adding a
+skill edits config/robot_skills.yaml; no runtime code names a skill.
+"""
+
+from dataclasses import dataclass
+import hashlib
+import json
+import math
+from pathlib import Path
+import re
+
+import yaml
+
+from lekiwi_rmf.arm_trajectory import ARM_JOINTS, JOINT_LIMITS
+from lekiwi_rmf.object_cameras import config_directory
+
+SKILL_ID = re.compile(r'^[a-z][a-z0-9_]{0,63}$')
+KINDS = ('lerobot_policy',)
+STATUSES = ('experimental', 'qualified')
+BASE_COMMANDS = ('base_x_vel', 'base_y_vel', 'base_yaw_rate')
+CAMERAS = ('front', 'wrist', 'astra')
+PARAMETER_TYPES = {'number': (int, float), 'boolean': (bool,), 'string': (str,)}
+
+
+@dataclass(frozen=True)
+class Skill:
+    skill_id: str
+    version: int
+    description: str
+    status: str
+    kind: str
+    checkpoint: Path
+    weights_sha256: str
+    action_names: tuple
+    cameras: tuple
+    fps: int
+    max_duration_sec: float
+    max_joint_step_rad: float
+    parameters: dict
+
+    def catalog(self):
+        return {'skill_id': self.skill_id, 'version': self.version, 'status': self.status,
+                'description': self.description, 'parameters': self.parameters,
+                'max_duration_sec': self.max_duration_sec}
+
+
+def _skill(skill_id, value, artifacts):
+    if not SKILL_ID.match(skill_id) or not isinstance(value, dict):
+        raise ValueError(f'invalid skill entry {skill_id!r}')
+    known = {'version', 'description', 'status', 'kind', 'checkpoint', 'weights_sha256', 'action_names',
+             'cameras', 'fps', 'max_duration_sec', 'max_joint_step_rad', 'parameters'}
+    if set(value) != known:
+        raise ValueError(f'{skill_id}: fields must be exactly {sorted(known)}')
+    if type(value['version']) is not int or value['version'] < 1:
+        raise ValueError(f'{skill_id}: version must be a positive integer')
+    if value['status'] not in STATUSES or value['kind'] not in KINDS:
+        raise ValueError(f'{skill_id}: status must be {STATUSES} and kind {KINDS}')
+    if not isinstance(value['description'], str) or not 1 <= len(value['description']) <= 500:
+        raise ValueError(f'{skill_id}: description must be 1..500 characters')
+    checkpoint = Path(str(value['checkpoint']))
+    if checkpoint.is_absolute() or '..' in checkpoint.parts:
+        raise ValueError(f'{skill_id}: checkpoint must be relative to the skill artifact directory')
+    digest = value['weights_sha256']
+    if not isinstance(digest, str) or not re.fullmatch(r'[0-9a-f]{64}', digest):
+        raise ValueError(f'{skill_id}: weights_sha256 must be lowercase SHA-256')
+    names = value['action_names']
+    if (not isinstance(names, list) or len(set(names)) != len(names)
+            or set(names) - set(ARM_JOINTS) - set(BASE_COMMANDS) or not set(names) & set(ARM_JOINTS)):
+        raise ValueError(f'{skill_id}: action_names must be distinct arm joints, optionally with base commands')
+    cameras = value['cameras']
+    if not isinstance(cameras, list) or len(set(cameras)) != len(cameras) or set(cameras) - set(CAMERAS):
+        raise ValueError(f'{skill_id}: cameras must be distinct names from {CAMERAS}')
+    if type(value['fps']) is not int or not 1 <= value['fps'] <= 30:
+        raise ValueError(f'{skill_id}: fps must be an integer in 1..30')
+    for name, upper in (('max_duration_sec', 120.0), ('max_joint_step_rad', .3)):
+        number = value[name]
+        if type(number) not in (int, float) or not math.isfinite(number) or not 0 < number <= upper:
+            raise ValueError(f'{skill_id}: {name} must be in (0, {upper}]')
+    parameters = value['parameters']
+    if not isinstance(parameters, dict) or any(
+            not re.fullmatch(r'[a-z][a-z0-9_]{0,31}', name) or not isinstance(spec, dict)
+            or spec.get('type') not in PARAMETER_TYPES or set(spec) - {'type', 'min', 'max', 'max_length'}
+            for name, spec in parameters.items()):
+        raise ValueError(f'{skill_id}: parameters map names to {{type, min, max, max_length}}')
+    return Skill(skill_id, value['version'], value['description'], value['status'], value['kind'],
+                 artifacts / checkpoint, digest, tuple(names), tuple(cameras), value['fps'],
+                 float(value['max_duration_sec']), float(value['max_joint_step_rad']), parameters)
+
+
+def load_registry(path=None, artifacts=None):
+    """Validate the whole registry; one malformed entry rejects it, never a partial load."""
+    path = Path(path) if path else config_directory() / 'robot_skills.yaml'
+    artifacts = Path(artifacts).expanduser() if artifacts else Path.home() / '.ros/lekiwi/skills'
+    document = yaml.safe_load(path.read_text())
+    if not isinstance(document, dict) or set(document) != {'skills'} or not isinstance(document['skills'], dict):
+        raise ValueError('skill registry must be a mapping with only `skills`')
+    return {skill_id: _skill(skill_id, value, artifacts) for skill_id, value in document['skills'].items()}
+
+
+def verify_artifact(skill):
+    """The implementation that runs is exactly the one that was evaluated."""
+    weights = skill.checkpoint / 'model.safetensors'
+    with weights.open('rb') as stream:
+        if hashlib.file_digest(stream, 'sha256').hexdigest() != skill.weights_sha256:
+            raise ValueError(f'{skill.skill_id}: weights do not match the registered digest')
+    return skill.checkpoint
+
+
+def skill_parameters(skill, text):
+    if len(text.encode()) > 4096:
+        raise ValueError('skill parameters exceed 4096 bytes')
+    try:
+        values = json.loads(text or '{}')
+    except (RecursionError, ValueError) as error:
+        raise ValueError('skill parameters must be a JSON object') from error
+    if not isinstance(values, dict) or set(values) - set(skill.parameters):
+        raise ValueError(f'{skill.skill_id} accepts only {sorted(skill.parameters)}')
+    for name, value in values.items():
+        spec = skill.parameters[name]
+        allowed = PARAMETER_TYPES[spec['type']]
+        if type(value) not in allowed or (spec['type'] == 'number' and not math.isfinite(value)):
+            raise ValueError(f'{name} must be a {spec["type"]}')
+        if spec['type'] == 'number' and not spec.get('min', -math.inf) <= value <= spec.get('max', math.inf):
+            raise ValueError(f'{name} is outside its declared range')
+        if spec['type'] == 'string' and len(value) > spec.get('max_length', 256):
+            raise ValueError(f'{name} is too long')
+    return values
+
+
+def arm_targets(skill, measured, chunk):
+    """Joint targets for one action chunk, rate-limited per step and kept inside joint limits.
+
+    Base commands in the chunk are ignored: learned skills drive only the arm until base
+    actuation has its own guarded path. The rows returned are what the trajectory carries.
+    """
+    previous = {name: measured[name] for name in ARM_JOINTS}
+    rows = []
+    for action in chunk:
+        if len(action) != len(skill.action_names) or not all(math.isfinite(float(v)) for v in action):
+            raise ValueError('policy produced a malformed or non-finite action')
+        target = dict(previous)
+        for name, value in zip(skill.action_names, action):
+            if name in ARM_JOINTS:
+                lower, upper = JOINT_LIMITS[name]
+                step = max(-skill.max_joint_step_rad, min(skill.max_joint_step_rad, float(value) - previous[name]))
+                target[name] = max(lower, min(upper, previous[name] + step))
+        rows.append(target)
+        previous = target
+    return rows
