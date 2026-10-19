@@ -16,6 +16,9 @@ Start with one of these:
 | Install pinned cup-recognition weights | `scripts/install-object-model.py` |
 | Start perception beside the camera stack (normal bringup defaults are tracked in `config/object_perception_deployment.yaml`) | `scripts/object-perception.sh` |
 | Evaluate recorded labeled scenes | `scripts/evaluate-object-recognition.py MANIFEST --output REPORT` |
+| Select a proposal profile on held-out evidence | `scripts/calibrate-perception-profile.py MANIFEST --model-name NAME --candidates FILE --output REPORT` |
+| Teach a new category from gallery views | `scripts/learn-perception-concept.py MANIFEST` |
+| Replay a stored capture | `scripts/replay-perception.py RECORD ARTIFACT --model-name NAME --output REPORT` |
 | Record a multimodal episode | `scripts/record-episode.py DIR --task TEXT` |
 | Export episodes to LeRobot | `scripts/install-lerobot-export.sh`, then `scripts/export-lerobot.py EPISODE... --root DATASET` |
 

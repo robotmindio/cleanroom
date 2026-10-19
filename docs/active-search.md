@@ -13,8 +13,10 @@ running (`start_object_perception`).
 
 The detector publishes its operating points on the latched
 `/robot/perception/profile` topic: the camera bindings and, for the primary and
-any fallback recognizer, the model SHA-256, confidence threshold, label
-catalogue and whether it is open-vocabulary. An open-vocabulary primary's
+any fallback recognizer, the model SHA-256, proposal profile (revision and
+parameters), label catalogue and whether it is open-vocabulary. A search session
+credits only frames under the profile revision it admitted at its start; frames
+after a profile change count as `ignored_other_profile`. An open-vocabulary primary's
 catalogue is the active query (see `object-observations.md`), and the topic
 republishes when it changes. Each stored frame keeps the SHA-256 of the
 recognizer that served it, and an open frame also keeps the query it ran under:
