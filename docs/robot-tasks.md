@@ -10,6 +10,7 @@ ROS owns physical execution, collision checking and the local motion guards.
 | `/robot/tasks/submit` (`lekiwi_rmf/srv/SubmitTask`) | caller task ID, capability, JSON parameters | task durably admitted, **not completed** |
 | `/robot/tasks/get` (`lekiwi_rmf/srv/GetTask`) | task ID | persisted state/result found |
 | `/robot/tasks/cancel` (`lekiwi_rmf/srv/CancelTask`) | task ID; empty selects the managed active task | cancellation requested, **not a confirmed stop** |
+| `/robot/tasks/v2/*` (`lekiwi_rmf/srv/TaskApi`) | schema 2 and a JSON request | see [negotiated task API](#negotiated-task-api-schema-2) |
 
 `navigate` accepts finite map-frame `x`, `y` and optional `yaw` (radians), and
 uses the normal Nav2 controller. It has a 180-second active-time budget. A collision STOP, stale collision state or
@@ -42,7 +43,8 @@ An aborted or incomplete exploration is `failed`.
 
 Repeated submission of the same ID and identical parameters returns the
 existing task; it never sends a second goal. Conflicting reuse is rejected.
-Only one managed task can be active, and observed native navigation/exploration
+Tasks whose resources overlap are serialized: admission is refused with the
+holder while another task holds one of them. Observed native navigation/exploration
 goals prevent admission and defer pending dispatch. External ROS clients still own their goals; cancellation
 through this API does not cancel their unrelated actions.
 
@@ -73,6 +75,84 @@ Same-instance uncertainty and legacy rows without a recorded server instance
 remain blocked until native terminal evidence becomes available. A canceled
 request alone is never proof that motion stopped.
 
+## Negotiated task API (schema 2)
+
+`/robot/capabilities` stays schema 1 and adds `task_api`: the supported schemas
+`[1, 2]`, the `TaskApi` services, the body profile, the journal ID and the
+current resource holders. Each capability declares its `resources`, SI `units`,
+`frame`, `effects` (`reversible`, `compensable` or `irreversible`, with a
+compensation description) and `requires_schema`. A `TaskApi` request with any
+schema other than 2 is refused with `schema_incompatible`, never reinterpreted.
+A capability whose effects are not reversible is refused through `SubmitTask`,
+because schema 1 reports an implementation that ran to its end as `succeeded`.
+Learned skills declare `effects` in `config/robot_skills.yaml`; an undeclared
+skill is irreversible.
+
+| Service | Request | Result |
+| --- | --- | --- |
+| `validate` | as `submit` | every admission check, without admitting |
+| `submit` | `task_id`, `capability`, `parameters`, `owner`; optional `goal {id, revision}`, `body_profile`, `frame`, `units`, `resources`, `authority`, `compensates {task_id, generation}` | task view with its `generation` |
+| `status` | `task_id`, optional `generation` | task view |
+| `events` | `cursor`, optional `task_id`, `limit` (≤100), `generation` | journal events after the cursor |
+| `cancel` | `task_id` (empty selects the active task), optional `generation`, `requester` | durable cancel receipt and stop state |
+| `transfer` | `task_id`, `generation`, `owner`, `new_owner`, `checkpoint` | successor generation |
+| `compensate` | `task_id`, `generation`, `owner`, `plan {intent, steps, note}` | recorded compensation plan |
+
+Resources are `base`, `arm` and `perception_query`. Navigation and exploration
+hold the base; search holds the base and the active perception query; a skill
+holds the arm and keeps the base still. A task holds them from admission until its
+journal row is terminal, which requires native terminal evidence or the
+reconciliation proof above; a timeout or an empty process never releases them. A
+holder in `unknown` makes admission fail with `execution_uncertain`. The gateway
+publishes holders on the latched `/robot/resources` topic; the detector refuses
+`set_query` while a search holds the query and treats an unreadable state as held.
+
+Admission and every handoff take a new, monotonic `generation`. A request that
+names an older generation is refused with `stale_generation`. A cancel without a
+generation is always accepted, so a stop is never fenced out. A `transfer` moves
+the task to a new owner with a typed checkpoint (`summary`, `goal`,
+`interpretation`, `references`, `plan`, `remote_commands`, `generations`,
+`resources`, `progress`, `pending_verifications`; at most 16 KiB, no
+credentials). The successor's generation starts unreconciled: it must read
+`status` or `events` with that generation before it may compensate or submit a
+compensating step. Handoff never dispatches anything, and the same `task_id`
+returns the existing task to any client.
+
+A repeated `task_id` with the same request digest (capability, parameters, goal
+and compensation target) returns the existing task without a second command; a
+different digest is `identity_conflict`. Refusal codes include
+`invalid_request`, `capability_unavailable`, `resource_busy`,
+`execution_uncertain`, `resource_mismatch`, `body_profile_mismatch`,
+`map_unaligned`, `unit_mismatch`, `precondition_failed`, `stale_generation`,
+`authority_denied`, `identity_conflict`, `irreversible_effect`, `not_found` and
+`schema_incompatible`.
+
+The task view keeps the legacy `state` and adds separate dimensions:
+`execution.phase` (`admitted`, `running`, `paused`, `uncertain`,
+`execution_finished`, `stopped`, `not_started`) with `outcome`; `cancel` (the
+receipt); `stop` (`not_requested`, `stopping`, `uncertain`, `confirmed`);
+`effect` evidence (a search's detected label, Nav2's reached pose; a skill has
+none); and `goal`, which the robot never verifies (`verified: null`,
+`verifier: recuriant`). It also carries owner, generation, resources, effects,
+checkpoint, compensation, effective parameters, admission/dispatch/finish times
+and the task's latest event cursor. After a gateway restart a dispatched task is
+`uncertain` until this process observes it live or a native result arrives.
+
+Events are journaled in the same transaction as the change they describe:
+admission, dispatch, state changes (with released resources), cancel requests,
+pause stops, resumes, handoffs, reconciliation, compensation and late replies
+for superseded attempts, which are recorded but never applied. The newest 10,000
+events are kept; `truncated` reports a cursor older than that or from another
+journal (`journal_id`), and the client then reconciles from `status`.
+
+Compensation is a recorded plan, never an automatic undo. It may be recorded only
+after the task is terminal. `restore` is allowed only for reversible effects,
+`repair` also for compensable ones; an irreversible effect can only be `isolate`d
+or `record`ed (`irreversible_effect` otherwise). Compensating steps are ordinary
+tasks submitted with `compensates`; their results update the plan's status, while
+the original task keeps its own state and outcome, and the plan always reports
+`counts_as_goal_success: false`.
+
 `/robot/tasks/events` publishes state changes as `std_msgs/msg/String` JSON.
 Events accelerate observation; the journal/status service is authoritative
 because a disconnected stream can miss events.
@@ -86,7 +166,9 @@ ROS frames. Read/status are read-only; cancellation is low-impact; starting a
 physical task retains its high-impact metadata but the managed submission
 operation is L1: authorized callers execute with an audit record and no human
 approval wait. Role scopes, exact service allow-lists and local safety still apply.
-The connector's exact service allow-list must include the four services above.
+The connector's exact service allow-list must include the four services above;
+add the `/robot/tasks/v2/*` services for schema 2. Without them, or on a robot
+that does not advertise schema 2, the connector uses schema 1.
 Rosbridge itself retains its general ROS functionality for other clients.
 
 Enable the existing tailnet binding with

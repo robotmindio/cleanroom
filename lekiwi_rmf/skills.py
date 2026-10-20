@@ -23,6 +23,12 @@ STATUSES = ('experimental', 'qualified')
 BASE_COMMANDS = ('base_x_vel', 'base_y_vel', 'base_yaw_rate')
 CAMERAS = ('front', 'wrist', 'astra')
 PARAMETER_TYPES = {'number': (int, float), 'boolean': (bool,), 'string': (str,)}
+# reversible: an inverse action restores the prior state. compensable: the state can be
+# repaired, but not exactly undone. irreversible: a material change; it can only be
+# stopped, isolated and recorded. An undeclared learned skill is treated as irreversible.
+REVERSIBILITY = ('reversible', 'compensable', 'irreversible')
+UNDECLARED_EFFECTS = {'reversibility': 'irreversible',
+                      'compensation': 'Stop the arm, isolate the object and record its partial state; no automatic undo.'}
 ARTIFACT_SUFFIXES = ('.safetensors', '.json')
 MAX_JSON_BYTES = 1024**2
 # Keys through which Hugging Face, LeRobot and Hydra-style configurations name code to import.
@@ -47,11 +53,12 @@ class Skill:
     max_duration_sec: float
     max_joint_step_rad: float
     parameters: dict
+    effects: dict
 
     def catalog(self):
         return {'skill_id': self.skill_id, 'version': self.version, 'status': self.status,
                 'description': self.description, 'parameters': self.parameters,
-                'max_duration_sec': self.max_duration_sec}
+                'max_duration_sec': self.max_duration_sec, 'effects': self.effects}
 
 
 def _skill(skill_id, value, artifacts):
@@ -62,8 +69,13 @@ def _skill(skill_id, value, artifacts):
     if 'weights_sha256' in value:
         # The old field pinned model.safetensors alone; such an entry never vouches for a whole checkpoint.
         raise ValueError(f'{skill_id}: weights_sha256 pins only the weights; re-register for artifact_sha256')
-    if set(value) != known:
-        raise ValueError(f'{skill_id}: fields must be exactly {sorted(known)}')
+    if set(value) - {'effects'} != known:
+        raise ValueError(f'{skill_id}: fields must be exactly {sorted(known)}, optionally with effects')
+    effects = value.get('effects', UNDECLARED_EFFECTS)
+    if (not isinstance(effects, dict) or set(effects) != {'reversibility', 'compensation'}
+            or effects['reversibility'] not in REVERSIBILITY or not isinstance(effects['compensation'], str)
+            or not 1 <= len(effects['compensation']) <= 500):
+        raise ValueError(f'{skill_id}: effects needs reversibility {REVERSIBILITY} and a compensation description')
     if type(value['version']) is not int or value['version'] < 1:
         raise ValueError(f'{skill_id}: version must be a positive integer')
     if value['status'] not in STATUSES or value['kind'] not in KINDS:
@@ -97,7 +109,7 @@ def _skill(skill_id, value, artifacts):
         raise ValueError(f'{skill_id}: parameters map names to {{type, min, max, max_length}}')
     return Skill(skill_id, value['version'], value['description'], value['status'], value['kind'],
                  artifacts / checkpoint, digest, tuple(names), tuple(cameras), value['fps'],
-                 float(value['max_duration_sec']), float(value['max_joint_step_rad']), parameters)
+                 float(value['max_duration_sec']), float(value['max_joint_step_rad']), parameters, dict(effects))
 
 
 def load_registry(path=None, artifacts=None):

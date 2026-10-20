@@ -20,6 +20,7 @@ from lekiwi_rmf.action import RunSkill
 from lekiwi_rmf.arm_trajectory import ARM_JOINTS
 from lekiwi_rmf.skills import artifact_digest, load_registry
 from lekiwi_rmf.srv import PinObservationEvidence, QueryObservations
+from ros_test_utils import release_graph
 
 SCRIPTS = Path(__file__).parents[1] / 'scripts'
 ACTIONS = [*ARM_JOINTS, 'base_x_vel', 'base_y_vel', 'base_yaw_rate']
@@ -298,7 +299,8 @@ class FakeWorld(Node):
         super().__init__('fake_world', context=context)
         self.cup_present, self.runner_changes_world, self.weights = False, True, weights
         self.observations, self.pins, self.lock = [], {}, threading.Lock()
-        ActionServer(self, RunSkill, '/robot/skills/run', self.execute, goal_callback=lambda _goal: GoalResponse.ACCEPT)
+        self.server = ActionServer(self, RunSkill, '/robot/skills/run', self.execute,
+                                   goal_callback=lambda _goal: GoalResponse.ACCEPT)
         self.create_service(QueryObservations, '/robot/observations/query', self.query)
         self.create_service(PinObservationEvidence, '/robot/observations/pin', self.pin)
         self.create_timer(.05, self.capture)
@@ -357,11 +359,9 @@ def world():
         evaluator.ready()
         yield fake, evaluator
     finally:
-        executor.shutdown(timeout_sec=5)
-        thread.join(5)
-        fake.destroy_node()
-        client.destroy_node()
-        context.try_shutdown()
+        # Node.destroy_node leaves action waitables alive; a leaked server answers the next suite's goals.
+        release_graph(executor=executor, thread=thread, waitables=(fake.server, evaluator.run_client),
+                      nodes=(fake, client), context=context)
 
 
 def arguments(trials, **changes):
