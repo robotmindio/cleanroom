@@ -62,6 +62,16 @@ def test_experimental_skills_are_offered_only_to_an_acquisition_protocol(tmp_pat
     assert sorted(skill['skill_id'] for skill in catalog(skills, allow_experimental=True)) == ['push', 'reach']
 
 
+def test_catalog_advertises_kind_and_the_resources_each_skill_uses(tmp_path):
+    skills = registry(tmp_path, {'drive': entry(cameras=['front', 'wrist']),
+                                 'grip': entry(action_names=list(ARM_JOINTS), cameras=[])})
+    drive, grip = catalog(skills)
+    assert drive['kind'] == grip['kind'] == 'lerobot_policy'
+    # Base commands in the action space and any camera input are declared, never assumed.
+    assert drive['resources'] == ['arm', 'base', 'camera'] and drive['cameras'] == ['front', 'wrist']
+    assert grip['resources'] == ['arm'] and grip['cameras'] == []
+
+
 def test_parameters_follow_the_declared_contract(tmp_path):
     skill = registry(tmp_path, {'push': entry()})['push']
     assert skill_parameters(skill, '{"force": 0.5}') == {'force': .5}

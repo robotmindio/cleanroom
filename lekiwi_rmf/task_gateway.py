@@ -39,7 +39,7 @@ from lekiwi_rmf.navigation_observer import NavigationObserver, server_instance
 from lekiwi_rmf.navigation_distance import NavigationDistance
 from lekiwi_rmf.map_bundle import validate_map_bundle
 from lekiwi_rmf.arm_trajectory import ARM_JOINTS
-from lekiwi_rmf.skills import BASE_COMMANDS, SKILL_ID, UNDECLARED_EFFECTS, catalog, load_registry
+from lekiwi_rmf.skills import BASE_COMMANDS, KINDS, SKILL_ID, UNDECLARED_EFFECTS, catalog, load_registry
 
 
 ACTIONS = {'navigate': ('/navigate_to_pose', NavigateToPose), 'explore': ('/robot/explore', Explore),
@@ -737,8 +737,12 @@ class TaskGateway(Node):
         if name == 'skill':
             return {**entry, 'parameters': ['skill_id', 'parameters'], 'required_parameters': ['skill_id'],
                     'defaults': {'parameters': {}}, 'effective_defaults': {'parameters': {}}, 'skills': self._skills,
+                    # The implementation kinds the runner executes, so a client acquires only runnable skills.
+                    'implementation_kinds': list(KINDS),
                     'description': 'Run a registered skill implementation on the arm. Success means the implementation '
-                                   'finished, not that the world reached the goal; verify the effect independently.'}
+                                   'finished, not that the world reached the goal; verify the effect independently. '
+                                   'Each skill lists the resources it commands or reads (arm, base, camera); '
+                                   'admission holds the capability resources whatever the skill uses.'}
         return {**entry, 'parameters': list(SEARCH_PARAMETERS), 'required_parameters': ['query'],
                 'defaults': {'region': None, 'max_duration_sec': 0.0, 'max_travel_m': 0.0, 'target_coverage': 0.0},
                 'effective_defaults': (dict(self._search_defaults, region=None)

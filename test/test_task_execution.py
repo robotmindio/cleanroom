@@ -159,6 +159,7 @@ def test_capabilities_declare_resources_effects_and_the_negotiated_schema(robot)
     entries = {entry['name']: entry for entry in catalog['capabilities']}
     assert entries['search']['resources'] == ['base', 'perception_query']
     assert entries['skill']['resources'] == ['arm', 'base']
+    assert entries['skill']['implementation_kinds'] == ['lerobot_policy']
     assert entries['navigate']['effects']['reversibility'] == 'reversible'
     assert entries['skill']['effects']['undeclared']['reversibility'] == 'irreversible'
     assert entries['navigate']['units']['yaw'] == 'rad' and entries['navigate']['frame'] == 'map'
