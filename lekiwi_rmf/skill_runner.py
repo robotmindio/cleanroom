@@ -134,6 +134,12 @@ class SkillRunner(Node):
         message.header.stamp = self.get_clock().now().to_msg()
         self._diagnostics.publish(message)
 
+    def destroy_node(self):
+        # rclpy Node.destroy_node does not destroy action waitables.
+        self._server.destroy()
+        self._arm.destroy()
+        return super().destroy_node()
+
     def catalog(self):
         return catalog(self._registry, self._experimental)
 
