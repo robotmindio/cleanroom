@@ -31,7 +31,13 @@ from lekiwi_rmf.perception_query import make_query
 from lekiwi_rmf.srv import GetTask, SetPerceptionQuery, SubmitTask, TaskApi
 from lekiwi_rmf.task_gateway import BODY_PROFILE, TASK_API, TaskGateway
 from ros_test_utils import release_graph
-from test_task_gateway import Peers, wait
+from test_task_gateway import Peers, wait as gateway_wait
+
+
+def wait(predicate, timeout=20):
+    # Each step here chains several service round trips; CI's single-process coverage run is slower.
+    gateway_wait(predicate, timeout)
+
 
 SKILL = {'skill_id': 'insert_peg', 'parameters': {}}
 
