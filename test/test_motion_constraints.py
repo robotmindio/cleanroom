@@ -97,8 +97,8 @@ def test_search_reaches_a_region_with_an_aligned_tool():
         sphere([0.18, 0.08, 0.05], 0.03),
         {'kind': 'orientation', 'axis': [1, 0, 0], 'direction': [0, 0, -1], 'tolerance_rad': 0.15}]})
     search = KinematicSearch(toy_fk, LOWER, UPPER)
-    found, used = search.solve(constraint, np.zeros(5), time.monotonic() + 10)
-    assert found and used <= search.max_evaluations
+    found, used, stopped = search.solve(constraint, np.zeros(5), time.monotonic() + 10)
+    assert found and used <= search.max_evaluations and stopped in (None, 'budget')
     for joints in found:
         assert judge(constraint, *toy_fk(joints))[0] == 'holds'
         assert np.all(joints >= LOWER) and np.all(joints <= UPPER)
@@ -108,20 +108,20 @@ def test_search_reaches_a_region_with_an_aligned_tool():
 def test_search_reports_nothing_for_an_unreachable_region_within_its_budget():
     constraint = resolved({'op': 'solve', 'constraints': [sphere([0.0, 0.0, 0.48], 0.05)]})
     search = KinematicSearch(toy_fk, LOWER, UPPER, max_evaluations=600)
-    found, used = search.solve(constraint, np.zeros(5), time.monotonic() + 10)
-    assert found == [] and used <= 600
+    found, used, stopped = search.solve(constraint, np.zeros(5), time.monotonic() + 10)
+    assert found == [] and used <= 600 and stopped in (None, 'budget')
 
 
 def test_search_respects_its_deadline():
     constraint = resolved({'op': 'solve', 'constraints': [sphere([0.0, 0.0, 0.48], 0.05)]})
     search = KinematicSearch(toy_fk, LOWER, UPPER, samples=16)
     started = time.monotonic()
-    found, _ = search.solve(constraint, np.zeros(5), started + 0.05)
-    assert found == [] and time.monotonic() - started < 1.0
+    found, _, stopped = search.solve(constraint, np.zeros(5), started + 0.05)
+    assert found == [] and stopped == 'deadline' and time.monotonic() - started < 1.0
 
 
 def test_current_joints_that_already_satisfy_are_preferred():
     position, _ = toy_fk(np.zeros(5))
     constraint = resolved({'op': 'solve', 'constraints': [sphere(position.tolist(), 0.05)]})
-    found, _ = KinematicSearch(toy_fk, LOWER, UPPER).solve(constraint, np.zeros(5), time.monotonic() + 10)
+    found, _, _ = KinematicSearch(toy_fk, LOWER, UPPER).solve(constraint, np.zeros(5), time.monotonic() + 10)
     assert np.allclose(found[0], np.zeros(5))

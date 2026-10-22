@@ -132,7 +132,7 @@ def graph():
     fake = FakeMoveIt(context)
     solver = MotionSolver(context=context, parameter_overrides=[
         Parameter('seed_samples', value=128), Parameter('service_timeout_sec', value=2.0),
-        Parameter('planning_frame', value='base_link')])
+        Parameter('planning_frame', value='base_link'), Parameter('max_fk_evaluations', value=600)])
     client_node = Node('motion_client', context=context)
     client = client_node.create_client(TaskApi, SERVICE)
     executor = MultiThreadedExecutor(num_threads=6, context=context)
@@ -174,7 +174,7 @@ DOWN = {'kind': 'orientation', 'axis': [1, 0, 0], 'direction': [0, 0, -1], 'tole
 
 def test_solve_returns_a_verified_joint_target_with_its_motion_and_validity(graph):
     fake, _, call = graph
-    answer = call({'op': 'solve', 'constraints': [point([0.18, 0.06, 0.05]), DOWN]})
+    answer = call({'op': 'solve', 'constraints': [point([0.18, 0.06, 0.05]), DOWN], 'max_time_sec': 10})
     assert answer['status'] == 'feasible', answer
     assert set(answer['joints']) == set(GROUP_JOINTS)
     position, rotation = toy_fk([answer['joints'][name] for name in GROUP_JOINTS])
@@ -186,7 +186,7 @@ def test_solve_returns_a_verified_joint_target_with_its_motion_and_validity(grap
 
 def test_solve_reaches_an_observed_object_through_tf_at_capture_time(graph):
     _, _, call = graph
-    answer = call({'op': 'solve', 'constraints': [observed()]})
+    answer = call({'op': 'solve', 'constraints': [observed()], 'max_time_sec': 10})
     assert answer['status'] == 'feasible', answer
     target = answer['targets'][0]
     # camera_optical sits 0.1 m above base_link, so the camera point (0.2, 0, 0) is (0.2, 0, 0.1).
@@ -215,7 +215,7 @@ def test_stale_joint_states_make_every_answer_unknown(graph):
 
 def test_an_unreachable_region_is_infeasible_with_the_search_bound_stated(graph):
     _, _, call = graph
-    answer = call({'op': 'solve', 'constraints': [point([0.0, 0.0, 0.48], 0.05)], 'max_time_sec': 5})
+    answer = call({'op': 'solve', 'constraints': [point([0.0, 0.0, 0.48], 0.05)], 'max_time_sec': 10})
     assert (answer['status'], answer['reason']) == ('infeasible', 'no_kinematic_solution')
     assert 'not complete' in answer['detail']
 
@@ -223,15 +223,16 @@ def test_an_unreachable_region_is_infeasible_with_the_search_bound_stated(graph)
 def test_colliding_solutions_are_rejected(graph):
     fake, _, call = graph
     fake.collide_below_z = 1.0
-    answer = call({'op': 'solve', 'constraints': [point([0.18, 0.06, 0.05])]})
+    answer = call({'op': 'solve', 'constraints': [point([0.18, 0.06, 0.05])], 'max_time_sec': 10})
     assert (answer['status'], answer['reason']) == ('infeasible', 'in_collision')
 
 
 def test_a_solution_without_a_motion_plan_is_infeasible_unless_planning_is_skipped(graph):
     fake, _, call = graph
     fake.plan_succeeds = False
-    assert call({'op': 'solve', 'constraints': [point([0.18, 0.06, 0.05])]})['reason'] == 'no_motion_plan'
-    assert call({'op': 'solve', 'constraints': [point([0.18, 0.06, 0.05])], 'plan': False})['status'] == 'feasible'
+    assert call({'op': 'solve', 'constraints': [point([0.18, 0.06, 0.05])], 'max_time_sec': 10})['reason'] == 'no_motion_plan'
+    assert call({'op': 'solve', 'constraints': [point([0.18, 0.06, 0.05])], 'plan': False,
+                 'max_time_sec': 10})['status'] == 'feasible'
 
 
 def test_verify_judges_the_current_pose(graph):
@@ -259,3 +260,10 @@ def test_malformed_requests_and_other_schemas_are_refused(graph):
     assert (refused.ok, refused.error) == (False, 'invalid_request')
     other = call({'op': 'solve', 'constraints': [DOWN]}, schema=2)
     assert (other.ok, other.error) == (False, 'schema_incompatible')
+
+
+def test_a_search_cut_short_by_its_deadline_is_unknown_not_infeasible(graph):
+    _, solver, call = graph
+    solver._search.solve = lambda resolved, current, deadline: ([], 3, 'deadline')
+    answer = call({'op': 'solve', 'constraints': [point([0.18, 0.06, 0.05])]})
+    assert (answer['status'], answer['reason']) == ('unknown', 'search_timeout')

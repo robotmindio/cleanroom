@@ -222,7 +222,7 @@ def halton(count, dimensions):
 
 
 class Exhausted(Exception):
-    """The forward-kinematics budget or deadline ran out."""
+    """The forward-kinematics budget (``budget``) or the caller's time (``deadline``) ran out."""
 
 
 class KinematicSearch:
@@ -230,7 +230,8 @@ class KinematicSearch:
 
     A deterministic low-discrepancy table of joint samples (built once, through the same FK)
     seeds bounded least-squares refinement from the closest samples. The search is not
-    complete: finding nothing within its budget is reported as such, never as impossibility.
+    complete: finding nothing within its budget is reported as such, never as impossibility,
+    and a search the deadline cut short reports that it stopped early.
     """
 
     def __init__(self, fk, lower, upper, samples=256, seeds=6, max_evaluations=1500):
@@ -248,7 +249,11 @@ class KinematicSearch:
         return self._table
 
     def solve(self, resolved, current, deadline):
-        """Candidate joint vectors that satisfy the constraints, closest to ``current`` first."""
+        """Candidate joint vectors closest to ``current`` first, evaluations used, and why it stopped.
+
+        The stop reason is ``None`` when every seed was refined, ``budget`` when the
+        evaluation budget ran out and ``deadline`` when the caller's time did.
+        """
         budget = {'used': 0}
         current = np.clip(np.asarray(current, dtype=float), self.lower, self.upper)
 
@@ -256,13 +261,19 @@ class KinematicSearch:
             return float(np.sum(residuals(resolved, position, rotation) ** 2))
 
         def evaluate(joints):
-            if budget['used'] >= self.max_evaluations or time.monotonic() >= deadline:
-                raise Exhausted()
+            if budget['used'] >= self.max_evaluations:
+                raise Exhausted('budget')
+            if time.monotonic() >= deadline:
+                raise Exhausted('deadline')
             budget['used'] += 1
             return residuals(resolved, *self._fk(joints))
 
         table = self._poses(budget)
-        start = evaluate(current)
+        stopped = None
+        try:
+            start = evaluate(current)
+        except Exhausted as error:
+            return [], budget['used'], error.args[0]
         seeds = [(float(np.sum(start ** 2)), current)]
         seeds += sorted(((cost(position, rotation), joints) for joints, position, rotation in table),
                         key=lambda item: item[0])[:self._seeds]
@@ -274,7 +285,8 @@ class KinematicSearch:
             try:
                 fit = least_squares(evaluate, seed, bounds=(self.lower, self.upper), method='trf',
                                     diff_step=1e-3, xtol=1e-9, ftol=1e-12, gtol=1e-12, max_nfev=40)
-            except Exhausted:
+            except Exhausted as error:
+                stopped = error.args[0]
                 break
             if np.max(fit.fun) <= 1e-9:
                 found.append(np.clip(fit.x, self.lower, self.upper))
@@ -282,4 +294,4 @@ class KinematicSearch:
         for joints in sorted(found, key=lambda item: float(np.linalg.norm(item - current))):
             if all(np.max(np.abs(joints - other)) > 1e-3 for other in unique):
                 unique.append(joints)
-        return unique, budget['used']
+        return unique, budget['used'], stopped

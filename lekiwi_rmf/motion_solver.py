@@ -35,7 +35,7 @@ from tf2_ros import Buffer, TransformException, TransformListener
 
 from lekiwi_rmf.arm_trajectory import ARM_JOINTS, JOINT_LIMITS
 from lekiwi_rmf.motion_constraints import (
-    SCHEMA, Exhausted, KinematicSearch, judge, parse_request, resolve, solvable,
+    SCHEMA, KinematicSearch, judge, parse_request, resolve, solvable,
 )
 from lekiwi_rmf.srv import QueryObservations, TaskApi
 
@@ -244,10 +244,11 @@ class MotionSolver(Node):
         if refusal:
             return {'status': 'unknown', 'reason': 'uncertainty_exceeds_tolerance', 'detail': refusal, 'targets': sources}
         current = np.array([joints[name] for name in GROUP_JOINTS])
-        try:
-            candidates, used = self._search.solve(resolved, current, deadline)
-        except Exhausted:
-            candidates, used = [], self._search.max_evaluations
+        candidates, used, stopped = self._search.solve(resolved, current, deadline)
+        if not candidates and stopped == 'deadline':
+            # Cut short by the caller's time: nothing was learned about feasibility.
+            return {'status': 'unknown', 'reason': 'search_timeout', 'targets': sources, 'evaluations': used,
+                    'detail': f'the search stopped at max_time_sec after {used} kinematic evaluations'}
         if not candidates:
             return {'status': 'infeasible', 'reason': 'no_kinematic_solution', 'targets': sources,
                     'detail': f'no joint values within limits satisfy the constraints after {used} kinematic '
