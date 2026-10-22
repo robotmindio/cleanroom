@@ -116,7 +116,8 @@ class FakeRunner(Node):
     def __init__(self, context, controller):
         super().__init__('fake_runner', context=context)
         self.controller, self.lifts, self.weights = controller, True, 'a' * 64
-        ActionServer(self, RunSkill, '/robot/skills/run', self.execute, goal_callback=lambda _goal: GoalResponse.ACCEPT)
+        self.server = ActionServer(self, RunSkill, '/robot/skills/run', self.execute,
+                                   goal_callback=lambda _goal: GoalResponse.ACCEPT)
 
     def execute(self, handle):
         if self.lifts:
@@ -149,7 +150,9 @@ def sim_world():
         evaluator.ready()
         yield controller, runner, evaluator, evaluate.protocol_of(args, predicate, (value, digest))
     finally:
-        release_graph(executor=executor, thread=thread, nodes=(runner, client), context=context)
+        # Node.destroy_node leaves action waitables alive; a leaked server answers the next suite's goals.
+        release_graph(executor=executor, thread=thread, waitables=(runner.server, evaluator.run_client),
+                      nodes=(runner, client), context=context)
 
 
 def test_sim_trials_are_judged_by_ground_truth_and_labeled_as_sim(sim_world):
@@ -263,7 +266,7 @@ class FakeArm(Node):
         from control_msgs.action import FollowJointTrajectory
         super().__init__('fake_arm', context=context)
         self.joints, self.goals = joints, []
-        ActionServer(self, FollowJointTrajectory, '/arm_controller/follow_joint_trajectory', self.execute)
+        self.server = ActionServer(self, FollowJointTrajectory, '/arm_controller/follow_joint_trajectory', self.execute)
         self.publisher = self.create_publisher(JointState, '/joint_states', 10)
         self.create_timer(.05, lambda: self.publisher.publish(JointState(
             name=list(self.joints), position=list(self.joints.values()))))
@@ -289,6 +292,7 @@ def test_a_reset_puts_the_arm_at_its_start_and_places_objects_at_the_trials_pose
     thread = threading.Thread(target=executor.spin, daemon=True)
     thread.start()
     gazebo = FakeGazebo(value)
+    controller = None
     try:
         controller = sim_scene.SceneController(node, {**value, 'settle_sec': 0.0}, run=gazebo)
         controller.ready()
@@ -305,4 +309,6 @@ def test_a_reset_puts_the_arm_at_its_start_and_places_objects_at_the_trials_pose
         gazebo.models['lekiwi_1'][0] += 0.3
         assert not controller.reset(3)['confirmed']
     finally:
-        release_graph(executor=executor, thread=thread, nodes=(arm, node), context=context)
+        clients = () if controller is None else (controller.arm,)
+        release_graph(executor=executor, thread=thread, waitables=(arm.server, *clients), nodes=(arm, node),
+                      context=context)
