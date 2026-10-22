@@ -266,7 +266,9 @@ def test_registration_appends_an_experimental_entry_and_keeps_the_base_catalogue
     entry = yaml.safe_load(registry.read_text())['cards_v1']
     assert entry['status'] == 'experimental' and entry['replaces'] == 'rtdetr_v2_r18'
     assert entry['training']['heldout_manifest_sha256'] == '5' * 64 and (models / 'cards_v1/model.safetensors').is_file()
-    # Promotion changes governance fields only, which stay out of the recognizer identity.
+    # Promotion changes governance fields only, which stay out of the recognizer identity. The identity also
+    # pins the Torch runtime's package versions; fixed stand-ins let this run where Torch is not installed.
+    monkeypatch.setattr(object_recognition.importlib.metadata, 'version', lambda package: f'{package}-test')
     monkeypatch.setattr(object_recognition, 'model_spec', lambda name: entry)
     identity = object_recognition.recognition_identity('cards_v1')
     monkeypatch.setattr(object_recognition, 'model_spec', lambda name: {**entry, 'status': 'qualified'})
