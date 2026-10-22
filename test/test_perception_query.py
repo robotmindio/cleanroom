@@ -19,7 +19,7 @@ from lekiwi_rmf.msg import PerceptionOperatingPoint
 from lekiwi_rmf.object_observations import observation
 from lekiwi_rmf.object_recognition import ProviderUnavailable, recognition_identity
 from lekiwi_rmf.perception_profiles import default_profile
-from lekiwi_rmf.perception_query import MAX_LABELS, make_query, normalize_label, recorded_query
+from lekiwi_rmf.perception_query import MAX_LABELS, ConceptRef, make_query, normalize_label, recorded_query
 from lekiwi_rmf.srv import ApplyPerceptionProfile, QueryObservations, SetPerceptionQuery
 from test_object_observations import capture, fake_recognizer, operating_point
 
@@ -48,6 +48,14 @@ def test_labels_are_normalized_deduplicated_and_ordered():
 def test_queries_outside_their_bounds_are_rejected(labels):
     with pytest.raises(ValueError):
         make_query(labels)
+
+
+def test_labels_and_concept_prompts_share_the_phrase_limit():
+    concepts = [ConceptRef(f'concept {index}', f'{index:064x}', tuple(f'prompt {index} {n}' for n in range(4)))
+                for index in range(4)]
+    with pytest.raises(ValueError, match='phrases'):
+        make_query(['a cup'], concepts=concepts)
+    assert len(make_query(['a cup'], concepts=concepts[:3]).phrases) == 13
 
 
 def test_a_recorded_query_must_already_be_canonical():
