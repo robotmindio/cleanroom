@@ -245,6 +245,9 @@ def test_terminal_state_comes_from_ros_result(system, capability, abort):
     wait(lambda: status().state in ('succeeded', 'failed'))
     assert status().state == ('failed' if abort else 'succeeded')
     assert isinstance(json.loads(status().result_json), dict)
+    stages = peers.gateway._budget.summary()['stages']
+    assert stages['queue']['count'] == stages['execution']['count'] == 1
+    assert 0 <= stages['queue']['p50_sec'] <= stages['queue']['p99_sec'] < 30
 
 
 def test_restart_recovers_live_exploration_without_resubmitting(system):
@@ -384,6 +387,7 @@ def test_failed_submission_is_durable_and_never_replayed(tmp_path):
     from types import SimpleNamespace
     from unittest.mock import Mock
 
+    from lekiwi_rmf.latency_budget import LatencyBudget
     from lekiwi_rmf.task_journal import TaskJournal
 
     journal = TaskJournal(tmp_path / 'tasks.db')
@@ -395,7 +399,8 @@ def test_failed_submission_is_durable_and_never_replayed(tmp_path):
         gateway = SimpleNamespace(_journal=journal, _enabled={'explore': True}, _observed={'explore': set()},
                                   _action_clients={'explore': action}, _children=Mock(busy=lambda: False), _sent=set(),
                                   _started={}, _recovering=set(), _update=journal.update,
-                                  _server_id=lambda _: 'server', get_logger=Mock())
+                                  _server_id=lambda _: 'server', get_logger=Mock(),
+                                  _budget=LatencyBudget('task'), _admitted_at={}, _dispatched_at={})
         gateway._delivery_failed = lambda task, error: TaskGateway._delivery_failed(gateway, task, error)
         TaskGateway._dispatch(gateway, journal.row('task'), time.monotonic())
         assert journal.row('task')['dispatched']
@@ -493,6 +498,7 @@ def test_terminal_task_releases_lost_transport_requests(tmp_path):
     from unittest.mock import Mock
     from rclpy.task import Future
 
+    from lekiwi_rmf.latency_budget import LatencyBudget
     from lekiwi_rmf.task_journal import TaskJournal
 
     journal = TaskJournal(tmp_path / 'tasks.db')
@@ -506,7 +512,8 @@ def test_terminal_task_releases_lost_transport_requests(tmp_path):
             _queried={(kind, 'task'): 0 for kind in futures},
             _result_clients={'explore': result_client}, _cancel_clients={'explore': cancel_client},
             _recovering={'task'}, _sent={'task'}, _started={'task': 0}, _terminal_seen={'task': 0},
-            _pausing=set(), _pause_started={}, _unknown_results={}, _unknown_cancels={}, _unknown_since={})
+            _pausing=set(), _pause_started={}, _unknown_results={}, _unknown_cancels={}, _unknown_since={},
+            _budget=LatencyBudget('task'), _admitted_at={}, _dispatched_at={'task': 0.})
         gateway._release_requests = lambda task, row: TaskGateway._release_requests(gateway, task, row)
         TaskGateway._update(gateway, 'task', 'succeeded', 'finished', {'complete': True})
         assert journal.row('task')['state'] == 'succeeded'

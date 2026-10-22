@@ -296,6 +296,33 @@ def test_fallback_frames_never_cover_labels_only_the_primary_can_report():
     assert not search('unicorn').supported
 
 
+def test_reprojection_moves_coverage_with_the_corrected_map():
+    """#90 gap: a SLAM correction moves earlier evidence instead of leaving it at stale coordinates."""
+    search, grid, _ = session()
+    before = capture(identifier='1' * 64, pose=Pose(0.0, 0.0, 0.2, 0.0, 0.0), stamp=10.0,
+                     detections=[Detection('cup', 0.9, 0.3, 0.2)])
+    search.integrate(before, grid)
+    covered_before = search.coverage.negative > -np.inf
+    assert covered_before.any() and search.prior_count == 1
+    # Spatial memory reprojects the same capture 0.5 m further along y in the corrected revision.
+    after = capture(identifier='1' * 64, pose=Pose(0.0, 0.5, 0.2, 0.0, 0.0), stamp=10.0,
+                    detections=[Detection('cup', 0.9, 0.3, 0.2)])
+    assert not search.reproject([after], grid, 'r2')
+    covered_after = search.coverage.negative > -np.inf
+    shift = round(0.5 / RESOLUTION)
+    assert np.array_equal(covered_after[shift:], covered_before[:-shift])
+    assert search.prior_count == 1  # Rebuilt, not counted twice.
+    assert search.revisions[-1]['reason'] == 'map revision r2: coverage reprojected from 1 anchored captures'
+    # A capture found during the search stays found after the rebuild.
+    found = capture(identifier='2' * 64, detections=[Detection('cup', 0.9, 0.1, -0.1)], stamp=200.0)
+    assert search.integrate(found, grid)
+    assert search.reproject([after, found], grid, 'r3') is False and search.evidence_ids()[-1] == '2' * 64
+    # A frame whose own query did not ask for the label gains it no coverage after reprojection either.
+    unasked = Capture('3' * 64, 'front', 'm' * 64, 300.0, Pose(0.0, 0.0, 0.2, 0.0, 0.0), CAMERA, True, (), ('chair',))
+    search.reproject([unasked], grid, 'r4')
+    assert not (search.coverage.negative > -np.inf).any()
+
+
 def test_a_frame_under_another_profile_is_silent_not_negative_evidence():
     """A profile change mid-search must not let frames under other thresholds claim this session's coverage."""
     grid = free_grid()

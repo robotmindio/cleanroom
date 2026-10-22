@@ -109,6 +109,28 @@
    },
    {
     "arguments": [],
+    "env": {
+     "OPENBLAS_NUM_THREADS": "1"
+    },
+    "name": "spatial_memory",
+    "namespace": "",
+    "node": "lekiwi_rmf/spatial_memory",
+    "output": "screen",
+    "parameters": {
+     "max_revisions": 2000,
+     "observer_ref": "lekiwi",
+     "retention_sec": 604800.0,
+     "rtabmap_database": "$(env HOME)/.ros/lekiwi_rtabmap.db",
+     "site_ref": "home",
+     "use_sim_time": false
+    },
+    "remappings": [],
+    "respawn": true,
+    "respawn_delay": 2.0,
+    "ros_arguments": []
+   },
+   {
+    "arguments": [],
     "env": {},
     "name": "rtabmap",
     "namespace": "",
@@ -556,6 +578,23 @@
   "remappings": [],
   "respawn": false,
   "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {},
+  "name": "skill_runner",
+  "namespace": "",
+  "node": "lekiwi_rmf/skill_runner",
+  "output": "screen",
+  "parameters": {
+   "allow_experimental": false,
+   "max_observation_age_sec": 0.5,
+   "use_sim_time": false
+  },
+  "remappings": [],
+  "respawn": true,
+  "respawn_delay": 2.0,
   "ros_arguments": []
  },
  {

@@ -166,6 +166,13 @@
   ],
   "default": "hold"
  },
+ "skill_acquisition": {
+  "choices": [
+   "true",
+   "false"
+  ],
+  "default": "false"
+ },
  "slam_mode": {
   "choices": [
    "mapping",

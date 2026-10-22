@@ -21,6 +21,9 @@ Start with one of these:
 | Replay a stored capture | `scripts/replay-perception.py RECORD ARTIFACT --model-name NAME --output REPORT` |
 | Record a multimodal episode | `scripts/record-episode.py DIR --task TEXT` |
 | Export episodes to LeRobot | `scripts/install-lerobot-export.sh`, then `scripts/export-lerobot.py EPISODE... --root DATASET` |
+| Train a skill policy (local or `--cluster`) | `scripts/train-skill.py DATASET --output RUN` |
+| Register or promote a skill | `scripts/register-skill.py ID --training RUN --version N --description TEXT` or `--promote REPORT` |
+| Evaluate a skill against observations | `scripts/evaluate-skill.py ID --success JSON --output REPORT` |
 
 Configuration comes from `.env` (only `LEKIWI_ROBOT_HOST`,
 `LEKIWI_DISARM_ON_FAILURE` and `LEKIWI_WIFI_COUNTRY`) and from `LEKIWI_*`
@@ -112,6 +115,7 @@ before using them; the robot runtime does not require it.
 - `render-model.py` renders the zero-pose calibration reference image.
 - `vendor-lekiwi-model.py` vendors the generated LeKiwi Xacro as the physical model.
 - `prune-ros-logs.sh` deletes stale ROS logs (run by `lekiwi-ros-logrotate.service`).
+- `robot-data.py audit|backup|restore|verify` applies the robot-local data classes of `config/data_retention.yaml`: permission audit, online backup of the journals and records with artifact manifests, and a restore that keeps replaced files, rebuilds indexes and reconciles observations with their evidence. See [operations budgets and data](../docs/operations.md).
 
 ## lib/
 

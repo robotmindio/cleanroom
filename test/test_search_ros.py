@@ -12,6 +12,7 @@ from geometry_msgs.msg import TransformStamped
 from nav_msgs.msg import Odometry
 import pytest
 import rclpy
+from ros_test_utils import release_graph
 from rclpy.action import ActionClient
 from rclpy.context import Context
 from rclpy.duration import Duration
@@ -182,13 +183,8 @@ def search_graph(tmp_path, request):
             wait(lambda: not explorer._busy, timeout=8)
             wait(lambda: not peers.nav_active)
         finally:
-            finished.set_result(True)
-            thread.join(timeout=5)
-            assert executor.shutdown(timeout_sec=5)
-            client.destroy()
-            for node in (client_node, explorer, guard, perception, peers):
-                node.destroy_node()
-            context.shutdown()
+            release_graph(executor=executor, thread=thread, finished=finished, waitables=(client,),
+                          nodes=(client_node, explorer, guard, perception, peers), context=context)
 
 
 def run(client, goal, timeout=60, feedback=None):
@@ -218,6 +214,9 @@ def test_search_observes_outside_the_initial_view_and_reports_evidence(search_gr
     assert any(stage.startswith('searching: viewpoint') for stage in stages)
     # Every goal went through the guarded exploration behaviour tree.
     assert all(abs(pose.pose.position.x) < 2 for pose in peers.navigation_goals)
+    stages = explorer._budget.summary()['stages']
+    # A drive interrupted by evidence has no completed execution sample.
+    assert stages['planning']['count'] >= 1 and stages['execution']['count'] <= peers.nav_count
 
 
 def test_absent_label_ends_at_stated_coverage_without_claiming_absence(search_graph):

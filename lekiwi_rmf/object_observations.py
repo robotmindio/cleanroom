@@ -6,6 +6,7 @@ import json
 import math
 from pathlib import Path
 import sqlite3
+import threading
 import time
 import uuid
 
@@ -256,10 +257,19 @@ def observation(image, detections, model_sha256, camera_id, query=None, *, profi
     return document, evidence
 
 
+def _serialized(method):
+    # The connection is shared across threads (check_same_thread=False); sqlite3 objects are not.
+    def call(self, *args, **kwargs):
+        with self._access:
+            return method(self, *args, **kwargs)
+    return call
+
+
 class ObservationStore:
     """One SQLite transaction owns metadata and JPEG, including retention."""
 
     def __init__(self, path, *, max_bytes=2 * 1024**3, max_records=100000, retention_sec=7 * 86400):
+        self._access = threading.Lock()
         if type(max_records) is not int or max_records < 1 or type(max_bytes) is not int or max_bytes < 65536:
             raise ValueError('invalid observation storage limits')
         if not math.isfinite(retention_sec) or retention_sec <= 0:
@@ -321,6 +331,7 @@ class ObservationStore:
         self._db.execute('DELETE FROM pins WHERE expires_at<?', (now,))
         self._delete('stored_at<? AND id NOT IN (SELECT observation_id FROM pins)', (now - self.retention_sec,))
 
+    @_serialized
     def pin(self, text, now=None):
         if len(text.encode()) > 4096:
             raise ValueError('pin request exceeds 4096 bytes')
@@ -356,6 +367,7 @@ class ObservationStore:
                     raise ValueError('cannot pin missing or expired evidence')
                 self._db.execute('INSERT INTO pins VALUES (?,?,?)', (request, identifier, now + self.retention_sec))
 
+    @_serialized
     def put(self, document, evidence, now=None):
         now = time.time() if now is None else now
         text = json.dumps(document, allow_nan=False, sort_keys=True)
@@ -385,6 +397,7 @@ class ObservationStore:
                         raise
                     self._evict_oldest()
 
+    @_serialized
     def query(self, text, now=None):
         cursor, ids, limit, epoch = query_parameters(text)
         if epoch is not None and epoch != self.epoch:
@@ -416,6 +429,7 @@ class ObservationStore:
                 'cursor_gap': bool(ids is None and cursor and (cursor < evicted or
                     (first is not None and cursor < first - 1) or (first is None and last is not None and cursor < last[0])))}
 
+    @_serialized
     def evidence(self, identifier, now=None):
         if not valid_id(identifier):
             raise ValueError('evidence requires a SHA-256 observation ID')
@@ -430,6 +444,7 @@ class ObservationStore:
             raise RuntimeError('stored evidence hash mismatch')
         return evidence, digest
 
+    @_serialized
     def close(self):
         self._db.close()
         self._lock.close()

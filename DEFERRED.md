@@ -268,6 +268,30 @@ Owner: robot integrator with object perception enabled at the deployment site.
 Done when a live `/robot/search` run finds a placed object outside the initial
 view, an absent-object run's reported covered cells match a site check of what
 the cameras saw, the evidence-of-absence criteria come from measured detector
-recall, occlusion uses 3D scene geometry and coverage is reprojected on SLAM
-optimization; only then set `allow_search: true` in `config/exploration.yaml`.
+recall, occlusion uses 3D scene geometry and coverage reprojection is checked
+on a live SLAM optimization; only then set `allow_search: true` in `config/exploration.yaml`.
 Tracked in [#88](https://github.com/robotmindio/cleanroom/issues/88).
+
+## Spatial memory qualification
+
+Owner: robot integrator with SLAM running at the deployment site.
+
+Done when a live or replayed RTAB-Map loop closure leaves an unmoved object at
+one place in the newest revision while its capture-revision coordinates differ,
+a localization restart keeps the `map_ref` with a new session, a mapping restart
+that later closes a loop records a merge whose captures project into the
+surviving map, relinked anchors stay projectable, and the capture/graph race is
+measured. Tracked in [#91](https://github.com/robotmindio/cleanroom/issues/91).
+
+## Latency budgets and robot data restore
+
+Owner: robot integrator on the deployed revision.
+
+Done when `lekiwi/budget/*` diagnostics are recorded under normal load and
+controlled saturation (both base cameras at `max_rate_hz` with the GPU provider
+loaded, and a provider outage served by the fallback), the measured
+p50/p95/p99 are committed as evidence and replace the derived budgets in
+`config/latency_budgets.yaml`, and `scripts/robot-data.py backup`, `restore`
+and `verify` have run on the robot with its services stopped, reporting
+`healthy` and `visual_evidence: verified`.
+Tracked in [#102](https://github.com/robotmindio/cleanroom/issues/102).

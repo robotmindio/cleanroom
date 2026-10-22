@@ -23,6 +23,19 @@ STATUSES = ('experimental', 'qualified')
 BASE_COMMANDS = ('base_x_vel', 'base_y_vel', 'base_yaw_rate')
 CAMERAS = ('front', 'wrist', 'astra')
 PARAMETER_TYPES = {'number': (int, float), 'boolean': (bool,), 'string': (str,)}
+# reversible: an inverse action restores the prior state. compensable: the state can be
+# repaired, but not exactly undone. irreversible: a material change; it can only be
+# stopped, isolated and recorded. An undeclared learned skill is treated as irreversible.
+REVERSIBILITY = ('reversible', 'compensable', 'irreversible')
+UNDECLARED_EFFECTS = {'reversibility': 'irreversible',
+                      'compensation': 'Stop the arm, isolate the object and record its partial state; no automatic undo.'}
+ARTIFACT_SUFFIXES = ('.safetensors', '.json')
+MAX_JSON_BYTES = 1024**2
+# Keys through which Hugging Face, LeRobot and Hydra-style configurations name code to import.
+IMPORT_KEYS = frozenset({'class', 'auto_map', '_target_', 'trust_remote_code', 'custom_pipeline'})
+# Provenance records registration adds beside the checkpoint. LeRobot never opens them, and the
+# evaluation report is written after the digest it names, so they are outside the artifact digest.
+PROVENANCE_RECORDS = frozenset({'training-manifest.json', 'evaluation-report.json'})
 
 
 @dataclass(frozen=True)
@@ -33,27 +46,43 @@ class Skill:
     status: str
     kind: str
     checkpoint: Path
-    weights_sha256: str
+    artifact_sha256: str
     action_names: tuple
     cameras: tuple
     fps: int
     max_duration_sec: float
     max_joint_step_rad: float
     parameters: dict
+    effects: dict
+
+    def resources(self):
+        """What the implementation commands or reads: arm joints, base commands and cameras."""
+        used = {'arm': bool(set(self.action_names) & set(ARM_JOINTS)),
+                'base': bool(set(self.action_names) & set(BASE_COMMANDS)), 'camera': bool(self.cameras)}
+        return [name for name, held in used.items() if held]
 
     def catalog(self):
-        return {'skill_id': self.skill_id, 'version': self.version, 'status': self.status,
+        return {'skill_id': self.skill_id, 'version': self.version, 'status': self.status, 'kind': self.kind,
                 'description': self.description, 'parameters': self.parameters,
-                'max_duration_sec': self.max_duration_sec}
+                'max_duration_sec': self.max_duration_sec, 'effects': self.effects,
+                'resources': self.resources(), 'cameras': list(self.cameras)}
 
 
 def _skill(skill_id, value, artifacts):
     if not SKILL_ID.match(skill_id) or not isinstance(value, dict):
         raise ValueError(f'invalid skill entry {skill_id!r}')
-    known = {'version', 'description', 'status', 'kind', 'checkpoint', 'weights_sha256', 'action_names',
+    known = {'version', 'description', 'status', 'kind', 'checkpoint', 'artifact_sha256', 'action_names',
              'cameras', 'fps', 'max_duration_sec', 'max_joint_step_rad', 'parameters'}
-    if set(value) != known:
-        raise ValueError(f'{skill_id}: fields must be exactly {sorted(known)}')
+    if 'weights_sha256' in value:
+        # The old field pinned model.safetensors alone; such an entry never vouches for a whole checkpoint.
+        raise ValueError(f'{skill_id}: weights_sha256 pins only the weights; re-register for artifact_sha256')
+    if set(value) - {'effects'} != known:
+        raise ValueError(f'{skill_id}: fields must be exactly {sorted(known)}, optionally with effects')
+    effects = value.get('effects', UNDECLARED_EFFECTS)
+    if (not isinstance(effects, dict) or set(effects) != {'reversibility', 'compensation'}
+            or effects['reversibility'] not in REVERSIBILITY or not isinstance(effects['compensation'], str)
+            or not 1 <= len(effects['compensation']) <= 500):
+        raise ValueError(f'{skill_id}: effects needs reversibility {REVERSIBILITY} and a compensation description')
     if type(value['version']) is not int or value['version'] < 1:
         raise ValueError(f'{skill_id}: version must be a positive integer')
     if value['status'] not in STATUSES or value['kind'] not in KINDS:
@@ -63,9 +92,9 @@ def _skill(skill_id, value, artifacts):
     checkpoint = Path(str(value['checkpoint']))
     if checkpoint.is_absolute() or '..' in checkpoint.parts:
         raise ValueError(f'{skill_id}: checkpoint must be relative to the skill artifact directory')
-    digest = value['weights_sha256']
+    digest = value['artifact_sha256']
     if not isinstance(digest, str) or not re.fullmatch(r'[0-9a-f]{64}', digest):
-        raise ValueError(f'{skill_id}: weights_sha256 must be lowercase SHA-256')
+        raise ValueError(f'{skill_id}: artifact_sha256 must be lowercase SHA-256')
     names = value['action_names']
     if (not isinstance(names, list) or len(set(names)) != len(names)
             or set(names) - set(ARM_JOINTS) - set(BASE_COMMANDS) or not set(names) & set(ARM_JOINTS)):
@@ -87,7 +116,7 @@ def _skill(skill_id, value, artifacts):
         raise ValueError(f'{skill_id}: parameters map names to {{type, min, max, max_length}}')
     return Skill(skill_id, value['version'], value['description'], value['status'], value['kind'],
                  artifacts / checkpoint, digest, tuple(names), tuple(cameras), value['fps'],
-                 float(value['max_duration_sec']), float(value['max_joint_step_rad']), parameters)
+                 float(value['max_duration_sec']), float(value['max_joint_step_rad']), parameters, dict(effects))
 
 
 def load_registry(path=None, artifacts=None):
@@ -105,12 +134,73 @@ def catalog(registry, allow_experimental=False):
     return [skill.catalog() for skill in registry.values() if skill.status == 'qualified' or allow_experimental]
 
 
+def _import_keys(value):
+    if isinstance(value, dict):
+        return (set(value) & IMPORT_KEYS) | {key for item in value.values() for key in _import_keys(item)}
+    if isinstance(value, list):
+        return {key for item in value for key in _import_keys(item)}
+    return set()
+
+
+def artifact_files(directory):
+    """Every file the runner may load from a checkpoint directory, by name, after the data-only checks."""
+    directory = Path(directory)
+    if directory.is_symlink() or not directory.is_dir():
+        raise ValueError(f'{directory}: checkpoint must be a real directory')
+    if directory.stat().st_mode & 0o002:
+        raise ValueError(f'{directory}: the checkpoint must not be world-writable')
+    files = []
+    for path in sorted(directory.iterdir()):
+        if path.is_symlink() or not path.is_file() or path.suffix not in ARTIFACT_SUFFIXES:
+            raise ValueError(f'{path.name} is not a safetensors or JSON file')
+        if path.stat().st_mode & 0o002:
+            raise ValueError(f'{path.name}: the checkpoint must not be world-writable')
+        if path.suffix == '.json':
+            if path.stat().st_size > MAX_JSON_BYTES:
+                raise ValueError(f'{path.name} exceeds {MAX_JSON_BYTES} bytes')
+            try:
+                keys = _import_keys(json.loads(path.read_text()))
+            except (RecursionError, UnicodeDecodeError, ValueError) as error:
+                raise ValueError(f'{path.name} is not valid JSON') from error
+            if keys:
+                raise ValueError(f'{path.name} names code to import ({", ".join(sorted(keys))})')
+        if path.name not in PROVENANCE_RECORDS:
+            files.append(path)
+    if 'model.safetensors' not in {path.name for path in files}:
+        raise ValueError('the checkpoint has no model.safetensors')
+    return files
+
+
+def artifact_digest(directory):
+    """SHA-256 of the checkpoint manifest: one `<sha256>  <name>` line per loadable file, sorted by name.
+
+    It covers the weights, the policy configuration, the processor configurations and their
+    normalization tensors, so changing, adding or removing any of them changes the digest.
+    """
+    lines = []
+    for path in artifact_files(directory):
+        with path.open('rb') as stream:
+            lines.append(f'{hashlib.file_digest(stream, "sha256").hexdigest()}  {path.name}\n')
+    return hashlib.sha256(''.join(lines).encode()).hexdigest()
+
+
 def verify_artifact(skill):
-    """The implementation that runs is exactly the one that was evaluated."""
-    weights = skill.checkpoint / 'model.safetensors'
-    with weights.open('rb') as stream:
-        if hashlib.file_digest(stream, 'sha256').hexdigest() != skill.weights_sha256:
-            raise ValueError(f'{skill.skill_id}: weights do not match the registered digest')
+    """The implementation that runs is exactly the one that was evaluated, and loading it runs no code.
+
+    A checkpoint is data: tensors in safetensors and configuration in JSON. Pickle-based weights
+    (.bin, .pt, .pth, .ckpt, .pkl), Python files, links and subdirectories are refused, and no JSON
+    file may name a class to import: LeRobot imports a processor step's `class` path and instantiates
+    it with the step's config, which would run arbitrary installed code. Registered `registry_name`
+    steps resolve only to LeRobot's own processors.
+    """
+    try:
+        digest = artifact_digest(skill.checkpoint)
+    except ValueError as error:
+        raise ValueError(f'{skill.skill_id}: {error}') from error
+    # Checked immediately before loading. The checkpoint is not world-writable, so changing it between
+    # this check and LeRobot's reads needs the robot account or its private group.
+    if digest != skill.artifact_sha256:
+        raise ValueError(f'{skill.skill_id}: the checkpoint does not match the registered artifact digest')
     return skill.checkpoint
 
 

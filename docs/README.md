@@ -9,6 +9,10 @@
   delivery phases for recognition, semantic state, goals, search and verification.
 - [Object observations](object-observations.md): stationary recognition, standard
   ROS detections, persistent evidence services and held-out evaluation.
+- [Skill acquisition](skill-acquisition.md): train, register, evaluate and promote
+  learned skills; cluster training and the independent verifier.
+- [Spatial memory](spatial-memory.md): map, revision, anchor and session
+  identities, capture-time map poses and reprojection after SLAM optimization.
 - [Robot task contract](robot-tasks.md): managed admission, status, cancellation,
   live defaults and Fiber workflow responsibilities.
 - [Launch options](launch-options.md): `bringup.launch.py` arguments, arm
@@ -21,6 +25,9 @@
   cancellation, revisits and persistent mapping quotas.
 - [Active search](active-search.md): per-query coverage, negative evidence,
   information-gain viewpoints, replanning and honest termination reports.
+- [Operations](operations.md): per-stage latency budgets and age gates,
+  health, learned-code isolation, robot data classes, backup and restore, and
+  versioned contract compatibility.
 - [Safety inputs and motor health](safety.md): implementation status, current
   diagnostic behavior, and the physical validation process.
 - [Network security](../README.md#network-security): exposed ports and their
