@@ -30,6 +30,8 @@ robot_explorer:
     # Evidence of absence: an object of this size must span this many pixels,
     # the whole height band must be in view, and the camera must be stationary.
     search_min_object_m: 0.08
+    # DEBT: uncalibrated default until scripts/calibrate-thresholds.py search fits it
+    # from the recorded corpus (docs/threshold-calibration.md, cleanroom#88).
     search_min_object_px: 24.0
     search_max_range_m: 4.0
     search_min_height_m: 0.02

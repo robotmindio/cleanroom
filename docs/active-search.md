@@ -96,5 +96,7 @@ searched. A sighting from before the search start is a prior, never a result.
   anchor-pose uncertainty is not added to the evidence.
 - Optical roll is ignored and travel cost is a straight line; Nav2 validates
   the real route.
+- `search_min_object_px` is an uncalibrated default; it is fitted by
+  [threshold calibration](threshold-calibration.md) once the recorded corpus exists.
 - Physical qualification on the robot is outstanding; tracked in
   [#88](https://github.com/robotmindio/cleanroom/issues/88) and `DEFERRED.md`.

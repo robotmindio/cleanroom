@@ -28,6 +28,9 @@
   cancellation, revisits and persistent mapping quotas.
 - [Active search](active-search.md): per-query coverage, negative evidence,
   information-gain viewpoints, replanning and honest termination reports.
+- [Threshold calibration](threshold-calibration.md): fitting search and
+  input-quality thresholds from labelled reports, exact bounds, the write gate
+  and the robot recording protocol.
 - [Operations](operations.md): per-stage latency budgets and age gates,
   health, learned-code isolation, robot data classes, backup and restore, and
   versioned contract compatibility.
