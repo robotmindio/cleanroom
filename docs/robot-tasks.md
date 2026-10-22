@@ -197,6 +197,7 @@ incomplete: `no_kinematic_solution` means none was found within the bound. Missi
 inputs are `unknown`, never `infeasible`: `joint_state_stale`,
 `observation_unavailable`, `position_unavailable` (no metric grounding),
 `observation_stale`, `transform_unavailable`, `uncertainty_exceeds_tolerance`,
+`search_timeout` (the request's `max_time_sec` ended the search early),
 `service_unavailable`, `service_timeout`, `kinematics_failed`. An answer carries
 `checked_at`, `valid_until` (5 s later), the resolved `targets` and its assumptions;
 it describes that scene only, so a planner checks again right before it moves.
