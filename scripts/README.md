@@ -19,6 +19,7 @@ Start with one of these:
 | Select a proposal profile on held-out evidence | `scripts/calibrate-perception-profile.py MANIFEST --model-name NAME --candidates FILE --output REPORT` |
 | Teach a new category from gallery views | `scripts/learn-perception-concept.py MANIFEST` |
 | Replay a stored capture | `scripts/replay-perception.py RECORD ARTIFACT --model-name NAME --output REPORT` |
+| Fit search or input-quality thresholds from evaluator reports | `scripts/calibrate-thresholds.py search --report CAMERA=REPORT... --output RESULT` |
 | Record a multimodal episode | `scripts/record-episode.py DIR --task TEXT` |
 | Export episodes to LeRobot | `scripts/install-lerobot-export.sh`, then `scripts/export-lerobot.py EPISODE... --root DATASET` |
 | Train a skill policy (local or `--cluster`) | `scripts/train-skill.py DATASET --output RUN` |
