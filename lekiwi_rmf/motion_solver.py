@@ -288,6 +288,8 @@ class MotionSolver(Node):
             response.detail = f'motion schema {SCHEMA} only'
             return response
         try:
+            if len(request.request_json.encode()) > 16384:
+                raise ValueError('request exceeds 16 KiB')
             values = json.loads(request.request_json)
             parsed = parse_request(values)
         except (ValueError, RecursionError) as error:

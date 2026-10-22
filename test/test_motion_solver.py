@@ -258,6 +258,8 @@ def test_malformed_requests_and_other_schemas_are_refused(graph):
     _, _, call = graph
     refused = call({'op': 'solve', 'constraints': []})
     assert (refused.ok, refused.error) == (False, 'invalid_request')
+    oversized = call({'op': 'solve', 'constraints': [DOWN], 'pad': 'x' * 17000})
+    assert (oversized.ok, oversized.error) == (False, 'invalid_request')
     other = call({'op': 'solve', 'constraints': [DOWN]}, schema=2)
     assert (other.ok, other.error) == (False, 'schema_incompatible')
 
