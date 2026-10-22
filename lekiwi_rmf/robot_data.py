@@ -19,12 +19,13 @@ import sqlite3
 import yaml
 
 from lekiwi_rmf.object_cameras import config_directory
+from lekiwi_rmf.task_journal import SCHEMA as JOURNAL_SCHEMA
 
 SCHEMA = 'lekiwi.robot_data_backup/1'
 CLASSES = ('transient_buffer', 'pinned_evidence', 'training_samples', 'model_artifacts')
 KINDS = ('sqlite', 'file')
 # Schema versions the owners open (TaskJournal, ObservationStore); test_robot_data ties these to them.
-SUPPORTED_VERSIONS = {'task_journal': (0, 1, 2, 3, 4), 'observations': (0, 1)}
+SUPPORTED_VERSIONS = {'task_journal': tuple(range(JOURNAL_SCHEMA + 1)), 'observations': (0, 1)}
 
 
 def _relative(text):

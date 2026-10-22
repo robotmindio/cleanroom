@@ -1,0 +1,14 @@
+# Negotiated robot task API (docs/robot-tasks.md). schema is the version the client
+# speaks; an unsupported one is refused with schema_incompatible, never reinterpreted.
+uint32 schema
+# Bounded JSON object; its fields depend on the service.
+string request_json
+---
+# The schema the gateway answered with.
+uint32 schema
+bool ok
+# Empty when ok, otherwise a stable code such as resource_busy, stale_generation,
+# identity_conflict, execution_uncertain or schema_incompatible.
+string error
+string detail
+string response_json

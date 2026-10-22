@@ -62,6 +62,16 @@ def test_experimental_skills_are_offered_only_to_an_acquisition_protocol(tmp_pat
     assert sorted(skill['skill_id'] for skill in catalog(skills, allow_experimental=True)) == ['push', 'reach']
 
 
+def test_catalog_advertises_kind_and_the_resources_each_skill_uses(tmp_path):
+    skills = registry(tmp_path, {'drive': entry(cameras=['front', 'wrist']),
+                                 'grip': entry(action_names=list(ARM_JOINTS), cameras=[])})
+    drive, grip = catalog(skills)
+    assert drive['kind'] == grip['kind'] == 'lerobot_policy'
+    # Base commands in the action space and any camera input are declared, never assumed.
+    assert drive['resources'] == ['arm', 'base', 'camera'] and drive['cameras'] == ['front', 'wrist']
+    assert grip['resources'] == ['arm'] and grip['cameras'] == []
+
+
 def test_parameters_follow_the_declared_contract(tmp_path):
     skill = registry(tmp_path, {'push': entry()})['push']
     assert skill_parameters(skill, '{"force": 0.5}') == {'force': .5}
@@ -339,6 +349,17 @@ def test_camera_frames_decode_to_rgb_without_cv_bridge():
     message.encoding = 'mono8'
     with pytest.raises(RuntimeError, match='encoding'):
         rgb_pixels(message)
+
+
+def test_effects_are_declared_or_conservatively_irreversible(tmp_path):
+    skills = registry(tmp_path, {'push': entry(), 'wave': entry(effects={
+        'reversibility': 'reversible', 'compensation': 'return the arm to its start pose'})})
+    assert skills['push'].effects['reversibility'] == 'irreversible'
+    assert catalog(skills)[1]['effects']['reversibility'] == 'reversible'
+    for effects in ({'reversibility': 'undoable', 'compensation': 'x'}, {'reversibility': 'reversible'},
+                    {'reversibility': 'reversible', 'compensation': ''}):
+        with pytest.raises(ValueError, match='effects'):
+            registry(tmp_path, {'push': entry(effects=effects)})
 
 
 def test_a_chunk_computed_too_late_never_moves_the_arm(ros_runner, monkeypatch):

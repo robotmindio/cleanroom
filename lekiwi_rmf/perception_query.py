@@ -121,6 +121,9 @@ def make_query(labels, part_of=None, concepts=()):
     names = query.phrases + tuple(concept.name for concept in concepts)
     if len(set(names)) != len(names):
         raise ValueError('labels, concept names and concept prompts must not repeat one another')
+    # The provider refuses a prompt of more phrases than this, so a query it cannot run is refused here.
+    if len(query.phrases) > MAX_LABELS:
+        raise ValueError(f'labels and concept prompts together exceed {MAX_LABELS} phrases')
     if len(query.prompt) > MAX_PROMPT_CHARS:
         raise ValueError(f'query prompt exceeds {MAX_PROMPT_CHARS} characters')
     return query
