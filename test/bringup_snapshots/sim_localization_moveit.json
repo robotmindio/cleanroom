@@ -579,6 +579,24 @@
    "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
    "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
   },
+  "name": "motion_solver",
+  "namespace": "",
+  "node": "lekiwi_rmf/motion_solver",
+  "output": "screen",
+  "parameters": {
+   "use_sim_time": true
+  },
+  "remappings": [],
+  "respawn": true,
+  "respawn_delay": 2.0,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {
+   "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
+   "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
+  },
   "name": "moveit_cloud_gate",
   "namespace": "",
   "node": "lekiwi_rmf/moveit_cloud_gate",

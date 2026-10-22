@@ -48,6 +48,7 @@ install(PROGRAMS lekiwi_rmf/object_detector.py DESTINATION lib/${PROJECT_NAME} R
 install(PROGRAMS lekiwi_rmf/object_observation_node.py DESTINATION lib/${PROJECT_NAME} RENAME object_observations)
 install(PROGRAMS lekiwi_rmf/spatial_memory_node.py DESTINATION lib/${PROJECT_NAME} RENAME spatial_memory)
 install(PROGRAMS lekiwi_rmf/skill_runner.py DESTINATION lib/${PROJECT_NAME} RENAME skill_runner)
+install(PROGRAMS lekiwi_rmf/motion_solver.py DESTINATION lib/${PROJECT_NAME} RENAME motion_solver)
 install(DIRECTORY thirdparty/opencv_yolox DESTINATION share/${PROJECT_NAME}/thirdparty)
 # install(PROGRAMS) accepts a single RENAME value, so each renamed script gets its own call.
 install(PROGRAMS lekiwi_rmf/driver.py DESTINATION lib/${PROJECT_NAME} RENAME lekiwi_driver)
@@ -242,6 +243,9 @@ if(BUILD_TESTING)
     add_lekiwi_pytest(test_perception_query)
     add_lekiwi_pytest(test_episode_export)
     add_lekiwi_pytest(test_skills)
+    add_lekiwi_pytest(test_motion_constraints)
+    add_lekiwi_pytest(test_motion_solver)
+    add_lekiwi_pytest(test_reach_task)
     add_lekiwi_pytest(test_latency_budget)
     add_lekiwi_pytest(test_robot_data)
     add_lekiwi_pytest(test_skill_acquisition)
@@ -300,6 +304,8 @@ if(BUILD_TESTING)
       # This is intentionally its own DDS graph: it launches MoveIt and the real
       # driver against the loopback-only fake motor host.
       add_lekiwi_launch_test(test_moveit_driver_e2e_launch 90)
+      # Real move_group (no driver): the motion solver over MoveIt's own model and scene.
+      add_lekiwi_launch_test(test_motion_solver_moveit_launch 90)
     endif()
   endif()
 endif()
