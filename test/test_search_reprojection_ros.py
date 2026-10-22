@@ -25,6 +25,7 @@ from lekiwi_rmf.srv import QueryObservations
 from test_spatial_memory_ros import graph, rtabmap_database, stop, wait
 
 MODEL = 'ab' * 32
+PROFILE_REVISION = 'e' * 64
 
 
 class Store(Node):
@@ -37,7 +38,7 @@ class Store(Node):
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.create_publisher(String, '/robot/perception/profile', latched).publish(String(data=json.dumps({
             'schema': 1, 'cameras': {'front': self.binding['sha256']}, 'recognizers': [
-                {'role': 'primary', 'model_sha256': MODEL, 'model_name': 'fake', 'confidence_threshold': .5,
+                {'role': 'primary', 'model_sha256': MODEL, 'model_name': 'fake', 'profile': {'revision': PROFILE_REVISION},
                  'labels': ['cup'], 'open_vocabulary': True}]})))
         self.info = self.create_publisher(CameraInfo, self.binding['camera_info_topic'], 10)
         self.create_service(QueryObservations, '/robot/observations/query', self.query)
@@ -55,7 +56,7 @@ class Store(Node):
             self.records.append({
                 'schema': 1, 'id': hashlib.sha256(str(sequence).encode()).hexdigest(), 'sequence': sequence,
                 'camera_id': 'front', 'frame_id': self.binding['optical_frame'],
-                'stamp': {'sec': stamp, 'nanosec': 0}, 'model_sha256': MODEL, 'stationary': True,
+                'stamp': {'sec': stamp, 'nanosec': 0}, 'model_sha256': MODEL, 'profile': {'revision': PROFILE_REVISION}, 'stationary': True,
                 'grounding': 'camera_position', 'map_pose': map_pose,
                 'vocabulary': 'open', 'query': {'labels': list(query)},
                 'detections': [{'label': 'cup', 'score': 0.9, 'bbox': [300.0, 200.0, 40.0, 40.0], 'position': {
