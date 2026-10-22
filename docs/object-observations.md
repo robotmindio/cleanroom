@@ -274,6 +274,8 @@ bounds to meet the precision/recall targets for every class and blue-goal
 metric. Correlated frames or objects do not add independent confidence trials.
 Eighty scenes are an initial screen, not proof of 98% operational precision.
 Development-only or insufficient datasets produce a report and exit nonzero.
+[Threshold calibration](threshold-calibration.md) fits the search and
+input-quality thresholds from these reports.
 
 ## Color, geometry and completion scope
 

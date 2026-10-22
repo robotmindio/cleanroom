@@ -19,32 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lekiwi_rmf.object_detector import detect
 from lekiwi_rmf.object_recognition import Recognizer, use_model_runtime
 from lekiwi_rmf.object_observations import observation
-
-
-def overlap(left, right):
-    x, y = max(left[0], right[0]), max(left[1], right[1])
-    width = max(0, min(left[0] + left[2], right[0] + right[2]) - x)
-    height = max(0, min(left[1] + left[3], right[1] + right[3]) - y)
-    area = width * height
-    return area / (left[2] * left[3] + right[2] * right[3] - area)
-
-
-def matches(predictions, expected):
-    """Match each labeled target once; extra same-class candidates count as false positives."""
-    possible = []
-    for p, prediction in enumerate(predictions):
-        for e, target in enumerate(expected):
-            score = overlap(prediction, target)
-            if score >= .5:
-                possible.append((score, p, e))
-    used_predictions, used_expected = set(), set()
-    paired = []
-    for _, p, e in sorted(possible, reverse=True):
-        if p not in used_predictions and e not in used_expected:
-            used_predictions.add(p)
-            used_expected.add(e)
-            paired.append((p, e))
-    return paired
+from lekiwi_rmf.threshold_calibration import matches, overlap
 
 
 def counts(predictions, expected):
