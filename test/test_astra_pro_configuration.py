@@ -46,7 +46,7 @@ def test_real_bringup_maps_both_calibrated_views_with_measured_depth():
         True, 0, "0")
     assert "qos_depth" not in parameters
     assert yaml.safe_load((ROOT / "config/rtabmap.yaml").read_text())["rtabmap"]["ros__parameters"]["qos_image"] == 1
-    views = find_node(records, node="rtabmap_sync/rgbdx_sync")
+    views = find_node(records, node="lekiwi_rmf/slam_views")
     assert views["remappings"] == [["rgbd_image0", "/slam/astra/rgbd_image"],
                                    ["rgbd_image1", "/slam/front/rgbd_image"],
                                    ["rgbd_images", "/slam/rgbd_images"]]

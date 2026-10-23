@@ -720,8 +720,8 @@
   "output": "screen",
   "parameters": {
    "kind": "topic",
-   "topic": "/slam/front_depth/image_raw",
-   "topic_type": "image"
+   "topic": "/slam/cloud",
+   "topic_type": "cloud"
   },
   "remappings": [],
   "respawn": false,

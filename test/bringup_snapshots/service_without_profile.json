@@ -705,15 +705,10 @@
   "env": {},
   "name": "slam_rgbd_views",
   "namespace": "",
-  "node": "rtabmap_sync/rgbdx_sync",
+  "node": "lekiwi_rmf/slam_views",
   "output": "screen",
   "parameters": {
-   "approx_sync": true,
    "approx_sync_max_interval": 0.35,
-   "qos": 1,
-   "rgbd_cameras": 2,
-   "sync_queue_size": 5,
-   "topic_queue_size": 5,
    "use_sim_time": false
   },
   "remappings": [
@@ -776,8 +771,8 @@
   "output": "screen",
   "parameters": {
    "kind": "topic",
-   "topic": "/slam/front_depth/image_raw",
-   "topic_type": "image"
+   "topic": "/slam/cloud",
+   "topic_type": "cloud"
   },
   "remappings": [],
   "respawn": false,

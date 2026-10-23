@@ -118,8 +118,8 @@ def _slam(context):
         package="lekiwi_rmf", executable="readiness_gate", name="wait_for_slam_sensor",
         parameters=[{
             "kind": "topic",
-            "topic": FRONT_DEPTH if camera_on else "/slam/cloud",
-            "topic_type": "image" if camera_on else "cloud",
+            "topic": "/slam/cloud" if lidar_on else FRONT_DEPTH,
+            "topic_type": "cloud" if lidar_on else "image",
         }],
         output="screen",
     )
@@ -164,17 +164,12 @@ def _slam(context):
                             ("rgbd_image", f"/slam/{camera}/rgbd_image")],
                 output="screen",
             ))
-        # The packaged mapper supports RGBDImages arrays, but was built
-        # without direct multi-topic RGB-D synchronization. Use its native
-        # array synchronizer rather than rebuilding RTAB-Map.
+        # The packaged mapper takes an RGBDImages array. rgbdx_sync emits only
+        # when every camera delivers, so a wedged camera stopped SLAM; this
+        # joins whichever cameras are alive.
         actions.append(Node(
-            package="rtabmap_sync", executable="rgbdx_sync", name="slam_rgbd_views",
-            parameters=[{
-                "use_sim_time": topology.sim,
-                "rgbd_cameras": 2, "qos": 1, "approx_sync": True,
-                "approx_sync_max_interval": 0.35,
-                "topic_queue_size": 5, "sync_queue_size": 5,
-            }],
+            package="lekiwi_rmf", executable="slam_views", name="slam_rgbd_views",
+            parameters=[{"use_sim_time": topology.sim, "approx_sync_max_interval": 0.35}],
             remappings=[("rgbd_image0", "/slam/astra/rgbd_image"),
                         ("rgbd_image1", "/slam/front/rgbd_image"),
                         ("rgbd_images", "/slam/rgbd_images")],
