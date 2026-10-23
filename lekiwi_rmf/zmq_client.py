@@ -23,6 +23,24 @@ from lekiwi_rmf.zmq_security import (
 )
 
 
+def connect_with_backoff(client, warn, first_s=2.0, max_s=60.0, sleep=time.sleep):
+    """Connect, retrying a host that does not answer with doubling waits up to ``max_s``.
+
+    Each process starts again from ``first_s``, so a driver that ran healthily and
+    then restarted reconnects quickly, while an offline host is retried at most
+    once per ``max_s`` instead of churning the process.
+    """
+    delay = first_s
+    while True:
+        try:
+            client.connect()
+            return
+        except ConnectionError as error:
+            warn(f"{error}; retrying in {delay:.0f} s")
+        sleep(delay)
+        delay = min(delay * 2, max_s)
+
+
 class LeKiwiZmqClient:
     def __init__(
         self,

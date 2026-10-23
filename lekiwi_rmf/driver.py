@@ -37,7 +37,7 @@ from lekiwi_rmf.motion_guards import (
 )
 from lekiwi_rmf.odometry import BASE_XY_SCALE, BASE_YAW_SCALE, HostPoseTracker
 from lekiwi_rmf.torque_control import TorqueControlClient
-from lekiwi_rmf.zmq_client import LeKiwiZmqClient
+from lekiwi_rmf.zmq_client import LeKiwiZmqClient, connect_with_backoff
 from lekiwi_rmf.zmq_security import CurveClientCredentials
 
 # MoveIt stamps zero (start now). Anything scheduled further ahead than this is
@@ -590,7 +590,7 @@ class LeKiwiDriver(Node):
             remote_ip, command_port, observation_port, STATE_KEYS,
             curve_credentials=curve_credentials,
         )
-        robot.connect()
+        connect_with_backoff(robot, self.get_logger().warning)
         torque = TorqueControlClient(
             remote_ip, torque_control_port, torque_control_timeout_ms,
             client_secret_key_file=curve_client_secret,
@@ -1492,7 +1492,12 @@ def main():
         raise KeyboardInterrupt
 
     signal.signal(signal.SIGTERM, on_sigterm)
-    node = LeKiwiDriver()
+    try:
+        node = LeKiwiDriver()
+    except KeyboardInterrupt:
+        # Stopped while still waiting for the host: nothing is connected yet.
+        rclpy.try_shutdown()
+        return
     # One thread each for update(), the arm/disarm transition group and a running
     # trajectory goal, plus two so permission callbacks can revoke while those block.
     executor = MultiThreadedExecutor(num_threads=5)

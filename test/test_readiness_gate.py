@@ -304,10 +304,10 @@ def test_interrupted_readiness_gate_is_not_a_successful_dependency():
     assert "raise SystemExit(130)" in source
 
 
-def test_real_driver_restart_is_rate_limited():
+def test_real_driver_respawns_promptly_and_backs_off_connects_itself():
     for profile in ("wired", "split"):
         driver = find_node(resolve_bringup(profile=profile), node="lekiwi_rmf/lekiwi_driver")
-        assert (driver["respawn"], driver["respawn_delay"]) == (True, 60.0)
+        assert (driver["respawn"], driver["respawn_delay"]) == (True, 2.0)
 
 
 def test_readiness_gate_exits_nonzero_when_ros_shuts_down_before_ready(monkeypatch):
