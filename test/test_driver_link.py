@@ -1515,3 +1515,25 @@ def test_applied_command_uses_the_host_trajectory_sample_instead_of_the_stale_ho
     command = dict(zip(message.name, message.position))
     assert command["arm_elbow_flex"] == pytest.approx(1.0)
     assert command["arm_shoulder_pan"] == pytest.approx(math.radians(10.0))
+
+
+def test_readback_sent_before_the_drivers_own_torque_change_is_not_an_outside_change(monkeypatch):
+    node = make_node(armed=False)
+    node.torque = types.SimpleNamespace(set_enabled=lambda enabled: None)
+    node.get_logger = lambda: types.SimpleNamespace(error=lambda *_: None, info=lambda *_: None)
+    disarms = []
+    node.set_disarmed = lambda state, **_: disarms.append(state)
+    clock = [100.0]
+    monkeypatch.setattr(driver.time, "monotonic", lambda: clock[0])
+
+    assert node.set_servo_torque(True)
+    node.armed = True
+    # Telemetry the host sent before enabling torque still reports it off.
+    node.robot = types.SimpleNamespace(observation_torque_enabled=False)
+    clock[0] += 0.05
+    assert node.enforce_reported_torque_state() is False
+    assert disarms == []
+    # A disagreement that outlasts the settle time is a real outside change.
+    clock[0] += driver.TORQUE_READBACK_SETTLE_S
+    assert node.enforce_reported_torque_state() is True
+    assert disarms == ["DISARMED"]
