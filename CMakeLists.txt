@@ -161,6 +161,10 @@ if(BUILD_TESTING)
         OR name STREQUAL "test_task_execution"
         OR name STREQUAL "test_search_ros")
       set(timeout_args TIMEOUT 120)
+    elseif(name STREQUAL "test_perception_training")
+      # Where the perception model is installed, one test trains and exports the real
+      # detector on CPU: about two minutes alone, longer beside a parallel CTest run.
+      set(timeout_args TIMEOUT 300)
     endif()
     ament_add_ros_isolated_pytest_test(${name} test/${name}.py ${timeout_args} ENV "${test_launch_environment}")
     isolate_lekiwi_test(${name})
