@@ -13,7 +13,7 @@ from lekiwi_rmf.zmq_security import (
 from lekiwi_rmf.host_protocol import (
     HOST_ODOMETRY_KEY, TELEMETRY_MONOTONIC_NS_KEY, TELEMETRY_SESSION_KEY, observation_payload,
 )
-from lekiwi_rmf.zmq_client import LeKiwiZmqClient
+from lekiwi_rmf.zmq_client import LeKiwiZmqClient, connect_with_backoff
 from lekiwi_rmf.motor_health import healthy_snapshot
 
 
@@ -326,3 +326,27 @@ def test_repository_client_speaks_authenticated_state_protocol(tmp_path):
         observation.close()
         security.close()
         context.term()
+
+
+def test_an_unreachable_host_is_retried_with_doubling_waits_capped_at_one_minute():
+    class Host:
+        attempts = 0
+
+        def connect(self):
+            self.attempts += 1
+            if self.attempts < 8:
+                raise ConnectionError("timeout waiting for LeKiwi host observation")
+
+    host, waits, warnings = Host(), [], []
+    connect_with_backoff(host, warnings.append, sleep=waits.append)
+    assert waits == [2.0, 4.0, 8.0, 16.0, 32.0, 60.0, 60.0]
+    assert host.attempts == 8 and len(warnings) == 7
+
+
+def test_a_connect_error_other_than_an_unreachable_host_is_not_retried():
+    class Host:
+        def connect(self):
+            raise ValueError("bad CURVE key")
+
+    with pytest.raises(ValueError):
+        connect_with_backoff(Host(), lambda _: None, sleep=lambda _: pytest.fail("retried"))

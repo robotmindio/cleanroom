@@ -44,7 +44,7 @@ An aborted or incomplete exploration is `failed`.
 Repeated submission of the same ID and identical parameters returns the
 existing task; it never sends a second goal. Conflicting reuse is rejected.
 Tasks whose resources overlap are serialized: admission is refused with the
-holder while another task holds one of them. Observed native navigation/exploration
+holder while another task holds one of them. Observed native navigation, exploration and MoveGroup (arm)
 goals prevent admission and defer pending dispatch. External ROS clients still own their goals; cancellation
 through this API does not cancel their unrelated actions.
 
@@ -104,7 +104,7 @@ additive schema 1 fields. Admission still holds the capability's `resources`
 | `compensate` | `task_id`, `generation`, `owner`, `plan {intent, steps, note}` | recorded compensation plan |
 
 Resources are `base`, `arm` and `perception_query`. Navigation and exploration
-hold the base; search holds the base and the active perception query; a skill
+hold the base; search holds the base and the active perception query; a skill or reach
 holds the arm and keeps the base still. A task holds them from admission until its
 journal row is terminal, which requires native terminal evidence or the
 reconciliation proof above; a timeout or an empty process never releases them. A
@@ -162,6 +162,58 @@ the original task keeps its own state and outcome, and the plan always reports
 Events accelerate observation; the journal/status service is authoritative
 because a disconnected stream can miss events.
 
+## Geometric feasibility and reach
+
+`motion_solver` (started with MoveIt) serves `/robot/motion/solve`
+(`lekiwi_rmf/srv/TaskApi`, motion schema 1). It never moves anything. MoveIt owns
+kinematics, collision checking and motion planning; the solver proposes joint values
+and lets MoveIt judge them. `/robot/capabilities` advertises it as `motion`
+(`available` while the service answers) beside a `reach` capability that executes a
+solution.
+
+| `op` | Answer |
+| --- | --- |
+| `solve` | `feasible` with `joints` for the arm group, the tool `pose`, and with `plan` (default true) a MoveIt `motion` (planning time, waypoints, duration); `infeasible` (`no_kinematic_solution`, `in_collision`, `no_motion_plan`, `no_verified_solution`); or `unknown` |
+| `verify` | `holds`, `violated` or `uncertain` for the current tool pose from `/joint_states` fresher than 0.5 s; or `unknown` |
+
+A request holds one to four `constraints` on `tool0` in `base_footprint` (MoveIt's
+model frame), plus `max_time_sec` (at most 10):
+
+- `position`: the tool within a `sphere` (`radius_m`) or `box` (`half_extents_m`),
+  at most 0.5 m, around a `target` plus `offset_m`. The target is a TF `point`
+  `{frame, xyz}` or an `observation` `{id, detection}`: a detection with a calibrated
+  metric position, at most 10 s old, carried from its capture time to now through
+  `odom` in TF. Its `uncertainty_m` stays visible: `verify` says `uncertain` within
+  that distance of the boundary, and `solve` searches inside the region shrunk by it.
+- `orientation`: one tool `axis` within `tolerance_rad` of a `direction`; rotation
+  about that axis is free.
+
+`solve` samples the arm's joint space once through MoveIt's `/compute_fk` and refines
+the closest samples with bounded least squares (`scipy`). Every candidate is then
+checked without the search's margin by `/compute_fk`, by `/check_state_validity`
+against the current planning scene and, with `plan`, by `/plan_kinematic_path` from
+the current state. The search is bounded (1500 kinematic evaluations by default) and
+incomplete: `no_kinematic_solution` means none was found within the bound. Missing
+inputs are `unknown`, never `infeasible`: `joint_state_stale`,
+`observation_unavailable`, `position_unavailable` (no metric grounding),
+`observation_stale`, `transform_unavailable`, `uncertainty_exceeds_tolerance`,
+`search_timeout` (the request's `max_time_sec` ended the search early),
+`service_unavailable`, `service_timeout`, `kinematics_failed`. An answer carries
+`checked_at`, `valid_until` (5 s later), the resolved `targets` and its assumptions;
+it describes that scene only, so a planner checks again right before it moves.
+
+`reach` takes `joints` for exactly `arm_shoulder_pan`, `arm_shoulder_lift`,
+`arm_elbow_flex`, `arm_wrist_flex` and `arm_wrist_roll` within the joint limits, and an
+optional `solution_id`. The gateway sends MoveIt's `MoveGroup` action (`/move_action`)
+a joint goal (0.01 rad tolerance) with `plan_only: false`: MoveIt plans again from
+the current state, checks the current scene and executes through the same controller
+and safety path as RViz. It holds the arm and keeps the base still, its effect is
+reversible, and `succeeded` requires MoveIt's `SUCCESS` error code. The result keeps
+MoveIt's code, planning time and final joints, not the trajectories. Success means
+the motion finished, not that a constraint holds; check that with `verify`.
+`allow_reach` is false by default, like `allow_skills`, until arm planning is
+qualified on this body.
+
 ## Fiber and permissions
 
 The Fiber rosbridge connector exposes `rosbridge.capabilities`,
@@ -182,7 +234,7 @@ matching option). Never bind the unauthenticated bridge to a public
 interface. Fiber's integration URL must match the compute host's tailnet IP;
 its encrypted integration configuration is maintained through Fiber's API.
 
-This contract exposes navigation, exploration and observation by base motion only. It does not qualify household
+This contract exposes navigation, exploration, observation by base motion and, when enabled, arm reach to a solved target. It does not qualify household
 manipulation, docking, unrestricted unattended operation or learned skills.
 
 

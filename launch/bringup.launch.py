@@ -269,11 +269,10 @@ def _stack(context):
                 "publish_odom_tf": False,
             }],
             remappings=[("safety/state", "safety/driver_state")],
-            # A ZMQ connect() timeout can be transient, but an offline
-            # robot host must not churn a driver process every few seconds.
-            # ponytail: fixed 60s backoff; use exponential backoff if host outages become frequent (#4).
+            # The driver retries an unreachable host itself with doubling waits up
+            # to 60 s, so a restart after a healthy run reconnects quickly.
             respawn=True,
-            respawn_delay=60.0,
+            respawn_delay=2.0,
             output="screen",
         ))
         actions.append(Node(
@@ -307,6 +306,16 @@ def _stack(context):
                 name="moveit_cloud_gate",
                 parameters=[{"use_sim_time": sim}],
                 output="screen",
+            ),
+            # Geometric feasibility over move_group's model and scene; it never moves the arm.
+            Node(
+                package="lekiwi_rmf",
+                executable="motion_solver",
+                name="motion_solver",
+                parameters=[{"use_sim_time": sim}],
+                output="screen",
+                respawn=True,
+                respawn_delay=2.0,
             ),
         ])
     actions.extend([

@@ -249,9 +249,10 @@ hosts/credentials/GPU. Tracks [#9](https://github.com/robotmindio/cleanroom/issu
 and evidence that it meets them.
 
 **Work:** measure host outages, feedback gaps, wrist reconnects and compute
-pressure at their source boundaries. Replace the fixed 60-second driver startup
-respawn delay with bounded retry/reset behavior after declaring the recovery
-target; test outage recovery without changing arming semantics. Exercise repeated
+pressure at their source boundaries. The driver retries an unreachable host with
+doubling waits from 2 to 60 seconds and starts again from 2 seconds after a
+restart; declare the recovery target and test outage recovery on the robot
+without changing arming semantics. Exercise repeated
 jobs, map growth, log storage and thermal behavior on the deployed stack.
 
 **Done:** the agreed pilot endurance run completes without unexplained task
