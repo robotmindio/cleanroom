@@ -827,7 +827,7 @@
    ]
   ],
   "respawn": true,
-  "respawn_delay": 60.0,
+  "respawn_delay": 2.0,
   "ros_arguments": []
  },
  {
