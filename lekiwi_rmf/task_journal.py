@@ -23,7 +23,7 @@ RESOURCES = ('base', 'arm', 'perception_query')
 # A learned skill keeps the base still while it moves the arm; search changes
 # what perception reports, so it reserves the active open-vocabulary query.
 CAPABILITY_RESOURCES = {'navigate': ('base',), 'explore': ('base',),
-                        'search': ('base', 'perception_query'), 'skill': ('arm', 'base')}
+                        'search': ('base', 'perception_query'), 'skill': ('arm', 'base'), 'reach': ('arm', 'base')}
 EVENT_RETENTION = 10000
 
 
