@@ -43,6 +43,10 @@ OPEN_BACKENDS = ('grounding_dino', 'remote_grounding_dino')
 # Backends whose provider matches learned concepts by exemplar embedding.
 CONCEPT_BACKENDS = ('remote_grounding_dino',)
 MAX_RESPONSE_BYTES = 1024 * 1024
+# Registry governance, not operating point: promotion changes these without changing what the model computes,
+# so they stay out of the identity every observation and evaluation report records.
+GOVERNANCE_KEYS = ('status', 'replaces', 'training')
+STATUSES = ('experimental', 'qualified')
 
 
 class ProviderUnavailable(RuntimeError):
@@ -192,7 +196,7 @@ def recognition_identity(name):
         runtime.update({package: importlib.metadata.version(package) for package in ['torch', 'torchvision', 'transformers', 'Pillow', 'safetensors', 'tokenizers']})
     # An open recognizer's labels are the per-frame query, recorded beside this identity in each observation;
     # the startup default is not an operating point of the model.
-    artifacts = {key: value for key, value in spec.items() if key != 'default_query'}
+    artifacts = {key: value for key, value in spec.items() if key != 'default_query' and key not in GOVERNANCE_KEYS}
     # Every recognizer consumes the frame's stored evidence artifact (a deterministic JPEG), so a stored
     # observation replays byte-exact; see object_observations.capture_artifact.
     document = {'model': name, 'artifacts': artifacts, 'postprocessing': 'profile', 'preprocessing_revision': 2,
@@ -218,10 +222,17 @@ def reject_parameter_changes(node, names):
 
 
 class Recognizer:
-    def __init__(self, name='yolox', directory=None):
+    def __init__(self, name='yolox', directory=None, allow_experimental=False):
         self.name = name
         self.spec = model_spec(name)
         self.backend = self.spec['backend']
+        # A trained recognizer serves only after promotion (scripts/register-recognizer.py); before that,
+        # only the offline evaluator and the trainer's load check may run it.
+        self.status = self.spec.get('status', 'qualified')
+        if self.status not in STATUSES:
+            raise ValueError(f'{name}: status must be one of {STATUSES}')
+        if self.status == 'experimental' and not allow_experimental:
+            raise ValueError(f'{name} is an experimental recognizer; promote it with a passing evaluation first')
         self.sha256, self.identity = recognition_identity(name)
         self.default_profile = default_profile(self.backend)
         # Open recognizers report only the phrases of the query they ran; closed ones their native catalogue.

@@ -1,0 +1,6 @@
+# Qualification suites (lekiwi_rmf/qualification.py): what qualified each skill and recognizer.
+# Written by scripts/register-skill.py --promote and scripts/register-recognizer.py --promote;
+# a new version is promoted only after passing every suite of the version it replaces.
+# Baseline reports live under ~/.ros/lekiwi/qualification-suites/<report_sha256>.json.
+recognizers: {}
+skills: {}

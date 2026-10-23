@@ -53,6 +53,7 @@ def test_simulated_arm_stale_feedback_abort_still_publishes_cached_hold():
     )
     published = []
     node._position_publisher = types.SimpleNamespace(publish=published.append)
+    node._applied_lock, node._applied = threading.Lock(), {"joint": 0.0}
 
     assert node._fresh_positions(("joint",)) is None
     node._hold(("joint",))
@@ -60,6 +61,8 @@ def test_simulated_arm_stale_feedback_abort_still_publishes_cached_hold():
     assert len(published) == 1
     assert published[0].joint_names == ["joint"]
     assert list(published[0].points[0].positions) == [0.25]
+    # The hold is the applied command the episode recorder exports.
+    assert node._applied == {"joint": 0.25}
 
 
 def test_simulated_arm_streams_positions_through_native_watchdog():

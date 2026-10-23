@@ -503,7 +503,7 @@ def test_evaluation_reports_failed_scene_and_keeps_small_corpus_unqualified(tmp_
         'image': 'one.png', 'cups': [{'bbox': [10, 10, 20, 20], 'blue': True}]}]))
     model = tmp_path / 'fixture.onnx'
     model.write_bytes(b'fixture')
-    monkeypatch.setattr(evaluator, 'Recognizer', lambda *args: SimpleNamespace(
+    monkeypatch.setattr(evaluator, 'Recognizer', lambda *args, **kwargs: SimpleNamespace(
         predict=lambda *_: [], sha256=MODEL_SHA256, identity={}, default_query=None, default_profile=PROFILE))
     result = evaluator.evaluate(manifest, model)
     assert not result['passed'] and not result['gates']['heldout_scenes']

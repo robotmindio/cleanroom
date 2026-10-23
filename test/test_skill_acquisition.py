@@ -16,8 +16,10 @@ from rclpy.context import Context
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 
+from lekiwi_rmf import training
 from lekiwi_rmf.action import RunSkill
 from lekiwi_rmf.arm_trajectory import ARM_JOINTS
+from lekiwi_rmf.qualification import canonical_sha256, load_suites, stored_report
 from lekiwi_rmf.skills import artifact_digest, load_registry
 from lekiwi_rmf.srv import PinObservationEvidence, QueryObservations
 from ros_test_utils import release_graph
@@ -93,12 +95,18 @@ def test_local_training_freezes_the_dataset_and_pins_the_weights(tmp_path, fake_
     assert manifest['compute']['backend'] == 'local' and manifest['compute']['declared']['time_limit_min'] == 120.0
     assert manifest['compute']['within_declared'] and 'source_revision' in manifest['provenance']
     assert (output / 'checkpoint/model.safetensors').is_file() and not (output / 'lerobot').exists()
+    # The trainer contract record: declaration, validated configuration, dataset digest and why it ended.
+    run = json.loads((output / 'run.json').read_text())
+    assert run['trainer']['name'] == 'lerobot_policy' and run['config']['steps'] == 5
+    assert run['termination'] == 'completed' and run['dataset_sha256'] == training.files_digest(files)
 
 
 def test_training_failures_are_reported_and_never_produce_a_manifest(tmp_path, fake_python, monkeypatch, capsys):
     root = dataset(tmp_path / 'export')
     assert run_train(monkeypatch, root, '--output', tmp_path / 'run', '--steps', 13, '--python', fake_python) == 1
     assert 'training failed (3)' in capsys.readouterr().err and not (tmp_path / 'run/manifest.json').exists()
+    run = json.loads((tmp_path / 'run/run.json').read_text())
+    assert run['termination'] == 'failed' and 'training failed (3)' in run['detail']
     assert run_train(monkeypatch, tmp_path / 'missing', '--output', tmp_path / 'other') == 1
     assert 'not a LeRobot dataset' in capsys.readouterr().err
     (root / 'link').symlink_to(root / 'export-report.json')
@@ -150,19 +158,19 @@ def pending(message):
 
 
 def test_a_job_waiting_for_a_gpu_slot_reports_why_and_gives_up_in_bounded_time(monkeypatch, capsys):
-    monkeypatch.setattr(train.time, 'sleep', lambda _seconds: None)
+    monkeypatch.setattr(training.time, 'sleep', lambda _seconds: None)
     clock = iter(range(0, 10**6, 30))
-    monkeypatch.setattr(train.time, 'monotonic', lambda: next(clock))
+    monkeypatch.setattr(training.time, 'monotonic', lambda: next(clock))
     args = SimpleNamespace(cluster_device='cuda', node='robotmind-web-001', slot_wait_min=5, time_limit_min=10)
     cluster = FakeCluster(args, [pending('0/2 nodes are available: 1 Insufficient nvidia.com/gpu')])
-    with pytest.raises(train.TrainingError, match='no slot on robotmind-web-001 within 5 min'):
+    with pytest.raises(training.TrainingError, match='no slot on robotmind-web-001 within 5 min'):
         cluster.wait(10**6)
     assert capsys.readouterr().err.count('waiting for a GPU slot on robotmind-web-001: 0/2 nodes') == 1
     # Once scheduled and finished, the published status is returned.
     running = {'metadata': {'name': 'p'}, 'status': {'phase': 'Running'}}
     assert FakeCluster(args, [running], status='0\n').wait(10**6) == 0
     failed = {'metadata': {'name': 'p'}, 'status': {'phase': 'Failed'}}
-    with pytest.raises(train.TrainingError, match='ended without a result'):
+    with pytest.raises(training.TrainingError, match='ended without a result'):
         FakeCluster(args, [failed]).wait(10**6)
 
 
@@ -189,8 +197,12 @@ def registry_file(tmp_path):
 
 
 def run_register(monkeypatch, registry_file, artifacts, *arguments):
-    monkeypatch.setattr('sys.argv', ['register-skill.py', *map(str, arguments), '--registry', str(registry_file),
-                                     '--artifacts', str(artifacts)])
+    suites = registry_file.with_name('qualification_suites.yaml')
+    if not suites.exists():
+        suites.write_text('# suites\nrecognizers: {}\nskills: {}\n')
+    monkeypatch.setattr('sys.argv', ['register-skill.py', '--registry', str(registry_file), '--artifacts', str(artifacts),
+                                     '--suites', str(suites), '--store', str(registry_file.parent / 'store'),
+                                     *map(str, arguments)])
     return register.main()
 
 
@@ -240,9 +252,19 @@ def test_host_unit_actions_are_refused_before_anything_is_installed(tmp_path, re
     assert not artifacts.exists() and registry_file.read_text() == HEADER + 'skills: {}\n'
 
 
-def report(skill, **changes):
-    value = {'kind': 'lekiwi_skill_evaluation', 'passed': True, 'skill_id': 'learned', 'version': skill.version,
-             'artifact_sha256': skill.artifact_sha256, 'success_rate': 1.0, 'wilson_interval': [.84, 1.0]}
+def protocol(trials=20, label='cup', **changes):
+    values = {'trials': trials, 'parameters': {}, 'confidence': .95, 'required_lower_bound': .1, 'min_trials': 1,
+              'reset_command': None, 'observe_sec': .4, 'settle_sec': .1, 'timeout_sec': 5.0, **changes}
+    return evaluate.protocol_of(SimpleNamespace(**values),
+                                evaluate.success_predicate(json.dumps({'label': label, 'min_observations': 2})))
+
+
+def report(skill, protocol_document=None, **changes):
+    protocol_document = protocol_document or protocol()
+    value = {'kind': 'lekiwi_skill_evaluation', 'schema': 2, 'passed': True, 'skill_id': 'learned',
+             'version': skill.version, 'artifact_sha256': skill.artifact_sha256, 'success_rate': 1.0,
+             'wilson_interval': [.84, 1.0], 'domain': 'physical', 'promotable': True, 'protocol': protocol_document,
+             'protocol_sha256': canonical_sha256(protocol_document), 'suite': None}
     value.update(changes)
     return value
 
@@ -253,7 +275,8 @@ def test_promotion_requires_a_passing_report_for_exactly_these_weights(tmp_path,
                         '--version', 1, '--description', 'x') == 0
     skill = load_registry(registry_file, artifacts)['learned']
     path = tmp_path / 'report.json'
-    for bad in ({'passed': False}, {'artifact_sha256': 'b' * 64}, {'version': 2}, {'skill_id': 'other'}, {'kind': 'x'}):
+    for bad in ({'passed': False}, {'artifact_sha256': 'b' * 64}, {'version': 2}, {'skill_id': 'other'}, {'kind': 'x'},
+                {'schema': 1}, {'domain': 'sim', 'promotable': False}, {'promotable': False}):
         path.write_text(json.dumps(report(skill, **bad)))
         assert run_register(monkeypatch, registry_file, artifacts, 'learned', '--promote', path) == 1
         assert load_registry(registry_file, artifacts)['learned'].status == 'experimental'
@@ -270,6 +293,40 @@ def test_promotion_requires_a_passing_report_for_exactly_these_weights(tmp_path,
     assert run_register(monkeypatch, registry_file, artifacts, 'learned', '--promote', path) == 0
     assert load_registry(registry_file, artifacts)['learned'].status == 'qualified'
     assert (skill.checkpoint / 'evaluation-report.json').is_file() and registry_file.read_text().startswith(HEADER)
+    # Keeping the report beside the checkpoint leaves the artifact digest the runner verifies unchanged.
+    assert artifact_digest(skill.checkpoint) == skill.artifact_sha256
+    # The first qualification stores its protocol as the skill's suite, with the report as baseline.
+    suites = load_suites(registry_file.with_name('qualification_suites.yaml'))['skills']['learned']
+    assert [suite['protocol_sha256'] for suite in suites] == [canonical_sha256(protocol())]
+    assert stored_report(suites[0]['report_sha256'], tmp_path / 'store')['version'] == 1
+
+
+def test_a_new_version_must_pass_every_suite_of_the_version_it_replaces(tmp_path, registry_file, monkeypatch):
+    artifacts = tmp_path / 'skills'
+    assert run_register(monkeypatch, registry_file, artifacts, 'learned', '--training', training_dir(tmp_path),
+                        '--version', 1, '--description', 'x') == 0
+    first = tmp_path / 'first.json'
+    first.write_text(json.dumps(report(load_registry(registry_file, artifacts)['learned'])))
+    assert run_register(monkeypatch, registry_file, artifacts, 'learned', '--promote', first) == 0
+    assert run_register(monkeypatch, registry_file, artifacts, 'learned', '--training',
+                        training_dir(tmp_path, b'better', name='better'), '--version', 2, '--description', 'x',
+                        '--replace') == 0
+    skill = load_registry(registry_file, artifacts)['learned']
+    assert skill.version == 2 and skill.status == 'experimental'
+    # Passing only a new protocol does not show the old qualification still holds.
+    other = tmp_path / 'other.json'
+    other.write_text(json.dumps(report(skill, protocol(label='mug'))))
+    assert run_register(monkeypatch, registry_file, artifacts, 'learned', '--promote', other) == 1
+    assert load_registry(registry_file, artifacts)['learned'].status == 'experimental'
+    rerun = tmp_path / 'rerun.json'
+    rerun.write_text(json.dumps(report(skill, suite='qualification-x')))
+    assert run_register(monkeypatch, registry_file, artifacts, 'learned', '--promote', rerun, other) == 0
+    suites = load_suites(registry_file.with_name('qualification_suites.yaml'))['skills']['learned']
+    assert len(suites) == 2 and {suite['qualified_version'] for suite in suites} == {2}
+    # evaluate-skill --suite reproduces exactly the stored protocol.
+    args = SimpleNamespace(skill_id='learned', suite=suites[0]['name'], sim_scene=None, success=None)
+    evaluate.apply_suite(args, None, {'skills': {'learned': suites}})
+    assert evaluate.protocol_of(args, evaluate.success_predicate(args.success)) == suites[0]['protocol']
 
 
 def test_wilson_interval_and_predicate_contract():
@@ -364,19 +421,12 @@ def world():
                       nodes=(fake, client), context=context)
 
 
-def arguments(trials, **changes):
-    value = {'trials': trials, 'parameters': {}, 'confidence': .95, 'required_lower_bound': .1, 'min_trials': 1,
-             'reset_command': None}
-    value.update(changes)
-    return SimpleNamespace(**value)
-
-
 def test_evaluation_judges_the_scene_not_the_runner_outcome(world):
     fake, evaluator = world
 
     def reset(_index):
         fake.cup_present = False
-    result = evaluate.evaluate(evaluator, arguments(2), 'skill-eval-test', reset, log=lambda _line: None)
+    result = evaluate.evaluate(evaluator, protocol(2), 'skill-eval-test', reset, log=lambda _line: None)
     assert [trial['verdict'] for trial in result['trials']] == ['success', 'success'] and result['passed']
     assert result['wilson_interval'] == pytest.approx(evaluate.wilson(2, 2))
     trial = result['trials'][0]
@@ -384,7 +434,7 @@ def test_evaluation_judges_the_scene_not_the_runner_outcome(world):
     assert set(fake.pins['skill-eval-test-1']) == {item['observation_id'] for item in trial['before'][-10:] + trial['after'][-10:]}
     # The runner still reports `finished`, but the scene did not change: the verifier says failure.
     fake.cup_present, fake.runner_changes_world = False, False
-    result = evaluate.evaluate(evaluator, arguments(1, required_lower_bound=.5), 'skill-eval-test2', log=lambda _line: None)
+    result = evaluate.evaluate(evaluator, protocol(1, required_lower_bound=.5), 'skill-eval-test2', log=lambda _line: None)
     assert result['trials'][0]['runner']['outcome'] == 'finished'
     assert result['trials'][0]['verdict'] == 'failure' and not result['passed']
 
@@ -392,11 +442,11 @@ def test_evaluation_judges_the_scene_not_the_runner_outcome(world):
 def test_trials_that_cannot_be_judged_count_against_the_skill(world):
     fake, evaluator = world
     fake.cup_present = True  # goal already satisfied before the run
-    result = evaluate.evaluate(evaluator, arguments(1), 'skill-eval-pre', log=lambda _line: None)
+    result = evaluate.evaluate(evaluator, protocol(1), 'skill-eval-pre', log=lambda _line: None)
     assert result['trials'][0]['verdict'] == 'invalid' and 'already held' in result['trials'][0]['reason']
     assert result['successes'] == 0 and result['invalid'] == 1 and not result['passed']
     fake.cup_present, fake.weights = False, 'b' * 64
-    result = evaluate.evaluate(evaluator, arguments(1), 'skill-eval-weights', log=lambda _line: None)
+    result = evaluate.evaluate(evaluator, protocol(1), 'skill-eval-weights', log=lambda _line: None)
     assert 'different checkpoint' in result['trials'][0]['reason']
 
 

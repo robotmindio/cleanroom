@@ -49,8 +49,8 @@ def permission_is_fresh(
 
 
 class SimArmController(Node):
-    def __init__(self) -> None:
-        super().__init__("sim_arm_controller")
+    def __init__(self, **kwargs) -> None:
+        super().__init__("sim_arm_controller", **kwargs)
         self.declare_parameter("state_timeout", 0.25)
         # No default: bringup passes the supervisor's tracked lease.
         self.declare_parameter("permission_timeout", Parameter.Type.DOUBLE)
@@ -73,6 +73,13 @@ class SimArmController(Node):
         self._position_publisher = self.create_publisher(
             JointTrajectory, "/sim/arm/joint_positions", 10
         )
+        # The applied command in ROS units, the learning action a recorded episode exports
+        # (scripts/export-lerobot.py), as the hardware driver publishes it. Gazebo's joint
+        # position controllers hold their last setpoint and start at initial_position 0.
+        self._applied = dict.fromkeys(ARM_JOINTS, 0.0)
+        self._applied_lock = threading.Lock()
+        self._applied_publisher = self.create_publisher(JointState, "/hardware/applied_command", 10)
+        self.create_timer(0.05, self._publish_applied)
         self.create_subscription(JointState, "/joint_states", self._joint_state, 20)
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.create_subscription(
@@ -167,8 +174,17 @@ class SimArmController(Node):
             positions = {name: self._positions[name] for name in names}
         self._publish_positions(positions)
 
+    def _publish_applied(self) -> None:
+        with self._applied_lock:
+            applied = dict(self._applied)
+        message = JointState(name=list(ARM_JOINTS), position=[applied[name] for name in ARM_JOINTS])
+        message.header.stamp = self.get_clock().now().to_msg()
+        self._applied_publisher.publish(message)
+
     def _publish_positions(self, positions: dict[str, float]) -> None:
         names = list(positions)
+        with self._applied_lock:
+            self._applied.update(positions)
         point = JointTrajectoryPoint(positions=[positions[name] for name in names])
         self._position_publisher.publish(
             JointTrajectory(joint_names=names, points=[point])
