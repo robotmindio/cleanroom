@@ -43,6 +43,9 @@ from lekiwi_rmf.zmq_security import CurveClientCredentials
 # MoveIt stamps zero (start now). Anything scheduled further ahead than this is
 # a clock mismatch or a mistake, not a plan to wait.
 MAX_TRAJECTORY_START_DELAY_NS = 2_000_000_000
+# Telemetry the host sent before a torque change can arrive after it; host readback
+# that disagrees within this long of the driver's own change is not an outside change.
+TORQUE_READBACK_SETTLE_S = 0.5
 
 
 @dataclasses.dataclass(frozen=True)
@@ -670,6 +673,7 @@ class LeKiwiDriver(Node):
         self.applied_action_pub = None
         self.applied_command_pub = None
         self.torque_lock = threading.Lock()
+        self._torque_changed_at = float("-inf")
         # Serializes physical actuator transitions and command submission. Local
         # state uses a separate lock so callbacks remain responsive while ZeroMQ
         # or the torque service is delayed.
@@ -961,7 +965,10 @@ class LeKiwiDriver(Node):
         can_log = rclpy.ok(context=self.context)
         try:
             with self.torque_lock:
-                self.torque.set_enabled(enabled)
+                try:
+                    self.torque.set_enabled(enabled)
+                finally:
+                    self._torque_changed_at = time.monotonic()
         except Exception as error:
             if can_log:
                 self.get_logger().error(
@@ -1179,6 +1186,8 @@ class LeKiwiDriver(Node):
         if self.action_lock.locked():
             # An arm or disarm transaction is changing torque right now and
             # settles the logical state itself once the host confirms.
+            return False
+        if time.monotonic() - self._torque_changed_at < TORQUE_READBACK_SETTLE_S:
             return False
         with self.state_lock:
             logical = self.armed
