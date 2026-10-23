@@ -159,7 +159,8 @@ python3 -c 'import zmq' || die "python3-zmq was not installed for the system Pyt
 if [[ ! -e /etc/ros/rosdep/sources.list.d/20-default.list ]]; then
   "${SUDO[@]}" rosdep init
 fi
-# ponytail: rosdep update has no retry flag and its index fetch times out on slow links (#13)
+# rosdep update has no retry option and fetches its index with a fixed 15 s timeout,
+# so a slow link needs a few attempts.
 for attempt in 1 2 3; do
   rosdep update && break
   [[ $attempt -lt 3 ]] || die "rosdep update failed after 3 attempts"
@@ -206,13 +207,13 @@ install_zenoh_bridge "$HOME/.local/bin"
 
 log "Creating the ROS-compatible Python environment"
 python3 -m venv --system-site-packages "$WORKSPACE/.venv"
-# ponytail: ROS setup.bash and venv activate both read unset vars; -u must be off for them (#14)
+# DEBT(#14): ROS's setup files read unset variables, so -u is off while sourcing them.
 set +u
 # shellcheck disable=SC1090,SC1091
 source "/opt/ros/$ROS_DISTRO/setup.bash"
+set -u
 # shellcheck disable=SC1091
 source "$WORKSPACE/.venv/bin/activate"
-set -u
 python -m pip install --upgrade pip
 # ROS's compiled extensions (rmf_adapter, cv_bridge) are built against the system numpy,
 # so this venv must match it or rmf_adapter segfaults mid-run: Jazzy/Noble ships numpy
@@ -228,14 +229,12 @@ python -m pip install \
 
 if [[ $install_mode == full ]]; then
   log "Creating the LeRobot Python environment"
-  # ponytail: LeRobot requires numpy>=2, which cannot coexist with ROS's numpy 1.26 in one
-  # interpreter. Separate venv; only the hardware driver runs in it (see bringup.launch.py) (#15).
+  # LeRobot requires numpy>=2, while ROS Jazzy's compiled extensions are built against
+  # Noble's numpy 1.26, so the motor host runs in its own interpreter.
   python3 -m venv --system-site-packages "$WORKSPACE/.venv-lerobot"
   (
-    set +u
     # shellcheck disable=SC1091
     source "$WORKSPACE/.venv-lerobot/bin/activate"
-    set -u
     python -m pip install --upgrade pip
     python -m pip install "lerobot[lekiwi,hardware]==${LEROBOT_VERSION}"
   )
