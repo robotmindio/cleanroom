@@ -1,0 +1,20 @@
+# Switch one recognizer's proposal profile. Exactly one source: a tracked profile name from
+# config/perception_profiles.yaml, an exact earlier revision of this detector (revert), or candidate
+# parameters with the calibration study that selected them (scripts/calibrate-perception-profile.py).
+# primary or fallback
+string role
+string profile_name
+string revert_to_revision
+# JSON object of the complete candidate parameters, with evidence_id naming its selected study.
+string parameters_json
+string evidence_id
+# Required optimistic concurrency: the change applies only while this revision is in force.
+string expected_revision
+---
+bool success
+string detail
+# The profile in force after this call (unchanged on failure), read back after the swap,
+# and the one it replaced.
+string revision
+string profile_json
+string previous_revision

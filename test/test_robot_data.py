@@ -14,7 +14,7 @@ from lekiwi_rmf.object_observations import ObservationStore, observation
 from lekiwi_rmf.robot_data import CLASSES, SUPPORTED_VERSIONS, audit, backup, load_policy, read_backup, restore, store_paths, verify
 from lekiwi_rmf.spatial_anchors import SpatialStore
 from lekiwi_rmf.task_journal import TaskJournal
-from test_object_observations import MODEL_SHA256, capture
+from test_object_observations import MODEL_SHA256, PROFILE, capture
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'scripts/robot-data.py'
 
@@ -28,7 +28,7 @@ def populated(home, domain=0):
     store = ObservationStore(paths['observations'])
     documents = []
     for stamp in (1, 2):
-        document, jpeg = observation(*capture(stamp=stamp), MODEL_SHA256, 'front')
+        document, jpeg = observation(*capture(stamp=stamp), MODEL_SHA256, 'front', profile=PROFILE)
         store.put(document, jpeg)
         documents.append(document)
     store.close()

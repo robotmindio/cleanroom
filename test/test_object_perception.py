@@ -18,7 +18,8 @@ from vision_msgs.msg import Detection2DArray
 from lekiwi_rmf.arm_trajectory import ARM_JOINTS
 from lekiwi_rmf.object_cameras import camera_bindings
 from lekiwi_rmf.observation_motion import ObservationMotion
-from test_object_observations import capture
+from lekiwi_rmf.perception_profiles import default_profile
+from test_object_observations import capture, fake_recognizer
 
 
 @pytest.mark.parametrize('names', [[], ['unknown'], ['front', 'front'], [['front']], ['front', 'wrist', 'astra_color', 'extra']])
@@ -80,7 +81,7 @@ def test_receipt_keeps_latest_frame_while_inference_is_busy_and_expires_old_resu
 
     entered, release = threading.Event(), threading.Event()
     active, maximum, calls = 0, 0, 0
-    def predict(image):
+    def predict(image, *_):
         nonlocal active, maximum, calls
         active += 1
         maximum = max(maximum, active)
@@ -90,7 +91,7 @@ def test_receipt_keeps_latest_frame_while_inference_is_busy_and_expires_old_resu
             release.wait(5)
         active -= 1
         return [[10, 10, 20, 20, .9, 'cup']]
-    monkeypatch.setattr(object_detector, 'Recognizer', lambda *args: SimpleNamespace(predict=predict, sha256='a' * 64, name='yolox', labels=['cup'], open_vocabulary=False, default_query=None))
+    monkeypatch.setattr(object_detector, 'Recognizer', lambda *args: fake_recognizer(predict))
     context = Context()
     rclpy.init(context=context)
     node = object_detector.ObjectDetector(context=context, parameter_overrides=[
@@ -198,14 +199,16 @@ def test_diagnostics_reads_clock_before_frame_lock_to_avoid_jump_deadlock():
 def test_operating_point_parameters_reject_runtime_changes_instead_of_silently_ignoring_them(monkeypatch):
     from lekiwi_rmf import object_detector
 
-    monkeypatch.setattr(object_detector, 'Recognizer', lambda *args: SimpleNamespace(predict=list, sha256='a' * 64, name='yolox', labels=['cup'], open_vocabulary=False, default_query=None))
+    monkeypatch.setattr(object_detector, 'Recognizer', lambda *args: fake_recognizer(lambda *_: []))
     context = Context()
     rclpy.init(context=context)
     node = object_detector.ObjectDetector(context=context)
     try:
-        result, = node.set_parameters([Parameter('confidence_threshold', value=.3)])
-        assert not result.successful and 'confidence_threshold' in result.reason
-        assert node.get_parameter('confidence_threshold').value == .5
+        result, = node.set_parameters([Parameter('max_rate_hz', value=5.)])
+        assert not result.successful and 'max_rate_hz' in result.reason
+        assert node.get_parameter('max_rate_hz').value == 2.
+        # Thresholds are a profile, applied through the owned service, never a parameter.
+        assert not node.has_parameter('confidence_threshold')
         assert node.set_parameters([Parameter('use_sim_time', value=False)])[0].successful
     finally:
         node.destroy_node()
@@ -218,8 +221,7 @@ def test_operating_point_profile_is_latched_for_late_consumers(monkeypatch):
     from std_msgs.msg import String
     from lekiwi_rmf import object_detector
 
-    monkeypatch.setattr(object_detector, 'Recognizer', lambda *args: SimpleNamespace(
-        predict=list, sha256='a' * 64, name='yolox', labels=['person', 'cup'], open_vocabulary=False, default_query=None))
+    monkeypatch.setattr(object_detector, 'Recognizer', lambda *args: fake_recognizer(lambda *_: [], labels=['person', 'cup']))
     context = Context()
     rclpy.init(context=context)
     node = object_detector.ObjectDetector(context=context)
@@ -235,7 +237,8 @@ def test_operating_point_profile_is_latched_for_late_consumers(monkeypatch):
         wait(lambda: received)
         assert received[-1] == {'schema': 1, 'cameras': {'front': camera_bindings(['front'])['front']['sha256']},
                                 'recognizers': [{'role': 'primary', 'model_sha256': 'a' * 64, 'model_name': 'yolox',
-                                                 'confidence_threshold': .5, 'labels': ['person', 'cup'],
+                                                 'profile': default_profile('yolox').document(),
+                                                 'concepts_supported': False, 'labels': ['person', 'cup'],
                                                  'open_vocabulary': False, 'query': None}]}
     finally:
         executor.shutdown(timeout_sec=5)

@@ -1,0 +1,18 @@
+# Tracked proposal profiles (lekiwi_rmf/perception_profiles.py), one set per recognizer backend.
+# The detector starts every recognizer on `default`; /robot/perception/apply_profile switches to another
+# tracked profile, to a candidate selected by a recorded calibration study, or back to an exact earlier
+# revision. Each frame records its profile revision beside its model_sha256 and query revision.
+schema: 1
+default: standard
+profiles:
+  yolox:
+    standard: {score_threshold: 0.5, nms_iou: 0.5, max_detections: 20}
+  rtdetr_v2:
+    standard: {score_threshold: 0.5, nms_iou: 0.5, max_detections: 20}
+  grounding_dino:
+    standard: {box_threshold: 0.5, text_threshold: 0.25, nms_iou: 0.5, nms_scope: prompt, max_detections: 20,
+               shortest_edge: 800}
+  remote_grounding_dino:
+    # proposal_floor lets the provider replay a stricter box_threshold from retained proposals.
+    standard: {box_threshold: 0.5, text_threshold: 0.25, nms_iou: 0.5, nms_scope: prompt, max_detections: 20,
+               shortest_edge: 800, proposal_floor: 0.3}

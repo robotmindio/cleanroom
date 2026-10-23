@@ -18,10 +18,23 @@ from vision_msgs.msg import Detection2D, Detection2DArray, ObjectHypothesisWithP
 from lekiwi_rmf.object_recognition import recognition_identity, model_spec
 
 from lekiwi_rmf.object_observations import ObservationStore, observation, query_parameters
+from lekiwi_rmf.perception_profiles import default_profile
 from lekiwi_rmf.perception_query import make_query
 
 
 MODEL_SHA256 = recognition_identity('yolox')[0]
+PROFILE = default_profile('yolox')
+
+
+def bare_recognizer(backend):
+    """A Recognizer without model files, for exercising one backend's pre- and postprocessing."""
+    from lekiwi_rmf.object_recognition import OPEN_BACKENDS, Recognizer
+    recognizer = object.__new__(Recognizer)
+    recognizer.spec, recognizer.backend = {'backend': backend}, backend
+    recognizer.open_vocabulary, recognizer.supports_concepts = backend in OPEN_BACKENDS, False
+    recognizer.default_profile = default_profile(backend)
+    recognizer.name = backend
+    return recognizer
 
 def capture(count=1, stamp=1, blue=True):
     pixels = np.zeros((40, 60, 3), np.uint8)
@@ -39,8 +52,32 @@ def capture(count=1, stamp=1, blue=True):
     return image, detections
 
 
+def fake_recognizer(predict, backend='yolox', **fields):
+    """A recognizer double with the attributes the detector reads; `predict(image, query, profile, artifact)`."""
+    values = {'sha256': 'a' * 64, 'name': backend, 'labels': ['cup'], 'open_vocabulary': False, 'default_query': None,
+              'supports_concepts': False, 'backend': backend, 'default_profile': default_profile(backend)}
+    return SimpleNamespace(predict=predict, **{**values, **fields})
+
+
+def operating_point(image, model=MODEL_SHA256, profile=PROFILE, query=None, extras=None, **fields):
+    """The detector's per-frame operating point for `image`, as the collector receives it."""
+    import hashlib
+    from lekiwi_rmf.msg import PerceptionOperatingPoint
+    from lekiwi_rmf.object_observations import capture_artifact
+    pixels = CvBridge().imgmsg_to_cv2(image, 'bgr8')
+    count = fields.pop('count', None)
+    message = PerceptionOperatingPoint(
+        header=image.header, model_sha256=model, profile_json=json.dumps(profile.document()),
+        query_json=json.dumps(query.document()) if query is not None else '',
+        input_sha256=hashlib.sha256(capture_artifact(pixels)).hexdigest(),
+        detections_json=json.dumps(extras if extras is not None else [{}] * (count or 0)))
+    for key, value in fields.items():
+        setattr(message, key, value)
+    return message
+
+
 def document(count=1, stamp=1):
-    return observation(*capture(count, stamp), MODEL_SHA256, 'astra_color')
+    return observation(*capture(count, stamp), MODEL_SHA256, 'astra_color', profile=PROFILE)
 
 
 @pytest.mark.parametrize('count', [0, 1, 2])
@@ -55,8 +92,14 @@ def test_contract_preserves_no_match_single_and_ambiguous_candidates(count):
 
 
 def test_each_operating_point_on_one_capture_is_a_distinct_observation(tmp_path):
-    first, jpeg = observation(*capture(), MODEL_SHA256, 'astra_color')
-    second, _ = observation(*capture(), 'b' * 64, 'astra_color')
+    first, jpeg = observation(*capture(), MODEL_SHA256, 'astra_color', profile=PROFILE)
+    second, _ = observation(*capture(), 'b' * 64, 'astra_color', profile=PROFILE)
+    stricter = default_profile('yolox').parameters | {'score_threshold': .6}
+    from lekiwi_rmf.perception_profiles import make_profile
+    third, _ = observation(*capture(), MODEL_SHA256, 'astra_color', profile=make_profile('yolox', stricter))
+    # Another profile on the same capture and model is another inference, recorded with its revision.
+    assert third['capture_id'] == first['capture_id'] and third['id'] not in (first['id'], second['id'])
+    assert third['profile']['parameters']['score_threshold'] == .6 and first['profile']['revision'] == PROFILE.revision
     assert first['capture_id'] == second['capture_id'] and first['id'] != second['id']
     store = ObservationStore(tmp_path / 'store.db')
     try:
@@ -97,10 +140,12 @@ def test_store_serves_queries_while_another_thread_writes(tmp_path):
 def test_operating_point_identity_records_native_label_output():
     _, document = recognition_identity('yolox')
     assert document['labels'] == 'native'
+    # Thresholds are the profile's, recorded per frame; the model identity never carries them.
+    assert 'confidence_threshold' not in document and document['postprocessing'] == 'profile'
 
 
 def test_color_measurement_does_not_label_red_as_blue():
-    record, _ = observation(*capture(blue=False), MODEL_SHA256, 'astra_color')
+    record, _ = observation(*capture(blue=False), MODEL_SHA256, 'astra_color', profile=PROFILE)
     assert record['detections'][0]['blue_fraction'] == 0
 
 
@@ -125,7 +170,7 @@ def test_invalid_boundary_data_is_rejected(fault):
     else:
         image.width = 2000
     with pytest.raises(ValueError):
-        observation(image, detections, MODEL_SHA256, 'astra_color')
+        observation(image, detections, MODEL_SHA256, 'astra_color', profile=PROFILE)
 
 
 @pytest.mark.parametrize('text', ['[]', '{"limit":true}', '{"limit":101}', '{"after_sequence":-1}',
@@ -265,10 +310,11 @@ def test_oversized_capture_does_not_evict_existing_evidence(tmp_path):
 def test_recognition_publishes_every_native_label_in_source_coordinates():
     from lekiwi_rmf.object_detector import detect
 
-    recognizer = SimpleNamespace(predict=lambda _: [[32, 32, 64, 64, .9, 'cup'],
-                                                   [160, 32, 32, 32, .8, 'cup'],
-                                                   [0, 0, 50, 50, .7, 'potted plant']])
-    result = detect(recognizer, np.zeros((320, 320, 3), np.uint8), Header())
+    recognizer = SimpleNamespace(predict=lambda *_: [[32, 32, 64, 64, .9, 'cup'],
+                                                    [160, 32, 32, 32, .8, 'cup'],
+                                                    [0, 0, 50, 50, .7, 'potted plant']])
+    result, extras, run = detect(recognizer, np.zeros((320, 320, 3), np.uint8), Header())
+    assert extras == [{}, {}, {}] and run is None
     assert [item.results[0].hypothesis.class_id for item in result.detections] == ['cup', 'cup', 'potted plant']
     assert result.detections[0].bbox.size_x == 64
     assert all(not item.id for item in result.detections)
@@ -278,7 +324,7 @@ def test_cluttered_frame_keeps_the_highest_scores_instead_of_dropping_the_captur
     from lekiwi_rmf.object_detector import detect
 
     rows = [[index, 0, 10, 10, index / 30, f'class {index}'] for index in range(1, 26)]
-    result = detect(SimpleNamespace(predict=lambda _: rows), np.zeros((40, 60, 3), np.uint8), Header())
+    result, _, _ = detect(SimpleNamespace(predict=lambda *_: rows), np.zeros((40, 60, 3), np.uint8), Header())
     scores = [item.results[0].hypothesis.score for item in result.detections]
     assert len(scores) == 20 and scores == sorted(scores, reverse=True) and min(scores) == 6 / 30
 
@@ -288,20 +334,21 @@ def test_recognition_rejects_missing_or_numeric_labels(label):
     from lekiwi_rmf.object_detector import detect
 
     with pytest.raises(ValueError, match='native label'):
-        detect(SimpleNamespace(predict=lambda _: [[0, 0, 10, 10, .9, label]]), np.zeros((40, 60, 3), np.uint8), Header())
+        detect(SimpleNamespace(predict=lambda *_: [[0, 0, 10, 10, .9, label]]), np.zeros((40, 60, 3), np.uint8), Header())
 
 
 def test_yolox_maps_every_output_class_to_its_native_coco_label():
-    from lekiwi_rmf.object_recognition import COCO_LABELS, Recognizer
+    from lekiwi_rmf.object_recognition import COCO_LABELS
 
-    recognizer = object.__new__(Recognizer)
-    recognizer.spec, recognizer.open_vocabulary = {'backend': 'yolox'}, False
+    recognizer = bare_recognizer('yolox')
     recognizer.model = SimpleNamespace(infer=lambda _: np.array(
         [[0, 0, 64, 64, .9, index] for index in range(80)], dtype=np.float32))
     rows = recognizer.predict(np.zeros((320, 640, 3), np.uint8))
     assert len(COCO_LABELS) == 80 and len(set(COCO_LABELS)) == 80
     assert [row[5] for row in rows] == list(COCO_LABELS) and COCO_LABELS[41] == 'cup'
     assert rows[0][2] == 64 / (640 / 640)
+    # The profile's thresholds reach the graph's own class-aware NMS; no second suppression follows it.
+    assert (recognizer.model.confThreshold, recognizer.model.nmsThreshold) == (.5, .5)
 
 
 @pytest.mark.parametrize('backend,labels,kept', [
@@ -310,8 +357,6 @@ def test_yolox_maps_every_output_class_to_its_native_coco_label():
 def test_transformer_nms_keeps_overlapping_classes_but_merges_synonymous_prompts(monkeypatch, backend, labels, kept):
     import contextlib
     import sys
-    from lekiwi_rmf.object_recognition import Recognizer
-
     monkeypatch.setitem(sys.modules, 'PIL', SimpleNamespace(Image=SimpleNamespace(fromarray=lambda pixels: pixels)))
     result = {'boxes': np.array([[0., 0., 20., 20.], [1., 1., 20., 20.]]), 'scores': [.9, .8],
               'labels': [0, 1 if labels[1] != labels[0] else 0], 'text_labels': labels}
@@ -331,9 +376,7 @@ def test_transformer_nms_keeps_overlapping_classes_but_merges_synonymous_prompts
 
         post_process_grounded_object_detection = post_process_object_detection
 
-    recognizer = object.__new__(Recognizer)
-    recognizer.spec, recognizer.confidence = {'backend': backend}, .5
-    recognizer.open_vocabulary = backend == 'grounding_dino'
+    recognizer = bare_recognizer(backend)
     query = make_query(['a cup', 'mug']) if recognizer.open_vocabulary else None
     recognizer.torch = SimpleNamespace(inference_mode=contextlib.nullcontext)
     recognizer.processor = Processor()
@@ -461,7 +504,7 @@ def test_evaluation_reports_failed_scene_and_keeps_small_corpus_unqualified(tmp_
     model = tmp_path / 'fixture.onnx'
     model.write_bytes(b'fixture')
     monkeypatch.setattr(evaluator, 'Recognizer', lambda *args: SimpleNamespace(
-        predict=lambda image: [], sha256=MODEL_SHA256, identity={}, default_query=None))
+        predict=lambda *_: [], sha256=MODEL_SHA256, identity={}, default_query=None, default_profile=PROFILE))
     result = evaluator.evaluate(manifest, model)
     assert not result['passed'] and not result['gates']['heldout_scenes']
     assert result['metrics']['cup']['fn'] == 1 and result['scenes'][0]['scene_id'] == 'test-fixture'
@@ -480,7 +523,8 @@ def test_evaluation_rejects_images_changed_after_preflight(tmp_path, evaluator, 
     model.write_bytes(b'fixture')
     def change_image(*args, **kwargs):
         cv2.imwrite(str(image), np.full((40, 60, 3), 255, np.uint8))
-        return SimpleNamespace(predict=lambda pixels: [], sha256=MODEL_SHA256, identity={})
+        return SimpleNamespace(predict=lambda *_: [], sha256=MODEL_SHA256, identity={}, default_query=None,
+                               default_profile=PROFILE)
     monkeypatch.setattr(evaluator, 'Recognizer', change_image)
     with pytest.raises(ValueError, match='changed after dataset validation'):
         evaluator.evaluate(manifest, model)

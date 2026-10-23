@@ -61,18 +61,28 @@ class ObjectGeometry:
             self.calibration, self.sha256 = value, hashlib.sha256(content).hexdigest()
 
     def ground(self, record, image, depth, info, transforms, map_context):
+        """Add a position to each detection the depth supports; every other detection gets a typed reason."""
+        def unavailable(reason):
+            for item in record['detections']:
+                item.setdefault('geometry_unavailable', reason)
         value = self.calibration
         if value is None or depth is None or info is None:
+            unavailable('no_depth_calibration' if value is None else 'no_synchronized_depth')
             return
         def stamp(msg):
             return msg.header.stamp.sec + msg.header.stamp.nanosec / 10**9
+        if abs(stamp(image)-stamp(depth)) > .05 or abs(stamp(image)-stamp(info)) > .05:
+            unavailable('depth_out_of_sync')
+            return
         if (record['camera_id'] != value['camera_id'] or
                 any(msg.header.frame_id != value['optical_frame'] for msg in (image, depth, info)) or
-                abs(stamp(image)-stamp(depth)) > .05 or abs(stamp(image)-stamp(info)) > .05 or
                 [image.width, image.height] != value['rgb_size'] or [depth.width, depth.height] != value['depth_size'] or
                 list(info.k) != value['rgb_k'] or list(info.p) != value['rgb_p'] or
-                list(info.r) != value['rgb_r'] or list(info.d) != value['rgb_d'] or [info.width, info.height] != value['rgb_size'] or
-                depth.encoding != '16UC1' or depth.step < depth.width * 2 or len(depth.data) != depth.step * depth.height):
+                list(info.r) != value['rgb_r'] or list(info.d) != value['rgb_d'] or [info.width, info.height] != value['rgb_size']):
+            unavailable('calibration_mismatch')
+            return
+        if depth.encoding != '16UC1' or depth.step < depth.width * 2 or len(depth.data) != depth.step * depth.height:
+            unavailable('invalid_depth_image')
             return
         depths = self.bridge.imgmsg_to_cv2(depth, 'passthrough')
         camera = PinholeCameraModel()
@@ -85,12 +95,14 @@ class ObjectGeometry:
             # The box interior limits background without assuming any object color.
             rows, columns = (axis.ravel() for axis in np.indices((bottom - top, right - left)))
             if len(rows) < 10:
+                item['geometry_unavailable'] = 'region_too_small'
                 continue
             step = max(1, math.ceil(len(rows)/1000))
             rgb = np.vstack((columns[::step]+left, rows[::step]+top, np.ones(len(rows[::step]))))
             mapped = mapping @ rgb
             valid = np.abs(mapped[2]) > 1e-12
             if not valid.any():
+                item['geometry_unavailable'] = 'no_depth_mapping'
                 continue
             mapped = mapped[:,valid]
             u, v = np.rint(mapped[0]/mapped[2]).astype(int), np.rint(mapped[1]/mapped[2]).astype(int)
@@ -98,16 +110,19 @@ class ObjectGeometry:
             samples = depths[v[valid], u[valid]].astype(float)*.001
             samples = samples[(samples >= value['depth_range_m'][0])&(samples <= value['depth_range_m'][1])]
             if len(samples) < 10:
+                item['geometry_unavailable'] = 'too_few_valid_depth_samples'
                 continue
             median = float(np.median(samples))
             spread = float(np.median(np.abs(samples-median)))*1.4826
             uncertainty = value['camera_uncertainty_m'] + 3*spread
             coherent = np.abs(samples - median) <= max(.01, 3 * spread)
             if uncertainty > .1 or np.count_nonzero(coherent) < max(10, math.ceil(.6 * len(samples))):
+                item['geometry_unavailable'] = 'incoherent_depth'
                 continue
             pixel = camera.rectifyPoint((float(np.median(rgb[0])), float(np.median(rgb[1]))))
             ray = camera.projectPixelTo3dRay(pixel)
             if not all(math.isfinite(coordinate) for coordinate in ray) or abs(ray[2]) < 1e-12:
+                item['geometry_unavailable'] = 'invalid_ray'
                 continue
             xyz = [float(coordinate*median/ray[2]) for coordinate in ray]
             position = {'mode': 'camera', 'xyz': xyz, 'frame_id': image.header.frame_id,

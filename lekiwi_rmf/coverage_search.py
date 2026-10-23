@@ -112,6 +112,8 @@ class Capture:
     detections: tuple
     # The labels an open-vocabulary inference was asked for; None for a closed native catalogue.
     query_labels: tuple | None = None
+    # The proposal profile revision the frame ran under; only the admitted revision is evidence.
+    profile_revision: str | None = None
 
 
 def detections_from_record(record, camera, map_id=None):
@@ -191,17 +193,24 @@ def searchable_mask(grid, resolution, origin, center, radius):
 
 
 class QueryCoverage:
-    """Per-label negative evidence from the models able to report it; memory is bounded by the map grid."""
+    """Per-label negative evidence from the models able to report it; memory is bounded by the map grid.
+
+    `models` maps each admitted model_sha256 to the profile revision admitted with it. A frame under any
+    other profile (for example after a profile change mid-search) is silent here, not negative evidence:
+    its thresholds are not the ones this session's coverage claims."""
 
     def __init__(self, label, models, profile, shape, resolution, origin):
-        self.label, self.models, self.profile = normalize_label(label), frozenset(models), profile
+        if not isinstance(models, dict):
+            raise ValueError('admitted models map each model_sha256 to its profile revision')
+        self.label, self.models, self.profile = normalize_label(label), dict(models), profile
         self.resolution, self.origin = resolution, origin
         self.negative = np.full(shape, -np.inf)
         self.sighting = np.full(shape, -np.inf)
         self.contributors = deque(maxlen=REPORT_ITEMS)
         self.viewpoints = deque(maxlen=REPORT_ITEMS)
         self.cameras = set()
-        self.counts = {'captures': 0, 'negative_captures': 0, 'other_model': 0, 'other_query': 0, 'moving': 0, 'occluded_cells': 0}
+        self.counts = {'captures': 0, 'negative_captures': 0, 'other_model': 0, 'other_profile': 0, 'other_query': 0,
+                       'moving': 0, 'occluded_cells': 0}
         self.by_model = {}
         self.span = [math.inf, -math.inf]
 
@@ -233,6 +242,9 @@ class QueryCoverage:
         if capture.model_sha256 not in self.models:
             # A frame from a recognizer whose catalogue lacks the label is silent about it, not negative.
             self.counts['other_model'] += 1
+            return []
+        if capture.profile_revision != self.models[capture.model_sha256]:
+            self.counts['other_profile'] += 1
             return []
         if capture.query_labels is not None and self.label not in capture.query_labels:
             # An open inference that was not asked for this label is equally silent about it.
@@ -424,8 +436,8 @@ class SearchSession:
                             for item in self.perception.get('recognizers', [])]
         self.supported = any(item['label_supported'] for item in self.recognizers)
         grid, resolution, origin = geometry
-        self.coverage = QueryCoverage(self.label, [item['model_sha256'] for item in self.recognizers
-                                                   if item['label_supported']], profile, grid.shape, resolution, origin)
+        self.coverage = QueryCoverage(self.label, {item['model_sha256']: item['profile']['revision'] for item in self.recognizers
+                                                   if item['label_supported']}, profile, grid.shape, resolution, origin)
         self.started, self.target, self.region = started, target, region
         self.found = []
         self.prior_sightings = deque(maxlen=REPORT_ITEMS)
@@ -521,8 +533,8 @@ class SearchSession:
                                                       'radius_m': self.region[1]}},
             'perception': {'label_supported': self.supported, 'cameras': self.perception.get('cameras', {}),
                            'recognizers': [{key: item.get(key) for key in (
-                               'role', 'model_sha256', 'model_name', 'confidence_threshold', 'open_vocabulary',
-                               'label_supported')} for item in self.recognizers]},
+                               'role', 'model_sha256', 'model_name', 'open_vocabulary', 'label_supported')}
+                              | {'profile_revision': item['profile']['revision']} for item in self.recognizers]},
             'coverage': {'fraction': round(fraction, 4), 'target': self.target,
                          'searchable_cells': int(np.count_nonzero(searchable)), 'covered_cells': int(np.count_nonzero(covered)),
                          'resolution_m': self.coverage.resolution,
@@ -541,6 +553,7 @@ class SearchSession:
                                   'first_stamp': span[0], 'last_stamp': span[1],
                                   'captures_considered': self.coverage.counts['captures'],
                                   'ignored_unable_model': self.coverage.counts['other_model'],
+                                  'ignored_other_profile': self.coverage.counts['other_profile'],
                                   'ignored_other_query': self.coverage.counts['other_query'],
                                   'rejected_moving': self.coverage.counts['moving'],
                                   'occluded_cells_observed_behind_obstacles': self.coverage.counts['occluded_cells']},

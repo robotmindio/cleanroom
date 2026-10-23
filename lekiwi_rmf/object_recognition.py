@@ -18,6 +18,8 @@ import numpy as np
 import yaml
 
 from lekiwi_rmf.object_cameras import config_directory
+from lekiwi_rmf.perception_concepts import load_concept
+from lekiwi_rmf.perception_profiles import default_profile
 from lekiwi_rmf.perception_query import make_query
 from lekiwi_rmf.opencv_yolox import YoloX
 
@@ -38,8 +40,8 @@ TORCH_BACKENDS = ('rtdetr_v2', 'grounding_dino')
 REMOTE_BACKENDS = ('remote_grounding_dino',)
 # Backends that localize the active query instead of a fixed native catalogue.
 OPEN_BACKENDS = ('grounding_dino', 'remote_grounding_dino')
-# Grounding DINO's phrase-to-token threshold; local and remote providers must agree on it.
-TEXT_THRESHOLD = .25
+# Backends whose provider matches learned concepts by exemplar embedding.
+CONCEPT_BACKENDS = ('remote_grounding_dino',)
 MAX_RESPONSE_BYTES = 1024 * 1024
 
 
@@ -75,33 +77,68 @@ def open_vocabulary(name):
     return model_spec(name)['backend'] in OPEN_BACKENDS
 
 
-def suppress(rows, backend, confidence):
-    # Synonymous prompt phrases can propose the same object twice, so prompts share one NMS group;
-    # closed-vocabulary classes are suppressed per class so overlapping different objects survive.
-    groups = [''] * len(rows) if backend in OPEN_BACKENDS else [row[5] for row in rows]
+class Rows(list):
+    """Detections as [x, y, w, h, score, label, extras] rows; `run` holds the provider's run reference."""
+    run = None
+
+
+def overlap(left, right):
+    x, y = max(left[0], right[0]), max(left[1], right[1])
+    width = max(0., min(left[0] + left[2], right[0] + right[2]) - x)
+    height = max(0., min(left[1] + left[3], right[1] + right[3]) - y)
+    area = width * height
+    union = left[2] * left[3] + right[2] * right[3] - area
+    return area / union if union > 0 else 0.
+
+
+def suppress(rows, scope, iou):
+    """Greedy NMS within each suppression group, keeping every suppressed candidate as evidence.
+
+    `scope` 'label' groups rows by label, so overlapping objects of different classes survive; 'prompt'
+    makes every query phrase one group, so synonyms proposing one object collapse into the strongest
+    phrase, which records the others as alternatives. `iou` 1 disables suppression.
+    """
+    rows = [list(row[:6]) + [dict(row[6]) if len(row) > 6 else {}] for row in rows]
+    if iou >= 1:
+        return rows
     kept = []
-    for group in dict.fromkeys(groups):
-        indices = [i for i, value in enumerate(groups) if value == group]
-        selected = cv2.dnn.NMSBoxes([rows[i][:4] for i in indices], [rows[i][4] for i in indices], confidence, .5)
-        kept.extend(indices[int(index)] for index in np.asarray(selected).reshape(-1))
-    return [rows[i] for i in sorted(kept)]
+    for row in sorted(rows, key=lambda item: -item[4]):
+        for survivor in kept:
+            if (scope == 'prompt' or survivor[5] == row[5]) and overlap(survivor, row) > iou:
+                if row[5] != survivor[5]:
+                    alternatives = survivor[6].setdefault('alternatives', [])
+                    if len(alternatives) < 4:
+                        alternatives.append({'label': row[5], 'score': float(row[4])})
+                break
+        else:
+            kept.append(row)
+    order = {id(row): index for index, row in enumerate(rows)}
+    return sorted(kept, key=lambda row: order[id(row)])
 
 
 class RemoteProvider:
-    """Stateless HTTP client for the RobotMind perception provider's `infer` operation."""
+    """Stateless HTTP client for the RobotMind perception provider's operations."""
 
     def __init__(self, url, timeout, opener=urlopen):
         self.url, self.timeout, self._open = url, timeout, opener
 
     def infer(self, body):
+        return self.post('/v1/infer', body)
+
+    def post(self, path, body, timeout=None):
         payload = json.dumps(body, separators=(',', ':')).encode()
-        request = Request(self.url + '/v1/infer', data=payload, method='POST',
+        request = Request(self.url + path, data=payload, method='POST',
                           headers={'Content-Type': 'application/json', 'Accept': 'application/json'})
         try:
-            with self._open(request, timeout=self.timeout) as response:
+            with self._open(request, timeout=timeout or self.timeout) as response:
                 data = response.read(MAX_RESPONSE_BYTES + 1)
         except HTTPError as error:
-            raise ProviderUnavailable(f'perception provider returned HTTP {error.code}') from error
+            code = ''
+            try:
+                code = json.loads(error.read(65536)).get('error', {}).get('code', '')
+            except (ValueError, AttributeError, OSError):
+                pass
+            raise ProviderUnavailable(f'perception provider returned HTTP {error.code} {code}'.rstrip()) from error
         except (URLError, OSError, ValueError) as error:
             raise ProviderUnavailable(f'perception provider unreachable: {getattr(error, "reason", error)}') from error
         if len(data) > MAX_RESPONSE_BYTES:
@@ -143,9 +180,12 @@ def verify_model(directory, spec):
     return directory
 
 
-def recognition_identity(name, confidence=.5):
-    if not 0 < confidence <= 1:
-        raise ValueError('confidence must be within (0,1]')
+def recognition_identity(name):
+    """The recognizer's model identity: artifacts, runtime and input normalization, but no thresholds.
+
+    Thresholds, suppression, resolution and budget are the proposal profile, whose revision every
+    frame records beside this identity (lekiwi_rmf/perception_profiles.py).
+    """
     spec = model_spec(name)
     runtime = {'opencv': cv2.__version__, 'numpy': np.__version__}
     if spec['backend'] in TORCH_BACKENDS:
@@ -153,12 +193,14 @@ def recognition_identity(name, confidence=.5):
     # An open recognizer's labels are the per-frame query, recorded beside this identity in each observation;
     # the startup default is not an operating point of the model.
     artifacts = {key: value for key, value in spec.items() if key != 'default_query'}
-    document = {'model': name, 'artifacts': artifacts, 'confidence_threshold': confidence, 'preprocessing_revision': 1,
-                'labels': 'query' if spec['backend'] in OPEN_BACKENDS else 'native', 'runtime': runtime,
+    # Every recognizer consumes the frame's stored evidence artifact (a deterministic JPEG), so a stored
+    # observation replays byte-exact; see object_observations.capture_artifact.
+    document = {'model': name, 'artifacts': artifacts, 'postprocessing': 'profile', 'preprocessing_revision': 2,
+                'input': 'evidence_jpeg_q80', 'labels': 'query' if spec['backend'] in OPEN_BACKENDS else 'native', 'runtime': runtime,
                 'device': 'cpu', 'threads': 2, 'interop_threads': 1}
     if spec['backend'] in REMOTE_BACKENDS:
         # The artifacts pin the provider's own operating-point hash (weights, Torch/CUDA, GPU), which every
-        # response must echo; the local runtime only encodes lossless PNG. The endpoint is not identity.
+        # response must echo; the robot sends the evidence artifact bytes unchanged. The endpoint is not identity.
         document.update(device='remote', threads=None, interop_threads=None)
     identity = hashlib.sha256(json.dumps(document, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
     return identity, document
@@ -176,25 +218,27 @@ def reject_parameter_changes(node, names):
 
 
 class Recognizer:
-    def __init__(self, name='yolox', directory=None, confidence=.5):
+    def __init__(self, name='yolox', directory=None):
         self.name = name
         self.spec = model_spec(name)
-        self.sha256, self.identity = recognition_identity(name, confidence)
-        self.confidence = confidence
+        self.backend = self.spec['backend']
+        self.sha256, self.identity = recognition_identity(name)
+        self.default_profile = default_profile(self.backend)
         # Open recognizers report only the phrases of the query they ran; closed ones their native catalogue.
-        self.open_vocabulary = self.spec['backend'] in OPEN_BACKENDS
+        self.open_vocabulary = self.backend in OPEN_BACKENDS
+        self.supports_concepts = self.backend in CONCEPT_BACKENDS
         self.default_query = make_query(self.spec['default_query']) if self.open_vocabulary else None
         self.labels = None
         # Remote only: (round trip, provider timings) of the last answer, for the latency budget.
         self.last_remote = None
         cv2.setNumThreads(2)
-        if self.spec['backend'] in REMOTE_BACKENDS:
+        if self.backend in REMOTE_BACKENDS:
             self.directory = None
             self.model = RemoteProvider(*provider_endpoint(self.spec['provider']))
             return
         self.directory = verify_model(directory or Path.home() / '.ros/lekiwi/models' / name, self.spec)
-        if self.spec['backend'] == 'yolox':
-            self.model = YoloX(str(self.directory / next(iter(self.spec['files']))), confThreshold=confidence)
+        if self.backend == 'yolox':
+            self.model = YoloX(str(self.directory / next(iter(self.spec['files']))))
             self.labels = list(COCO_LABELS)
         else:
             import torch
@@ -204,7 +248,7 @@ class Recognizer:
             if torch.get_num_interop_threads() != 1:
                 torch.set_num_interop_threads(1)
             self.torch = torch
-            if self.spec['backend'] == 'rtdetr_v2':
+            if self.backend == 'rtdetr_v2':
                 self.processor = RTDetrImageProcessor.from_pretrained(
                     self.directory, local_files_only=True,
                     size={'height': self.spec['input_size'], 'width': self.spec['input_size']})
@@ -216,82 +260,127 @@ class Recognizer:
                 self.model = AutoModelForZeroShotObjectDetection.from_pretrained(
                     self.directory, local_files_only=True, use_safetensors=True).eval().to('cpu')
 
-    def predict(self, image, query=None):
-        """Open recognizers localize exactly `query`; closed ones cannot express a query and refuse one."""
+    def predict(self, image, query=None, profile=None, artifact=None):
+        """Detections of `image` (the decoded evidence `artifact`) under `profile`.
+
+        Open recognizers localize exactly `query`; closed ones cannot express a query and refuse one.
+        A remote recognizer sends `artifact` itself, so the provider sees the stored evidence bytes.
+        """
         if self.open_vocabulary != (query is not None):
             raise ValueError('an open-vocabulary recognizer needs a query' if self.open_vocabulary else
                              'a closed-vocabulary recognizer cannot answer a query')
+        profile = profile or self.default_profile
+        if profile.backend != self.backend:
+            raise ValueError(f'profile for {profile.backend} cannot run {self.backend}')
+        if query is not None and query.concepts and not self.supports_concepts:
+            raise ValueError(f'{self.name} cannot match learned concepts; it has no exemplar encoder')
+        values = profile.parameters
         height, width = image.shape[:2]
-        if self.spec['backend'] in REMOTE_BACKENDS:
-            return suppress(self._remote(image, query), self.spec['backend'], self.confidence)
+        if self.backend in REMOTE_BACKENDS:
+            if artifact is None:
+                raise ValueError('a remote recognizer needs the evidence artifact')
+            return self._remote(artifact, (width, height), query, profile)
         rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        if self.spec['backend'] == 'yolox':
+        if self.backend == 'yolox':
             scale = min(640 / width, 640 / height)
             resized = cv2.resize(rgb, (max(1, int(width * scale)), max(1, int(height * scale))))
             padded = np.full((640, 640, 3), 114.0, dtype=np.float32)
             padded[:resized.shape[0], :resized.shape[1]] = resized
+            # The graph's own class-aware NMS is the suppression; no second pass is added after it.
+            self.model.confThreshold, self.model.nmsThreshold = values['score_threshold'], values['nms_iou']
             predictions = self.model.infer(padded)
-            return [[x / scale, y / scale, w / scale, h / scale, score, COCO_LABELS[int(label)]]
-                    for x, y, w, h, score, label in predictions]
+            # max_detections is applied by object_detector.detect, which every caller shares.
+            return Rows([[x / scale, y / scale, w / scale, h / scale, score, COCO_LABELS[int(label)], {}]
+                         for x, y, w, h, score, label in predictions])
         from PIL import Image
         pixels = Image.fromarray(rgb)
-        if self.spec['backend'] == 'rtdetr_v2':
+        if self.backend == 'rtdetr_v2':
             inputs = self.processor(images=pixels, return_tensors='pt')
         else:
-            inputs = self.processor(images=pixels, text=query.prompt, return_tensors='pt')
+            inputs = self.processor(images=pixels, text=query.prompt, return_tensors='pt',
+                                    size={'shortest_edge': values['shortest_edge'], 'longest_edge': 1333})
         with self.torch.inference_mode():
             outputs = self.model(**inputs)
-        if self.spec['backend'] == 'rtdetr_v2':
+        if self.backend == 'rtdetr_v2':
             result = self.processor.post_process_object_detection(
-                outputs, target_sizes=[(height, width)], threshold=self.confidence)[0]
+                outputs, target_sizes=[(height, width)], threshold=values['score_threshold'])[0]
             labels = [self.model.config.id2label[int(label)] for label in result['labels']]
+            scope = 'label'
         else:
             result = self.processor.post_process_grounded_object_detection(
-                outputs, inputs.input_ids, box_threshold=self.confidence, text_threshold=TEXT_THRESHOLD,
-                target_sizes=[(height, width)])[0]
-            labels = result['text_labels']
+                outputs, inputs.input_ids, box_threshold=values['box_threshold'],
+                text_threshold=values['text_threshold'], target_sizes=[(height, width)])[0]
+            labels, scope = result['text_labels'], values['nms_scope']
         rows = []
         for label, box, score in zip(labels, result['boxes'], result['scores']):
             x0, y0, x1, y1 = box.tolist()
-            rows.append([x0, y0, x1 - x0, y1 - y0, float(score), str(label)])
-        return suppress(rows, self.spec['backend'], self.confidence)
+            rows.append([x0, y0, x1 - x0, y1 - y0, float(score), str(label), {}])
+        return Rows(suppress(rows, scope, values['nms_iou']))
 
-    def _remote(self, image, query):
-        """Lossless pixels out; a response counts only if it proves the admitted operating point and query."""
-        height, width = image.shape[:2]
-        encoded, png = cv2.imencode('.png', image)
-        if not encoded:
-            raise ValueError('could not encode the capture for the perception provider')
-        data = png.tobytes()
+    def concept_documents(self, query):
+        # A stored concept is immutable under its revision, so a validated load is cached by it.
+        cache = self.__dict__.setdefault('_concepts', {})
+        for concept in query.concepts:
+            if concept.revision not in cache:
+                cache[concept.revision] = load_concept(concept.revision)
+        return [cache[concept.revision] for concept in query.concepts]
+
+    def _remote(self, data, size, query, profile):
+        """The evidence artifact out; a response counts only if it proves the admitted operating point and query."""
+        parameters = profile.parameters
         labels = list(query.labels)
         expected = {'labels': labels, 'prompt': query.prompt,
-                    'box_threshold': self.confidence, 'text_threshold': TEXT_THRESHOLD}
+                    'box_threshold': parameters['box_threshold'], 'text_threshold': parameters['text_threshold']}
+        body = {'model': self.spec['provider_model'], 'image': base64.b64encode(data).decode('ascii'),
+                'labels': labels, 'profile': parameters, 'deadline_ms': int(self.model.timeout * 1000)}
+        concepts = self.concept_documents(query)
+        if concepts:
+            body['concepts'] = concepts
         self.last_remote = None
         sent = time.monotonic()
-        response = self.model.infer({
-            'model': self.spec['provider_model'], 'image': base64.b64encode(data).decode('ascii'),
-            'labels': labels, 'box_threshold': self.confidence, 'text_threshold': TEXT_THRESHOLD,
-            'deadline_ms': int(self.model.timeout * 1000)})
+        response = self.model.infer(body)
         self.last_remote = time.monotonic() - sent, provider_timings(response)
-        source = response.get('image')
+        source, echoed = response.get('image'), response.get('profile')
         if (response.get('schema') != 1 or response.get('model') != self.spec['provider_model']
                 or response.get('model_sha256') != self.spec['provider_model_sha256']
+                or response.get('state', 'succeeded') != 'succeeded'
                 or response.get('effective') != expected or not isinstance(source, dict)
+                or not isinstance(echoed, dict) or echoed.get('parameters') != parameters
                 or source.get('sha256') != hashlib.sha256(data).hexdigest()
-                or (source.get('width'), source.get('height')) != (width, height)):
+                or (source.get('width'), source.get('height')) != size):
             raise ProviderUnavailable('perception provider answered outside the admitted operating point')
         detections = response.get('detections')
-        if not isinstance(detections, list) or len(detections) > 900:
+        if not isinstance(detections, list) or len(detections) > parameters['max_detections']:
             raise ProviderUnavailable('perception provider returned malformed detections')
-        rows = []
+        reportable, revisions = set(query.reportable), {concept['revision'] for concept in concepts}
+        rows = Rows()
         for item in detections:
             box = item.get('box') if isinstance(item, dict) else None
             if (not isinstance(box, list) or len(box) != 4
                     or not all(type(value) in (int, float) and math.isfinite(value) for value in box)
                     or type(item.get('score')) not in (int, float) or not isinstance(item.get('label'), str)):
                 raise ProviderUnavailable('perception provider returned malformed detections')
+            extras = {}
+            alternatives = item.get('alternatives', [])
+            if (not isinstance(alternatives, list) or len(alternatives) > 4 or any(
+                    not isinstance(other, dict) or not isinstance(other.get('label'), str)
+                    or type(other.get('score')) not in (int, float) for other in alternatives)):
+                raise ProviderUnavailable('perception provider returned malformed alternatives')
+            if alternatives:
+                extras['alternatives'] = [{'label': other['label'], 'score': float(other['score'])} for other in alternatives]
+            concept = item.get('concept')
+            if concept is not None:
+                if (not isinstance(concept, dict) or concept.get('revision') not in revisions
+                        or concept.get('name') != item['label'] or item['label'] not in reportable
+                        or any(type(concept.get(key)) not in (int, float) for key in ('similarity', 'negative_similarity'))):
+                    raise ProviderUnavailable('perception provider returned a concept match outside the query')
+                extras['concept'] = {key: concept[key] for key in ('name', 'revision', 'similarity', 'negative_similarity')}
             x0, y0, x1, y1 = box
-            rows.append([x0, y0, x1 - x0, y1 - y0, float(item['score']), item['label']])
+            rows.append([x0, y0, x1 - x0, y1 - y0, float(item['score']), item['label'], extras])
+        run = {key: response.get(key) for key in ('run_id', 'inference_id')}
+        proposals = response.get('proposals')
+        if all(isinstance(value, str) and 1 <= len(value) <= 64 for value in run.values()):
+            rows.run = {**run, 'proposals': proposals if isinstance(proposals, dict) else None}
         return rows
 
 
@@ -322,16 +411,18 @@ def main():
     from lekiwi_rmf.object_cameras import camera_bindings
     settings = yaml.safe_load((config_directory() / 'object_perception.yaml').read_text())['/**']['ros__parameters']
     use_model_runtime(*selected_models(settings))
-    identity, operating = recognition_identity(settings['model_name'], settings['confidence_threshold'])
+    identity, operating = recognition_identity(settings['model_name'])
     deployment = yaml.safe_load((config_directory() / 'object_perception_deployment.yaml').read_text())
     described = {'model_sha256': identity, 'operating_point': operating,
+                 'profile': default_profile(model_spec(settings['model_name'])['backend']).document(),
                  'vocabulary': 'open' if open_vocabulary(settings['model_name']) else 'closed'}
     if open_vocabulary(settings['model_name']):
         described['default_query'] = make_query(model_spec(settings['model_name'])['default_query']).document()
     if settings.get('fallback_model_name'):
         # Frames served by the fallback carry its own identity; an admitting profile lists both.
-        fallback, fallback_operating = recognition_identity(settings['fallback_model_name'], settings['confidence_threshold'])
-        described.update(fallback_model_sha256=fallback, fallback_operating_point=fallback_operating)
+        fallback, fallback_operating = recognition_identity(settings['fallback_model_name'])
+        described.update(fallback_model_sha256=fallback, fallback_operating_point=fallback_operating,
+                         fallback_profile=default_profile(model_spec(settings['fallback_model_name'])['backend']).document())
     described['cameras'] = {name: value['sha256'] for name, value in camera_bindings(deployment['cameras']).items()}
     print(json.dumps(described, indent=2))
 

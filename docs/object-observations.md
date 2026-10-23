@@ -108,20 +108,118 @@ state owned by the detector, not a parameter. Clients set it with
   leaves the query unchanged and says why. Closed-vocabulary primaries reject
   every query.
 
-The query's revision is the SHA-256 of its canonical labels. Each inference
-snapshots the query before it runs, and the primary's frame is published with a
-capture-stamped `vision_msgs/LabelInfo` on `/robot/perception/<camera>/query`.
-The collector synchronizes it exactly with the image and detections. A query
-change during inference therefore never relabels the frame that was already
-running. The observation records `vocabulary: open` and `query` (revision,
-labels, prompt), and its `id` is `sha256(capture_id:model_sha256:revision)`. The
-same capture under another query is a distinct inference, and replay rebuilds
-the exact prompt from the record. Fallback frames are recorded as
-`vocabulary: closed` without a query and keep the established
-`sha256(capture_id:model_sha256)` ID: they never claim to answer a query they
-cannot express. `/robot/perception/profile` republishes on every change, with
-the primary's `labels` equal to the query in force, and `/robot/capabilities`
-advertises the service and its bounds under `observations.query`.
+The query's revision is the SHA-256 of its canonical labels (plus parts and
+concepts when present). Each inference snapshots the query and the proposal
+profile before it runs, and every frame is published with a capture-stamped
+`lekiwi_rmf/msg/PerceptionOperatingPoint` on
+`/robot/perception/<camera>[/fallback]/operating_point`: model SHA-256, profile
+document, query document, the SHA-256 of the input artifact, per-detection
+evidence, the provider run reference and, for fallback frames, why the primary
+was unavailable. The collector synchronizes it exactly with the image and
+detections and accepts it only if the profile proves its revision and the query
+is canonical. A query or profile change during inference therefore never
+relabels the frame that was already running. The observation records
+`vocabulary: open` and `query` (revision, labels, prompt), and its `id` is
+`sha256(capture_id:model_sha256:profile_revision:query_revision)`. The same
+capture under another query or profile is a distinct inference. Fallback frames
+are recorded as `vocabulary: closed` without a query, with
+`sha256(capture_id:model_sha256:profile_revision)` and a `degraded` reason: they
+never claim to answer a query they cannot express. `/robot/perception/profile`
+republishes on every change, with the primary's `labels` equal to the labels and
+concept names in force, and `/robot/capabilities` advertises the services under
+`observations.query` and `observations.proposal_profile`.
+
+A label may declare the whole it is a part of (`part_of`, parallel to `labels`).
+A part detection is tied to the smallest detection of that whole containing at
+least 80% of it (`part_of: {index, label, containment}`); without one it stays
+unassigned (`part_status: no_referent`). States such as on, hot or held are not
+visual labels and are not produced here.
+
+## Proposal profiles
+
+Thresholds, suppression, resolution and the per-frame budget form a **proposal
+profile**, separate from the model identity (`lekiwi_rmf/perception_profiles.py`).
+`model_sha256` pins weights, runtime and input normalization only. Each backend
+specifies its parameters with type, range, unit, cost (`postprocess`,
+`inference` or `retention`) and meaning; a parameter a backend cannot honour is
+refused with its reason rather than ignored, and a profile must be complete.
+`config/perception_profiles.yaml` holds the tracked profiles; every recognizer
+starts on `default`. The tracked `standard` profiles keep the previous operating
+point: 0.50 score or box threshold, 0.25 text threshold, NMS IoU 0.50 (per label
+for closed catalogues, across the prompt for open queries, keeping suppressed
+phrases as `alternatives`), at most 20 detections, Grounding DINO shortest edge
+800, and a provider proposal floor of 0.30 for replay.
+
+`/robot/perception/apply_profile` (`lekiwi_rmf/srv/ApplyPerceptionProfile`)
+switches one recognizer (`role` primary or fallback). It requires the
+`expected_revision` in force and exactly one source: a tracked `profile_name`,
+`revert_to_revision` from this detector's history (the exact earlier revision),
+or `parameters_json` with the `evidence_id` of a calibration study that selected
+exactly those parameters for this recognizer. Before the swap the detector runs
+the candidate once on a synthetic capture on the same recognizer; a remote
+provider must echo the candidate's parameters. A failed probe leaves the
+previous profile active and publishes nothing. The response reads back the
+profile in force, the profile topic republishes, and `profile_applied` is
+logged only after the swap. Search coverage credits only frames whose profile
+revision is the one its session admitted (`ignored_other_profile` otherwise).
+Runtime ROS parameter changes remain rejected; a persistent default is a
+tracked change to `config/perception_profiles.yaml`.
+
+## Capture artifacts and replay
+
+Every recognizer consumes the frame's stored evidence: the detector encodes the
+capture once as JPEG quality 80 (`capture_artifact`), sends those bytes to a
+remote provider and decodes them for local models; the collector encodes the
+same pixels to the same bytes and records `evidence.model_input` when they match
+the frame's input digest. A stored observation, or the same bytes stored
+byte-exact in Knowledge, is therefore a replayable capture.
+`scripts/replay-perception.py RECORD ARTIFACT --model-name NAME` re-runs it under
+the record's own operating point (and reports `reproduced`) or under another
+`--profile`, `--profile-json` or `--labels`, which produces a new inference ID on
+the same `capture_id`. It writes a report and never touches the robot or the
+store. The remote provider additionally keeps bounded proposals and images for
+its own `replay` and `evaluate` operations by `provider_run.run_id`.
+
+## Abstention
+
+Each observation records `input_quality` (mean luma, Laplacian sharpness and
+`dark`, `overexposed` or `blurred` flags) and typed `abstentions`, each with the
+next information that would answer it: `no_candidate` (another viewpoint or a
+memory query), `low_quality_input` (light, glare or a steadier view),
+`geometry_unavailable` with the depth reason (`no_depth_calibration`,
+`depth_out_of_sync`, `calibration_mismatch`, `too_few_valid_depth_samples`,
+`incoherent_depth`, ...; a depth observation) and `provider_unavailable` on
+fallback frames. `ambiguous_identity` is Knowledge association's outcome, not a
+per-frame result. An abstention is never resolved by lowering a threshold: an
+untracked profile needs a selected study.
+
+## Calibration studies and learned concepts
+
+`scripts/calibrate-perception-profile.py MANIFEST --model-name NAME --candidates
+CANDIDATES.json --output REPORT` freezes the corpus hash, splits, objective
+(macro F1 over labels), regression rule (no label F1 or recall, and no condition
+with at least five scenes, may drop by more than 0.02) and a seeded paired
+bootstrap over scene groups. It searches the candidates on development, then
+evaluates the current profile and the best candidate once on held-out. It
+selects only when the lower 95% bound of the held-out macro-F1 gain is above
+zero and nothing regresses. The content-addressed record, with per-label and
+per-condition results for every candidate, goes to
+`~/.ros/lekiwi/perception/studies/<evidence_id>.json`; apply a selection with
+`parameters_json` and that `evidence_id`, and revert with the recorded
+`revert.revision`.
+
+`scripts/learn-perception-concept.py MANIFEST` teaches a new category from
+byte-exact views, such as Knowledge appearance-gallery region observations and
+their source artifacts, without retraining the detector. Taught positives and
+negatives become exemplar embeddings from the provider's encoder. Held-out
+positives and negatives calibrate the match threshold so that no held-out
+negative is admitted. Views that cannot be separated are refused, because that
+concept needs a reviewed dataset and a trained detector instead. The concept
+(name, prompts, encoder identity, exemplars, match) is stored by revision under
+`~/.ros/lekiwi/perception/concepts/`. Name it in `set_query` as
+`concept_revisions`: the provider proposes regions for its prompts and keeps
+only those that match its exemplars, labelled with the concept name and its
+similarity evidence. Only the remote recognizer can match concepts.
 
 ## Camera binding and coverage
 
@@ -252,10 +350,16 @@ scripts/evaluate-object-recognition.py /path/to/scenes.json \
   --model-name rtdetr_v2_r18 --output /path/to/report.json
 ```
 
-`--split development`, `--confidence` and `--blue-fraction` support operating-point
-selection before held-out evaluation. Freeze the selected values before opening
+`--split development`, `--profile NAME`, `--profile-json` and `--blue-fraction`
+support operating-point selection before held-out evaluation; the calibration
+study script automates that protocol. Freeze the selected values before opening
 the held-out results. Reusing a held-out set to tune a model invalidates it.
 Non-OpenCV models automatically run in the installed perception environment.
+Scenes may carry `conditions` tags; the report counts them and lists the hard
+conditions (`dark`, `overhead`, `occlusion`, `transparent`, `reflective`, `blur`,
+`similar_instances`) the corpus does not cover yet. These are accuracy results
+on real models; the unit tests use controlled backend outputs and prove only
+that every label, profile and concept crosses the system intact.
 
 Schema 3 reports, per vocabulary label, **class detection** and **false
 unique-target successes**; for labels with `blue` annotations it adds

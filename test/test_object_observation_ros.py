@@ -18,7 +18,8 @@ from lekiwi_rmf.object_recognition import recognition_identity
 
 from lekiwi_rmf.object_observation_node import ObjectObservations
 from lekiwi_rmf.srv import GetObservationEvidence, PinObservationEvidence, QueryObservations
-from test_object_observations import capture
+from test_object_observations import capture, operating_point
+from lekiwi_rmf.msg import PerceptionOperatingPoint
 
 
 MODEL_SHA256 = recognition_identity('yolox')[0]
@@ -46,6 +47,7 @@ def test_synchronized_capture_query_evidence_and_stale_stream(tmp_path):
     peer = Node('observation_peer', context=context)
     images = peer.create_publisher(Image, '/robot/perception/astra_color/source_image', 1)
     detections = peer.create_publisher(Detection2DArray, '/robot/perception/astra_color/detections', 1)
+    points = peer.create_publisher(PerceptionOperatingPoint, '/robot/perception/astra_color/operating_point', 1)
     query = peer.create_client(QueryObservations, '/robot/observations/query')
     evidence = peer.create_client(GetObservationEvidence, '/robot/observations/evidence')
     pin = peer.create_client(PinObservationEvidence, '/robot/observations/pin')
@@ -70,6 +72,7 @@ def test_synchronized_capture_query_evidence_and_stale_stream(tmp_path):
         for item in found.detections:
             item.header = image.header
         detections.publish(found)
+        points.publish(operating_point(image, count=2))
         time.sleep(.05)
         assert not json.loads(call(query, QueryObservations.Request(request_json='{}')).response_json)['observations']
         images.publish(image)
@@ -81,6 +84,11 @@ def test_synchronized_capture_query_evidence_and_stale_stream(tmp_path):
         assert record['clock_domain'] == 'ros_system_time'
         assert record['ros_domain_id'] == context.get_domain_id()
         assert len(record['detections']) == 2 and record['position'] is None
+        # The evidence is the exact artifact the recognizer consumed, so it replays byte-exact.
+        assert record['evidence']['model_input'] is True and record['profile']['backend'] == 'yolox'
+        # Without depth, each detection says why it has no position and what would supply one.
+        assert [item['reason'] for item in record['abstentions']] == ['geometry_unavailable'] * 2
+        assert record['detections'][0]['geometry_unavailable'] == 'no_depth_calibration'
         saved = call(evidence, GetObservationEvidence.Request(observation_id=record['id']))
         assert saved.success and len(base64.b64decode(saved.data_base64)) == record['evidence']['size']
         assert saved.sha256 == record['evidence']['sha256']
@@ -122,7 +130,7 @@ def test_multiple_camera_readiness_cannot_mask_wrong_or_missing_source(tmp_path)
         found.header = image.header
         for item in found.detections:
             item.header = image.header
-        collector._capture(image, found, camera)
+        collector._capture(image, found, camera, collector._roles[''], operating_point(image, count=1))
     try:
         ingest('front', 'front_optical')
         state = collector._readiness()
