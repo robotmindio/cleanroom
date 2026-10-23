@@ -14,6 +14,8 @@ from action_msgs.msg import GoalStatus, GoalStatusArray
 from action_msgs.srv import CancelGoal
 from diagnostic_msgs.msg import DiagnosticArray
 from geometry_msgs.msg import PoseStamped
+from moveit_msgs.action import MoveGroup
+from moveit_msgs.msg import Constraints, JointConstraint, MoveItErrorCodes
 from nav2_msgs.action import NavigateToPose
 from nav2_msgs.msg import CollisionMonitorState
 from nav_msgs.msg import Odometry
@@ -38,12 +40,20 @@ from lekiwi_rmf.navigation_pause import NavigationPause
 from lekiwi_rmf.navigation_observer import NavigationObserver, server_instance
 from lekiwi_rmf.navigation_distance import NavigationDistance
 from lekiwi_rmf.map_bundle import validate_map_bundle
-from lekiwi_rmf.arm_trajectory import ARM_JOINTS
+from lekiwi_rmf.motion_constraints import (
+    MAX_CONSTRAINTS, MAX_REGION_M, MAX_TIME_SEC as MOTION_MAX_TIME_SEC, OPERATIONS as MOTION_OPERATIONS,
+    SCHEMA as MOTION_SCHEMA,
+)
+from lekiwi_rmf.arm_trajectory import ARM_JOINTS, JOINT_LIMITS
 from lekiwi_rmf.skills import BASE_COMMANDS, KINDS, SKILL_ID, UNDECLARED_EFFECTS, catalog, load_registry
 
 
 ACTIONS = {'navigate': ('/navigate_to_pose', NavigateToPose), 'explore': ('/robot/explore', Explore),
-           'skill': ('/robot/skills/run', RunSkill), 'search': ('/robot/search', Search)}
+           'skill': ('/robot/skills/run', RunSkill), 'search': ('/robot/search', Search),
+           'reach': ('/move_action', MoveGroup)}
+# The arm planning group: a reach moves these joints and holds the gripper where it is.
+REACH_JOINTS = tuple(name for name in ARM_JOINTS if name != 'arm_gripper')
+MOTION_SERVICE = '/robot/motion/solve'
 SEARCH_PARAMETERS = ('query', 'region', 'max_duration_sec', 'max_travel_m', 'target_coverage')
 SEARCH_LIMITS = ('max_duration_sec', 'max_travel_m')
 # Schema 1 is SubmitTask/GetTask/CancelTask; schema 2 is the TaskApi services below.
@@ -54,11 +64,12 @@ TASK_API = {name: f'/robot/tasks/v2/{name}'
 EFFECTS = {name: {'reversibility': 'reversible', 'compensation': text} for name, text in (
     ('navigate', 'Navigate back to the starting pose.'),
     ('explore', 'Map growth is data; navigate back to the starting pose.'),
-    ('search', 'Observations are data; navigate back to the starting pose.'))}
+    ('search', 'Observations are data; navigate back to the starting pose.'),
+    ('reach', 'Move the arm back to its starting joint positions.'))}
 UNITS = {'navigate': {'x': 'm', 'y': 'm', 'yaw': 'rad', 'deadline_unix_sec': 's', 'max_travel_m': 'm'},
          'explore': {'max_duration_sec': 's', 'max_radius_m': 'm'},
          'search': {'region': 'm', 'max_duration_sec': 's', 'max_travel_m': 'm', 'target_coverage': 'fraction'},
-         'skill': {}}
+         'skill': {}, 'reach': {'joints': 'rad'}}
 FRAMES = {'navigate': 'map', 'search': 'map'}
 # The joint and base-command mapping a plan was made for; a different body is refused, never guessed.
 BODY_PROFILE = 'lekiwi:' + hashlib.sha256(json.dumps([*ARM_JOINTS, *BASE_COMMANDS]).encode()).hexdigest()[:16]
@@ -143,9 +154,39 @@ def task_goal(capability, text):
             raise ValueError('skill requires a registered skill_id and an optional parameters object')
         goal = RunSkill.Goal(skill_id=values['skill_id'],
                              parameters_json=json.dumps(values.get('parameters', {}), sort_keys=True, allow_nan=False))
+    elif capability == 'reach':
+        # A joint target, normally a /robot/motion/solve solution; MoveIt plans and checks collisions again.
+        if set(values) - {'joints', 'solution_id'} or not isinstance(values.get('joints'), dict) \
+                or set(values['joints']) != set(REACH_JOINTS):
+            raise ValueError(f'reach requires joints for exactly {list(REACH_JOINTS)} and an optional solution_id')
+        for name, value in values['joints'].items():
+            lower, upper = JOINT_LIMITS[name]
+            if type(value) not in (float, int) or not math.isfinite(value) or not lower <= value <= upper:
+                raise ValueError(f'{name} must be a finite angle within [{lower}, {upper}] rad')
+        if 'solution_id' in values and (not isinstance(values['solution_id'], str)
+                                        or not REFERENCE.match(values['solution_id'])):
+            raise ValueError('solution_id must be a short reference')
+        goal = MoveGroup.Goal()
+        goal.request.group_name = 'arm'
+        goal.request.num_planning_attempts, goal.request.allowed_planning_time = 3, 5.0
+        goal.request.start_state.is_diff = True
+        goal.request.goal_constraints = [Constraints(joint_constraints=[
+            JointConstraint(joint_name=name, position=float(values['joints'][name]),
+                            tolerance_above=0.01, tolerance_below=0.01, weight=1.0) for name in REACH_JOINTS])]
+        goal.planning_options.plan_only = False
     else:
         raise ValueError('unsupported capability')
     return goal, json.dumps(values, sort_keys=True, allow_nan=False)
+
+
+def reach_result(result):
+    """A MoveGroup result without its trajectories; success is MoveIt's own error code."""
+    code = (result.get('error_code') or {}).get('val')
+    points = ((result.get('executed_trajectory') or {}).get('joint_trajectory') or {}).get('points') or []
+    names = ((result.get('executed_trajectory') or {}).get('joint_trajectory') or {}).get('joint_names') or []
+    final = dict(zip(names, points[-1]['positions'])) if points else None
+    return {'moveit_error_code': code, 'error_code': 0 if code == MoveItErrorCodes.SUCCESS else (code or -1),
+            'planning_time_sec': result.get('planning_time'), 'final_joints': final}
 
 
 class TaskGateway(Node):
@@ -160,13 +201,16 @@ class TaskGateway(Node):
         self.declare_parameter('allow_navigation', True)
         self.declare_parameter('allow_exploration', True)
         self.declare_parameter('allow_skills', False)
+        # Arm motion to a solved joint target; off until arm planning is qualified on this body.
+        self.declare_parameter('allow_reach', False)
         # The explorer's tracked allow_search keeps the action server itself off by default.
         self.declare_parameter('allow_search', True)
         self.declare_parameter('map_bundle', '')
         self._enabled = {'navigate': self.get_parameter('allow_navigation').value,
                          'explore': self.get_parameter('allow_exploration').value,
                          'skill': self.get_parameter('allow_skills').value,
-                         'search': self.get_parameter('allow_search').value}
+                         'search': self.get_parameter('allow_search').value,
+                         'reach': self.get_parameter('allow_reach').value}
         try:
             # Experimental skills run only through an acquisition protocol, never a user task.
             self._skills = catalog(load_registry())
@@ -250,6 +294,8 @@ class TaskGateway(Node):
         self._observation_status = self.create_client(Trigger, '/robot/observations/status')
         # Only to report availability; clients call the detector's query service directly.
         self._perception_query = self.create_client(SetPerceptionQuery, '/robot/perception/set_query')
+        # Only to report availability; planners call the motion solver directly.
+        self._motion = self.create_client(TaskApi, MOTION_SERVICE)
         self._distance = NavigationDistance()
         self.create_subscription(Odometry, '/odom', self._distance.update, 1)
         self.create_service(Trigger, '/robot/navigation/odometry', self._odometry)
@@ -347,7 +393,7 @@ class TaskGateway(Node):
             self._check_request(capability, request, resources)
         self._journal.require_free(resources)
         if any(self._observed.values()) or self._children.busy():
-            raise Refused('resource_busy', 'another ROS navigation or exploration client has an active goal',
+            raise Refused('resource_busy', 'another ROS client has an active navigation, exploration, search, skill or arm goal',
                           holders=[{'resource': 'base', 'task_id': '', 'owner': 'external ROS client'}])
         if not self._action_clients[capability].server_is_ready():
             raise Refused('capability_unavailable', 'capability action server unavailable')
@@ -734,6 +780,15 @@ class TaskGateway(Node):
                                     'Omitted/zero limits use the tracked robot limits; positive limits may only reduce them. '
                                     'Duration is active seconds, radius is metres around the starting pose. '
                                     'resume_task_id is a saved native exploration UUID and preserves its original bounds.')}
+        if name == 'reach':
+            return {**entry, 'parameters': ['joints', 'solution_id'], 'required_parameters': ['joints'],
+                    'defaults': {}, 'effective_defaults': {}, 'joints': list(REACH_JOINTS),
+                    'limits': {name: list(JOINT_LIMITS[name]) for name in REACH_JOINTS},
+                    'solver': MOTION_SERVICE,
+                    'description': 'Move the arm to a joint target, normally a feasible solution from '
+                                   f'{MOTION_SERVICE}. MoveIt plans from the current state and checks the current '
+                                   'scene again; success means the motion finished, not that a constraint holds. '
+                                   'Verify it with the solver.'}
         if name == 'skill':
             return {**entry, 'parameters': ['skill_id', 'parameters'], 'required_parameters': ['skill_id'],
                     'defaults': {'parameters': {}}, 'effective_defaults': {'parameters': {}}, 'skills': self._skills,
@@ -803,6 +858,17 @@ class TaskGateway(Node):
                                        'description': 'Set the labels the detector localizes from the next frame. '
                                                       'Empty labels restore the default query; expected_revision '
                                                       'applies the change only while that revision is in force.'}},
+            'motion': {'available': self._motion.service_is_ready(), 'schema': MOTION_SCHEMA,
+                       'service': MOTION_SERVICE, 'type': 'lekiwi_rmf/srv/TaskApi',
+                       'operations': list(MOTION_OPERATIONS), 'planning_frame': 'base_footprint', 'tool_link': 'tool0',
+                       'execute': 'reach', 'limits': {'max_constraints': MAX_CONSTRAINTS, 'max_region_m': MAX_REGION_M,
+                                                      'max_time_sec': MOTION_MAX_TIME_SEC},
+                       'description': ('Geometric feasibility over MoveIt: solve finds arm joints whose tool pose '
+                                       'satisfies position (sphere/box around a point or an observed detection) and '
+                                       'orientation (one tool axis within a cone) constraints, verified by MoveIt FK, '
+                                       'collision check and optionally a motion plan; verify checks the current pose '
+                                       'from fresh joint states. Answers are feasible, infeasible or unknown and hold '
+                                       'only for the scene they were computed in.')},
             'examples': [{'capability': 'explore', 'parameters': {}},
                          {'capability': 'explore', 'parameters': {'revisit_known': True}}],
             'services': {'submit': '/robot/tasks/submit', 'get': '/robot/tasks/get', 'cancel': '/robot/tasks/cancel'},
@@ -870,6 +936,8 @@ class TaskGateway(Node):
         try:
             response = future.result()
             result = dict(message_to_ordereddict(response.result))
+            if self._row(identifier)['capability'] == 'reach':
+                result = reach_result(result)
             json.dumps(result, allow_nan=False)
         except Exception as error:
             self.get_logger().error(f'task result unconfirmed: {error}')

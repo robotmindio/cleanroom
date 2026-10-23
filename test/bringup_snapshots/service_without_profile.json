@@ -485,6 +485,21 @@
  {
   "arguments": [],
   "env": {},
+  "name": "motion_solver",
+  "namespace": "",
+  "node": "lekiwi_rmf/motion_solver",
+  "output": "screen",
+  "parameters": {
+   "use_sim_time": false
+  },
+  "remappings": [],
+  "respawn": true,
+  "respawn_delay": 2.0,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {},
   "name": "moveit_cloud_gate",
   "namespace": "",
   "node": "lekiwi_rmf/moveit_cloud_gate",

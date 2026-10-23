@@ -307,6 +307,16 @@ def _stack(context):
                 parameters=[{"use_sim_time": sim}],
                 output="screen",
             ),
+            # Geometric feasibility over move_group's model and scene; it never moves the arm.
+            Node(
+                package="lekiwi_rmf",
+                executable="motion_solver",
+                name="motion_solver",
+                parameters=[{"use_sim_time": sim}],
+                output="screen",
+                respawn=True,
+                respawn_delay=2.0,
+            ),
         ])
     actions.extend([
         # Join Nav2's smoothed stream and the manually requested stream
