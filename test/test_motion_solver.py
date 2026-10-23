@@ -133,6 +133,9 @@ def graph():
     solver = MotionSolver(context=context, parameter_overrides=[
         Parameter('seed_samples', value=128), Parameter('service_timeout_sec', value=2.0),
         Parameter('planning_frame', value='base_link'), Parameter('max_fk_evaluations', value=600)])
+    # The search's FK runs in process so its wall-clock cost cannot reach max_time_sec on a
+    # loaded runner; candidates are still verified through the /compute_fk service.
+    solver._search._fk = toy_fk
     client_node = Node('motion_client', context=context)
     client = client_node.create_client(TaskApi, SERVICE)
     executor = MultiThreadedExecutor(num_threads=6, context=context)
