@@ -473,10 +473,12 @@ completion condition and cannot be satisfied by the find-object result.
 
 Keep [DEFERRED.md](../DEFERRED.md) as the authoritative external acceptance
 checklist; this report supplies prioritization and product outcomes.
-Open issues #13–#16 describe upstream compatibility compromises (rosdep retries,
-unset-variable setup, NumPy environment separation and shell-specific setup),
-not unfinished user features. Their stated removal conditions remain unmet;
-removing those workarounds would regress installation.
+Installation keeps one tracked upstream workaround: ROS and colcon setup files
+read unset variables, so scripts turn `set -u` off while sourcing them (#14,
+fixed upstream in ament/ament_package#170, ros/ros_environment#44,
+colcon/colcon-core#749, colcon/colcon-bash#38 and colcon/colcon-zsh#33).
+Retrying `rosdep update`, the separate LeRobot interpreter (numpy 2 versus
+Jazzy's 1.26) and per-shell setup variants are deliberate design, not debt.
 
 ## Assessment limits
 
