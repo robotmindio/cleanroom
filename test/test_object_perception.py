@@ -88,7 +88,7 @@ def test_receipt_keeps_latest_frame_while_inference_is_busy_and_expires_old_resu
         calls += 1
         if calls == 1:
             entered.set()
-            release.wait(5)
+            release.wait()
         active -= 1
         return [[10, 10, 20, 20, .9, 'cup']]
     monkeypatch.setattr(object_detector, 'Recognizer', lambda *args: fake_recognizer(predict))
@@ -122,7 +122,8 @@ def test_receipt_keeps_latest_frame_while_inference_is_busy_and_expires_old_resu
         assert len(node._frames) <= 1
         time.sleep(.8)
         latest = send()
-        time.sleep(.05)
+        wait(lambda: node._last_stamp.get('front') ==
+             latest.stamp.sec * 10**9 + latest.stamp.nanosec)
         release.set()
         end = time.monotonic() + 8
         while not received and time.monotonic() < end:
@@ -131,7 +132,8 @@ def test_receipt_keeps_latest_frame_while_inference_is_busy_and_expires_old_resu
         assert received
         assert maximum == 1
         assert all(item.header != original for item in received)
-        assert received[-1].header.stamp.sec >= latest.stamp.sec
+        stamp = received[-1].header.stamp
+        assert (stamp.sec, stamp.nanosec) >= (latest.stamp.sec, latest.stamp.nanosec)
         assert node._stats['front']['rejected'] >= 1
         # The held frame's answer came back past max_source_age_sec: counted as late, never published.
         budget = node._budget.summary()

@@ -1,0 +1,47 @@
+diff --git a/nav2_smac_planner/src/smac_planner_lattice.cpp b/nav2_smac_planner/src/smac_planner_lattice.cpp
+--- a/nav2_smac_planner/src/smac_planner_lattice.cpp
++++ b/nav2_smac_planner/src/smac_planner_lattice.cpp
+@@ -347,9 +347,40 @@
+   if (std::floor(mx_start) == std::floor(mx_goal) &&
+     std::floor(my_start) == std::floor(my_goal))
+   {
+-    pose.pose = start.pose;
+-    pose.pose.orientation = goal.pose.orientation;
+-    plan.poses.push_back(pose);
++    // Preserve the requested sub-cell goal instead of declaring the start reached.
++    const double start_yaw = tf2::getYaw(start.pose.orientation);
++    const double turn = tf2::getYaw(goal.pose.orientation) - start_yaw;
++    const double yaw_delta = std::atan2(std::sin(turn), std::cos(turn));
++    double radius = 0.0;
++    for (const auto & point : _costmap_ros->getRobotFootprint()) {
++      radius = std::max(radius, std::hypot(point.x, point.y));
++    }
++    const auto bins = _collision_checker.getPrecomputedAngles().size();
++    const int steps = std::max(1, static_cast<int>(std::ceil(10.0 * (
++        std::hypot(mx_goal - mx_start, my_goal - my_start) +
++        radius * std::abs(yaw_delta) / _costmap->getResolution()))));
++    for (int i = 0; i <= steps; ++i) {
++      if (cancel_checker()) {
++        throw nav2_core::PlannerCancelled("Sub-cell goal connection canceled");
++      }
++      const double fraction = static_cast<double>(i) / steps;
++      const double yaw = start_yaw + fraction * yaw_delta;
++      float bin = (yaw + 2.0 * M_PI) * bins / (2.0 * M_PI);
++      bin = std::fmod(bin, static_cast<float>(bins));
++      if (_collision_checker.inCollision(
++          mx_start + fraction * (mx_goal - mx_start),
++          my_start + fraction * (my_goal - my_start), bin, _allow_unknown))
++      {
++        throw nav2_core::NoValidPathCouldBeFound("Sub-cell goal connection in collision");
++      }
++      pose.pose = start.pose;
++      pose.pose.position.x += fraction * (goal.pose.position.x - start.pose.position.x);
++      pose.pose.position.y += fraction * (goal.pose.position.y - start.pose.position.y);
++      pose.pose.orientation.z = std::sin(yaw / 2.0);
++      pose.pose.orientation.w = std::cos(yaw / 2.0);
++      plan.poses.push_back(pose);
++    }
++    plan.poses.back().pose = goal.pose;
+ 
+     // Publish raw path for debug
+     if (_raw_plan_publisher->get_subscription_count() > 0) {

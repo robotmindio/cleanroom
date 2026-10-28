@@ -373,4 +373,6 @@ def test_perception_is_explicit_and_reuses_camera_topics():
     detector = find_node(description, name='object_detector')
     assert collector['parameters']['camera_ids'] == ['front']
     assert detector['parameters']['camera_ids'] == ['front']
+    assert detector['parameters']['model_name'] == 'grounding_dino_tiny_gpu'
+    assert detector['parameters']['fallback_model_name'] == 'rtdetr_v2_r18'
     assert collector['parameters']['model_name'] == detector['parameters']['model_name']

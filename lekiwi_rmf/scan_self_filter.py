@@ -133,6 +133,13 @@ class ScanSelfFilter(Node):
         self.get_logger().info(f"{input_topic} -> {output_topic}, blanking returns {described}")
 
     def on_scan(self, scan: LaserScan) -> None:
+        stamp = scan.header.stamp
+        last_ray = stamp.sec + stamp.nanosec * 1e-9 + max(0, len(scan.ranges) - 1) * scan.time_increment
+        # A malformed device stamp otherwise aborts every native /scan consumer.
+        if (stamp.sec < 0 or stamp.nanosec >= 10**9 or not math.isfinite(last_ray) or not 0 <= last_ray < 2**31
+                or not math.isfinite(scan.scan_time) or scan.scan_time < 0):
+            self.get_logger().warning('discarding scan with invalid acquisition timing', throttle_duration_sec=5.0)
+            return
         self.pub.publish(blank_body_sectors(scan, self.sectors))
 
 

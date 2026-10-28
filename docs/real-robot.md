@@ -146,9 +146,23 @@ The compute installer picks the topology:
   the same canonical topics (`/scan` has the body-masked LD06 as its sole publisher
   by default), so nothing downstream can tell the topologies apart.
 
-Both installers are re-runnable when the split changes; keep the machines'
-clocks roughly in sync (anything NTP-ish) since camera stamps originate on the
-device machine and are paired approximately. The stack keeps retrying until the
+Both installers are re-runnable when the split changes. They install chrony via
+`scripts/install-time-sync.sh compute|device`. The tracked
+`config/chrony-compute.conf` makes the Lenovo the NTP server for
+`192.168.110.0/24`; `config/chrony-device.conf` follows
+`andres-Lenovo.local` over the LAN every 4–8 seconds. These are site settings:
+update both tracked files if the compute hostname or LAN changes. mDNS must
+resolve the compute hostname on the device; UDP port 123 must be reachable.
+The installer owns `/etc/chrony/chrony.conf`, excludes DHCP time sources,
+and replaces the earlier timesyncd/Cloudflare configuration. Corrections slew
+without clock steps, including on daemon startup, to protect live acquisition
+stamps. A large initial error therefore takes time to converge. The device
+holds over when the compute reference is unavailable; it does not switch to an
+independent Internet source. No `local` directive advertises an unsynchronised
+compute clock as accurate. Check `chronyc tracking`, `chronyc sources -v` and
+`chronyc sourcestats -v` on both machines; on the device the selected source must
+be the compute LAN address. Camera stamps originate on the device machine and
+are paired approximately. The stack keeps retrying until the
 device half appears, however long the other machine takes to boot; stop
 services with `systemctl`, since `scripts/ros-stop.sh` leaves them alone and
 the restart policy would undo a raw kill anyway. RViz is deliberately not a

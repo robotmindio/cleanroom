@@ -221,7 +221,8 @@ def _stack(context):
                 "{header: {frame_id: map}, pose: {pose: {position: {x: -4.0, y: -2.5}, orientation: {w: 1.0}}, covariance: [0.25, 0, 0, 0, 0, 0, 0, 0.25, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.07]}}",
             ],
         )] if topology.amcl else []),
-        *_include(nav2_launch("navigation_launch.py"), params_file=params_file, use_sim_time=use_sim_time),
+        *_include(nav2_launch("navigation_launch.py"), params_file=params_file, use_sim_time=use_sim_time,
+                  use_respawn="true"),
         *(gated(_readiness_gate("wait_for_nav2", kind="navigate_to_pose_action", action="/navigate_to_pose"),
                 "Nav2", rmf_actions) if topology.start_rmf else []),
     ]

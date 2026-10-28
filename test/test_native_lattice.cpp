@@ -1,8 +1,64 @@
 #include <array>
 #include <cmath>
 #include <iostream>
+#include <string>
 #include <nav2_smac_planner/node_lattice.hpp>
 #include <nav2_smac_planner/collision_checker.hpp>
+#include <nav2_smac_planner/smac_planner_lattice.hpp>
+
+bool subcell_goals(const std::string & lattice)
+{
+  auto node = std::make_shared<rclcpp_lifecycle::LifecycleNode>("subcell_goal_test");
+  node->declare_parameter("test.lattice_filepath", lattice);
+  node->declare_parameter("test.allow_unknown", false);
+  node->declare_parameter("test.smooth_path", false);
+  auto costmap = std::make_shared<nav2_costmap_2d::Costmap2DROS>("subcell_costmap");
+  costmap->set_parameter(rclcpp::Parameter("footprint",
+    "[[0.24,0.22],[0.24,-0.22],[-0.22,-0.22],[-0.22,0.22]]"));
+  costmap->on_configure(rclcpp_lifecycle::State());
+  costmap->getCostmap()->resizeMap(40, 40, 0.05, -1.0, -1.0);
+  auto * grid = costmap->getCostmap();
+  for (unsigned int y = 0; y < 40; ++y) {
+    for (unsigned int x = 0; x < 40; ++x) {grid->setCost(x, y, 0);}
+  }
+  nav2_smac_planner::SmacPlannerLattice planner;
+  planner.configure(node, "test", nullptr, costmap);
+  geometry_msgs::msg::PoseStamped start, goal;
+  start.pose.position.x = start.pose.position.y = 0.001;
+  start.pose.orientation.w = 1.0;
+  goal = start;
+  goal.pose.position.x = goal.pose.position.y = 0.049;
+  auto canceled = []() {return false;};
+  const auto plan = planner.createPlan(start, goal, canceled);
+  const bool exact = plan.poses.size() >= 2 &&
+    std::abs(plan.poses.back().pose.position.x - goal.pose.position.x) < 1e-8 &&
+    std::abs(plan.poses.back().pose.position.y - goal.pose.position.y) < 1e-8;
+  grid->setCost(25, 25, nav2_costmap_2d::LETHAL_OBSTACLE);
+  bool endpoint_blocked = false, rotation_blocked = false;
+  try {planner.createPlan(start, goal, canceled);} catch (const nav2_core::PlannerException &) {
+    endpoint_blocked = true;
+  }
+  grid->setCost(25, 25, 0);
+  grid->setCost(26, 20, nav2_costmap_2d::LETHAL_OBSTACLE);
+  goal = start;
+  goal.pose.orientation.z = goal.pose.orientation.w = std::sqrt(0.5);
+  try {planner.createPlan(start, goal, canceled);} catch (const nav2_core::PlannerException &) {
+    rotation_blocked = true;
+  }
+  grid->setCost(26, 20, 0);
+  const auto rotation = planner.createPlan(start, goal, canceled);
+  const bool rotation_exact = !rotation.poses.empty() &&
+    std::abs(rotation.poses.back().pose.orientation.z - goal.pose.orientation.z) < 1e-8;
+  bool cancellation_honored = false;
+  try {planner.createPlan(start, goal, []() {return true;});}
+  catch (const nav2_core::PlannerCancelled &) {cancellation_honored = true;}
+  planner.cleanup();
+  costmap->on_cleanup(rclcpp_lifecycle::State());
+  std::cout << "exact_subcell_goal=" << exact << " endpoint_blocked=" << endpoint_blocked
+            << " swept_rotation_blocked=" << rotation_blocked << " rotation_exact=" << rotation_exact
+            << " cancellation_honored=" << cancellation_honored << '\n';
+  return exact && endpoint_blocked && rotation_blocked && rotation_exact && cancellation_honored;
+}
 
 int main(int argc, char ** argv)
 {
@@ -49,7 +105,8 @@ int main(int argc, char ** argv)
   state.setPose({40.01f, 40.01f, 0.0f});
   const bool fractional_clear = state.isNodeValid(false, &checker);
   const bool outside_blocked = checker.inCollision(80.0f, 40.0f, 0.0f, false);
-  const bool passed = clear && blocked && allowed_unknown && middle_blocked && fractional_clear && outside_blocked;
+  const bool passed = clear && blocked && allowed_unknown && middle_blocked && fractional_clear && outside_blocked &&
+    argc == 2 && subcell_goals(argv[1]);
   if (!passed) {
     std::cerr << "clear=" << clear << " blocked=" << blocked
               << " allowed_unknown=" << allowed_unknown
