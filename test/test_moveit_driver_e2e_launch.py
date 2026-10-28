@@ -216,11 +216,13 @@ class TestMoveItDriverEndToEnd(unittest.TestCase):
         ]
         future = client.call_async(request)
         self.assertTrue(self._until(future.done, timeout=10.0))
+        self.assertFalse(future.result().valid)
         self._assert_only_shallow_floor_contact(future.result().contacts)
 
     def _assert_only_shallow_floor_contact(self, contacts):
         # Recorded resting poses touch the real floor. The keepout is exact,
         # so they report floor contact; arm calibration error bounds its depth.
+        self.assertTrue(contacts, "expected contact with the physical floor")
         for contact in contacts:
             self.assertIn("arm_ground_keepout_proxy", (contact.contact_body_1, contact.contact_body_2), contact)
             self.assertLess(contact.depth, 0.02, contact)
@@ -283,6 +285,7 @@ class TestMoveItDriverEndToEnd(unittest.TestCase):
         ]
         future = client.call_async(request)
         self.assertTrue(self._until(future.done, timeout=10.0))
+        self.assertFalse(future.result().valid)
         self._assert_only_shallow_floor_contact(future.result().contacts)
 
     def test_open_gripper_can_reach_floor_object(self):

@@ -262,6 +262,28 @@ def _link_surface_points(robot: ET.Element, link: str, count: int) -> np.ndarray
     return points[np.random.default_rng(0).choice(len(points), count, replace=False)]
 
 
+def test_cad_wheel_contact_planes_are_on_the_floor():
+    robot = _real_robot()
+    parents = {joint.find('child').get('link'): joint for joint in robot.findall('joint')}
+    wheels = [link.get('name') for link in robot.findall('link')
+              if link.get('name').startswith('4-Omni-Directional-Wheel_Single_Body')]
+    assert len(wheels) == 3
+    for wheel in wheels:
+        visual = robot.find(f"link[@name='{wheel}']/visual")
+        mesh = visual.find('geometry/mesh')
+        data = (ROOT / mesh.get('filename').removeprefix('package://lekiwi_rmf/')).read_bytes()
+        points = np.frombuffer(data, offset=84, dtype=np.dtype([
+            ('normal', '<f4', (3,)), ('vertices', '<f4', (3, 3)), ('attr', '<u2')
+        ]))['vertices'].reshape(-1, 3) * np.fromstring(mesh.get('scale', '1 1 1'), sep=' ')
+        frame, transform = wheel, _transform(visual.find('origin'))
+        while frame != 'base_footprint':
+            joint = parents[frame]
+            transform = _transform(joint.find('origin')) @ transform
+            frame = joint.find('parent').get('link')
+        world = points @ transform[:3, :3].T + transform[:3, 3]
+        assert world[:, 2].min() == pytest.approx(0, abs=0.001), wheel
+
+
 def test_wrist_and_moving_jaw_meshes_never_touch_at_any_roll_or_gripper_angle():
     """Justifies the SRDF exemption: only their padded proxies overlap when the jaw opens."""
     robot = _real_robot()
