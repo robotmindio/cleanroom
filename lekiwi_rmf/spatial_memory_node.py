@@ -72,7 +72,7 @@ class SpatialMemory(Node):
         if self.get_parameter('use_sim_time').value:
             suffix += '_sim'
         defaults = {'database_path': str(Path.home() / f'.ros/lekiwi/spatial{suffix}.sqlite3'),
-                    'rtabmap_database': str(Path.home() / '.ros/lekiwi_rtabmap.db'),
+                    'rtabmap_database': str(Path.home() / '.ros/lekiwi_rtabmap_floor_v2.db'),
                     'site_ref': '', 'observer_ref': 'lekiwi', 'retention_sec': 7 * 86400.0,
                     'max_revisions': 2000, 'graph_topic': '/mapGraph', 'info_topic': '/info'}
         for name, value in defaults.items():

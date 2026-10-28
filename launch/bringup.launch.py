@@ -533,7 +533,7 @@ def generate_launch_description():
                 default_value=PythonExpression([
                     "('", EnvironmentVariable("HOME"), "/.ros/lekiwi_rtabmap_sim.db' "
                     "if '", LaunchConfiguration("mode"), "' == 'sim' else '",
-                    EnvironmentVariable("HOME"), "/.ros/lekiwi_rtabmap.db')",
+                    EnvironmentVariable("HOME"), "/.ros/lekiwi_rtabmap_floor_v2.db')",
                 ]),
             ),
             # RTAB-Map keeps its working memory in RAM and, unbounded, grows without end:

@@ -145,7 +145,7 @@
  },
  "rtabmap_database": {
   "choices": null,
-  "default": "$(env HOME)/.ros/lekiwi_rtabmap.db"
+  "default": "$(env HOME)/.ros/lekiwi_rtabmap_floor_v2.db"
  },
  "rtabmap_mapping_max_bytes": {
   "choices": null,

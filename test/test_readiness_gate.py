@@ -235,7 +235,7 @@ def test_simulation_base_controller_consumes_only_the_guarded_velocity_topic():
 
 
 def test_simulation_uses_a_database_separate_from_the_real_robot():
-    for profile, database in (("sim", "lekiwi_rtabmap_sim.db"), ("wired", "lekiwi_rtabmap.db")):
+    for profile, database in (("sim", "lekiwi_rtabmap_sim.db"), ("wired", "lekiwi_rtabmap_floor_v2.db")):
         records = resolve_bringup(profile=profile)
         for name in ("rtabmap", "robot_explorer"):
             assert find_node(records, name=name)["parameters"]["database_path"] == (

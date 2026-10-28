@@ -77,7 +77,7 @@ class RobotExplorer(Node):
         # The tracked exploration profile is the single source of the limits
         # and mapping quota; only machine-local paths are computed here.
         defaults = {
-            "allow_exploration": True, "database_path": str(Path.home() / ".ros/lekiwi_rtabmap.db"),
+            "allow_exploration": True, "database_path": str(Path.home() / ".ros/lekiwi_rtabmap_floor_v2.db"),
             **yaml.safe_load((config / "exploration.yaml").read_text())["robot_explorer"]["ros__parameters"],
             "navigation_tree": str(config / "explore_nav_to_pose.xml"),
             "navigation_params_file": str(config / "nav2_params.yaml"),

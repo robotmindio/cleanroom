@@ -452,12 +452,28 @@ Accurate wheel scale matters: RTAB-Map's ICP starts from wheel odometry, and Nav
 The CAD floor correction places `base_link` 40.6 mm above `base_footprint`
 (previously 93 mm) and lowers every mounted sensor frame by 52.4 mm. Before
 rolling this correction onto a robot with an existing RTAB-Map database, back
-up that database with the repository data-backup tooling and select a fresh
-database path in the tracked deployment profile. Rebuild and qualify the map
+up that database separately from the robot's journals and records. The physical
+launch defaults now select `~/.ros/lekiwi_rtabmap_floor_v2.db`; simulation keeps
+its separate database. Explicit database overrides must also use a fresh path
+when migrating from the old geometry. Rebuild and qualify the map
 with the corrected sensor extrinsics; keep the old database for rollback.
 Recheck stored object heights and map-bound observations before using them for
 manipulation. The geometric regression checks the vendored CAD contact plane;
 it does not replace a physical height or arm-calibration measurement.
+
+Create a consistent SQLite snapshot, including committed WAL data, before
+cutover. The destination must be new; the tool checks integrity and records its
+size and SHA-256 in a private manifest:
+
+```bash
+python3 scripts/rtabmap-db-maintenance.py --backup \
+  "$HOME/.ros/lekiwi_rtabmap.db" "$HOME/.ros/lekiwi/backups/pre-floor-v2"
+```
+
+Repeat into another new destination after the old SLAM process has shut down
+cleanly, so its saved in-memory graph is included. Keep the original database
+and both snapshots for rollback. `scripts/robot-data.py backup` separately
+preserves journals, observation evidence, spatial memory and arm calibration.
 
 Use a new database filename for the first mapping run. Start the workstation side
 (the robot address comes from `LEKIWI_ROBOT_HOST`; on a wired robot use
@@ -465,7 +481,7 @@ Use a new database filename for the first mapping run. Start the workstation sid
 
 ```bash
 scripts/workstation-up.sh localization:=visual_slam slam_mode:=mapping \
-  rtabmap_database:=$HOME/.ros/lekiwi_cleanroom.db
+  rtabmap_database:=$HOME/.ros/lekiwi_rtabmap_floor_v2.db
 ```
 
 For an authenticated ZMQ link add `curve_client_secret_key_file:=/secure/path/driver.key_secret`
