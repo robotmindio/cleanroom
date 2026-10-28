@@ -4,7 +4,7 @@ diff --git a/nav2_smac_planner/src/smac_planner_lattice.cpp b/nav2_smac_planner/
 @@ -343,12 +343,13 @@
    pose.pose.orientation.z = 0.0;
    pose.pose.orientation.w = 1.0;
- 
+
 -  // Corner case of start and goal being on the same cell
 -  if (std::floor(mx_start) == std::floor(mx_goal) &&
 -    std::floor(my_start) == std::floor(my_goal))
@@ -65,13 +65,13 @@ diff --git a/nav2_smac_planner/src/smac_planner_lattice.cpp b/nav2_smac_planner/
 +    std::floor(my_start) == std::floor(my_goal))
 +  {
 +    append_goal(start.pose);
- 
+
      // Publish raw path for debug
      if (_raw_plan_publisher->get_subscription_count() > 0) {
-@@ -533,6 +541,11 @@
+@@ -533,5 +541,10 @@
      }
    }
- 
+
 +  if (plan.poses.empty()) {
 +    throw nav2_core::NoValidPathCouldBeFound("Lattice search returned an empty path");
 +  }
@@ -79,4 +79,3 @@ diff --git a/nav2_smac_planner/src/smac_planner_lattice.cpp b/nav2_smac_planner/
 +
    return plan;
  }
- 

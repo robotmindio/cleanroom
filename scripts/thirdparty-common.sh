@@ -47,10 +47,17 @@ checkout_pinned() { # checkout_pinned <url> <destination> <revision> [known-patc
 }
 
 apply_thirdparty_patches() { # apply_thirdparty_patches <dependency> <destination>
-  # Applies thirdparty/<dependency>/*.patch in name order; already applied ones are kept.
-  local patch
-  for patch in "$THIRDPARTY_PATCH_ROOT/$1/"*.patch; do
-    [[ -e $patch ]] || continue
+  # Later patches can change earlier hunks; unwind the recognized stack first.
+  local patch patch_index
+  local -a patches=("$THIRDPARTY_PATCH_ROOT/$1/"*.patch)
+  [[ -e ${patches[0]} ]] || return 0
+  for ((patch_index=${#patches[@]} - 1; patch_index >= 0; patch_index--)); do
+    patch=${patches[patch_index]}
+    if git -C "$2" apply --reverse --check "$patch" 2>/dev/null; then
+      git -C "$2" apply --reverse "$patch" || return
+    fi
+  done
+  for patch in "${patches[@]}"; do
     apply_pinned_patch "$2" "$patch" "${patch#"$THIRDPARTY_PATCH_ROOT"/}"
   done
 }
