@@ -19,12 +19,13 @@ from test_object_observations import MODEL_SHA256, PROFILE, capture
 SCRIPT = Path(__file__).resolve().parents[1] / 'scripts/robot-data.py'
 
 
-def populated(home, domain=0):
+def populated(home, domain=0, sim=False):
     """The real owners write their own stores, as on the robot."""
+    simulation = '_sim' if sim else ''
     paths = {
-        'task_journal': home / f'.ros/lekiwi_tasks{f"_{domain}" if domain else ""}.sqlite3',
-        'observations': home / f'.ros/lekiwi/observations_{domain}.sqlite3',
-        'spatial_memory': home / f'.ros/lekiwi/spatial_{domain}.sqlite3',
+        'task_journal': home / f'.ros/lekiwi_tasks{f"_{domain}" if domain else ""}{simulation}.sqlite3',
+        'observations': home / f'.ros/lekiwi/observations_{domain}{simulation}.sqlite3',
+        'spatial_memory': home / f'.ros/lekiwi/spatial_{domain}{simulation}.sqlite3',
         'arm_calibration': home / '.ros/lekiwi_arm_calibration.json',
     }
     journal = TaskJournal(paths['task_journal'])
@@ -77,11 +78,11 @@ def test_malformed_policies_are_rejected(tmp_path, change):
         load_policy(path)
 
 
-@pytest.mark.parametrize('domain', [0, 5])
-def test_backup_restore_round_trip_rebuilds_indexes_and_reconciles_evidence(tmp_path, domain):
+@pytest.mark.parametrize('domain, sim', [(0, False), (0, True), (5, False), (5, True)])
+def test_backup_restore_round_trip_rebuilds_indexes_and_reconciles_evidence(tmp_path, domain, sim):
     home, target = tmp_path / 'robot', tmp_path / 'replacement'
-    paths, documents = populated(home, domain)
-    manifest = backup(home, tmp_path / 'backup', domain=domain)
+    paths, documents = populated(home, domain, sim)
+    manifest = backup(home, tmp_path / 'backup', domain=domain, sim=sim)
     assert set(manifest['stores']) == {'task_journal', 'observations', 'spatial_memory', 'arm_calibration'}
     assert manifest['absent'] == [] and manifest['artifacts']['models']['yolox/weights.onnx']['size'] == 7
     assert not any(path.suffix == '.onnx' for path in (tmp_path / 'backup').iterdir())  # weights by digest only
@@ -96,7 +97,7 @@ def test_backup_restore_round_trip_rebuilds_indexes_and_reconciles_evidence(tmp_
     assert all(report[name]['integrity'] == 'ok' and report[name]['indexes_rebuilt']
                for name in ('task_journal', 'observations', 'spatial_memory'))
     # The owners reopen what was restored, with the same records and identities.
-    restored = store_paths(load_policy(), target, domain)
+    restored = store_paths(load_policy(), target, domain, sim)
     journal = TaskJournal(restored['task_journal'])
     assert journal.row('task-1')['capability'] == 'explore'
     journal.close()
