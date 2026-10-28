@@ -1,0 +1,82 @@
+diff --git a/nav2_smac_planner/src/smac_planner_lattice.cpp b/nav2_smac_planner/src/smac_planner_lattice.cpp
+--- a/nav2_smac_planner/src/smac_planner_lattice.cpp
++++ b/nav2_smac_planner/src/smac_planner_lattice.cpp
+@@ -343,12 +343,13 @@
+   pose.pose.orientation.z = 0.0;
+   pose.pose.orientation.w = 1.0;
+ 
+-  // Corner case of start and goal being on the same cell
+-  if (std::floor(mx_start) == std::floor(mx_goal) &&
+-    std::floor(my_start) == std::floor(my_goal))
+-  {
+-    // Preserve the requested sub-cell goal instead of declaring the start reached.
+-    const double start_yaw = tf2::getYaw(start.pose.orientation);
++  // Lattice endpoints are discretized; collision-check the exact requested finish.
++  const auto append_goal = [&](const geometry_msgs::msg::Pose from) {
++    float from_x, from_y;
++    if (!_costmap->worldToMapContinuous(from.position.x, from.position.y, from_x, from_y)) {
++      throw nav2_core::NoValidPathCouldBeFound("Goal connection starts outside map");
++    }
++    const double start_yaw = tf2::getYaw(from.orientation);
+     const double turn = tf2::getYaw(goal.pose.orientation) - start_yaw;
+     const double yaw_delta = std::atan2(std::sin(turn), std::cos(turn));
+     double radius = 0.0;
+@@ -357,30 +358,37 @@
+     }
+     const auto bins = _collision_checker.getPrecomputedAngles().size();
+     const int steps = std::max(1, static_cast<int>(std::ceil(10.0 * (
+-        std::hypot(mx_goal - mx_start, my_goal - my_start) +
++        std::hypot(mx_goal - from_x, my_goal - from_y) +
+         radius * std::abs(yaw_delta) / _costmap->getResolution()))));
+-    for (int i = 0; i <= steps; ++i) {
++    for (int i = plan.poses.empty() ? 0 : 1; i <= steps; ++i) {
+       if (cancel_checker()) {
+-        throw nav2_core::PlannerCancelled("Sub-cell goal connection canceled");
++        throw nav2_core::PlannerCancelled("Exact goal connection canceled");
+       }
+       const double fraction = static_cast<double>(i) / steps;
+       const double yaw = start_yaw + fraction * yaw_delta;
+       float bin = (yaw + 2.0 * M_PI) * bins / (2.0 * M_PI);
+       bin = std::fmod(bin, static_cast<float>(bins));
+       if (_collision_checker.inCollision(
+-          mx_start + fraction * (mx_goal - mx_start),
+-          my_start + fraction * (my_goal - my_start), bin, _allow_unknown))
++          from_x + fraction * (mx_goal - from_x),
++          from_y + fraction * (my_goal - from_y), bin, _allow_unknown))
+       {
+-        throw nav2_core::NoValidPathCouldBeFound("Sub-cell goal connection in collision");
++        throw nav2_core::NoValidPathCouldBeFound("Exact goal connection in collision");
+       }
+-      pose.pose = start.pose;
+-      pose.pose.position.x += fraction * (goal.pose.position.x - start.pose.position.x);
+-      pose.pose.position.y += fraction * (goal.pose.position.y - start.pose.position.y);
++      pose.pose = from;
++      pose.pose.position.x += fraction * (goal.pose.position.x - from.position.x);
++      pose.pose.position.y += fraction * (goal.pose.position.y - from.position.y);
+       pose.pose.orientation.z = std::sin(yaw / 2.0);
+       pose.pose.orientation.w = std::cos(yaw / 2.0);
+       plan.poses.push_back(pose);
+     }
+     plan.poses.back().pose = goal.pose;
++  };
++
++  // Corner case of start and goal being on the same cell
++  if (std::floor(mx_start) == std::floor(mx_goal) &&
++    std::floor(my_start) == std::floor(my_goal))
++  {
++    append_goal(start.pose);
+ 
+     // Publish raw path for debug
+     if (_raw_plan_publisher->get_subscription_count() > 0) {
+@@ -533,6 +541,11 @@
+     }
+   }
+ 
++  if (plan.poses.empty()) {
++    throw nav2_core::NoValidPathCouldBeFound("Lattice search returned an empty path");
++  }
++  append_goal(plan.poses.back().pose);
++
+   return plan;
+ }
+ 
