@@ -435,6 +435,16 @@ Accurate wheel scale matters: RTAB-Map's ICP starts from wheel odometry, and Nav
 
 ## 4. Build the map
 
+The CAD floor correction places `base_link` 40.6 mm above `base_footprint`
+(previously 93 mm) and lowers every mounted sensor frame by 52.4 mm. Before
+rolling this correction onto a robot with an existing RTAB-Map database, back
+up that database with the repository data-backup tooling and select a fresh
+database path in the tracked deployment profile. Rebuild and qualify the map
+with the corrected sensor extrinsics; keep the old database for rollback.
+Recheck stored object heights and map-bound observations before using them for
+manipulation. The geometric regression checks the vendored CAD contact plane;
+it does not replace a physical height or arm-calibration measurement.
+
 Use a new database filename for the first mapping run. Start the workstation side
 (the robot address comes from `LEKIWI_ROBOT_HOST`; on a wired robot use
 `scripts/up.sh` with the same arguments):
