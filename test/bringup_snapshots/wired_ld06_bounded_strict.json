@@ -394,7 +394,7 @@
           "max_planning_time": 1.0,
           "plugin": "nav2_smac_planner::SmacPlannerLattice",
           "smooth_path": false,
-          "tolerance": 0.2
+          "tolerance": 0.0
          },
          "expected_planner_frequency": 5.0,
          "planner_plugins": [
@@ -914,7 +914,7 @@
           "max_planning_time": 1.0,
           "plugin": "nav2_smac_planner::SmacPlannerLattice",
           "smooth_path": false,
-          "tolerance": 0.2
+          "tolerance": 0.0
          },
          "expected_planner_frequency": 5.0,
          "planner_plugins": [
@@ -1552,7 +1552,7 @@
           "max_planning_time": 1.0,
           "plugin": "nav2_smac_planner::SmacPlannerLattice",
           "smooth_path": false,
-          "tolerance": 0.2
+          "tolerance": 0.0
          },
          "expected_planner_frequency": 5.0,
          "planner_plugins": [

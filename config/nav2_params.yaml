@@ -200,7 +200,7 @@ planner_server:
     planner_plugins: [GridBased, ExploreKnown]
     GridBased:
       plugin: nav2_smac_planner::SmacPlannerLattice
-      tolerance: 0.20
+      tolerance: 0.0
       allow_unknown: true
       allow_reverse_expansion: true
       max_planning_time: 1.0

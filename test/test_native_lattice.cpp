@@ -12,6 +12,7 @@ bool subcell_goals(const std::string & lattice)
   node->declare_parameter("test.lattice_filepath", lattice);
   node->declare_parameter("test.allow_unknown", false);
   node->declare_parameter("test.smooth_path", false);
+  node->declare_parameter("test.tolerance", 0.0);
   auto costmap = std::make_shared<nav2_costmap_2d::Costmap2DROS>("subcell_costmap");
   costmap->set_parameter(rclcpp::Parameter("footprint",
     "[[0.24,0.22],[0.24,-0.22],[-0.22,-0.22],[-0.22,0.22]]"));
@@ -52,12 +53,25 @@ bool subcell_goals(const std::string & lattice)
   bool cancellation_honored = false;
   try {planner.createPlan(start, goal, []() {return true;});}
   catch (const nav2_core::PlannerCancelled &) {cancellation_honored = true;}
+  goal = start;
+  goal.pose.position.x = 0.123;
+  goal.pose.position.y = 0.073;
+  goal.pose.orientation.z = std::sin(0.137 / 2.0);
+  goal.pose.orientation.w = std::cos(0.137 / 2.0);
+  const auto general = planner.createPlan(start, goal, canceled);
+  const auto & endpoint = general.poses.back().pose;
+  const bool general_exact =
+    std::abs(endpoint.position.x - goal.pose.position.x) < 1e-8 &&
+    std::abs(endpoint.position.y - goal.pose.position.y) < 1e-8 &&
+    std::abs(endpoint.orientation.z - goal.pose.orientation.z) < 1e-8 &&
+    std::abs(endpoint.orientation.w - goal.pose.orientation.w) < 1e-8;
   planner.cleanup();
   costmap->on_cleanup(rclcpp_lifecycle::State());
   std::cout << "exact_subcell_goal=" << exact << " endpoint_blocked=" << endpoint_blocked
             << " swept_rotation_blocked=" << rotation_blocked << " rotation_exact=" << rotation_exact
-            << " cancellation_honored=" << cancellation_honored << '\n';
-  return exact && endpoint_blocked && rotation_blocked && rotation_exact && cancellation_honored;
+            << " cancellation_honored=" << cancellation_honored
+            << " general_exact=" << general_exact << '\n';
+  return exact && endpoint_blocked && rotation_blocked && rotation_exact && cancellation_honored && general_exact;
 }
 
 int main(int argc, char ** argv)

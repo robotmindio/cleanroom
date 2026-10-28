@@ -340,17 +340,23 @@ revision=$(git -C upstream rev-parse HEAD)
 mkdir -p thirdparty/dep thirdparty/plain
 printf 'two\n' > upstream/a.txt
 git -C upstream diff > thirdparty/dep/0001-first.patch
-git -C upstream checkout -q a.txt
-printf 'three\n' > upstream/b.txt
+git -C upstream add a.txt
+git -C upstream commit -qm first
+printf 'three\n' > upstream/a.txt
 git -C upstream diff > thirdparty/dep/0002-second.patch
-git -C upstream checkout -q b.txt
+git -C upstream restore --source="$revision" --staged --worktree a.txt
 
 checkout_with_patches dep "$PWD/upstream" "$PWD/dest" "$revision" >/dev/null 2>&1
-[[ $(cat dest/a.txt) == two && $(cat dest/b.txt) == three ]]
+[[ $(cat dest/a.txt) == three && $(cat dest/b.txt) == one ]]
 checkout_with_patches dep "$PWD/upstream" "$PWD/dest" "$revision" >/dev/null 2>&1
-[[ $(cat dest/a.txt) == two && $(cat dest/b.txt) == three ]]
+[[ $(cat dest/a.txt) == three && $(cat dest/b.txt) == one ]]
+printf 'mine\n' > dest/b.txt
 apply_thirdparty_patches dep dest
-[[ $(cat dest/a.txt) == two && $(cat dest/b.txt) == three ]]
+[[ $(cat dest/a.txt) == three && $(cat dest/b.txt) == mine ]]
+# A retry also completes a partially applied stack.
+git -C dest apply --reverse "$PWD/thirdparty/dep/0002-second.patch"
+apply_thirdparty_patches dep dest
+[[ $(cat dest/a.txt) == three && $(cat dest/b.txt) == mine ]]
 # A dependency without tracked patches is a plain pinned checkout.
 checkout_with_patches plain "$PWD/upstream" "$PWD/clean" "$revision" >/dev/null 2>&1
 [[ $(cat clean/a.txt) == one && -z $(git -C clean status --porcelain) ]]

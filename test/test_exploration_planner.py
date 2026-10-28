@@ -150,7 +150,9 @@ def test_native_routes_fit_the_body_without_extra_wall_clearance(tmp_path, scene
                 2 * math.atan2(pose.pose.orientation.z, pose.pose.orientation.w), footprint, 20,
             ) for pose in path), [(pose.pose.position, pose.pose.orientation) for pose in path]
             assert math.hypot(path[-1].pose.position.x - goal.pose.position.x,
-                              path[-1].pose.position.y - goal.pose.position.y) < 0.03
+                              path[-1].pose.position.y - goal.pose.position.y) < 1e-8
+            final_yaw = 2 * math.atan2(path[-1].pose.orientation.z, path[-1].pose.orientation.w)
+            assert abs(math.atan2(math.sin(final_yaw - yaw), math.cos(final_yaw - yaw))) < 1e-8
     finally:
         if process is not None and process.poll() is None:
             process.send_signal(signal.SIGINT)
