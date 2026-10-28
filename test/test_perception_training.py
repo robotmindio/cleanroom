@@ -204,6 +204,8 @@ def test_the_recognizer_job_reuses_the_shared_job_and_returns_results_even_on_fa
     job = json.loads(next(call[2] for call in cluster.calls if call[0] == 'kubectl' and call[1][0] == 'create'))
     container = job['spec']['template']['spec']['containers'][0]
     assert container['image'] == trainer.IMAGE and {'name': 'PACKAGES', 'value': trainer.PACKAGES} in container['env']
+    pins = (REPOSITORY / 'config/requirements-perception.txt').read_text().splitlines()
+    assert all(pin in trainer.PACKAGES.split() for pin in pins if pin and not pin.startswith('#'))
     assert job['metadata']['labels'] == {'app.kubernetes.io/name': 'recognizer-train'}
     assert 'sha256sum --check' in container['command'][2]
     lost = StagedCluster(cluster_args(), fail_wait=True)
