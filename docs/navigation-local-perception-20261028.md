@@ -112,3 +112,37 @@ selection and disabled perception startup. Recognition accuracy, independent
 scene coverage and full object-search acceptance remain unqualified; the
 three-image development sample is not an independent corpus. The existing
 search coverage policy still requires fresh stationary observations.
+
+## General lattice endpoint follow-up
+
+Repeating after the reviewed `69db27d` restart exposed the remaining general-path
+case. A 0.10 m / zero-yaw request received an initial path ending at 0.05 m /
+-pi/2 yaw. The task exhausted the 30 s trial deadline and was canceled to a
+confirmed terminal state. Guarded manual return restored its pre-trial wheel
+pose without health faults. The earlier six successful tasks therefore did not
+establish reliable general paths after restart.
+
+`GridBased` search tolerance is now zero instead of 0.20 m. A real-plugin
+regression showed zero tolerance alone still returning a discretized endpoint.
+`0005-exact-lattice-endpoints.patch` shares the existing collision-checked exact
+finish between same-cell and general paths, after smoothing. A final connection
+that collides is rejected. Arrival tolerances, footprint, unknown-space policy
+and motion limits are unchanged. All six native regression cases, all 12 actual
+planner route cases with exact final position/orientation checks, and 68 launch
+checks pass. GitHub's full build/test/lint and coverage run also passed.
+
+The split deployment installed `ee7cbeac2ff7` on both hosts after all 16 device
+and 105 compute groups passed. Live parameter reads confirmed both planner
+tolerances at zero and controller arrival tolerances at 0.03 m / 0.15 rad;
+planner, controller and collision monitor were active. Perception startup
+remained disabled, with the reviewed primary/fallback selection retained.
+
+All six new managed 0.10 m out-and-back tasks passed after this restart, each
+in 4.78–5.93 s. Settled client-TF position errors were 0.02014, 0.02423, 0.02361,
+0.02411, 0.02348 and 0.02421 m. Maximum final yaw error was 0.01636 rad;
+maximum wheel-yaw excursion was 0.02151 rad, without a recovery spin. Wheel
+translation stayed within 0.07914 m of the initial pose. No health faults were
+recorded. Final checks confirmed operational readiness, armed torque, fresh
+`travel_stow`, all five Pi services active and the temporary perception service
+stopped. These remain short-range map/odometry trials; independent physical
+metrology, whole-room navigation and recognition accuracy remain unqualified.
