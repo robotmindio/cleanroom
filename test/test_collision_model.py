@@ -65,14 +65,14 @@ def test_distal_arm_checks_physical_chassis_and_mounted_hardware():
     assert guard.get("filename") == "package://lekiwi_rmf/urdf/chassis_guard.stl"
     assert visible_guard.get("filename") == guard.get("filename")
     assert base.find("collision/origin").get("xyz") == base.find("visual/origin").get("xyz")
-    assert np.fromstring(base.find("collision/origin").get("xyz"), sep=" ") == pytest.approx([0, 0, -0.020])
+    assert np.fromstring(base.find("collision/origin").get("xyz"), sep=" ") == pytest.approx([0, 0, 0.082])
     assert float(base.find("visual/material/color").get("rgba").split()[-1]) > 0
     mesh = np.frombuffer((ROOT / "urdf/chassis_guard.stl").read_bytes()[84:],
                          dtype=np.dtype([("normal", "<f4", (3,)), ("vertices", "<f4", (3, 3)), ("attr", "<u2")]))["vertices"].reshape(-1, 3)
     assert mesh[:, 0].min() == pytest.approx(-0.145)
     assert mesh[:, 0].max() == pytest.approx(-0.003)
     assert np.ptp(mesh[:, 2]) == pytest.approx(0.050)
-    assert np.fromstring(mount.get("xyz"), sep=" ") == pytest.approx([0.0, 0.0, 0.093])
+    assert np.fromstring(mount.get("xyz"), sep=" ") == pytest.approx([0.0, 0.0, 0.0406])
     obstacles = (
         "base_link", "front_camera_collision_proxy", "lidar_collision_proxy",
         "rpi5_stack_collision_proxy", "astra_camera_link",
@@ -260,6 +260,28 @@ def _link_surface_points(robot: ET.Element, link: str, count: int) -> np.ndarray
         points.append(cloud @ transform[:3, :3].T + transform[:3, 3])
     points = np.vstack(points)
     return points[np.random.default_rng(0).choice(len(points), count, replace=False)]
+
+
+def test_cad_wheel_contact_planes_are_on_the_floor():
+    robot = _real_robot()
+    parents = {joint.find('child').get('link'): joint for joint in robot.findall('joint')}
+    wheels = [link.get('name') for link in robot.findall('link')
+              if link.get('name').startswith('4-Omni-Directional-Wheel_Single_Body')]
+    assert len(wheels) == 3
+    for wheel in wheels:
+        visual = robot.find(f"link[@name='{wheel}']/visual")
+        mesh = visual.find('geometry/mesh')
+        data = (ROOT / mesh.get('filename').removeprefix('package://lekiwi_rmf/')).read_bytes()
+        points = np.frombuffer(data, offset=84, dtype=np.dtype([
+            ('normal', '<f4', (3,)), ('vertices', '<f4', (3, 3)), ('attr', '<u2')
+        ]))['vertices'].reshape(-1, 3) * np.fromstring(mesh.get('scale', '1 1 1'), sep=' ')
+        frame, transform = wheel, _transform(visual.find('origin'))
+        while frame != 'base_footprint':
+            joint = parents[frame]
+            transform = _transform(joint.find('origin')) @ transform
+            frame = joint.find('parent').get('link')
+        world = points @ transform[:3, :3].T + transform[:3, 3]
+        assert world[:, 2].min() == pytest.approx(0, abs=0.001), wheel
 
 
 def test_wrist_and_moving_jaw_meshes_never_touch_at_any_roll_or_gripper_angle():
