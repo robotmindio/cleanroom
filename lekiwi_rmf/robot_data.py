@@ -87,7 +87,9 @@ def load_policy(path=None):
 def store_paths(policy, home, domain=0, sim=False):
     """Where each store lives for this ROS domain, with the same suffix rule as the owning nodes."""
     suffix = (f'_{domain}' if domain else '') + ('_sim' if sim else '')
-    return {name: Path(home) / store['path'].format(suffix=suffix) for name, store in policy['stores'].items()}
+    return {name: Path(home) / store['path'].format(
+        suffix=f'_{domain}' + ('_sim' if sim else '') if name in ('observations', 'spatial_memory') else suffix)
+        for name, store in policy['stores'].items()}
 
 
 def digest(path):
