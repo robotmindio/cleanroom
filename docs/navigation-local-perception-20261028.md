@@ -29,8 +29,8 @@ Validation before rollout: 28 scan-filter tests, 145 broader scan/launch/provide
 profile tests, 13 launch snapshots, native clock regression, repository lint and
 Git diff checks passed. The diagnostic planner returned paths for 0.10, 0.20
 and 0.30 m goals without commanding motion. This is not evidence of successful
-physical navigation. Runtime rollout and managed navigation/perception trials
-are pending; private inputs and outputs are retained under
+physical navigation. Subsequent runtime and physical results follow below;
+private inputs and outputs are retained under
 `~/.ros/lekiwi/qualification/20261028-navigation-rtdetr/`.
 
 
@@ -72,5 +72,43 @@ real-plugin regression fails before and passes after the patch for exact arrival
 occupied endpoint, swept rotation collision, free rotation and cancellation.
 The test links only the lattice DSO because loading both the generic and lattice
 DSOs duplicates the upstream search-table statics. The robot was returned slowly
-near its starting pose after the failed trial. Final goal-fix rollout and repeated
-managed navigation are pending.
+near its starting pose after the failed trial.
+
+## Corrected planner rollout and physical trials
+
+The repository split-deployment script installed `528ddaffaa6e` on both hosts.
+All 16 device and 105 compute test groups passed; the script verified fresh
+`travel_stow`, activated the release and confirmed operational readiness and
+armed torque. This release also contains the final no-step chrony LAN policy;
+it supersedes the earlier timesyncd proposal above. See
+[clock synchronization verification](clock-sync-20261028.md) for the installer,
+77 installer tests, measured synchronization estimates and remaining limits.
+
+Six managed navigation tasks alternated between a point 0.10 m ahead and the
+initial map pose. Each task succeeded within 30 s. A separate client sampled
+map-to-base TF 0.7 s after task completion; all six samples satisfied the
+unchanged 0.03 m / 0.15 rad tolerances. Position errors in task order were
+0.02307, 0.02865, 0.02438, 0.02200, 0.02474 and 0.02301 m; maximum yaw error
+was 0.04044 rad. Wheel-odometry displacement from the initial pose stayed below
+0.07915 m and the live guard recorded no health faults. These are short-range
+map/odometry checks, not independent metrology or whole-room qualification.
+
+A repeated stationary front-camera run on this release recorded 141 fresh
+local RT-DETR outputs, zero late outputs, zero invalid ages and zero rejected
+or overwritten frames. Inference p50/p95/p99 was 0.283/0.334/0.398 s;
+queue p95 was 0.362 s and sensor-age p95 0.050 s. The local-only profile had
+no fallback and retained the pinned model identity. The temporary perception
+service was stopped after measurement.
+
+The remote CI coverage run exposed a test race: the simulated first inference
+automatically resumed after five seconds while the test thread could still be
+sending frames. The fixture now waits for explicit release and confirms the
+latest frame was received before releasing inference. All 13 perception tests
+pass with coverage locally; repository Python style checks pass. This changes
+test synchronization, not production freshness or scheduling behavior.
+
+The reviewed source retains the prior open-vocabulary primary/local-fallback
+selection and disabled perception startup. Recognition accuracy, independent
+scene coverage and full object-search acceptance remain unqualified; the
+three-image development sample is not an independent corpus. The existing
+search coverage policy still requires fresh stationary observations.
