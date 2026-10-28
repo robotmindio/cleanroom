@@ -1,7 +1,8 @@
 # Lidar clock recovery and local recognition
 
-Runtime candidate: `1b8ae73`, based on deployed `f6598a1` plus the data backup fix
-from PR #115. Physical qualification is in progress; this is not acceptance.
+Initial runtime candidate: `1b8ae73`, based on deployed `f6598a1` plus the data backup fix
+from PR #115. The experimental perception default described below was removed during review;
+the final PR retains the existing perception selection and startup policy.
 
 The October 26 journal shows `slam_cloud` failing in `Time.from_msg(scan.header.stamp)`
 with negative seconds, concurrently with native controller, planner and collision
@@ -18,9 +19,10 @@ clockwise negative time increments. Discarded scans retain no invented timestamp
 the existing sensor freshness gates remain in force. Nav2 processes use the
 standard launch respawn option and existing lifecycle supervision.
 
-Recognition configuration now selects local RT-DETR with no remote fallback,
-using the tracked front camera. Production perception startup remains disabled
-pending qualification. GPU model pins, collision geometry, speed limits, goal
+The initial candidate selected local RT-DETR without a remote fallback for a
+front-camera trial. That trial has not established a qualified replacement for
+the open-vocabulary default, so review removed the selection change. Production
+perception startup remains disabled pending qualification. GPU model pins, collision geometry, speed limits, goal
 tolerances and the two-second perception freshness limit are unchanged.
 
 Validation before rollout: 28 scan-filter tests, 145 broader scan/launch/provider/

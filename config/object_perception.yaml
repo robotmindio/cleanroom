@@ -1,8 +1,9 @@
 /**:
   ros__parameters:
-    # Qualify one local operating point without paying a failed remote attempt before CPU inference.
-    model_name: rtdetr_v2_r18
-    fallback_model_name: ''
+    # Open-vocabulary Grounding DINO on the RobotMind GPU provider; while it is unreachable or answers
+    # outside its pinned identity, the local CPU RT-DETR serves frames under its own model_sha256.
+    model_name: grounding_dino_tiny_gpu
+    fallback_model_name: rtdetr_v2_r18
 object_detector:
   ros__parameters:
     max_rate_hz: 2.0
