@@ -166,6 +166,7 @@ render_systemd_unit "$PROJECT_ROOT/systemd/lekiwi.slice" "$UNIT_DIR/lekiwi.slice
 install_unit lekiwi-stack.service
 log "Installing ROS log rotation"
 install_log_rotation
+as_root "$PROJECT_ROOT/scripts/install-time-sync.sh"
 log "Validating rendered systemd unit"
 verify_systemd_units lekiwi.slice lekiwi-stack.service
 verify_systemd_units lekiwi-ros-logrotate.service lekiwi-ros-logrotate.timer

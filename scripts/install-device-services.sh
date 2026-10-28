@@ -175,6 +175,7 @@ else
 fi
 log "Installing ROS log rotation"
 install_log_rotation
+as_root "$PROJECT_ROOT/scripts/install-time-sync.sh"
 if [[ $camera_ros_available == true && -z "$(first_match '/dev/v4l/by-id/*WEBCAM*-video-index0')" ]]; then
   log "no front camera found -- lekiwi-cameras will wait without affecting Astra"
   log "(set LEKIWI_FRONT for other hardware)."

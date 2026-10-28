@@ -18,6 +18,36 @@ import pytest
 ROOT = pathlib.Path(__file__).parents[1]
 
 
+def test_clock_setup_is_repeatable_and_only_restarts_timesyncd(tmp_path):
+    environment = tmp_path / 'environment.sh'
+    log = tmp_path / 'calls'
+    environment.write_text(r'''
+as_root() {
+  local command=$1 arg
+  shift
+  local args=()
+  for arg; do
+    [[ $arg != /etc/* ]] || arg="$LEKIWI_TEST_ROOT$arg"
+    args+=("$arg")
+  done
+  if [[ $command == systemctl ]]; then
+    printf '%s\n' "${args[*]}" >> "$LEKIWI_TEST_LOG"
+  else
+    "$command" "${args[@]}"
+  fi
+}
+''')
+    env = {**os.environ, 'BASH_ENV': str(environment), 'LEKIWI_TEST_ROOT': str(tmp_path),
+           'LEKIWI_TEST_LOG': str(log)}
+    for _ in range(2):
+        subprocess.run(['bash', str(ROOT / 'scripts/install-time-sync.sh')], env=env, check=True)
+    installed = tmp_path / 'etc/systemd/timesyncd.conf.d/60-lekiwi.conf'
+    assert installed.read_text() == (ROOT / 'config/timesyncd.conf').read_text().rstrip('\n')
+    assert log.read_text().splitlines() == [
+        'try-restart systemd-timesyncd.service', 'enable --now systemd-timesyncd.service',
+        'enable --now systemd-timesyncd.service']
+
+
 @pytest.mark.parametrize('activation_failure',[False,True])
 @pytest.mark.parametrize('existing_profile',[False,True])
 def test_wifi_switch_arms_rollback_before_activation_and_retains_original(tmp_path,activation_failure,existing_profile):
@@ -841,10 +871,11 @@ def test_managed_build_prefers_system_cmake_and_records_its_revision():
     ("compute", ("systemd/lekiwi.slice", "systemd/lekiwi-stack.service", "scripts/lib/service-install-common.sh",
                  "scripts/lib/runtime-common.sh", "scripts/install-deploy-sudoers.sh",
                  "scripts/setup-zenoh-tls.sh", "scripts/install-wifi-powersave.sh",
-                 "scripts/install-compute-services.sh")),
+                 "scripts/install-compute-services.sh", "scripts/install-time-sync.sh", "config/timesyncd.conf")),
     ("device", ("systemd/lekiwi-astra.service", "scripts/ros-astra.sh", "systemd/lekiwi-lidar.service",
                 "scripts/ros-lidar.sh", "scripts/lib/runtime-common.sh", "scripts/install-device-network.sh",
-                "scripts/install-wifi-powersave.sh", "config/dds_socket_buffers.conf")),
+                "scripts/install-wifi-powersave.sh", "config/dds_socket_buffers.conf",
+                "scripts/install-time-sync.sh", "config/timesyncd.conf")),
 ])
 def test_service_fingerprint_changes_with_each_installed_service_input(tmp_path, role, sources):
     checkout = tmp_path / "checkout"
@@ -852,6 +883,7 @@ def test_service_fingerprint_changes_with_each_installed_service_input(tmp_path,
     shutil.copytree(ROOT / "scripts", checkout / "scripts")
     (checkout / "config").mkdir()
     shutil.copy2(ROOT / "config" / "dds_socket_buffers.conf", checkout / "config")
+    shutil.copy2(ROOT / "config" / "timesyncd.conf", checkout / "config")
 
     def fingerprint():
         result = _bash('PROJECT_ROOT=$1; source "$LIB/runtime-common.sh"; source "$LIB/service-install-revision.sh"\n'
