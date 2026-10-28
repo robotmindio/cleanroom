@@ -40,7 +40,8 @@ FINETUNE = REPOSITORY / 'lekiwi_rmf/detector_finetune.py'
 # pytorch/pytorch:2.7.1-cuda12.6-cudnn9-runtime, the image scripts/train-skill.py pins; sm_60 kernels run on the GTX 1070.
 IMAGE = 'docker.io/pytorch/pytorch@sha256:2b59b1b91885677814f78be1f8df48a25d5dc952eb6580eaecfefca510f9afd3'
 # The runtime's own pins (config/requirements-perception.txt) plus the matcher's scipy.
-PACKAGES = 'transformers==4.51.3 safetensors==0.5.3 Pillow==11.2.1 scipy==1.15.3'
+PACKAGES = ' '.join(line for line in (REPOSITORY / 'config/requirements-perception.txt').read_text().splitlines()
+                    if line and not line.startswith('#')) + ' scipy==1.15.3'
 LOCAL_PYTHON = Path.home() / '.ros/lekiwi/perception-venv/bin/python'
 MODELS = Path.home() / '.ros/lekiwi/models'
 INSTALL = r'''set -e

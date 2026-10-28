@@ -319,7 +319,7 @@ class Recognizer:
             scope = 'label'
         else:
             result = self.processor.post_process_grounded_object_detection(
-                outputs, inputs.input_ids, box_threshold=values['box_threshold'],
+                outputs, inputs.input_ids, threshold=values['box_threshold'],
                 text_threshold=values['text_threshold'], target_sizes=[(height, width)])[0]
             labels, scope = result['text_labels'], values['nms_scope']
         rows = []

@@ -374,7 +374,8 @@ def test_transformer_nms_keeps_overlapping_classes_but_merges_synonymous_prompts
         def post_process_object_detection(self, *args, **kwargs):
             return [result]
 
-        post_process_grounded_object_detection = post_process_object_detection
+        def post_process_grounded_object_detection(self, outputs, input_ids, *, threshold, text_threshold, target_sizes):
+            return [result]
 
     recognizer = bare_recognizer(backend)
     query = make_query(['a cup', 'mug']) if recognizer.open_vocabulary else None
