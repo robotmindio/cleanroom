@@ -1,5 +1,5 @@
 # Kept in a separate perception venv; ROS and motor-driver Python stay unchanged.
 numpy==1.26.4
-Pillow==12.3.0
+Pillow==13.0.0
 transformers==5.10.1
 safetensors==0.5.3
