@@ -1,0 +1,79 @@
+diff --git a/ldlidar_driver/src/dataprocess/lipkg.cpp b/ldlidar_driver/src/dataprocess/lipkg.cpp
+--- a/ldlidar_driver/src/dataprocess/lipkg.cpp
++++ b/ldlidar_driver/src/dataprocess/lipkg.cpp
+@@ -156,6 +156,13 @@
+           continue;
+         }
+         uint64_t current_pack_stamp = get_timestamp_();
++        // Wall-clock adjustments must not underflow unsigned packet interpolation.
++        if (current_pack_stamp <= last_pkg_timestamp_) {
++          frame_tmp_.clear();
++          first_frame_ = true;
++          last_pkg_timestamp_ = current_pack_stamp;
++          continue;
++        }
+         int pkg_point_number = POINT_PER_PACK;
+         double pack_stamp_point_step =  
+           static_cast<double>(current_pack_stamp - last_pkg_timestamp_) / static_cast<double>(pkg_point_number - 1);
+diff --git a/test/clock_jump.cpp b/test/clock_jump.cpp
+new file mode 100644
+--- /dev/null
++++ b/test/clock_jump.cpp
+@@ -0,0 +1,40 @@
++#include <cstdint>
++#include <iostream>
++#include "lipkg.h"
++
++namespace ldlidar { uint8_t CalCRC8(const uint8_t *, uint16_t); }
++
++int main() {
++  ldlidar::LiPkg parser;
++  parser.SetProductType(ldlidar::LDType::LD_06);
++  parser.EnableFilter(false);
++  uint64_t clock = 1793011200000000000ULL;
++  parser.RegisterTimestampGetFunctional([&clock]() { return clock; });
++  int before = 0, after = 0;
++  for (int index = 0; index < 400; ++index) {
++    clock += 3000000;
++    if (index == 100) clock -= 500000000;
++    if (index == 200) clock -= 3000000;
++    ldlidar::LiDARFrameTypeDef packet{};
++    packet.header = ldlidar::PKG_HEADER;
++    packet.ver_len = ldlidar::PKG_VER_LEN;
++    packet.speed = 3600;
++    packet.start_angle = (index % 36) * 1000;
++    packet.end_angle = packet.start_angle + 990;
++    for (auto &point : packet.point) { point.distance = 1000; point.intensity = 100; }
++    packet.crc8 = ldlidar::CalCRC8(reinterpret_cast<const uint8_t *>(&packet), sizeof(packet) - 1);
++    parser.CommReadCallback(reinterpret_cast<const char *>(&packet), sizeof(packet));
++    ldlidar::Points2D scan;
++    if (!parser.GetLaserScanData(scan)) continue;
++    if (index < 100) ++before; else ++after;
++    for (const auto &point : scan) {
++      if (point.stamp > clock || clock - point.stamp > 200000000) {
++        std::cerr << "invalid acquisition timestamp after clock adjustment\n";
++        return 1;
++      }
++    }
++  }
++  if (!before || !after) return 1;
++  std::cout << "valid scans before and after backward and repeated clock values\n";
++  return 0;
++}
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -66,6 +66,13 @@
+ ament_target_dependencies(${PROJECT_NAME}_node rclcpp sensor_msgs)
+ target_link_libraries(${PROJECT_NAME}_node pthread)
+ 
++if(BUILD_TESTING)
++  enable_testing()
++  add_executable(test_lidar_clock test/clock_jump.cpp ${LDLIDAR_DRI_DATARPC} ${LDLIDAR_DRI_FILTER})
++  target_link_libraries(test_lidar_clock pthread)
++  add_test(NAME lidar_clock_jump COMMAND test_lidar_clock)
++endif()
++
+ # Install
+ install(TARGETS ${PROJECT_NAME}_node
+   DESTINATION lib/${PROJECT_NAME}

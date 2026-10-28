@@ -1,5 +1,14 @@
 # Vendored: ldlidar_stl_ros2
 
+`0005-clock-reset.patch` clears the incomplete revolution when the packet clock
+moves backward or repeats. The SDK previously subtracted unsigned timestamps
+across a backward adjustment, yielding impossible acquisition stamps that could
+crash every ROS scan consumer. Normal packet stamps and clockwise scan timing
+are unchanged. Its packet-stream regression feeds backward and repeated clock
+values through the real parser, verifies valid acquisition stamps and checks
+that complete scans resume. Build the patched dependency with `BUILD_TESTING=ON`
+and run `ctest -R lidar_clock_jump --output-on-failure` in its build directory.
+
 `scripts/install.sh` clones [LDROBOT's official ROS 2 driver](https://github.com/ldrobotSensorTeam/ldlidar_stl_ros2)
 into `$LEKIWI_WS/src/ldlidar_stl_ros2` at the revision pinned by `LDLIDAR_STL_REV` in
 `scripts/thirdparty-common.sh`, then applies the tracked patches in this directory before building.

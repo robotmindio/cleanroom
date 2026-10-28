@@ -27,6 +27,7 @@
    {
     "arguments": {
      "params_file": "$(share lekiwi_rmf)/config/nav2_params.yaml",
+     "use_respawn": "true",
      "use_sim_time": "True"
     },
     "include": "$(share nav2_bringup)/launch/navigation_launch.py"

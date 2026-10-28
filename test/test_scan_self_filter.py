@@ -2,6 +2,8 @@
 
 import math
 import pathlib
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 import yaml
@@ -17,6 +19,38 @@ def _scan(ranges, angle_min=0.0, increment=math.radians(30)):
     scan.angle_max = angle_min + increment * (len(ranges) - 1)
     scan.ranges = list(ranges)
     return scan
+
+
+@pytest.mark.parametrize('seconds,nanoseconds,increment,period', [
+    (-1, 0, .001, .1), (1, 10**9, .001, .1), (0, 0, -.001, .1),
+    (1, 0, math.nan, .1), (1, 0, math.inf, .1), (1, 0, 1e20, .1), (1, 0, .001, math.nan),
+    (1, 0, .001, -.1),
+])
+def test_invalid_device_timing_never_reaches_scan_consumers(seconds, nanoseconds, increment, period):
+    from lekiwi_rmf.scan_self_filter import ScanSelfFilter
+
+    scan = _scan([1.0] * 3)
+    scan.header.stamp.sec, scan.header.stamp.nanosec = seconds, nanoseconds
+    scan.time_increment, scan.scan_time = increment, period
+    peer = SimpleNamespace(pub=Mock(), get_logger=Mock(), sectors=[])
+    ScanSelfFilter.on_scan(peer, scan)
+    peer.pub.publish.assert_not_called()
+    peer.get_logger().warning.assert_called_once()
+
+
+@pytest.mark.parametrize('increment', [-.001, 0., .001])
+def test_valid_scan_timing_in_either_direction_is_preserved(increment):
+    from lekiwi_rmf.scan_self_filter import ScanSelfFilter
+
+    scan = _scan([1.0] * 3)
+    scan.header.stamp.sec = 10
+    scan.time_increment, scan.scan_time = increment, .1
+    peer = SimpleNamespace(pub=Mock(), get_logger=Mock(), sectors=[])
+    ScanSelfFilter.on_scan(peer, scan)
+    published = peer.pub.publish.call_args.args[0]
+    assert published.header == scan.header and published.time_increment == scan.time_increment
+    assert list(published.ranges) == list(scan.ranges)
+    peer.get_logger.assert_not_called()
 
 
 def test_close_returns_in_the_sector_become_no_return_and_the_rest_is_untouched():

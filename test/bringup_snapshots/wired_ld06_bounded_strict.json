@@ -465,6 +465,7 @@
        }
       }
      },
+     "use_respawn": "true",
      "use_sim_time": "False"
     },
     "include": "$(share nav2_bringup)/launch/navigation_launch.py"

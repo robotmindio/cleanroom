@@ -61,7 +61,12 @@ upstream license/provenance remain in `thirdparty/opencv_yolox/`.
 
 ## Remote GPU provider and local fallback
 
-`config/object_perception.yaml` selects `grounding_dino_tiny_gpu`: the same pinned
+`config/object_perception.yaml` selects local `rtdetr_v2_r18`, with no fallback,
+for the front-camera qualification. Production startup remains disabled until
+that operating point is qualified. This avoids spending a remote timeout before
+CPU inference while the GPU provider's runtime differs from its admitted pin.
+
+The optional `grounding_dino_tiny_gpu` recognizer uses the same pinned
 Grounding DINO weights as `grounding_dino_tiny`, served by
 RobotMind's `perception-provider` on the cluster GTX 1070. The endpoint lives in
 `config/perception_providers.yaml` (Tailscale address, 1.5 s timeout) and is not
@@ -73,7 +78,7 @@ SHA-256 and size of the image it was sent. Boxes then go through the same
 suppression as the local Grounding DINO. Measured on the cluster, GPU and CPU
 results for one image agreed to 1e-4 in score and 0.01 px.
 
-`fallback_model_name` (`rtdetr_v2_r18`) serves frames while the provider is
+When configured with `fallback_model_name: rtdetr_v2_r18`, it serves frames while the provider is
 unreachable, busy, not ready, too slow, or answering outside its pinned identity.
 After a failure, frames skip the primary for 10 s, so an outage costs one timeout
 per window. Fallback frames go to `/robot/perception/<camera>/fallback/...`, and
