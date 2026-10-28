@@ -11,7 +11,7 @@ service_fingerprint() {
         scripts/lib/service-install-common.sh scripts/lib/runtime-common.sh \
         scripts/lib/self-heal.sh scripts/install-deploy-sudoers.sh scripts/setup-zenoh-tls.sh \
         scripts/install-compute-services.sh scripts/install-wifi-powersave.sh \
-        scripts/install-time-sync.sh config/timesyncd.conf)
+        scripts/install-time-sync.sh config/chrony-compute.conf config/chrony-device.conf)
       ;;
     device)
       sources=(systemd/lekiwi-host.service systemd/lekiwi-astra.service \
@@ -22,7 +22,7 @@ service_fingerprint() {
         scripts/lib/service-install-common.sh scripts/lib/runtime-common.sh \
         scripts/lib/self-heal.sh scripts/install-deploy-sudoers.sh scripts/install-device-services.sh \
         scripts/install-device-network.sh scripts/install-wifi-regdom.sh scripts/install-wifi-powersave.sh \
-        config/dds_socket_buffers.conf scripts/install-time-sync.sh config/timesyncd.conf)
+        config/dds_socket_buffers.conf scripts/install-time-sync.sh config/chrony-compute.conf config/chrony-device.conf)
       ;;
     *) die "service fingerprint role must be compute or device" ;;
   esac

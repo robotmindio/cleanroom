@@ -18,10 +18,19 @@ import pytest
 ROOT = pathlib.Path(__file__).parents[1]
 
 
-def test_clock_setup_is_repeatable_and_only_restarts_timesyncd(tmp_path):
+@pytest.mark.parametrize('role', ['compute', 'device'])
+@pytest.mark.parametrize('package_installed', [False, True])
+def test_clock_setup_is_repeatable_and_only_restarts_chrony(tmp_path, role, package_installed):
     environment = tmp_path / 'environment.sh'
     log = tmp_path / 'calls'
     environment.write_text(r'''
+command() {
+  if [[ $* == '-v chronyd' ]]; then
+    [[ -f $LEKIWI_TEST_ROOT/chrony-installed ]]
+  else
+    builtin command "$@"
+  fi
+}
 as_root() {
   local command=$1 arg
   shift
@@ -30,22 +39,49 @@ as_root() {
     [[ $arg != /etc/* ]] || arg="$LEKIWI_TEST_ROOT$arg"
     args+=("$arg")
   done
-  if [[ $command == systemctl ]]; then
+  if [[ $command == env ]]; then
+    touch "$LEKIWI_TEST_ROOT/chrony-installed"
+    printf '%s\n' "package-install ${args[*]}" >> "$LEKIWI_TEST_LOG"
+  elif [[ $command == systemctl || $command == chronyd ]]; then
     printf '%s\n' "${args[*]}" >> "$LEKIWI_TEST_LOG"
   else
     "$command" "${args[@]}"
   fi
 }
 ''')
-    env = {**os.environ, 'BASH_ENV': str(environment), 'LEKIWI_TEST_ROOT': str(tmp_path),
+    if package_installed:
+        (tmp_path / 'chrony-installed').touch()
+    fakes = tmp_path / 'bin'
+    _executable(fakes / 'systemctl', 'exit 0\n')
+    env = {**os.environ, 'PATH': f"{fakes}:{os.environ['PATH']}",
+           'BASH_ENV': str(environment), 'LEKIWI_TEST_ROOT': str(tmp_path),
            'LEKIWI_TEST_LOG': str(log)}
     for _ in range(2):
-        subprocess.run(['bash', str(ROOT / 'scripts/install-time-sync.sh')], env=env, check=True)
-    installed = tmp_path / 'etc/systemd/timesyncd.conf.d/60-lekiwi.conf'
-    assert installed.read_text() == (ROOT / 'config/timesyncd.conf').read_text().rstrip('\n')
-    assert log.read_text().splitlines() == [
-        'try-restart systemd-timesyncd.service', 'enable --now systemd-timesyncd.service',
-        'enable --now systemd-timesyncd.service']
+        subprocess.run(['bash', str(ROOT / 'scripts/install-time-sync.sh'), role], env=env, check=True)
+    installed = tmp_path / 'etc/chrony/chrony.conf'
+    assert installed.read_text() == (ROOT / f'config/chrony-{role}.conf').read_text().rstrip('\n')
+    package_calls = [] if package_installed else [
+        'mask --runtime chrony.service',
+        'package-install NEEDRESTART_MODE=l DEBIAN_FRONTEND=noninteractive apt-get install -y chrony']
+    assert log.read_text().splitlines() == package_calls + [
+        '-p -f ' + str(installed), 'disable --now systemd-timesyncd.service',
+        'unmask --runtime chrony.service', 'try-restart chrony.service',
+        'enable --now chrony.service', '-p -f ' + str(installed),
+        'disable --now systemd-timesyncd.service', 'unmask --runtime chrony.service',
+        'enable --now chrony.service']
+
+
+def test_clock_profiles_share_lan_reference_without_clock_steps():
+    compute = (ROOT / 'config/chrony-compute.conf').read_text()
+    device = (ROOT / 'config/chrony-device.conf').read_text()
+    assert 'pool ntp.ubuntu.com iburst maxpoll 6' in compute
+    assert 'allow 192.168.110.0/24' in compute
+    assert 'server andres-Lenovo.local iburst minpoll 2 maxpoll 3 xleave' in device
+    for profile in (compute, device):
+        directives = [line.split()[0] for line in profile.splitlines()
+                      if line.strip() and not line.startswith('#')]
+        assert not {'makestep', 'initstepslew', 'local'} & set(directives)
+    assert not any(line.startswith(('pool ', 'peer ')) for line in device.splitlines())
 
 
 @pytest.mark.parametrize('activation_failure',[False,True])
@@ -871,11 +907,12 @@ def test_managed_build_prefers_system_cmake_and_records_its_revision():
     ("compute", ("systemd/lekiwi.slice", "systemd/lekiwi-stack.service", "scripts/lib/service-install-common.sh",
                  "scripts/lib/runtime-common.sh", "scripts/install-deploy-sudoers.sh",
                  "scripts/setup-zenoh-tls.sh", "scripts/install-wifi-powersave.sh",
-                 "scripts/install-compute-services.sh", "scripts/install-time-sync.sh", "config/timesyncd.conf")),
+                 "scripts/install-compute-services.sh", "scripts/install-time-sync.sh",
+                 "config/chrony-compute.conf", "config/chrony-device.conf")),
     ("device", ("systemd/lekiwi-astra.service", "scripts/ros-astra.sh", "systemd/lekiwi-lidar.service",
                 "scripts/ros-lidar.sh", "scripts/lib/runtime-common.sh", "scripts/install-device-network.sh",
                 "scripts/install-wifi-powersave.sh", "config/dds_socket_buffers.conf",
-                "scripts/install-time-sync.sh", "config/timesyncd.conf")),
+                "scripts/install-time-sync.sh", "config/chrony-compute.conf", "config/chrony-device.conf")),
 ])
 def test_service_fingerprint_changes_with_each_installed_service_input(tmp_path, role, sources):
     checkout = tmp_path / "checkout"
@@ -883,7 +920,8 @@ def test_service_fingerprint_changes_with_each_installed_service_input(tmp_path,
     shutil.copytree(ROOT / "scripts", checkout / "scripts")
     (checkout / "config").mkdir()
     shutil.copy2(ROOT / "config" / "dds_socket_buffers.conf", checkout / "config")
-    shutil.copy2(ROOT / "config" / "timesyncd.conf", checkout / "config")
+    for clock_role in ("compute", "device"):
+        shutil.copy2(ROOT / "config" / f"chrony-{clock_role}.conf", checkout / "config")
 
     def fingerprint():
         result = _bash('PROJECT_ROOT=$1; source "$LIB/runtime-common.sh"; source "$LIB/service-install-revision.sh"\n'
