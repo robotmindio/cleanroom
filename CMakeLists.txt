@@ -106,7 +106,11 @@ if(BUILD_TESTING)
     ament_target_dependencies(test_native_waitable rclcpp rclcpp_action control_msgs)
     find_package(nav2_smac_planner REQUIRED)
     add_executable(test_native_lattice test/test_native_lattice.cpp)
+    # The planner DSOs duplicate search-table statics; the fixture needs only lattice.
+    set(lekiwi_smac_libraries "${nav2_smac_planner_LIBRARIES}")
+    list(FILTER nav2_smac_planner_LIBRARIES EXCLUDE REGEX "/libnav2_smac_planner(_2d)?[.]so$")
     ament_target_dependencies(test_native_lattice nav2_smac_planner)
+    set(nav2_smac_planner_LIBRARIES "${lekiwi_smac_libraries}")
     add_executable(test_rest_contacts test/test_rest_contacts.cpp)
     target_compile_features(test_rest_contacts PUBLIC cxx_std_17)
     ament_target_dependencies(test_rest_contacts moveit_core)
@@ -183,6 +187,7 @@ if(BUILD_TESTING)
     isolate_lekiwi_test(test_native_waitable)
     ament_add_test(test_native_lattice
       COMMAND "$<TARGET_FILE:test_native_lattice>"
+        "${nav2_smac_planner_DIR}/../sample_primitives/5cm_resolution/0.5m_turning_radius/omni/output.json"
       RUNNER "${test_isolated_runner}"
       GENERATE_RESULT_FOR_RETURN_CODE_ZERO)
     isolate_lekiwi_test(test_native_lattice)
