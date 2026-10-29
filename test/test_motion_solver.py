@@ -130,8 +130,9 @@ def graph():
     context = Context()
     rclpy.init(context=context)
     fake = FakeMoveIt(context)
+    # Semantic reply tests must survive coverage scheduling delays in fake RPCs.
     solver = MotionSolver(context=context, parameter_overrides=[
-        Parameter('seed_samples', value=128), Parameter('service_timeout_sec', value=2.0),
+        Parameter('seed_samples', value=128), Parameter('service_timeout_sec', value=5.0),
         Parameter('planning_frame', value='base_link'), Parameter('max_fk_evaluations', value=600)])
     # The search's FK runs in process so its wall-clock cost cannot reach max_time_sec on a
     # loaded runner; candidates are still verified through the /compute_fk service.
