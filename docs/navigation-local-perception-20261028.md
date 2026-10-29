@@ -146,3 +146,15 @@ recorded. Final checks confirmed operational readiness, armed torque, fresh
 `travel_stow`, all five Pi services active and the temporary perception service
 stopped. These remain short-range map/odometry trials; independent physical
 metrology, whole-room navigation and recognition accuracy remain unqualified.
+
+### Confined short-goal replanning
+
+On the corrected floor map, an oblique 5 cm goal had a collision-free direct
+sweep, but lattice-heading discretization produced a roughly 40 cm route.
+`0006-short-omni-connections.patch` first checks the exact straight translation
+and shortest yaw sweep for omni goals within two map cells (10 cm at the tracked
+resolution). It uses the existing footprint/unknown-space checks and cancellation;
+a blocked sweep falls back to ordinary lattice planning. Other motion models and
+longer routes retain lattice search. Native tests cover seven short goals,
+mid-connection cancellation, and a blocked direct sweep with a valid detour.
+The short-path regression fails on the preceding binary and passes with the patch.

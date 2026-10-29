@@ -1,0 +1,27 @@
+diff --git a/nav2_smac_planner/src/smac_planner_lattice.cpp b/nav2_smac_planner/src/smac_planner_lattice.cpp
+--- a/nav2_smac_planner/src/smac_planner_lattice.cpp
++++ b/nav2_smac_planner/src/smac_planner_lattice.cpp
+@@ -383,6 +383,23 @@
+     }
+     plan.poses.back().pose = goal.pose;
+   };
++
++  // Omni bases can connect nearby poses directly without lattice-heading detours.
++  if (NodeLattice::motion_table.lattice_metadata.motion_model == "omni" &&
++    std::hypot(goal.pose.position.x - start.pose.position.x,
++      goal.pose.position.y - start.pose.position.y) <= 2.0 * _costmap->getResolution() + 1e-6)
++  {
++    try {
++      append_goal(start.pose);
++      if (_raw_plan_publisher->get_subscription_count() > 0) {
++        _raw_plan_publisher->publish(plan);
++      }
++      return plan;
++    } catch (const nav2_core::NoValidPathCouldBeFound &) {
++      // A blocked direct sweep still needs the ordinary lattice search.
++      plan.poses.clear();
++    }
++  }
+ 
+   // Corner case of start and goal being on the same cell
+   if (std::floor(mx_start) == std::floor(mx_goal) &&
