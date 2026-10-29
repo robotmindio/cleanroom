@@ -16,7 +16,7 @@ def test_deployment_profiles_resolve_coherent_defaults(profile, mode, source, la
         mode, source, source, laser,
     )
     assert values["safety_policy"] == "hold"
-    assert values["slam_mode"] == "mapping"
+    assert values["slam_mode"] == ("mapping" if mode == "sim" else "localization")
     validate_launch_arguments(values)
 
 
@@ -28,6 +28,20 @@ def test_profiles_preserve_installed_explicit_topology_arguments():
     assert values["camera_source"] == "remote"
     assert values["lidar_source"] == "remote"
     validate_launch_arguments(values)
+
+
+@pytest.mark.parametrize('profile', ['wired', 'split'])
+def test_real_mapping_remains_an_explicit_operator_choice(profile):
+    _, values = resolve_launch(profile=profile, slam_mode='mapping')
+    assert values['slam_mode'] == 'mapping'
+    mapper = find_node(resolve_bringup(profile=profile, slam_mode='mapping'), name='rtabmap')
+    assert mapper['parameters']['Mem/IncrementalMemory'] == 'True'
+    assert mapper['parameters']['Rtabmap/StartNewMapOnLoopClosure'] == 'false'
+
+
+def test_legacy_real_topology_also_reuses_the_saved_map():
+    _, values = resolve_launch(mode='real')
+    assert values['slam_mode'] == 'localization'
 
 
 @pytest.mark.parametrize("profile,publish_astra,strategy,visual,rgb,depth,rgbd,cameras", [
@@ -44,7 +58,7 @@ def test_mapper_yaml_and_dynamic_view_parameters_preserve_behavior(
     assert parameters["Vis/EstimationType"] == visual
     assert (parameters["subscribe_rgb"], parameters["subscribe_depth"], parameters["subscribe_rgbd"],
             parameters["rgbd_cameras"]) == (rgb, depth, rgbd, cameras)
-    assert parameters["Mem/IncrementalMemory"] == "True"
+    assert parameters["Mem/IncrementalMemory"] == ("True" if profile == "sim" else "False")
     assert parameters["Mem/InitWMWithAllNodes"] == "True"
     for key, expected in {
         "Kp/MaxFeatures": "500", "RGBD/NeighborLinkRefining": "false",

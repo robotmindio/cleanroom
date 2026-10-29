@@ -65,13 +65,61 @@ bool subcell_goals(const std::string & lattice)
     std::abs(endpoint.position.y - goal.pose.position.y) < 1e-8 &&
     std::abs(endpoint.orientation.z - goal.pose.orientation.z) < 1e-8 &&
     std::abs(endpoint.orientation.w - goal.pose.orientation.w) < 1e-8;
+  bool short_direct = true;
+  start.pose.position.x = 0.044;
+  start.pose.position.y = -0.394;
+  const double heading = -0.5;
+  start.pose.orientation.z = std::sin(heading / 2.0);
+  start.pose.orientation.w = std::cos(heading / 2.0);
+  // Replanning across a cell edge must not turn centimetres into a lattice detour.
+  for (const auto & delta : std::array<std::array<double, 3>, 7>{{
+      {.05, 0, 0}, {.08, 0, 0}, {.10, 0, 0}, {-.05, 0, 0}, {0, .05, 0}, {0, -.05, 0}, {.05, 0, .137}}})
+  {
+    goal = start;
+    goal.pose.position.x += delta[0] * std::cos(heading) - delta[1] * std::sin(heading);
+    goal.pose.position.y += delta[0] * std::sin(heading) + delta[1] * std::cos(heading);
+    goal.pose.orientation.z = std::sin((heading + delta[2]) / 2.0);
+    goal.pose.orientation.w = std::cos((heading + delta[2]) / 2.0);
+    const auto short_plan = planner.createPlan(start, goal, canceled);
+    double length = 0.0;
+    for (size_t i = 1; i < short_plan.poses.size(); ++i) {
+      length += std::hypot(
+        short_plan.poses[i].pose.position.x - short_plan.poses[i - 1].pose.position.x,
+        short_plan.poses[i].pose.position.y - short_plan.poses[i - 1].pose.position.y);
+    }
+    short_direct &= short_plan.poses.size() >= 2 &&
+      std::abs(length - std::hypot(delta[0], delta[1])) < 1e-6 &&
+      std::abs(short_plan.poses.front().pose.position.x - start.pose.position.x) < 1e-8 &&
+      std::abs(short_plan.poses.back().pose.position.x - goal.pose.position.x) < 1e-8;
+  }
+  bool short_cancellation = false;
+  int polls = 0;
+  try {planner.createPlan(start, goal, [&polls]() {return ++polls > 3;});}
+  catch (const nav2_core::PlannerCancelled &) {short_cancellation = true;}
+  start.pose.position.x = start.pose.position.y = 0.001;
+  start.pose.orientation.z = 0.0;
+  start.pose.orientation.w = 1.0;
+  goal = start;
+  goal.pose.position.x = 0.061;
+  goal.pose.orientation.z = goal.pose.orientation.w = std::sqrt(0.5);
+  grid->setCost(26, 20, nav2_costmap_2d::LETHAL_OBSTACLE);
+  bool blocked_short_fallback = false;
+  try {
+    const auto detour = planner.createPlan(start, goal, canceled);
+    blocked_short_fallback = !detour.poses.empty();
+  } catch (const nav2_core::NoValidPathCouldBeFound &) {
+    blocked_short_fallback = false;
+  }
   planner.cleanup();
   costmap->on_cleanup(rclcpp_lifecycle::State());
   std::cout << "exact_subcell_goal=" << exact << " endpoint_blocked=" << endpoint_blocked
             << " swept_rotation_blocked=" << rotation_blocked << " rotation_exact=" << rotation_exact
             << " cancellation_honored=" << cancellation_honored
-            << " general_exact=" << general_exact << '\n';
-  return exact && endpoint_blocked && rotation_blocked && rotation_exact && cancellation_honored && general_exact;
+            << " general_exact=" << general_exact << " short_direct=" << short_direct
+            << " short_cancellation=" << short_cancellation
+            << " blocked_short_fallback=" << blocked_short_fallback << '\n';
+  return exact && endpoint_blocked && rotation_blocked && rotation_exact && cancellation_honored &&
+         general_exact && short_direct && short_cancellation && blocked_short_fallback;
 }
 
 int main(int argc, char ** argv)
