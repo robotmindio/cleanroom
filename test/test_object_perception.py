@@ -68,11 +68,13 @@ def test_stationary_requires_recent_continuous_motion_feedback_and_still_wrist()
     assert not motion.stationary(100.35)
 
 
-def wait(predicate, timeout=5):
+def wait(predicate, timeout=5, refresh=None):
     end = time.monotonic() + timeout
     while not predicate():
         if time.monotonic() > end:
             raise AssertionError('isolated perception operation timed out')
+        if refresh is not None:
+            refresh()
         time.sleep(.01)
 
 
@@ -113,17 +115,16 @@ def test_receipt_keeps_latest_frame_while_inference_is_busy_and_expires_old_resu
         return image.header
     try:
         wait(lambda: source.get_subscription_count() == 1)
-        original = send()
-        wait(entered.is_set)
+        wait(entered.is_set, refresh=send)
         for _ in range(12):
             send()
             time.sleep(.02)
-        wait(lambda: node._stats['front']['overwritten'] > 0)
+        wait(lambda: node._stats['front']['overwritten'] > 0, refresh=send)
         assert len(node._frames) <= 1
         time.sleep(.8)
-        latest = send()
-        wait(lambda: node._last_stamp.get('front') ==
-             latest.stamp.sec * 10**9 + latest.stamp.nanosec)
+        latest = peer.get_clock().now().nanoseconds
+        # Best-effort receipt can drop or expire one frame; keep sending fresh ones.
+        wait(lambda: node._last_stamp.get('front', 0) >= latest, refresh=send)
         release.set()
         end = time.monotonic() + 8
         while not received and time.monotonic() < end:
@@ -131,9 +132,8 @@ def test_receipt_keeps_latest_frame_while_inference_is_busy_and_expires_old_resu
             time.sleep(.05)
         assert received
         assert maximum == 1
-        assert all(item.header != original for item in received)
-        stamp = received[-1].header.stamp
-        assert (stamp.sec, stamp.nanosec) >= (latest.stamp.sec, latest.stamp.nanosec)
+        assert all(item.header.stamp.sec * 10**9 + item.header.stamp.nanosec >= latest
+                   for item in received)
         assert node._stats['front']['rejected'] >= 1
         # The held frame's answer came back past max_source_age_sec: counted as late, never published.
         budget = node._budget.summary()
