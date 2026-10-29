@@ -24,7 +24,7 @@ shared saved calibration, including negative pitch.
 | `remote_ip` | IPv4/hostname | `127.0.0.1` | Address of the LeKiwi ZMQ host and of the device zenoh bridge (`scripts/ros-start.sh` takes it from `LEKIWI_ROBOT_HOST`) |
 | `curve_client_secret_key_file`, `curve_server_public_key_file` | file paths | empty | Optional CURVE identity for the ZMQ link; set both or neither |
 | `safety_policy` | `hold`, `strict` | `hold` | `hold` (domestic robot) stays armed through failures and re-arms itself. `strict` (larger robots): every failure disarms, cuts torque and waits for `/safety/arm`, startup included, and the safety supervisor denies motion. See [Arming and recovery](#arming-and-recovery). `scripts/ros-start.sh` passes `strict` when `LEKIWI_DISARM_ON_FAILURE=true` |
-| `rtabmap_database` | file path | sim: `~/.ros/lekiwi_rtabmap_sim.db`; real: `~/.ros/lekiwi_rtabmap.db` | RTAB-Map map database |
+| `rtabmap_database` | file path | sim: `~/.ros/lekiwi_rtabmap_sim.db`; real: `~/.ros/lekiwi_rtabmap_floor_v2.db` | RTAB-Map map database |
 | `rtabmap_wm_nodes` | integer | `300` | Nodes kept in RTAB-Map working memory before older ones move to the database |
 | `rtabmap_mapping_max_bytes`, `rtabmap_mapping_max_seconds` | integers | `17179869184`, `14400` | Mapping-session quota; reaching either switches RTAB-Map to localization |
 | `static_map` | `true`, `false` | `false` | Serve the checked-in floor plan on `/map` and move RTAB-Map's own grid to `/rtabmap/map` |

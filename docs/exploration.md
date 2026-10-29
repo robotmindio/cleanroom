@@ -200,7 +200,7 @@ resume request uses zero duration/radius and the original `revisit_known` settin
 ## Mapping lifecycle and quotas
 
 The task verifies `/rtabmap/set_mode_mapping` before navigating. It preserves
-`~/.ros/lekiwi_rtabmap.db`, without resetting, rotating or renaming the active
+`~/.ros/lekiwi_rtabmap_floor_v2.db`, without resetting, rotating or renaming the active
 database. If the task began in localization, it restores localization when it
 finishes, fails or is canceled; an existing mapping session remains mapping
 unless it reaches a quota.
