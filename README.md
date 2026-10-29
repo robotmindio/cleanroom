@@ -320,7 +320,7 @@ map -> odom -> base_footprint -> base_link -> ld06_body -> laser
 | `/safety/arm`, `/safety/disarm`, `/safety/reset_fault` | Driver / supervisor | Explicit operator control |
 | `ws://127.0.0.1:9090` | rosbridge when explicitly enabled | Local browser/external client |
 
-By default nothing serves the checked-in PGM: RTAB-Map publishes `/map` itself, drawing the occupancy grid from the merged LD06 and Astra cloud while ICP scan matching and proximity loop closure correct pose drift. The robot starts at the origin of a map it has not seen yet, and the grid grows as it drives. `static_map:=true` puts the checked-in floor plan back on `/map` instead, and moves RTAB-Map's own grid to `/rtabmap/map`.
+By default nothing serves the checked-in PGM: RTAB-Map publishes `/map` itself from the merged LD06 and Astra cloud. Hardware starts in localization on its saved database, preserving the saved pose across restarts. Build the first map with `slam_mode:=mapping`; an explicit exploration task can extend it later. Simulation defaults to mapping from its origin. `static_map:=true` puts the checked-in floor plan back on `/map` instead, and moves RTAB-Map's own grid to `/rtabmap/map`.
 
 A live map and the checked-in RMF navigation graph do not agree on coordinates: the graph names points in the PGM's frame. Keep `start_rmf:=false` while mapping, or regenerate the graph against the map the robot draws.
 

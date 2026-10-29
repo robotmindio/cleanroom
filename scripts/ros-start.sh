@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Bring up the full ROS stack against the real robot.
 # Usage: scripts/ros-start.sh [extra launch args...]
-#   scripts/ros-start.sh                                    # build/update the active map
-#   scripts/ros-start.sh slam_mode:=localization            # drive a map you already built
+#   scripts/ros-start.sh                                    # navigate the saved map
+#   scripts/ros-start.sh slam_mode:=mapping                 # build the first map explicitly
 #   scripts/ros-start.sh start_rmf:=false                   # Nav2 only
 # Override per machine: LEKIWI_FRONT, LEKIWI_WS. The Astra serial is pinned
 # in config/hardware.yaml so the safety camera cannot be selected ad hoc.

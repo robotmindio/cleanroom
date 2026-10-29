@@ -449,6 +449,11 @@ Accurate wheel scale matters: RTAB-Map's ICP starts from wheel odometry, and Nav
 
 ## 4. Build the map
 
+Hardware defaults to localization on the saved map. Use the explicit mapping
+command below to build the first map; exploration tasks temporarily enable
+mapping and restore localization when they finish. Repeated hardware starts
+must not create unanchored mapping sessions after wheel odometry resets.
+
 The CAD floor correction places `base_link` 40.6 mm above `base_footprint`
 (previously 93 mm) and lowers every mounted sensor frame by 52.4 mm. Before
 rolling this correction onto a robot with an existing RTAB-Map database, back

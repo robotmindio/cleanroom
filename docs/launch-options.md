@@ -20,7 +20,7 @@ shared saved calibration, including negative pitch.
 | `profile` | `sim`, `wired`, `split` | `sim` | Select simulation, local hardware, or device-service streams |
 | `headless` | `true`, `false` | `true` | Run Gazebo server-only with offscreen rendering; set false to open its GUI |
 | `localization` | `visual_slam`, `amcl` | `visual_slam` | Select the sole `map -> odom` provider; `visual_slam` is RTAB-Map running lidar-only |
-| `slam_mode` | `mapping`, `localization` | `mapping` | Extend or reuse the RTAB-Map database; the session quota switches mapping to localization |
+| `slam_mode` | `mapping`, `localization` | real: `localization`; sim: `mapping` | Reuse the saved map on hardware; explicit mapping or exploration extends it |
 | `remote_ip` | IPv4/hostname | `127.0.0.1` | Address of the LeKiwi ZMQ host and of the device zenoh bridge (`scripts/ros-start.sh` takes it from `LEKIWI_ROBOT_HOST`) |
 | `curve_client_secret_key_file`, `curve_server_public_key_file` | file paths | empty | Optional CURVE identity for the ZMQ link; set both or neither |
 | `safety_policy` | `hold`, `strict` | `hold` | `hold` (domestic robot) stays armed through failures and re-arms itself. `strict` (larger robots): every failure disarms, cuts torque and waits for `/safety/arm`, startup included, and the safety supervisor denies motion. See [Arming and recovery](#arming-and-recovery). `scripts/ros-start.sh` passes `strict` when `LEKIWI_DISARM_ON_FAILURE=true` |

@@ -39,8 +39,12 @@ RMF_DOMAIN = "0"
 def _profile_defaults(context):
     defaults = PROFILES[LaunchConfiguration("profile").perform(context)]
     # Retain explicit topology values from previously installed service arguments.
-    return [SetLaunchConfiguration(key, value) for key, value in defaults.items()
-            if key not in context.launch_configurations]
+    values = {key: value for key, value in defaults.items() if key not in context.launch_configurations}
+    if "slam_mode" not in context.launch_configurations:
+        # Real navigation reloads the saved pose; explicit exploration enables mapping.
+        mode = context.launch_configurations.get("mode", defaults["mode"])
+        values["slam_mode"] = "mapping" if mode == "sim" else "localization"
+    return [SetLaunchConfiguration(key, value) for key, value in values.items()]
 
 
 def _navigation_params(source_file, bounded_test, linear_limit, angular_limit, qualification=None):
@@ -477,9 +481,8 @@ def generate_launch_description():
             DeclareLaunchArgument("foxglove_address", default_value="127.0.0.1"),
             DeclareLaunchArgument("foxglove_port", default_value="8765"),
             DeclareLaunchArgument("localization", default_value="visual_slam", choices=list(CHOICES["localization"])),
-            # A domestic robot keeps extending its map as it runs. The session
-            # guard freezes it (switches to localization) at the quota, and
-            # slam_mode:=localization pins a finished map.
+            # Profiles select saved-map localization on hardware and mapping in sim.
+            # An explicit slam_mode or exploration task can enable mapping.
             DeclareLaunchArgument(
                 "slam_mode",
                 default_value="mapping",

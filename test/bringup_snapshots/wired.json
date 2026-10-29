@@ -150,7 +150,7 @@
      "Icp/PointToPlane": "false",
      "Icp/VoxelSize": "0.05",
      "Kp/MaxFeatures": "500",
-     "Mem/IncrementalMemory": "True",
+     "Mem/IncrementalMemory": "False",
      "Mem/InitWMWithAllNodes": "True",
      "Mem/NotLinkedNodesKept": "false",
      "RGBD/LinearUpdate": "0.04",
@@ -165,7 +165,7 @@
      "Rtabmap/DetectionRate": "2",
      "Rtabmap/ImagesAlreadyRectified": "false",
      "Rtabmap/MemoryThr": "300",
-     "Rtabmap/StartNewMapOnLoopClosure": "false",
+     "Rtabmap/StartNewMapOnLoopClosure": "true",
      "Vis/EstimationType": "0",
      "approx_sync": true,
      "database_path": "$(env HOME)/.ros/lekiwi_rtabmap_floor_v2.db",
@@ -858,8 +858,5 @@
   ],
   "respawn": false,
   "respawn_delay": null
- },
- {
-  "log": "RTAB-Map mapping starts a new session immediately; a verified loop closure merges it with earlier sessions"
  }
 ]
