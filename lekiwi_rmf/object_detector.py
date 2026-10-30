@@ -216,10 +216,10 @@ class ObjectDetector(Node):
                 concepts = [reference(load_concept(revision)) for revision in request.concept_revisions]
                 if concepts and not getattr(self._detector, 'supports_concepts', False):
                     raise ValueError(f'{self._detector.name} cannot match learned concepts')
-                if request.labels:
+                if request.labels or concepts:
                     query = make_query(list(request.labels), list(request.part_of) or None, concepts)
-                elif request.part_of or concepts:
-                    raise ValueError('parts and concepts need labels')
+                elif request.part_of:
+                    raise ValueError('parts need labels')
                 else:
                     query = self._detector.default_query
             except ValueError as error:

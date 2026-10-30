@@ -92,8 +92,8 @@ def make_query(labels, part_of=None, concepts=()):
     `part_of` is parallel to `labels`: '' or the whole that label is a part of. `concepts` are
     ConceptRef values of learned concepts the recognizer matches by exemplar.
     """
-    if not isinstance(labels, (list, tuple)) or not 1 <= len(labels) <= MAX_LABELS:
-        raise ValueError(f'a query needs 1..{MAX_LABELS} labels')
+    if not isinstance(labels, (list, tuple)) or len(labels) > MAX_LABELS:
+        raise ValueError(f'a query accepts at most {MAX_LABELS} plain labels')
     part_of = list(part_of or [])
     if part_of and len(part_of) != len(labels):
         raise ValueError('part_of must name one whole (or nothing) for every label')
@@ -117,6 +117,8 @@ def make_query(labels, part_of=None, concepts=()):
         if normalize_label(concept.name) != concept.name or any(normalize_label(p) != p for p in concept.prompts):
             raise ValueError('concept names and prompts must be canonical labels')
     unique = tuple(dict.fromkeys(normalized))
+    if not unique and not concepts:
+        raise ValueError('a query needs labels or learned concepts')
     query = Query(unique, tuple((label, wholes[label]) for label in unique if label in wholes), concepts)
     names = query.phrases + tuple(concept.name for concept in concepts)
     if len(set(names)) != len(names):
