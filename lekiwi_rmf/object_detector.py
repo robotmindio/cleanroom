@@ -216,10 +216,10 @@ class ObjectDetector(Node):
                 concepts = [reference(load_concept(revision)) for revision in request.concept_revisions]
                 if concepts and not getattr(self._detector, 'supports_concepts', False):
                     raise ValueError(f'{self._detector.name} cannot match learned concepts')
-                if request.labels:
+                if request.labels or concepts:
                     query = make_query(list(request.labels), list(request.part_of) or None, concepts)
-                elif request.part_of or concepts:
-                    raise ValueError('parts and concepts need labels')
+                elif request.part_of:
+                    raise ValueError('parts need labels')
                 else:
                     query = self._detector.default_query
             except ValueError as error:
@@ -434,7 +434,9 @@ class ObjectDetector(Node):
                     raise
                 self._primary_retry_at = time.monotonic() + PRIMARY_RETRY_SEC
                 with self._frame_lock:
-                    self._stats[camera]['primary_reason'] = str(error)
+                    # The retry window is shared; every camera using it is degraded.
+                    for stats in self._stats.values():
+                        stats['primary_reason'] = str(error)
                 self.get_logger().warning(f'{camera}: primary recognizer unavailable, serving fallback: {error}',
                                           throttle_duration_sec=30)
         with self._frame_lock:

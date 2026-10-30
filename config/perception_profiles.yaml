@@ -16,3 +16,6 @@ profiles:
     # proposal_floor lets the provider replay a stricter box_threshold from retained proposals.
     standard: {box_threshold: 0.5, text_threshold: 0.25, nms_iou: 0.5, nms_scope: prompt, max_detections: 20,
                shortest_edge: 800, proposal_floor: 0.3}
+    # Development trial for nearby objects; independent scene qualification is still required.
+    near_field: {box_threshold: 0.5, text_threshold: 0.25, nms_iou: 0.5, nms_scope: prompt, max_detections: 20,
+                 shortest_edge: 480, proposal_floor: 0.3}

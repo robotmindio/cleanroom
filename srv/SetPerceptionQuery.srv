@@ -1,11 +1,11 @@
 # Labels the open-vocabulary detector localizes from the next frame on. Labels are normalized
 # (NFKC, lower case, single spaces), de-duplicated in order and bounded; see /robot/capabilities.
-# Empty restores the tracked default query.
+# Empty labels and concept_revisions restore the tracked default query.
 string[] labels
 # Optional, parallel to labels: the label each one is a part of ('' for none). A part detection is
 # tied only to a detection of its whole that contains it.
 string[] part_of
-# Learned concepts (scripts/learn-perception-concept.py) matched by exemplar; their names become labels.
+# Learned concepts matched by exemplar; may be queried alone. Their names become labels.
 string[] concept_revisions
 # Optimistic concurrency: when set, the change applies only while this revision is in force.
 string expected_revision

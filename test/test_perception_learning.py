@@ -22,7 +22,7 @@ from lekiwi_rmf.object_observations import ObservationStore, artifact_pixels, ca
 from lekiwi_rmf.object_recognition import COCO_LABELS, ProviderUnavailable, Recognizer
 from lekiwi_rmf.perception_concepts import calibrate, learn_concept, load_concept, reference, validate_concept
 from lekiwi_rmf.perception_profiles import default_profile, make_profile
-from lekiwi_rmf.perception_query import make_query
+from lekiwi_rmf.perception_query import make_query, recorded_query
 from lekiwi_rmf.perception_replay import replay
 from test_object_observations import bare_recognizer, fake_recognizer
 from test_perception_query import DEFAULT, Harness, open_recognizer
@@ -115,12 +115,15 @@ def concept(tmp_path, monkeypatch):
     return learn_concept(manifest, encoder)['concept']
 
 
-def test_a_query_names_learned_concepts_and_the_provider_proves_each_match(concept, monkeypatch):
+@pytest.mark.parametrize('labels', [['a cup'], []])
+def test_a_query_names_learned_concepts_and_the_provider_proves_each_match(concept, monkeypatch, labels):
     fake = FakeProvider()
     monkeypatch.setattr(object_recognition, 'provider_endpoint', lambda name: (fake.url, 1.0))
     try:
-        query = make_query(['a cup'], concepts=[reference(concept)])
-        assert query.prompt == 'a cup. a soda can. an aluminium can.' and query.reportable == ('a cup', 'lata')
+        query = make_query(labels, concepts=[reference(concept)])
+        assert query.prompt == ('a cup. ' if labels else '') + 'a soda can. an aluminium can.'
+        assert query.reportable == (('a cup', 'lata') if labels else ('lata',))
+        assert recorded_query(query.document()) == query
         assert query.document()['concepts'] == [{'name': 'lata', 'revision': concept['revision'],
                                                   'prompts': ['a soda can', 'an aluminium can']}]
         assert query.revision != make_query(['a cup']).revision
@@ -132,6 +135,7 @@ def test_a_query_names_learned_concepts_and_the_provider_proves_each_match(conce
         assert rows == [[1.0, 2.0, 20.0, 30.0, .7, 'lata', {'concept': match}]]
         # The provider receives the full exemplar document the query revision pins.
         assert fake.requests[-1][1]['concepts'] == [concept]
+        assert fake.requests[-1][1]['labels'] == labels
         with pytest.raises(ValueError, match='cannot match learned concepts'):
             bare = bare_recognizer('grounding_dino')
             bare.predict(np.zeros((40, 60, 3), np.uint8), query, default_profile('grounding_dino'))
@@ -145,8 +149,12 @@ def test_the_query_service_resolves_concepts_and_refuses_recognizers_without_an_
         applied = harness.set_query(['a cup'], concept_revisions=[concept['revision']])
         assert applied.success
         assert harness.detector._query.reportable == ('a cup', 'lata')
+        only = harness.set_query([], concept_revisions=[concept['revision']], expected=applied.revision)
+        assert only.success and only.labels == []
+        assert harness.detector._query.reportable == ('lata',)
+        assert harness.detector._query.prompt == 'a soda can. an aluminium can.'
         harness.detector._detector.supports_concepts = False
-        refused = harness.set_query(['a cup'], concept_revisions=[concept['revision']], expected=applied.revision)
+        refused = harness.set_query([], concept_revisions=[concept['revision']], expected=only.revision)
         assert not refused.success and 'cannot match learned concepts' in refused.detail
         unknown = harness.set_query(['a cup'], concept_revisions=['f' * 64])
         assert not unknown.success and 'not in the concept store' in unknown.detail
