@@ -406,6 +406,12 @@ class Recognizer:
         return rows
 
 
+def perception_config(mode='remote'):
+    if mode not in ('remote', 'local'):
+        raise ValueError('perception mode must be remote or local')
+    return config_directory() / ('object_perception_local.yaml' if mode == 'local' else 'object_perception.yaml')
+
+
 def selected_models(settings):
     """The primary recognizer and, when configured, the local recognizer that serves while it is unavailable."""
     return [name for name in (settings['model_name'], settings.get('fallback_model_name', '')) if name]
@@ -429,9 +435,13 @@ def use_model_runtime(*names):
                   {**os.environ, 'PYTHONNOUSERSITE': '1'})
 
 
-def main():
+def main(argv=None):
+    import argparse
     from lekiwi_rmf.object_cameras import camera_bindings
-    settings = yaml.safe_load((config_directory() / 'object_perception.yaml').read_text())['/**']['ros__parameters']
+    parser = argparse.ArgumentParser(description='Describe the selected perception operating point.')
+    parser.add_argument('--mode', choices=('remote', 'local'), default='remote')
+    args = parser.parse_args(argv)
+    settings = yaml.safe_load(perception_config(args.mode).read_text())['/**']['ros__parameters']
     use_model_runtime(*selected_models(settings))
     identity, operating = recognition_identity(settings['model_name'])
     deployment = yaml.safe_load((config_directory() / 'object_perception_deployment.yaml').read_text())

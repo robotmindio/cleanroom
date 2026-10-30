@@ -24,18 +24,18 @@ weights. RT-DETR and Grounding DINO use a separate CPU environment under
 requirements and a compatible CPU Torch/Torchvision pair. ROS and motor-driver
 Python installations are not modified. Models remain outside Git.
 
-The current **development** operating point is RT-DETRv2-R18 at 384×384 and a
+An earlier local **development** benchmark used RT-DETRv2-R18 at 384×384 and a
 0.50 score threshold. It detected the three retained patterned-mug frames at
 0.693–0.706, where YOLOX missed them. Warm processing was approximately 0.89 s;
 the first measured frame took 6.76 s. This one scene establishes a reproducible
 improvement, not site qualification. Production start remains disabled in
 `config/object_perception_deployment.yaml`.
 
-`model_sha256` now identifies the complete recognition operating point: pinned
-artifacts, backend, input size, threshold, preprocessing revision, label
-output (`native`, or `query` for open-vocabulary recognizers) and actual runtime
-package versions. It is not just the weight-file hash. Model,
-threshold or runtime changes require a new admitted profile identity. The
+`model_sha256` identifies pinned artifacts, backend, input size, preprocessing
+revision, label output (`native`, or `query` for open-vocabulary recognizers) and
+actual runtime package versions. Proposal thresholds have their own
+`profile.revision`. Model or runtime changes require a newly admitted model
+identity; threshold changes require an admitted proposal profile. The
 `--describe` output supplies the exact model and camera identities to put in a
 reviewed Fiber profile. Old weight-only profiles must not be reused.
 
@@ -58,6 +58,40 @@ restart. No
 model cascade or language-model completion authority is introduced. The
 vendored YOLOX implementation lives directly in the Python package; its
 upstream license/provenance remain in `thirdparty/opencv_yolox/`.
+
+## Local CPU mode
+
+Use the installed RT-DETR checkpoint as the primary detector when the requested
+native class (for example `cup`) needs fresh evidence without a remote inference
+round trip:
+
+```bash
+scripts/object-perception.sh --describe --mode local
+scripts/object-perception.sh mode:=local cameras:=front
+```
+
+Both nodes load `config/object_perception_local.yaml`. The descriptor selects the
+same model, runtime and standard RT-DETR profile as the launcher. The script uses
+its own repository launch file and Python package so a source checkout cannot
+silently launch another installed version. The default `remote` mode retains the
+open-vocabulary detector and local fallback.
+
+Local mode has a closed vocabulary. It does not implement an open query such as
+`green spiky ball` or a learned `durian seed` concept. Keep those requests on the
+remote operating point and qualify their views separately. Image inference is
+local; a deployed Fiber verifier still has its own transport latency.
+
+`config/fiber_perception_local_profile.json` is a disabled, cup-only image profile
+for this mode. It retains the 0.5 minimum score, 2 s evidence age, 2 s confirmation
+window, and no moving search. Read the actual descriptor before admitting its
+runtime identity. Production perception start remains disabled.
+
+A 2026-10-30 qualification harness completed three cup goals against live camera
+observations, real immutable pins and both JPEG hashes. The oldest evidence at
+verification was 1.325, 1.570 and 1.352 s. This used isolated SQLite persistence
+and local workflow scheduling: it validates the local robot integration, not a
+deployed Fiber/Temporal goal or independent category recognition. Metric distance
+and grasp acceptance remain separate.
 
 ## Remote GPU provider and local fallback
 

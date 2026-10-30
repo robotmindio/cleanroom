@@ -562,3 +562,46 @@ def test_shared_provider_failure_marks_every_camera_fallback_as_degraded(monkeyp
     finally:
         node.destroy_node()
         context.try_shutdown()
+
+
+@pytest.mark.parametrize('mode,models', [('remote', [REMOTE, 'rtdetr_v2_r18']), ('local', ['rtdetr_v2_r18'])])
+def test_launch_binds_both_nodes_to_the_selected_mode(mode, models, monkeypatch):
+    import importlib.util
+    from pathlib import Path
+    from launch import LaunchContext
+    import yaml
+
+    path = Path(__file__).resolve().parents[1] / 'launch/object_perception.launch.py'
+    spec = importlib.util.spec_from_file_location('perception_mode_launch', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setattr(module, 'Node', lambda **kwargs: kwargs)
+    context = LaunchContext()
+    context.launch_configurations.update(mode=mode, cameras='front', use_sim_time='false')
+    nodes = module.nodes(context)
+    config = object_recognition.perception_config(mode)
+    assert len(nodes) == 2 and all(node['parameters'][0] == str(config) for node in nodes)
+    parameters = yaml.safe_load(config.read_text())
+    assert object_recognition.selected_models(parameters['/**']['ros__parameters']) == models
+    for name in ('object_detector', 'object_observations'):
+        assert parameters[name]['ros__parameters']['max_source_age_sec'] == 2.0
+    assert all(node['additional_env'] == {'PYTHONNOUSERSITE': '1'} for node in nodes)
+
+
+@pytest.mark.parametrize('mode,model,vocabulary', [('local', 'rtdetr_v2_r18', 'closed'),
+                                                 ('remote', REMOTE, 'open')])
+def test_describe_reports_the_same_mode_as_launch(mode, model, vocabulary, monkeypatch, capsys):
+    from lekiwi_rmf import object_cameras
+
+    monkeypatch.setattr(object_recognition, 'use_model_runtime', lambda *names: None)
+    monkeypatch.setattr(object_recognition, 'recognition_identity', lambda name: ('a' * 64, {'model': name}))
+    monkeypatch.setattr(object_cameras, 'camera_bindings', lambda names: {'front': {'sha256': 'c' * 64}})
+    object_recognition.main(['--mode', mode])
+    document = json.loads(capsys.readouterr().out)
+    assert document['operating_point']['model'] == model and document['vocabulary'] == vocabulary
+    assert ('fallback_model_sha256' in document) == (mode == 'remote')
+
+
+def test_perception_mode_rejects_unknown_configuration():
+    with pytest.raises(ValueError, match='remote or local'):
+        object_recognition.perception_config('../unknown')
