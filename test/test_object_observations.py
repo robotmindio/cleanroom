@@ -667,3 +667,14 @@ def test_preparation_never_pins_incomplete_wrong_identity_or_corrupt_evidence(tm
         with pytest.raises(RuntimeError, match='hash mismatch'):
             store.prepare(preparation_request(), now=100)
         assert store._db.execute('SELECT COUNT(*) FROM pins').fetchone()[0] == 0
+
+
+def test_preparation_handles_legacy_null_proposal_profiles(tmp_path):
+    with closing(ObservationStore(tmp_path / 'legacy.db')) as store:
+        for stamp in (99, 100):
+            record, jpeg = document(stamp=stamp)
+            record['clock_domain'] = 'ros_system_time'
+            record['profile'] = None
+            store.put(record, jpeg, now=100)
+        result = store.prepare(preparation_request(recognizers=[[MODEL_SHA256, '']]), now=100)
+        assert len(result['observations']) == 2 and len(result['pins']) == 2

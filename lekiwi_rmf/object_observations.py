@@ -402,7 +402,7 @@ class ObservationStore:
         for row in self._db.execute('SELECT document FROM observations ORDER BY sequence DESC LIMIT 100'):
             record = json.loads(row[0])
             stamp = record['stamp']['sec'] + record['stamp']['nanosec'] / 1e9
-            identity = (record['model_sha256'], record.get('profile', {}).get('revision', ''))
+            identity = (record['model_sha256'], (record.get('profile') or {}).get('revision', ''))
             if (record['camera_id'] != camera or identity not in admitted
                     or record.get('clock_domain') != 'ros_system_time'
                     or not after <= stamp <= now or now - stamp > age

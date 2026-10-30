@@ -288,7 +288,7 @@ class ObjectObservations(Node):
             result['map_context'] = self._map_context
             response.response_json = json.dumps(result, allow_nan=False)
             response.success = True
-        except (ValueError, RuntimeError, OSError, sqlite3.Error) as error:
+        except (ValueError, RuntimeError, OSError, sqlite3.Error, KeyError, TypeError, AttributeError) as error:
             response.detail = str(error)
         return response
 
