@@ -44,10 +44,14 @@ class FakeProvider:
 
     def __init__(self):
         self.requests, self.respond = [], self.admitted
+        self.connections = set()
         provider = self
 
         class Handler(BaseHTTPRequestHandler):
+            protocol_version = 'HTTP/1.1'
+
             def do_POST(self):  # noqa: N802 - stdlib handler name
+                provider.connections.add(self.client_address)
                 body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
                 provider.requests.append((self.path, body))
                 status, payload = provider.respond(body)
@@ -128,6 +132,51 @@ def test_remote_detections_use_source_pixels_the_profile_and_the_evidence_artifa
     assert 'box_threshold' not in body and 'concepts' not in body
     # The provider sees exactly the stored evidence bytes.
     assert base64.b64decode(body['image']) == artifact
+
+
+def test_provider_reuses_its_connection_without_changing_the_request(provider):
+    recognizer = Recognizer(REMOTE, None)
+    first, _ = predict(recognizer, DEFAULT)
+    second, _ = predict(recognizer, DEFAULT)
+    assert first == second
+    assert len(provider.requests) == 2
+    assert provider.requests[0] == provider.requests[1]
+    assert len(provider.connections) == 1
+
+
+def test_a_timed_out_request_is_not_replayed_and_the_next_call_reconnects(provider):
+    recognizer = Recognizer(REMOTE, None)
+    recognizer.model.timeout = .1
+    provider.respond = lambda body: time.sleep(.3) or provider.admitted(body)
+    with pytest.raises(ProviderUnavailable, match='unreachable'):
+        predict(recognizer, DEFAULT)
+    assert len(provider.requests) == 1
+    provider.respond = provider.admitted
+    recognizer.model.timeout = 1.
+    assert predict(recognizer, DEFAULT)[0]
+    assert len(provider.requests) == 2
+    assert len(provider.connections) == 2
+
+
+def test_a_server_that_closes_each_response_is_still_usable(provider):
+    provider.server.RequestHandlerClass.protocol_version = 'HTTP/1.0'
+    recognizer = Recognizer(REMOTE, None)
+    first, _ = predict(recognizer, DEFAULT)
+    second, _ = predict(recognizer, DEFAULT)
+    assert first == second
+    assert len(provider.requests) == len(provider.connections) == 2
+
+
+@pytest.mark.parametrize('reply', [(503, {'error': {'code': 'busy'}}), (200, b'not json'),
+                                  (200, b' ' * (1024 * 1024 + 1))])
+def test_a_rejected_response_does_not_poison_the_next_request(provider, reply):
+    recognizer = Recognizer(REMOTE, None)
+    provider.respond = lambda _: reply
+    with pytest.raises(ProviderUnavailable):
+        predict(recognizer, DEFAULT)
+    provider.respond = provider.admitted
+    assert predict(recognizer, DEFAULT)[0]
+    assert len(provider.requests) == 2
 
 
 def test_remote_provider_receives_the_requested_query_for_any_label(provider):

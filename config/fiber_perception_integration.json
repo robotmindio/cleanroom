@@ -1,0 +1,20 @@
+{
+  "enabled": true,
+  "allowed_topics": [
+    "/robot/tasks/events",
+    "/robot/observations/events",
+    "/robot/perception/profile"
+  ],
+  "allowed_services": [
+    "/robot/capabilities",
+    "/robot/tasks/cancel",
+    "/robot/tasks/get",
+    "/robot/tasks/submit",
+    "/robot/observations/query",
+    "/robot/observations/evidence",
+    "/robot/observations/pin",
+    "/robot/observations/status",
+    "/robot/perception/set_query",
+    "/robot/perception/apply_profile"
+  ]
+}

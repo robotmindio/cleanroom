@@ -2,16 +2,16 @@
 
 import base64
 import hashlib
+from http.client import HTTPConnection, HTTPSConnection, HTTPException
 import importlib.metadata
 import json
 import math
 import os
 import sys
+import threading
 import time
 from pathlib import Path
-from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
-from urllib.request import Request, urlopen
 
 import cv2
 import numpy as np
@@ -121,32 +121,43 @@ def suppress(rows, scope, iou):
 
 
 class RemoteProvider:
-    """Stateless HTTP client for the RobotMind perception provider's operations."""
+    """Serialize operations on one reusable connection to the configured provider."""
 
-    def __init__(self, url, timeout, opener=urlopen):
-        self.url, self.timeout, self._open = url, timeout, opener
+    def __init__(self, url, timeout):
+        self.url, self.timeout = url, timeout
+        origin = urlsplit(url)
+        connection = HTTPSConnection if origin.scheme == 'https' else HTTPConnection
+        self._connection = connection(origin.hostname, origin.port, timeout=timeout)
+        self._lock = threading.Lock()
 
     def infer(self, body):
         return self.post('/v1/infer', body)
 
     def post(self, path, body, timeout=None):
         payload = json.dumps(body, separators=(',', ':')).encode()
-        request = Request(self.url + path, data=payload, method='POST',
-                          headers={'Content-Type': 'application/json', 'Accept': 'application/json'})
-        try:
-            with self._open(request, timeout=timeout or self.timeout) as response:
+        with self._lock:
+            try:
+                self._connection.timeout = timeout or self.timeout
+                if self._connection.sock is not None:
+                    self._connection.sock.settimeout(self._connection.timeout)
+                self._connection.request('POST', path, body=payload,
+                    headers={'Content-Type': 'application/json', 'Accept': 'application/json'})
+                response = self._connection.getresponse()
                 data = response.read(MAX_RESPONSE_BYTES + 1)
-        except HTTPError as error:
+            except (HTTPException, OSError, ValueError) as error:
+                self._connection.close()
+                # A lost reply may already own a provider run; never replay the POST.
+                raise ProviderUnavailable(f'perception provider unreachable: {error}') from error
+            if len(data) > MAX_RESPONSE_BYTES:
+                self._connection.close()
+                raise ProviderUnavailable('perception provider response exceeds 1 MiB')
+        if response.status >= 300:
             code = ''
             try:
-                code = json.loads(error.read(65536)).get('error', {}).get('code', '')
+                code = json.loads(data).get('error', {}).get('code', '')
             except (ValueError, AttributeError, OSError):
                 pass
-            raise ProviderUnavailable(f'perception provider returned HTTP {error.code} {code}'.rstrip()) from error
-        except (URLError, OSError, ValueError) as error:
-            raise ProviderUnavailable(f'perception provider unreachable: {getattr(error, "reason", error)}') from error
-        if len(data) > MAX_RESPONSE_BYTES:
-            raise ProviderUnavailable('perception provider response exceeds 1 MiB')
+            raise ProviderUnavailable(f'perception provider returned HTTP {response.status} {code}'.rstrip())
         try:
             document = json.loads(data)
         except ValueError as error:
