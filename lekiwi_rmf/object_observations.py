@@ -1,5 +1,6 @@
 """Bounded image observations; no goal state, object identity or metric claims."""
 
+import base64
 import fcntl
 import hashlib
 import json
@@ -269,7 +270,7 @@ class ObservationStore:
     """One SQLite transaction owns metadata and JPEG, including retention."""
 
     def __init__(self, path, *, max_bytes=2 * 1024**3, max_records=100000, retention_sec=7 * 86400):
-        self._access = threading.Lock()
+        self._access = threading.RLock()
         if type(max_records) is not int or max_records < 1 or type(max_bytes) is not int or max_bytes < 65536:
             raise ValueError('invalid observation storage limits')
         if not math.isfinite(retention_sec) or retention_sec <= 0:
@@ -366,6 +367,64 @@ class ObservationStore:
                 if self._db.execute('SELECT 1 FROM observations WHERE id=?', (identifier,)).fetchone() is None:
                     raise ValueError('cannot pin missing or expired evidence')
                 self._db.execute('INSERT INTO pins VALUES (?,?,?)', (request, identifier, now + self.retention_sec))
+
+    @_serialized
+    def prepare(self, text, now=None):
+        """Reserve the newest two distinct captures and return their immutable proof in one call.
+
+        Selection narrows transport only; the caller still verifies the goal and every detection.
+        The reentrant store lock keeps selection, JPEG validation and pinning together.
+        """
+        if len(text.encode()) > 4096:
+            raise ValueError('preparation request exceeds 4096 bytes')
+        try:
+            values = json.loads(text)
+        except RecursionError as error:
+            raise ValueError('preparation request is nested too deeply') from error
+        fields = {'request_id', 'camera_id', 'recognizers', 'after', 'max_age_sec'}
+        if not isinstance(values, dict) or set(values) != fields:
+            raise ValueError('invalid preparation request fields')
+        prefix, camera, recognizers = values['request_id'], values['camera_id'], values['recognizers']
+        if (not isinstance(prefix, str) or not 1 <= len(prefix) <= 63
+                or any(c not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_' for c in prefix)
+                or not isinstance(camera, str) or not 1 <= len(camera) <= 128
+                or not isinstance(recognizers, list) or not 1 <= len(recognizers) <= 17
+                or any(not isinstance(r, list) or len(r) != 2 or not valid_id(r[0])
+                       or (r[1] != '' and not valid_id(r[1])) for r in recognizers)):
+            raise ValueError('invalid preparation identity')
+        after, age = values['after'], values['max_age_sec']
+        if (any(type(v) not in (int, float) or not math.isfinite(v) for v in (after, age))
+                or after < 0 or not 0 < age <= 2):
+            raise ValueError('invalid preparation capture window')
+        now = time.time() if now is None else now
+        admitted = {tuple(r) for r in recognizers}
+        selected, captures = [], set()
+        for row in self._db.execute('SELECT document FROM observations ORDER BY sequence DESC LIMIT 100'):
+            record = json.loads(row[0])
+            stamp = record['stamp']['sec'] + record['stamp']['nanosec'] / 1e9
+            identity = (record['model_sha256'], (record.get('profile') or {}).get('revision', ''))
+            if (record['camera_id'] != camera or identity not in admitted
+                    or record.get('clock_domain') != 'ros_system_time'
+                    or not after <= stamp <= now or now - stamp > age
+                    or record['capture_id'] in captures):
+                continue
+            captures.add(record['capture_id'])
+            selected.append(record)
+        selected.sort(key=lambda r: (r['stamp']['sec'], r['stamp']['nanosec']))
+        ids = [r['id'] for r in selected[-2:]]
+        if len(ids) != 2:
+            return {'schema': 1, 'epoch': self.epoch, 'observations': [], 'pins': {}, 'evidence': {}}
+        images = {}
+        for identifier in ids:
+            data, digest = self.evidence(identifier, now=now)
+            images[identifier] = {'mime_type': 'image/jpeg', 'sha256': digest,
+                                  'data_base64': base64.b64encode(data).decode('ascii')}
+        digest = hashlib.sha256(json.dumps(sorted(ids), separators=(',', ':')).encode()).hexdigest()
+        request = f'{prefix}-{digest}'
+        self.pin(json.dumps({'request_id': request, 'observation_ids': ids}), now=now)
+        result = self.query(json.dumps({'observation_ids': ids, 'pin_request_id': request}), now=now)
+        result.update(request_id=request, evidence=images)
+        return result
 
     @_serialized
     def put(self, document, evidence, now=None):

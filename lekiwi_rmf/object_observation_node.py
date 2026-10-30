@@ -35,7 +35,7 @@ from lekiwi_rmf.object_recognition import model_spec, open_vocabulary, recogniti
 from lekiwi_rmf.perception_profiles import recorded_profile
 from lekiwi_rmf.perception_query import recorded_query
 from lekiwi_rmf.msg import PerceptionOperatingPoint
-from lekiwi_rmf.srv import GetObservationEvidence, QueryObservations, PinObservationEvidence
+from lekiwi_rmf.srv import GetObservationEvidence, QueryObservations, PinObservationEvidence, PrepareObservationEvidence
 
 
 def bounded_json(text, name, limit=65536):
@@ -130,6 +130,7 @@ class ObjectObservations(Node):
         self.create_service(QueryObservations, '/robot/observations/query', self._query)
         self.create_service(GetObservationEvidence, '/robot/observations/evidence', self._evidence)
         self.create_service(PinObservationEvidence, '/robot/observations/pin', self._pin)
+        self.create_service(PrepareObservationEvidence, '/robot/observations/prepare', self._prepare)
         self.create_service(Trigger, '/robot/observations/status', self._status)
 
     def _operating_point(self, image, point, role):
@@ -276,6 +277,18 @@ class ObjectObservations(Node):
             response.response_json = json.dumps(result, allow_nan=False)
             response.success = True
         except (ValueError, RuntimeError, OSError, sqlite3.Error) as error:
+            response.detail = str(error)
+        return response
+
+    def _prepare(self, request, response):
+        try:
+            result = self._store.prepare(request.request_json)
+            result['streams'] = self._readiness()
+            result['stream_ready'] = all(value['ready'] for value in result['streams'].values())
+            result['map_context'] = self._map_context
+            response.response_json = json.dumps(result, allow_nan=False)
+            response.success = True
+        except (ValueError, RuntimeError, OSError, sqlite3.Error, KeyError, TypeError, AttributeError) as error:
             response.detail = str(error)
         return response
 

@@ -1,6 +1,7 @@
 """Image contract, quota, corruption and replay cases; no physical acceptance."""
 
 import copy
+from contextlib import closing
 import importlib.util
 import json
 from pathlib import Path
@@ -603,3 +604,77 @@ def test_multiclass_manifest_defines_vocabulary_and_keeps_legacy_cups(tmp_path, 
         manifest.write_text(json.dumps([{'scene_id': 'one', 'split': 'heldout', 'image': 'one.png', **bad}]))
         with pytest.raises(ValueError):
             evaluator.load_scenes(manifest)
+
+
+def preparation_request(**changes):
+    return json.dumps({'request_id': 'goal-test-1', 'camera_id': 'astra_color',
+                       'recognizers': [[MODEL_SHA256, PROFILE.revision]],
+                       'after': 98.0, 'max_age_sec': 2.0, **changes})
+
+
+def test_preparation_returns_newest_distinct_captures_with_owned_hash_checked_receipt(tmp_path):
+    import base64
+    import hashlib
+    with closing(ObservationStore(tmp_path / 'observations.db')) as store:
+        for stamp in (97, 98, 99, 100, 101):
+            record, jpeg = document(stamp=stamp)
+            record['clock_domain'] = 'ros_system_time'
+            store.put(record, jpeg, now=100)
+        result = store.prepare(preparation_request(), now=100)
+        assert [r['stamp']['sec'] for r in result['observations']] == [99, 100]
+        ids = sorted(r['id'] for r in result['observations'])
+        digest = hashlib.sha256(json.dumps(ids, separators=(',', ':')).encode()).hexdigest()
+        assert result['request_id'] == 'goal-test-1-' + digest
+        assert set(result['pins']) == set(result['evidence']) == set(ids)
+        for row in result['observations']:
+            proof = result['evidence'][row['id']]
+            raw = base64.b64decode(proof['data_base64'], validate=True)
+            assert proof['sha256'] == row['evidence']['sha256'] == hashlib.sha256(raw).hexdigest()
+            assert result['pins'][row['id']] > 100
+        assert store.prepare(preparation_request(), now=100) == result
+        assert store._db.execute('SELECT COUNT(*) FROM pins').fetchone()[0] == 2
+        # A later pair gets another immutable receipt under the same goal prefix.
+        newer = store.prepare(preparation_request(), now=101)
+        assert newer['request_id'] != result['request_id']
+        assert set(store.query(json.dumps({'observation_ids': ids, 'pin_request_id': result['request_id']}), now=101)['pins']) == set(ids)
+
+
+@pytest.mark.parametrize('changes', [
+    {'max_age_sec': 2.01}, {'max_age_sec': True}, {'max_age_sec': float('nan')},
+    {'after': -1}, {'after': float('inf')}, {'request_id': '../bad'},
+    {'request_id': 'x' * 64}, {'recognizers': []}, {'recognizers': [['invalid', '']]},
+    {'recognizers': [[MODEL_SHA256, 'invalid']]}, {'unknown': True},
+])
+def test_preparation_rejects_invalid_or_widened_requests(tmp_path, changes):
+    with closing(ObservationStore(tmp_path / 'observations.db')) as store:
+        with pytest.raises(ValueError):
+            store.prepare(preparation_request(**changes), now=100)
+        assert store._db.execute('SELECT COUNT(*) FROM pins').fetchone()[0] == 0
+
+
+def test_preparation_never_pins_incomplete_wrong_identity_or_corrupt_evidence(tmp_path):
+    with closing(ObservationStore(tmp_path / 'observations.db')) as store:
+        for stamp in (99, 100):
+            record, jpeg = document(stamp=stamp)
+            record['clock_domain'] = 'ros_system_time'
+            store.put(record, jpeg, now=100)
+        for changes in ({'camera_id': 'another'}, {'recognizers': [['a' * 64, PROFILE.revision]]},
+                        {'after': 100}, {'max_age_sec': .5}):
+            result = store.prepare(preparation_request(**changes), now=100)
+            assert result['observations'] == [] and result['pins'] == {} and result['evidence'] == {}
+        store._db.execute('UPDATE observations SET evidence=? WHERE id=?', (b'corrupt', record['id']))
+        store._db.commit()
+        with pytest.raises(RuntimeError, match='hash mismatch'):
+            store.prepare(preparation_request(), now=100)
+        assert store._db.execute('SELECT COUNT(*) FROM pins').fetchone()[0] == 0
+
+
+def test_preparation_handles_legacy_null_proposal_profiles(tmp_path):
+    with closing(ObservationStore(tmp_path / 'legacy.db')) as store:
+        for stamp in (99, 100):
+            record, jpeg = document(stamp=stamp)
+            record['clock_domain'] = 'ros_system_time'
+            record['profile'] = None
+            store.put(record, jpeg, now=100)
+        result = store.prepare(preparation_request(recognizers=[[MODEL_SHA256, '']]), now=100)
+        assert len(result['observations']) == 2 and len(result['pins']) == 2

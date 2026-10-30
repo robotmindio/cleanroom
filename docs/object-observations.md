@@ -461,3 +461,23 @@ passes. Outcomes distinguish verified, ambiguous, unverifiable and not found
 within inspected views; a detector miss never proves global absence. Existing
 Nav2 safeguards, evidence authority, scoped approvals and deployment re-arm
 behavior remain in force.
+
+## Compound evidence preparation
+
+`/robot/observations/prepare` (`PrepareObservationEvidence`) is an explicit
+mutation: it selects the newest two distinct captures for a camera and admitted
+model/profile pairs, verifies the stored JPEG hashes, and reserves them under
+the existing pin quota in one serialized store operation. It does not decide
+whether a goal was found. Its response contains the native records, owned pin
+receipt and both private JPEGs; callers must keep the image bytes out of
+workflow history and independently enforce label, ambiguity, geometry, motion,
+policy, cancellation and final freshness checks.
+
+The strict JSON request contains `request_id` (goal prefix, at most 63 ASCII
+alphanumeric/underscore/hyphen characters), `camera_id`, `recognizers` (up to
+17 `[model_sha256, profile_revision]` pairs), `after` (capture Unix seconds),
+and `max_age_sec` (positive, at most 2). An empty profile revision admits only
+legacy records without a revision. Missing or stale pairs return no evidence
+and create no reservation. Each pair's receipt appends the SHA-256 of its sorted
+JSON ID array to the goal prefix, matching Fiber's immutable per-pair identity.
+The service uses the existing retention, corruption and half-quota protections.

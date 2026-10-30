@@ -17,7 +17,7 @@ from vision_msgs.msg import Detection2DArray
 from lekiwi_rmf.object_recognition import recognition_identity
 
 from lekiwi_rmf.object_observation_node import ObjectObservations
-from lekiwi_rmf.srv import GetObservationEvidence, PinObservationEvidence, QueryObservations
+from lekiwi_rmf.srv import GetObservationEvidence, PinObservationEvidence, QueryObservations, PrepareObservationEvidence
 from test_object_observations import capture, operating_point
 from lekiwi_rmf.msg import PerceptionOperatingPoint
 
@@ -51,6 +51,7 @@ def test_synchronized_capture_query_evidence_and_stale_stream(tmp_path):
     query = peer.create_client(QueryObservations, '/robot/observations/query')
     evidence = peer.create_client(GetObservationEvidence, '/robot/observations/evidence')
     pin = peer.create_client(PinObservationEvidence, '/robot/observations/pin')
+    prepare = peer.create_client(PrepareObservationEvidence, '/robot/observations/prepare')
     status = peer.create_client(Trigger, '/robot/observations/status')
     executor = SingleThreadedExecutor(context=context)
     executor.add_node(peer)
@@ -97,6 +98,26 @@ def test_synchronized_capture_query_evidence_and_stale_stream(tmp_path):
         receipt = call(query, QueryObservations.Request(request_json=json.dumps({
             'observation_ids': [record['id']], 'pin_request_id': 'goal-ros-test'})))
         assert record['id'] in json.loads(receipt.response_json)['pins']
+        # The compound service reserves two captures and returns the exact bytes in one response.
+        image.header.stamp = peer.get_clock().now().to_msg()
+        found.header = image.header
+        for item in found.detections:
+            item.header = image.header
+        images.publish(image)
+        detections.publish(found)
+        points.publish(operating_point(image, count=2))
+        wait(lambda: len(json.loads(call(query, QueryObservations.Request(request_json='{}')).response_json)['observations']) == 2)
+        prepared = call(prepare, PrepareObservationEvidence.Request(request_json=json.dumps({
+            'request_id': 'goal-ros-preparation', 'camera_id': 'astra_color',
+            'recognizers': [[MODEL_SHA256, record['profile']['revision']]],
+            'after': record['stamp']['sec'] - 1, 'max_age_sec': 2})))
+        assert prepared.success, prepared.detail
+        bundle = json.loads(prepared.response_json)
+        assert len(bundle['observations']) == len(bundle['pins']) == len(bundle['evidence']) == 2
+        for item in bundle['observations']:
+            proof = bundle['evidence'][item['id']]
+            assert proof['sha256'] == item['evidence']['sha256']
+            assert len(base64.b64decode(proof['data_base64'], validate=True)) == item['evidence']['size']
         assert not call(query, QueryObservations.Request(request_json='{"limit":true}')).success
         assert not call(evidence, GetObservationEvidence.Request(observation_id='../secret')).success
         wait(lambda: not call(status, Trigger.Request()).success)
