@@ -23,6 +23,13 @@ baseline, not evidence for the transport change. Its 101 observation events and
 63/120 stale-output diagnostic samples show why the two-second gate remains
 necessary. A source-verified canary is measured separately.
 
+The source-verified 120-second canary produced 130 events versus 101 in the
+baseline. Final processing p95 decreased from 2.094 s to 1.689 s; stale-output
+diagnostics remained frequent (67/120 samples versus 63/120). These sequential
+live runs include variable network conditions and are not an independent
+accuracy comparison or continuous-readiness acceptance. A direct Tailscale ping
+to the GPU host measured 254 ms; its HTTP health round trip measured 515 ms.
+
 ## Fiber binding
 
 The existing managed rosbridge is bound to the compute host's private Tailscale
