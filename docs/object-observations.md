@@ -67,7 +67,7 @@ round trip:
 
 ```bash
 scripts/object-perception.sh --describe --mode local
-scripts/object-perception.sh mode:=local cameras:=front
+scripts/object-perception.sh perception_mode:=local cameras:=front
 ```
 
 Both nodes load `config/object_perception_local.yaml`. The descriptor selects the
