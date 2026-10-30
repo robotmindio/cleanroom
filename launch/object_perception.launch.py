@@ -8,13 +8,13 @@ from launch_ros.parameter_descriptions import ParameterValue
 import yaml
 
 from lekiwi_rmf.object_cameras import camera_bindings, config_directory
-from lekiwi_rmf.object_recognition import model_runtime, needs_private_runtime, selected_models
+from lekiwi_rmf.object_recognition import model_runtime, needs_private_runtime, perception_config, selected_models
 
 
 def nodes(context):
     cameras = LaunchConfiguration('cameras').perform(context).split(',')
     camera_bindings(cameras)
-    config = config_directory() / 'object_perception.yaml'
+    config = perception_config(LaunchConfiguration('mode').perform(context))
     settings = yaml.safe_load(config.read_text())['/**']['ros__parameters']
     environment, prefix = {}, ''
     models = selected_models(settings)
@@ -35,6 +35,7 @@ def generate_launch_description():
     deployment = yaml.safe_load((config_directory() / 'object_perception_deployment.yaml').read_text())
     return LaunchDescription([
         DeclareLaunchArgument('use_sim_time', default_value='false'),
+        DeclareLaunchArgument('mode', default_value='remote', choices=['remote', 'local']),
         DeclareLaunchArgument('cameras', default_value=','.join(deployment['cameras'])),
         OpaqueFunction(function=nodes),
     ])

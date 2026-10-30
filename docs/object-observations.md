@@ -59,6 +59,40 @@ model cascade or language-model completion authority is introduced. The
 vendored YOLOX implementation lives directly in the Python package; its
 upstream license/provenance remain in `thirdparty/opencv_yolox/`.
 
+## Local CPU mode
+
+Use the installed RT-DETR checkpoint as the primary detector when the requested
+native class (for example `cup`) needs fresh evidence without a remote inference
+round trip:
+
+```bash
+scripts/object-perception.sh --describe --mode local
+scripts/object-perception.sh mode:=local cameras:=front
+```
+
+Both nodes load `config/object_perception_local.yaml`. The descriptor selects the
+same model, runtime and standard RT-DETR profile as the launcher. The script uses
+its own repository launch file and Python package so a source checkout cannot
+silently launch another installed version. The default `remote` mode retains the
+open-vocabulary detector and local fallback.
+
+Local mode has a closed vocabulary. It does not implement an open query such as
+`green spiky ball` or a learned `durian seed` concept. Keep those requests on the
+remote operating point and qualify their views separately. Image inference is
+local; a deployed Fiber verifier still has its own transport latency.
+
+`config/fiber_perception_local_profile.json` is a disabled, cup-only image profile
+for this mode. It retains the 0.5 minimum score, 2 s evidence age, 2 s confirmation
+window, and no moving search. Read the actual descriptor before admitting its
+runtime identity. Production perception start remains disabled.
+
+A 2026-10-30 qualification harness completed three cup goals against live camera
+observations, real immutable pins and both JPEG hashes. The oldest evidence at
+verification was 1.325, 1.570 and 1.352 s. This used isolated SQLite persistence
+and local workflow scheduling: it validates the local robot integration, not a
+deployed Fiber/Temporal goal or independent category recognition. Metric distance
+and grasp acceptance remain separate.
+
 ## Remote GPU provider and local fallback
 
 `config/object_perception.yaml` selects `grounding_dino_tiny_gpu`: the same pinned

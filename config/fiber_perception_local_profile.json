@@ -1,0 +1,21 @@
+{
+  "robot_id": "roboto-1",
+  "site_id": "home",
+  "camera_id": "front",
+  "camera_sha256": "58836269f27778b37cb56ecd77c02559778544bda649f9148a35f520390d0888",
+  "model_sha256": "81778a0ac0300bfd3c885954d983f02a86ee3ce4469ef2a76b1a00100ddb3869",
+  "profile_revision": "54bbe58b1930f5f20b0371509bd5058c5b14c8101bf7ac4d4c002577deda0f2a",
+  "enabled": false,
+  "allow_search": false,
+  "allow_any_color": true,
+  "views": [],
+  "max_duration_sec": 30,
+  "max_travel_m": 0.12,
+  "minimum_score": 0.5,
+  "max_evidence_age_sec": 2,
+  "confirmation_window_sec": 2,
+  "labels": [
+    "cup"
+  ],
+  "open_vocabulary": false
+}

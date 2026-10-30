@@ -5,8 +5,9 @@ set +u
 # shellcheck source=/dev/null
 source "$script_dir/setup.bash"
 set -u
+export PYTHONPATH="$script_dir/..${PYTHONPATH:+:$PYTHONPATH}"
 if [[ ${1:-} == --describe ]]; then
-  export PYTHONPATH="$script_dir/..${PYTHONPATH:+:$PYTHONPATH}"
-  exec python -m lekiwi_rmf.object_recognition
+  shift
+  exec python -m lekiwi_rmf.object_recognition "$@"
 fi
-exec ros2 launch lekiwi_rmf object_perception.launch.py "$@"
+exec ros2 launch "$script_dir/../launch/object_perception.launch.py" "$@"

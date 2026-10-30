@@ -1,0 +1,15 @@
+/**:
+  ros__parameters:
+    # Native classes on the robot CPU; use remote mode for open-vocabulary queries.
+    model_name: rtdetr_v2_r18
+    fallback_model_name: ''
+object_detector:
+  ros__parameters:
+    max_rate_hz: 2.0
+    max_source_age_sec: 2.0
+object_observations:
+  ros__parameters:
+    max_source_age_sec: 2.0
+    max_records: 100000
+    max_bytes: 2147483648
+    retention_sec: 604800.0
