@@ -434,7 +434,9 @@ class ObjectDetector(Node):
                     raise
                 self._primary_retry_at = time.monotonic() + PRIMARY_RETRY_SEC
                 with self._frame_lock:
-                    self._stats[camera]['primary_reason'] = str(error)
+                    # The retry window is shared; every camera using it is degraded.
+                    for stats in self._stats.values():
+                        stats['primary_reason'] = str(error)
                 self.get_logger().warning(f'{camera}: primary recognizer unavailable, serving fallback: {error}',
                                           throttle_duration_sec=30)
         with self._frame_lock:

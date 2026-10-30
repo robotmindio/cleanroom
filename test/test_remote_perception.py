@@ -477,3 +477,39 @@ def test_remote_answers_split_into_queue_inference_and_network_stages():
     # Without usable provider timings the whole call is inference and the network is not guessed.
     for remote in (None, (.4, None), (.4, {'decode': 0., 'queue': 0., 'inference': .5, 'total': .5})):
         assert stages(remote) == {'sensor_age': None, 'queue': .2, 'inference': .7, 'network': None}
+
+
+def test_shared_provider_failure_marks_every_camera_fallback_as_degraded(monkeypatch):
+    from lekiwi_rmf import object_detector
+
+    calls = []
+
+    def unavailable(*_):
+        calls.append('primary')
+        raise ProviderUnavailable('provider identity changed')
+
+    primary = fake_recognizer(unavailable, 'remote_grounding_dino', name=REMOTE,
+                             open_vocabulary=True, default_query=DEFAULT, supports_concepts=True)
+    fallback = fake_recognizer(lambda *_: [], 'rtdetr_v2', name='rtdetr_v2_r18', sha256='b' * 64)
+    monkeypatch.setattr(object_detector, 'Recognizer', lambda name, *_: primary if name == REMOTE else fallback)
+    context = Context()
+    rclpy.init(context=context)
+    node = object_detector.ObjectDetector(context=context, parameter_overrides=[
+        Parameter('model_name', value=REMOTE), Parameter('fallback_model_name', value='rtdetr_v2_r18'),
+        Parameter('camera_ids', value=['front', 'wrist'])])
+    try:
+        image, _ = capture()
+        for camera in ('front', 'wrist'):
+            _, role, reason = node._recognize(camera, frame(), b'artifact', image.header, DEFAULT, node._profiles)
+            assert role == 'fallback'
+            assert reason == 'provider identity changed'
+            assert node._stats[camera]['primary_reason'] == reason
+        assert calls == ['primary']
+        primary.predict = lambda *_: []
+        node._primary_retry_at = 0.
+        _, role, reason = node._recognize('wrist', frame(), b'artifact', image.header, DEFAULT, node._profiles)
+        assert (role, reason) == ('primary', '')
+        assert node._stats['wrist']['primary_reason'] == ''
+    finally:
+        node.destroy_node()
+        context.try_shutdown()
