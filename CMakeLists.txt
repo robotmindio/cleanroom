@@ -9,6 +9,7 @@ find_package(std_msgs REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME} "action/Explore.action" "action/RunSkill.action" "action/Search.action"
   "srv/SubmitTask.srv" "srv/GetTask.srv" "srv/CancelTask.srv" "srv/TaskApi.srv"
   "srv/QueryObservations.srv" "srv/GetObservationEvidence.srv" "srv/PinObservationEvidence.srv"
+  "srv/PrepareObservationEvidence.srv"
   "srv/QuerySpatial.srv" "srv/SetPerceptionQuery.srv" "srv/ApplyPerceptionProfile.srv"
   "msg/PerceptionOperatingPoint.msg" DEPENDENCIES geometry_msgs std_msgs)
 ament_export_dependencies(rosidl_default_runtime)

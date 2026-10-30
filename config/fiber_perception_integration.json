@@ -13,6 +13,7 @@
     "/robot/observations/query",
     "/robot/observations/evidence",
     "/robot/observations/pin",
+    "/robot/observations/prepare",
     "/robot/observations/status",
     "/robot/perception/set_query",
     "/robot/perception/apply_profile"
