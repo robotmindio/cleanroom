@@ -1,0 +1,19 @@
+{
+  "robot_id": "roboto-1",
+  "site_id": "home",
+  "camera_id": "front",
+  "camera_sha256": "58836269f27778b37cb56ecd77c02559778544bda649f9148a35f520390d0888",
+  "model_sha256": "6ec9eb1f5a01c271a5b0b6ce6d95432148f94d33c16b1ad6a4ccca6ee2f5636f",
+  "profile_revision": "dd4f8f1c82020dabf74c6a6700056b6654730624f9f003ea94984ad1e5429b40",
+  "enabled": false,
+  "allow_search": false,
+  "allow_any_color": true,
+  "views": [],
+  "max_duration_sec": 30,
+  "max_travel_m": 0.12,
+  "minimum_score": 0.5,
+  "max_evidence_age_sec": 2,
+  "confirmation_window_sec": 2,
+  "labels": ["cup", "green spiky ball"],
+  "open_vocabulary": false
+}
