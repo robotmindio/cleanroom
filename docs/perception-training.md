@@ -14,6 +14,12 @@ trained detector. The loop mirrors [skill acquisition](skill-acquisition.md):
 | Regression | the same evaluator on every suite manifest of the recognizer it replaces | one report per suite |
 | Promote | `scripts/register-recognizer.py NAME --promote REPORT --regression REPORT...` | `status: qualified` |
 
+A learned concept can be queried alone: set `labels: []` and its immutable
+revision in `concept_revisions` on `/robot/perception/set_query`. Adding an
+unrelated label changes the detector prompt and can suppress a proposal. Empty
+labels and empty concept revisions together restore the tracked default query.
+The published operating point records the concept name and revision.
+
 ## Datasets
 
 The annotation file lists views of taught or corrected observations (an
