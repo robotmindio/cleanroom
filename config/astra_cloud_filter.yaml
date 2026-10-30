@@ -6,7 +6,7 @@ astra_cloud_filter:
     # safety observations timely without increasing the RGB/depth image rate.
     pixel_stride: 8
     max_rate_hz: 10.0
-    # Visual registration needs dense measured depth, paired with RGB.
+    # Pair capture stamps within 50 ms before applying this shared image rate.
     image_max_rate_hz: 2.0
     # Bound RGB traffic even when Tailscale has to relay the sensor connection.
     jpeg_quality: 70

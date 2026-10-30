@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Publish compact Astra points and rate-limited RGB for the device bridge."""
+"""Publish compact Astra points and capture-paired RGB/depth for the device bridge."""
 
 from __future__ import annotations
 
@@ -15,6 +15,8 @@ from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from rclpy.serialization import deserialize_message
 from sensor_msgs.msg import CompressedImage, Image, PointCloud2, PointField
+
+IMAGE_PAIR_MAX_SKEW_NS = 50_000_000
 
 
 def compact_cloud(message: PointCloud2, stride: int) -> PointCloud2 | None:
@@ -95,35 +97,56 @@ class AstraCloudFilter(Node):
         )
         self._bridge = CvBridge()
         self._image_period = 1.0 / image_rate
-        self._last_image_publish = {"color": 0.0, "depth": 0.0}
+        self._last_image_publish = 0.0
+        self._pending_images = {}
+        self._image_publishers = {}
         # image_transport's lazy republisher does not remain subscribed for the
         # bridge's native DDS reader. Subscribe eagerly, encode only sent frames.
-        for camera, extension, encoding in [("color", ".jpg", "jpeg"), ("depth", ".png", "16UC1; png compressed")]:
-            publisher = self.create_publisher(CompressedImage, f"/camera/astra/{camera}/image_raw/compressed", 1)
+        for camera in ("color", "depth"):
+            self._image_publishers[camera] = self.create_publisher(
+                CompressedImage, f"/camera/astra/{camera}/image_raw/compressed", 1)
             self.create_subscription(Image, f"/camera/astra/{camera}/image_raw",
-                lambda msg,c=camera,e=extension,f=encoding,p=publisher:self._on_image(msg,c,e,f,p),
+                lambda msg,c=camera:self._on_image(msg,c),
                 # UVC colour publishes reliably; its 0.9 MB raw frame needs
                 # fragment recovery while this process also receives clouds.
                 1 if camera == "color" else qos_profile_sensor_data, raw=True)
 
-    def _on_image(self, serialized: bytes, camera: str, extension: str, encoding: str, publisher) -> None:
+    def _on_image(self, serialized: bytes, camera: str) -> None:
         now = time.monotonic()
-        if now - self._last_image_publish[camera] < self._image_period:
+        if now - self._last_image_publish < self._image_period:
             return
         try:
             image = deserialize_message(serialized, Image)
             if camera == "depth" and image.encoding != "16UC1":
                 raise ValueError(f"expected depth in millimetres as 16UC1, got {image.encoding}")
-            desired = "passthrough" if camera == "depth" else "bgr8"
-            parameters = [cv2.IMWRITE_JPEG_QUALITY,self._jpeg_quality] if camera == "color" else []
-            ok, compressed = cv2.imencode(extension, self._bridge.imgmsg_to_cv2(image, desired),parameters)
-            if not ok:
-                raise RuntimeError(f"{extension} encoding failed")
+            stamp = image.header.stamp.sec * 1_000_000_000 + image.header.stamp.nanosec
+            if stamp <= 0:
+                raise ValueError("image capture stamp must be positive")
+            self._pending_images[camera] = image
+            if len(self._pending_images) != 2:
+                return
+            stamps = {c: m.header.stamp.sec * 1_000_000_000 + m.header.stamp.nanosec
+                      for c, m in self._pending_images.items()}
+            if abs(stamps["color"] - stamps["depth"]) > IMAGE_PAIR_MAX_SKEW_NS:
+                del self._pending_images[min(stamps, key=stamps.get)]
+                return
+            frames = {}
+            for c, extension, encoding in [("color", ".jpg", "jpeg"), ("depth", ".png", "16UC1; png compressed")]:
+                image = self._pending_images[c]
+                desired = "passthrough" if c == "depth" else "bgr8"
+                parameters = [cv2.IMWRITE_JPEG_QUALITY,self._jpeg_quality] if c == "color" else []
+                ok, compressed = cv2.imencode(extension, self._bridge.imgmsg_to_cv2(image, desired),parameters)
+                if not ok:
+                    raise RuntimeError(f"{extension} encoding failed")
+                frames[c] = CompressedImage(header=image.header, format=encoding, data=compressed.tobytes())
         except Exception as error:
+            self._pending_images.clear()
             self.get_logger().warning(f"discarding invalid Astra {camera} frame: {error}", throttle_duration_sec=5)
             return
-        self._last_image_publish[camera] = now
-        publisher.publish(CompressedImage(header=image.header, format=encoding, data=compressed.tobytes()))
+        self._pending_images.clear()
+        self._last_image_publish = now
+        for c, frame in frames.items():
+            self._image_publishers[c].publish(frame)
 
     def _on_cloud(self, serialized: bytes) -> None:
         now = time.monotonic()

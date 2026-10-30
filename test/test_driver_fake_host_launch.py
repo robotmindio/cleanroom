@@ -178,7 +178,11 @@ class TestDriverFakeHostGraph(unittest.TestCase):
         self.assertFalse(fake_host.torque_enabled)
 
         self._permission(self.arm_permission, True)
-        self.assertTrue(self._until(lambda: self._arm().success, timeout=4.0))
+        self.assertTrue(self._until(
+            lambda: self._permission(self.arm_permission, True) is None
+            and self._arm().success,
+            timeout=4.0,
+        ))
         self.assertTrue(fake_host.torque_enabled)
 
         self._permission(self.base_permission, True)
