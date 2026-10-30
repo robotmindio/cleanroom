@@ -24,18 +24,18 @@ weights. RT-DETR and Grounding DINO use a separate CPU environment under
 requirements and a compatible CPU Torch/Torchvision pair. ROS and motor-driver
 Python installations are not modified. Models remain outside Git.
 
-The current **development** operating point is RT-DETRv2-R18 at 384×384 and a
+An earlier local **development** benchmark used RT-DETRv2-R18 at 384×384 and a
 0.50 score threshold. It detected the three retained patterned-mug frames at
 0.693–0.706, where YOLOX missed them. Warm processing was approximately 0.89 s;
 the first measured frame took 6.76 s. This one scene establishes a reproducible
 improvement, not site qualification. Production start remains disabled in
 `config/object_perception_deployment.yaml`.
 
-`model_sha256` now identifies the complete recognition operating point: pinned
-artifacts, backend, input size, threshold, preprocessing revision, label
-output (`native`, or `query` for open-vocabulary recognizers) and actual runtime
-package versions. It is not just the weight-file hash. Model,
-threshold or runtime changes require a new admitted profile identity. The
+`model_sha256` identifies pinned artifacts, backend, input size, preprocessing
+revision, label output (`native`, or `query` for open-vocabulary recognizers) and
+actual runtime package versions. Proposal thresholds have their own
+`profile.revision`. Model or runtime changes require a newly admitted model
+identity; threshold changes require an admitted proposal profile. The
 `--describe` output supplies the exact model and camera identities to put in a
 reviewed Fiber profile. Old weight-only profiles must not be reused.
 
