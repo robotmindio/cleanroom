@@ -382,8 +382,11 @@ class ObservationStore:
         except RecursionError as error:
             raise ValueError('preparation request is nested too deeply') from error
         fields = {'request_id', 'camera_id', 'recognizers', 'after', 'max_age_sec'}
-        if not isinstance(values, dict) or set(values) != fields:
+        if not isinstance(values, dict) or set(values) - {'evidence_format'} != fields:
             raise ValueError('invalid preparation request fields')
+        evidence_format = values.get('evidence_format', 'jpeg')
+        if evidence_format not in ('jpeg', 'native_sha256_v1'):
+            raise ValueError('invalid preparation evidence format')
         prefix, camera, recognizers = values['request_id'], values['camera_id'], values['recognizers']
         if (not isinstance(prefix, str) or not 1 <= len(prefix) <= 63
                 or any(c not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_' for c in prefix)
@@ -412,18 +415,24 @@ class ObservationStore:
             selected.append(record)
         selected.sort(key=lambda r: (r['stamp']['sec'], r['stamp']['nanosec']))
         ids = [r['id'] for r in selected[-2:]]
+        representation = {'evidence_format': evidence_format} if evidence_format != 'jpeg' else {}
         if len(ids) != 2:
-            return {'schema': 1, 'epoch': self.epoch, 'observations': [], 'pins': {}, 'evidence': {}}
+            return {'schema': 1, 'epoch': self.epoch, 'observations': [], 'pins': {}, 'evidence': {}, **representation}
         images = {}
         for identifier in ids:
+            # evidence() reads the immutable bytes and recomputes their SHA-256 in either representation.
             data, digest = self.evidence(identifier, now=now)
-            images[identifier] = {'mime_type': 'image/jpeg', 'sha256': digest,
-                                  'data_base64': base64.b64encode(data).decode('ascii')}
+            proof = {'mime_type': 'image/jpeg', 'sha256': digest}
+            if evidence_format == 'native_sha256_v1':
+                proof.update(size=len(data), verification=evidence_format)
+            else:
+                proof['data_base64'] = base64.b64encode(data).decode('ascii')
+            images[identifier] = proof
         digest = hashlib.sha256(json.dumps(sorted(ids), separators=(',', ':')).encode()).hexdigest()
         request = f'{prefix}-{digest}'
         self.pin(json.dumps({'request_id': request, 'observation_ids': ids}), now=now)
         result = self.query(json.dumps({'observation_ids': ids, 'pin_request_id': request}), now=now)
-        result.update(request_id=request, evidence=images)
+        result.update(request_id=request, evidence=images, **representation)
         return result
 
     @_serialized

@@ -483,6 +483,27 @@ receipt and both private JPEGs; callers must keep the image bytes out of
 workflow history and independently enforce label, ambiguity, geometry, motion,
 policy, cancellation and final freshness checks.
 
+An explicitly opted-in consumer may request `evidence_format: "native_sha256_v1"`
+to keep JPEGs at their authoritative store. The same operation still reads each
+JPEG and recomputes SHA-256 before pinning; it returns the actual byte size and
+digest with `verification: "native_sha256_v1"` instead of `data_base64`, and
+echoes the format at the response root. This is a native verification receipt,
+not an independent hash calculation by the remote consumer. Accept it only
+from the configured, authenticated robot authority and compare its digest and
+actual size with each immutable observation. Goal binding, live pins and final
+freshness remain consumer checks. The ordinary evidence service still retrieves
+the original JPEG for inspection or identity reidentification.
+
+Omitting the format preserves the existing JPEG response byte-for-byte. Invalid
+formats are rejected, and a corrupt stored JPEG produces no successful receipt
+or new reservation in either representation.
+
+The optional `config/fiber_native_evidence_receipts.json` is an additive
+integration-config patch, applied through Fiber's owning API after verifying
+that this native format is installed. Preserve the full existing configuration
+and credentials when applying it; an integration PUT replaces its document.
+The ordinary perception integration patch continues to require JPEGs by default.
+
 The strict JSON request contains `request_id` (goal prefix, at most 63 ASCII
 alphanumeric/underscore/hyphen characters), `camera_id`, `recognizers` (up to
 17 `[model_sha256, profile_revision]` pairs), `after` (capture Unix seconds),
