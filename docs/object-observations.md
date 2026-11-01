@@ -498,6 +498,12 @@ Omitting the format preserves the existing JPEG response byte-for-byte. Invalid
 formats are rejected, and a corrupt stored JPEG produces no successful receipt
 or new reservation in either representation.
 
+The optional `config/fiber_native_evidence_receipts.json` is an additive
+integration-config patch, applied through Fiber's owning API after verifying
+that this native format is installed. Preserve the full existing configuration
+and credentials when applying it; an integration PUT replaces its document.
+The ordinary perception integration patch continues to require JPEGs by default.
+
 The strict JSON request contains `request_id` (goal prefix, at most 63 ASCII
 alphanumeric/underscore/hyphen characters), `camera_id`, `recognizers` (up to
 17 `[model_sha256, profile_revision]` pairs), `after` (capture Unix seconds),
