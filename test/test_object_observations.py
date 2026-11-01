@@ -639,11 +639,37 @@ def test_preparation_returns_newest_distinct_captures_with_owned_hash_checked_re
         assert set(store.query(json.dumps({'observation_ids': ids, 'pin_request_id': result['request_id']}), now=101)['pins']) == set(ids)
 
 
+def test_native_hash_receipts_read_and_hash_actual_bytes_without_transferring_them(tmp_path):
+    import hashlib
+    with closing(ObservationStore(tmp_path / 'observations.db')) as store:
+        images = {}
+        for stamp in (99, 100):
+            record, jpeg = document(stamp=stamp)
+            record['clock_domain'] = 'ros_system_time'
+            store.put(record, jpeg, now=100)
+            images[record['id']] = jpeg
+        result = store.prepare(preparation_request(evidence_format='native_sha256_v1'), now=100)
+        assert result['evidence_format'] == 'native_sha256_v1'
+        assert set(result['evidence']) == set(result['pins']) == set(images)
+        for identifier, raw in images.items():
+            assert result['evidence'][identifier] == {
+                'mime_type': 'image/jpeg', 'sha256': hashlib.sha256(raw).hexdigest(),
+                'size': len(raw), 'verification': 'native_sha256_v1'}
+            assert result['pins'][identifier] > 100
+        assert store._db.execute('SELECT COUNT(*) FROM pins').fetchone()[0] == 2
+        assert store.prepare(preparation_request(evidence_format='native_sha256_v1'), now=100) == result
+        # Representation does not change the capture set or its owned reservation identity.
+        legacy = store.prepare(preparation_request(), now=100)
+        assert legacy['request_id'] == result['request_id'] and 'evidence_format' not in legacy
+
+
 @pytest.mark.parametrize('changes', [
     {'max_age_sec': 2.01}, {'max_age_sec': True}, {'max_age_sec': float('nan')},
     {'after': -1}, {'after': float('inf')}, {'request_id': '../bad'},
     {'request_id': 'x' * 64}, {'recognizers': []}, {'recognizers': [['invalid', '']]},
     {'recognizers': [[MODEL_SHA256, 'invalid']]}, {'unknown': True},
+    {'evidence_format': None}, {'evidence_format': True}, {'evidence_format': {}},
+    {'evidence_format': ['jpeg']}, {'evidence_format': 'metadata_only'},
 ])
 def test_preparation_rejects_invalid_or_widened_requests(tmp_path, changes):
     with closing(ObservationStore(tmp_path / 'observations.db')) as store:
@@ -652,7 +678,8 @@ def test_preparation_rejects_invalid_or_widened_requests(tmp_path, changes):
         assert store._db.execute('SELECT COUNT(*) FROM pins').fetchone()[0] == 0
 
 
-def test_preparation_never_pins_incomplete_wrong_identity_or_corrupt_evidence(tmp_path):
+@pytest.mark.parametrize('evidence_format', ['jpeg', 'native_sha256_v1'])
+def test_preparation_never_pins_incomplete_wrong_identity_or_corrupt_evidence(tmp_path, evidence_format):
     with closing(ObservationStore(tmp_path / 'observations.db')) as store:
         for stamp in (99, 100):
             record, jpeg = document(stamp=stamp)
@@ -660,12 +687,12 @@ def test_preparation_never_pins_incomplete_wrong_identity_or_corrupt_evidence(tm
             store.put(record, jpeg, now=100)
         for changes in ({'camera_id': 'another'}, {'recognizers': [['a' * 64, PROFILE.revision]]},
                         {'after': 100}, {'max_age_sec': .5}):
-            result = store.prepare(preparation_request(**changes), now=100)
+            result = store.prepare(preparation_request(evidence_format=evidence_format, **changes), now=100)
             assert result['observations'] == [] and result['pins'] == {} and result['evidence'] == {}
         store._db.execute('UPDATE observations SET evidence=? WHERE id=?', (b'corrupt', record['id']))
         store._db.commit()
         with pytest.raises(RuntimeError, match='hash mismatch'):
-            store.prepare(preparation_request(), now=100)
+            store.prepare(preparation_request(evidence_format=evidence_format), now=100)
         assert store._db.execute('SELECT COUNT(*) FROM pins').fetchone()[0] == 0
 
 
