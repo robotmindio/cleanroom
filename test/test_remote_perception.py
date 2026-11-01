@@ -1,6 +1,7 @@
 """Remote GPU perception provider adapter against a fake HTTP provider."""
 
 import base64
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import socket
@@ -142,6 +143,106 @@ def test_provider_reuses_its_connection_without_changing_the_request(provider):
     assert len(provider.requests) == 2
     assert provider.requests[0] == provider.requests[1]
     assert len(provider.connections) == 1
+
+
+def test_provider_overlaps_two_requests_without_sharing_or_exceeding_its_connections(provider):
+    from lekiwi_rmf.object_recognition import RemoteProvider
+    from test_object_perception import wait
+
+    release = threading.Event()
+    active = maximum = 0
+    lock = threading.Lock()
+
+    def reply(body):
+        nonlocal active, maximum
+        with lock:
+            active += 1
+            maximum = max(maximum, active)
+        assert release.wait(3)
+        with lock:
+            active -= 1
+        return 200, body
+
+    provider.respond = reply
+    client = RemoteProvider(provider.url, 4.)
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = [executor.submit(client.post, '/v1/infer', {'request': index}) for index in range(4)]
+        try:
+            wait(lambda: active == 2)
+            assert len(provider.requests) == 2
+        finally:
+            release.set()
+        assert [future.result(timeout=5) for future in futures] == [{'request': i} for i in range(4)]
+    assert maximum == len(provider.connections) == 2
+
+
+def test_concurrent_recognizer_timings_belong_to_their_own_capture(provider):
+    recognizer = Recognizer(REMOTE, None)
+    barrier = threading.Barrier(2)
+
+    def reply(body):
+        pixels = artifact_pixels(base64.b64decode(body['image']))
+        duration = 10 if pixels[..., 0].mean() < 50 else 20
+        return provider.admitted(body, timings_ms={'decode': 1, 'queue': 0,
+                                                  'inference': duration, 'total': duration + 1})
+
+    provider.respond = reply
+
+    def infer(blue):
+        image = frame()
+        image[..., 0] = blue
+        artifact = capture_artifact(image)
+        assert recognizer.predict(artifact_pixels(artifact), DEFAULT, artifact=artifact)
+        barrier.wait(timeout=3)
+        return recognizer.last_remote[1]['inference']
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        assert list(executor.map(infer, [0, 200])) == [.01, .02]
+
+
+def test_inflight_success_does_not_clear_another_requests_failure_cooldown(monkeypatch):
+    from lekiwi_rmf import object_detector
+
+    entered, release = threading.Event(), threading.Event()
+    calls = 0
+
+    def primary(*_):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            entered.set()
+            assert release.wait(3)
+            return [[1, 1, 5, 5, .9, 'a cup']]
+        raise ProviderUnavailable('unreachable')
+
+    recognizers = {REMOTE: fake_recognizer(primary, 'remote_grounding_dino', open_vocabulary=True,
+                                          default_query=DEFAULT),
+                   'yolox': fake_recognizer(lambda *_: [])}
+    monkeypatch.setattr(object_detector, 'Recognizer', lambda name, *args: recognizers[name])
+    context = Context()
+    rclpy.init(context=context)
+    node = object_detector.ObjectDetector(context=context, parameter_overrides=[
+        Parameter('model_name', value=REMOTE), Parameter('fallback_model_name', value='yolox')])
+    artifact = capture_artifact(frame())
+    from std_msgs.msg import Header
+
+    def recognize():
+        return node._recognize('front', artifact_pixels(artifact), artifact, Header(), DEFAULT, dict(node._profiles))
+
+    try:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            pending = executor.submit(recognize)
+            try:
+                assert entered.wait(3)
+                assert recognize()[1:] == ('fallback', 'unreachable')
+            finally:
+                release.set()
+            assert pending.result(timeout=3)[1] == 'primary'
+        assert recognize()[1:] == ('fallback', 'unreachable') and calls == 2
+        assert node._stats['front']['primary_reason'] == 'unreachable'
+    finally:
+        node.destroy_node()
+        context.try_shutdown()
 
 
 def test_a_timed_out_request_is_not_replayed_and_the_next_call_reconnects(provider):

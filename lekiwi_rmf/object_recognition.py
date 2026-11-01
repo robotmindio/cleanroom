@@ -11,6 +11,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from queue import LifoQueue
 from urllib.parse import urlsplit
 
 import cv2
@@ -121,36 +122,40 @@ def suppress(rows, scope, iou):
 
 
 class RemoteProvider:
-    """Serialize operations on one reusable connection to the configured provider."""
+    """Reuse at most two connections so consecutive captures can overlap network IO."""
 
     def __init__(self, url, timeout):
         self.url, self.timeout = url, timeout
         origin = urlsplit(url)
         connection = HTTPSConnection if origin.scheme == 'https' else HTTPConnection
-        self._connection = connection(origin.hostname, origin.port, timeout=timeout)
-        self._lock = threading.Lock()
+        self._connections = LifoQueue(2)
+        for _ in range(2):
+            self._connections.put_nowait(connection(origin.hostname, origin.port, timeout=timeout))
 
     def infer(self, body):
         return self.post('/v1/infer', body)
 
     def post(self, path, body, timeout=None):
         payload = json.dumps(body, separators=(',', ':')).encode()
-        with self._lock:
+        connection = self._connections.get()
+        try:
             try:
-                self._connection.timeout = timeout or self.timeout
-                if self._connection.sock is not None:
-                    self._connection.sock.settimeout(self._connection.timeout)
-                self._connection.request('POST', path, body=payload,
+                connection.timeout = timeout or self.timeout
+                if connection.sock is not None:
+                    connection.sock.settimeout(connection.timeout)
+                connection.request('POST', path, body=payload,
                     headers={'Content-Type': 'application/json', 'Accept': 'application/json'})
-                response = self._connection.getresponse()
+                response = connection.getresponse()
                 data = response.read(MAX_RESPONSE_BYTES + 1)
             except (HTTPException, OSError, ValueError) as error:
-                self._connection.close()
+                connection.close()
                 # A lost reply may already own a provider run; never replay the POST.
                 raise ProviderUnavailable(f'perception provider unreachable: {error}') from error
             if len(data) > MAX_RESPONSE_BYTES:
-                self._connection.close()
+                connection.close()
                 raise ProviderUnavailable('perception provider response exceeds 1 MiB')
+        finally:
+            self._connections.put_nowait(connection)
         if response.status >= 300:
             code = ''
             try:
@@ -233,6 +238,16 @@ def reject_parameter_changes(node, names):
 
 
 class Recognizer:
+    @property
+    def last_remote(self):
+        return getattr(getattr(self, '_remote_state', None), 'last_remote', None)
+
+    @last_remote.setter
+    def last_remote(self, value):
+        if not hasattr(self, '_remote_state'):
+            self._remote_state = threading.local()
+        self._remote_state.last_remote = value
+
     def __init__(self, name='yolox', directory=None, allow_experimental=False):
         self.name = name
         self.spec = model_spec(name)

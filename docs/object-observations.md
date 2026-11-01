@@ -273,19 +273,29 @@ One recognizer fairly schedules the newest pending capture of each selected
 camera. One collector owns the database and global services. All selected
 streams are required: a healthy camera cannot mask a missing required camera.
 Select additional cameras only after their coverage and aggregate processing
-budget are qualified; the two-Hz setting is a total inference limit, not two Hz
+budget are qualified; the two-Hz setting is a total inference start limit, not two Hz
 per camera. Do not increase front resolution without measuring optical quality,
 transport, processing latency and the camera's corresponding calibration.
 
 ## Freshness and stationary evidence
 
 Sensor-compatible KEEP_LAST depth one, separate ROS callback groups and a
-two-thread executor let receipt continue while one inference runs. At most one
-frame per camera and one inference are pending. Newer frames replace pending
-ones; they do not create a processing backlog. Both start and completion check
+four-thread executor keep receipt and profile verification running beside inference.
+Remote recognition allows at most two requests in flight, each on its own reusable
+HTTP connection, so waiting for one response does not delay sending the next capture.
+Local models remain exclusive. At most one pending frame per camera is retained;
+a full pipeline leaves that newest frame in its slot instead of queuing work.
+The front sensor bridge exports at most five frames per second to reduce time spent
+waiting for the next capture; inference still starts at most twice per second.
+Newer frames replace pending ones. Both start and completion check
 capture freshness, with the existing two-second limit. Clock changes clear
 pending captures and invalidate in-flight results. The collector rechecks age
 after image encoding and geometry work.
+
+Query/profile snapshots and remote timing measurements belong to each request,
+including when responses finish out of order. Uncertain POSTs are not retried.
+Overlapping requests do not establish deployed goal acceptance; final verifier
+age, hash, owned pin, cancellation and deadline checks still apply.
 
 `/diagnostics` exposes per-camera received/published/rejected/overwritten counts,
 source/output age, inference duration and rolling p95, pending frames and the
