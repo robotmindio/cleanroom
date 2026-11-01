@@ -162,13 +162,12 @@ def test_profile_applies_atomically_with_expected_revision_and_never_relabels_a_
         assert not stale.success and 'changed' in stale.detail and stale.revision == OPEN.revision
         unknown = harness.apply_profile(profile_name='lenient', expected_revision=OPEN.revision)
         assert not unknown.success and 'not a tracked' in unknown.detail
-        # The candidate's probe waits for the recognizer the frame in flight holds; nothing swaps meanwhile.
+        # A stateless remote probe can use the other slot; the frame retains its earlier snapshot.
         pending = harness.profile_client.call_async(object_detector.ApplyPerceptionProfile.Request(
             profile_name='strict', expected_revision=OPEN.revision))
-        time.sleep(.3)
-        assert not pending.done() and harness.detector._profiles['primary'] == OPEN
-        gate.release.set()
         wait(pending.done, 15)
+        assert harness.detector._profiles['primary'] == strict
+        gate.release.set()
         applied = pending.result()
         assert applied.success and applied.revision == strict.revision and applied.previous_revision == OPEN.revision
         assert json.loads(applied.profile_json) == strict.document()

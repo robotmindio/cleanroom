@@ -11,7 +11,7 @@ from rclpy.duration import Duration
 from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
-from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from collections import deque
 import hashlib
@@ -24,7 +24,7 @@ from std_msgs.msg import Header, String
 from vision_msgs.msg import Detection2D, Detection2DArray, ObjectHypothesisWithPose
 
 from lekiwi_rmf.latency_budget import LatencyBudget
-from lekiwi_rmf.object_recognition import ProviderUnavailable, Recognizer, reject_parameter_changes
+from lekiwi_rmf.object_recognition import REMOTE_BACKENDS, ProviderUnavailable, Recognizer, reject_parameter_changes
 from lekiwi_rmf.object_cameras import camera_bindings
 from lekiwi_rmf.object_observations import artifact_pixels, capture_artifact
 from lekiwi_rmf.perception_concepts import load_concept, reference
@@ -121,8 +121,11 @@ class ObjectDetector(Node):
         self._query = self._detector.default_query
         self._profiles = {role: recognizer.default_profile for role, recognizer in self._recognizers.items()}
         self._history = {role: deque(maxlen=PROFILE_HISTORY) for role in self._recognizers}
-        # One inference at a time per recognizer: a profile probe never races a frame on a shared model.
-        self._model_locks = {role: threading.Lock() for role in self._recognizers}
+        # Remote requests are stateless; local models still need exclusive access.
+        self._model_locks = {role: threading.BoundedSemaphore(2) if recognizer.backend in REMOTE_BACKENDS
+                             else threading.Lock() for role, recognizer in self._recognizers.items()}
+        remote = self._detector.backend in REMOTE_BACKENDS
+        self._inference_slots = threading.BoundedSemaphore(2 if remote else 1)
         self._primary_retry_at = 0.
         self._bridge = CvBridge()
         self._frames, self._last_stamp = {}, {}
@@ -142,7 +145,7 @@ class ObjectDetector(Node):
         self._received_at = {}
         self._outputs = {}
         self._receipt_group = MutuallyExclusiveCallbackGroup()
-        self._inference_group = MutuallyExclusiveCallbackGroup()
+        self._inference_group = ReentrantCallbackGroup() if remote else MutuallyExclusiveCallbackGroup()
         # A profile probe may wait for a remote provider; it must stall neither receipt nor inference.
         self._profile_group = MutuallyExclusiveCallbackGroup()
         qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT)
@@ -347,6 +350,15 @@ class ObjectDetector(Node):
             self._received_at[camera] = time.monotonic()
 
     def _infer(self):
+        # Leave a full pipeline's newest frame in its slot; never queue old captures or callbacks.
+        if not self._inference_slots.acquire(blocking=False):
+            return
+        try:
+            self._infer_one()
+        finally:
+            self._inference_slots.release()
+
+    def _infer_one(self):
         cameras = list(self._bindings)
         with self._frame_lock:
             generation = self._generation
@@ -397,11 +409,12 @@ class ObjectDetector(Node):
             with self._frame_lock:
                 self._stats[camera]['published'] += 1
                 self._stats[camera]['fallback_published'] += role == 'fallback'
-                self._stats[camera]['served_by'] = role
-                self._stats[camera]['published_stamp'] = stamp
-                self._stats[camera]['query_revision'] = frame_query.revision if frame_query else ''
-                self._stats[camera]['profile_revision'] = profiles[role].revision
-                self._stats[camera]['reason'] = ''
+                if stamp >= self._stats[camera]['published_stamp']:
+                    self._stats[camera]['served_by'] = role
+                    self._stats[camera]['published_stamp'] = stamp
+                    self._stats[camera]['query_revision'] = frame_query.revision if frame_query else ''
+                    self._stats[camera]['profile_revision'] = profiles[role].revision
+                    self._stats[camera]['reason'] = ''
         except (ValueError, RuntimeError, CvBridgeError, cv2.error) as error:
             self._reject(camera, str(error))
 
@@ -427,7 +440,8 @@ class ObjectDetector(Node):
                 with self._model_locks['primary']:
                     result = detect(self._detector, pixels, header, query, profiles['primary'], artifact)
                 with self._frame_lock:
-                    self._stats[camera]['primary_reason'] = ''
+                    if time.monotonic() >= self._primary_retry_at:
+                        self._stats[camera]['primary_reason'] = ''
                 return result, 'primary', ''
             except ProviderUnavailable as error:
                 if self._fallback is None:
@@ -474,8 +488,8 @@ class ObjectDetector(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = None
-    # Receipt, inference and profile verification each own a thread.
-    executor = MultiThreadedExecutor(num_threads=3)
+    # Receipt and profile verification keep running beside two bounded remote requests.
+    executor = MultiThreadedExecutor(num_threads=4)
     try:
         node = ObjectDetector()
         executor.add_node(node)

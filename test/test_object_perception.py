@@ -19,6 +19,7 @@ from lekiwi_rmf.arm_trajectory import ARM_JOINTS
 from lekiwi_rmf.object_cameras import camera_bindings
 from lekiwi_rmf.observation_motion import ObservationMotion
 from lekiwi_rmf.perception_profiles import default_profile
+from lekiwi_rmf.perception_query import make_query
 from test_object_observations import capture, fake_recognizer
 
 
@@ -78,7 +79,8 @@ def wait(predicate, timeout=5, refresh=None):
         time.sleep(.01)
 
 
-def test_receipt_keeps_latest_frame_while_inference_is_busy_and_expires_old_result(monkeypatch):
+@pytest.mark.parametrize('backend,capacity', [('yolox', 1), ('remote_grounding_dino', 2)])
+def test_receipt_keeps_latest_frame_while_inference_is_busy_and_expires_old_result(monkeypatch, backend, capacity):
     from lekiwi_rmf import object_detector
 
     entered, release = threading.Event(), threading.Event()
@@ -88,12 +90,15 @@ def test_receipt_keeps_latest_frame_while_inference_is_busy_and_expires_old_resu
         active += 1
         maximum = max(maximum, active)
         calls += 1
-        if calls == 1:
-            entered.set()
+        if calls <= capacity:
+            if active == capacity:
+                entered.set()
             release.wait()
         active -= 1
         return [[10, 10, 20, 20, .9, 'cup']]
-    monkeypatch.setattr(object_detector, 'Recognizer', lambda *args: fake_recognizer(predict))
+    monkeypatch.setattr(object_detector, 'Recognizer', lambda *args: fake_recognizer(
+        predict, backend, open_vocabulary=capacity == 2,
+        default_query=make_query(['cup']) if capacity == 2 else None))
     context = Context()
     rclpy.init(context=context)
     node = object_detector.ObjectDetector(context=context, parameter_overrides=[
@@ -102,7 +107,7 @@ def test_receipt_keeps_latest_frame_while_inference_is_busy_and_expires_old_resu
     source = peer.create_publisher(Image, '/camera/front/image_raw', 1)
     received = []
     peer.create_subscription(Detection2DArray, '/robot/perception/front/detections', received.append, 10)
-    executor = MultiThreadedExecutor(num_threads=2, context=context)
+    executor = MultiThreadedExecutor(num_threads=4, context=context)
     executor.add_node(node)
     executor.add_node(peer)
     thread = threading.Thread(target=executor.spin, daemon=True)
@@ -121,6 +126,7 @@ def test_receipt_keeps_latest_frame_while_inference_is_busy_and_expires_old_resu
             time.sleep(.02)
         wait(lambda: node._stats['front']['overwritten'] > 0, refresh=send)
         assert len(node._frames) <= 1
+        assert calls == capacity
         time.sleep(.8)
         latest = peer.get_clock().now().nanoseconds
         # Best-effort receipt can drop or expire one frame; keep sending fresh ones.
@@ -131,7 +137,7 @@ def test_receipt_keeps_latest_frame_while_inference_is_busy_and_expires_old_resu
             send()
             time.sleep(.05)
         assert received
-        assert maximum == 1
+        assert maximum == capacity
         assert all(item.header.stamp.sec * 10**9 + item.header.stamp.nanosec >= latest
                    for item in received)
         assert node._stats['front']['rejected'] >= 1
