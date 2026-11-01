@@ -80,8 +80,8 @@ def detect(detector, image, header, query=None, profile=None, artifact=None):
     return result, [extras for _, extras in rows], getattr(predictions, 'run', None)
 
 
-# How long frames go straight to the fallback after the primary provider failed, so an unreachable
-# provider costs one timeout per window instead of one per frame.
+# After a primary failure, new frames use fallback until this window expires.
+# Up to two requests can already be in flight when the failure arrives.
 PRIMARY_RETRY_SEC = 10.
 
 
