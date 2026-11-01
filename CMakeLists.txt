@@ -300,6 +300,8 @@ if(BUILD_TESTING)
     # CI installs python3-zmq; minimal ROS hosts may intentionally omit it.
     if(test_python_has_zmq EQUAL 0)
       add_lekiwi_launch_test(test_driver_fake_host_launch 45)
+      # Concurrent Gazebo/MoveIt startup can starve its 200/300 ms lease/link checks.
+      set_tests_properties(test_test_driver_fake_host_launch.py PROPERTIES RUN_SERIAL TRUE)
     else()
       message(WARNING
         "pyzmq is unavailable to ${Python3_EXECUTABLE}; not registering ZMQ launch tests")
