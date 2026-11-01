@@ -71,12 +71,17 @@ as_root() {
         'enable --now chrony.service']
 
 
-def test_clock_profiles_share_lan_reference_without_clock_steps():
+def test_clock_profiles_share_reference_across_lan_changes_without_clock_steps():
     compute = (ROOT / 'config/chrony-compute.conf').read_text()
     device = (ROOT / 'config/chrony-device.conf').read_text()
     assert 'pool ntp.ubuntu.com iburst maxpoll 6' in compute
     assert 'allow 192.168.110.0/24' in compute
-    assert 'server andres-Lenovo.local iburst minpoll 2 maxpoll 3 xleave' in device
+    assert 'allow 100.107.20.66/32' in compute
+    servers = [line for line in device.splitlines() if line.startswith('server ')]
+    assert servers == [
+        'server andres-Lenovo.local iburst minpoll 2 maxpoll 3 xleave prefer',
+        'server 100.87.252.60 iburst minpoll 2 maxpoll 3',
+    ]
     for profile in (compute, device):
         directives = [line.split()[0] for line in profile.splitlines()
                       if line.strip() and not line.startswith('#')]
