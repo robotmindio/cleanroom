@@ -32,7 +32,8 @@
       // would drop an extra frame. Limit the remaining native high-rate feeds.
       pub_max_frequencies: [
         "^/pi/lidar/scan$=5",
-        "^/pi/camera/front/image_raw/compressed$=2",
+        // Keep the newest front capture within 200 ms before recognition.
+        "^/pi/camera/front/image_raw/compressed$=5",
         // Keep the gripper view current during short arm movements.
         "^/pi/camera/wrist/image_raw/compressed$=2",
       ],

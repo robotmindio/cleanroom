@@ -6,7 +6,7 @@
     fallback_model_name: rtdetr_v2_r18
 object_detector:
   ros__parameters:
-    max_rate_hz: 2.0
+    max_rate_hz: 4.0
     max_source_age_sec: 2.0
 object_observations:
   ros__parameters:
