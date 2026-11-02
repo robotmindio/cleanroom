@@ -1,6 +1,7 @@
 """Remote GPU perception provider adapter against a fake HTTP provider."""
 
 import base64
+import gzip
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
@@ -46,6 +47,8 @@ class FakeProvider:
     def __init__(self):
         self.requests, self.respond = [], self.admitted
         self.connections = set()
+        self.accept_encoding = None
+        self.wire_requests = []
         provider = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -53,13 +56,18 @@ class FakeProvider:
 
             def do_POST(self):  # noqa: N802 - stdlib handler name
                 provider.connections.add(self.client_address)
-                body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+                wire = self.rfile.read(int(self.headers['Content-Length']))
+                encoding = self.headers.get('Content-Encoding', 'identity')
+                provider.wire_requests.append((encoding, len(wire)))
+                body = json.loads(gzip.decompress(wire) if encoding == 'gzip' else wire)
                 provider.requests.append((self.path, body))
                 status, payload = provider.respond(body)
                 data = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
                 self.send_response(status)
                 self.send_header('Content-Type', 'application/json')
                 self.send_header('Content-Length', str(len(data)))
+                if provider.accept_encoding is not None:
+                    self.send_header('Accept-Encoding', provider.accept_encoding)
                 self.end_headers()
                 self.wfile.write(data)
 
@@ -145,7 +153,60 @@ def test_provider_reuses_its_connection_without_changing_the_request(provider):
     assert len(provider.connections) == 1
 
 
-def test_provider_overlaps_two_requests_without_sharing_or_exceeding_its_connections(provider):
+@pytest.mark.parametrize('advertised,compressed', [
+    (None, False), ('identity', False), ('gzip;q=0', False), ('x-gzip', False), ('gzip, identity', True)])
+def test_provider_compresses_later_requests_only_after_explicit_advertisement(provider, advertised, compressed):
+    provider.accept_encoding = advertised
+    recognizer = Recognizer(REMOTE, None)
+    for _ in range(3):
+        predict(recognizer, DEFAULT)
+    assert provider.wire_requests[0][0] == 'identity'
+    assert [item[0] for item in provider.wire_requests[1:]] == ['gzip' if compressed else 'identity'] * 2
+    assert provider.requests[0] == provider.requests[1] == provider.requests[2]
+    if compressed:
+        assert provider.wire_requests[1][1] < provider.wire_requests[0][1]
+    assert len(provider.connections) == 1
+
+
+def test_provider_drops_compression_admission_after_a_peer_rollback(provider):
+    provider.accept_encoding = 'gzip'
+    recognizer = Recognizer(REMOTE, None)
+    predict(recognizer, DEFAULT)
+    provider.accept_encoding = None
+    provider.respond = lambda body: (415, {'error': {'code': 'unsupported_content_encoding'}})
+    with pytest.raises(ProviderUnavailable, match='415'):
+        predict(recognizer, DEFAULT)
+    assert len(provider.requests) == 2
+    provider.respond = provider.admitted
+    predict(recognizer, DEFAULT)
+    assert [item[0] for item in provider.wire_requests] == ['identity', 'gzip', 'identity']
+
+
+def test_provider_forgets_compression_after_a_lost_reply_without_replaying_it(provider):
+    provider.accept_encoding = 'gzip'
+    recognizer = Recognizer(REMOTE, None)
+    predict(recognizer, DEFAULT)
+    release = threading.Event()
+    def delayed(body):
+        assert release.wait(3)
+        return provider.admitted(body)
+    provider.respond = delayed
+    recognizer.model.timeout = .05
+    try:
+        with pytest.raises(ProviderUnavailable, match='unreachable'):
+            predict(recognizer, DEFAULT)
+        assert len(provider.requests) == 2
+    finally:
+        release.set()
+    provider.respond = provider.admitted
+    recognizer.model.timeout = 1.
+    predict(recognizer, DEFAULT)
+    assert [item[0] for item in provider.wire_requests] == ['identity', 'gzip', 'identity']
+    assert len(provider.connections) == 2
+
+
+@pytest.mark.parametrize('advertise', [False, True])
+def test_provider_overlaps_two_requests_without_sharing_or_exceeding_its_connections(provider, advertise):
     from lekiwi_rmf.object_recognition import RemoteProvider
     from test_object_perception import wait
 
@@ -164,6 +225,7 @@ def test_provider_overlaps_two_requests_without_sharing_or_exceeding_its_connect
         return 200, body
 
     provider.respond = reply
+    provider.accept_encoding = 'gzip' if advertise else None
     client = RemoteProvider(provider.url, 4.)
     with ThreadPoolExecutor(max_workers=4) as executor:
         futures = [executor.submit(client.post, '/v1/infer', {'request': index}) for index in range(4)]
