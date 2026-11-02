@@ -1,6 +1,7 @@
 """Pinned local and remote recognizers with one source-pixel prediction contract."""
 
 import base64
+import gzip
 import hashlib
 from http.client import HTTPConnection, HTTPSConnection, HTTPException
 import importlib.metadata
@@ -130,32 +131,41 @@ class RemoteProvider:
         connection = HTTPSConnection if origin.scheme == 'https' else HTTPConnection
         self._connections = LifoQueue(2)
         for _ in range(2):
-            self._connections.put_nowait(connection(origin.hostname, origin.port, timeout=timeout))
+            self._connections.put_nowait((connection(origin.hostname, origin.port, timeout=timeout), False))
 
     def infer(self, body):
         return self.post('/v1/infer', body)
 
     def post(self, path, body, timeout=None):
         payload = json.dumps(body, separators=(',', ':')).encode()
-        connection = self._connections.get()
+        connection, accepts_gzip = self._connections.get()
+        headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
+        if accepts_gzip:
+            compressed = gzip.compress(payload, mtime=0)
+            if len(compressed) < len(payload):
+                payload = compressed
+                headers['Content-Encoding'] = 'gzip'
         try:
             try:
                 connection.timeout = timeout or self.timeout
                 if connection.sock is not None:
                     connection.sock.settimeout(connection.timeout)
-                connection.request('POST', path, body=payload,
-                    headers={'Content-Type': 'application/json', 'Accept': 'application/json'})
+                connection.request('POST', path, body=payload, headers=headers)
                 response = connection.getresponse()
                 data = response.read(MAX_RESPONSE_BYTES + 1)
+                accepts_gzip = 'gzip' in {value.strip().lower() for value in
+                                          response.getheader('Accept-Encoding', '').split(',')}
             except (HTTPException, OSError, ValueError) as error:
                 connection.close()
+                accepts_gzip = False
                 # A lost reply may already own a provider run; never replay the POST.
                 raise ProviderUnavailable(f'perception provider unreachable: {error}') from error
             if len(data) > MAX_RESPONSE_BYTES:
                 connection.close()
+                accepts_gzip = False
                 raise ProviderUnavailable('perception provider response exceeds 1 MiB')
         finally:
-            self._connections.put_nowait(connection)
+            self._connections.put_nowait((connection, accepts_gzip))
         if response.status >= 300:
             code = ''
             try:
