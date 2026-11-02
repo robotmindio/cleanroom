@@ -80,8 +80,9 @@ def detect(detector, image, header, query=None, profile=None, artifact=None):
     return result, [extras for _, extras in rows], getattr(predictions, 'run', None)
 
 
-# After a primary failure, new frames use fallback until this window expires.
+# Retry transient failures promptly; repeated outages retain the ten-second ceiling.
 # Up to two requests can already be in flight when the failure arrives.
+PRIMARY_RETRY_MIN_SEC = 1.
 PRIMARY_RETRY_SEC = 10.
 
 
@@ -127,6 +128,7 @@ class ObjectDetector(Node):
         remote = self._detector.backend in REMOTE_BACKENDS
         self._inference_slots = threading.BoundedSemaphore(2 if remote else 1)
         self._primary_retry_at = 0.
+        self._primary_retry_delay = PRIMARY_RETRY_MIN_SEC
         self._bridge = CvBridge()
         self._frames, self._last_stamp = {}, {}
         self._frame_lock = threading.Lock()
@@ -442,12 +444,14 @@ class ObjectDetector(Node):
                 with self._frame_lock:
                     if time.monotonic() >= self._primary_retry_at:
                         self._stats[camera]['primary_reason'] = ''
+                        self._primary_retry_delay = PRIMARY_RETRY_MIN_SEC
                 return result, 'primary', ''
             except ProviderUnavailable as error:
                 if self._fallback is None:
                     raise
-                self._primary_retry_at = time.monotonic() + PRIMARY_RETRY_SEC
                 with self._frame_lock:
+                    self._primary_retry_at = time.monotonic() + self._primary_retry_delay
+                    self._primary_retry_delay = min(PRIMARY_RETRY_SEC, 2 * self._primary_retry_delay)
                     # The retry window is shared; every camera using it is degraded.
                     for stats in self._stats.values():
                         stats['primary_reason'] = str(error)

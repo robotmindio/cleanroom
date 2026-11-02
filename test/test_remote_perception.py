@@ -224,6 +224,8 @@ def test_inflight_success_does_not_clear_another_requests_failure_cooldown(monke
     node = object_detector.ObjectDetector(context=context, parameter_overrides=[
         Parameter('model_name', value=REMOTE), Parameter('fallback_model_name', value='yolox')])
     artifact = capture_artifact(frame())
+    now = [100.]
+    monkeypatch.setattr(object_detector, 'time', SimpleNamespace(monotonic=lambda: now[0]))
     from std_msgs.msg import Header
 
     def recognize():
@@ -240,6 +242,9 @@ def test_inflight_success_does_not_clear_another_requests_failure_cooldown(monke
             assert pending.result(timeout=3)[1] == 'primary'
         assert recognize()[1:] == ('fallback', 'unreachable') and calls == 2
         assert node._stats['front']['primary_reason'] == 'unreachable'
+        now[0] += 1.
+        assert recognize()[1:] == ('fallback', 'unreachable') and calls == 3
+        assert node._primary_retry_at == pytest.approx(now[0] + 2.)
     finally:
         node.destroy_node()
         context.try_shutdown()
@@ -429,6 +434,7 @@ def test_detector_serves_fallback_frames_on_fallback_topics_and_retries_primary_
         Parameter('model_name', value='grounding_dino_tiny_gpu'), Parameter('fallback_model_name', value='rtdetr_v2_r18'),
         Parameter('max_rate_hz', value=10.)])
     peer = Node('fallback_peer', context=context)
+    monkeypatch.setattr(object_detector, 'time', SimpleNamespace(monotonic=lambda: 100.))
     profiles = []
     peer.create_subscription(String, '/robot/perception/profile', lambda msg: profiles.append(json.loads(msg.data)),
                              QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
@@ -660,6 +666,50 @@ def test_shared_provider_failure_marks_every_camera_fallback_as_degraded(monkeyp
         _, role, reason = node._recognize('wrist', frame(), b'artifact', image.header, DEFAULT, node._profiles)
         assert (role, reason) == ('primary', '')
         assert node._stats['wrist']['primary_reason'] == ''
+    finally:
+        node.destroy_node()
+        context.try_shutdown()
+
+
+def test_primary_retry_recovers_quickly_and_backs_off_during_a_sustained_outage(monkeypatch):
+    from lekiwi_rmf import object_detector
+
+    calls = []
+    def unavailable(*_):
+        calls.append('primary')
+        raise ProviderUnavailable('unreachable')
+
+    primary = fake_recognizer(unavailable, 'remote_grounding_dino', name=REMOTE,
+                             open_vocabulary=True, default_query=DEFAULT, supports_concepts=True)
+    fallback = fake_recognizer(lambda *_: [], 'rtdetr_v2', name='rtdetr_v2_r18', sha256='b' * 64)
+    monkeypatch.setattr(object_detector, 'Recognizer', lambda name, *_: primary if name == REMOTE else fallback)
+    context = Context()
+    rclpy.init(context=context)
+    node = object_detector.ObjectDetector(context=context, parameter_overrides=[
+        Parameter('model_name', value=REMOTE), Parameter('fallback_model_name', value='rtdetr_v2_r18'),
+        Parameter('camera_ids', value=['front', 'wrist'])])
+    now = [100.]
+    monkeypatch.setattr(object_detector, 'time', SimpleNamespace(monotonic=lambda: now[0]))
+    image, _ = capture()
+    def recognize(camera='front'):
+        return node._recognize(camera, frame(), b'artifact', image.header, DEFAULT, node._profiles)
+
+    try:
+        for attempt, delay in enumerate((1., 2., 4., 8., 10., 10.), start=1):
+            assert recognize()[1:] == ('fallback', 'unreachable')
+            assert node._primary_retry_at == pytest.approx(now[0] + delay)
+            now[0] += delay - .001
+            assert recognize('wrist')[1:] == ('fallback', 'unreachable')
+            assert len(calls) == attempt
+            now[0] += .001
+        primary.predict = lambda *_: []
+        assert recognize()[1:] == ('primary', '')
+        primary.predict = unavailable
+        assert recognize()[1:] == ('fallback', 'unreachable')
+        assert node._primary_retry_at == pytest.approx(now[0] + 1.)
+        now[0] += 1.
+        primary.predict = lambda *_: []
+        assert recognize()[1:] == ('primary', '')
     finally:
         node.destroy_node()
         context.try_shutdown()
