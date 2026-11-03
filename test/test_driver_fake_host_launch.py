@@ -136,6 +136,14 @@ class TestDriverFakeHostGraph(unittest.TestCase):
         self.assertTrue(self._until(future.done, timeout=3.0))
         return future.result()
 
+    def _arm_with_permission(self):
+        # The simulated supervisor renews its receive-time lease on every retry.
+        self.assertTrue(self._until(
+            lambda: self._permission(self.arm_permission, True) is None
+            and self._arm().success,
+            timeout=4.0,
+        ))
+
     def test_default_deny_motion_restart_and_link_loss(self, fake_host):
         self.assertTrue(self._until(
             lambda: self.commands.get_subscription_count() == 1
@@ -159,11 +167,7 @@ class TestDriverFakeHostGraph(unittest.TestCase):
         ))
         # Re-publish while spinning so the test cannot race discovery against
         # the first transient-local sample on a slow CI runner.
-        self.assertTrue(self._until(
-            lambda: self._permission(self.arm_permission, True) is None
-            and self._arm().success,
-            timeout=4.0,
-        ))
+        self._arm_with_permission()
         self.assertTrue(fake_host.torque_enabled)
         self.assertTrue(self._until(lambda: "ARMED" in self.states))
 
@@ -178,11 +182,7 @@ class TestDriverFakeHostGraph(unittest.TestCase):
         self.assertFalse(fake_host.torque_enabled)
 
         self._permission(self.arm_permission, True)
-        self.assertTrue(self._until(
-            lambda: self._permission(self.arm_permission, True) is None
-            and self._arm().success,
-            timeout=4.0,
-        ))
+        self._arm_with_permission()
         self.assertTrue(fake_host.torque_enabled)
 
         self._permission(self.base_permission, True)
@@ -225,7 +225,7 @@ class TestDriverFakeHostGraph(unittest.TestCase):
         self.assertFalse(fake_host.torque_enabled)
 
         self._permission(self.arm_permission, True)
-        self.assertTrue(self._until(lambda: self._arm().success, timeout=4.0))
+        self._arm_with_permission()
         self.assertTrue(fake_host.torque_enabled)
 
         # Silence the source for longer than the driver's link watchdog.  This
