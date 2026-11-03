@@ -1553,11 +1553,12 @@ struct Device {
   std::array<int, 2> statuses;
   bool value;
   int calls = 0;
-  int setProperty(int property, bool requested) {
+  template <typename T> int setProperty(int property, T requested) {
     if (calls >= 2 || requested != value ||
         property != (calls == 0 ? openni::OBEXTENSION_ID_LASER_EN : XN_MODULE_PROPERTY_EMITTER_STATE))
       std::abort();
-    return statuses[calls++];
+    const auto status = statuses[calls++];
+    return sizeof(T) == sizeof(int) ? status : 4;
   }
 };
 struct OBCameraNode {

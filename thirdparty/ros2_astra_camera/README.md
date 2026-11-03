@@ -22,3 +22,11 @@ Measured optical calibration remains required for those accuracy claims.
 returning success. Either supported property interface may accept the command;
 if both reject it, the response includes both status codes. An accepted command
 is not a measurement of the physical emitter state or valid scene depth.
+
+Both laser property writes use a four-byte integer (OpenNI `OniBool`), rather
+than the one-byte C++ `bool` in the ROS request. The [Orbbec OpenNI migration
+guide](https://github.com/orbbec/OrbbecSDK_v2/blob/main/docs/tutorial/opennisdk_to_orbbecsdkv2.md#423-enable-laser)
+documents a four-byte laser-enable payload. On the device, the boolean command
+returned success without clearing depth; repeated integer commands could clear
+and restore depth, but one off cycle still retained depth. Physical emitter
+state remains unverified because this device rejects the readback properties.
