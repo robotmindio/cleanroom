@@ -1,0 +1,23 @@
+--- a/astra_camera/src/ros_service.cpp
++++ b/astra_camera/src/ros_service.cpp
+@@ -315,10 +315,16 @@
+ 
+ bool OBCameraNode::setLaserEnableCallback(const std::shared_ptr<SetBool::Request>& request,
+                                           std::shared_ptr<SetBool::Response>& response) {
+-  device_->setProperty(openni::OBEXTENSION_ID_LASER_EN, request->data);
+-  device_->setProperty(XN_MODULE_PROPERTY_EMITTER_STATE, request->data);
+-  response->success = true;
+-  return true;
++  const auto extension_status = device_->setProperty(openni::OBEXTENSION_ID_LASER_EN, request->data);
++  const auto emitter_status = device_->setProperty(XN_MODULE_PROPERTY_EMITTER_STATE, request->data);
++  response->success = extension_status == openni::STATUS_OK || emitter_status == openni::STATUS_OK;
++  if (!response->success) {
++    std::stringstream ss;
++    ss << "Laser command rejected: extension status=" << extension_status
++       << ", emitter status=" << emitter_status;
++    response->message = ss.str();
++  }
++  return response->success;
+ }
+ 
+ bool OBCameraNode::setLdpEnableCallback(const std::shared_ptr<SetBool::Request>& request,

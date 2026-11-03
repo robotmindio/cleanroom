@@ -1533,3 +1533,65 @@ echo "$*" >> "{log}"
     finished, calls = run(f'echo "{{}}" > "{motor_file}"\n')
     assert finished.returncode == 0, finished.stderr
     assert calls == ["stop lekiwi-host.service", "start lekiwi-host.service"]
+
+
+def test_astra_laser_callback_reports_device_rejections(tmp_path):
+    """Run the patched vendor callback against both supported property interfaces."""
+    patch = (ROOT / 'thirdparty/ros2_astra_camera/0003-laser-command-status.patch').read_text()
+    harness = r'''
+#include <array>
+#include <memory>
+#include <sstream>
+#include <string>
+namespace openni { enum { STATUS_OK = 0, OBEXTENSION_ID_LASER_EN = 15 }; }
+constexpr int XN_MODULE_PROPERTY_EMITTER_STATE = 0x1080E007;
+struct SetBool {
+  struct Request { bool data; };
+  struct Response { bool success = false; std::string message; };
+};
+struct Device {
+  std::array<int, 2> statuses;
+  bool value;
+  int calls = 0;
+  int setProperty(int property, bool requested) {
+    if (calls >= 2 || requested != value ||
+        property != (calls == 0 ? openni::OBEXTENSION_ID_LASER_EN : XN_MODULE_PROPERTY_EMITTER_STATE))
+      std::abort();
+    return statuses[calls++];
+  }
+};
+struct OBCameraNode {
+  Device* device_;
+  bool setLaserEnableCallback(const std::shared_ptr<SetBool::Request>&,
+                             std::shared_ptr<SetBool::Response>&);
+};
+CALLBACK
+int main() {
+  for (bool value : {false, true}) for (int first : {0, 1, 4}) for (int second : {0, 1, 4}) {
+    Device device{{first, second}, value};
+    OBCameraNode node{&device};
+    auto request = std::make_shared<SetBool::Request>();
+    request->data = value;
+    auto response = std::make_shared<SetBool::Response>();
+    const bool expected = first == 0 || second == 0;
+    if (node.setLaserEnableCallback(request, response) != expected ||
+        response->success != expected || device.calls != 2 ||
+        (!expected && (response->message.find("extension status=") == std::string::npos ||
+                       response->message.find("emitter status=") == std::string::npos))) return 1;
+  }
+}
+'''
+    for version, prefixes in [('before', (' ', '-')), ('after', (' ', '+'))]:
+        source = '\n'.join(
+            line[1:] for line in patch.splitlines()
+            if line.startswith(prefixes) and not line.startswith(('---', '+++'))
+        )
+        start = source.index('bool OBCameraNode::setLaserEnableCallback')
+        callback = source[start:source.index('\n}', start) + 2]
+        path = tmp_path / f'{version}.cpp'
+        path.write_text(harness.replace('CALLBACK', callback))
+        executable = tmp_path / version
+        subprocess.run(['c++', '-std=c++17', '-Wall', '-Wextra', '-Werror', str(path),
+                        '-o', str(executable)], check=True)
+        result = subprocess.run([str(executable)], check=False)
+        assert result.returncode == (1 if version == 'before' else 0)
