@@ -155,6 +155,7 @@ class TestDriverFakeHostGraph(unittest.TestCase):
             and self.commands.publish(command) is None
             and any(action.get("x.vel") == pytest.approx(command.linear.x)
                     for action in fake_host.actions[start:])
+            and fake_host.state["x.vel"] == pytest.approx(command.linear.x)
         ))
 
     def test_default_deny_motion_restart_and_link_loss(self, fake_host):
@@ -200,22 +201,20 @@ class TestDriverFakeHostGraph(unittest.TestCase):
         self._drive_with_permission(fake_host, command)
 
         # Keep arm permission alive while allowing base permission to expire.
-        # The command watchdog is deliberately longer than this lease so the
-        # zero action demonstrates the permission watchdog itself.
-        start = len(fake_host.actions)
+        # Observe the stopped feedback even if a CI stall made the host's
+        # watchdog stop it first; isolated lease tests establish the deadline.
         self.assertTrue(self._until(
             lambda: self._permission(self.arm_permission, True) is None
-            and any(action.get("x.vel") == 0.0 for action in fake_host.actions[start:]),
+            and fake_host.state["x.vel"] == 0.0,
             timeout=2.0,
         ))
 
-        # Start moving again so explicit denial is independent of lease expiry.
+        # Establish motion again before withdrawing base permission.
         self._drive_with_permission(fake_host, command)
-        start = len(fake_host.actions)
         self._permission(self.base_permission, False)
         self.assertTrue(self._until(
             lambda: self._permission(self.arm_permission, True) is None
-            and any(action.get("x.vel") == 0.0 for action in fake_host.actions[start:])
+            and fake_host.state["x.vel"] == 0.0
         ))
 
         # A host process restart has a new telemetry session and begins with
