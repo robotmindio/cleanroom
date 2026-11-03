@@ -17,3 +17,8 @@ Field-of-view defaults are **uncalibrated**. They prevent invalid metadata;
 they do not establish RGB/depth alignment or precise visual odometry. On the
 current Astra Pro, the factory query returned NaN for every calibration field.
 Measured optical calibration remains required for those accuracy claims.
+
+`0003` makes the laser-enable service report device rejection instead of always
+returning success. Either supported property interface may accept the command;
+if both reject it, the response includes both status codes. An accepted command
+is not a measurement of the physical emitter state or valid scene depth.
