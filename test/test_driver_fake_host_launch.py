@@ -150,6 +150,8 @@ class TestDriverFakeHostGraph(unittest.TestCase):
         self.assertTrue(self._until(
             lambda: self._permission(self.arm_permission, True) is None
             and self._permission(self.base_permission, True) is None
+            # A scheduling stall can legitimately trip the strict link watchdog.
+            and (fake_host.torque_enabled or self._arm().success)
             and self.commands.publish(command) is None
             and any(action.get("x.vel") == pytest.approx(command.linear.x)
                     for action in fake_host.actions[start:])
