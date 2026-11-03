@@ -53,13 +53,14 @@ def test_camera_supervisor_kills_reparented_camera_process(tmp_path):
         stderr=subprocess.DEVNULL,
     )
     try:
-        deadline = time.monotonic() + 5
+        # Device qualification shares the Pi with live camera and motor services.
+        deadline = time.monotonic() + 20
         while not child_pid_file.exists() and time.monotonic() < deadline:
             time.sleep(0.05)
         assert child_pid_file.exists()
         queries = query_log.read_text().splitlines()
         assert queries and set(queries) == {f"--device {device} --info"}
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + 20
         while not any(line.startswith("topic echo") for line in ros_log.read_text().splitlines()):
             assert time.monotonic() < deadline, "camera heartbeat was never checked"
             time.sleep(0.05)
@@ -73,5 +74,9 @@ def test_camera_supervisor_kills_reparented_camera_process(tmp_path):
         assert not stat.exists() or stat.read_text().split()[2] == "Z"
     finally:
         if process.poll() is None:
-            process.kill()
-            process.wait(timeout=2)
+            process.terminate()
+            try:
+                process.wait(timeout=8)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=2)
