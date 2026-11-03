@@ -1,6 +1,6 @@
 --- a/astra_camera/src/ros_service.cpp
 +++ b/astra_camera/src/ros_service.cpp
-@@ -315,10 +315,16 @@
+@@ -315,10 +315,18 @@
  
  bool OBCameraNode::setLaserEnableCallback(const std::shared_ptr<SetBool::Request>& request,
                                            std::shared_ptr<SetBool::Response>& response) {
@@ -8,8 +8,10 @@
 -  device_->setProperty(XN_MODULE_PROPERTY_EMITTER_STATE, request->data);
 -  response->success = true;
 -  return true;
-+  const auto extension_status = device_->setProperty(openni::OBEXTENSION_ID_LASER_EN, request->data);
-+  const auto emitter_status = device_->setProperty(XN_MODULE_PROPERTY_EMITTER_STATE, request->data);
++  // OpenNI laser properties use a four-byte integer, not the ROS request bool.
++  const int enabled = request->data;
++  const auto extension_status = device_->setProperty(openni::OBEXTENSION_ID_LASER_EN, enabled);
++  const auto emitter_status = device_->setProperty(XN_MODULE_PROPERTY_EMITTER_STATE, enabled);
 +  response->success = extension_status == openni::STATUS_OK || emitter_status == openni::STATUS_OK;
 +  if (!response->success) {
 +    std::stringstream ss;
