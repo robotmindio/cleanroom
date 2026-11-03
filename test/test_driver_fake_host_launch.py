@@ -144,6 +144,17 @@ class TestDriverFakeHostGraph(unittest.TestCase):
             timeout=4.0,
         ))
 
+    def _drive_with_permission(self, fake_host, command):
+        self._arm_with_permission()
+        start = len(fake_host.actions)
+        self.assertTrue(self._until(
+            lambda: self._permission(self.arm_permission, True) is None
+            and self._permission(self.base_permission, True) is None
+            and self.commands.publish(command) is None
+            and any(action.get("x.vel") == pytest.approx(command.linear.x)
+                    for action in fake_host.actions[start:])
+        ))
+
     def test_default_deny_motion_restart_and_link_loss(self, fake_host):
         self.assertTrue(self._until(
             lambda: self.commands.get_subscription_count() == 1
@@ -181,20 +192,10 @@ class TestDriverFakeHostGraph(unittest.TestCase):
         ))
         self.assertFalse(fake_host.torque_enabled)
 
-        self._permission(self.arm_permission, True)
-        self._arm_with_permission()
-        self.assertTrue(fake_host.torque_enabled)
-
-        self._permission(self.base_permission, True)
-        start = len(fake_host.actions)
         command = Twist()
         # Within the tracked Nav2 limit, which the fake host enforces like the Pi.
         command.linear.x = 0.02
-        self.assertTrue(self._until(
-            lambda: self.commands.publish(command) is None
-            and any(action.get("x.vel") == pytest.approx(0.02)
-                    for action in fake_host.actions[start:])
-        ))
+        self._drive_with_permission(fake_host, command)
 
         # Keep arm permission alive while allowing base permission to expire.
         # The command watchdog is deliberately longer than this lease so the
@@ -206,10 +207,13 @@ class TestDriverFakeHostGraph(unittest.TestCase):
             timeout=2.0,
         ))
 
+        # Start moving again so explicit denial is independent of lease expiry.
+        self._drive_with_permission(fake_host, command)
         start = len(fake_host.actions)
         self._permission(self.base_permission, False)
         self.assertTrue(self._until(
-            lambda: any(action.get("x.vel") == 0.0 for action in fake_host.actions[start:])
+            lambda: self._permission(self.arm_permission, True) is None
+            and any(action.get("x.vel") == 0.0 for action in fake_host.actions[start:])
         ))
 
         # A host process restart has a new telemetry session and begins with
