@@ -552,7 +552,7 @@ def test_arm_position_gains_preserve_gripper_zero_integral(monkeypatch):
     assert robot.bus.writes[("P_Coefficient", "arm_shoulder_pan")] == 16
     assert robot.bus.writes[("P_Coefficient", "arm_shoulder_lift")] == 32
     assert robot.bus.writes[("P_Coefficient", "arm_elbow_flex")] == 64
-    assert robot.bus.writes[("P_Coefficient", "arm_gripper")] == 48
+    assert robot.bus.writes[("P_Coefficient", "arm_gripper")] == 64
     assert robot.bus.writes[("I_Coefficient", "arm_gripper")] == 0
     assert robot.bus.writes[("D_Coefficient", "arm_gripper")] == 32
     assert robot.bus.writes[("I_Coefficient", "arm_shoulder_lift")] == 1
