@@ -27,11 +27,10 @@
         action_servers: [],
         action_clients: [],
       },
-      // Astra preprocessing already limits points to 10 Hz and images to 2 Hz.
+      // LD06 sweeps and Astra points are already bounded near 10 Hz; Astra images at 2 Hz.
       // Do not throttle those again: arrival jitter near an identical period
-      // would drop an extra frame. Limit the remaining native high-rate feeds.
+      // would drop an extra frame. Cap preview images only, preserving scan freshness.
       pub_max_frequencies: [
-        "^/pi/lidar/scan$=5",
         // Keep the newest front capture within 200 ms before recognition.
         "^/pi/camera/front/image_raw/compressed$=5",
         // Keep the gripper view current during short arm movements.
