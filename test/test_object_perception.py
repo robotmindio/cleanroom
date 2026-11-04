@@ -73,11 +73,32 @@ def test_stationary_requires_recent_continuous_motion_feedback_and_still_wrist()
 def wait(predicate, timeout=5, refresh=None):
     end = time.monotonic() + timeout
     while not predicate():
-        if time.monotonic() > end:
+        # A callback can satisfy the condition between the loop test and the deadline check.
+        if time.monotonic() > end and not predicate():
             raise AssertionError('isolated perception operation timed out')
         if refresh is not None:
             refresh()
         time.sleep(.01)
+
+
+def test_wait_accepts_readiness_that_arrives_during_the_deadline_check(monkeypatch):
+    ticks = iter([0., 6.])
+    ready = threading.Event()
+    def predicate():
+        previous = ready.is_set()
+        ready.set()
+        return previous
+    monkeypatch.setitem(wait.__globals__, 'time', SimpleNamespace(
+        monotonic=lambda: next(ticks), sleep=lambda _: None))
+    wait(predicate)
+
+
+def test_wait_still_rejects_an_unready_condition_at_the_deadline(monkeypatch):
+    ticks = iter([0., 6.])
+    monkeypatch.setitem(wait.__globals__, 'time', SimpleNamespace(
+        monotonic=lambda: next(ticks), sleep=lambda _: None))
+    with pytest.raises(AssertionError, match='operation timed out'):
+        wait(lambda: False)
 
 
 @pytest.mark.parametrize('backend,capacity', [('yolox', 1), ('remote_grounding_dino', 2)])
