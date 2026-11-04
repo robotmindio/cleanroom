@@ -151,18 +151,26 @@ class TestDriverFakeHostGraph(unittest.TestCase):
             self.node.destroy_timer(timer)
 
     def _drive_with_permission(self, fake_host, command):
-        self._arm_with_permission()
-        start = len(fake_host.actions)
-        self.assertTrue(self._until(
-            lambda: self._permission(self.arm_permission, True) is None
-            and self._permission(self.base_permission, True) is None
-            # A scheduling stall can legitimately trip the strict link watchdog.
-            and (fake_host.torque_enabled or self._arm().success)
-            and self.commands.publish(command) is None
-            and any(action.get("x.vel") == pytest.approx(command.linear.x)
-                    for action in fake_host.actions[start:])
-            and fake_host.state["x.vel"] == pytest.approx(command.linear.x)
+        # A recovery arm RPC must not suspend the simulated supervisor.
+        timer = self.node.create_timer(0.05, lambda: (
+            self._permission(self.arm_permission, True),
+            self._permission(self.base_permission, True),
         ))
+        try:
+            self._arm_with_permission()
+            start = len(fake_host.actions)
+            self.assertTrue(self._until(
+                lambda: self._permission(self.arm_permission, True) is None
+                and self._permission(self.base_permission, True) is None
+                # A scheduling stall can legitimately trip the strict link watchdog.
+                and (fake_host.torque_enabled or self._arm().success)
+                and self.commands.publish(command) is None
+                and any(action.get("x.vel") == pytest.approx(command.linear.x)
+                        for action in fake_host.actions[start:])
+                and fake_host.state["x.vel"] == pytest.approx(command.linear.x)
+            ))
+        finally:
+            self.node.destroy_timer(timer)
 
     def test_default_deny_motion_restart_and_link_loss(self, fake_host):
         self.assertTrue(self._until(
