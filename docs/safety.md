@@ -191,6 +191,10 @@ it to LeRobot. Base commands are checked against the tracked Nav2 limits after
 applying the saved wheel scales. Arm commands use the tracked joint limits and
 the host's saved `~/.ros/lekiwi_arm_calibration.json`; trajectory uploads must
 match that calibration. The gripper remains within its normalized 0–100 range.
+Its position conversion rounds to the nearest encoder count; truncation added
+1.2 mrad of target bias in the exact opening test. Gripper position gains are
+P=64, I=0, D=32: both free-jaw endpoints held for eight seconds within the unchanged
+0.005 rad trajectory tolerance. This does not qualify contact force or grasping.
 An exact previously measured hold is retained even if torque-off sag put it
 outside a joint boundary; new out-of-bounds targets are rejected. Rejected
 streamed actions do not refresh the existing command watchdog or change torque.
