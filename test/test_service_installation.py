@@ -45,6 +45,64 @@ exit "$CLI_STATUS"
     assert response in result.stdout + result.stderr
 
 
+@pytest.mark.parametrize('inhibit_status', [0, 13])
+def test_ros_start_inhibits_sleep_and_records_the_signalable_launcher(tmp_path, inhibit_status):
+    import json
+    import signal
+
+    scripts = tmp_path / 'scripts'
+    (scripts / 'lib').mkdir(parents=True)
+    for name in ('ros-start.sh', 'lib/runtime-common.sh'):
+        shutil.copy2(ROOT / 'scripts' / name, scripts / name)
+    (scripts / 'setup.bash').write_text('')
+    (scripts / 'lib/self-heal.sh').write_text('self_heal() { :; }\n')
+    _executable(scripts / 'rtabmap-db-maintenance.py', 'exit 0\n')
+    fakes = tmp_path / 'bin'
+    _executable(fakes / 'python3', 'exit 0\n')
+    _executable(fakes / 'systemd-inhibit', r'''
+printf '%s\n' "$@" > "$INHIBIT_ARGS"
+[[ $INHIBIT_STATUS == 0 ]] || exit "$INHIBIT_STATUS"
+while [[ $1 == --* ]]; do shift; done
+"$@" &
+wait "$!"
+''')
+    ros = fakes / 'ros2'
+    ros.write_text("#!/usr/bin/python3\nimport json,os,signal,sys,time\n"
+                   "from pathlib import Path\n"
+                   "signal.signal(signal.SIGINT,lambda s,f:sys.exit(17))\n"
+                   "Path(os.environ['ROS_ARGS']).write_text(json.dumps(sys.argv[1:]))\n"
+                   "time.sleep(30)\n")
+    ros.chmod(0o700)
+    ros_args, inhibit_args = tmp_path / 'ros-args', tmp_path / 'inhibit-args'
+    env = {k: v for k, v in os.environ.items() if not k.startswith('LEKIWI_')}
+    env.update(PATH=f"{fakes}:{os.environ['PATH']}", ROS_ARGS=str(ros_args),
+               INHIBIT_ARGS=str(inhibit_args), INHIBIT_STATUS=str(inhibit_status),
+               LEKIWI_RUNTIME_DIR=str(tmp_path / 'runtime'))
+    process = subprocess.Popen(['bash', str(scripts / 'ros-start.sh'), 'profile:=split',
+                                'map:=/a path/map.yaml'], env=env, start_new_session=True)
+    try:
+        if inhibit_status:
+            assert process.wait(timeout=5) == inhibit_status
+            assert not ros_args.exists()
+        else:
+            deadline = time.monotonic() + 5
+            while not ros_args.exists() and time.monotonic() < deadline:
+                time.sleep(.02)
+            assert ros_args.exists() and process.poll() is None
+            assert 'map:=/a path/map.yaml' in json.loads(ros_args.read_text())
+            launcher = int((tmp_path / 'runtime/stack.pid').read_text())
+            assert launcher != process.pid
+            os.kill(launcher, signal.SIGINT)
+            assert process.wait(timeout=5) == 17
+        assert {'--what=sleep', '--mode=block'} <= set(inhibit_args.read_text().splitlines())
+    finally:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        process.wait(timeout=5)
+
+
 @pytest.mark.parametrize('role', ['compute', 'device'])
 @pytest.mark.parametrize('package_installed', [False, True])
 def test_clock_setup_is_repeatable_and_only_restarts_chrony(tmp_path, role, package_installed):

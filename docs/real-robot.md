@@ -3,6 +3,11 @@
 Part of the [LeKiwi README](../README.md). Network exposure and its
 protection are in the README's [Network security](../README.md#network-security).
 
+The real-robot launcher holds a systemd sleep inhibitor while ROS is running,
+including when started by `lekiwi-stack.service`. Starting ROS fails if the
+inhibitor cannot be acquired. Stopping the launcher releases it; shutdown and
+the robot's existing motion and torque protections are unchanged.
+
 Before anything here, bring the robot up under plain LeRobot: motor IDs,
 calibration, cameras, and keyboard teleoperation. See
 [HARDWARE.md](../HARDWARE.md). If teleoperation does not work there, nothing in
