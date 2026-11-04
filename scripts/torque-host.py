@@ -20,7 +20,8 @@ from pathlib import Path
 import draccus
 import zmq
 
-from lerobot.motors.feetech import OperatingMode
+from lerobot.motors import MotorNormMode
+from lerobot.motors.feetech import FeetechMotorsBus, OperatingMode
 from lerobot.robots.lekiwi.config_lekiwi import LeKiwiConfig, LeKiwiHostConfig
 from lerobot.robots.lekiwi.lekiwi import LeKiwi
 
@@ -135,10 +136,37 @@ class BoundLeKiwiHost:
         self.zmq_context.term()
 
 
+class GripperPositionBus(FeetechMotorsBus):
+    def _unnormalize(self, ids_values):
+        positions = super()._unnormalize(ids_values)
+        for motor_id, value in ids_values.items():
+            name = self._id_to_name(motor_id)
+            if name != "arm_gripper":
+                continue
+            if self.motors[name].norm_mode is not MotorNormMode.RANGE_0_100:
+                raise ValueError("gripper position encoding requires RANGE_0_100")
+            calibration = self.calibration[name]
+            if self.apply_drive_mode and calibration.drive_mode:
+                value = 100 - value
+            value = min(100.0, max(0.0, value))
+            # Truncation added 1.2 mrad of bias to the measured 1 rad goal.
+            positions[motor_id] = round(value / 100 * (calibration.range_max - calibration.range_min)
+                                        + calibration.range_min)
+        return positions
+
+
 class SafetyLeKiwi(LeKiwi):
     """Configure the vendor robot but leave torque off until an explicit arm request."""
 
     maximum_base_linear_speed_m_s = 0.0
+
+    def __init__(self, config):
+        super().__init__(config)
+        previous = self.bus
+        if previous.is_connected:
+            raise RuntimeError("replace position encoding before connecting the motor bus")
+        self.bus = GripperPositionBus(config.port, previous.motors, previous.calibration)
+        self.bus.apply_drive_mode = previous.apply_drive_mode
 
     def _body_to_wheel_raw(self, x, y, theta, wheel_radius=.05, base_radius=.125, max_raw=None):
         # Vendor's 3000 tick/s cap clips 0.30 m/s; cover the validated pure translation ceiling.
