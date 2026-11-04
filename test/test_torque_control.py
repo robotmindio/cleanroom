@@ -539,11 +539,12 @@ def test_wheel_conversion_covers_validated_translation_without_removing_saturati
     assert robot._body_to_wheel_raw(.30, 0., 0., max_raw=2000)[-1] == 2000
 
 
-def test_loaded_arm_joints_get_tuned_position_gain(monkeypatch):
+def test_arm_position_gains_preserve_gripper_zero_integral(monkeypatch):
     host = _torque_host_script(monkeypatch)
     robot = host.SafetyLeKiwi(host.LeKiwiConfig())
     robot.bus = _Bus()
-    robot.arm_motors = ["arm_shoulder_pan", "arm_shoulder_lift", "arm_elbow_flex", "arm_wrist_flex"]
+    robot.arm_motors = ["arm_shoulder_pan", "arm_shoulder_lift", "arm_elbow_flex",
+                        "arm_wrist_flex", "arm_wrist_roll", "arm_gripper"]
     robot.base_motors = list(BASE)
 
     robot.configure()
@@ -551,6 +552,9 @@ def test_loaded_arm_joints_get_tuned_position_gain(monkeypatch):
     assert robot.bus.writes[("P_Coefficient", "arm_shoulder_pan")] == 16
     assert robot.bus.writes[("P_Coefficient", "arm_shoulder_lift")] == 32
     assert robot.bus.writes[("P_Coefficient", "arm_elbow_flex")] == 64
+    assert robot.bus.writes[("P_Coefficient", "arm_gripper")] == 48
+    assert robot.bus.writes[("I_Coefficient", "arm_gripper")] == 0
+    assert robot.bus.writes[("D_Coefficient", "arm_gripper")] == 32
     assert robot.bus.writes[("I_Coefficient", "arm_shoulder_lift")] == 1
     assert robot.bus.writes[("I_Coefficient", "arm_elbow_flex")] == 1
     assert robot.bus.writes[("I_Coefficient", "arm_wrist_flex")] == 1

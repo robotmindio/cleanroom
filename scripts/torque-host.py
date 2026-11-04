@@ -38,9 +38,10 @@ from lekiwi_rmf.odometry import load_base_scales
 
 # P=96 made the unsupported folded lift oscillate 0.0245 rad at a constant
 # goal. Integral correction below handles static load error; soften its P loop.
-ARM_P_COEFFICIENTS = {"arm_shoulder_lift": 32, "arm_elbow_flex": 64}
+# Free-jaw P=16 leaves nine counts of static error beyond the 0.005 rad goal tolerance.
+ARM_P_COEFFICIENTS = {"arm_shoulder_lift": 32, "arm_elbow_flex": 64, "arm_gripper": 48}
 # Proportional control alone leaves a load-dependent position error. Use the
-# smallest integral gain on gravity-loaded joints; keep jaw contact unchanged.
+# smallest integral gain on gravity-loaded joints; avoid jaw integral windup.
 ARM_I_COEFFICIENTS = {"arm_shoulder_lift": 1, "arm_elbow_flex": 1, "arm_wrist_flex": 1}
 BASE_VELOCITY_REGISTERS = (
     'Maximum_Velocity_Limit', 'Velocity_Unit_factor',
