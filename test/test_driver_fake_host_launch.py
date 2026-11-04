@@ -137,12 +137,18 @@ class TestDriverFakeHostGraph(unittest.TestCase):
         return future.result()
 
     def _arm_with_permission(self):
-        # The simulated supervisor renews its receive-time lease on every retry.
-        self.assertTrue(self._until(
-            lambda: self._permission(self.arm_permission, True) is None
-            and self._arm().success,
-            timeout=4.0,
-        ))
+        # Keep the simulated supervisor alive while a service reply is pending.
+        timer = self.node.create_timer(
+            0.05, lambda: self._permission(self.arm_permission, True)
+        )
+        try:
+            self.assertTrue(self._until(
+                lambda: self._permission(self.arm_permission, True) is None
+                and self._arm().success,
+                timeout=4.0,
+            ))
+        finally:
+            self.node.destroy_timer(timer)
 
     def _drive_with_permission(self, fake_host, command):
         self._arm_with_permission()
