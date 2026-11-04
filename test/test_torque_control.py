@@ -898,6 +898,29 @@ def test_host_keeps_command_loop_fast_and_limits_observation_bandwidth(host, tmp
     assert len(loop.host.zmq_observation_socket.sent) == 2
 
 
+def test_host_feedback_supports_stationary_capture_after_one_dropped_packet(host, tmp_path):
+    from lekiwi_rmf.observation_motion import ObservationMotion
+
+    loop, clock, _socket, _robot = _loop(host, tmp_path)
+    motion = ObservationMotion()
+    start, dropped, received = clock.now, False, 0
+    for tick in range(19):
+        clock.now = start + tick / 30
+        loop.step()
+        sent = len(loop.host.zmq_observation_socket.sent)
+        if sent == received:
+            continue
+        received = sent
+        if not dropped and clock.now >= start + .5:
+            dropped = True
+            continue
+        motion._append(motion.odometry, (clock.now, 0., 0., 0., 0., 0.))
+
+    assert dropped
+    assert motion.stationary(start + .615)
+    assert not motion.stationary(start + 1.)
+
+
 def test_host_reports_the_stage_causing_a_slow_observation(host, monkeypatch, tmp_path, caplog):
     loop, _clock, _socket, _robot = _loop(host, tmp_path)
     timings = iter((100.0, 100.01, 100.02, 100.03, 100.34))
