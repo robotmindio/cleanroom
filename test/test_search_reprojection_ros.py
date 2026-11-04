@@ -107,7 +107,9 @@ def test_loop_closure_reprojects_the_capture_log(tmp_path):
         wait(lambda: evidence._target is not None)
         first = dict(evidence._target)
         # The cursor starts at the store's head, so captures are added after the first poll.
-        wait(lambda: evidence._cursor is not None)
+        # A page consumed before camera_info arrives is correctly rejected, not retried.
+        wait(lambda: evidence._cursor is not None and 'front' in evidence._intrinsics
+             and evidence._spatial.service_is_ready())
         camera = {'t': [2.1, 0.0, 0.3], 'q': [-0.5, 0.5, -0.5, 0.5]}
         store.add({'site_ref': 'home', 'map_ref': first['map_ref'], 'revision': first['revision'],
                    'localization_session': 'x', 'pose': camera}, now - 4)
