@@ -85,9 +85,15 @@ def pose_from_transform(translation, rotation):
     x, y, z, w = x / norm, y / norm, z / norm, w / norm
     # Third column of the rotation matrix: the optical +Z axis expressed in map.
     forward = (2 * (x * z + w * y), 2 * (y * z - w * x), 1 - 2 * (x * x + y * y))
-    # DEBT: optical roll is ignored, so a rolled camera's frustum is misplaced; revisit before mounting one (#88).
+    yaw = math.atan2(forward[1], forward[0])
+    if math.hypot(forward[0], forward[1]) < 1e-6:
+        raise ValueError('coverage does not support a vertical optical axis')
+    right = (1 - 2 * (y * y + z * z), 2 * (x * y + w * z), 2 * (x * z - w * y))
+    # The 2D fan cannot represent optical roll; refuse it rather than invent negative evidence (#88).
+    if not math.isclose(right[0] * math.sin(yaw) - right[1] * math.cos(yaw), 1., rel_tol=0., abs_tol=1e-9):
+        raise ValueError('coverage does not support optical roll')
     return Pose(float(translation[0]), float(translation[1]), float(translation[2]),
-                math.atan2(forward[1], forward[0]), math.atan2(forward[2], math.hypot(forward[0], forward[1])))
+                yaw, math.atan2(forward[2], math.hypot(forward[0], forward[1])))
 
 
 @dataclass(frozen=True)

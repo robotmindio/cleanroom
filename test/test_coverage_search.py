@@ -55,6 +55,24 @@ def test_optical_axis_from_transform():
         pose_from_transform((0, 0, 0), (0, 0, 0, 2))
 
 
+@pytest.mark.parametrize('roll', [math.pi / 2, -math.pi / 2, math.pi])
+def test_coverage_rejects_roll_instead_of_crediting_the_wrong_frustum(roll):
+    # Rotate the usual forward optical frame around its optical +Z axis.
+    c, s = math.cos(roll / 2), math.sin(roll / 2)
+    q = ((s - c) / 2, (c + s) / 2, (s - c) / 2, (c + s) / 2)
+    with pytest.raises(ValueError, match='optical roll'):
+        pose_from_transform((0, 0, .2), q)
+
+
+def test_coverage_rejects_vertical_axis_but_preserves_unrolled_pitch():
+    with pytest.raises(ValueError, match='vertical'):
+        pose_from_transform((0, 0, .2), (0, 0, 0, 1))
+    pitch = .3
+    c, s = math.cos(pitch / 2), math.sin(pitch / 2)
+    q = ((s - c) / 2, (c - s) / 2, -(c + s) / 2, (c + s) / 2)
+    assert pose_from_transform((0, 0, .2), q).pitch == pytest.approx(pitch)
+
+
 def test_frustum_resolution_band_and_occlusion():
     grid = free_grid()
     wall_x = 1.0

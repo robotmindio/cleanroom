@@ -91,7 +91,9 @@ def test_loop_closure_reprojects_the_capture_log(tmp_path):
     # TF for the record without a map pose: it is placed while TF holds its time, and only then.
     tf = TransformStamped()
     tf.header.frame_id, tf.child_frame_id = 'map', store.binding['optical_frame']
-    tf.transform.translation.x, tf.transform.rotation.w = 1.0, 1.0
+    tf.transform.translation.x = 1.0
+    tf.transform.rotation.x, tf.transform.rotation.y = -.5, .5
+    tf.transform.rotation.z, tf.transform.rotation.w = -.5, .5
     transforms.set_transform_static(tf, 'test')
     evidence = SearchEvidence(host, transforms, ReentrantCallbackGroup(), 100)
     graphs = host.create_publisher(MapGraph, '/test/mapGraph', 1)

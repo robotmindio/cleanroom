@@ -94,8 +94,9 @@ searched. A sighting from before the search start is a prior, never a result.
   below the lidar plane can be hidden by furniture the map does not contain.
 - Reprojection moves coverage with the graph node each capture was anchored to;
   anchor-pose uncertainty is not added to the evidence.
-- Optical roll is ignored and travel cost is a straight line; Nav2 validates
-  the real route.
+- Rolled and vertically aimed camera transforms are refused: the 2D fan cannot
+  represent their frustum. They contribute no negative coverage or viewpoints.
+- Travel cost is a straight line; Nav2 validates the real route.
 - `search_min_object_px` is an uncalibrated default; it is fitted by
   [threshold calibration](threshold-calibration.md) once the recorded corpus exists.
 - Physical qualification on the robot is outstanding; tracked in
