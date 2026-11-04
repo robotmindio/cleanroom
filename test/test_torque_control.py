@@ -326,15 +326,32 @@ def _torque_host_script(monkeypatch, filename=None):
         watchdog_timeout_ms: int = 500
         max_loop_freq_hz: int = 30
 
+    norm_mode = object()
+
+    class FeetechMotorsBus:
+        def __init__(self, port, motors, calibration):
+            self.port, self.motors, self.calibration = port, motors, calibration
+            self.is_connected = self.apply_drive_mode = False
+
+        def _id_to_name(self, motor_id):
+            return next(name for name, motor in self.motors.items() if motor.id == motor_id)
+
+        def _unnormalize(self, values):
+            # Sentinel proves non-gripper conversions remain delegated to LeRobot.
+            return dict.fromkeys(values, -999)
+
     class LeKiwi:
         def __init__(self, config):
             self.config = config
+            self.bus = FeetechMotorsBus(config.port, {
+                'arm_gripper': types.SimpleNamespace(id=6, norm_mode=norm_mode),
+            }, {})
 
     modules = {
         "draccus": types.SimpleNamespace(wrap=lambda: (lambda function: function)),
         "lerobot": types.ModuleType("lerobot"),
-        "lerobot.motors": types.ModuleType("lerobot.motors"),
-        "lerobot.motors.feetech": types.SimpleNamespace(OperatingMode=types.SimpleNamespace(
+        "lerobot.motors": types.SimpleNamespace(MotorNormMode=types.SimpleNamespace(RANGE_0_100=norm_mode)),
+        "lerobot.motors.feetech": types.SimpleNamespace(FeetechMotorsBus=FeetechMotorsBus, OperatingMode=types.SimpleNamespace(
             POSITION=types.SimpleNamespace(value=0), VELOCITY=types.SimpleNamespace(value=1),
         )),
         "lerobot.robots": types.ModuleType("lerobot.robots"),
@@ -539,11 +556,48 @@ def test_wheel_conversion_covers_validated_translation_without_removing_saturati
     assert robot._body_to_wheel_raw(.30, 0., 0., max_raw=2000)[-1] == 2000
 
 
-def test_loaded_arm_joints_get_tuned_position_gain(monkeypatch):
+@pytest.mark.parametrize('drive_mode', [False, True])
+def test_gripper_encoding_rounds_to_nearest_count_and_preserves_every_measured_hold(monkeypatch, drive_mode):
+    host = _torque_host_script(monkeypatch)
+    calibration = types.SimpleNamespace(range_min=2014, range_max=3471, drive_mode=drive_mode)
+    bus = host.GripperPositionBus('', {
+        'arm_gripper': types.SimpleNamespace(id=6, norm_mode=host.MotorNormMode.RANGE_0_100),
+        'arm_shoulder_pan': types.SimpleNamespace(id=1),
+    }, {'arm_gripper': calibration})
+    bus.apply_drive_mode = True
+    for count in range(2014, 3472):
+        normalized = (count - 2014) / 1457 * 100
+        if drive_mode:
+            normalized = 100 - normalized
+        assert bus._unnormalize({6: normalized, 1: 25}) == {6: count, 1: -999}
+    value = 54.00880699638088
+    encoded = bus._unnormalize({6: 100 - value if drive_mode else value})[6]
+    assert encoded == 2801  # The old truncation emitted 2800 for the exact 1 rad request.
+    assert abs(encoded - (value / 100 * 1457 + 2014)) <= .5
+    assert bus._unnormalize({6: -1})[6] == (3471 if drive_mode else 2014)
+    assert bus._unnormalize({6: 101})[6] == (2014 if drive_mode else 3471)
+    bus.motors['arm_gripper'].norm_mode = object()
+    with pytest.raises(ValueError, match='RANGE_0_100'):
+        bus._unnormalize({6: 50})
+
+
+def test_position_bus_replacement_refuses_an_already_connected_bus(monkeypatch):
+    host = _torque_host_script(monkeypatch)
+    initialize = host.LeKiwi.__init__
+    def connected(robot, config):
+        initialize(robot, config)
+        robot.bus.is_connected = True
+    monkeypatch.setattr(host.LeKiwi, '__init__', connected)
+    with pytest.raises(RuntimeError, match='before connecting'):
+        host.SafetyLeKiwi(host.LeKiwiConfig())
+
+
+def test_arm_position_gains_preserve_gripper_zero_integral(monkeypatch):
     host = _torque_host_script(monkeypatch)
     robot = host.SafetyLeKiwi(host.LeKiwiConfig())
     robot.bus = _Bus()
-    robot.arm_motors = ["arm_shoulder_pan", "arm_shoulder_lift", "arm_elbow_flex", "arm_wrist_flex"]
+    robot.arm_motors = ["arm_shoulder_pan", "arm_shoulder_lift", "arm_elbow_flex",
+                        "arm_wrist_flex", "arm_wrist_roll", "arm_gripper"]
     robot.base_motors = list(BASE)
 
     robot.configure()
@@ -551,6 +605,9 @@ def test_loaded_arm_joints_get_tuned_position_gain(monkeypatch):
     assert robot.bus.writes[("P_Coefficient", "arm_shoulder_pan")] == 16
     assert robot.bus.writes[("P_Coefficient", "arm_shoulder_lift")] == 32
     assert robot.bus.writes[("P_Coefficient", "arm_elbow_flex")] == 64
+    assert robot.bus.writes[("P_Coefficient", "arm_gripper")] == 64
+    assert robot.bus.writes[("I_Coefficient", "arm_gripper")] == 0
+    assert robot.bus.writes[("D_Coefficient", "arm_gripper")] == 32
     assert robot.bus.writes[("I_Coefficient", "arm_shoulder_lift")] == 1
     assert robot.bus.writes[("I_Coefficient", "arm_elbow_flex")] == 1
     assert robot.bus.writes[("I_Coefficient", "arm_wrist_flex")] == 1

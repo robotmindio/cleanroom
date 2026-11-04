@@ -20,7 +20,8 @@ from pathlib import Path
 import draccus
 import zmq
 
-from lerobot.motors.feetech import OperatingMode
+from lerobot.motors import MotorNormMode
+from lerobot.motors.feetech import FeetechMotorsBus, OperatingMode
 from lerobot.robots.lekiwi.config_lekiwi import LeKiwiConfig, LeKiwiHostConfig
 from lerobot.robots.lekiwi.lekiwi import LeKiwi
 
@@ -38,9 +39,10 @@ from lekiwi_rmf.odometry import load_base_scales
 
 # P=96 made the unsupported folded lift oscillate 0.0245 rad at a constant
 # goal. Integral correction below handles static load error; soften its P loop.
-ARM_P_COEFFICIENTS = {"arm_shoulder_lift": 32, "arm_elbow_flex": 64}
+# Jaw P=16 left nine counts of static error; P=48 still missed exact goals by four (>0.005 rad).
+ARM_P_COEFFICIENTS = {"arm_shoulder_lift": 32, "arm_elbow_flex": 64, "arm_gripper": 64}
 # Proportional control alone leaves a load-dependent position error. Use the
-# smallest integral gain on gravity-loaded joints; keep jaw contact unchanged.
+# smallest integral gain on gravity-loaded joints; avoid jaw integral windup.
 ARM_I_COEFFICIENTS = {"arm_shoulder_lift": 1, "arm_elbow_flex": 1, "arm_wrist_flex": 1}
 BASE_VELOCITY_REGISTERS = (
     'Maximum_Velocity_Limit', 'Velocity_Unit_factor',
@@ -134,10 +136,37 @@ class BoundLeKiwiHost:
         self.zmq_context.term()
 
 
+class GripperPositionBus(FeetechMotorsBus):
+    def _unnormalize(self, ids_values):
+        positions = super()._unnormalize(ids_values)
+        for motor_id, value in ids_values.items():
+            name = self._id_to_name(motor_id)
+            if name != "arm_gripper":
+                continue
+            if self.motors[name].norm_mode is not MotorNormMode.RANGE_0_100:
+                raise ValueError("gripper position encoding requires RANGE_0_100")
+            calibration = self.calibration[name]
+            if self.apply_drive_mode and calibration.drive_mode:
+                value = 100 - value
+            value = min(100.0, max(0.0, value))
+            # Truncation added 1.2 mrad of bias to the measured 1 rad goal.
+            positions[motor_id] = round(value / 100 * (calibration.range_max - calibration.range_min)
+                                        + calibration.range_min)
+        return positions
+
+
 class SafetyLeKiwi(LeKiwi):
     """Configure the vendor robot but leave torque off until an explicit arm request."""
 
     maximum_base_linear_speed_m_s = 0.0
+
+    def __init__(self, config):
+        super().__init__(config)
+        previous = self.bus
+        if previous.is_connected:
+            raise RuntimeError("replace position encoding before connecting the motor bus")
+        self.bus = GripperPositionBus(config.port, previous.motors, previous.calibration)
+        self.bus.apply_drive_mode = previous.apply_drive_mode
 
     def _body_to_wheel_raw(self, x, y, theta, wheel_radius=.05, base_radius=.125, max_raw=None):
         # Vendor's 3000 tick/s cap clips 0.30 m/s; cover the validated pure translation ceiling.
