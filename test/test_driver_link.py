@@ -957,6 +957,122 @@ def test_automatic_rearm_waits_for_telemetry_and_supervisor_permission():
     assert node.arm_after_startup_telemetry() is True
 
 
+def held_torque_recovery_node():
+    from rclpy.time import Time
+    from lekiwi_rmf.motor_health import healthy_snapshot, parse_motor_health
+
+    node = rearm_node()
+    node.auto_arm_pending = True
+    grant_fresh_arm_permission(node, permitted=False)
+    grant_fresh_base_permission(node)
+    node.robot = fake_client(
+        observation_torque_enabled=True,
+        observation_motor_health=parse_motor_health(healthy_snapshot(['arm_gripper'], True)),
+    )
+    node.get_clock = lambda: types.SimpleNamespace(now=lambda: Time(nanoseconds=2_000_000_000))
+    node._healthy_telemetry_at = Time(nanoseconds=2_000_000_000)
+    node.link_timeout = 1.
+    return node
+
+
+def test_automatic_recovery_of_held_torque_never_sends_an_enable_request():
+    node = held_torque_recovery_node()
+
+    assert node.auto_arm_tick() is True
+    assert node.armed and not node.auto_arm_pending
+    assert node.states[-1] == 'ARMED'
+    assert node.torque_requests == []
+    assert not node._arm_permission_is_current()
+
+
+def test_explicit_arm_still_requires_arm_permission_with_verified_held_torque():
+    node = held_torque_recovery_node()
+    node.last_fresh = node._healthy_telemetry_at
+    response = node.arm(None, types.SimpleNamespace())
+    assert not response.success
+    assert not node.armed and node.torque_requests == []
+
+
+def test_held_torque_recovers_guarded_base_control_on_the_loopback_host(connected_driver):
+    from geometry_msgs.msg import Twist
+
+    node = connected_driver
+    # This fixture tests the transport; the local DiagnosticStatus extension is broken.
+    node.publish_motor_health_enabled = False
+    requests, enable = [], node.set_servo_torque
+    node.set_servo_torque = lambda value: requests.append(value) or enable(value)
+    grant_fresh_arm_permission(node)
+    grant_fresh_base_permission(node)
+
+    def until(predicate):
+        deadline = time.monotonic() + 5.
+        while time.monotonic() < deadline:
+            node.update()
+            node.auto_arm_tick()
+            if predicate():
+                return
+            time.sleep(.02)
+        pytest.fail('loopback host did not reach the expected guarded state')
+
+    until(lambda: node.armed)
+    assert requests == [True]
+    positions = {key: value for key, value in node.last_observation.items() if key.endswith('.pos')}
+    grant_fresh_arm_permission(node, permitted=False)
+    node.set_disarmed('LINK_LOST')
+    until(lambda: node.armed)
+    assert requests == [True]
+
+    command = Twist()
+    command.linear.x = .01
+    node.on_command(command)
+    until(lambda: node.last_observation['x.vel'] > 0)
+    assert not node._arm_permission_is_current()
+    assert positions == {key: value for key, value in node.last_observation.items() if key.endswith('.pos')}
+    grant_fresh_base_permission(node, permitted=False)
+    until(lambda: node.last_observation['x.vel'] == 0)
+    assert requests == [True]
+
+
+@pytest.mark.parametrize('fault', [
+    'base_denied', 'base_expired', 'torque_off', 'torque_unknown', 'health_missing',
+    'health_error', 'health_torque_off', 'telemetry_missing', 'telemetry_stale',
+    'telemetry_future', 'strict', 'operator_disarmed', 'link_lost', 'torque_fault',
+])
+def test_held_torque_recovery_rejects_missing_evidence_and_manual_or_strict_disarm(fault):
+    from rclpy.time import Time
+    from lekiwi_rmf.motor_health import fault_snapshot, healthy_snapshot, parse_motor_health
+
+    node = held_torque_recovery_node()
+    if fault == 'base_denied':
+        grant_fresh_base_permission(node, permitted=False)
+    elif fault == 'base_expired':
+        node.base_permission.received_at_ns = 0
+    elif fault in ('torque_off', 'torque_unknown'):
+        node.robot.observation_torque_enabled = False if fault == 'torque_off' else None
+    elif fault == 'health_missing':
+        node.robot.observation_motor_health = ()
+    elif fault == 'health_error':
+        node.robot.observation_motor_health = parse_motor_health(fault_snapshot(['arm_gripper'], 'fault'))
+    elif fault == 'health_torque_off':
+        node.robot.observation_motor_health = parse_motor_health(healthy_snapshot(['arm_gripper'], False))
+    elif fault == 'telemetry_missing':
+        node._healthy_telemetry_at = None
+    elif fault in ('telemetry_stale', 'telemetry_future'):
+        node._healthy_telemetry_at = Time(nanoseconds=0 if fault == 'telemetry_stale' else 3_000_000_000)
+    elif fault == 'strict':
+        node.disarm_on_failure = True
+    elif fault == 'operator_disarmed':
+        node.operator_disarmed = True
+    elif fault == 'link_lost':
+        node.link_lost = True
+    elif fault == 'torque_fault':
+        node.torque_fault = True
+
+    assert node.arm_after_startup_telemetry() is False
+    assert not node.armed
+    assert node.torque_requests == []
+
+
 def test_a_failed_automatic_rearm_is_retried_at_a_bounded_rate():
     node = rearm_node()
     node.auto_arm_pending = True

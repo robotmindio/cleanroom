@@ -216,6 +216,13 @@ driver, cuts torque, and leaves it disarmed until an operator calls
 `/safety/arm`. An operator's `/safety/disarm` holds in either mode. See
 [Arming and recovery](launch-options.md#arming-and-recovery).
 
+After a hold-mode failure, fresh healthy readbacks confirming torque is already
+on allow logical recovery with a current base permission lease. That lease
+requires the arm stowed. This recovery sends no torque-enable request and resets
+the base command to zero; arm movement still requires its own permission lease.
+Enabling torque from off or unknown state, and explicit `/safety/arm` requests,
+continue to require arm permission.
+
 The diagnostics use these units:
 
 | Value | Reported representation |
