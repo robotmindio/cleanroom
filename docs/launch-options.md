@@ -121,6 +121,13 @@ later link losses until an operator calls `/safety/arm`. The ZMQ command,
 observation and torque sockets use heartbeat and TCP keepalive, so a half-open
 link is detected and reconnected instead of hanging.
 
+When fresh healthy servo readbacks confirm that torque remained on, automatic
+recovery can restore logical control with a current base permission lease. The
+supervisor grants that lease only with the arm stowed, and arm motion continues
+to require arm permission. Recovery resets the base command to zero and sends
+no torque-enable request. Off or unknown torque still requires arm permission
+before it can be enabled.
+
 For larger robots, set `LEKIWI_DISARM_ON_FAILURE=true` in `.env` on both the
 workstation and the robot computer (launch argument `safety_policy:=strict`, host
 option `--safety.disarm_on_failure=true`). This strict mode disarms on every
@@ -135,10 +142,9 @@ ros2 service call /safety/arm std_srvs/srv/Trigger '{}'
 The driver publishes its `DISARMED`, `ARMED`, or `LINK_LOST` state on
 `safety/driver_state` (the driver's own `safety/state`, remapped by bringup).
 The supervisor publishes `safety/supervisor_state`,
-`safety/base_motion_permitted`, and `safety/arm_motion_permitted`. By default (real
-mode, domestic robot) it reports missing or unhealthy inputs in `/diagnostics` but
-does not withhold motion. With `LEKIWI_DISARM_ON_FAILURE=true`, and always in
-simulation, missing or unhealthy inputs deny motion and runtime faults latch until
+`safety/base_motion_permitted`, and `safety/arm_motion_permitted`. Missing or
+unhealthy required inputs deny their affected motion scope in both policies.
+With `LEKIWI_DISARM_ON_FAILURE=true`, and always in simulation, runtime faults latch until
 `/safety/reset_fault` is called while the hardware driver is disarmed and all
 required inputs are healthy. Simulation has no hardware driver; it accepts the
 same explicit reset only after its required inputs recover. An e-stop always

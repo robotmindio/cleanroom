@@ -1048,12 +1048,32 @@ class LeKiwiDriver(Node):
                     or time.monotonic() < self._next_rearm_at
                     or self.link_lost
                     or self.armed
-                    or not self._arm_permission_is_current()
+                    or self.operator_disarmed
                     or self.torque_fault
                 ):
                     return False
+                held_torque = not self._arm_permission_is_current()
+                if held_torque:
+                    # Resuming already-powered servos needs no enable transaction.
+                    if (self.disarm_on_failure or not self.base_permission.current()
+                            or self._healthy_telemetry_at is None
+                            or self.robot.observation_torque_enabled is not True):
+                        return False
+                    health = self.robot.observation_motor_health
+                    age = (self.get_clock().now() - self._healthy_telemetry_at).nanoseconds / 1e9
+                    if (not 0.0 <= age <= self.link_timeout or not health
+                            or any(status.level != 0 or
+                                   dict(status.values).get('torque_enabled', '').lower() != 'true'
+                                   for status in health)):
+                        return False
+                    self.armed = True
+                    self._zero_command()
                 self.auto_arm_pending = False
                 disarm_epoch = self._disarm_epoch
+            if held_torque:
+                self.publish_safety("ARMED", disarm_epoch=disarm_epoch)
+                self.get_logger().info("Recovered control with verified torque left on")
+                return True
             outcome, _torque_cut = self._enable_torque_and_arm(
                 self._arm_permission_is_current, operator=False, disarm_epoch=disarm_epoch
             )
