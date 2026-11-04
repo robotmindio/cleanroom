@@ -22,4 +22,11 @@ if ! wait_for 30 ros2 service type /safety/arm; then
   exit 1
 fi
 
-exec ros2 service call /safety/arm std_srvs/srv/Trigger '{}'
+response=$(timeout 30 ros2 service call /safety/arm std_srvs/srv/Trigger '{}') || {
+  status=$?
+  printf '%s\n' "$response" >&2
+  exit "$status"
+}
+printf '%s\n' "$response"
+# ros2 exits zero for a delivered request even when the driver rejects it.
+grep -qE '^std_srvs[.]srv[.]Trigger_Response[(]success=True, message=' <<< "$response"
