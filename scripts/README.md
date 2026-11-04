@@ -95,7 +95,7 @@ before using them; the robot runtime does not require it.
 - `gripper-calibrate.py` records and applies a gripper-only calibration; `gripper-diagnose.py` reads its registers.
 - `odom_scale.py` measures the odometry scale against a checkerboard.
 - `lidar-self-mask.py` measures the LD06 returns from the stationary robot's own body and proposes `config/lidar_self_mask.yaml`.
-- `rearm-robot.sh` explicitly re-arms a running real-robot stack.
+- `rearm-robot.sh` explicitly re-arms a running real-robot stack; it exits nonzero on rejection, transport failure, or timeout.
 - `generate-zmq-keys.py` generates the CURVE server identity and authorized client keys.
 - `host-health-check.py` checks that the motor host serves both protocols (the host unit's start gate).
 

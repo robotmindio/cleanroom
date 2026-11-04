@@ -18,6 +18,33 @@ import pytest
 ROOT = pathlib.Path(__file__).parents[1]
 
 
+@pytest.mark.parametrize('response,cli_status,expected', [
+    ("std_srvs.srv.Trigger_Response(success=True, message='armed')", 0, 0),
+    ("std_srvs.srv.Trigger_Response(success=False, message='permission denied')", 0, 1),
+    ("std_srvs.srv.Trigger_Response(success=False, message='not success=True')", 0, 1),
+    ('success=True', 0, 1),
+    ('transport failed', 2, 2),
+])
+def test_rearm_exit_status_reflects_service_result(tmp_path, response, cli_status, expected):
+    scripts = tmp_path / 'scripts'
+    (scripts / 'lib').mkdir(parents=True)
+    for name in ('rearm-robot.sh', 'lib/runtime-common.sh'):
+        shutil.copy2(ROOT / 'scripts' / name, scripts / name)
+    (scripts / 'setup.bash').write_text('')
+    fakes = tmp_path / 'bin'
+    _executable(fakes / 'ros2', '''
+if [[ $2 == type ]]; then echo std_srvs/srv/Trigger; exit 0; fi
+printf '%s\\n' "$RESPONSE"
+exit "$CLI_STATUS"
+''')
+    env = {**os.environ, 'PATH': f"{fakes}:{os.environ['PATH']}",
+           'RESPONSE': response, 'CLI_STATUS': str(cli_status)}
+    result = subprocess.run(['bash', str(scripts / 'rearm-robot.sh')], env=env,
+                            text=True, capture_output=True, timeout=5)
+    assert result.returncode == expected
+    assert response in result.stdout + result.stderr
+
+
 @pytest.mark.parametrize('role', ['compute', 'device'])
 @pytest.mark.parametrize('package_installed', [False, True])
 def test_clock_setup_is_repeatable_and_only_restarts_chrony(tmp_path, role, package_installed):

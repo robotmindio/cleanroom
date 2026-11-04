@@ -481,7 +481,7 @@ operational_ready 120 false || die "navigation did not become operationally read
 # armed, so arm it again; only LEKIWI_DISARM_ON_FAILURE=true keeps it disarmed for an operator.
 outcome="robot remains disarmed"
 if [[ ${LEKIWI_DISARM_ON_FAILURE:-false} != true ]]; then
-  if wait_for 60 sh -c "ros2 service call /safety/arm std_srvs/srv/Trigger '{}' | grep -q 'success=True'"; then
+  if wait_for 60 "$PROJECT_ROOT/scripts/rearm-robot.sh"; then
     outcome="robot armed"
   else
     die "required re-arm failed; deployment remains unverified"
