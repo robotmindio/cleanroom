@@ -198,10 +198,13 @@ This envelope does not establish obstacle clearance or extend physical acceptanc
 
 ## Current motor-health behavior
 
-The motor host is the only serial-bus owner. At 10 Hz it reads each STS3215's
-torque state, position, raw status register, load, voltage, temperature,
-current, and programmed minimum/maximum voltage and maximum-temperature limits.
-It sends this snapshot in its observation telemetry (authenticated when CURVE
+The motor host is the only serial-bus owner. It requests position and odometry
+observations every 50 ms; the 30 Hz host loop normally publishes every two cycles.
+This leaves more margin for lost telemetry within the unchanged capture-time
+stationary checks. Motor-health register groups are still read at most every
+100 ms, spreading torque state, position, raw status register, load, voltage,
+temperature, current, and programmed voltage and temperature limits across cycles.
+It sends the latest snapshot in its observation telemetry (authenticated when CURVE
 is configured); the ROS driver
 validates it and publishes `/hardware/diagnostics`.
 

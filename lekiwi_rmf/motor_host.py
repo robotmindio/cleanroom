@@ -38,8 +38,8 @@ TORQUE_RETRIES = 5
 # starve the position loop on the shared Feetech bus.
 HEALTH_READ_PERIOD_S = 0.10
 # State and the full per-servo diagnostic snapshot share the narrow Pi uplink.
-# Ten hertz keeps feedback fresh while leaving command and watchdog handling at 30 Hz.
-OBSERVATION_PERIOD_S = 0.10
+# Leave margin for a lost packet inside the capture-time stationary feedback window.
+OBSERVATION_PERIOD_S = 0.05
 # An unconfirmed watchdog action is retried no more often than this.
 WATCHDOG_RETRY_S = 0.25
 HEALTH_READS = (
