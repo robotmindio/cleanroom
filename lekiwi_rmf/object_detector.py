@@ -127,6 +127,9 @@ class ObjectDetector(Node):
                              else threading.Lock() for role, recognizer in self._recognizers.items()}
         remote = self._detector.backend in REMOTE_BACKENDS
         self._inference_slots = threading.BoundedSemaphore(2 if remote else 1)
+        self._inference_clock = Clock(clock_type=ClockType.STEADY_TIME)
+        self._inference_period_ns = round(1e9 / rate)
+        self._next_inference_ns = 0
         self._primary_retry_at = 0.
         self._primary_retry_delay = PRIMARY_RETRY_MIN_SEC
         self._bridge = CvBridge()
@@ -174,7 +177,9 @@ class ObjectDetector(Node):
                                  callback_group=self._receipt_group)
         self._diagnostics = self.create_publisher(DiagnosticArray, '/diagnostics', 10)
         self.create_timer(1., self._health, callback_group=self._receipt_group)
-        self.create_timer(1 / rate, self._infer, clock=Clock(clock_type=ClockType.STEADY_TIME),
+        # Start eligible arrivals immediately; the timer retries frames held by the rate cap.
+        self._inference_guard = self.create_guard_condition(self._infer, callback_group=self._inference_group)
+        self.create_timer(1 / rate, self._infer, clock=self._inference_clock,
                           callback_group=self._inference_group)
 
     def _publish_profile(self):
@@ -350,11 +355,18 @@ class ObjectDetector(Node):
             self._stats[camera]['overwritten'] += camera in self._frames
             self._frames[camera] = image
             self._received_at[camera] = time.monotonic()
+        self._inference_guard.trigger()
 
     def _infer(self):
         # Leave a full pipeline's newest frame in its slot; never queue old captures or callbacks.
-        if not self._inference_slots.acquire(blocking=False):
-            return
+        with self._frame_lock:
+            now = self._inference_clock.now().nanoseconds
+            if not self._frames or now < self._next_inference_ns:
+                return
+            if not self._inference_slots.acquire(blocking=False):
+                return
+            # Arrival and timer callbacks share one rate limit, including overlapping remote calls.
+            self._next_inference_ns = now + self._inference_period_ns
         try:
             self._infer_one()
         finally:
