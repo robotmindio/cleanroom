@@ -3,7 +3,7 @@ import xml.etree.ElementTree as ET
 
 import pytest
 
-from lekiwi_rmf.moveit_config import apply_gripper_calibration, moveit_config_builder
+from lekiwi_rmf.moveit_config import apply_gripper_calibration, moveit_config_builder, moveit_parameters
 
 
 def test_moveit_execution_budget_allows_real_servo_timing_margin():
@@ -13,6 +13,24 @@ def test_moveit_execution_budget_allows_real_servo_timing_margin():
         # Include the driver's five-second settling window and transport margin.
         "allowed_goal_duration_margin": 6.0,
     }
+
+
+@pytest.mark.parametrize('sim', ['true', 'false'])
+def test_rviz_and_movegroup_share_the_selected_joint_model_and_clock(tmp_path, sim):
+    config = moveit_parameters(sim, tmp_path / 'missing.json')
+    model = ET.fromstring(config['robot_description'])
+    joints = {joint.attrib['name'] for joint in model.findall('joint')}
+    assert ('sim_base_back_wheel_joint' in joints) == (sim == 'true')
+    assert config['use_sim_time'] is (sim == 'true')
+    assert config['collision_detector'] == 'lekiwi_rmf/RestFCL'
+
+
+def test_simulation_never_loads_the_physical_servo_calibration(tmp_path):
+    path = tmp_path / 'physical.json'
+    path.write_text('invalid physical calibration')
+    assert moveit_parameters('true', path)['use_sim_time']
+    with pytest.raises(ValueError):
+        moveit_parameters('false', path)
 
 
 def parameters():

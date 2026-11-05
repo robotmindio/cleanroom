@@ -166,8 +166,8 @@ def test_sensor_calibration_has_one_xacro_source_for_all_model_consumers():
         publisher = find_node(resolve_bringup(profile=profile), node="robot_state_publisher/robot_state_publisher")
         assert publisher["parameters"]["robot_description"] == (
             f"$(command xacro $(share lekiwi_rmf)/urdf/lekiwi.urdf.xacro sim:={sim})")
-    assert "moveit_config_builder(\"false\")" in rviz
-    assert "apply_gripper_calibration(config" in rviz
+    assert "AsyncParameterClient(node, '/robot_state_publisher')" in rviz
+    assert 'config = moveit_parameters(sim, sys.argv[2])' in rviz
     assert 'file_path="urdf/lekiwi.urdf.xacro"' in moveit
 
 

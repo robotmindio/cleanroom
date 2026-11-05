@@ -681,7 +681,7 @@ def test_ros_stop_interrupts_only_the_stack_launcher_so_it_can_shut_its_nodes_do
 
 def test_rviz_exports_the_selected_collision_plugin_in_its_parameter_file():
     script = (ROOT / 'scripts/rviz.sh').read_text()
-    assert 'config["collision_detector"] = "lekiwi_rmf/RestFCL"' in script
+    assert 'config = moveit_parameters(sim, sys.argv[2])' in script
     keys = script.split('keys = (', 1)[1].split(')', 1)[0]
     assert '"collision_detector"' in keys
     display = (ROOT / 'src/rest_motion_planning_display.cpp').read_text()

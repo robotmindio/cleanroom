@@ -19,6 +19,21 @@ def moveit_config_builder(sim):
     )
 
 
+def moveit_parameters(sim, calibration_file):
+    """The same model, clock and physical calibration for MoveGroup and RViz."""
+    if sim not in ("true", "false"):
+        raise ValueError('sim must be true or false')
+    parameters = moveit_config_builder(sim).sensors_3d(
+        file_path="config/moveit_sensors.yaml").to_moveit_configs().to_dict()
+    parameters["collision_detector"] = "lekiwi_rmf/RestFCL"
+    parameters["use_sim_time"] = sim == "true"
+    if sim == "false":
+        # The guarded driver pauses its execution clock when permission is lost.
+        parameters.setdefault("trajectory_execution", {})["execution_duration_monitoring"] = False
+        apply_gripper_calibration(parameters, calibration_file)
+    return parameters
+
+
 def apply_gripper_calibration(parameters, calibration_file):
     """Keep MoveIt's gripper limits and endpoints aligned with calibration."""
     calibration = Path(calibration_file).expanduser()
