@@ -137,7 +137,7 @@ fi
 
 # Device sensors cross the network through the mutual-TLS zenoh bridge; make sure both
 # ends have their identities (a no-op once they are installed).
-if [[ $STACK_ARGS == *remote* ]]; then
+if [[ $STACK_ARGS == *remote* || $STACK_ARGS == *start_rmf:=true* ]]; then
   log "Ensuring the zenoh bridge TLS identities"
   as_root "$PROJECT_ROOT/scripts/setup-zenoh-tls.sh" --user "$LEKIWI_SERVICE_USER" "${REMOTE:-local}"
 fi

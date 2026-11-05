@@ -214,7 +214,8 @@ def _stack(context):
         Node(package="rmf_task_ros2", executable="rmf_task_dispatcher", parameters=[{"bidding_time_window": 2.0}], additional_env={"ROS_DOMAIN_ID": RMF_DOMAIN}, output="screen"),
         *gated(rmf_owner_guard, "RMF ownership", [Node(
             package="free_fleet_adapter", executable="fleet_adapter.py",
-            arguments=["-c", selected_fleet_config, "-n", selected_nav_graph],
+            arguments=["-c", selected_fleet_config, "-n", selected_nav_graph,
+                       "--zenoh-config", config("zenoh_fleet_client.json5")],
             additional_env={"ROS_DOMAIN_ID": RMF_DOMAIN}, output="screen",
         )]),
     ]

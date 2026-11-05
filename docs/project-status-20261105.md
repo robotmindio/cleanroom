@@ -74,8 +74,7 @@ recovery and preserving task identity/budgets through the interruption.
 
 ## All currently open GitHub issues
 
-The issue list was read from GitHub on 2026-11-05: **13 open issues** at this
-inventory point. A row is not closed merely because part of its software exists.
+The issue list was read from GitHub on 2026-11-05: **12 open issues** after closing #10 for deployed revision `3d7de958`. A row is not closed merely because part of its software exists.
 Detailed acceptance remains in [DEFERRED.md](../DEFERRED.md).
 
 | Issue | Remaining closure evidence / work |
@@ -83,16 +82,44 @@ Detailed acceptance remains in [DEFERRED.md](../DEFERRED.md).
 | [#6 — physical safety](https://github.com/robotmindio/cleanroom/issues/6) | Qualify the current predictive collision model and affected faults; measure low/overhanging/blind-zone coverage and arm-workspace coverage; review independent stop and motor diagnostics. Bumper, IMU and real battery sensing are absent. Existing acceptance is restricted attended operation, not full-hardware or unattended acceptance. |
 | [#7 — physical arm](https://github.com/robotmindio/cleanroom/issues/7) | Review assembled CAD/SRDF and folded stow/cable envelope; measure intrusion stop and trajectory cancel/preemption/tolerances/restart with accepted payload; qualify retention/endurance; resolve wrist USB disconnects and remaining source-feedback gaps. |
 | [#8 — calibration/map/RMF](https://github.com/robotmindio/cleanroom/issues/8) | Measure cameras/Astra/wheel/yaw/odometry; qualify quota freeze and offline map close/archive/reopen; survey and approve a ≤0.05 m map with pinned RMF graph/report and clearance/envelope validation. Resolve deployment ownership/domain architecture; keep charging unqualified. |
-| [#9 — security deployment](https://github.com/robotmindio/cleanroom/issues/9) | Retain the actual network isolation, tailnet/proxy authorization, firewall/CURVE and credential lifecycle decision, plus deployed unauthorized-client rejection tests. mTLS/CURVE implementation alone does not prove the whole site access policy. The optional RMF bridge (`config/zenoh_bridge.json5`) still uses default peer transport while exposing navigation actions; secure and qualify that path before enabling fleet operation. |
-| [#10 — release qualification](https://github.com/robotmindio/cleanroom/issues/10) | Retain service verification, dependencies, a clean revision/install-bound MoveIt shutdown probe and hosted CI for the deployed runtime revision. Native teardown fixes and previous clean probes exist; bind the final evidence before closing. |
+| [#9 — security deployment](https://github.com/robotmindio/cleanroom/issues/9) | Retain the actual network isolation, tailnet/proxy authorization, firewall/CURVE and credential lifecycle decision, plus deployed unauthorized-client rejection tests. mTLS/CURVE implementation alone does not prove the whole site access policy. The optional RMF bridge now binds only localhost:7448 with mutual TLS and an explicit authenticated fleet client, with discovery disabled. Qualify that configuration on an approved map before enabling fleet operation or extending it across hosts. |
 | [#11 — GPU simulation acceptance](https://github.com/robotmindio/cleanroom/issues/11) | Run the strict qualification runner on a qualified GPU/EGL host for the exact release, then review its scan/depth, mux, obstacle, RViz and native actuator-heartbeat observations. Renderer-free unit/physics tests do not close the graphical/runtime checklist. |
 | [#12 — deployed measurements](https://github.com/robotmindio/cleanroom/issues/12) | Assemble the exact-revision sensor rates/ages, guarded base and camera/link loss, gripper endpoint/return, wrist travel, RViz/driver and simulation-response evidence into formal acceptance artifacts. Existing scattered trials are not the complete package. |
 | [#14 — upstream setup compatibility](https://github.com/robotmindio/cleanroom/issues/14) | ROS/venv setup scripts must themselves source cleanly under `set -u` before removing the local nounset toggle. This is upstream compatibility debt; retaining the deliberate workaround is not a missing robot capability. |
 | [#88 — active search](https://github.com/robotmindio/cleanroom/issues/88) | Live found-outside-initial-view and absent-object trials; detector-derived object-size/height limits; 3D occlusion; coverage reprojection checked on live SLAM optimization. Only then promote moving search. |
 | [#91 — spatial memory](https://github.com/robotmindio/cleanroom/issues/91) | Real/replayed loop closure, localization restart, map-session merge, relinked anchors and capture/graph race with stated positional uncertainty. |
 | [#98 — image quality](https://github.com/robotmindio/cleanroom/issues/98) | Collect ≥20 independent scene groups per listed hard condition on robot cameras; choose luma/blur abstention limits and report per-condition recall. Engineering defaults are not a measured calibration. |
-| [#102 — latency and restore](https://github.com/robotmindio/cleanroom/issues/102) | Record every operation's p50/p95/p99 under normal and saturated camera/GPU load and provider outage/fallback; replace derived budgets with measured ones; execute backup/restore/verify with services stopped and verified visual evidence. Transport separation is one improvement, not completion of this matrix. |
-| [#148 — intermittent CI receipt test](https://github.com/robotmindio/cleanroom/issues/148) | Identify and fix the held-inference busy-receipt timeout under coverage, with a reproducer. Recent green runs and the separate driver recovery-window fix do not establish that root cause. |
+| [#102 — latency and restore](https://github.com/robotmindio/cleanroom/issues/102) | Record every operation's p50/p95/p99 under normal and saturated camera/GPU load and provider outage/fallback; replace derived budgets with measured ones; The stopped-service backup/restore/verify drill passed on November 5: healthy databases, 28,086 matching evidence records and no mismatches; prior databases were preserved and armed readiness restored. The load/outage latency matrix and measured budgets remain open. |
+| [#148 — intermittent CI receipt test](https://github.com/robotmindio/cleanroom/issues/148) | Identify and fix the held-inference busy-receipt timeout under coverage, with a reproducer. Forty isolated one-CPU coverage repetitions passed without reproducing the fault. Pre-cleanup thread/state diagnostics now retain evidence if it recurs; neither instrumentation nor a green retry establishes the root cause. |
+
+## Release and recovery evidence completed on November 5
+
+Issue #10 is closed for deployed revision `3d7de958bfb7d04fc979844612280ff2b4b7472a`:
+105 compute and 16 device CTests passed, both release seals and target services
+were verified, selected-install MoveIt teardown exited zero, and
+[hosted CI passed](https://github.com/robotmindio/cleanroom/actions/runs/42024450388).
+Three real two-second sensor-bridge interruptions withdrew permissions, held
+motor torque and recovered armed readiness in 1.67–1.78 seconds. A short steady
+capture still included one 369 ms scan; this is not an uninterrupted-radio SLA.
+
+The real offline backup/restore drill preserved the replaced stores and verified
+all 28,086 observation images against their recorded hashes. Restore hardening
+also has regressions for crash WAL recovery, retained owner locks, duplicate
+recovery-copy names and malformed manifests. Private artifacts are under
+`~/.ros/lekiwi/qualification/20261105-remaining-fixes/`.
+
+This host's service-account renderer probe passed EGL 1.5 / OpenGL 4.6 using AMD
+radeonsi. The simulation qualification runner now allows 1,800 seconds for the
+whole suite (measured ~800 seconds); individual test deadlines are unchanged.
+The native simulator exposed a stale scan mask: the September 26 body sectors
+predated the September 30 -90 degree lidar calibration. Forty native raw scans
+were all rejected with the old mask and all valid after rotating those same
+sectors +90 degrees. The corrected mask retains the same 71 degree width and
+reaches; the physical mask and all freshness limits are unchanged. The renderer
+scan check now uses the supervisor's validity checks and rejects negative
+infinity, out-of-range and blind scans instead of reporting false success.
+Full runtime qualification with the corrected installed configuration remains
+required, including mux, obstacle, RViz and native-heartbeat observations.
 
 ## Acceptance gaps beyond individual issue titles
 

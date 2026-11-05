@@ -120,12 +120,32 @@ def test_simulation_mask_matches_the_measured_cad_returns_and_scan_gate():
 
     path = ROOT / "config" / "lidar_self_mask_simulation.yaml"
     node = yaml.safe_load(path.read_text())["scan_self_filter"]["ros__parameters"]
-    assert node["body_start_deg"] == [87.0, 119.0, 139.0, 163.0, 208.0]
+    assert node["body_start_deg"] == [177.0, 209.0, 229.0, 253.0, 298.0]
     coverage = 2 * math.pi - _scan_masked_angle(str(path))
     safety = yaml.safe_load((ROOT / "config" / "safety_simulation.yaml").read_text())
     minimum = safety["safety_supervisor"]["ros__parameters"]["minimum_scan_coverage"]
     assert coverage > minimum
     assert math.isclose(coverage, math.radians(289.0), abs_tol=1e-9)
+
+
+def test_simulation_mask_retains_its_width_and_tracks_the_calibrated_scan_axis():
+    import xml.etree.ElementTree as ET
+    from lekiwi_rmf.scan_self_filter import blank_body_sectors, parse_sectors
+    params = yaml.safe_load((ROOT / 'config/lidar_self_mask_simulation.yaml').read_text())[
+        'scan_self_filter']['ros__parameters']
+    sectors = parse_sectors(*(params[key] for key in ('body_start_deg', 'body_end_deg', 'body_max_range_m')))
+    old = [(87, 99, .104), (119, 127, .225), (139, 148, .161), (163, 192, .162), (208, 221, .218)]
+    urdf = ET.parse(ROOT / 'urdf/lekiwi.urdf.xacro')
+    yaw = next(float(p.attrib['value']) for p in urdf.iter('{http://www.ros.org/wiki/xacro}property')
+               if p.attrib.get('name') == 'lidar_offset_yaw')
+    correction = -math.degrees(yaw)
+    assert sectors == [((a + correction) % 360, (b + correction) % 360, r) for a, b, r in old]
+    scan = _scan([2.0] * 360, angle_min=math.radians(-180), increment=math.radians(1))
+    scan.ranges[128] = -math.inf  # Native Gazebo ray at 308 degrees: CAD occlusion after yaw correction.
+    scan.ranges[150] = -math.inf  # An external too-close return still withdraws permission.
+    filtered = blank_body_sectors(scan, sectors)
+    assert filtered.ranges[128] == math.inf
+    assert filtered.ranges[150] == -math.inf
 
 
 def test_the_tracked_mask_covers_the_measured_body_returns_and_nothing_far():

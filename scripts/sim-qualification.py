@@ -378,7 +378,8 @@ def main() -> int:
         required=True, passed=not missing, log=str(expected_log.relative_to(evidence)),
         note="The three pyzmq-dependent tests are required: test_fake_host, test_test_driver_fake_host_launch.py, test_test_moveit_driver_e2e_launch.py.",
     ))
-    results.append(run_command(evidence, "ctest", ["ctest", "--test-dir", str(args.build_dir), "--output-on-failure"], timeout=600.0))
+    # The full installed suite takes ~800 s on the target; retain each test's own tighter deadline.
+    results.append(run_command(evidence, "ctest", ["ctest", "--test-dir", str(args.build_dir), "--output-on-failure"], timeout=1800.0))
     results.extend(moveit_shutdown_results(
         evidence,
         args.moveit_shutdown_probe.expanduser().resolve(),
