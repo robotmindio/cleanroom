@@ -52,24 +52,34 @@ def test_ros_start_inhibits_sleep_and_records_the_signalable_launcher(tmp_path, 
 
     scripts = tmp_path / 'scripts'
     (scripts / 'lib').mkdir(parents=True)
-    for name in ('ros-start.sh', 'lib/runtime-common.sh'):
+    for name in ('ros-start.sh', 'inhibit-robot-sleep.py', 'lib/runtime-common.sh'):
         shutil.copy2(ROOT / 'scripts' / name, scripts / name)
     (scripts / 'setup.bash').write_text('')
     (scripts / 'lib/self-heal.sh').write_text('self_heal() { :; }\n')
     _executable(scripts / 'rtabmap-db-maintenance.py', 'exit 0\n')
     fakes = tmp_path / 'bin'
     _executable(fakes / 'python3', 'exit 0\n')
-    _executable(fakes / 'systemd-inhibit', r'''
-printf '%s\n' "$@" > "$INHIBIT_ARGS"
-[[ $INHIBIT_STATUS == 0 ]] || exit "$INHIBIT_STATUS"
-while [[ $1 == --* ]]; do shift; done
-"$@" &
-wait "$!"
-''')
+    (fakes / 'dbus.py').write_text("""import os,json
+from pathlib import Path
+class DBusException(Exception): pass
+class Lease:
+    def take(self):
+        fd=os.open(os.environ['LEASE_FILE'],os.O_RDONLY)
+        Path(os.environ['FD_NUMBER']).write_text(str(fd))
+        return fd
+class SystemBus:
+    def get_object(self,*args): return self
+    def Inhibit(self,*args,**kwargs):
+        Path(os.environ['INHIBIT_ARGS']).write_text(json.dumps(args))
+        if os.environ['INHIBIT_STATUS']!='0': raise DBusException('permission denied')
+        return Lease()
+""")
+    (tmp_path / 'lease').touch()
     ros = fakes / 'ros2'
     ros.write_text("#!/usr/bin/python3\nimport json,os,signal,sys,time\n"
                    "from pathlib import Path\n"
                    "signal.signal(signal.SIGINT,lambda s,f:sys.exit(17))\n"
+                   "assert os.get_inheritable(int(Path(os.environ['FD_NUMBER']).read_text()))\n"
                    "Path(os.environ['ROS_ARGS']).write_text(json.dumps(sys.argv[1:]))\n"
                    "time.sleep(30)\n")
     ros.chmod(0o700)
@@ -77,12 +87,13 @@ wait "$!"
     env = {k: v for k, v in os.environ.items() if not k.startswith('LEKIWI_')}
     env.update(PATH=f"{fakes}:{os.environ['PATH']}", ROS_ARGS=str(ros_args),
                INHIBIT_ARGS=str(inhibit_args), INHIBIT_STATUS=str(inhibit_status),
+               PYTHONPATH=str(fakes), LEASE_FILE=str(tmp_path/'lease'), FD_NUMBER=str(tmp_path/'fd-number'),
                LEKIWI_RUNTIME_DIR=str(tmp_path / 'runtime'))
     process = subprocess.Popen(['bash', str(scripts / 'ros-start.sh'), 'profile:=split',
                                 'map:=/a path/map.yaml'], env=env, start_new_session=True)
     try:
         if inhibit_status:
-            assert process.wait(timeout=5) == inhibit_status
+            assert process.wait(timeout=5) == 1
             assert not ros_args.exists()
         else:
             deadline = time.monotonic() + 5
@@ -91,10 +102,10 @@ wait "$!"
             assert ros_args.exists() and process.poll() is None
             assert 'map:=/a path/map.yaml' in json.loads(ros_args.read_text())
             launcher = int((tmp_path / 'runtime/stack.pid').read_text())
-            assert launcher != process.pid
+            assert launcher == process.pid
             os.kill(launcher, signal.SIGINT)
             assert process.wait(timeout=5) == 17
-        assert {'--what=sleep', '--mode=block'} <= set(inhibit_args.read_text().splitlines())
+        assert json.loads(inhibit_args.read_text()) == ['sleep', 'lekiwi', 'Robot stack is running', 'block']
     finally:
         try:
             os.killpg(process.pid, signal.SIGTERM)
@@ -999,8 +1010,33 @@ def test_managed_build_prefers_system_cmake_and_records_its_revision():
     assert '.lekiwi-source-revision' in builder
 
 
+def test_sleep_policy_is_rendered_for_only_the_protected_robot_service(tmp_path):
+    result = _bash('''
+PROJECT_ROOT=$1
+LEKIWI_SERVICE_USER=robot_test
+LEKIWI_SERVICE_HOME=$2/home
+LEKIWI_SERVICE_WORKSPACE=$2/workspace
+LEKIWI_SERVICE_LEROBOT_VENV=
+as_root() { "$@"; }
+source "$LIB/service-install-common.sh"
+render_systemd_unit "$PROJECT_ROOT/systemd/lekiwi-sleep.rules" "$2/sleep.rules"
+''', str(ROOT), str(tmp_path))
+    assert result.returncode == 0, result.stderr
+    policy = (tmp_path / 'sleep.rules').read_text()
+    assert '@SERVICE_USER@' not in policy and 'subject.user === "robot_test"' in policy
+    assert 'subject.system_unit === "lekiwi-stack.service"' in policy
+    assert 'subject.no_new_privileges' in policy
+    assert policy.count('org.freedesktop.') == 1
+    assert 'action.id === "org.freedesktop.login1.inhibit-block-sleep"' in policy
+    installer = (ROOT / 'scripts/install-compute-services.sh').read_text()
+    assert installer.index('systemd/lekiwi-sleep.rules') < installer.index('systemctl daemon-reload')
+    assert 'chown root:root /etc/polkit-1/rules.d/49-lekiwi-sleep.rules' in installer
+    assert 'chmod 0644 /etc/polkit-1/rules.d/49-lekiwi-sleep.rules' in installer
+
+
 @pytest.mark.parametrize("role,sources", [
-    ("compute", ("systemd/lekiwi.slice", "systemd/lekiwi-stack.service", "scripts/lib/service-install-common.sh",
+    ("compute", ("systemd/lekiwi.slice", "systemd/lekiwi-stack.service", "systemd/lekiwi-sleep.rules",
+                 "scripts/ros-start.sh", "scripts/inhibit-robot-sleep.py", "scripts/lib/service-install-common.sh",
                  "scripts/lib/runtime-common.sh", "scripts/install-deploy-sudoers.sh",
                  "scripts/setup-zenoh-tls.sh", "scripts/install-wifi-powersave.sh",
                  "scripts/install-compute-services.sh", "scripts/install-time-sync.sh",

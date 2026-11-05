@@ -24,8 +24,7 @@ if [[ -n ${LEKIWI_ROBOT_HOST:-} ]]; then
   done
   $use_env_host && set -- "remote_ip:=$LEKIWI_ROBOT_HOST" "$@"
 fi
-# Record setup ownership; the inhibited child records its launcher PID below
-# so ros-stop.sh signals ROS rather than the waiting inhibitor process.
+# Exec preserves this PID through inhibitor acquisition and the ROS launcher.
 runtime_dir="${LEKIWI_RUNTIME_DIR:-${LEKIWI_LOGS:-$HOME/.ros/lekiwi}/runtime}"
 mkdir -p "$runtime_dir"
 chmod 700 "$runtime_dir"
@@ -80,11 +79,7 @@ front_camera_info="file://${LEKIWI_CAMERA_INFO:-$HOME/.ros/camera_info/lekiwi_fr
 wrist_camera_info="file://${LEKIWI_WRIST_CAMERA_INFO:-$HOME/.ros/camera_info/lekiwi_wrist.yaml}"
 
 self_heal
-# shellcheck disable=SC2016 # The child must expand its own PID and arguments.
-exec systemd-inhibit --what=sleep --mode=block --who=lekiwi \
-  --why='Robot stack is running' \
-  bash -c 'printf "%s\n" "$$" > "$1"; shift; exec "$@"' \
-  lekiwi-stack "$runtime_dir/stack.pid" \
+exec /usr/bin/python3 scripts/inhibit-robot-sleep.py \
   ros2 launch lekiwi_rmf bringup.launch.py profile:="$profile" \
   camera_device:="$FRONT" wrist_camera_device:="${WRIST:-none}" \
   camera_info_url:="$front_camera_info" wrist_camera_info_url:="$wrist_camera_info" \

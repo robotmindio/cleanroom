@@ -130,6 +130,7 @@ apt_get install -y \
   logrotate \
   python3-opencv \
   python3-yaml \
+  python3-dbus \
   python3-zmq \
   psmisc \
   v4l-utils
