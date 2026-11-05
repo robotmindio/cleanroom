@@ -134,7 +134,8 @@ class TestMotionSolverOverMoveIt(unittest.TestCase):
         self.assertGreater(answer['motion']['waypoints'], 0)
 
     def test_a_point_beyond_the_arm_is_infeasible(self):
-        answer = self.call({'op': 'solve', 'max_time_sec': 6, 'constraints': [
+        # Test FK agreement after the 1500 evaluations; a six-second CPU deadline can stop at 1422.
+        answer = self.call({'op': 'solve', 'max_time_sec': 10, 'constraints': [
             {'kind': 'position', 'target': {'point': {'frame': 'base_footprint', 'xyz': [1.2, 0.0, 0.3]}}, 'radius_m': 0.05}]})
         self.assertEqual((answer['status'], answer['reason']), ('infeasible', 'no_kinematic_solution'), answer)
 

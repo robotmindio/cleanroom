@@ -182,6 +182,8 @@ def _stack(context):
             # Simulation keeps its qualified enforcement; real mode is strict only
             # for larger robots that opt in with safety_policy:=strict.
             "strict": sim or strict_policy,
+            # A simulated MoveIt trajectory must obey its live workspace collision gate too.
+            **({"require_arm_workspace": True} if sim and topology.start_moveit else {}),
             "acceptance_file": config("safety_acceptance.yaml"),
             "scan_self_mask_file": ParameterValue(
                 config("lidar_self_mask_simulation.yaml" if sim else "lidar_self_mask.yaml"), value_type=str),
