@@ -1,5 +1,5 @@
 # Sensor bridge on the device machine: exports its sensor topics to the
-# compute stack over one zenoh TCP link (config/zenoh_device.json5).
+# compute stack over authenticated sensor sessions (config/zenoh_device.json5).
 [Unit]
 Description=LeKiwi sensor bridge (zenoh)
 Documentation=file://@PROJECT_ROOT@/HARDWARE.md

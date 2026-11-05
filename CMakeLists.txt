@@ -174,6 +174,10 @@ if(BUILD_TESTING)
     endif()
     ament_add_ros_isolated_pytest_test(${name} test/${name}.py ${timeout_args} ENV "${test_launch_environment}")
     isolate_lekiwi_test(${name})
+    if(name STREQUAL "test_zenoh_tls")
+      # The native fault probe measures deadlines; isolate it from simulation startup load.
+      set_tests_properties(${name} PROPERTIES RUN_SERIAL TRUE)
+    endif()
   endfunction()
   function(add_lekiwi_launch_test name timeout)
     add_launch_test(test/${name}.py TIMEOUT ${timeout} RUNNER "${test_isolated_runner}"
