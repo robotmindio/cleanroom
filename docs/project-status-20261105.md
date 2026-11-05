@@ -131,6 +131,8 @@ velocity 0.50 and acceleration 0.40, matching MoveGroup.
 
 The workspace monitor now schedules its monotonic freshness checks on a steady
 clock. A real ROS test proves ticks continue while simulation time is paused.
+Its joint subscription retains only the newest complete pose; a stalled-executor
+burst regression fails with the old ten-sample queue and passes with depth one.
 Simulated MoveIt also enables the live workspace permission gate. On this shared
 host, occasional checked-pose ages still exceed the unchanged 150 ms bound and
 latch the strict simulation fault; the action server correctly aborts the denied

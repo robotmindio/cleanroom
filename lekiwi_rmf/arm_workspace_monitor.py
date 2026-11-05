@@ -14,7 +14,7 @@ from rclpy.clock import Clock
 from rclpy.clock_type import ClockType
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
-from rclpy.qos import DurabilityPolicy, QoSProfile, qos_profile_sensor_data
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from sensor_msgs.msg import JointState, PointCloud2
 from std_msgs.msg import Bool
 
@@ -135,7 +135,7 @@ class ArmWorkspaceMonitor(Node):
         self._diagnostics_pub = self.create_publisher(DiagnosticArray, "/diagnostics", 10)
         self.create_subscription(
             JointState, str(self.get_parameter("joint_state_topic").value),
-            self._on_joint_state, 10,
+            self._on_joint_state, QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT),
         )
         # Only the arrival matters, so skip deserialising the cloud. Best
         # effort matches either reliability the updater publishes with.
