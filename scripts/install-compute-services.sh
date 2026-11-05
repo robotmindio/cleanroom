@@ -178,6 +178,12 @@ install_unit_config "$stack_env" lekiwi-stack.service "$stack_config"
 log "Disabling Wi-Fi power saving on the telemetry receiver"
 as_root "$PROJECT_ROOT/scripts/install-wifi-powersave.sh"
 
+log "Granting the protected robot service its sleep inhibitor"
+[[ -d /etc/polkit-1/rules.d ]] || as_root install -d -m 0755 /etc/polkit-1/rules.d
+render_systemd_unit "$PROJECT_ROOT/systemd/lekiwi-sleep.rules" /etc/polkit-1/rules.d/49-lekiwi-sleep.rules
+as_root chown root:root /etc/polkit-1/rules.d/49-lekiwi-sleep.rules
+as_root chmod 0644 /etc/polkit-1/rules.d/49-lekiwi-sleep.rules
+
 log "Reloading systemd and enabling lekiwi-stack.service"
 as_root systemctl daemon-reload
 # Restart first: try-restart skips a stopped stack, which enable --now then starts

@@ -46,7 +46,8 @@ exit "$CLI_STATUS"
 
 
 @pytest.mark.parametrize('inhibit_status', [0, 13])
-def test_ros_start_inhibits_sleep_and_records_the_signalable_launcher(tmp_path, inhibit_status):
+@pytest.mark.parametrize('managed', [False, True])
+def test_ros_start_inhibits_sleep_and_records_the_signalable_launcher(tmp_path, inhibit_status, managed):
     import json
     import signal
 
@@ -59,6 +60,7 @@ def test_ros_start_inhibits_sleep_and_records_the_signalable_launcher(tmp_path, 
     _executable(scripts / 'rtabmap-db-maintenance.py', 'exit 0\n')
     fakes = tmp_path / 'bin'
     _executable(fakes / 'python3', 'exit 0\n')
+    _executable(fakes / 'systemd-notify', 'printf "%s\\n" "$@" > "$NOTIFY_ARGS"\n')
     _executable(fakes / 'systemd-inhibit', r'''
 printf '%s\n' "$@" > "$INHIBIT_ARGS"
 [[ $INHIBIT_STATUS == 0 ]] || exit "$INHIBIT_STATUS"
@@ -77,7 +79,11 @@ wait "$!"
     env = {k: v for k, v in os.environ.items() if not k.startswith('LEKIWI_')}
     env.update(PATH=f"{fakes}:{os.environ['PATH']}", ROS_ARGS=str(ros_args),
                INHIBIT_ARGS=str(inhibit_args), INHIBIT_STATUS=str(inhibit_status),
+               NOTIFY_ARGS=str(tmp_path / 'notify-args'),
                LEKIWI_RUNTIME_DIR=str(tmp_path / 'runtime'))
+    env.pop('NOTIFY_SOCKET', None)
+    if managed:
+        env['NOTIFY_SOCKET'] = '/test/notify-socket'
     process = subprocess.Popen(['bash', str(scripts / 'ros-start.sh'), 'profile:=split',
                                 'map:=/a path/map.yaml'], env=env, start_new_session=True)
     try:
@@ -92,6 +98,10 @@ wait "$!"
             assert 'map:=/a path/map.yaml' in json.loads(ros_args.read_text())
             launcher = int((tmp_path / 'runtime/stack.pid').read_text())
             assert launcher != process.pid
+            if managed:
+                assert (tmp_path / 'notify-args').read_text().strip() == f'MAINPID={launcher}'
+            else:
+                assert not (tmp_path / 'notify-args').exists()
             os.kill(launcher, signal.SIGINT)
             assert process.wait(timeout=5) == 17
         assert {'--what=sleep', '--mode=block'} <= set(inhibit_args.read_text().splitlines())
@@ -608,6 +618,7 @@ def test_robot_stack_runs_in_a_protected_top_level_slice():
 def test_mapper_shutdown_signals_the_launcher_without_interrupting_its_save():
     service = _unit("lekiwi-stack.service")["Service"]
     assert service["KillMode"] == ["mixed"] and service["KillSignal"] == ["SIGINT"]
+    assert service['NotifyAccess'] == ['all']
     runner = (ROOT / 'scripts/test-navigation.py').read_text()
     assert 'os.kill(stack.pid,signal.SIGINT)' in runner
     assert re.search(r'try:\s+stack\.wait\(timeout=45\)', runner)
@@ -999,8 +1010,33 @@ def test_managed_build_prefers_system_cmake_and_records_its_revision():
     assert '.lekiwi-source-revision' in builder
 
 
+def test_sleep_policy_is_rendered_for_only_the_protected_robot_service(tmp_path):
+    result = _bash('''
+PROJECT_ROOT=$1
+LEKIWI_SERVICE_USER=robot_test
+LEKIWI_SERVICE_HOME=$2/home
+LEKIWI_SERVICE_WORKSPACE=$2/workspace
+LEKIWI_SERVICE_LEROBOT_VENV=
+as_root() { "$@"; }
+source "$LIB/service-install-common.sh"
+render_systemd_unit "$PROJECT_ROOT/systemd/lekiwi-sleep.rules" "$2/sleep.rules"
+''', str(ROOT), str(tmp_path))
+    assert result.returncode == 0, result.stderr
+    policy = (tmp_path / 'sleep.rules').read_text()
+    assert '@SERVICE_USER@' not in policy and 'subject.user === "robot_test"' in policy
+    assert 'subject.system_unit === "lekiwi-stack.service"' in policy
+    assert 'subject.no_new_privileges' in policy
+    assert policy.count('org.freedesktop.') == 1
+    assert 'action.id === "org.freedesktop.login1.inhibit-block-sleep"' in policy
+    installer = (ROOT / 'scripts/install-compute-services.sh').read_text()
+    assert installer.index('systemd/lekiwi-sleep.rules') < installer.index('systemctl daemon-reload')
+    assert 'chown root:root /etc/polkit-1/rules.d/49-lekiwi-sleep.rules' in installer
+    assert 'chmod 0644 /etc/polkit-1/rules.d/49-lekiwi-sleep.rules' in installer
+
+
 @pytest.mark.parametrize("role,sources", [
-    ("compute", ("systemd/lekiwi.slice", "systemd/lekiwi-stack.service", "scripts/lib/service-install-common.sh",
+    ("compute", ("systemd/lekiwi.slice", "systemd/lekiwi-stack.service", "systemd/lekiwi-sleep.rules",
+                 "scripts/ros-start.sh", "scripts/lib/service-install-common.sh",
                  "scripts/lib/runtime-common.sh", "scripts/install-deploy-sudoers.sh",
                  "scripts/setup-zenoh-tls.sh", "scripts/install-wifi-powersave.sh",
                  "scripts/install-compute-services.sh", "scripts/install-time-sync.sh",

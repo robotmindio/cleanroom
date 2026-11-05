@@ -7,6 +7,9 @@ The real-robot launcher holds a systemd sleep inhibitor while ROS is running,
 including when started by `lekiwi-stack.service`. Starting ROS fails if the
 inhibitor cannot be acquired. Stopping the launcher releases it; shutdown and
 the robot's existing motion and torque protections are unchanged.
+The compute installer grants this permission only to the configured user inside
+the protected `lekiwi-stack.service`, so it also works without a desktop login.
+The inhibited child reports its launcher PID to systemd for orderly shutdown.
 
 Before anything here, bring the robot up under plain LeRobot: motor IDs,
 calibration, cameras, and keyboard teleoperation. See

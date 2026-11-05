@@ -33,6 +33,8 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=simple
+# The inhibited child becomes MAINPID so mixed-mode shutdown signals ROS once.
+NotifyAccess=all
 # Memory, CPU and disk protection against other workloads: see lekiwi.slice.
 Slice=lekiwi.slice
 # Keep robot callbacks responsive when desktop/build workloads compete for CPU.

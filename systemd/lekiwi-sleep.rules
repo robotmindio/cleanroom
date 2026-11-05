@@ -1,0 +1,9 @@
+// The headless system service has no interactive login session.
+polkit.addRule(function(action, subject) {
+    if (action.id === "org.freedesktop.login1.inhibit-block-sleep" &&
+        subject.user === "@SERVICE_USER@" &&
+        subject.system_unit === "lekiwi-stack.service" &&
+        subject.no_new_privileges) {
+        return polkit.Result.YES;
+    }
+});

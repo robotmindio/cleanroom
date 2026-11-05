@@ -6,10 +6,10 @@ service_fingerprint() {
   local sources=()
   case $role in
     compute)
-      sources=(systemd/lekiwi.slice systemd/lekiwi-stack.service systemd/lekiwi-ros-logrotate.conf \
+      sources=(systemd/lekiwi.slice systemd/lekiwi-stack.service systemd/lekiwi-sleep.rules systemd/lekiwi-ros-logrotate.conf \
         systemd/lekiwi-ros-logrotate.service systemd/lekiwi-ros-logrotate.timer \
         scripts/lib/service-install-common.sh scripts/lib/runtime-common.sh \
-        scripts/lib/self-heal.sh scripts/install-deploy-sudoers.sh scripts/setup-zenoh-tls.sh \
+        scripts/ros-start.sh scripts/lib/self-heal.sh scripts/install-deploy-sudoers.sh scripts/setup-zenoh-tls.sh \
         scripts/install-compute-services.sh scripts/install-wifi-powersave.sh \
         scripts/install-time-sync.sh config/chrony-compute.conf config/chrony-device.conf)
       ;;

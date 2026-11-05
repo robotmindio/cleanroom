@@ -83,7 +83,9 @@ self_heal
 # shellcheck disable=SC2016 # The child must expand its own PID and arguments.
 exec systemd-inhibit --what=sleep --mode=block --who=lekiwi \
   --why='Robot stack is running' \
-  bash -c 'printf "%s\n" "$$" > "$1"; shift; exec "$@"' \
+  bash -c 'printf "%s\n" "$$" > "$1"; shift
+    if [[ -n ${NOTIFY_SOCKET:-} ]]; then systemd-notify "MAINPID=$$" || exit; fi
+    exec "$@"' \
   lekiwi-stack "$runtime_dir/stack.pid" \
   ros2 launch lekiwi_rmf bringup.launch.py profile:="$profile" \
   camera_device:="$FRONT" wrist_camera_device:="${WRIST:-none}" \
