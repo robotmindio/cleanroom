@@ -184,6 +184,7 @@ def test_native_fleet_listener_requires_a_trusted_client_identity(tmp_path):
                     time.sleep(.02)
             for identity in ('compute', None, 'device'):
                 context = ssl.create_default_context(cafile=str(ca / 'ca.crt'))
+                context.minimum_version = ssl.TLSVersion.TLSv1_3
                 if identity:
                     context.load_cert_chain(str(ca / f'{identity}.crt'), str(ca / f'{identity}.key'))
                 with socket.create_connection(('127.0.0.1', port), timeout=2) as connection:
