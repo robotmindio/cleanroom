@@ -134,7 +134,9 @@ class TestDriverFakeHostGraph(unittest.TestCase):
         self.assertTrue(self.arm_client.wait_for_service(timeout_sec=3.0))
         future = self.arm_client.call_async(Trigger.Request())
         self.assertTrue(self._until(future.done, timeout=3.0))
-        return future.result()
+        response = future.result()
+        self._last_arm_reply = response.message
+        return response
 
     def _arm_with_permission(self):
         # Keep the simulated supervisor alive while a service reply is pending.
@@ -147,7 +149,7 @@ class TestDriverFakeHostGraph(unittest.TestCase):
                 and self._arm().success,
                 # Allow a strict cut and another RPC after a hosted-runner stall.
                 timeout=8.0,
-            ))
+            ), getattr(self, '_last_arm_reply', 'no arm reply'))
         finally:
             self.node.destroy_timer(timer)
 
@@ -158,7 +160,9 @@ class TestDriverFakeHostGraph(unittest.TestCase):
             self._permission(self.base_permission, True),
         ))
         try:
-            self._arm_with_permission()
+            # Continuing an armed drive needs a fresh command, not another torque RPC.
+            if not fake_host.torque_enabled:
+                self._arm_with_permission()
             start = len(fake_host.actions)
             self.assertTrue(self._until(
                 lambda: self._permission(self.arm_permission, True) is None
