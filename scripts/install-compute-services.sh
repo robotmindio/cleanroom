@@ -163,12 +163,13 @@ fi
 slice_before=$(as_root sha256sum "$UNIT_DIR/lekiwi.slice" 2>/dev/null || true)
 render_systemd_unit "$PROJECT_ROOT/systemd/lekiwi.slice" "$UNIT_DIR/lekiwi.slice"
 [[ $slice_before == "$(as_root sha256sum "$UNIT_DIR/lekiwi.slice")" ]] || queue_restart lekiwi-stack.service
+install_unit lekiwi-awake.service
 install_unit lekiwi-stack.service
 log "Installing ROS log rotation"
 install_log_rotation
 as_root "$PROJECT_ROOT/scripts/install-time-sync.sh" compute
 log "Validating rendered systemd unit"
-verify_systemd_units lekiwi.slice lekiwi-stack.service
+verify_systemd_units lekiwi.slice lekiwi-awake.service lekiwi-stack.service
 verify_systemd_units lekiwi-ros-logrotate.service lekiwi-ros-logrotate.timer
 
 stack_env=/etc/default/lekiwi-stack
@@ -178,11 +179,8 @@ install_unit_config "$stack_env" lekiwi-stack.service "$stack_config"
 log "Disabling Wi-Fi power saving on the telemetry receiver"
 as_root "$PROJECT_ROOT/scripts/install-wifi-powersave.sh"
 
-log "Granting the protected robot service its sleep inhibitor"
-[[ -d /etc/polkit-1/rules.d ]] || as_root install -d -m 0755 /etc/polkit-1/rules.d
-render_systemd_unit "$PROJECT_ROOT/systemd/lekiwi-sleep.rules" /etc/polkit-1/rules.d/49-lekiwi-sleep.rules
-as_root chown root:root /etc/polkit-1/rules.d/49-lekiwi-sleep.rules
-as_root chmod 0644 /etc/polkit-1/rules.d/49-lekiwi-sleep.rules
+# Superseded by the root-owned native inhibitor unit, without a Polkit grant.
+as_root rm -f /etc/polkit-1/rules.d/49-lekiwi-sleep.rules
 
 log "Reloading systemd and enabling lekiwi-stack.service"
 as_root systemctl daemon-reload

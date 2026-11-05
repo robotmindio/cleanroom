@@ -45,7 +45,7 @@ exit "$CLI_STATUS"
     assert response in result.stdout + result.stderr
 
 
-@pytest.mark.parametrize('inhibit_status', [0, 13])
+@pytest.mark.parametrize('inhibit_status', [0, 13, None])
 def test_ros_start_inhibits_sleep_and_records_the_signalable_launcher(tmp_path, inhibit_status):
     import json
     import signal
@@ -79,7 +79,8 @@ class SystemBus:
     ros.write_text("#!/usr/bin/python3\nimport json,os,signal,sys,time\n"
                    "from pathlib import Path\n"
                    "signal.signal(signal.SIGINT,lambda s,f:sys.exit(17))\n"
-                   "assert os.get_inheritable(int(Path(os.environ['FD_NUMBER']).read_text()))\n"
+                   "if os.environ.get('LEKIWI_SLEEP_INHIBITED') != 'true':\n"
+                   "    assert os.get_inheritable(int(Path(os.environ['FD_NUMBER']).read_text()))\n"
                    "Path(os.environ['ROS_ARGS']).write_text(json.dumps(sys.argv[1:]))\n"
                    "time.sleep(30)\n")
     ros.chmod(0o700)
@@ -89,6 +90,8 @@ class SystemBus:
                INHIBIT_ARGS=str(inhibit_args), INHIBIT_STATUS=str(inhibit_status),
                PYTHONPATH=str(fakes), LEASE_FILE=str(tmp_path/'lease'), FD_NUMBER=str(tmp_path/'fd-number'),
                LEKIWI_RUNTIME_DIR=str(tmp_path / 'runtime'))
+    if inhibit_status is None:
+        env['LEKIWI_SLEEP_INHIBITED'] = 'true'
     process = subprocess.Popen(['bash', str(scripts / 'ros-start.sh'), 'profile:=split',
                                 'map:=/a path/map.yaml'], env=env, start_new_session=True)
     try:
@@ -105,7 +108,10 @@ class SystemBus:
             assert launcher == process.pid
             os.kill(launcher, signal.SIGINT)
             assert process.wait(timeout=5) == 17
-        assert json.loads(inhibit_args.read_text()) == ['sleep', 'lekiwi', 'Robot stack is running', 'block']
+        if inhibit_status is None:
+            assert not inhibit_args.exists()
+        else:
+            assert json.loads(inhibit_args.read_text()) == ['sleep', 'lekiwi', 'Robot stack is running', 'block']
     finally:
         try:
             os.killpg(process.pid, signal.SIGTERM)
@@ -298,6 +304,9 @@ done
             "@CURVE_AUTHORIZED_CLIENTS@", "@CURVE_HEALTH_CLIENT_SECRET@",
         ):
             assert placeholder not in text
+        if unit.name == "lekiwi-awake.service":
+            assert "User=root" in text and str(ROOT) not in text
+            continue
         assert "User=robot" in text
         assert "Environment=HOME=/srv/robot" in text
         assert "WorkingDirectory=" + str(ROOT) in text
@@ -306,6 +315,9 @@ done
     assert "host-health-check.py --host 127.0.0.1" in host
     for unit in tmp_path.glob("*.service"):
         rendered = unit.read_text(encoding="utf-8")
+        if unit.name == "lekiwi-awake.service":
+            assert "NoNewPrivileges=yes" in rendered and "ProtectSystem=strict" in rendered
+            continue
         for setting in (
             "NoNewPrivileges=true",
             "PrivateTmp=true",
@@ -613,7 +625,7 @@ def test_robot_stack_runs_in_a_protected_top_level_slice():
     # The slice is installed and validated before the stack that uses it, and a change restarts the stack.
     assert compute.index('"$UNIT_DIR/lekiwi.slice"') < compute.index("install_unit lekiwi-stack.service")
     assert "queue_restart lekiwi-stack.service" in compute
-    assert "verify_systemd_units lekiwi.slice lekiwi-stack.service" in compute
+    assert "verify_systemd_units lekiwi.slice lekiwi-awake.service lekiwi-stack.service" in compute
 
 
 def test_mapper_shutdown_signals_the_launcher_without_interrupting_its_save():
@@ -1010,32 +1022,27 @@ def test_managed_build_prefers_system_cmake_and_records_its_revision():
     assert '.lekiwi-source-revision' in builder
 
 
-def test_sleep_policy_is_rendered_for_only_the_protected_robot_service(tmp_path):
-    result = _bash('''
-PROJECT_ROOT=$1
-LEKIWI_SERVICE_USER=robot_test
-LEKIWI_SERVICE_HOME=$2/home
-LEKIWI_SERVICE_WORKSPACE=$2/workspace
-LEKIWI_SERVICE_LEROBOT_VENV=
-as_root() { "$@"; }
-source "$LIB/service-install-common.sh"
-render_systemd_unit "$PROJECT_ROOT/systemd/lekiwi-sleep.rules" "$2/sleep.rules"
-''', str(ROOT), str(tmp_path))
-    assert result.returncode == 0, result.stderr
-    policy = (tmp_path / 'sleep.rules').read_text()
-    assert '@SERVICE_USER@' not in policy and 'subject.user === "robot_test"' in policy
-    assert 'subject.system_unit === "lekiwi-stack.service"' in policy
-    assert 'subject.no_new_privileges' in policy
-    assert policy.count('org.freedesktop.') == 1
-    assert 'action.id === "org.freedesktop.login1.inhibit-block-sleep"' in policy
+def test_managed_sleep_lease_precedes_ros_and_uses_only_native_root_tools():
+    stack = (ROOT / 'systemd/lekiwi-stack.service').read_text()
+    awake = (ROOT / 'systemd/lekiwi-awake.service').read_text()
+    assert 'BindsTo=lekiwi-awake.service' in stack
+    assert 'After=network-online.target lekiwi-awake.service' in stack
+    assert 'Environment=LEKIWI_SLEEP_INHIBITED=true' in stack
+    assert 'User=@SERVICE_USER@' in stack and 'KillMode=mixed' in stack
+    assert 'PartOf=lekiwi-stack.service' in awake and 'StopWhenUnneeded=yes' in awake
+    assert 'Type=notify' in awake and 'NotifyAccess=all' in awake
+    assert '--mode=block' in awake and '--ready --pid=parent --exec \\;' in awake
+    assert 'NOTIFY_SOCKET=${NOTIFY_SOCKET}' in awake
+    assert '/usr/bin/sleep infinity' in awake
+    assert '@PROJECT_ROOT@' not in awake and 'python' not in awake
     installer = (ROOT / 'scripts/install-compute-services.sh').read_text()
-    assert installer.index('systemd/lekiwi-sleep.rules') < installer.index('systemctl daemon-reload')
-    assert 'chown root:root /etc/polkit-1/rules.d/49-lekiwi-sleep.rules' in installer
-    assert 'chmod 0644 /etc/polkit-1/rules.d/49-lekiwi-sleep.rules' in installer
+    assert installer.index('install_unit lekiwi-awake.service') < installer.index('systemctl daemon-reload')
+    assert 'verify_systemd_units lekiwi.slice lekiwi-awake.service lekiwi-stack.service' in installer
+    assert 'rm -f /etc/polkit-1/rules.d/49-lekiwi-sleep.rules' in installer
 
 
 @pytest.mark.parametrize("role,sources", [
-    ("compute", ("systemd/lekiwi.slice", "systemd/lekiwi-stack.service", "systemd/lekiwi-sleep.rules",
+    ("compute", ("systemd/lekiwi.slice", "systemd/lekiwi-stack.service", "systemd/lekiwi-awake.service",
                  "scripts/ros-start.sh", "scripts/inhibit-robot-sleep.py", "scripts/lib/service-install-common.sh",
                  "scripts/lib/runtime-common.sh", "scripts/install-deploy-sudoers.sh",
                  "scripts/setup-zenoh-tls.sh", "scripts/install-wifi-powersave.sh",

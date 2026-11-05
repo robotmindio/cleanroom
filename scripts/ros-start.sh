@@ -24,7 +24,7 @@ if [[ -n ${LEKIWI_ROBOT_HOST:-} ]]; then
   done
   $use_env_host && set -- "remote_ip:=$LEKIWI_ROBOT_HOST" "$@"
 fi
-# Exec preserves this PID through inhibitor acquisition and the ROS launcher.
+# Exec preserves this PID through the ROS launcher.
 runtime_dir="${LEKIWI_RUNTIME_DIR:-${LEKIWI_LOGS:-$HOME/.ros/lekiwi}/runtime}"
 mkdir -p "$runtime_dir"
 chmod 700 "$runtime_dir"
@@ -79,8 +79,12 @@ front_camera_info="file://${LEKIWI_CAMERA_INFO:-$HOME/.ros/camera_info/lekiwi_fr
 wrist_camera_info="file://${LEKIWI_WRIST_CAMERA_INFO:-$HOME/.ros/camera_info/lekiwi_wrist.yaml}"
 
 self_heal
-exec /usr/bin/python3 scripts/inhibit-robot-sleep.py \
-  ros2 launch lekiwi_rmf bringup.launch.py profile:="$profile" \
+# The managed service waits for its companion lease; manual launches acquire their own.
+sleep_inhibitor=()
+if [[ ${LEKIWI_SLEEP_INHIBITED:-false} != true ]]; then
+  sleep_inhibitor=(/usr/bin/python3 scripts/inhibit-robot-sleep.py)
+fi
+exec "${sleep_inhibitor[@]}" ros2 launch lekiwi_rmf bringup.launch.py profile:="$profile" \
   camera_device:="$FRONT" wrist_camera_device:="${WRIST:-none}" \
   camera_info_url:="$front_camera_info" wrist_camera_info_url:="$wrist_camera_info" \
   "${calibration_args[@]}" "$@"
