@@ -88,14 +88,16 @@ def _sensors(context):
         # Device sensors cross the network only through zenoh: DDS stays on
         # each machine (cyclonedds.xml), and the device's lekiwi-zenoh
         # service exports exactly the topics this bridge imports.
-        actions.append(ExecuteProcess(
-            cmd=[
-                "zenoh-bridge-ros2dds",
-                "-c", PathJoinSubstitution([package, "config", "zenoh_compute.json5"]),
-                "-e", ["tls/", LaunchConfiguration("remote_ip"), ":7447"],
-            ],
-            respawn=True, respawn_delay=5.0, output="screen",
-        ))
+        # Separate client sessions retain isolation after a Zenoh 1.5 reconnect.
+        for traffic, priorities in (("scan", "0-1"), ("depth", "2-5"), ("images", "6-7")):
+            actions.append(ExecuteProcess(
+                cmd=[
+                    "zenoh-bridge-ros2dds",
+                    "-c", PathJoinSubstitution([package, "config", f"zenoh_compute_{traffic}.json5"]),
+                    "-e", ["tls/", LaunchConfiguration("remote_ip"), f":7447?prio={priorities}"],
+                ],
+                respawn=True, respawn_delay=1.0, output="screen",
+            ))
     if topology.ld06 or topology.remote_ld06:
         # Both LD06 paths end here: the robot's own body is blanked out of the scan
         # (config/lidar_self_mask.yaml) before anything reads /scan. The node

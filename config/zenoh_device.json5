@@ -1,8 +1,8 @@
 // Device-side half of the sensor bridge (lekiwi-zenoh.service).
 //
 // DDS stays on each machine (cyclonedds.xml: MulticastTimeToLive 0). This
-// bridge carries the device's sensor topics to the compute machine over one
-// TCP link, so no router has to pass DDS multicast discovery. It only exports:
+// bridge carries the device's sensor topics to the compute machine over priority-separated
+// TLS links, so no router has to pass DDS multicast discovery. It only exports:
 // nothing on the network can publish into the device's DDS through it.
 //
 // The link is mutual TLS: only a peer holding a certificate signed by the

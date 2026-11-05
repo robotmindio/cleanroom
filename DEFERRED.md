@@ -88,10 +88,10 @@ matrix review is recorded, and the physical MoveIt trials and arm-workspace
 intrusion stop are in the acceptance record. Tracked in
 [#7](https://github.com/robotmindio/cleanroom/issues/7).
 
-- The real joint-zero calibration is measured. A manually positioned upright
-  stow candidate is captured in both tracked safety files and is collision-free
-  in MoveIt. Measure its physical arm and cable envelope against the base
-  footprint before accepting it; the CAD check alone does not prove clearance.
+- The real joint-zero calibration and folded `travel_stow` are tracked. Confirm
+  the assembled arm rests on its contacts within the unchanged 0.02 rad tolerance
+  using fresh joint states before any torque cut. Qualify the physical arm/cable
+  envelope against the base footprint; CAD clearance alone is insufficient.
 - Find and record a physically collision-free calibration pose, then review
   the production CAD/SRDF collision matrix against the assembled robot. The
   loopback MoveIt test uses that production matrix, but simulated clearance is
@@ -104,7 +104,9 @@ intrusion stop are in the acceptance record. Tracked in
   established by its launch test.
 - Run real MoveIt plan-and-execute trials at the accepted scaling limits and
   payload, including cancel, preemption, path tolerance, goal tolerance,
-  telemetry loss and restart. Finish every trial with explicit disarm.
+  telemetry loss and restart. Finish in `travel_stow` confirmed from fresh
+  joint states. The normal runtime policy stays armed; any explicit torque cut
+  requires that stow confirmation first.
 - Recheck the newly launched RViz MotionPlanning panel as well as `move_group`
   after any RViz, MoveIt, desktop image or configuration revision.
 - Qualify arm payload beyond the tested case. The installed reported 200 g

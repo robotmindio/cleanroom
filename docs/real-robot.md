@@ -10,6 +10,14 @@ the companion stops the stack. Ordered shutdown keeps the lease until ROS has
 stopped and then releases it. Manual launches acquire their own lease in the
 launcher process, preserving the same PID and single-signal ROS shutdown.
 
+The remote sensor bridge uses three mTLS connections on port 7447: scan/control,
+depth/metadata and image previews. Loss or backlog in a preview stream therefore
+does not hold up scan/depth on the same TCP stream. Three independent compute clients use disjoint import lists, without listeners
+or scouting; their reconnect backoff is 100 ms to 1 s.
+Freshness and motion gates still stop on a complete outage and recover only
+when current inputs return. The native encrypted-delay probe and remaining
+acceptance are in [the project status](project-status-20261105.md).
+
 Before anything here, bring the robot up under plain LeRobot: motor IDs,
 calibration, cameras, and keyboard teleoperation. See
 [HARDWARE.md](../HARDWARE.md). If teleoperation does not work there, nothing in
