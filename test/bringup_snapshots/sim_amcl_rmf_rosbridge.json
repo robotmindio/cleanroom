@@ -12,7 +12,9 @@
      "-c",
      "$(share lekiwi_rmf)/config/fleet_config.yaml",
      "-n",
-     "$(share lekiwi_rmf)/maps/nav_graph.yaml"
+     "$(share lekiwi_rmf)/maps/nav_graph.yaml",
+     "--zenoh-config",
+     "$(share lekiwi_rmf)/config/zenoh_fleet_client.json5"
     ],
     "env": {
      "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",

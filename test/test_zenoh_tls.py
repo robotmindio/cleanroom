@@ -4,9 +4,11 @@ import os
 import re
 import signal
 import shutil
+import socket
 import ssl
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -31,14 +33,15 @@ def openssl(*args):
 def test_setup_generates_role_limited_identities_and_is_idempotent(tmp_path):
     ca = tmp_path / "ca"
     generate(ca)
-    for name in ("ca", "device", "compute"):
+    for name in ("ca", "device", "compute", "rmf"):
         assert (ca / f"{name}.crt").is_file()
-    for name in ("ca", "device", "compute"):
+    for name in ("ca", "device", "compute", "rmf"):
         assert (ca / f"{name}.key").stat().st_mode & 0o777 == 0o600
         # The certificate carries the key that was written beside it.
         assert openssl("x509", "-in", str(ca / f"{name}.crt"), "-noout", "-pubkey") == \
             openssl("pkey", "-in", str(ca / f"{name}.key"), "-pubout")
     assert "TLS Web Server Authentication" in openssl("x509", "-in", str(ca / "device.crt"), "-noout", "-text")
+    assert "TLS Web Server Authentication" in openssl("x509", "-in", str(ca / "rmf.crt"), "-noout", "-text")
     compute = openssl("x509", "-in", str(ca / "compute.crt"), "-noout", "-text")
     assert "TLS Web Client Authentication" in compute and "Server Authentication" not in compute
     ssl.PEM_cert_to_DER_cert((ca / "device.crt").read_text())  # valid PEM
@@ -102,8 +105,24 @@ def test_sensor_bridge_caps_previews_and_drops_stale_sensor_samples_on_congestio
 def test_main_installers_provision_the_identities():
     compute = (ROOT / "scripts" / "install-compute-services.sh").read_text()
     assert 'setup-zenoh-tls.sh" --user "$LEKIWI_SERVICE_USER" "${REMOTE:-local}"' in compute
+    assert '$STACK_ARGS == *start_rmf:=true*' in compute
     # test_service_installation checks that a change to setup-zenoh-tls.sh changes the
     # compute service fingerprint, so deploy-split refreshes the compute service.
+
+
+def test_fleet_actions_use_explicit_local_mutual_tls_without_discovery():
+    bridge = (ROOT / 'config/zenoh_bridge.json5').read_text()
+    client = (ROOT / 'config/zenoh_fleet_client.json5').read_text()
+    for config in (bridge, client):
+        assert '"tls/127.0.0.1:7448"' in config
+        assert 'enable_mtls: true' in config and 'tcp/' not in config
+        assert 'scouting: { multicast: { enabled: false }, gossip: { enabled: false } }' in config
+    assert 'listen_private_key: "/etc/lekiwi/zenoh-tls/rmf.key"' in bridge
+    assert 'listen: { endpoints: [] }' in client
+    records = resolve_bringup(profile='split', localization='amcl', start_rmf='true', map_bundle_approved=True)
+    adapter = next(record for gate in records for record in gate.get('start', [])
+                   if record.get('node') == 'free_fleet_adapter/fleet_adapter.py')
+    assert '--zenoh-config' in adapter['arguments']
 
 
 def test_missing_options_and_unknown_flags_are_rejected():
@@ -136,3 +155,49 @@ def test_native_priority_links_isolate_camera_delay_and_recover(tmp_path):
                 os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
+
+
+def test_native_fleet_listener_requires_a_trusted_client_identity(tmp_path):
+    binary = shutil.which('zenoh-bridge-ros2dds')
+    if binary is None:
+        pytest.skip('native fleet qualification requires the pinned Zenoh bridge')
+    ca = tmp_path / 'pki'
+    generate(ca)
+    with socket.socket() as reservation:
+        reservation.bind(('127.0.0.1', 0))
+        port = reservation.getsockname()[1]
+    config = (ROOT / 'config/zenoh_bridge.json5').read_text().replace(TLS_DIR, str(ca))
+    path = tmp_path / 'fleet.json5'
+    path.write_text(config.replace('127.0.0.1:7448', f'127.0.0.1:{port}'))
+    env = {**os.environ, 'CYCLONEDDS_URI': f'file://{ROOT}/config/cyclonedds.xml'}
+    with (tmp_path / 'fleet.log').open('w') as log:
+        process = subprocess.Popen([binary, '-c', str(path), '-d', '226'], env=env, stdout=log, stderr=log)
+        try:
+            deadline = time.monotonic() + 5
+            while True:
+                assert process.poll() is None, (tmp_path / 'fleet.log').read_text()
+                try:
+                    with socket.create_connection(('127.0.0.1', port), timeout=.2):
+                        break
+                except ConnectionRefusedError:
+                    assert time.monotonic() < deadline, 'fleet listener did not start'
+                    time.sleep(.02)
+            for identity in ('compute', None, 'device'):
+                context = ssl.create_default_context(cafile=str(ca / 'ca.crt'))
+                if identity:
+                    context.load_cert_chain(str(ca / f'{identity}.crt'), str(ca / f'{identity}.key'))
+                with socket.create_connection(('127.0.0.1', port), timeout=2) as connection:
+                    if identity == 'compute':
+                        with context.wrap_socket(connection, server_hostname='lekiwi-rmf') as secured:
+                            assert secured.getpeercert()
+                    else:
+                        with pytest.raises(ssl.SSLError):
+                            with context.wrap_socket(connection, server_hostname='lekiwi-rmf') as secured:
+                                secured.recv(1)
+        finally:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)

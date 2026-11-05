@@ -3,11 +3,11 @@
 # config/zenoh_compute_*.json5). install-compute-services.sh runs this whenever
 # the stack takes sensors over the bridge; run it by hand to renew.
 #
-# A private CA signs one certificate for the device (server) and one for compute
-# (client). Each side trusts only that CA, and the device refuses any connection
+# A private CA signs server certificates for the device and local RMF bridge,
+# and a compute client certificate. Each side trusts only that CA and refuses any connection
 # that does not present the compute certificate. The CA key stays in --ca-dir on
 # the compute machine; each machine gets only the CA certificate and its own
-# key, under /etc/lekiwi/zenoh-tls, the fixed path both configs name.
+# key, under /etc/lekiwi/zenoh-tls, the fixed path the configs name.
 #
 # Idempotent: existing identities are kept and already-installed files are left
 # alone (no sudo needed). --renew replaces every identity.
@@ -75,7 +75,8 @@ generate() {
   fi
   [[ -f $ca_dir/device.crt ]] || leaf device serverAuth
   [[ -f $ca_dir/compute.crt ]] || leaf compute clientAuth
-  for name in device compute; do
+  [[ -f $ca_dir/rmf.crt ]] || leaf rmf serverAuth
+  for name in device compute rmf; do
     openssl verify -CAfile "$ca_dir/ca.crt" "$ca_dir/$name.crt" >/dev/null || \
       die "$name certificate does not verify against the CA"
   done
@@ -112,6 +113,7 @@ install_local() {
 }
 
 install_local compute
+install_local rmf
 if [[ $device == local ]]; then
   install_local device
   exit 0

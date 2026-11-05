@@ -8,6 +8,7 @@ recovers its history but is reported as visual evidence unverified, never as int
 """
 
 import datetime
+from contextlib import ExitStack
 import fcntl
 import hashlib
 import json
@@ -15,6 +16,7 @@ import os
 from pathlib import Path
 import shutil
 import sqlite3
+from tempfile import NamedTemporaryFile
 
 import yaml
 
@@ -150,55 +152,78 @@ def read_backup(directory):
     """The manifest, after every listed file proved byte-identical to what was backed up."""
     directory = Path(directory)
     manifest = json.loads((directory / 'manifest.json').read_text())
-    if manifest.get('schema') != SCHEMA or not isinstance(manifest.get('stores'), dict):
+    if not isinstance(manifest, dict) or manifest.get('schema') != SCHEMA or not isinstance(manifest.get('stores'), dict):
         raise ValueError('not a robot data backup')
+    if (type(manifest.get('domain')) is not int or not 0 <= manifest['domain'] <= 232
+            or type(manifest.get('sim')) is not bool or not isinstance(manifest.get('absent'), list)):
+        raise ValueError('backup needs a valid ROS domain, simulation flag and absent-store list')
     for name, entry in manifest['stores'].items():
+        if (not isinstance(entry, dict) or not isinstance(entry.get('file'), str)
+                or not entry['file'] or Path(entry['file']).name != entry['file']
+                or entry['file'] in ('.', '..') or type(entry.get('size')) is not int
+                or entry['size'] < 0 or not isinstance(entry.get('sha256'), str)):
+            raise ValueError(f'{name} has an invalid backup file entry')
         path = directory / Path(entry['file']).name
-        if not path.is_file() or path.stat().st_size != entry['size'] or digest(path) != entry['sha256']:
+        if path.is_symlink() or not path.is_file() or path.stat().st_size != entry['size'] or digest(path) != entry['sha256']:
             raise ValueError(f'{name} in the backup is missing or corrupt')
     return manifest
 
 
-def _held(path):
-    """Whether the owning node holds the store's lock (it is running)."""
+def _restore_lock(path, cleanup):
+    """Keep the owner's lock until replacement and verification finish."""
     lock = Path(f'{path}.lock')
-    if not lock.exists():
-        return False
-    with lock.open('a') as stream:
-        try:
-            fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            return True
-        fcntl.flock(stream, fcntl.LOCK_UN)
-    return False
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    stream = cleanup.enter_context(lock.open('a'))
+    try:
+        fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError as error:
+        raise RuntimeError(f'{path.name} is open by its node; stop the robot services before restoring') from error
 
 
 def restore(directory, home, *, policy=None, stamp=None):
     """Replace the stores from a verified backup; each replaced file is kept beside it, never deleted."""
-    policy = policy or load_policy()
-    directory, home = Path(directory), Path(home)
-    manifest = read_backup(directory)
-    paths = store_paths(policy, home, manifest['domain'], manifest['sim'])
-    if set(manifest['stores']) - set(paths):
-        raise ValueError('the backup holds stores this policy does not know')
-    for name in manifest['stores']:
-        if policy['stores'][name]['lock'] and _held(paths[name]):
-            raise RuntimeError(f'{name} is open by its node; stop the robot services before restoring')
-    stamp = stamp or datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
-    kept = {}
-    for name, entry in manifest['stores'].items():
-        target = paths[name]
-        target.parent.mkdir(parents=True, exist_ok=True)
-        staging = target.with_name(f'.{target.name}.restoring')
-        shutil.copyfile(directory / Path(entry['file']).name, staging)
-        staging.chmod(0o600)
-        if target.exists():
-            previous = target.with_name(f'{target.name}.pre-restore-{stamp}')
-            os.replace(target, previous)
-            kept[name] = str(previous)
-        os.replace(staging, target)
-    return {'restored': sorted(manifest['stores']), 'kept': kept, 'absent': manifest['absent'],
-            'verification': verify(home, policy=policy, domain=manifest['domain'], sim=manifest['sim'])}
+    with ExitStack() as cleanup:
+        policy = policy or load_policy()
+        directory, home = Path(directory), Path(home)
+        manifest = read_backup(directory)
+        paths = store_paths(policy, home, manifest['domain'], manifest['sim'])
+        if set(manifest['stores']) - set(paths):
+            raise ValueError('the backup holds stores this policy does not know')
+        stamp = stamp or datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
+        if not isinstance(stamp, str) or not stamp or Path(stamp).name != stamp or stamp in ('.', '..'):
+            raise ValueError('restore stamp must be a filename component')
+        for name in manifest['stores']:
+            target = paths[name]
+            if not target.resolve().is_relative_to(home.resolve()) or target.is_symlink():
+                raise ValueError(f'{name} restore target escapes the robot home or is a symlink')
+            if policy['stores'][name]['lock']:
+                _restore_lock(target, cleanup)
+            for suffix in ('', '-wal', '-shm'):
+                if target.with_name(f'{target.name}.pre-restore-{stamp}{suffix}').exists():
+                    raise ValueError(f'{name} pre-restore copy already exists')
+        kept = {}
+        for name, entry in manifest['stores'].items():
+            target = paths[name]
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with NamedTemporaryFile(dir=target.parent, prefix=f'.{target.name}.restoring-', delete=False) as temporary:
+                staging = Path(temporary.name)
+            cleanup.callback(staging.unlink, missing_ok=True)
+            shutil.copyfile(directory / Path(entry['file']).name, staging)
+            staging.chmod(0o600)
+            if target.exists():
+                previous = target.with_name(f'{target.name}.pre-restore-{stamp}')
+                os.link(target, previous)
+                # Old WAL belongs to the preserved database, never to the restored snapshot.
+                if policy['stores'][name]['kind'] == 'sqlite':
+                    for suffix in ('-wal', '-shm'):
+                        sidecar = Path(f'{target}{suffix}')
+                        if sidecar.exists():
+                            os.link(sidecar, Path(f'{previous}{suffix}'))
+                            sidecar.unlink()
+                kept[name] = str(previous)
+            os.replace(staging, target)
+        return {'restored': sorted(manifest['stores']), 'kept': kept, 'absent': manifest['absent'],
+                'verification': verify(home, policy=policy, domain=manifest['domain'], sim=manifest['sim'])}
 
 
 def _evidence(database):
@@ -211,7 +236,8 @@ def _evidence(database):
             expected = json.loads(document)['evidence']['sha256']
         except (KeyError, TypeError, ValueError):
             expected = None
-        counts['matched' if hashlib.sha256(evidence).hexdigest() == expected else 'mismatched'] += 1
+        matched = isinstance(evidence, bytes) and hashlib.sha256(evidence).hexdigest() == expected
+        counts['matched' if matched else 'mismatched'] += 1
     return counts
 
 

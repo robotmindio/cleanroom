@@ -1,0 +1,23 @@
+// The local fleet adapter authenticates to the navigation bridge explicitly.
+{
+  mode: "client",
+  listen: { endpoints: [] },
+  connect: {
+    endpoints: ["tls/127.0.0.1:7448"],
+    timeout_ms: -1,
+    exit_on_failure: false,
+    retry: { period_init_ms: 100, period_max_ms: 1000, period_increase_factor: 2 },
+  },
+  transport: {
+    link: {
+      tls: {
+        root_ca_certificate: "/etc/lekiwi/zenoh-tls/ca.crt",
+        connect_private_key: "/etc/lekiwi/zenoh-tls/compute.key",
+        connect_certificate: "/etc/lekiwi/zenoh-tls/compute.crt",
+        enable_mtls: true,
+        verify_name_on_connect: false,
+      },
+    },
+  },
+  scouting: { multicast: { enabled: false }, gossip: { enabled: false } },
+}

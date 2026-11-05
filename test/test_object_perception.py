@@ -1,5 +1,6 @@
 """Camera provenance, capture-time motion and bounded inference scheduling."""
 
+import faulthandler
 import threading
 import time
 from types import SimpleNamespace
@@ -172,6 +173,11 @@ def test_receipt_keeps_latest_frame_while_inference_is_busy_and_expires_old_resu
         budget = node._budget.summary()
         assert budget['late'] >= 1 and budget['max_age_sec'] == .8
         assert budget['stages']['inference']['count'] >= 1 and budget['stages']['queue']['count'] >= 1
+    except AssertionError:
+        # Preserve the busy state before finally releases the deliberately held workers (#148).
+        print('busy-receipt state:', node._stats, node._last_stamp, list(node._frames), flush=True)
+        faulthandler.dump_traceback()
+        raise
     finally:
         release.set()
         executor.shutdown(timeout_sec=5)

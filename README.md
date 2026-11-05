@@ -426,6 +426,14 @@ work is tracked in [DEFERRED.md](DEFERRED.md#network-security-and-credentials).
   `scripts/setup-zenoh-tls.sh` creates the CA and both identities under
   `/etc/lekiwi/zenoh-tls`, and `scripts/install-compute-services.sh` runs it.
   Its allow-list is export-only, so no peer can publish into the device's DDS.
+The optional RMF navigation bridge uses mutual TLS on **localhost:7448**, with
+multicast and gossip disabled. The local fleet adapter receives
+`config/zenoh_fleet_client.json5` explicitly; it does not discover arbitrary LAN
+peers. Run `scripts/setup-zenoh-tls.sh local` before a local/simulation RMF launch
+that has not used the compute installer. Missing certificates prevent startup.
+Distributed fleet transport needs a separately reviewed deployment configuration;
+the default does not expose navigation actions outside this host.
+
 - Rosbridge has no authentication, authorization or TLS and is not a safety
   boundary. It is disabled by default and loopback-bound when enabled;
   `--rosbridge-tailnet` binds it to the host's WireGuard-authenticated

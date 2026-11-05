@@ -110,12 +110,13 @@ def test_backup_restore_round_trip_rebuilds_indexes_and_reconciles_evidence(tmp_
         store.close()
 
 
-def test_records_without_matching_media_restore_history_but_not_visual_memory(tmp_path):
+@pytest.mark.parametrize('evidence', [b'\x00', 'not a binary image', 42])
+def test_records_without_matching_media_restore_history_but_not_visual_memory(tmp_path, evidence):
     home = tmp_path / 'robot'
     paths, _ = populated(home)
     database = sqlite3.connect(paths['observations'])
     with database:
-        database.execute("UPDATE observations SET evidence=x'00' WHERE sequence=1")
+        database.execute('UPDATE observations SET evidence=? WHERE sequence=1', (evidence,))
     database.close()
     report = verify(home)
     assert report['healthy'] and report['observations']['evidence']['mismatched'] == 1
@@ -153,6 +154,76 @@ def test_audit_reports_class_data_beyond_its_mode(tmp_path):
     assert ('transient_buffer', str(paths['observations'])) in findings
     assert ('pinned_evidence', str(paths['observations'])) in findings
     assert ('training_samples', str(episodes)) in findings
+
+
+def test_restore_preserves_the_original_copy_when_stamp_is_reused(tmp_path):
+    home = tmp_path / 'robot'
+    paths, _ = populated(home)
+    backup(home, tmp_path / 'backup')
+    restore(tmp_path / 'backup', home, stamp='same')
+    preserved = paths['arm_calibration'].with_name(paths['arm_calibration'].name + '.pre-restore-same')
+    before = preserved.read_bytes()
+    paths['arm_calibration'].write_text('new calibration')
+    with pytest.raises(ValueError, match='already exists'):
+        restore(tmp_path / 'backup', home, stamp='same')
+    assert preserved.read_bytes() == before
+    assert paths['arm_calibration'].read_text() == 'new calibration'
+
+
+def test_restore_holds_owner_locks_through_verification(tmp_path, monkeypatch):
+    from lekiwi_rmf import robot_data
+    home = tmp_path / 'robot'
+    paths, _ = populated(home)
+    backup(home, tmp_path / 'backup')
+    original = robot_data.verify
+    def check(*args, **kwargs):
+        with pytest.raises(BlockingIOError):
+            TaskJournal(paths['task_journal'])
+        return original(*args, **kwargs)
+    monkeypatch.setattr(robot_data, 'verify', check)
+    assert restore(tmp_path / 'backup', home)['verification']['healthy']
+    TaskJournal(paths['task_journal']).close()
+
+
+def test_restore_keeps_crash_wal_with_old_database_not_restored_database(tmp_path):
+    home = tmp_path / 'robot'
+    paths, _ = populated(home)
+    backup(home, tmp_path / 'backup')
+    path = paths['task_journal']
+    subprocess.run([sys.executable, '-c', '''
+import os, sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+db.execute('PRAGMA journal_mode=WAL')
+db.execute('CREATE TABLE crash_canary(value)')
+db.execute('INSERT INTO crash_canary VALUES (42)')
+db.commit()
+os._exit(0)
+''', str(path)], check=True)
+    assert Path(f'{path}-wal').is_file()
+    result = restore(tmp_path / 'backup', home)
+    with sqlite3.connect(path) as db:
+        assert not db.execute("SELECT 1 FROM sqlite_master WHERE name='crash_canary'").fetchall()
+    with sqlite3.connect(result['kept']['task_journal']) as db:
+        assert db.execute('SELECT value FROM crash_canary').fetchone() == (42,)
+
+
+@pytest.mark.parametrize('change', [
+    lambda d: d.update(domain='../escape'),
+    lambda d: d.update(sim='false'),
+    lambda d: d['stores']['observations'].update(file='../observations.sqlite3'),
+    lambda d: d['stores']['observations'].update(size=True),
+])
+def test_restore_rejects_malformed_manifests_before_replacing_data(tmp_path, change):
+    home = tmp_path / 'robot'
+    paths, _ = populated(home)
+    directory = tmp_path / 'backup'
+    manifest = backup(home, directory)
+    change(manifest)
+    (directory / 'manifest.json').write_text(json.dumps(manifest))
+    before = paths['task_journal'].read_bytes()
+    with pytest.raises(ValueError):
+        restore(directory, home)
+    assert paths['task_journal'].read_bytes() == before
 
 
 def test_cli_backs_up_and_verifies_a_home(tmp_path):

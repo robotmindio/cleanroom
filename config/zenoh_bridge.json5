@@ -12,5 +12,19 @@
       },
     },
   },
+  // Fleet ownership is local; do not expose navigation actions to the LAN.
   mode: "peer",
+  listen: { endpoints: ["tls/127.0.0.1:7448"] },
+  connect: { endpoints: [] },
+  transport: {
+    link: {
+      tls: {
+        root_ca_certificate: "/etc/lekiwi/zenoh-tls/ca.crt",
+        listen_private_key: "/etc/lekiwi/zenoh-tls/rmf.key",
+        listen_certificate: "/etc/lekiwi/zenoh-tls/rmf.crt",
+        enable_mtls: true,
+      },
+    },
+  },
+  scouting: { multicast: { enabled: false }, gossip: { enabled: false } },
 }
