@@ -145,7 +145,8 @@ class TestDriverFakeHostGraph(unittest.TestCase):
             self.assertTrue(self._until(
                 lambda: self._permission(self.arm_permission, True) is None
                 and self._arm().success,
-                timeout=4.0,
+                # Allow a strict cut and another RPC after a hosted-runner stall.
+                timeout=8.0,
             ))
         finally:
             self.node.destroy_timer(timer)
