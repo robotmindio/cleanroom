@@ -148,6 +148,12 @@ def probe(root, output, binary):
         received = {key: [] for key, _, _ in topics}
         sent = set()
         phase = 'warmup'
+        report = {'passed': False, 'samples': received}
+
+        def save_report():
+            report.update(phase=phase, connections=[link.connections for link in links])
+            (output / 'transport-proof.json').write_text(json.dumps(report, indent=2) + '\n')
+        cleanup.callback(save_report)
 
         def receive(key, message):
             stamp = message.header.stamp.sec * 10**9 + message.header.stamp.nanosec
@@ -233,14 +239,16 @@ def probe(root, output, binary):
             link.disconnect()
         while time.monotonic() - reconnect_at < 5 and not (
                 all(link.connections >= 2 for link in links)
-                and all(any(p == phase and age < .3 for p, _, age in values) for values in received.values())):
+                and all(any(p == phase and age < .3 for p, _, age in values) for values in received.values())
+                and all(nodes[1].count_publishers(topic) == 1 for _, _, topic in topics)):
             spin(.02)
         assert all(link.connections >= 2 for link in links), 'closed priority links did not reconnect'
         assert all(any(p == phase and age < .3 for p, _, age in values) for values in received.values())
         version = subprocess.check_output([binary, '--version'], text=True).strip().splitlines()[-1]
-        report = {'bridge_version': version, 'started_without_device': True, 'camera_delay_sec': .8, 'depth_delay_sec': .8, 'all_links_delay_sec': .8,
+        assert all(nodes[1].count_publishers(topic) == 1 for _, _, topic in topics), 'duplicate writers after reconnect'
+        report.update({'bridge_version': version, 'started_without_device': True, 'camera_delay_sec': .8, 'depth_delay_sec': .8, 'all_links_delay_sec': .8,
                   'reconnect_sec': time.monotonic() - reconnect_at,
-                  'recovery_sec': recovery, 'samples': received}
-        (output / 'transport-proof.json').write_text(json.dumps(report, indent=2) + '\n')
+                  'recovery_sec': recovery})
         assert all(value is not None and value < 2 for value in recovery.values()), recovery
+        report['passed'] = True
         return report
