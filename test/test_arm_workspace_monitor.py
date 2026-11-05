@@ -2,6 +2,9 @@
 
 import math
 import types
+import time
+
+import rclpy
 
 from sensor_msgs.msg import JointState
 
@@ -11,6 +14,53 @@ from lekiwi_rmf.arm_workspace_monitor import (
 
 
 SECOND = 1_000_000_000
+
+
+def test_watchdog_ticks_while_the_simulation_clock_is_paused(monkeypatch):
+    ticks = []
+    monkeypatch.setattr(ArmWorkspaceMonitor, '_tick', lambda _: ticks.append(time.monotonic()))
+    rclpy.init(args=['--ros-args', '-p', 'use_sim_time:=true'])
+    node = None
+    try:
+        node = ArmWorkspaceMonitor()
+        deadline = time.monotonic() + 1
+        while len(ticks) < 3 and time.monotonic() < deadline:
+            rclpy.spin_once(node, timeout_sec=.05)
+        assert node.get_clock().now().nanoseconds == 0
+        assert len(ticks) >= 3
+    finally:
+        if node is not None:
+            node.destroy_node()
+        rclpy.try_shutdown()
+
+
+def test_joint_backlog_keeps_the_newest_complete_pose():
+    from rclpy.node import Node
+    from lekiwi_rmf.arm_trajectory import ARM_JOINTS
+    rclpy.init()
+    node, peer = None, None
+    try:
+        node, peer = ArmWorkspaceMonitor(), Node('workspace_joint_burst')
+        publisher = peer.create_publisher(JointState, '/joint_states', 10)
+        deadline = time.monotonic() + 3
+        while publisher.get_subscription_count() == 0 and time.monotonic() < deadline:
+            rclpy.spin_once(peer, timeout_sec=.02)
+        assert publisher.get_subscription_count() > 0
+        for index in range(10):
+            message = JointState(name=list(ARM_JOINTS), position=[index / 100.] * len(ARM_JOINTS))
+            message.header.stamp = peer.get_clock().now().to_msg()
+            publisher.publish(message)
+        time.sleep(.05)  # Let DDS receive the burst while the monitor's executor is stalled.
+        deadline = time.monotonic() + 1
+        while node._joint_snapshot is None and time.monotonic() < deadline:
+            rclpy.spin_once(node, timeout_sec=.02)
+        assert node._joint_snapshot is not None
+        assert node._joint_snapshot.position[0] == .09
+    finally:
+        for item in (node, peer):
+            if item is not None:
+                item.destroy_node()
+        rclpy.try_shutdown()
 
 
 def _joints(names=("joint_a", "joint_b"), positions=(0.1, -0.2)):

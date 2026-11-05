@@ -121,6 +121,30 @@ infinity, out-of-range and blind scans instead of reporting false success.
 Full runtime qualification with the corrected installed configuration remains
 required, including mux, obstacle, RViz and native-heartbeat observations.
 
+## RViz and workspace follow-up
+
+RViz previously generated the physical robot model even for a simulated graph;
+receiving `sim_base_back_wheel_joint` aborted the planning panel. RViz now reads
+the running state publisher's clock mode and shares MoveGroup's model and
+physical-calibration generator. A fresh candidate window stayed running with
+velocity 0.50 and acceleration 0.40, matching MoveGroup.
+
+The workspace monitor now schedules its monotonic freshness checks on a steady
+clock. A real ROS test proves ticks continue while simulation time is paused.
+Its joint subscription retains only the newest complete pose; a stalled-executor
+burst regression fails with the old ten-sample queue and passes with depth one.
+Simulated MoveIt also enables the live workspace permission gate. On this shared
+host, occasional checked-pose ages still exceed the unchanged 150 ms bound and
+latch the strict simulation fault; the action server correctly aborts the denied
+trajectory. Positive obstacle-interruption qualification remains incomplete.
+The measured simulation/wall time ratio was about 0.53. No freshness threshold,
+physical scan mask or torque-hold policy was relaxed.
+
+Hosted qualification now explicitly selects the same Cyclone DDS and loopback
+configuration as `scripts/setup.bash`. Earlier jobs used an implicit middleware
+selection; passing Cyclone qualification does not establish compatibility with
+other DDS implementations or resolve the unknown #148 race.
+
 ## Acceptance gaps beyond individual issue titles
 
 * **E1 evidence binding:** the reviewed safety-relevant code/configuration,

@@ -7,29 +7,14 @@ from launch.substitutions import (
 )
 from launch_ros.actions import Node
 
-from lekiwi_rmf.moveit_config import apply_gripper_calibration, moveit_config_builder
+from lekiwi_rmf.moveit_config import moveit_parameters
 
 
 def generate_launch_description():
     def launch_move_group(context):
         sim = LaunchConfiguration("sim").perform(context)
-        sim_enabled = sim == "true"
-        config = (
-            moveit_config_builder(sim)
-            .sensors_3d(file_path="config/moveit_sensors.yaml")
-            .to_moveit_configs()
-        )
-        parameters = config.to_dict()
-        parameters["collision_detector"] = "lekiwi_rmf/RestFCL"
-        parameters["use_sim_time"] = sim_enabled
-        if not sim_enabled:
-            # The Pi owns path/goal tolerances and its execution clock pauses on
-            # lost safety permission. A wall-clock watchdog would cancel that
-            # safely suspended goal. Cancellation and motor-host leases stay live.
-            parameters.setdefault("trajectory_execution", {})["execution_duration_monitoring"] = False
-            apply_gripper_calibration(
-                parameters, LaunchConfiguration("arm_calibration_file").perform(context)
-            )
+        parameters = moveit_parameters(
+            sim, LaunchConfiguration("arm_calibration_file").perform(context))
         # Keep the calibrated depth scene and bounded planning-scene updates.
         parameters["octomap_resolution"] = 0.1
         parameters["publish_planning_scene"] = True

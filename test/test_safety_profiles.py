@@ -103,6 +103,13 @@ def test_every_permission_consumer_uses_the_supervisors_tracked_lease():
     assert gate["parameters"]["joint_names"] == list(ARM_JOINTS)
 
 
+@pytest.mark.parametrize('start_moveit', ['true', 'false'])
+def test_simulated_moveit_enforces_its_live_workspace_gate(start_moveit):
+    records = resolve_bringup(profile='sim', start_moveit=start_moveit)
+    supervisor = find_node(records, name='safety_supervisor')['parameters']
+    assert supervisor['require_arm_workspace'] is (start_moveit == 'true')
+
+
 @pytest.mark.parametrize("module,node_class", [
     ("lekiwi_rmf.cmd_vel_mux", "CmdVelMux"), ("lekiwi_rmf.sim_arm_controller", "SimArmController"),
 ])

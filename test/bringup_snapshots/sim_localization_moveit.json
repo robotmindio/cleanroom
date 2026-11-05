@@ -291,7 +291,7 @@
      "permission_timeout": 0.5,
      "publish_frequency": 20.0,
      "require_acceptance": false,
-     "require_arm_workspace": false,
+     "require_arm_workspace": true,
      "require_battery": false,
      "require_bumper": false,
      "require_depth": true,

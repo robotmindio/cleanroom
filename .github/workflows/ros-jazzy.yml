@@ -18,6 +18,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     container: ros:jazzy-ros-base
+    env:
+      RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
     defaults:
       run:
         shell: bash
@@ -45,6 +47,8 @@ jobs:
           # compile this package.
           rosdep install --from-paths . --ignore-src --rosdistro jazzy -y \
             --skip-keys "free_fleet_adapter astra_camera ldlidar_stl_ros2"
+          # Match the deployed middleware/interface from scripts/setup.bash.
+          printf 'CYCLONEDDS_URI=file://%s/config/cyclonedds.xml\n' "$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
       # The patched native overlay takes ~11 minutes to build and changes only
       # with its pinned inputs or the ROS packages it links against.
       - name: Key the native overlay

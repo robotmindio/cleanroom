@@ -138,14 +138,32 @@ import sys
 from pathlib import Path
 
 import yaml
+import rclpy
+from rclpy.parameter_client import AsyncParameterClient
+from rcl_interfaces.msg import ParameterType
 
-from lekiwi_rmf.moveit_config import apply_gripper_calibration, moveit_config_builder
+from lekiwi_rmf.moveit_config import moveit_parameters
 
-config = moveit_config_builder("false").to_moveit_configs().to_dict()
-config["collision_detector"] = "lekiwi_rmf/RestFCL"
-apply_gripper_calibration(config, sys.argv[2])
+rclpy.init(args=[])
+node = rclpy.create_node('rviz_model_parameter_reader')
+try:
+    client = AsyncParameterClient(node, '/robot_state_publisher')
+    if not client.wait_for_services(timeout_sec=10):
+        raise RuntimeError('robot_state_publisher is unavailable; cannot select the RViz model')
+    future = client.get_parameters(['use_sim_time'])
+    rclpy.spin_until_future_complete(node, future, timeout_sec=10)
+    if not future.done():
+        raise RuntimeError('robot_state_publisher clock query timed out')
+    values = future.result().values
+    if len(values) != 1 or values[0].type != ParameterType.PARAMETER_BOOL:
+        raise RuntimeError('robot_state_publisher did not report its clock mode')
+    sim = 'true' if values[0].bool_value else 'false'
+finally:
+    node.destroy_node()
+    rclpy.shutdown()
+config = moveit_parameters(sim, sys.argv[2])
 keys = (
-    "collision_detector",
+    "collision_detector", "use_sim_time",
     "robot_description", "robot_description_semantic",
     "robot_description_kinematics", "robot_description_planning",
 )
