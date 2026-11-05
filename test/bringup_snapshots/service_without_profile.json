@@ -866,7 +866,11 @@
    "-c",
    "$(share lekiwi_rmf)/config/zenoh_compute.json5",
    "-e",
-   "tls/192.0.2.66:7447"
+   "tls/192.0.2.66:7447?prio=0-1",
+   "-e",
+   "tls/192.0.2.66:7447?prio=2-5",
+   "-e",
+   "tls/192.0.2.66:7447?prio=6-7"
   ],
   "respawn": true,
   "respawn_delay": 5.0

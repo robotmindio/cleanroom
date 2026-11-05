@@ -88,13 +88,15 @@ def _sensors(context):
         # Device sensors cross the network only through zenoh: DDS stays on
         # each machine (cyclonedds.xml), and the device's lekiwi-zenoh
         # service exports exactly the topics this bridge imports.
+        bridge_cmd = [
+            "zenoh-bridge-ros2dds",
+            "-c", PathJoinSubstitution([package, "config", "zenoh_compute.json5"]),
+        ]
+        # Isolate scans, depth/control, and image previews into separate TLS streams.
+        for priorities in ("0-1", "2-5", "6-7"):
+            bridge_cmd.extend(["-e", ["tls/", LaunchConfiguration("remote_ip"), f":7447?prio={priorities}"]])
         actions.append(ExecuteProcess(
-            cmd=[
-                "zenoh-bridge-ros2dds",
-                "-c", PathJoinSubstitution([package, "config", "zenoh_compute.json5"]),
-                "-e", ["tls/", LaunchConfiguration("remote_ip"), ":7447"],
-            ],
-            respawn=True, respawn_delay=5.0, output="screen",
+            cmd=bridge_cmd, respawn=True, respawn_delay=5.0, output="screen",
         ))
     if topology.ld06 or topology.remote_ld06:
         # Both LD06 paths end here: the robot's own body is blanked out of the scan

@@ -2,6 +2,9 @@
 
 import re
 import ssl
+import shutil
+
+import pytest
 import subprocess
 from pathlib import Path
 
@@ -58,8 +61,14 @@ def test_bridge_configs_require_the_same_private_ca_and_never_use_plaintext():
                                              "laser_source": "camera", "remote_ip": "192.0.2.4"}):
         (bridge,) = [record["process"] for record in resolve_bringup(**arguments)
                      if "process" in record and record["process"][0] == "zenoh-bridge-ros2dds"]
-        endpoint = bridge[bridge.index("-e") + 1]
-        assert endpoint.startswith("tls/") and endpoint.endswith(":7447")
+        endpoints = [bridge[i + 1] for i, value in enumerate(bridge) if value == "-e"]
+        assert len(endpoints) == 3
+        assert [endpoint.split("?prio=")[-1] for endpoint in endpoints] == ["0-1", "2-5", "6-7"]
+        assert all(endpoint.startswith("tls/") and ":7447?prio=" in endpoint for endpoint in endpoints)
+    assert "max_links: 3" in device and "max_links: 3" in compute
+    assert 'mode: "peer"' in compute and "listen: { endpoints: [] }" in compute
+    assert "exit_on_failure: false" in compute
+    assert "period_max_ms: 1000" in compute
 
 
 def test_sensor_bridge_caps_previews_and_drops_stale_sensor_samples_on_congestion():
@@ -92,3 +101,12 @@ def test_missing_options_and_unknown_flags_are_rejected():
         result = subprocess.run([str(ROOT / "scripts" / "setup-zenoh-tls.sh"), *args],
                                 capture_output=True, text=True)
         assert result.returncode != 0 and result.stderr, args
+
+
+def test_native_priority_links_isolate_camera_delay_and_recover(tmp_path):
+    binary = shutil.which('zenoh-bridge-ros2dds')
+    if binary is None:
+        pytest.skip('native transport qualification requires the pinned Zenoh bridge')
+    from zenoh_transport_faults import probe
+    generate(tmp_path / 'pki')
+    probe(ROOT, tmp_path, binary)
