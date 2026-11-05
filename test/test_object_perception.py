@@ -193,6 +193,63 @@ def test_clock_reset_clears_cached_captures_and_readiness():
     assert state._stats['front']['published_stamp'] == 0
 
 
+def test_arriving_capture_runs_without_waiting_for_the_poll_timer(monkeypatch):
+    from lekiwi_rmf import object_detector
+
+    inferred = threading.Event()
+    def predict(*_args):
+        inferred.set()
+        return []
+    monkeypatch.setattr(object_detector, 'Recognizer', lambda *args: fake_recognizer(predict))
+    context = Context()
+    rclpy.init(context=context)
+    node = object_detector.ObjectDetector(context=context)
+    for timer in node.timers:
+        timer.cancel()
+    executor = MultiThreadedExecutor(num_threads=2, context=context)
+    executor.add_node(node)
+    thread = threading.Thread(target=executor.spin, daemon=True)
+    thread.start()
+    try:
+        image, _ = capture()
+        image.header.frame_id = 'front_camera_optical_frame'
+        image.header.stamp = node.get_clock().now().to_msg()
+        node._receive(image, 'front')
+        assert inferred.wait(3), 'A fresh eligible capture waited for the periodic timer'
+    finally:
+        executor.shutdown(timeout_sec=5)
+        thread.join(5)
+        node.destroy_node()
+        context.try_shutdown()
+
+
+def test_arrival_and_timer_share_rate_limit_and_keep_only_the_latest_capture():
+    from lekiwi_rmf.object_detector import ObjectDetector
+
+    now, seen = [1_000_000_000], []
+    state = SimpleNamespace(
+        _frame_lock=threading.Lock(), _frames={}, _inference_slots=threading.BoundedSemaphore(2),
+        _inference_clock=SimpleNamespace(now=lambda: RosTime(nanoseconds=now[0])),
+        _inference_period_ns=500_000_000, _next_inference_ns=0)
+    def infer():
+        if state._frames:
+            seen.append(state._frames.pop('front'))
+    state._infer_one = infer
+    ObjectDetector._infer(state)  # An empty timer tick must not consume the next capture's allowance.
+    state._frames['front'] = 'first'
+    ObjectDetector._infer(state)
+    state._frames['front'] = 'superseded'
+    now[0] += 100_000_000
+    ObjectDetector._infer(state)
+    assert seen == ['first']
+    state._frames['front'] = 'latest'
+    now[0] += 400_000_000
+    ObjectDetector._infer(state)
+    assert seen == ['first', 'latest'] and not state._frames
+    assert state._inference_slots.acquire(blocking=False)
+    assert state._inference_slots.acquire(blocking=False)
+
+
 def test_cli_uses_the_pinned_private_runtime(monkeypatch, tmp_path):
     from lekiwi_rmf import object_recognition
 
