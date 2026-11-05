@@ -10,6 +10,8 @@ from dataclasses import dataclass
 import rclpy
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from moveit_msgs.srv import GetStateValidity
+from rclpy.clock import Clock
+from rclpy.clock_type import ClockType
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, qos_profile_sensor_data
@@ -144,7 +146,9 @@ class ArmWorkspaceMonitor(Node):
         self._client = self.create_client(
             GetStateValidity, str(self.get_parameter("state_validity_service").value)
         )
-        self.create_timer(1.0 / frequency, self._tick)
+        # Freshness leases use monotonic time even when simulation or wall time slows/jumps.
+        self._watchdog_clock = Clock(clock_type=ClockType.STEADY_TIME)
+        self.create_timer(1.0 / frequency, self._tick, clock=self._watchdog_clock)
         self._publish(False, "monitor starting")
 
     @staticmethod

@@ -2,6 +2,9 @@
 
 import math
 import types
+import time
+
+import rclpy
 
 from sensor_msgs.msg import JointState
 
@@ -11,6 +14,24 @@ from lekiwi_rmf.arm_workspace_monitor import (
 
 
 SECOND = 1_000_000_000
+
+
+def test_watchdog_ticks_while_the_simulation_clock_is_paused(monkeypatch):
+    ticks = []
+    monkeypatch.setattr(ArmWorkspaceMonitor, '_tick', lambda _: ticks.append(time.monotonic()))
+    rclpy.init(args=['--ros-args', '-p', 'use_sim_time:=true'])
+    node = None
+    try:
+        node = ArmWorkspaceMonitor()
+        deadline = time.monotonic() + 1
+        while len(ticks) < 3 and time.monotonic() < deadline:
+            rclpy.spin_once(node, timeout_sec=.05)
+        assert node.get_clock().now().nanoseconds == 0
+        assert len(ticks) >= 3
+    finally:
+        if node is not None:
+            node.destroy_node()
+        rclpy.try_shutdown()
 
 
 def _joints(names=("joint_a", "joint_b"), positions=(0.1, -0.2)):
