@@ -1,0 +1,19 @@
+# Root runs only native systemd tools; ROS remains an unprivileged service.
+[Unit]
+Description=Keep the LeKiwi compute host awake while ROS runs
+PartOf=lekiwi-stack.service
+StopWhenUnneeded=yes
+
+[Service]
+User=root
+Type=notify
+NotifyAccess=all
+# systemd-inhibit removes NOTIFY_SOCKET; restore the manager-expanded value.
+ExecStart=/usr/bin/systemd-inhibit --what=sleep --mode=block --who=lekiwi --why="Robot stack is running" /usr/bin/env NOTIFY_SOCKET=${NOTIFY_SOCKET} /usr/bin/systemd-notify --ready --pid=parent --exec \; /usr/bin/sleep infinity
+TimeoutStartSec=10
+KillMode=control-group
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+RestrictAddressFamilies=AF_UNIX

@@ -25,7 +25,8 @@
 [Unit]
 Description=LeKiwi ROS 2 stack (bringup.launch.py)
 Documentation=file://@PROJECT_ROOT@/README.md
-After=network-online.target
+BindsTo=lekiwi-awake.service
+After=network-online.target lekiwi-awake.service
 Wants=network-online.target
 # Missing devices at startup must not exhaust the automatic retry budget.
 # A start limit would leave the robot without its stack until a human intervenes.
@@ -45,6 +46,7 @@ WorkingDirectory=@PROJECT_ROOT@
 # camera_source:=remote remote_ip:=... . /etc/default/lekiwi-stack is rewritten
 # on every installer run; extra arguments (slam_mode:=localization) belong in a
 # drop-in that repeats ExecStart= with them appended.
+Environment=LEKIWI_SLEEP_INHIBITED=true
 Environment=LEKIWI_STACK_ARGS=
 EnvironmentFile=-/etc/default/lekiwi-stack
 ExecStart=@PROJECT_ROOT@/scripts/ros-start.sh $LEKIWI_STACK_ARGS
