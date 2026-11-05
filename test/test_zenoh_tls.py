@@ -112,6 +112,9 @@ def test_missing_options_and_unknown_flags_are_rejected():
 
 def test_native_priority_links_isolate_camera_delay_and_recover(tmp_path):
     binary = shutil.which('zenoh-bridge-ros2dds')
+    installed = Path.home() / '.local/bin/zenoh-bridge-ros2dds'
+    if binary is None and installed.is_file():
+        binary = str(installed)
     if binary is None:
         pytest.skip('native transport qualification requires the pinned Zenoh bridge')
     from zenoh_transport_faults import probe

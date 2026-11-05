@@ -237,7 +237,8 @@ def probe(root, output, binary):
             spin(.02)
         assert all(link.connections >= 2 for link in links), 'closed priority links did not reconnect'
         assert all(any(p == phase and age < .3 for p, _, age in values) for values in received.values())
-        report = {'started_without_device': True, 'camera_delay_sec': .8, 'depth_delay_sec': .8, 'all_links_delay_sec': .8,
+        version = subprocess.check_output([binary, '--version'], text=True).strip().splitlines()[-1]
+        report = {'bridge_version': version, 'started_without_device': True, 'camera_delay_sec': .8, 'depth_delay_sec': .8, 'all_links_delay_sec': .8,
                   'reconnect_sec': time.monotonic() - reconnect_at,
                   'recovery_sec': recovery, 'samples': received}
         (output / 'transport-proof.json').write_text(json.dumps(report, indent=2) + '\n')
