@@ -252,3 +252,13 @@ def probe(root, output, binary):
         assert all(value is not None and value < 2 for value in recovery.values()), recovery
         report['passed'] = True
         return report
+
+
+if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--root', required=True, type=Path)
+    parser.add_argument('--output', required=True, type=Path)
+    parser.add_argument('--binary', required=True)
+    args = parser.parse_args()
+    probe(args.root, args.output, args.binary)

@@ -1,9 +1,12 @@
 """The zenoh sensor bridge accepts only mutually authenticated TLS peers."""
 
+import os
 import re
+import signal
 import shutil
 import ssl
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -117,6 +120,19 @@ def test_native_priority_links_isolate_camera_delay_and_recover(tmp_path):
         binary = str(installed)
     if binary is None:
         pytest.skip('native transport qualification requires the pinned Zenoh bridge')
-    from zenoh_transport_faults import probe
     generate(tmp_path / 'pki')
-    probe(ROOT, tmp_path, binary)
+    # Match the native bridge's middleware/interface without changing the pytest process.
+    env = {**os.environ, 'RMW_IMPLEMENTATION': 'rmw_cyclonedds_cpp',
+           'CYCLONEDDS_URI': f'file://{ROOT}/config/cyclonedds.xml'}
+    env.pop('ROS_LOCALHOST_ONLY', None)
+    command = [sys.executable, str(ROOT / 'test/zenoh_transport_faults.py'),
+               '--root', str(ROOT), '--output', str(tmp_path), '--binary', binary]
+    with subprocess.Popen(command, env=env, start_new_session=True) as process:
+        try:
+            assert process.wait(timeout=45) == 0, 'native transport probe failed; see its output directory'
+        finally:
+            # A timeout must not leave any of this isolated fixture's bridges alive.
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
