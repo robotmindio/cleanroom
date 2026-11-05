@@ -1,0 +1,43 @@
+// Compute-side images session; launch/sensors.launch.py starts one per traffic class.
+// Separate client sessions keep TCP isolation after reconnect in Zenoh 1.5.
+// All use the existing device endpoint and the same mutual TLS identities.
+{
+  plugins: {
+    ros2dds: {
+      nodename: "zenoh_images_bridge",
+      allow: {
+        publishers: [],
+        subscribers: [
+          "^/pi/camera/(front|wrist)/image_raw/compressed$",
+          "^/camera/astra/(color|depth)/image_raw/compressed$",
+        ],
+        service_servers: [],
+        service_clients: [],
+        action_servers: [],
+        action_clients: [],
+      },
+    },
+  },
+  // A client never listens and keeps reconnecting to the device on its own.
+  mode: "client",
+  listen: { endpoints: [] },
+  connect: {
+    timeout_ms: -1,
+    exit_on_failure: false,
+    retry: { period_init_ms: 100, period_max_ms: 1000, period_increase_factor: 2 },
+  },
+  transport: {
+    link: {
+      tls: {
+        root_ca_certificate: "/etc/lekiwi/zenoh-tls/ca.crt",
+        connect_private_key: "/etc/lekiwi/zenoh-tls/compute.key",
+        connect_certificate: "/etc/lekiwi/zenoh-tls/compute.crt",
+        enable_mtls: true,
+        // The device is reached by whatever address is current (LAN, Tailscale);
+        // its identity is the private CA's signature, not its name.
+        verify_name_on_connect: false,
+      },
+    },
+  },
+  scouting: { multicast: { enabled: false }, gossip: { enabled: false } },
+}

@@ -50,18 +50,20 @@ Previously all sensor priorities shared one TLS/TCP stream. Priority scheduling
 could choose the next message, but could not undo TCP head-of-line blocking after
 a lost packet or a queued camera frame.
 
-The transport change uses the installed Zenoh 1.5 support for three authenticated
-priority-scoped links on the existing port: scan/control `0–1`, depth/metadata
-`2–5`, and preview images `6–7`. Compute uses peer mode with **no listener and
-no discovery**: client mode treats the endpoints as failover alternatives and
-opens only one link. Both peers allow three links. Background reconnect retries
-are bounded from 100 ms to 1 s; the node can survive an unavailable peer.
+The transport change uses three independent authenticated client sessions on the
+existing port: scan/control `0–1`, depth/metadata `2–5`, and preview images
+`6–7`. Each has a unique ROS bridge node and a disjoint import allow-list; compute
+has no listener or discovery. Zenoh 1.5 restores only one link after a multi-link
+peer session closes, so separate clients preserve isolation through reconnect.
+Background reconnect retries range from 100 ms to 1 s, including cold startup
+before the device exists.
 
 `test/test_zenoh_tls.py` invokes a real two-domain ROS/mTLS probe when the pinned
-native bridge is installed. It delays encrypted camera traffic for 800 ms,
-requires scan/depth to remain fresh, then delays all links and checks data loss
-and recovery with unchanged acquisition timestamps. The legacy configuration
-fails the independent-link check. This is repeatable software fault injection;
+native bridge is installed. It checks startup without the device, one imported
+writer per topic, camera and depth delays of 800 ms without blocking scan,
+all-link interruption with unchanged acquisition timestamps, and reconnection
+of all three clients after their TCP connections are forcibly closed. The probe
+checks bounded fresh-data recovery. This is repeatable software fault injection;
 it does not establish a physical Wi-Fi outage or stopping-distance SLA.
 
 The motion rule remains: stale safety data stops motion; torque is held according
@@ -81,7 +83,7 @@ Detailed acceptance remains in [DEFERRED.md](../DEFERRED.md).
 | [#6 — physical safety](https://github.com/robotmindio/cleanroom/issues/6) | Qualify the current predictive collision model and affected faults; measure low/overhanging/blind-zone coverage and arm-workspace coverage; review independent stop and motor diagnostics. Bumper, IMU and real battery sensing are absent. Existing acceptance is restricted attended operation, not full-hardware or unattended acceptance. |
 | [#7 — physical arm](https://github.com/robotmindio/cleanroom/issues/7) | Review assembled CAD/SRDF and folded stow/cable envelope; measure intrusion stop and trajectory cancel/preemption/tolerances/restart with accepted payload; qualify retention/endurance; resolve wrist USB disconnects and remaining source-feedback gaps. |
 | [#8 — calibration/map/RMF](https://github.com/robotmindio/cleanroom/issues/8) | Measure cameras/Astra/wheel/yaw/odometry; qualify quota freeze and offline map close/archive/reopen; survey and approve a ≤0.05 m map with pinned RMF graph/report and clearance/envelope validation. Resolve deployment ownership/domain architecture; keep charging unqualified. |
-| [#9 — security deployment](https://github.com/robotmindio/cleanroom/issues/9) | Retain the actual network isolation, tailnet/proxy authorization, firewall/CURVE and credential lifecycle decision, plus deployed unauthorized-client rejection tests. mTLS/CURVE implementation alone does not prove the whole site access policy. |
+| [#9 — security deployment](https://github.com/robotmindio/cleanroom/issues/9) | Retain the actual network isolation, tailnet/proxy authorization, firewall/CURVE and credential lifecycle decision, plus deployed unauthorized-client rejection tests. mTLS/CURVE implementation alone does not prove the whole site access policy. The optional RMF bridge (`config/zenoh_bridge.json5`) still uses default peer transport while exposing navigation actions; secure and qualify that path before enabling fleet operation. |
 | [#10 — release qualification](https://github.com/robotmindio/cleanroom/issues/10) | Retain service verification, dependencies, a clean revision/install-bound MoveIt shutdown probe and hosted CI for the deployed runtime revision. Native teardown fixes and previous clean probes exist; bind the final evidence before closing. |
 | [#11 — GPU simulation acceptance](https://github.com/robotmindio/cleanroom/issues/11) | Run the strict qualification runner on a qualified GPU/EGL host for the exact release, then review its scan/depth, mux, obstacle, RViz and native actuator-heartbeat observations. Renderer-free unit/physics tests do not close the graphical/runtime checklist. |
 | [#12 — deployed measurements](https://github.com/robotmindio/cleanroom/issues/12) | Assemble the exact-revision sensor rates/ages, guarded base and camera/link loss, gripper endpoint/return, wrist travel, RViz/driver and simulation-response evidence into formal acceptance artifacts. Existing scattered trials are not the complete package. |

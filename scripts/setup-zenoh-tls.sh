@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Mutual-TLS identities for the zenoh sensor bridge (config/zenoh_device.json5,
-# config/zenoh_compute.json5). install-compute-services.sh runs this whenever
+# config/zenoh_compute_*.json5). install-compute-services.sh runs this whenever
 # the stack takes sensors over the bridge; run it by hand to renew.
 #
 # A private CA signs one certificate for the device (server) and one for compute

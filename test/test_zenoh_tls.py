@@ -1,12 +1,12 @@
 """The zenoh sensor bridge accepts only mutually authenticated TLS peers."""
 
 import re
-import ssl
 import shutil
-
-import pytest
+import ssl
 import subprocess
 from pathlib import Path
+
+import pytest
 
 from launch_snapshot import resolve_bringup
 
@@ -49,31 +49,38 @@ def test_setup_generates_role_limited_identities_and_is_idempotent(tmp_path):
 
 def test_bridge_configs_require_the_same_private_ca_and_never_use_plaintext():
     device = (ROOT / "config" / "zenoh_device.json5").read_text()
-    compute = (ROOT / "config" / "zenoh_compute.json5").read_text()
+    computes = [(ROOT / "config" / f"zenoh_compute_{role}.json5").read_text()
+                for role in ("scan", "depth", "images")]
+    compute = "\n".join(computes)
 
     assert 'endpoints: ["tls/0.0.0.0:7447"]' in device and "tcp/" not in re.sub(r"//.*", "", device)
     assert "enable_mtls: true" in device and "enable_mtls: true" in compute
-    for config in (device, compute):
+    for config in (device, *computes):
         assert f'root_ca_certificate: "{TLS_DIR}/ca.crt"' in config
     assert f'"{TLS_DIR}/device.key"' in device and f'"{TLS_DIR}/device.crt"' in device
     assert f'"{TLS_DIR}/compute.key"' in compute and f'"{TLS_DIR}/compute.crt"' in compute
     for arguments in ({"profile": "split"}, {"profile": "wired", "camera_source": "remote",
                                              "laser_source": "camera", "remote_ip": "192.0.2.4"}):
-        (bridge,) = [record["process"] for record in resolve_bringup(**arguments)
-                     if "process" in record and record["process"][0] == "zenoh-bridge-ros2dds"]
-        endpoints = [bridge[i + 1] for i, value in enumerate(bridge) if value == "-e"]
+        bridges = [record["process"] for record in resolve_bringup(**arguments)
+                   if "process" in record and record["process"][0] == "zenoh-bridge-ros2dds"]
+        assert len(bridges) == 3
+        endpoints = [bridge[bridge.index("-e") + 1] for bridge in bridges]
         assert len(endpoints) == 3
-        assert [endpoint.split("?prio=")[-1] for endpoint in endpoints] == ["0-1", "2-5", "6-7"]
+        assert sorted(endpoint.split("?prio=")[-1] for endpoint in endpoints) == ["0-1", "2-5", "6-7"]
         assert all(endpoint.startswith("tls/") and ":7447?prio=" in endpoint for endpoint in endpoints)
-    assert "max_links: 3" in device and "max_links: 3" in compute
-    assert 'mode: "peer"' in compute and "listen: { endpoints: [] }" in compute
-    assert "exit_on_failure: false" in compute
-    assert "period_max_ms: 1000" in compute
+    for config in computes:
+        assert 'mode: "client"' in config and "listen: { endpoints: [] }" in config
+        assert "timeout_ms: -1" in config and "exit_on_failure: false" in config
+        assert "period_max_ms: 1000" in config
+    for role, config in zip(("scan", "depth", "images"), computes, strict=True):
+        assert f'nodename: "zenoh_{role}_bridge"' in config
 
 
 def test_sensor_bridge_caps_previews_and_drops_stale_sensor_samples_on_congestion():
     device = (ROOT / "config" / "zenoh_device.json5").read_text()
-    compute = (ROOT / "config" / "zenoh_compute.json5").read_text()
+    computes = [(ROOT / "config" / f"zenoh_compute_{role}.json5").read_text()
+                for role in ("scan", "depth", "images")]
+    compute = "\n".join(computes)
     assert "reliable_routes_blocking: false" in device
     assert '"^/pi/lidar/scan$=1:express"' in device
     frequencies = re.search(r'pub_max_frequencies:\s*\[(.*?)\]', device, re.S).group(1)
@@ -86,7 +93,7 @@ def test_sensor_bridge_caps_previews_and_drops_stale_sensor_samples_on_congestio
     assert '"^/camera/astra/(color|depth)/image_raw/compressed$=2"' not in device
     assert '"^/camera/astra/color/image_raw/compressed$"' in device
     assert '"^/camera/astra/color/image_raw$"' not in device
-    assert '"^/camera/astra/color/image_raw/compressed$"' in compute
+    assert '"^/camera/astra/(color|depth)/image_raw/compressed$"' in compute
 
 
 def test_main_installers_provision_the_identities():

@@ -53,8 +53,6 @@
   mode: "peer",
   listen: { endpoints: ["tls/0.0.0.0:7447"] },
   transport: {
-    // Independent TCP streams prevent camera retransmissions from blocking range sensors.
-    unicast: { max_links: 3 },
     link: {
       tls: {
         root_ca_certificate: "/etc/lekiwi/zenoh-tls/ca.crt",

@@ -769,15 +769,39 @@
   "process": [
    "zenoh-bridge-ros2dds",
    "-c",
-   "$(share lekiwi_rmf)/config/zenoh_compute.json5",
+   "$(share lekiwi_rmf)/config/zenoh_compute_depth.json5",
    "-e",
-   "tls/127.0.0.1:7447?prio=0-1",
-   "-e",
-   "tls/127.0.0.1:7447?prio=2-5",
+   "tls/127.0.0.1:7447?prio=2-5"
+  ],
+  "respawn": true,
+  "respawn_delay": 1.0
+ },
+ {
+  "env": {},
+  "name": null,
+  "output": "screen",
+  "process": [
+   "zenoh-bridge-ros2dds",
+   "-c",
+   "$(share lekiwi_rmf)/config/zenoh_compute_images.json5",
    "-e",
    "tls/127.0.0.1:7447?prio=6-7"
   ],
   "respawn": true,
-  "respawn_delay": 5.0
+  "respawn_delay": 1.0
+ },
+ {
+  "env": {},
+  "name": null,
+  "output": "screen",
+  "process": [
+   "zenoh-bridge-ros2dds",
+   "-c",
+   "$(share lekiwi_rmf)/config/zenoh_compute_scan.json5",
+   "-e",
+   "tls/127.0.0.1:7447?prio=0-1"
+  ],
+  "respawn": true,
+  "respawn_delay": 1.0
  }
 ]

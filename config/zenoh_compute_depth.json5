@@ -1,17 +1,15 @@
-// Compute-side half of the sensor bridge; see zenoh_device.json5. The launch
-// file adds three priority-scoped endpoints on tls/<remote_ip>:7447. Each link is
-// mutual TLS; see zenoh_device.json5.
+// Compute-side depth session; launch/sensors.launch.py starts one per traffic class.
+// Separate client sessions keep TCP isolation after reconnect in Zenoh 1.5.
+// All use the existing device endpoint and the same mutual TLS identities.
 {
   plugins: {
     ros2dds: {
+      nodename: "zenoh_depth_bridge",
       allow: {
         publishers: [],
         subscribers: [
-          "^/pi/lidar/scan$",
-          "^/pi/camera/(front|wrist)/(image_raw/compressed|camera_info)$",
           "^/camera/depth/points$",
-          "^/camera/astra/color/image_raw/compressed$",
-          "^/camera/astra/depth/image_raw/compressed$",
+          "^/pi/camera/(front|wrist)/camera_info$",
           "^/camera/astra/color/camera_info$",
         ],
         service_servers: [],
@@ -21,16 +19,15 @@
       },
     },
   },
-  // Peer mode connects every endpoint; client mode treats them as failover alternatives.
-  mode: "peer",
+  // A client never listens and keeps reconnecting to the device on its own.
+  mode: "client",
   listen: { endpoints: [] },
   connect: {
+    timeout_ms: -1,
     exit_on_failure: false,
     retry: { period_init_ms: 100, period_max_ms: 1000, period_increase_factor: 2 },
   },
   transport: {
-    // Independent TCP streams prevent camera retransmissions from blocking range sensors.
-    unicast: { max_links: 3 },
     link: {
       tls: {
         root_ca_certificate: "/etc/lekiwi/zenoh-tls/ca.crt",

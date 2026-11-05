@@ -26,6 +26,7 @@ class DelayedLink:
         self.target = target
         self.hold = False
         self.connections = 0
+        self.writers = set()
         self.loop = asyncio.new_event_loop()
         self.thread = threading.Thread(target=self.loop.run_forever, daemon=True)
         self.thread.start()
@@ -36,8 +37,14 @@ class DelayedLink:
         return await asyncio.start_server(self.forward, '127.0.0.1', 0)
 
     async def forward(self, reader, writer):
-        remote_reader, remote_writer = await asyncio.open_connection('127.0.0.1', self.target)
+        try:
+            remote_reader, remote_writer = await asyncio.open_connection('127.0.0.1', self.target)
+        except ConnectionError as error:
+            logging.info('Transport probe upstream unavailable: %s', error)
+            writer.close()
+            return
         self.connections += 1
+        self.writers.update((writer, remote_writer))
 
         async def pipe(source, destination, delay):
             while data := await source.read(65536):
@@ -58,6 +65,13 @@ class DelayedLink:
                     logging.warning('Transport probe proxy closed: %s', result)
             writer.close()
             remote_writer.close()
+            self.writers.difference_update((writer, remote_writer))
+
+    def disconnect(self):
+        async def reset():
+            for writer in list(self.writers):
+                writer.close()
+        asyncio.run_coroutine_threadsafe(reset(), self.loop).result(5)
 
     def close(self):
         async def stop():
@@ -86,16 +100,19 @@ def probe(root, output, binary):
         for link in links:
             cleanup.callback(link.close)
         processes = []
-        for role, domain in [('device', 222), ('compute', 223)]:
+        for role, domain in [('compute_scan', 223), ('compute_depth', 223), ('compute_images', 223), ('device', 222)]:
             config = (root / 'config' / f'zenoh_{role}.json5').read_text()
             config = config.replace('/etc/lekiwi/zenoh-tls', str(output / 'pki'))
             config = config.replace('tls/0.0.0.0:7447', f'tls/127.0.0.1:{port}')
             path = output / f'{role}.json5'
             path.write_text(config)
             command = [binary, '-c', str(path), '-d', str(domain)]
-            if role == 'compute':
-                for link, priorities in zip(links, ('0-1', '2-5', '6-7'), strict=True):
-                    command += ['-e', f'tls/127.0.0.1:{link.port}?prio={priorities}']
+            if role.startswith('compute_'):
+                index = ('compute_scan', 'compute_depth', 'compute_images').index(role)
+                command += ['-e', f'tls/127.0.0.1:{links[index].port}?prio={(("0-1", "2-5", "6-7")[index])}']
+            if role == 'device':
+                time.sleep(.15)
+                assert all(p.poll() is None for p in processes), 'client exited while device was unavailable'
             log = cleanup.enter_context((output / f'{role}.log').open('w'))
             process = subprocess.Popen(command, stdout=log, stderr=log,
                                        env={**os.environ, 'CYCLONEDDS_URI': f'file://{root}/config/cyclonedds.xml'})
@@ -178,6 +195,7 @@ def probe(root, output, binary):
             spin(.1)
         assert all(received.values()), 'sensor discovery did not complete'
         assert all(link.connections == 1 for link in links), 'priority links were not established independently'
+        assert all(nodes[1].count_publishers(topic) == 1 for _, _, topic in topics), 'duplicate imported sensor writers'
         phase = 'camera_delayed'
         links[2].hold = True
         spin(.8)
@@ -186,6 +204,14 @@ def probe(root, output, binary):
             assert len(samples) >= 4 and max(samples) < .3, (key, samples)
         assert time.monotonic() - received['image'][-1][1] >= .5
         links[2].hold = False
+        spin(.5)
+        phase = 'depth_delayed'
+        links[1].hold = True
+        spin(.8)
+        samples = [age for p, _, age in received['scan'] if p == phase]
+        assert len(samples) >= 4 and max(samples) < .3, samples
+        assert time.monotonic() - received['depth'][-1][1] >= .5
+        links[1].hold = False
         spin(.5)
         phase = 'all_delayed'
         for link in links:
@@ -201,7 +227,18 @@ def probe(root, output, binary):
             spin(.02)
         recovery = {key: min((at - resumed_at for p, at, age in values if p == phase and age < .3), default=None)
                     for key, values in received.items()}
-        report = {'camera_delay_sec': .8, 'all_links_delay_sec': .8,
+        phase = 'reconnect'
+        reconnect_at = time.monotonic()
+        for link in links:
+            link.disconnect()
+        while time.monotonic() - reconnect_at < 5 and not (
+                all(link.connections >= 2 for link in links)
+                and all(any(p == phase and age < .3 for p, _, age in values) for values in received.values())):
+            spin(.02)
+        assert all(link.connections >= 2 for link in links), 'closed priority links did not reconnect'
+        assert all(any(p == phase and age < .3 for p, _, age in values) for values in received.values())
+        report = {'started_without_device': True, 'camera_delay_sec': .8, 'depth_delay_sec': .8, 'all_links_delay_sec': .8,
+                  'reconnect_sec': time.monotonic() - reconnect_at,
                   'recovery_sec': recovery, 'samples': received}
         (output / 'transport-proof.json').write_text(json.dumps(report, indent=2) + '\n')
         assert all(value is not None and value < 2 for value in recovery.values()), recovery
