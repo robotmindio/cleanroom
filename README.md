@@ -413,6 +413,7 @@ work is tracked in [DEFERRED.md](DEFERRED.md#network-security-and-credentials).
 | `5556/tcp` | `lekiwi-host` | ZMQ observations and joint state | none; optional CURVE |
 | `5557/tcp` | `lekiwi-host` | Torque arm, disarm and state | none; optional CURVE |
 | `7447/tcp` | `lekiwi-zenoh` | Zenoh, export-only: `/pi/lidar/scan`, rate-limited compressed `/pi/camera/*`, compact `/camera/depth/points`, and the compressed Astra colour preview with `camera_info` | mutual TLS |
+| `7448/tcp` | Optional local RMF bridge | Navigation actions, TF and battery export to the fleet adapter | localhost only, mutual TLS |
 | `9090/tcp` | `rosbridge` (off by default) | JSON over WebSocket to one ROS graph | none; loopback or tailnet bind |
 
 - The ZMQ listeners bind every interface by default and accept any client
@@ -423,7 +424,7 @@ work is tracked in [DEFERRED.md](DEFERRED.md#network-security-and-credentials).
   by the robot's private CA, and presents its own
   (`config/zenoh_device.json5`, `enable_mtls: true`); it refuses to start
   without its identity rather than fall back to plaintext.
-  `scripts/setup-zenoh-tls.sh` creates the CA and both identities under
+  `scripts/setup-zenoh-tls.sh` creates the CA and role-specific identities under
   `/etc/lekiwi/zenoh-tls`, and `scripts/install-compute-services.sh` runs it.
   Its allow-list is export-only, so no peer can publish into the device's DDS.
 The optional RMF navigation bridge uses mutual TLS on **localhost:7448**, with

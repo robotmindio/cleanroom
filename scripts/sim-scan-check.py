@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Wait for a simulated lidar scan and reject the known all-minimum failure."""
+"""Wait for a usable simulated lidar scan, retaining the supervisor's range checks."""
 
 from __future__ import annotations
 
@@ -7,10 +7,13 @@ import argparse
 import math
 import time
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
+
+from lekiwi_rmf.safety_supervisor import _valid_scan_ranges
 
 
 @dataclass(frozen=True)
@@ -19,7 +22,7 @@ class ScanAssessment:
     message: str
 
 
-def assess_scan(ranges: list[float], range_min: float) -> ScanAssessment:
+def assess_scan(ranges: list[float], range_min: float, range_max: float) -> ScanAssessment:
     """Require an actual 360-degree-like scan with space beyond its blind zone."""
     if len(ranges) < 180:
         return ScanAssessment(False, f"only {len(ranges)} ranges received (expected at least 180)")
@@ -33,6 +36,10 @@ def assess_scan(ranges: list[float], range_min: float) -> ScanAssessment:
             False,
             f"all {len(ranges)} ranges are at or below range_min={range_min:.3f} m; renderer/lidar is unusable",
         )
+
+    sample = SimpleNamespace(ranges=ranges, range_min=range_min, range_max=range_max)
+    if not _valid_scan_ranges(sample, 0.01):
+        return ScanAssessment(False, "scan contains invalid ranges or too few valid returns")
 
     finite = [value for value in ranges if math.isfinite(value)]
     maximum = max(finite) if finite else math.inf
@@ -49,7 +56,7 @@ class ScanCheck(Node):
         self.create_subscription(LaserScan, "/scan", self._on_scan, 10)
 
     def _on_scan(self, message: LaserScan) -> None:
-        self.assessment = assess_scan(list(message.ranges), message.range_min)
+        self.assessment = assess_scan(list(message.ranges), message.range_min, message.range_max)
 
 
 def main() -> int:

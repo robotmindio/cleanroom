@@ -111,7 +111,15 @@ recovery-copy names and malformed manifests. Private artifacts are under
 This host's service-account renderer probe passed EGL 1.5 / OpenGL 4.6 using AMD
 radeonsi. The simulation qualification runner now allows 1,800 seconds for the
 whole suite (measured ~800 seconds); individual test deadlines are unchanged.
-The complete simulation runtime checklist still needs qualification.
+The native simulator exposed a stale scan mask: the September 26 body sectors
+predated the September 30 -90 degree lidar calibration. Forty native raw scans
+were all rejected with the old mask and all valid after rotating those same
+sectors +90 degrees. The corrected mask retains the same 71 degree width and
+reaches; the physical mask and all freshness limits are unchanged. The renderer
+scan check now uses the supervisor's validity checks and rejects negative
+infinity, out-of-range and blind scans instead of reporting false success.
+Full runtime qualification with the corrected installed configuration remains
+required, including mux, obstacle, RViz and native-heartbeat observations.
 
 ## Acceptance gaps beyond individual issue titles
 

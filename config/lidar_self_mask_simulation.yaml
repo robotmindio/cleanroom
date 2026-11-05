@@ -1,7 +1,7 @@
 scan_self_filter:
   ros__parameters:
-    # Calibrated from 80 stationary scans in the empty simulation spawn area.
-    # These five sectors contain only robot CAD returns; their reach includes 2 cm margin.
-    body_start_deg: [87.0, 119.0, 139.0, 163.0, 208.0]
-    body_end_deg: [99.0, 127.0, 148.0, 192.0, 221.0]
+    # Original 80-scan CAD calibration, rotated +90 deg for laser_calibration's -90 deg yaw.
+    # Confirmed on 40 native scans; the same 71 deg and reaches remain masked.
+    body_start_deg: [177.0, 209.0, 229.0, 253.0, 298.0]
+    body_end_deg: [189.0, 217.0, 238.0, 282.0, 311.0]
     body_max_range_m: [0.104, 0.225, 0.161, 0.162, 0.218]

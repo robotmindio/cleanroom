@@ -132,13 +132,18 @@ def test_missing_options_and_unknown_flags_are_rejected():
         assert result.returncode != 0 and result.stderr, args
 
 
-def test_native_priority_links_isolate_camera_delay_and_recover(tmp_path):
+def native_bridge():
     binary = shutil.which('zenoh-bridge-ros2dds')
     installed = Path.home() / '.local/bin/zenoh-bridge-ros2dds'
     if binary is None and installed.is_file():
         binary = str(installed)
     if binary is None:
         pytest.skip('native transport qualification requires the pinned Zenoh bridge')
+    return binary
+
+
+def test_native_priority_links_isolate_camera_delay_and_recover(tmp_path):
+    binary = native_bridge()
     generate(tmp_path / 'pki')
     # Match the native bridge's middleware/interface without changing the pytest process.
     env = {**os.environ, 'RMW_IMPLEMENTATION': 'rmw_cyclonedds_cpp',
@@ -158,9 +163,7 @@ def test_native_priority_links_isolate_camera_delay_and_recover(tmp_path):
 
 
 def test_native_fleet_listener_requires_a_trusted_client_identity(tmp_path):
-    binary = shutil.which('zenoh-bridge-ros2dds')
-    if binary is None:
-        pytest.skip('native fleet qualification requires the pinned Zenoh bridge')
+    binary = native_bridge()
     ca = tmp_path / 'pki'
     generate(ca)
     with socket.socket() as reservation:

@@ -183,6 +183,10 @@ if(BUILD_TESTING)
     add_launch_test(test/${name}.py TIMEOUT ${timeout} RUNNER "${test_isolated_runner}"
       ENV "${test_launch_environment}")
     isolate_lekiwi_test(test_${name}.py)
+    if(name STREQUAL "test_driver_fake_host_launch")
+      # Its 200 ms strict leases must not compete with training/Gazebo on hosted runners.
+      set_tests_properties(test_${name}.py PROPERTIES RUN_SERIAL TRUE)
+    endif()
   endfunction()
   if(LEKIWI_BUILD_COMPUTE)
     ament_add_test(test_native_waitable

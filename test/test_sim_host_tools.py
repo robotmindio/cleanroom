@@ -32,13 +32,27 @@ def test_renderer_version_check_requires_gl_33():
 
 def test_scan_check_rejects_the_all_minimum_renderer_failure():
     scan = _load("sim_scan_check", "scripts/sim-scan-check.py")
-    bad = scan.assess_scan([0.08] * 360, 0.08)
+    bad = scan.assess_scan([0.08] * 360, 0.08, 12.0)
     assert not bad.usable
     assert "all 360 ranges" in bad.message
 
-    good = scan.assess_scan([0.08, 1.2, float("inf")] * 120, 0.08)
+    good = scan.assess_scan([0.08, 1.2, float("inf")] * 120, 0.08, 12.0)
     assert good.usable
     assert "360 ranges" in good.message
+
+
+@pytest.mark.parametrize('invalid', [float('-inf'), float('nan'), 0.01, 13.0])
+def test_scan_check_rejects_a_single_invalid_ray_even_when_most_ranges_are_good(invalid):
+    scan = _load('sim_scan_check_invalid', 'scripts/sim-scan-check.py')
+    ranges = [2.0] * 360
+    ranges[128] = invalid  # Native AMD renderer trial: -inf outside the measured body mask.
+    result = scan.assess_scan(ranges, 0.08, 12.0)
+    assert not result.usable and 'invalid ranges' in result.message
+
+
+def test_scan_check_rejects_a_blind_all_infinite_scan():
+    scan = _load('sim_scan_check_blind', 'scripts/sim-scan-check.py')
+    assert not scan.assess_scan([float('inf')] * 360, 0.08, 12.0).usable
 
 
 def test_gripper_calibration_requires_an_explicit_apply_flag(monkeypatch):
