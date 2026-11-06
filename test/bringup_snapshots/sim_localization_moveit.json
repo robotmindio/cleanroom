@@ -360,9 +360,33 @@
  },
  {
   "arguments": [
-   "/camera/front@sensor_msgs/msg/Image[gz.msgs.Image",
-   "/camera/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo",
    "/camera/depth/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked"
+  ],
+  "env": {
+   "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
+   "GZ_SIM_SYSTEM_PLUGIN_PATH": ":$(prefix lekiwi_rmf)/lib/lekiwi_rmf"
+  },
+  "name": "sim_depth_bridge",
+  "namespace": "",
+  "node": "ros_gz_bridge/parameter_bridge",
+  "output": "screen",
+  "parameters": {
+   "override_frame_id": "front_camera_link"
+  },
+  "remappings": [
+   [
+    "/camera/depth/points",
+    "/camera/depth/points_raw"
+   ]
+  ],
+  "respawn": false,
+  "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [
+   "/camera/front@sensor_msgs/msg/Image[gz.msgs.Image",
+   "/camera/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo"
   ],
   "env": {
    "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
@@ -383,10 +407,6 @@
    [
     "/camera/camera_info",
     "/camera/front/camera_info"
-   ],
-   [
-    "/camera/depth/points",
-    "/camera/depth/points_raw"
    ]
   ],
   "respawn": false,

@@ -25,13 +25,17 @@ def generate_test_description():
         package="ros_gz_bridge", executable="parameter_bridge",
         arguments=[
             "/camera/front@sensor_msgs/msg/Image[gz.msgs.Image",
-            "/camera/depth/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked",
         ],
         parameters=[{"override_frame_id": "front_camera_optical_frame"}],
         remappings=[
             ("/camera/front", "/camera/front/image_raw"),
-            ("/camera/depth/points", "/camera/depth/points_raw"),
         ], output="screen",
+    )
+    depth = Node(
+        package="ros_gz_bridge", executable="parameter_bridge",
+        arguments=["/camera/depth/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked"],
+        parameters=[{"override_frame_id": "front_camera_link"}],
+        remappings=[("/camera/depth/points", "/camera/depth/points_raw")], output="screen",
     )
     publish = ExecuteProcess(cmd=["bash", "-c", """
         sleep 2
@@ -43,7 +47,7 @@ def generate_test_description():
     """], output="screen")
     return launch.LaunchDescription([
         SetEnvironmentVariable("GZ_PARTITION", f"lekiwi_sensor_frames_{uuid.uuid4().hex}"),
-        lidar, camera, publish, launch_testing.actions.ReadyToTest(),
+        lidar, camera, depth, publish, launch_testing.actions.ReadyToTest(),
     ]), {"publish": publish}
 
 
@@ -69,7 +73,7 @@ class TestSensorFrames(unittest.TestCase):
         self.assertEqual(frames, {
             "scan": "laser",
             "rgb": "front_camera_optical_frame",
-            "depth": "front_camera_optical_frame",
+            "depth": "front_camera_link",
         })
 
 
