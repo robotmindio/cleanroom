@@ -1,12 +1,13 @@
 # Stationary wrist cup canary
 
-`config/fiber_perception_wrist_canary.json` binds a finite attended pilot to the
-tracked wrist camera and standard remote proposal profile. It admits only cup,
+`config/fiber_perception_wrist_canary.json` and
+`config/fiber_perception_front_canary.json` bind finite attended pilots to their
+tracked cameras and the standard remote proposal profile. It admits only cup,
 keeps score0.50, evidence age2s and confirmation window2s, has no search views,
-and is disabled at rest. It adds no metric or manipulation qualification.
+allows 30 seconds per stationary goal, and is disabled at rest. It adds no metric or manipulation qualification.
 
 Register this body through the owning authenticated API at
-`PUT /robot/profiles/wrist-cup-canary-20261106`. The operator authentication
+`PUT /robot/profiles/wrist-cup-canary-20261106` (or the corresponding front name). The operator authentication
 procedure is `scripts/cikut-ops-jwt.sh` in the RobotMind platform repository;
 retain the explicit RobotMind tenant header and never print the bearer token.
 A local expired FIBER_API_KEY is not evidence that this documented administrative
