@@ -125,12 +125,11 @@ def generate_launch_description():
             # Images and CameraInfo use optical axes; Gazebo's XYZ cloud uses link axes.
             arguments=[
                 "/camera/front@sensor_msgs/msg/Image[gz.msgs.Image",
-                "/camera/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo",
+                "/camera/front/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo",
             ],
             parameters=[{"override_frame_id": "front_camera_optical_frame"}],
             remappings=[
                 ("/camera/front", "/camera/front/image_raw"),
-                ("/camera/camera_info", "/camera/front/camera_info"),
             ],
             output="screen",
         ),
