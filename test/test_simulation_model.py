@@ -151,6 +151,9 @@ def test_simulation_has_physical_wheels_arm_actuator_and_depth():
     assert depth is not None
     assert depth.findtext("topic") == "/camera/depth"
     assert float(depth.findtext("update_rate")) == 10.0
+    assert depth.findtext("camera/camera_info_topic") == "/camera/depth/camera_info"
+    front = robot.find(".//sensor[@name='front_camera']")
+    assert front.findtext("camera/camera_info_topic") == "/camera/front/camera_info"
     assert float(depth.findtext("camera/noise/stddev")) > 0.0
 
 
@@ -172,6 +175,7 @@ def test_simulation_bridge_pins_ros_sensor_frames():
     assert find_node(records, name="scan_self_filter")["parameters"]["input_topic"] == "/sim/scan_raw"
     camera = find_node(records, name="sim_camera_bridge")
     assert camera["parameters"] == {"override_frame_id": "front_camera_optical_frame"}
+    assert "/camera/front/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo" in camera["arguments"]
     depth = find_node(records, name="sim_depth_bridge")
     assert depth["parameters"] == {"override_frame_id": "front_camera_link"}
     assert depth["remappings"] == [["/camera/depth/points", "/camera/depth/points_raw"]]
@@ -191,7 +195,9 @@ def test_simulation_urdf_converts_to_valid_sdf():
     model = sdf.find("model")
     assert model is not None
     assert model.find("./joint[@name='sim_base_left_wheel_joint']") is not None
-    assert model.find(".//sensor[@name='front_depth']") is not None
+    for sensor, topic in (("front_camera", "/camera/front/camera_info"),
+                          ("front_depth", "/camera/depth/camera_info")):
+        assert model.findtext(f".//sensor[@name='{sensor}']/camera/camera_info_topic") == topic
     directions = {
         "sim_base_left_wheel_contact": "-0.866025 0.5 0",
         "sim_base_back_wheel_contact": "0 -1 0",

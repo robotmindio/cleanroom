@@ -11,7 +11,7 @@ import pytest
 import rclpy
 from launch.actions import ExecuteProcess, SetEnvironmentVariable
 from launch_ros.actions import Node
-from sensor_msgs.msg import Image, LaserScan, PointCloud2
+from sensor_msgs.msg import CameraInfo, Image, LaserScan, PointCloud2
 
 
 @pytest.mark.launch_test
@@ -25,6 +25,7 @@ def generate_test_description():
         package="ros_gz_bridge", executable="parameter_bridge",
         arguments=[
             "/camera/front@sensor_msgs/msg/Image[gz.msgs.Image",
+            "/camera/front/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo",
         ],
         parameters=[{"override_frame_id": "front_camera_optical_frame"}],
         remappings=[
@@ -42,6 +43,7 @@ def generate_test_description():
         for i in {1..8}; do
           gz topic -t /scan -m gz.msgs.LaserScan -p 'header { stamp { sec: 1 } data { key: "frame_id" value: "wrong" } } frame: "wrong" angle_min: -1 angle_max: 1 angle_step: 2 range_min: 0.1 range_max: 10 count: 1 vertical_count: 1 ranges: 1.0 intensities: 1.0'
           gz topic -t /camera/front -m gz.msgs.Image -p 'header { stamp { sec: 1 } data { key: "frame_id" value: "wrong" } } width: 1 height: 1 step: 3 pixel_format_type: RGB_INT8 data: "rgb"'
+          gz topic -t /camera/front/camera_info -m gz.msgs.CameraInfo -p 'header { stamp { sec: 1 } data { key: "frame_id" value: "wrong" } } width: 640 height: 480'
           gz topic -t /camera/depth/points -m gz.msgs.PointCloudPacked -p 'header { stamp { sec: 1 } data { key: "frame_id" value: "wrong" } } height: 1 width: 0 point_step: 12 row_step: 0 is_dense: true'
         done
     """], output="screen")
@@ -65,15 +67,17 @@ class TestSensorFrames(unittest.TestCase):
         frames = {}
         node.create_subscription(LaserScan, "/scan", lambda msg: frames.setdefault("scan", msg.header.frame_id), 10)
         node.create_subscription(Image, "/camera/front/image_raw", lambda msg: frames.setdefault("rgb", msg.header.frame_id), 10)
+        node.create_subscription(CameraInfo, "/camera/front/camera_info", lambda msg: frames.setdefault("info", (msg.header.frame_id, msg.width, msg.height)), 10)
         node.create_subscription(PointCloud2, "/camera/depth/points_raw", lambda msg: frames.setdefault("depth", msg.header.frame_id), 10)
         deadline = time.monotonic() + 20
-        while len(frames) < 3 and time.monotonic() < deadline:
+        while len(frames) < 4 and time.monotonic() < deadline:
             rclpy.spin_once(node, timeout_sec=0.1)
         node.destroy_node()
         self.assertEqual(frames, {
             "scan": "laser",
             "rgb": "front_camera_optical_frame",
             "depth": "front_camera_link",
+            "info": ("front_camera_optical_frame", 640, 480),
         })
 
 

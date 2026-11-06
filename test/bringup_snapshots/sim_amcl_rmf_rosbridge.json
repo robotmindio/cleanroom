@@ -348,7 +348,7 @@
  {
   "arguments": [
    "/camera/front@sensor_msgs/msg/Image[gz.msgs.Image",
-   "/camera/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo"
+   "/camera/front/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo"
   ],
   "env": {
    "GZ_SIM_RESOURCE_PATH": ":$(share lekiwi_rmf)/..",
@@ -365,10 +365,6 @@
    [
     "/camera/front",
     "/camera/front/image_raw"
-   ],
-   [
-    "/camera/camera_info",
-    "/camera/front/camera_info"
    ]
   ],
   "respawn": false,
