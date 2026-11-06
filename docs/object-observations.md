@@ -136,6 +136,12 @@ state owned by the detector, not a parameter. Clients set it with
   254 characters, so Grounding DINO's 256-token text limit never truncates it.
 - Empty labels restore the tracked `default_query` from
   `config/recognition_models.yaml`. The default is not part of `model_sha256`.
+  The startup query is the single canonical phrase `cup`; clients can still request
+  multiple distinct labels. Duplicating cup/mug synonyms lowered confidence and
+  produced fused labels in the native robot-camera trial, so startup no longer
+  uses that combined prompt. This changes the recorded query revision, not the
+  model identity or score threshold, and does not qualify general recognition.
+
 - `expected_revision` applies the change only while that revision is in force,
   so a client restoring its predecessor never clobbers a newer query.
 - The response returns the query in force and the one it replaced; a rejection

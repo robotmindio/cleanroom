@@ -37,7 +37,7 @@ from test_object_observations import capture, fake_recognizer, operating_point
 
 REMOTE = 'grounding_dino_tiny_gpu'
 SPEC = model_spec(REMOTE)
-DEFAULT = make_query(SPEC['default_query'])
+DEFAULT = make_query(['a cup', 'a mug'])
 PROFILE = default_profile('remote_grounding_dino')
 
 

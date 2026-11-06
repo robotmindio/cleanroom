@@ -25,9 +25,10 @@ rtdetr_v2_r18:
 # Open-vocabulary recognizers localize the active query (lekiwi_rmf/perception_query.py), which every
 # frame records beside its model_sha256. default_query only seeds that query at startup and when a client
 # clears its own; it is not part of the model identity.
+# One canonical startup phrase avoids competing cup/mug synonyms diluting proposals.
 grounding_dino_tiny:
   backend: grounding_dino
-  default_query: [a cup, a mug]
+  default_query: [cup]
   base_url: https://huggingface.co/IDEA-Research/grounding-dino-tiny/resolve/a2bb814dd30d776dcf7e30523b00659f4f141c71
   files:
     model.safetensors:
@@ -60,4 +61,4 @@ grounding_dino_tiny_gpu:
   provider: robotmind_gpu
   provider_model: grounding-dino-tiny
   provider_model_sha256: 0986e83de3b27f7fa69634a0d13270681423446b248338da60b984a9a0c0a87e
-  default_query: [a cup, a mug]
+  default_query: [cup]
