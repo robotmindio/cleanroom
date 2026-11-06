@@ -9,7 +9,7 @@
   "allow_search": false,
   "allow_any_color": true,
   "views": [],
-  "max_duration_sec": 30,
+  "max_duration_sec": 15,
   "max_travel_m": 0.12,
   "minimum_score": 0.5,
   "max_evidence_age_sec": 2,

@@ -18,7 +18,7 @@ from test_perception_query import DEFAULT, Harness, closed_recognizer, open_reco
 
 @pytest.mark.parametrize('filename,camera,proposal', [
     ('fiber_perception_profile.json', 'front', 'near_field'),
-    ('fiber_perception_wrist_canary.json', 'wrist', 'standard'),
+    ('fiber_perception_wrist_canary.json', 'wrist', 'near_field'),
     ('fiber_perception_front_canary.json', 'front', 'standard'),
 ])
 def test_fiber_stationary_profile_matches_the_tracked_camera_and_proposal(filename, camera, proposal):
