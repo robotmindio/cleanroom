@@ -37,7 +37,7 @@ from test_object_observations import capture, fake_recognizer, operating_point
 
 REMOTE = 'grounding_dino_tiny_gpu'
 SPEC = model_spec(REMOTE)
-DEFAULT = make_query(SPEC['default_query'])
+DEFAULT = make_query(['a cup', 'a mug'])
 PROFILE = default_profile('remote_grounding_dino')
 
 
@@ -141,6 +141,24 @@ def test_remote_detections_use_source_pixels_the_profile_and_the_evidence_artifa
     assert 'box_threshold' not in body and 'concepts' not in body
     # The provider sees exactly the stored evidence bytes.
     assert base64.b64decode(body['image']) == artifact
+
+
+@pytest.mark.parametrize('alternative', [False, True])
+@pytest.mark.parametrize('field,value', [
+    ('label', ''), ('label', 'x' * 129), ('score', float('nan')),
+    ('score', float('inf')), ('score', -.1), ('score', 1.1)])
+def test_invalid_detection_metadata_is_a_provider_failure(provider, alternative, field, value):
+    def malformed(body):
+        status, response = provider.admitted(body)
+        entry = response['detections'][0]
+        if alternative:
+            entry = entry['alternatives'][0]
+        entry[field] = value
+        return status, response
+
+    provider.respond = malformed
+    with pytest.raises(ProviderUnavailable, match='malformed'):
+        predict(Recognizer(REMOTE, None), DEFAULT)
 
 
 def test_provider_reuses_its_connection_without_changing_the_request(provider):

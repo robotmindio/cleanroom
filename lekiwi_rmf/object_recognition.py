@@ -405,13 +405,16 @@ class Recognizer:
             box = item.get('box') if isinstance(item, dict) else None
             if (not isinstance(box, list) or len(box) != 4
                     or not all(type(value) in (int, float) and math.isfinite(value) for value in box)
-                    or type(item.get('score')) not in (int, float) or not isinstance(item.get('label'), str)):
+                    or type(item.get('score')) not in (int, float) or not 0 <= item['score'] <= 1
+                    or not isinstance(item.get('label'), str) or not 1 <= len(item['label']) <= 128):
                 raise ProviderUnavailable('perception provider returned malformed detections')
             extras = {}
             alternatives = item.get('alternatives', [])
             if (not isinstance(alternatives, list) or len(alternatives) > 4 or any(
                     not isinstance(other, dict) or not isinstance(other.get('label'), str)
-                    or type(other.get('score')) not in (int, float) for other in alternatives)):
+                    or not 1 <= len(other['label']) <= 128
+                    or type(other.get('score')) not in (int, float)
+                    or not 0 <= other['score'] <= 1 for other in alternatives)):
                 raise ProviderUnavailable('perception provider returned malformed alternatives')
             if alternatives:
                 extras['alternatives'] = [{'label': other['label'], 'score': float(other['score'])} for other in alternatives]
