@@ -138,10 +138,11 @@ class RemoteProvider:
         return self.post('/v1/infer', body)
 
     def post(self, path, body, timeout=None):
-        deadline = time.monotonic() + (timeout or self.timeout)
+        budget = timeout or self.timeout
+        setup_deadline = time.monotonic() + budget
         payload = json.dumps(body, separators=(',', ':')).encode()
         try:
-            connection, accepts_gzip = self._connections.get(timeout=max(0., deadline - time.monotonic()))
+            connection, accepts_gzip = self._connections.get(timeout=max(0., setup_deadline - time.monotonic()))
         except Empty as error:
             raise ProviderUnavailable('perception provider capacity wait exceeded request deadline') from error
         headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
@@ -153,17 +154,19 @@ class RemoteProvider:
         alarm = None
         try:
             try:
-                remaining = deadline - time.monotonic()
+                remaining = setup_deadline - time.monotonic()
                 if remaining <= 0:
                     raise TimeoutError('request deadline exceeded')
                 connection.timeout = remaining
                 if connection.sock is None:
                     connection.connect()
-                remaining = deadline - time.monotonic()
+                remaining = setup_deadline - time.monotonic()
                 if remaining <= 0:
                     raise TimeoutError('request deadline exceeded')
+                # A fresh connection has its own bound; keep it usable after a valid first response.
+                deadline = time.monotonic() + budget
                 transport = connection.sock
-                transport.settimeout(remaining)
+                transport.settimeout(budget)
 
                 def expire():
                     try:
@@ -172,7 +175,7 @@ class RemoteProvider:
                         pass  # A completed response may already have closed its socket.
 
                 # Socket timeouts reset on each read; one alarm also bounds a trickling response.
-                alarm = threading.Timer(remaining, expire)
+                alarm = threading.Timer(budget, expire)
                 alarm.daemon = True
                 alarm.start()
                 connection.request('POST', path, body=payload, headers=headers)

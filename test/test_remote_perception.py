@@ -364,7 +364,7 @@ def test_the_request_deadline_covers_headers_and_a_trickling_body(provider, head
     assert len(provider.requests) == len(provider.connections) == 2
 
 
-def test_waiting_for_a_provider_connection_is_inside_the_request_deadline(provider):
+def test_waiting_for_a_provider_connection_is_bounded(provider):
     recognizer = Recognizer(REMOTE, None)
     recognizer.model.timeout = .05
     pool = recognizer.model._connections
@@ -390,6 +390,22 @@ def test_a_finished_requests_alarm_cannot_interrupt_the_next_pooled_request(prov
     recognizer.model.timeout = 1.
     second, _ = predict(recognizer, DEFAULT)
     assert second == first and len(provider.connections) == 1
+
+
+def test_connection_setup_has_a_separate_bound_from_the_first_response(provider, monkeypatch):
+    connect = object_recognition.HTTPConnection.connect
+
+    def delayed_connect(connection):
+        time.sleep(.25)
+        return connect(connection)
+
+    monkeypatch.setattr(object_recognition.HTTPConnection, 'connect', delayed_connect)
+    provider.header_delay = .25
+    recognizer = Recognizer(REMOTE, None)
+    recognizer.model.timeout = .4
+    assert predict(recognizer, DEFAULT)[0]
+    assert predict(recognizer, DEFAULT)[0]
+    assert len(provider.requests) == 2 and len(provider.connections) == 1
 
 
 def test_a_server_that_closes_each_response_is_still_usable(provider):
