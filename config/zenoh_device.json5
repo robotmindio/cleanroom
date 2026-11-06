@@ -33,8 +33,8 @@
       pub_max_frequencies: [
         // Keep the newest front capture within 200 ms before recognition.
         "^/pi/camera/front/image_raw/compressed$=5",
-        // Keep the gripper view current during short arm movements.
-        "^/pi/camera/wrist/image_raw/compressed$=2",
+        // A 2-Hz export adds up to 500 ms before the 2-Hz recognizer can start.
+        "^/pi/camera/wrist/image_raw/compressed$=5",
       ],
       // This is a sensor-only bridge. Congestion must drop an old sample rather
       // than block a reliable DDS writer and make every later scan stale.
