@@ -172,6 +172,10 @@ def test_simulation_bridge_pins_ros_sensor_frames():
     assert find_node(records, name="scan_self_filter")["parameters"]["input_topic"] == "/sim/scan_raw"
     camera = find_node(records, name="sim_camera_bridge")
     assert camera["parameters"] == {"override_frame_id": "front_camera_optical_frame"}
+    depth = find_node(records, name="sim_depth_bridge")
+    assert depth["parameters"] == {"override_frame_id": "front_camera_link"}
+    assert depth["remappings"] == [["/camera/depth/points", "/camera/depth/points_raw"]]
+    assert all('PointCloud2' not in argument for argument in camera['arguments'])
 
 
 def test_simulation_urdf_converts_to_valid_sdf():

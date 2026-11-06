@@ -130,12 +130,15 @@ def test_astra_optical_axis_faces_left_rear_and_down_in_the_complete_robot():
     assert tuple(map(float, mount.get("xyz").split())) == (-0.09, -0.04, 0.007)
 
 
-def test_fixed_camera_optical_axis_follows_the_physical_lens():
+@pytest.mark.parametrize('frame,axis', [
+    ('front_camera_optical_frame', (0, 0, 1)),
+    ('front_camera_link', (1, 0, 0)),
+])
+def test_fixed_camera_optical_axis_follows_the_physical_lens(frame, axis):
     robot = ET.fromstring(subprocess.check_output(
         ["xacro", str(ROOT / "urdf/lekiwi.urdf.xacro")], text=True
     ))
     parents = {joint.find("child").get("link"): joint for joint in robot.findall("joint")}
-    frame, axis = "front_camera_optical_frame", (0, 0, 1)
     while frame != "base_link":
         joint = parents[frame]
         roll, pitch, yaw = map(float, joint.find("origin").get("rpy", "0 0 0").split())

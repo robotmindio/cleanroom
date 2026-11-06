@@ -122,21 +122,25 @@ def generate_launch_description():
             package="ros_gz_bridge",
             executable="parameter_bridge",
             name="sim_camera_bridge",
-            # gz derives CameraInfo from the parent namespace. All three
-            # streams originate at the same optical frame.
+            # Images and CameraInfo use optical axes; Gazebo's XYZ cloud uses link axes.
             arguments=[
                 "/camera/front@sensor_msgs/msg/Image[gz.msgs.Image",
                 "/camera/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo",
-                "/camera/depth/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked",
             ],
             parameters=[{"override_frame_id": "front_camera_optical_frame"}],
             remappings=[
                 ("/camera/front", "/camera/front/image_raw"),
                 ("/camera/camera_info", "/camera/front/camera_info"),
-                # Preserve the acquisition stamp while adding seeded
-                # transport latency/dropout before MoveIt sees the cloud.
-                ("/camera/depth/points", "/camera/depth/points_raw"),
             ],
+            output="screen",
+        ),
+        Node(
+            package="ros_gz_bridge", executable="parameter_bridge",
+            name="sim_depth_bridge",
+            arguments=["/camera/depth/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked"],
+            parameters=[{"override_frame_id": "front_camera_link"}],
+            # Keep the acquisition stamp through the seeded delay/dropout stage.
+            remappings=[("/camera/depth/points", "/camera/depth/points_raw")],
             output="screen",
         ),
         _sim_process("sim_omni_controller"),
