@@ -286,12 +286,14 @@ def test_cad_wheel_contact_planes_are_on_the_floor():
 
 def test_wrist_and_moving_jaw_meshes_never_touch_at_any_roll_or_gripper_angle():
     """Justifies the SRDF exemption: only their padded proxies overlap when the jaw opens."""
+    from scipy.spatial import cKDTree
+
     robot = _real_robot()
     roll = robot.find("joint[@name='arm_wrist_roll']")
     grip = robot.find("joint[@name='arm_gripper']")
     wrist = _link_surface_points(robot, "so101_wrist_link", 4000)
     jaw = _link_surface_points(robot, "so101_moving_jaw_link", 2500)
-    wrist_sq = (wrist ** 2).sum(axis=1)
+    wrist_tree = cKDTree(wrist)
 
     def limits(joint):
         return float(joint.find("limit").get("lower")), float(joint.find("limit").get("upper"))
@@ -306,8 +308,7 @@ def test_wrist_and_moving_jaw_meshes_never_touch_at_any_roll_or_gripper_angle():
             pose = (_transform(roll.find("origin")) @ spin(roll_angle)
                     @ _transform(grip.find("origin")) @ spin(grip_angle))
             moved = jaw @ pose[:3, :3].T + pose[:3, 3]
-            squared = wrist_sq[:, None] + (moved ** 2).sum(axis=1) - 2 * wrist @ moved.T
-            closest = min(closest, float(np.sqrt(max(squared.min(), 0.0))))
+            closest = min(closest, float(wrist_tree.query(moved)[0].min()))
     # Measured 9 mm on the full meshes; sampling error is about 2 mm.
     assert closest > 0.004
 
