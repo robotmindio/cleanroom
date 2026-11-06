@@ -8,11 +8,12 @@ import importlib.metadata
 import json
 import math
 import os
+import socket
 import sys
 import threading
 import time
 from pathlib import Path
-from queue import LifoQueue
+from queue import Empty, LifoQueue
 from urllib.parse import urlsplit
 
 import cv2
@@ -137,22 +138,48 @@ class RemoteProvider:
         return self.post('/v1/infer', body)
 
     def post(self, path, body, timeout=None):
+        deadline = time.monotonic() + (timeout or self.timeout)
         payload = json.dumps(body, separators=(',', ':')).encode()
-        connection, accepts_gzip = self._connections.get()
+        try:
+            connection, accepts_gzip = self._connections.get(timeout=max(0., deadline - time.monotonic()))
+        except Empty as error:
+            raise ProviderUnavailable('perception provider capacity wait exceeded request deadline') from error
         headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
         if accepts_gzip:
             compressed = gzip.compress(payload, mtime=0)
             if len(compressed) < len(payload):
                 payload = compressed
                 headers['Content-Encoding'] = 'gzip'
+        alarm = None
         try:
             try:
-                connection.timeout = timeout or self.timeout
-                if connection.sock is not None:
-                    connection.sock.settimeout(connection.timeout)
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError('request deadline exceeded')
+                connection.timeout = remaining
+                if connection.sock is None:
+                    connection.connect()
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError('request deadline exceeded')
+                transport = connection.sock
+                transport.settimeout(remaining)
+
+                def expire():
+                    try:
+                        transport.shutdown(socket.SHUT_RDWR)
+                    except OSError:
+                        pass  # A completed response may already have closed its socket.
+
+                # Socket timeouts reset on each read; one alarm also bounds a trickling response.
+                alarm = threading.Timer(remaining, expire)
+                alarm.daemon = True
+                alarm.start()
                 connection.request('POST', path, body=payload, headers=headers)
                 response = connection.getresponse()
                 data = response.read(MAX_RESPONSE_BYTES + 1)
+                if time.monotonic() >= deadline:
+                    raise TimeoutError('request deadline exceeded')
                 accepts_gzip = 'gzip' in {value.strip().lower() for value in
                                           response.getheader('Accept-Encoding', '').split(',')}
             except (HTTPException, OSError, ValueError) as error:
@@ -165,6 +192,10 @@ class RemoteProvider:
                 accepts_gzip = False
                 raise ProviderUnavailable('perception provider response exceeds 1 MiB')
         finally:
+            if alarm is not None:
+                alarm.cancel()
+                if alarm.ident is not None:
+                    alarm.join()  # Never let an old alarm interrupt the next pooled request.
             self._connections.put_nowait((connection, accepts_gzip))
         if response.status >= 300:
             code = ''

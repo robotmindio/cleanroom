@@ -49,6 +49,7 @@ class FakeProvider:
         self.connections = set()
         self.accept_encoding = None
         self.wire_requests = []
+        self.header_delay, self.body_delay, self.body_chunks = 0., 0., 1
         provider = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -63,13 +64,18 @@ class FakeProvider:
                 provider.requests.append((self.path, body))
                 status, payload = provider.respond(body)
                 data = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
+                time.sleep(provider.header_delay)
                 self.send_response(status)
                 self.send_header('Content-Type', 'application/json')
                 self.send_header('Content-Length', str(len(data)))
                 if provider.accept_encoding is not None:
                     self.send_header('Accept-Encoding', provider.accept_encoding)
                 self.end_headers()
-                self.wfile.write(data)
+                chunk_size = max(1, (len(data) + provider.body_chunks - 1) // provider.body_chunks)
+                for offset in range(0, len(data), chunk_size):
+                    time.sleep(provider.body_delay)
+                    self.wfile.write(data[offset:offset + chunk_size])
+                    self.wfile.flush()
 
             def log_message(self, *args):
                 pass
@@ -342,6 +348,48 @@ def test_a_timed_out_request_is_not_replayed_and_the_next_call_reconnects(provid
     assert predict(recognizer, DEFAULT)[0]
     assert len(provider.requests) == 2
     assert len(provider.connections) == 2
+
+
+@pytest.mark.parametrize('header_delay,body_delay,chunks', [(.25, .25, 1), (0., .15, 4)])
+def test_the_request_deadline_covers_headers_and_a_trickling_body(provider, header_delay, body_delay, chunks):
+    recognizer = Recognizer(REMOTE, None)
+    recognizer.model.timeout = .4
+    provider.header_delay, provider.body_delay, provider.body_chunks = header_delay, body_delay, chunks
+    with pytest.raises(ProviderUnavailable, match='unreachable'):
+        predict(recognizer, DEFAULT)
+    assert len(provider.requests) == 1
+    provider.header_delay, provider.body_delay, provider.body_chunks = 0., 0., 1
+    recognizer.model.timeout = 1.
+    assert predict(recognizer, DEFAULT)[0]
+    assert len(provider.requests) == len(provider.connections) == 2
+
+
+def test_waiting_for_a_provider_connection_is_inside_the_request_deadline(provider):
+    recognizer = Recognizer(REMOTE, None)
+    recognizer.model.timeout = .05
+    pool = recognizer.model._connections
+    borrowed = [pool.get_nowait(), pool.get_nowait()]
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        pending = executor.submit(predict, recognizer, DEFAULT)
+        try:
+            with pytest.raises(ProviderUnavailable, match='capacity wait exceeded'):
+                pending.result(timeout=1.)
+            assert not provider.requests
+        finally:
+            for item in borrowed:
+                pool.put_nowait(item)
+    recognizer.model.timeout = 1.
+    assert predict(recognizer, DEFAULT)[0]
+
+
+def test_a_finished_requests_alarm_cannot_interrupt_the_next_pooled_request(provider):
+    recognizer = Recognizer(REMOTE, None)
+    recognizer.model.timeout = .2
+    first, _ = predict(recognizer, DEFAULT)
+    provider.respond = lambda body: time.sleep(.3) or provider.admitted(body)
+    recognizer.model.timeout = 1.
+    second, _ = predict(recognizer, DEFAULT)
+    assert second == first and len(provider.connections) == 1
 
 
 def test_a_server_that_closes_each_response_is_still_usable(provider):
