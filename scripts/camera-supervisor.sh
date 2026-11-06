@@ -5,7 +5,7 @@
 set -Eeuo pipefail
 
 usage() {
-  echo "usage: $0 --device PATH --name NAME --namespace NS --camera-name NAME --frame FRAME --size '[W, H]' --camera-info-url URL [--heartbeat-interval SEC --heartbeat-timeout SEC --startup-grace SEC]" >&2
+  echo "usage: $0 --device PATH --name NAME --namespace NS --camera-name NAME --frame FRAME --size '[W, H]' --camera-info-url URL [--jpeg-quality 0..100] [--heartbeat-interval SEC --heartbeat-timeout SEC --startup-grace SEC]" >&2
   exit 2
 }
 
@@ -39,6 +39,18 @@ while (( $# )); do
 done
 [[ -n $device && -n $node_name && -n $namespace && -n $camera_name && -n $frame && -n $size && -n $info_url ]] || usage
 [[ $heartbeat_interval =~ ^[1-9][0-9]*$ && $heartbeat_timeout =~ ^[1-9][0-9]*$ && $startup_grace =~ ^[0-9]+$ ]] || usage
+
+[[ -z $jpeg_quality || $jpeg_quality =~ ^(0|[1-9][0-9]?|100)$ ]] || usage
+
+compression_params=""
+if [[ -n $jpeg_quality ]]; then
+  runtime_dir="${LEKIWI_RUNTIME_DIR:-${XDG_RUNTIME_DIR:-/tmp}/lekiwi-runtime}/camera-info"
+  compression_params="$runtime_dir/${node_name}-compression.yaml"
+  # Older Jazzy plugins declare leading-dot names; YAML accepts them, CLI overrides do not.
+  (umask 077; mkdir -p "$runtime_dir"
+   printf '/**:\n  ros__parameters:\n    .image_raw.compressed.jpeg_quality: %s\n    .image_raw.jpeg_quality: %s\n' \
+     "$jpeg_quality" "$jpeg_quality" > "$compression_params")
+fi
 
 child=""; stopping=0
 stop() {
@@ -183,7 +195,8 @@ while (( ! stopping )); do
   # ROS 2 parameter names may be dot-qualified but cannot begin with a dot.
   # A leading dot aborts v4l2_camera during argument parsing, leaving the
   # supervisor to retry forever without publishing a front-camera frame.
-  [[ -z $jpeg_quality ]] || camera_args+=(-p "image_raw.compressed.jpeg_quality:=$jpeg_quality")
+  [[ -z $jpeg_quality ]] || camera_args+=(
+    -p "image_raw.compressed.jpeg_quality:=$jpeg_quality" --params-file "$compression_params")
   setsid --wait "${camera_args[@]}" &
   child=$!
   disconnected=0

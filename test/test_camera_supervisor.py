@@ -3,6 +3,11 @@ import subprocess
 import time
 from pathlib import Path
 
+import pytest
+import rclpy
+from rclpy.context import Context
+from rclpy.node import Node
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -37,6 +42,7 @@ def test_camera_supervisor_kills_reparented_camera_process(tmp_path):
         "CAMERA_CHILD_PID": str(child_pid_file),
         "CAMERA_V4L_LOG": str(query_log),
         "CAMERA_ROS_LOG": str(ros_log),
+        "LEKIWI_RUNTIME_DIR": str(tmp_path / "runtime"),
     }
     process = subprocess.Popen(
         [
@@ -45,7 +51,7 @@ def test_camera_supervisor_kills_reparented_camera_process(tmp_path):
             "--namespace", "/test", "--camera-name", "test",
             "--frame", "test_frame", "--size", "[320, 240]",
             "--camera-info-url", "none", "--startup-grace", "0",
-            "--heartbeat-interval", "1",
+            "--heartbeat-interval", "1", "--jpeg-quality", "50",
         ],
         env=env,
         start_new_session=True,
@@ -58,6 +64,17 @@ def test_camera_supervisor_kills_reparented_camera_process(tmp_path):
         while not child_pid_file.exists() and time.monotonic() < deadline:
             time.sleep(0.05)
         assert child_pid_file.exists()
+        parameters = tmp_path / "runtime/camera-info/test_camera-compression.yaml"
+        assert f"--params-file {parameters}" in ros_log.read_text()
+        context = Context()
+        rclpy.init(args=["--ros-args", "--params-file", str(parameters)], context=context)
+        node = Node("compression_parameter_test", context=context)
+        try:
+            for name in (".image_raw.compressed.jpeg_quality", ".image_raw.jpeg_quality"):
+                assert node.declare_parameter(name, 95).value == 50
+        finally:
+            node.destroy_node()
+            context.try_shutdown()
         queries = query_log.read_text().splitlines()
         assert queries and set(queries) == {f"--device {device} --info"}
         deadline = time.monotonic() + 20
@@ -80,3 +97,15 @@ def test_camera_supervisor_kills_reparented_camera_process(tmp_path):
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait(timeout=2)
+
+
+@pytest.mark.parametrize('quality', ['-1', '101', '1.5', 'nan', '50\nother: 1'])
+def test_camera_supervisor_rejects_invalid_jpeg_quality(quality):
+    result = subprocess.run([
+        str(ROOT / "scripts/camera-supervisor.sh"),
+        "--device", "/dev/null", "--name", "test_camera", "--namespace", "/test",
+        "--camera-name", "test", "--frame", "test_frame", "--size", "[320, 240]",
+        "--camera-info-url", "none", "--jpeg-quality", quality,
+    ], capture_output=True, text=True, timeout=3)
+    assert result.returncode == 2
+    assert 'usage:' in result.stderr
