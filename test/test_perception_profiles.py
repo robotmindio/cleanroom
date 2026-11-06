@@ -16,13 +16,18 @@ from lekiwi_rmf.perception_study import admitted_candidate, paired_bootstrap, ru
 from test_perception_query import DEFAULT, Harness, closed_recognizer, open_recognizer, wait
 
 
-def test_fiber_stationary_profile_matches_the_tracked_camera_and_proposal():
+@pytest.mark.parametrize('filename,camera,proposal', [
+    ('fiber_perception_profile.json', 'front', 'near_field'),
+    ('fiber_perception_wrist_canary.json', 'wrist', 'near_field'),
+    ('fiber_perception_front_canary.json', 'front', 'standard'),
+])
+def test_fiber_stationary_profile_matches_the_tracked_camera_and_proposal(filename, camera, proposal):
     from lekiwi_rmf.object_cameras import camera_bindings
 
     root = Path(__file__).resolve().parents[1]
-    profile = json.loads((root / 'config/fiber_perception_profile.json').read_text())
-    assert profile['camera_sha256'] == camera_bindings(['front'])['front']['sha256']
-    assert profile['profile_revision'] == tracked_profiles()[1]['remote_grounding_dino']['near_field'].revision
+    profile = json.loads((root / 'config' / filename).read_text())
+    assert profile['camera_sha256'] == camera_bindings([camera])[camera]['sha256']
+    assert profile['profile_revision'] == tracked_profiles()[1]['remote_grounding_dino'][proposal].revision
     assert not profile['enabled'] and not profile['allow_search'] and not profile['views']
     assert profile['max_evidence_age_sec'] == profile['confirmation_window_sec'] == 2
 
