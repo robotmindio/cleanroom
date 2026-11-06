@@ -55,6 +55,7 @@ before using them; the robot runtime does not require it.
 - `deploy-split.sh [DEVICE]` deploys one pushed revision to the compute machine and its device host.
 - `stage-release.sh compute|device WORKSPACE REVISION` builds and tests a detached release before cutover, retaining the active workspace.
 - `check-release.py seal|verify RELEASE REVISION compute|device` checks source, installed artifacts, local settings, and complete passing CTest evidence.
+- `prune-release-builds.py WORKSPACE REVISION [REVISION ...] [--apply]` retires explicitly selected inactive builds (dry-run by default). It locks staging/deployment, protects `current`, `previous` and process references, archives qualification evidence and removes the seal before deleting generated build/install/log/test files. Sources, local settings, dependency overlays and virtual environments remain. Restage a retired revision before activation. Run with access to the managed user's process details; if elevated, retain the deployment's `LEKIWI_LOGS` so it locks the same `deploy.lock`.
 - `reinstall-compute.sh` reinstalls the compute service from `.env` (`LEKIWI_ROBOT_HOST`) with MoveIt enabled.
 - `build-lekiwi.sh [--device] [--dependencies]` rebuilds this package; `--device` omits compute-only plugins and selects the tracked device tests, and `--dependencies` builds only the patched camera and lidar drivers for a dependency overlay.
 - `dependency-overlay-key.sh compute|device SOURCE WORKSPACE` prints the content key that decides when staging reuses a built dependency overlay.

@@ -1,9 +1,11 @@
 """Release staging and activation never mutate the live installation."""
 
 import importlib.util
+import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -12,6 +14,106 @@ import yaml
 
 
 ROOT = Path(__file__).parents[1]
+
+
+@pytest.fixture
+def pruner():
+    spec = importlib.util.spec_from_file_location('prune_release', ROOT / 'scripts/prune-release-builds.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def cached_release(workspace, revision='a' * 40):
+    release = workspace / 'releases' / revision
+    release.mkdir(parents=True)
+    (release / 'release.json').write_text(json.dumps({'revision': revision}))
+    return release
+
+
+@pytest.mark.parametrize('name', ['current', 'previous'])
+def test_pruning_protects_active_and_rollback_releases(tmp_path, pruner, name):
+    release = cached_release(tmp_path)
+    (tmp_path / name).symlink_to(release)
+    with pytest.raises(ValueError, match=f'protected by {name}'):
+        pruner.inspect_release(tmp_path, release.name, tmp_path / 'proc')
+
+
+@pytest.mark.parametrize('reference', ['cmdline', 'maps', 'environ', 'cwd'])
+def test_pruning_refuses_process_references(tmp_path, pruner, reference):
+    release = cached_release(tmp_path)
+    processes = tmp_path / 'proc'
+    process = processes / '123'
+    process.mkdir(parents=True)
+    for name in ('cmdline', 'maps', 'environ'):
+        (process / name).write_bytes(b'')
+    if reference == 'cwd':
+        (process / reference).symlink_to(release)
+    else:
+        (process / reference).write_bytes(str(release).encode())
+    with pytest.raises(ValueError, match='process 123'):
+        pruner.inspect_release(tmp_path, release.name, processes)
+
+
+def test_pruning_preserves_sources_evidence_and_external_symlink_targets(tmp_path, pruner):
+    release = cached_release(tmp_path)
+    for name in ('source', 'src', 'build/lekiwi_rmf', 'log', 'test-tmp'):
+        (release / name).mkdir(parents=True)
+    (release / 'source/.env').write_text('private configuration')
+    (release / 'src/local-change').write_text('retain source changes')
+    report = release / 'build/lekiwi_rmf/release-ctest.xml'
+    report.write_text('<testsuite/>')
+    external = tmp_path / 'shared-install'
+    external.mkdir()
+    (external / 'keep').write_text('dependency underlay')
+    (release / 'install').symlink_to(external)
+    receipt = pruner.retire(release, tmp_path / 'receipts')
+    assert json.loads((receipt / 'release.json').read_text())['revision'] == release.name
+    import tarfile
+    with tarfile.open(receipt / 'qualification.tar.gz') as archive:
+        assert archive.extractfile('release-ctest.xml').read() == b'<testsuite/>'
+    assert (release / 'source/.env').read_text() == 'private configuration'
+    assert (release / 'src/local-change').read_text() == 'retain source changes'
+    assert (external / 'keep').read_text() == 'dependency underlay'
+    assert not (release / 'release.json').exists()
+    assert all(not (release / name).exists() for name in pruner.GENERATED)
+
+
+def test_pruning_dry_run_and_batch_validation_do_not_remove_builds(tmp_path, pruner, monkeypatch, capsys):
+    release = cached_release(tmp_path)
+    (release / 'build').mkdir()
+    logs = tmp_path / 'logs'
+    logs.mkdir()
+    arguments = ['prune-release-builds.py', str(tmp_path), release.name]
+    monkeypatch.setenv('LEKIWI_LOGS', str(logs))
+    inspect = pruner.inspect_release
+    monkeypatch.setattr(pruner, 'inspect_release', lambda workspace, revision: inspect(workspace, revision, tmp_path / 'proc'))
+    monkeypatch.setattr(sys, 'argv', arguments)
+    pruner.main()
+    assert json.loads(capsys.readouterr().out)['applied'] is False
+    monkeypatch.setattr(sys, 'argv', arguments + ['../outside', '--apply'])
+    with pytest.raises(ValueError, match='full lowercase Git SHA'):
+        pruner.main()
+    assert (release / 'build').is_dir() and (release / 'release.json').is_file()
+
+
+def test_pruning_refuses_release_directory_symlinks(tmp_path, pruner):
+    outside = tmp_path / 'outside'
+    outside.mkdir()
+    (tmp_path / 'releases').symlink_to(outside)
+    with pytest.raises(ValueError, match='releases directory'):
+        pruner.inspect_release(tmp_path, 'a' * 40, tmp_path / 'proc')
+
+
+def test_pruning_archive_failure_keeps_the_seal_and_build(tmp_path, pruner, monkeypatch):
+    release = cached_release(tmp_path)
+    (release / 'build').mkdir()
+    def fail(*_args, **_kwargs):
+        raise OSError('archive storage unavailable')
+    monkeypatch.setattr(pruner.tarfile, 'open', fail)
+    with pytest.raises(OSError, match='archive storage unavailable'):
+        pruner.retire(release, tmp_path / 'receipts')
+    assert (release / 'release.json').is_file() and (release / 'build').is_dir()
 
 
 @pytest.mark.parametrize("builder", ["build-lekiwi.sh", "build-native.sh"])
