@@ -2,6 +2,7 @@
 # Opt-in Tailnet-only motor transport. CURVE authentication is still required.
 # LEKIWI_NETWORK_ROOT=DIR installs files without changing a live host (tests).
 set -Eeuo pipefail
+# shellcheck source=/dev/null
 source "$(dirname -- "${BASH_SOURCE[0]}")/lib/runtime-common.sh"
 [[ $# -eq 0 ]] || die "usage: $0"
 root=${LEKIWI_NETWORK_ROOT:-}
