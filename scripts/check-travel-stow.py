@@ -8,6 +8,7 @@ gripper group is not required; it cannot fall onto anything. Never commands moti
 """
 
 import argparse
+import math
 import sys
 import time
 from pathlib import Path
@@ -16,6 +17,8 @@ import xml.etree.ElementTree as ET
 import rclpy
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import JointState
+
+from lekiwi_rmf.motion_guards import FUTURE_STAMP_TOLERANCE_NS, positive_seconds_ns, stamp_ns
 
 SEMANTIC = Path(__file__).resolve().parents[1] / "config" / "lekiwi.srdf"
 TOLERANCE = 0.02
@@ -30,14 +33,21 @@ def travel_stow(path=SEMANTIC):
 
 def stow_errors(stow, names, positions, tolerance=TOLERANCE):
     """Joints outside tolerance (or missing), as {name: error or None}."""
+    if len(names) != len(positions) or len(names) != len(set(names)):
+        return dict.fromkeys(stow)
     measured = dict(zip(names, positions))
     errors = {}
     for name, target in stow.items():
         if name not in measured:
             errors[name] = None
-        elif abs(measured[name] - target) > tolerance:
+        elif not math.isfinite(measured[name]) or abs(measured[name] - target) > tolerance:
             errors[name] = measured[name] - target
     return errors
+
+
+def fresh_joint_stamp(message, now_ns, max_age_ns):
+    stamp = stamp_ns(message.header.stamp)
+    return stamp > 0 and -FUTURE_STAMP_TOLERANCE_NS <= now_ns - stamp <= max_age_ns
 
 
 def main():
@@ -45,6 +55,11 @@ def main():
     parser.add_argument("--timeout", type=float, default=20.0)
     parser.add_argument("--max-age", type=float, default=3.0)
     args = parser.parse_args()
+    try:
+        max_age_ns = positive_seconds_ns(args.max_age, "--max-age")
+        positive_seconds_ns(args.timeout, "--timeout")
+    except ValueError as error:
+        parser.error(str(error))
     stow = travel_stow()
     rclpy.init()
     node = rclpy.create_node("travel_stow_check")
@@ -55,8 +70,7 @@ def main():
         while time.monotonic() < deadline:
             rclpy.spin_once(node, timeout_sec=0.2)
             for message in received:
-                stamp = message.header.stamp.sec + message.header.stamp.nanosec * 1e-9
-                if node.get_clock().now().nanoseconds * 1e-9 - stamp > args.max_age:
+                if not fresh_joint_stamp(message, node.get_clock().now().nanoseconds, max_age_ns):
                     continue
                 errors = stow_errors(stow, message.name, message.position)
                 if not errors:
