@@ -145,3 +145,44 @@ collision-interruption success is claimed. The source artifacts retain both
 the invalid-request diagnostic and the corrected unsuccessful attempt. The
 separate first helper's expectation of a hardware driver-state topic, absent
 from this simulation, is also retained as a failed test rather than acceptance.
+
+## Later timer recovery and dark-scene rejection
+
+A separate Temporal GitOps rollout at 10:19 UTC included RobotMind commit
+`fe1c4378c`: the native timer scheduler now gives active recovery tasks priority
+over retention cleanup while retaining eight workers, twenty SQL connections
+and a positive cleanup share. The installed ConfigMap read back weights
+`high: 100`, `low: 90`, `preemptable: 1`. This was an independently delivered
+server change, not a robot safety-policy change.
+
+On the resulting server, real goal `9ce84ec2-6a16-5313-ab79-b76f5ac11395` started
+its workflow task after 37 ms and its first verification after 741 ms. Five
+checks returned `input_quality_unusable` before the 15-second observation
+budget expired. The workflow completed `unverifiable` after 16.047 seconds,
+including terminal persistence. Two fresh, stationary, identity-matched dark
+captures were required before admission. The pilot profile was disabled after
+the test. This demonstrates timely execution and rejection of unusable input
+in this trial; it does not replace three positive recognitions.
+
+The current wrist view no longer supplies eligible YOLOX cup observations.
+Eight bounded viewpoints were tested with the canonical navigation guard;
+retreat and forward studies reached maximum excursions of approximately
+12.2 cm and 5.2 cm respectively, and returned to their anchors. Neither lowered
+recognition or quality thresholds. The GPU standard profile recognized the cup
+in a retained capture at score 0.519; its reduced-resolution `near_field`
+profile did not. Subsequent live GPU captures carried `dark` and `blurred`
+quality flags and were correctly ineligible. Private evidence is under
+`20261107-temporal-tail/`, especially `fiber-dark-negative/timeline.json`,
+`gpu-profiles.json`, and both viewpoint `result.json` files.
+
+The disabled `config/fiber_perception_wrist_gpu_canary.json` binds the existing
+GPU standard operating point to the wrist camera, fixes the class to cup and
+retains the 15-second goal and two-second evidence limits. It is a controlled
+test profile, not a default deployment or general scene qualification.
+
+The provider client also had a misleading failure message: its own deadline
+alarm closes the socket, which can surface as `RemoteDisconnected`. It now
+identifies that deadline explicitly while retaining the existing unavailable
+error contract. Timed-out POSTs are still not replayed, and the next request
+reconnects. All 85 remote-provider tests passed, including the stricter timeout
+and trickling-response assertions.
