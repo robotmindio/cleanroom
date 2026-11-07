@@ -186,3 +186,38 @@ identifies that deadline explicitly while retaining the existing unavailable
 error contract. Timed-out POSTs are still not replayed, and the next request
 reconnects. All 85 remote-provider tests passed, including the stricter timeout
 and trickling-response assertions.
+
+## Steady watchdog and interruption follow-up
+
+The supervisor now publishes permission on a steady timer and preserves each
+stamped input's ROS acquisition age when converting it to monotonic time.
+A clock-progress requirement uses the existing 0.5-second permission lease;
+repeated inputs cannot keep the measured safety decision healthy while ROS
+time is frozen or moves backwards. No lease, geometry or actuator limit was
+widened. All 92 focused tests and the exact staged release `6462f06`'s
+105/105 native CTests passed (550.53 seconds); its sealed-release verification
+also passed.
+
+A separate domain-231 simulation on that release demonstrated interruption
+after actual motion. A six-joint trajectory requested 0.02 rad shoulder pan;
+feedback and 0.001144 rad measured motion preceded insertion of the temporary
+wrist collision object. MoveIt then reported contacts, the supervisor withdrew
+arm permission and the accepted action aborted. There was no blocked workspace
+or false permission between sending the goal and inserting the object.
+The object was removed afterward. Private evidence is
+`20261107-temporal-tail/simulation-priority/probe-pan.json`.
+
+This controlled trial ran inside a user systemd scope with CPUWeight 1000,
+while the physical compute service was paused and its independent recovery
+timer remained armed. Physical motor services stayed running. The wrapper
+stopped its simulator and restored the physical compute service afterward.
+This observation does not isolate CPU contention as the cause of earlier
+failures or establish a hard real-time guarantee.
+
+The separate wrist-roll trial remains unsuccessful: its accepted trajectory
+ended with a goal-tolerance violation before the required positive displacement.
+The test's 0.003-rad tolerance was stricter than the default; no gain, tolerance
+or model change is justified by that result alone. A later retry outlived the
+finite simulation fixture and found no action server, so it supplies no further
+actuator evidence. The passing shoulder interruption is distinct from wrist
+tracking qualification and does not grant administrator acceptance.
