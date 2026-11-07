@@ -340,7 +340,7 @@ def test_a_timed_out_request_is_not_replayed_and_the_next_call_reconnects(provid
     recognizer = Recognizer(REMOTE, None)
     recognizer.model.timeout = .1
     provider.respond = lambda body: time.sleep(.3) or provider.admitted(body)
-    with pytest.raises(ProviderUnavailable, match='unreachable'):
+    with pytest.raises(ProviderUnavailable, match='unreachable: request deadline exceeded'):
         predict(recognizer, DEFAULT)
     assert len(provider.requests) == 1
     provider.respond = provider.admitted
@@ -355,7 +355,7 @@ def test_the_request_deadline_covers_headers_and_a_trickling_body(provider, head
     recognizer = Recognizer(REMOTE, None)
     recognizer.model.timeout = .4
     provider.header_delay, provider.body_delay, provider.body_chunks = header_delay, body_delay, chunks
-    with pytest.raises(ProviderUnavailable, match='unreachable'):
+    with pytest.raises(ProviderUnavailable, match='unreachable: request deadline exceeded'):
         predict(recognizer, DEFAULT)
     assert len(provider.requests) == 1
     provider.header_delay, provider.body_delay, provider.body_chunks = 0., 0., 1

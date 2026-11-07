@@ -189,7 +189,9 @@ class RemoteProvider:
                 connection.close()
                 accepts_gzip = False
                 # A lost reply may already own a provider run; never replay the POST.
-                raise ProviderUnavailable(f'perception provider unreachable: {error}') from error
+                reason = ('request deadline exceeded' if isinstance(error, TimeoutError) or
+                          (alarm is not None and time.monotonic() >= deadline) else str(error))
+                raise ProviderUnavailable(f'perception provider unreachable: {reason}') from error
             if len(data) > MAX_RESPONSE_BYTES:
                 connection.close()
                 accepts_gzip = False
