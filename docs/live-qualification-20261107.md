@@ -64,3 +64,45 @@ anchor. Evidence: `fiber-yolox-centered/` and `yolox-live-position/result.json`.
 
 No detector score, input-quality, freshness or physical safety threshold was
 relaxed. One successful scene does not qualify a general recognition model.
+
+## Stationary perception follow-up on release 5791f96
+
+The later compute/Pi deployment uses
+`5791f96c3e49ec1eff01d29cabe50a231ca730d7`; its tree is identical to main's
+`ce088ac19f339eac1ef19f45d72d926ce2e9f2f2`. Fresh armed readiness and
+`travel_stow` passed before the tests below. No physical motion was required.
+Follow-up artifacts are private under
+`~/.ros/lekiwi/qualification/20261107-resume/`.
+
+The JPEG-mode goal `4592a753-6ca3-5fb9-98f8-757a6569c8c6` finished
+`unverifiable`. Its first workflow task started after 48 ms; five verification
+activities ran within 16.54 seconds. The last four checks each retained only
+one fresh qualifying capture. This failure was not a workflow queue delay.
+The native source supplied the admitted camera, model and profile identities,
+stationary captures, no input-quality flags, and cup scores above 0.5.
+
+Both installed endpoints already support native SHA-256 receipts. The owning
+Fiber integration was still configured for JPEGs. The tracked
+`config/fiber_native_evidence_receipts.json` patch was applied through the
+owning integration API with its complete configuration preserved. Read-back
+confirmed that only `observation_evidence_format` changed. Credentials were not
+logged or committed. Capture selection, two-second freshness, two-capture
+requirement, 0.25-second separation and the 15-second goal budget stayed intact.
+
+Goal `50e95a6d-e05f-5bff-a160-2c9dd4ce3bd7` then completed `done/found`, with
+verifier version 3, 10.57 seconds after admission. The two cup captures were
+0.604 seconds apart and 1.557/0.953 seconds old at verification. Both original
+JPEGs were subsequently downloaded through the goal evidence endpoint; their
+independently computed SHA-256 digests matched the immutable goal evidence.
+The same request returned the same goal on retry. Evidence:
+`fiber-native-retry/result.json`, `admitted-0.json`, and its two retained JPEGs.
+
+The intended series of three successes remains incomplete. A preceding goal's
+first workflow task timed out and retried at 75.82 seconds; the next goal after
+the success also exceeded the pilot's wait. Both were canceled, their API
+states confirmed terminal, and the pilot profile disabled. Temporal's server
+reported persistence deadlines, while read-only PostgreSQL inspection observed
+WAL write/sync waits. These observations identify a separate server-side
+latency problem; they do not establish its storage root cause or qualify the
+recognizer across scenes. No timeout or safety gate was relaxed to count a
+success.
