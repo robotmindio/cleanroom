@@ -1,0 +1,9 @@
+# Replace only our table, atomically; preserve the host and Tailscale rules.
+destroy table inet lekiwi_motor_guard
+table inet lekiwi_motor_guard {
+    chain input {
+        type filter hook input priority -10; policy accept;
+        tcp dport 5555-5557 iifname { "lo", "tailscale0" } accept
+        tcp dport 5555-5557 reject with tcp reset
+    }
+}
