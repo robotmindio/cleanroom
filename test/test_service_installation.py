@@ -1724,3 +1724,31 @@ int main() {
                         '-o', str(executable)], check=True)
         result = subprocess.run([str(executable)], check=False)
         assert result.returncode == (1 if version == 'before' else 0)
+
+
+def test_motor_network_guard_installs_without_restarting_motors(tmp_path):
+    root = tmp_path / 'root'
+    fakes = tmp_path / 'bin'
+    _executable(fakes / 'systemctl', 'exit 99\n')
+    env = {**os.environ, 'LEKIWI_NETWORK_ROOT': str(root),
+           'PATH': f"{fakes}:{os.environ['PATH']}"}
+    script = ROOT / 'scripts/install-motor-network-guard.sh'
+    for _ in range(2):
+        subprocess.run([str(script)], env=env, check=True, capture_output=True)
+    for source, target in [
+        ('config/motor-network.nft', 'etc/lekiwi/motor-network.nft'),
+        ('systemd/lekiwi-motor-network.service',
+         'etc/systemd/system/lekiwi-motor-network.service'),
+    ]:
+        assert (root / target).read_bytes() == (ROOT / source).read_bytes()
+        assert stat.S_IMODE((root / target).stat().st_mode) == 0o644
+    unit = (root / 'etc/systemd/system/lekiwi-motor-network.service').read_text()
+    assert 'Before=lekiwi-host.service' in unit
+    assert not re.search(r'^(Requires|BindsTo|PartOf|ExecStop)=', unit, re.MULTILINE)
+    rules = (root / 'etc/lekiwi/motor-network.nft').read_text()
+    assert 'flush ruleset' not in rules
+    assert 'destroy table inet lekiwi_motor_guard' in rules
+    assert 'iifname { "lo", "tailscale0" } accept' in rules
+    assert 'tcp dport 5555-5557 reject with tcp reset' in rules
+    result = subprocess.run([str(script), '--unknown'], env=env, capture_output=True)
+    assert result.returncode != 0

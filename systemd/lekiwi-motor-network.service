@@ -1,0 +1,14 @@
+[Unit]
+Description=Restrict LeKiwi motor ports to loopback and Tailscale
+After=nftables.service tailscaled.service
+Before=lekiwi-host.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/lekiwi/motor-network.nft
+ExecReload=/usr/sbin/nft -f /etc/lekiwi/motor-network.nft
+# No stop action: stopping this unit must not expose motors or cut their torque.
+
+[Install]
+WantedBy=multi-user.target
