@@ -150,3 +150,65 @@ def test_shutdown_probe_reserves_an_isolated_domain_through_launch_failure(tmp_p
     assert result["ros_domain_id"] == int(captured["additional_env"]["ROS_DOMAIN_ID"])
     assert "stop before launching" in result["launch_error"]
     assert not held and os.environ["ROS_DOMAIN_ID"] == "42"
+
+
+@pytest.mark.parametrize('missing_arm_joint', [False, True])
+def test_workspace_gate_sends_only_complete_arm_joints(monkeypatch, missing_arm_joint):
+    from types import SimpleNamespace
+
+    from sensor_msgs.msg import JointState
+
+    from lekiwi_rmf.arm_trajectory import ARM_JOINTS
+
+    monkeypatch.syspath_prepend(str(ROOT / 'scripts'))
+    gate = _load('acceptance_gates_joint_scope', 'scripts/test-acceptance-gates.py')
+    names = list(reversed(ARM_JOINTS)) + ['wheel_joint']
+    if missing_arm_joint:
+        names.remove('arm_gripper')
+    joints = JointState(name=names, position=[0.] * len(names))
+    joints.header.stamp.sec = 1
+    sent = []
+    mutations = []
+    flags = dict(base_motion_permitted=True, arm_motion_permitted=True, driver='ARMED')
+
+    def wait(condition, _seconds):
+        assert condition()
+
+    def scene(operation):
+        mutations.append(operation)
+        added = operation == gate.CollisionObject.ADD
+        flags.update(collision=added, arm_motion_permitted=not added)
+
+    def send(goal):
+        sent.append(goal)
+        return SimpleNamespace(done=lambda: True, result=lambda: SimpleNamespace(accepted=False))
+
+    def tick(*_args, **_kwargs):
+        joints.position[names.index('wheel_joint')] = .5
+
+    reply = SimpleNamespace(valid=False, contacts=[SimpleNamespace(
+        contact_body_1='arm_wrist_roll', contact_body_2='qualification_workspace_intrusion')])
+    def ready():
+        return True
+
+    node = SimpleNamespace(
+        case='workspace', checks={}, flags=flags, joints=joints, pose=(0., 0., 0.),
+        wait_ready=lambda: None, wait=wait, tick=tick, scene_object=scene,
+        scene=SimpleNamespace(service_is_ready=ready),
+        validity=SimpleNamespace(service_is_ready=ready, call_async=lambda _: SimpleNamespace(
+            done=ready, result=lambda: reply)),
+        arm=SimpleNamespace(server_is_ready=ready, send_goal_async=send),
+    )
+    ticks = iter(range(20))
+    monkeypatch.setattr(gate, 'time', SimpleNamespace(monotonic=lambda: next(ticks)))
+    if missing_arm_joint:
+        with pytest.raises(RuntimeError, match='complete finite arm joint snapshot'):
+            gate.Gates.run(node)
+        assert not sent and not mutations
+    else:
+        gate.Gates.run(node)
+        trajectory = sent[0].trajectory
+        assert list(trajectory.joint_names) == list(ARM_JOINTS)
+        assert list(trajectory.points[0].positions) == [0., 0., 0., 0., .02, 0.]
+        assert node.checks['arm_workspace_intrusion_stop']['maximum_joint_change_rad'] == 0
+        assert mutations == [gate.CollisionObject.ADD, gate.CollisionObject.REMOVE]
