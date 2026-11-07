@@ -21,6 +21,9 @@ from std_msgs.msg import Bool
 from trajectory_msgs.msg import JointTrajectoryPoint
 from visualization_msgs.msg import MarkerArray
 
+from lekiwi_rmf.arm_trajectory import ARM_JOINTS
+from lekiwi_rmf.arm_workspace_monitor import complete_joint_snapshot
+
 nav = import_module('test-navigation')
 
 
@@ -94,7 +97,10 @@ class Gates(nav.Test):
         else:
             self.wait(lambda:self.scene.service_is_ready() and self.validity.service_is_ready()
                       and self.arm.server_is_ready(), 10)
-            before = dict(zip(self.joints.name,self.joints.position))
+            snapshot = complete_joint_snapshot(self.joints, ARM_JOINTS)
+            if snapshot is None:
+                raise RuntimeError('workspace test requires a complete finite arm joint snapshot')
+            before = dict(zip(snapshot.name, snapshot.position))
             try:
                 self.scene_object(CollisionObject.ADD)
                 self.wait(lambda:self.flags.get('collision') and
@@ -108,8 +114,8 @@ class Gates(nav.Test):
                 if response.valid or not any('qualification_workspace_intrusion' in c for c in contacts):
                     raise RuntimeError('MoveIt did not report the injected real geometry collision')
                 goal = FollowJointTrajectory.Goal()
-                goal.trajectory.joint_names = list(self.joints.name)
-                point = JointTrajectoryPoint(positions=list(self.joints.position))
+                goal.trajectory.joint_names = list(snapshot.name)
+                point = JointTrajectoryPoint(positions=list(snapshot.position))
                 point.positions[goal.trajectory.joint_names.index('arm_wrist_roll')] += .02
                 point.time_from_start.sec = 1
                 goal.trajectory.points = [point]
@@ -124,7 +130,10 @@ class Gates(nav.Test):
                 end = time.monotonic()+1
                 while time.monotonic()<end:
                     self.tick(Twist(),check=False)
-                delta = max(abs(p-before[n]) for n,p in zip(self.joints.name,self.joints.position))
+                after = complete_joint_snapshot(self.joints, ARM_JOINTS)
+                if after is None:
+                    raise RuntimeError('workspace test lost its complete finite arm joint snapshot')
+                delta = max(abs(p-before[n]) for n,p in zip(after.name, after.position))
                 if delta>.02:
                     raise RuntimeError('arm moved during the collision gate test')
                 self.checks['arm_workspace_intrusion_stop'] = {

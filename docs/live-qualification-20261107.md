@@ -126,9 +126,22 @@ object was removed afterward. Evidence under `simulation-manual/` includes
 
 Execution-interruption acceptance remains incomplete. Before injecting the
 object, the workspace gate intermittently reported stale state-validity results
-and the supervisor had latched motion denial. A pre-existing denial cannot
-prove that the injected object interrupted execution. The host also showed
-about 45% CPU scheduling pressure; this is a capacity observation, not a proven
-software root cause. The 0.15-second validity lease was not widened. The first
-manual helper also expected a hardware driver-state topic absent from this
-simulation; its failed result is retained and is not counted as acceptance.
+and the supervisor had latched motion denial. The host showed about 45% CPU
+scheduling pressure; this is a capacity observation, not a proven root cause.
+The 0.15-second validity lease was not widened.
+
+The manual checks also exposed a qualification-script defect: it copied every
+joint from `/joint_states` into the arm trajectory. Simulation includes wheel
+joints, so that request was rejected as malformed even with a clear arm path.
+The initial rejection result was withdrawn. The repository script now uses
+its existing complete-snapshot validator to select precisely `ARM_JOINTS`,
+requires a complete finite stamped sample, and measures only arm displacement.
+Regression coverage exercises mixed/reordered wheel-and-arm samples and rejects
+missing arm joints before changing the scene or sending a goal.
+
+With the corrected six-joint request, the simulator accepted a clear-path goal,
+but a stale workspace lease withdrew permission before measurable motion. No
+collision-interruption success is claimed. The source artifacts retain both
+the invalid-request diagnostic and the corrected unsuccessful attempt. The
+separate first helper's expectation of a hardware driver-state topic, absent
+from this simulation, is also retained as a failed test rather than acceptance.
