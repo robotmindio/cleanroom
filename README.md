@@ -420,6 +420,16 @@ work is tracked in [DEFERRED.md](DEFERRED.md#network-security-and-credentials).
   unless CURVE is configured. Anyone who can reach `5555` or `5557` can command
   the robot and cut torque, so keep them on a trusted robot network or behind a
   firewall. `--bind-address DEVICE_IP` pins them to one interface.
+- For a deployment whose compute connects over Tailscale, run
+  `sudo scripts/install-motor-network-guard.sh` on the motor host. This opt-in
+  persistent nftables table allows `5555`–`5557/tcp` only on loopback and
+  `tailscale0`; LAN motor clients stop working. CURVE remains required. The
+  installer validates the rules before loading them atomically, preserves other
+  firewall tables, and does not restart the motor host. Its independent systemd
+  unit runs before the motor host at boot; a rule-load failure leaves CURVE as
+  the authentication boundary and does not cut arm torque. Removing the filter
+  requires explicitly deleting `inet lekiwi_motor_guard`; stopping the unit
+  leaves it in place. Do not run a later global `nft flush ruleset`.
 - The zenoh sensor bridge accepts only peers that present a certificate signed
   by the robot's private CA, and presents its own
   (`config/zenoh_device.json5`, `enable_mtls: true`); it refuses to start
