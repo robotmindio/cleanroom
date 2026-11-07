@@ -216,6 +216,11 @@ def system(tmp_path):
     for node in (gateway, client, peers, guard):
         node.destroy_node()
     context.try_shutdown()
+    with sqlite3.connect(path) as database:
+        print('task fixture states:', database.execute(
+            'SELECT state,pause_requested,navigation_stopped,cancel_requested,remaining_sec FROM tasks').fetchall())
+        print('task fixture transitions:', [(at, json.loads(data).get('state')) for at, data in database.execute(
+            "SELECT at,data FROM events WHERE kind='state' ORDER BY seq")])
 
 
 def test_admission_deduplicates_and_rejects_conflicting_payload(system):
@@ -567,16 +572,16 @@ def test_late_result_reply_preserves_current_lookup(tmp_path):
 @pytest.mark.parametrize('fault', ['collision', 'permission'])
 def test_navigation_pause_waits_for_terminal_proof_then_resumes_same_destination(system, fault):
     peers, start, status, stop, _ = system
+    peers.hold_cancel = True
     assert start('navigate', '{"x":1,"y":2,"yaw":0.5}').accepted
     wait(lambda: len(peers.received) == 1 and status().state == 'running')
     original = peers.received[0]
     old_row = peers.journal_row('task-1')
-    peers.hold_cancel = True
     if fault == 'collision':
         peers.collision_stop = True
     else:
         peers.permission = False
-    wait(lambda: status().state == 'paused')
+    wait(lambda: peers.journal_row('task-1')['state'] == 'paused')
     budget = peers.journal_row('task-1')['remaining_sec']
     time.sleep(1.2)
     assert peers.journal_row('task-1')['remaining_sec'] == budget
@@ -717,9 +722,9 @@ def test_reconciliation_requires_replacement_server_and_clear_owner_guard(origin
 
 def test_navigation_pause_with_unconfirmed_stop_expires_owner_lease(system):
     peers, start, status, _, _ = system
+    peers.hold_cancel = True
     assert start('navigate', '{"x":1,"y":2}').accepted
     wait(lambda: len(peers.received) == 1 and status().state == 'running')
-    peers.hold_cancel = True
     peers.collision_stop = True
     wait(lambda: 'task-1' in peers.gateway._pausing)
     peers.gateway._pause_started['task-1'] -= 4.0
@@ -791,11 +796,11 @@ def test_unknown_native_result_stops_lease_without_a_server_identity(tmp_path):
 @pytest.mark.parametrize('stop_unconfirmed', [False, True])
 def test_restart_during_navigation_pause_preserves_intent_until_terminal_proof(system, stop_unconfirmed):
     peers, start, status, stop, restart = system
+    peers.hold_cancel = True
     assert start('navigate', '{"x":1,"y":2}').accepted
     wait(lambda: len(peers.received) == 1 and status().state == 'running')
-    peers.hold_cancel = True
     peers.collision_stop = True
-    wait(lambda: status().state == 'paused')
+    wait(lambda: peers.journal_row('task-1')['state'] == 'paused')
     budget = peers.journal_row('task-1')['remaining_sec']
     if stop_unconfirmed:
         peers.gateway._pause_started['task-1'] -= 4.0
