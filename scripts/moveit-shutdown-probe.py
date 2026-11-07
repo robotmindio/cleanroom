@@ -11,9 +11,11 @@ and trajectory execution succeeded before shutdown.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import platform
+import random
 import subprocess
 import sys
 from collections.abc import Sequence
@@ -122,8 +124,11 @@ def main() -> int:
     output_chunks: list[str] = []
     readiness_buffer = ""
     launch_error: str | None = None
+    probe_domain: int | None = None
+    isolation = contextlib.ExitStack()
 
     try:
+        import domain_coordinator
         import launch
         from launch.actions import EmitEvent, TimerAction
         from launch.event_handlers import OnProcessExit, OnProcessIO
@@ -131,6 +136,12 @@ def main() -> int:
         import launch_ros.actions
         from lekiwi_rmf.moveit_config import moveit_config_builder
 
+        # Reserve a separate graph so probe services cannot answer the live stack.
+        caller_domain = int(os.environ.get("ROS_DOMAIN_ID", "0"))
+        domains = [domain for domain in range(1, 101) if domain != caller_domain]
+        probe_domain = isolation.enter_context(
+            domain_coordinator.domain_id(selector=lambda: random.choice(domains))
+        )
         moveit_config = moveit_config_builder("false").to_moveit_configs()
         parameters = moveit_config.to_dict()
         parameters["octomap_resolution"] = 0.1
@@ -139,6 +150,7 @@ def main() -> int:
             package="moveit_ros_move_group",
             executable="move_group",
             name="move_group_shutdown_probe",
+            additional_env={"ROS_DOMAIN_ID": str(probe_domain)},
             output="log",
             parameters=[parameters],
             respawn=False,
@@ -187,6 +199,8 @@ def main() -> int:
         launch_service.run(shutdown_when_idle=False)
     except Exception as error:  # Preserve evidence for dependency/config failures.
         launch_error = f"{type(error).__name__}: {error}"
+    finally:
+        isolation.close()
 
     combined_output = "".join(output_chunks)
     returncode = state["returncode"]
@@ -201,6 +215,7 @@ def main() -> int:
     artifact = {
         "schema_version": 1,
         "probe": "moveit_shutdown",
+        "ros_domain_id": probe_domain,
         "timestamp_utc": datetime.now(timezone.utc).isoformat(),
         "revision": revision,
         "working_tree_dirty": bool(dirty_output),
