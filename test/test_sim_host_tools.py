@@ -103,3 +103,50 @@ def test_sim_up_records_one_launch_session_and_passes_arguments_through(tmp_path
     assert command == ["launch", "lekiwi_rmf", "bringup.launch.py", "profile:=sim", "slam_mode:=localization", "gui:=false"]
     # The recorded stack PID is the process that became ros2 launch.
     assert (logs / "runtime" / "stack.pid").read_text().strip() == pid
+
+
+def test_shutdown_probe_reserves_an_isolated_domain_through_launch_failure(tmp_path, monkeypatch):
+    import contextlib
+    import json
+    from types import SimpleNamespace
+
+    import domain_coordinator
+    import launch_ros.actions
+    from lekiwi_rmf import moveit_config
+
+    probe = _load("isolated_shutdown_probe", "scripts/moveit-shutdown-probe.py")
+    monkeypatch.setenv("ROS_DOMAIN_ID", "42")
+    monkeypatch.setenv("ROS_LOG_DIR", str(tmp_path / "caller-logs"))
+    output = tmp_path / "probe.json"
+    monkeypatch.setattr(probe, "_parse_arguments",
+                        lambda: SimpleNamespace(output=output, timeout=1))
+    monkeypatch.setattr(probe, "_command_output", lambda *args, **kwargs: None)
+    monkeypatch.setattr(probe, "_package_versions", lambda: {})
+    monkeypatch.setattr(probe, "_package_prefix", lambda *args: None)
+    monkeypatch.setattr(moveit_config, "moveit_config_builder",
+                        lambda _: SimpleNamespace(to_moveit_configs=lambda: SimpleNamespace(to_dict=lambda: {})))
+    held = []
+    captured = {}
+
+    @contextlib.contextmanager
+    def lease(*, selector):
+        domain = selector()
+        assert 1 <= domain <= 100 and domain != 42
+        held.append(domain)
+        try:
+            yield domain
+        finally:
+            held.clear()
+
+    def node(**kwargs):
+        captured.update(kwargs)
+        assert held == [int(kwargs["additional_env"]["ROS_DOMAIN_ID"])]
+        raise RuntimeError("stop before launching the isolated process")
+
+    monkeypatch.setattr(domain_coordinator, "domain_id", lease)
+    monkeypatch.setattr(launch_ros.actions, "Node", node)
+    assert probe.main() == 1
+    result = json.loads(output.read_text())
+    assert result["ros_domain_id"] == int(captured["additional_env"]["ROS_DOMAIN_ID"])
+    assert "stop before launching" in result["launch_error"]
+    assert not held and os.environ["ROS_DOMAIN_ID"] == "42"

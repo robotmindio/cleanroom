@@ -46,6 +46,10 @@ launch Gazebo as a launch-managed process, use a fresh transport partition per
 invocation, and hold a shared CTest resource lock so a stale or parallel server
 cannot supply their evidence.
 
+The shutdown probe reserves its own ROS domain through the existing test-domain
+coordinator, excluding the caller's domain, so its MoveIt services cannot answer
+the managed stack. The chosen domain is retained in its JSON evidence.
+
 The runner directly invokes `scripts/moveit-shutdown-probe.py` and keeps its
 revision-bound JSON. It puts the selected build's install prefix ahead of any
 older sourced overlay and requires schema 1, that exact package prefix, the
