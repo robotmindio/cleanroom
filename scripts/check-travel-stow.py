@@ -11,14 +11,18 @@ import argparse
 import math
 import sys
 import time
-from pathlib import Path
 import xml.etree.ElementTree as ET
+from pathlib import Path
 
 import rclpy
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import JointState
 
-from lekiwi_rmf.motion_guards import FUTURE_STAMP_TOLERANCE_NS, positive_seconds_ns, stamp_ns
+from lekiwi_rmf.motion_guards import (
+    FUTURE_STAMP_TOLERANCE_NS,
+    positive_seconds_ns,
+    stamp_ns,
+)
 
 SEMANTIC = Path(__file__).resolve().parents[1] / "config" / "lekiwi.srdf"
 TOLERANCE = 0.02
