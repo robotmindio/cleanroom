@@ -1385,12 +1385,15 @@ def _launcher(tmp_path, body, *args, **env):
     return subprocess.run(
         ["bash", "-c", script, "launcher-test", *args],
         env={**os.environ, "LAUNCHER_LIB": str(ROOT / "scripts/lib/launcher.sh"),
-             "LEKIWI_LOGS": str(tmp_path / "logs"), **env},
+             "LEKIWI_LOGS": str(tmp_path / "logs"),
+             "LEKIWI_RUNTIME_DIR": str(tmp_path / "logs" / "runtime"), **env},
         capture_output=True, text=True, timeout=30,
     )
 
 
-def test_launcher_init_serializes_startup_and_children_never_hold_the_lock(tmp_path):
+def test_launcher_init_serializes_startup_and_children_never_hold_the_lock(tmp_path, monkeypatch):
+    outside = tmp_path / "outside-runtime"
+    monkeypatch.setenv("LEKIWI_RUNTIME_DIR", str(outside))
     runtime = tmp_path / "logs" / "runtime"
     # The first launcher starts a long-running child, then keeps the lock while a
     # second launcher of the same name tries to start.
@@ -1408,6 +1411,7 @@ bash -c 'source "$LAUNCHER_LIB"; launcher_init demo; echo third-started' > "$LOG
 [[ $(<"$LOGS/third") == third-started ]]
 ''')
     assert result.returncode == 0, result.stderr
+    assert not outside.exists()
     child = int((runtime / "child.pid").read_text())
     try:
         # The recorded PID leads its own session and process group, which ros-stop signals.
