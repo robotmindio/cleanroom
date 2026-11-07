@@ -221,3 +221,22 @@ or model change is justified by that result alone. A later retry outlived the
 finite simulation fixture and found no action server, so it supplies no further
 actuator evidence. The passing shoulder interruption is distinct from wrist
 tracking qualification and does not grant administrator acceptance.
+
+## Wrist-roll physics tracking correction
+
+A renderer-free domain-232 extension of the existing physics smoke requested
+0.10 rad wrist roll together with shoulder pan and gripper motion. With the
+original derivative gain 0.4, the wrist reached only 0.0249 rad and violated
+the unchanged 0.05-rad goal tolerance. Extending only the diagnostic goal
+allowance from two to eight seconds still failed (0.0176 rad), so additional
+waiting did not resolve the observed tracking error.
+
+Changing only the simulated wrist-roll derivative gain to 0.02 reached
+0.099925 rad; repeating with the original two-second goal allowance reached
+0.099889 rad. Both runs passed the existing base, shoulder and gripper checks.
+The tracked physics smoke now includes this wrist target and checks its actual
+feedback with the same 0.05-rad tolerance. Proportional/integral gains, effort
+limits, safety leases, CAD geometry and hardware motor configuration are
+unchanged. These are simulator results, not physical wrist qualification.
+Private experiment logs are under
+`20261107-temporal-tail/wrist-physics/`.
