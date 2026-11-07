@@ -304,7 +304,7 @@ done
             "@CURVE_AUTHORIZED_CLIENTS@", "@CURVE_HEALTH_CLIENT_SECRET@",
         ):
             assert placeholder not in text
-        if unit.name == "lekiwi-awake.service":
+        if unit.name in {"lekiwi-awake.service", "lekiwi-motor-network.service"}:
             assert "User=root" in text and str(ROOT) not in text
             continue
         assert "User=robot" in text
@@ -315,7 +315,7 @@ done
     assert "host-health-check.py --host 127.0.0.1" in host
     for unit in tmp_path.glob("*.service"):
         rendered = unit.read_text(encoding="utf-8")
-        if unit.name == "lekiwi-awake.service":
+        if unit.name in {"lekiwi-awake.service", "lekiwi-motor-network.service"}:
             assert "NoNewPrivileges=yes" in rendered and "ProtectSystem=strict" in rendered
             continue
         for setting in (
@@ -1744,6 +1744,8 @@ def test_motor_network_guard_installs_without_restarting_motors(tmp_path):
         assert stat.S_IMODE((root / target).stat().st_mode) == 0o644
     unit = (root / 'etc/systemd/system/lekiwi-motor-network.service').read_text()
     assert 'Before=lekiwi-host.service' in unit
+    assert 'User=root' in unit and 'CapabilityBoundingSet=CAP_NET_ADMIN' in unit
+    assert 'RestrictAddressFamilies=AF_NETLINK AF_UNIX' in unit
     assert not re.search(r'^(Requires|BindsTo|PartOf|ExecStop)=', unit, re.MULTILINE)
     rules = (root / 'etc/lekiwi/motor-network.nft').read_text()
     assert 'flush ruleset' not in rules
