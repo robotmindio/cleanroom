@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import math
 import struct
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -23,6 +24,7 @@ import rclpy
 import yaml
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from nav_msgs.msg import Odometry
+from rclpy.clock import Clock, ClockType
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
@@ -227,7 +229,8 @@ class SafetySupervisor(Node):
         if permission_timeout >= state_timeout:
             raise ValueError("permission_timeout must be shorter than state_timeout")
         battery_timeout = positive_seconds_ns(float(self.get_parameter("battery_timeout").value), "battery_timeout")
-        requirements: dict[str, Requirement] = {}
+        requirements: dict[str, Requirement] = {"clock": Requirement(permission_timeout)}
+        self._last_ros_ns: int | None = None
         require_driver_state = bool(self.get_parameter("require_driver_state").value)
         if require_driver_state:
             requirements["driver"] = Requirement(state_timeout)
@@ -357,11 +360,18 @@ class SafetySupervisor(Node):
             raise ValueError(
                 "publish_frequency must refresh permission before permission_timeout"
             )
-        self.create_timer(1.0 / frequency, self._publish)
+        self._watchdog_clock = Clock(clock_type=ClockType.STEADY_TIME)
+        self.create_timer(1.0 / frequency, self._publish, clock=self._watchdog_clock)
         self._publish()
 
     def _now(self) -> int:
-        return self.get_clock().now().nanoseconds
+        return time.monotonic_ns()
+
+    def _source_time_ns(self, stamp) -> int:
+        source = stamp_ns(stamp)
+        now = self._now()
+        # Preserve capture age at receipt, then age it even if ROS time stops or jumps.
+        return now - (self.get_clock().now().nanoseconds - source) if source else now
 
     def _on_driver(self, message: String) -> None:
         self._machine.driver_state = message.data
@@ -396,7 +406,7 @@ class SafetySupervisor(Node):
         elif stamp <= 0:
             failure = "scan timestamp is missing"
         self._machine.update(
-            "scan", failure is None, stamp or self._now(),
+            "scan", failure is None, self._source_time_ns(message.header.stamp),
             failure or f"coverage={coverage:.2f} rad",
         )
 
@@ -404,7 +414,7 @@ class SafetySupervisor(Node):
         stamp = stamp_ns(message.header.stamp)
         stream_healthy = _depth_layout(message) is not None and stamp > 0
         self._machine.update(
-            "depth_stream", stream_healthy, stamp or self._now(),
+            "depth_stream", stream_healthy, self._source_time_ns(message.header.stamp),
             "malformed or stampless depth stream",
         )
         healthy = (
@@ -423,7 +433,7 @@ class SafetySupervisor(Node):
                 throttle_duration_sec=5.0,
             )
         self._machine.update(
-            "depth", healthy, stamp or self._now(),
+            "depth", healthy, self._source_time_ns(message.header.stamp),
             "invalid, blind, or stampless point cloud",
         )
 
@@ -435,7 +445,7 @@ class SafetySupervisor(Node):
             message.twist.twist.angular.z,
         )
         healthy = all(math.isfinite(value) for value in values) and stamp_ns(message.header.stamp) > 0
-        self._machine.update("odometry", healthy, stamp_ns(message.header.stamp) or self._now(), "non-finite/stampless odometry")
+        self._machine.update("odometry", healthy, self._source_time_ns(message.header.stamp), "non-finite/stampless odometry")
 
     def _on_imu(self, message: Imu) -> None:
         values = (
@@ -445,7 +455,7 @@ class SafetySupervisor(Node):
             message.linear_acceleration.z,
         )
         healthy = all(math.isfinite(value) for value in values) and stamp_ns(message.header.stamp) > 0
-        self._machine.update("imu", healthy, stamp_ns(message.header.stamp) or self._now(), "non-finite/stampless IMU feedback")
+        self._machine.update("imu", healthy, self._source_time_ns(message.header.stamp), "non-finite/stampless IMU feedback")
 
     def _on_joints(self, message: JointState) -> None:
         positions = dict(zip(message.name, message.position))
@@ -457,7 +467,7 @@ class SafetySupervisor(Node):
             abs(positions[name] - expected) <= self._stow_tolerance
             for name, expected in self._stow.items()
         )
-        self._machine.update("joints", healthy, stamp_ns(message.header.stamp) or self._now(), "incomplete/stampless joint feedback")
+        self._machine.update("joints", healthy, self._source_time_ns(message.header.stamp), "incomplete/stampless joint feedback")
 
     def _on_bumper(self, message: Bool) -> None:
         self._machine.update("bumper", not message.data, self._now(), "bumper active")
@@ -478,7 +488,7 @@ class SafetySupervisor(Node):
         healthy = _valid_battery(
             message, self._minimum_battery_voltage, self._minimum_battery_percentage
         ) and stamp_ns(message.header.stamp) > 0
-        self._machine.update("battery", healthy, stamp_ns(message.header.stamp) or self._now(), "battery below threshold or stampless")
+        self._machine.update("battery", healthy, self._source_time_ns(message.header.stamp), "battery below threshold or stampless")
 
     def _on_hardware_diagnostics(self, message: DiagnosticArray) -> None:
         healthy = stamp_ns(message.header.stamp) > 0 and bool(message.status) and all(
@@ -488,7 +498,7 @@ class SafetySupervisor(Node):
             f"{status.name}: {status.message}"
             for status in message.status if status.level >= DiagnosticStatus.ERROR
         ) or "no motor diagnostics"
-        self._machine.update("motor_health", healthy, stamp_ns(message.header.stamp) or self._now(), detail)
+        self._machine.update("motor_health", healthy, self._source_time_ns(message.header.stamp), detail)
 
     def _reset(self, _request: Trigger.Request, response: Trigger.Response) -> Trigger.Response:
         response.success, response.message = self._machine.reset(self._now())
@@ -496,6 +506,11 @@ class SafetySupervisor(Node):
         return response
 
     def _publish(self) -> None:
+        ros_ns = self.get_clock().now().nanoseconds
+        if ros_ns != self._last_ros_ns:
+            progressing = ros_ns > 0 and (self._last_ros_ns is None or ros_ns > self._last_ros_ns)
+            self._machine.update("clock", progressing, self._now(), "ROS clock stopped or moved backwards")
+            self._last_ros_ns = ros_ns
         measured = self._machine.decision(self._now())
         decision = permit_unless_strict(
             measured, self._strict, self._machine.driver_state

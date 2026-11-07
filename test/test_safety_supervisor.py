@@ -642,6 +642,7 @@ def test_scan_diagnostic_reports_invalid_ranges_separately_from_coverage():
     node._require_full_scan = True
     node._minimum_scan_coverage = 4.5
     node._now = lambda: SECOND
+    node.get_clock = lambda: types.SimpleNamespace(now=lambda: types.SimpleNamespace(nanoseconds=SECOND))
     updates = []
     node._machine = types.SimpleNamespace(update=lambda *values: updates.append(values))
 
@@ -1025,3 +1026,85 @@ def test_safety_policy_import_requires_no_ros():
                     'import sys; import lekiwi_rmf.safety_state; '
                     'assert not any(name.startswith(("rclpy", "sensor_msgs", "nav_msgs")) '
                     'for name in sys.modules)'], check=True)
+
+
+def test_source_acquisition_age_is_preserved_in_monotonic_time():
+    from builtin_interfaces.msg import Time
+
+    node = object.__new__(SafetySupervisor)
+    node._now = lambda: 10 * SECOND
+    node.get_clock = lambda: types.SimpleNamespace(now=lambda: types.SimpleNamespace(nanoseconds=100 * SECOND))
+    assert node._source_time_ns(Time(sec=99, nanosec=500_000_000)) == 9_500_000_000
+    assert node._source_time_ns(Time(sec=101)) == 11 * SECOND
+    assert node._source_time_ns(Time()) == 10 * SECOND
+
+
+def test_supervisor_publishes_and_expires_inputs_while_ros_time_is_paused():
+    import time
+    import rclpy
+    from builtin_interfaces.msg import Time as Stamp
+    from rclpy.time import Time
+
+    rclpy.init(args=['--ros-args', '-p', 'use_sim_time:=true'])
+    node = None
+    try:
+        node = SafetySupervisor()
+        node.get_clock().set_ros_time_override(Time(seconds=10))
+        node._machine.driver_state = 'ARMED'
+        node._machine.arm_stowed = True
+        for name in node._machine.requirements:
+            node._machine.update(name, True, node._source_time_ns(Stamp(sec=10)))
+        published = []
+        node._base_pub = types.SimpleNamespace(publish=lambda msg: published.append(msg.data))
+        node._publish()
+        deadline = time.monotonic() + 1.5
+        while time.monotonic() < deadline and (not published or published[-1] or len(published) < 4):
+            # Repeated input cannot keep motion alive when its source clock is frozen.
+            for name in node._machine.requirements:
+                if name != 'clock':
+                    node._machine.update(name, True, node._now())
+            rclpy.spin_once(node, timeout_sec=.02)
+        assert node.get_clock().now().nanoseconds == 10 * SECOND
+        assert True in published and published[-1] is False and len(published) >= 4
+        node.get_clock().set_ros_time_override(Time(seconds=9))
+        node._publish()
+        assert published[-1] is False
+        node.get_clock().set_ros_time_override(Time(seconds=11))
+        node._publish()
+        assert published[-1] is True
+    finally:
+        if node is not None:
+            node.destroy_node()
+        rclpy.try_shutdown()
+
+
+def test_stamped_sensor_callbacks_keep_acquisition_age():
+    import rclpy
+    from builtin_interfaces.msg import Time as Stamp
+    from diagnostic_msgs.msg import DiagnosticArray
+    from nav_msgs.msg import Odometry
+    from rclpy.time import Time
+    from sensor_msgs.msg import Imu, JointState
+
+    rclpy.init(args=['--ros-args', '-p', 'use_sim_time:=true'])
+    node = None
+    try:
+        node = SafetySupervisor()
+        node.get_clock().set_ros_time_override(Time(seconds=10))
+        node._now = lambda: 20 * SECOND
+        updates = []
+        node._machine = types.SimpleNamespace(update=lambda *values: updates.append(values))
+        for callback, kind in [('_on_scan', LaserScan), ('_on_depth', PointCloud2),
+                               ('_on_odometry', Odometry), ('_on_imu', Imu),
+                               ('_on_joints', JointState), ('_on_battery', BatteryState),
+                               ('_on_hardware_diagnostics', DiagnosticArray)]:
+            message = kind()
+            message.header.stamp = Stamp(sec=9, nanosec=500_000_000)
+            getattr(node, callback)(message)
+        assert {value[0] for value in updates} == {
+            'scan', 'depth_stream', 'depth', 'odometry', 'imu', 'joints', 'battery', 'motor_health'}
+        assert all(value[2] == 19_500_000_000 for value in updates)
+    finally:
+        if node is not None:
+            node.destroy_node()
+        rclpy.try_shutdown()

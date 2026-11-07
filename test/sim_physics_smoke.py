@@ -95,14 +95,15 @@ class PhysicsSmoke(Node):
 
         goal = FollowJointTrajectory.Goal()
         goal.trajectory = JointTrajectory(
-            joint_names=["arm_shoulder_pan", "arm_gripper"]
+            joint_names=["arm_shoulder_pan", "arm_gripper", "arm_wrist_roll"]
         )
-        point = JointTrajectoryPoint(positions=[0.25, 0.30])
+        point = JointTrajectoryPoint(positions=[0.25, 0.30, 0.10])
         point.time_from_start.sec = 2
         goal.trajectory.points = [point]
         goal.goal_tolerance = [
             JointTolerance(name="arm_shoulder_pan", position=0.08),
             JointTolerance(name="arm_gripper", position=0.08),
+            JointTolerance(name="arm_wrist_roll", position=0.05),
         ]
         goal.goal_time_tolerance.sec = 2
         send = self.arm.send_goal_async(goal)
@@ -130,10 +131,13 @@ class PhysicsSmoke(Node):
             raise RuntimeError(f"simulated shoulder feedback missed target: {final:.3f}")
         if not math.isclose(gripper, 0.30, abs_tol=0.08):
             raise RuntimeError(f"simulated gripper feedback missed target: {gripper:.3f}")
+        wrist = float(self.joints["arm_wrist_roll"])
+        if not math.isclose(wrist, 0.10, abs_tol=0.05):
+            raise RuntimeError(f"simulated wrist feedback missed target: {wrist:.3f}")
         print(
             "simulation physics smoke passed: "
             f"odom dx={dx:.3f}, dy={dy:.3f}, shoulder={final:.3f}, "
-            f"gripper={gripper:.3f}"
+            f"gripper={gripper:.3f}, wrist={wrist:.3f}"
         )
 
 
