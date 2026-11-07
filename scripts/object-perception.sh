@@ -5,6 +5,7 @@ set +u
 # shellcheck source=/dev/null
 source "$script_dir/setup.bash"
 set -u
+export PYTHONNOUSERSITE=1
 export PYTHONPATH="$script_dir/..${PYTHONPATH:+:$PYTHONPATH}"
 if [[ ${1:-} == --describe ]]; then
   shift

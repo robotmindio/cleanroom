@@ -271,7 +271,7 @@ def test_cli_uses_the_pinned_private_runtime(monkeypatch, tmp_path):
     assert calls[0][0] == python
     assert calls[0][2]['PYTHONNOUSERSITE'] == '1'
     object_recognition.use_model_runtime('yolox')
-    assert len(calls) == 1
+    assert len(calls) == (1 if object_recognition.sys.flags.no_user_site else 2)
 
 
 def test_diagnostics_reads_clock_before_frame_lock_to_avoid_jump_deadlock():

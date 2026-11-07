@@ -31,6 +31,23 @@ def test_fiber_stationary_profile_matches_the_tracked_camera_and_proposal(filena
     assert not profile['enabled'] and not profile['allow_search'] and not profile['views']
     assert profile['max_evidence_age_sec'] == profile['confirmation_window_sec'] == 2
 
+def test_local_yolox_canary_keeps_the_wrist_binding_and_existing_safety_bounds():
+    from lekiwi_rmf.object_cameras import camera_bindings
+    from lekiwi_rmf.object_recognition import recognition_identity
+
+    root = Path(__file__).resolve().parents[1]
+    value = json.loads((root / 'config/fiber_perception_wrist_yolox_canary.json').read_text())
+    assert value['camera_id'] == 'wrist'
+    assert value['camera_sha256'] == camera_bindings(['wrist'])['wrist']['sha256']
+    assert value['model_sha256'] == recognition_identity('yolox')[0]
+    assert value['profile_revision'] == default_profile('yolox').revision
+    assert value['minimum_score'] == .5
+    assert value['max_evidence_age_sec'] == value['confirmation_window_sec'] == 2
+    assert value['max_duration_sec'] == 15
+    assert not value['open_vocabulary'] and not value['enabled'] and not value['allow_search']
+    assert not value['views']
+
+
 OPEN = default_profile('remote_grounding_dino')
 
 

@@ -8,7 +8,7 @@ from launch_ros.parameter_descriptions import ParameterValue
 import yaml
 
 from lekiwi_rmf.object_cameras import camera_bindings, config_directory
-from lekiwi_rmf.object_recognition import model_runtime, needs_private_runtime, perception_config, selected_models
+from lekiwi_rmf.object_recognition import PERCEPTION_CONFIGS, model_runtime, needs_private_runtime, perception_config, selected_models
 
 
 def nodes(context):
@@ -16,11 +16,10 @@ def nodes(context):
     camera_bindings(cameras)
     config = perception_config(LaunchConfiguration('perception_mode').perform(context))
     settings = yaml.safe_load(config.read_text())['/**']['ros__parameters']
-    environment, prefix = {}, ''
+    environment, prefix = {'PYTHONNOUSERSITE': '1'}, ''
     models = selected_models(settings)
     if needs_private_runtime(*models):
         prefix = str(model_runtime(*models))
-        environment = {'PYTHONNOUSERSITE': '1'}
     shared = {'use_sim_time': ParameterValue(LaunchConfiguration('use_sim_time'), value_type=bool),
               'camera_ids': cameras}
     return [
@@ -35,7 +34,7 @@ def generate_launch_description():
     deployment = yaml.safe_load((config_directory() / 'object_perception_deployment.yaml').read_text())
     return LaunchDescription([
         DeclareLaunchArgument('use_sim_time', default_value='false'),
-        DeclareLaunchArgument('perception_mode', default_value='remote', choices=['remote', 'local']),
+        DeclareLaunchArgument('perception_mode', default_value='remote', choices=list(PERCEPTION_CONFIGS)),
         DeclareLaunchArgument('cameras', default_value=','.join(deployment['cameras'])),
         OpaqueFunction(function=nodes),
     ])

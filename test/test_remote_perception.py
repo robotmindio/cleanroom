@@ -859,7 +859,7 @@ def test_primary_retry_recovers_quickly_and_backs_off_during_a_sustained_outage(
         context.try_shutdown()
 
 
-@pytest.mark.parametrize('mode,models', [('remote', [REMOTE, 'rtdetr_v2_r18']), ('local', ['rtdetr_v2_r18'])])
+@pytest.mark.parametrize('mode,models', [('remote', [REMOTE, 'rtdetr_v2_r18']), ('local', ['rtdetr_v2_r18']), ('local_yolox', ['yolox'])])
 def test_launch_binds_both_nodes_to_the_selected_mode(mode, models, monkeypatch):
     import importlib.util
     from pathlib import Path
@@ -884,6 +884,7 @@ def test_launch_binds_both_nodes_to_the_selected_mode(mode, models, monkeypatch)
 
 
 @pytest.mark.parametrize('mode,model,vocabulary', [('local', 'rtdetr_v2_r18', 'closed'),
+                                                 ('local_yolox', 'yolox', 'closed'),
                                                  ('remote', REMOTE, 'open')])
 def test_describe_reports_the_same_mode_as_launch(mode, model, vocabulary, monkeypatch, capsys):
     from lekiwi_rmf import object_cameras
@@ -898,5 +899,20 @@ def test_describe_reports_the_same_mode_as_launch(mode, model, vocabulary, monke
 
 
 def test_perception_mode_rejects_unknown_configuration():
-    with pytest.raises(ValueError, match='remote or local'):
+    with pytest.raises(ValueError, match='perception mode must be one of'):
         object_recognition.perception_config('../unknown')
+
+
+def test_yolox_descriptor_disables_user_site_before_computing_its_identity(monkeypatch):
+    import sys
+
+    interpreter = sys.executable
+    monkeypatch.setattr(object_recognition, 'sys', SimpleNamespace(
+        executable=interpreter, prefix=sys.prefix,
+        flags=SimpleNamespace(no_user_site=0), argv=[object_recognition.__file__]))
+    calls = []
+    monkeypatch.setattr(object_recognition.os, 'execve', lambda *args: calls.append(args))
+    object_recognition.use_model_runtime('yolox')
+    assert len(calls) == 1
+    assert str(calls[0][0]) == interpreter
+    assert calls[0][2]['PYTHONNOUSERSITE'] == '1'
