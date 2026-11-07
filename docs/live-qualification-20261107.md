@@ -106,3 +106,29 @@ WAL write/sync waits. These observations identify a separate server-side
 latency problem; they do not establish its storage root cause or qualify the
 recognizer across scenes. No timeout or safety gate was relaxed to count a
 success.
+
+## Simulation follow-up on release 5791f96
+
+The canonical runner completed all **105/105 CTests** in 507.35 seconds against
+the exact sealed release. Its combined summary has no required-check failures:
+source/build provenance, clean tree, dependency/static checks, EGL 1.5/OpenGL
+4.6 renderer, isolated clean MoveIt shutdown, live scan/depth, active collision
+monitor, guarded command topology and MoveIt parameters all passed. Evidence:
+`20261107-resume/simulation/evidence/summary.json` and `commands/ctest.log`.
+The summary correctly remains `NOT_QUALIFIED`: evidence collection does not
+grant administrator acceptance.
+
+A separately launched RViz MotionPlanning panel showed velocity scaling 0.50
+and acceleration scaling 0.40. A temporary wrist collision object was visible
+in its Scene Objects list and returned explicit contacts from MoveIt. The
+object was removed afterward. Evidence under `simulation-manual/` includes
+`rviz-main.png`, `rviz-obstacle.png`, and `scene.json`.
+
+Execution-interruption acceptance remains incomplete. Before injecting the
+object, the workspace gate intermittently reported stale state-validity results
+and the supervisor had latched motion denial. A pre-existing denial cannot
+prove that the injected object interrupted execution. The host also showed
+about 45% CPU scheduling pressure; this is a capacity observation, not a proven
+software root cause. The 0.15-second validity lease was not widened. The first
+manual helper also expected a hardware driver-state topic absent from this
+simulation; its failed result is retained and is not counted as acceptance.
