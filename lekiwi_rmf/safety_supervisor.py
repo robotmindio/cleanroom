@@ -229,7 +229,8 @@ class SafetySupervisor(Node):
         if permission_timeout >= state_timeout:
             raise ValueError("permission_timeout must be shorter than state_timeout")
         battery_timeout = positive_seconds_ns(float(self.get_parameter("battery_timeout").value), "battery_timeout")
-        requirements: dict[str, Requirement] = {}
+        requirements: dict[str, Requirement] = {"clock": Requirement(permission_timeout)}
+        self._last_ros_ns: int | None = None
         require_driver_state = bool(self.get_parameter("require_driver_state").value)
         if require_driver_state:
             requirements["driver"] = Requirement(state_timeout)
@@ -505,6 +506,11 @@ class SafetySupervisor(Node):
         return response
 
     def _publish(self) -> None:
+        ros_ns = self.get_clock().now().nanoseconds
+        if ros_ns != self._last_ros_ns:
+            progressing = ros_ns > 0 and (self._last_ros_ns is None or ros_ns > self._last_ros_ns)
+            self._machine.update("clock", progressing, self._now(), "ROS clock stopped or moved backwards")
+            self._last_ros_ns = ros_ns
         measured = self._machine.decision(self._now())
         decision = permit_unless_strict(
             measured, self._strict, self._machine.driver_state

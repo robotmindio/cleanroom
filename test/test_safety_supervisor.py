@@ -1059,9 +1059,19 @@ def test_supervisor_publishes_and_expires_inputs_while_ros_time_is_paused():
         node._publish()
         deadline = time.monotonic() + 1.5
         while time.monotonic() < deadline and (not published or published[-1] or len(published) < 4):
+            # Repeated input cannot keep motion alive when its source clock is frozen.
+            for name in node._machine.requirements:
+                if name != 'clock':
+                    node._machine.update(name, True, node._now())
             rclpy.spin_once(node, timeout_sec=.02)
         assert node.get_clock().now().nanoseconds == 10 * SECOND
         assert True in published and published[-1] is False and len(published) >= 4
+        node.get_clock().set_ros_time_override(Time(seconds=9))
+        node._publish()
+        assert published[-1] is False
+        node.get_clock().set_ros_time_override(Time(seconds=11))
+        node._publish()
+        assert published[-1] is True
     finally:
         if node is not None:
             node.destroy_node()
