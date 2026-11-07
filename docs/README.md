@@ -41,3 +41,5 @@
 - [Scripts](../scripts/README.md): every script, one line each.
 - [Deferred work](../DEFERRED.md): open acceptance and deployment work with
   completion conditions and tracking issues.
+
+Latest native recovery and gate observations: [2026-11-07 evidence](live-qualification-20261107.md).
