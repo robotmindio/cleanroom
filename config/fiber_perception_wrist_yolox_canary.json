@@ -1,0 +1,21 @@
+{
+  "robot_id": "roboto-1",
+  "site_id": "home",
+  "camera_id": "wrist",
+  "camera_sha256": "1e26da0382c0b414132a03a4823c5529fa385d1d3405ad45aebb608745c1cc8e",
+  "model_sha256": "50e4abb361de258708bee760578501b512057ab590a7c3d8150314923bc5cabc",
+  "profile_revision": "515f31212948c96a191135dedcdaffd208fb15aeabf359f6029de355a6467fd1",
+  "enabled": false,
+  "allow_search": false,
+  "allow_any_color": true,
+  "views": [],
+  "max_duration_sec": 15,
+  "max_travel_m": 0.12,
+  "minimum_score": 0.5,
+  "max_evidence_age_sec": 2,
+  "confirmation_window_sec": 2,
+  "labels": [
+    "cup"
+  ],
+  "open_vocabulary": false
+}
