@@ -28,3 +28,15 @@ Apply the tracked near_field profile to the primary recognizer before admitting
 the wrist pilot, using /robot/perception/apply_profile with optimistic revision
 checking. The profile hash in every accepted observation must match this body.
 The platform caps stationary admission at15s independently of max_duration_sec.
+
+
+The optional `perception_mode:=local_yolox` selects the existing pinned OpenCV
+YOLOX recognizer, with the same 2 Hz inference and 2 s capture-age limit.
+`config/fiber_perception_wrist_yolox_canary.json` binds a disabled, stationary,
+image-only cup pilot to that operating point. Run it with
+`scripts/object-perception.sh perception_mode:=local_yolox cameras:=wrist` and
+register the disabled body at `/robot/profiles/wrist-yolox-canary-20261107`.
+Use the same enable/owned-goal/disable cleanup protocol above; no open-vocabulary
+query or near_field application is needed for this closed-vocabulary model.
+A source view that works for one model does not qualify another model or the
+independent scene corpus. Preserve the actual scene and every failed trial.

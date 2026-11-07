@@ -468,10 +468,14 @@ class Recognizer:
         return rows
 
 
+PERCEPTION_CONFIGS = {'remote': 'object_perception.yaml', 'local': 'object_perception_local.yaml',
+                      'local_yolox': 'object_perception_yolox.yaml'}
+
+
 def perception_config(mode='remote'):
-    if mode not in ('remote', 'local'):
-        raise ValueError('perception mode must be remote or local')
-    return config_directory() / ('object_perception_local.yaml' if mode == 'local' else 'object_perception.yaml')
+    if mode not in PERCEPTION_CONFIGS:
+        raise ValueError('perception mode must be one of ' + ', '.join(PERCEPTION_CONFIGS))
+    return config_directory() / PERCEPTION_CONFIGS[mode]
 
 
 def selected_models(settings):
@@ -490,7 +494,7 @@ def model_runtime(*names):
 
 def use_model_runtime(*names):
     python = model_runtime(*names)
-    if needs_private_runtime(*names) and Path(sys.prefix) != python.parent.parent:
+    if (needs_private_runtime(*names) and Path(sys.prefix) != python.parent.parent) or not sys.flags.no_user_site:
         if not python.exists():
             raise ValueError('install the selected model with scripts/install-object-model.py first')
         os.execve(python, [str(python), str(Path(sys.argv[0]).resolve()), *sys.argv[1:]],
@@ -501,7 +505,7 @@ def main(argv=None):
     import argparse
     from lekiwi_rmf.object_cameras import camera_bindings
     parser = argparse.ArgumentParser(description='Describe the selected perception operating point.')
-    parser.add_argument('--mode', choices=('remote', 'local'), default='remote')
+    parser.add_argument('--mode', choices=tuple(PERCEPTION_CONFIGS), default='remote')
     args = parser.parse_args(argv)
     settings = yaml.safe_load(perception_config(args.mode).read_text())['/**']['ros__parameters']
     use_model_runtime(*selected_models(settings))
