@@ -1,7 +1,7 @@
 # Product readiness and delivery epics
 
 For current implementation, acceptance gaps and the complete open-issue inventory,
-see [project status — 2026-11-05](project-status-20261105.md). The October assessment
+see [project status — 2026-11-07](project-status-20261107.md). The October assessment
 below predates the delivered perception, semantic-memory and Fiber objective software.
 
 Assessment date: 2026-10-13. Scope: this ROS repository and its tracked

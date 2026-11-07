@@ -1,5 +1,8 @@
 # Project completion and outstanding work — 2026-11-05
 
+For subsequent deployments, measurements and the current open-issue inventory,
+see [the November 7 report](project-status-20261107.md).
+
 This is a current inventory of documented acceptance gaps, open GitHub issues
 and missing product capabilities. It replaces the **current-status** interpretation
 of the October 13 readiness assessment; that assessment remains useful history.

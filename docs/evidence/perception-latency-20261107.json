@@ -1,0 +1,66 @@
+{
+  "schema": 1,
+  "revision": "7f51fed145694a51aa13afdb0b613069653bb5c6",
+  "source": "native diagnostic snapshots on the deployed compute host",
+  "scope": "stationary dark front and wrist streams, default remote recognizer and CPU fallback; no robot goals",
+  "max_rate_hz": 2.0,
+  "max_source_age_sec": 2.0,
+  "target_seconds_after_both_cameras_published": 90,
+  "total_wall_seconds_including_startup_and_cleanup": 104.67837440999574,
+  "cameras": {
+    "front": {
+      "received": 463,
+      "published": 77,
+      "overwritten": 384,
+      "rejected": 0,
+      "fallback_published": 4
+    },
+    "wrist": {
+      "received": 463,
+      "published": 75,
+      "overwritten": 385,
+      "rejected": 2,
+      "fallback_published": 3
+    }
+  },
+  "stages_sec": {
+    "sensor_age": {
+      "count": 512,
+      "p50": 0.037198575,
+      "p95": 0.071090826,
+      "p99": 0.081288133
+    },
+    "queue": {
+      "count": 154,
+      "p50": 0.003630682009970769,
+      "p95": 0.25210250401227735,
+      "p99": 0.4052526560014952
+    },
+    "inference": {
+      "count": 154,
+      "p50": 0.48075999999999997,
+      "p95": 0.54096,
+      "p99": 1.9751447959861252
+    },
+    "network": {
+      "count": 145,
+      "p50": 0.25442887201907116,
+      "p95": 0.314429136992069,
+      "p99": 0.535465299003143
+    }
+  },
+  "fresh": 152,
+  "late": 2,
+  "invalid": 0,
+  "over_budget": [
+    "network"
+  ],
+  "primary_model_sha256": "6ec9eb1f5a01c271a5b0b6ce6d95432148f94d33c16b1ad6a4ccca6ee2f5636f",
+  "fallback_model_sha256": "81778a0ac0300bfd3c885954d983f02a86ee3ce4469ef2a76b1a00100ddb3869",
+  "qualification": "MEASUREMENT_ONLY",
+  "limitations": [
+    "Frames were dark and blurred; no recognition acceptance.",
+    "Seven published fallback results do not qualify a controlled provider-outage scenario.",
+    "No active skill, navigation or task latency samples; no global budget change."
+  ]
+}
