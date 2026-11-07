@@ -240,3 +240,26 @@ limits, safety leases, CAD geometry and hardware motor configuration are
 unchanged. These are simulator results, not physical wrist qualification.
 Private experiment logs are under
 `20261107-temporal-tail/wrist-physics/`.
+
+## Combined-run recovery-fixture finding
+
+The deployed `9ca8e75` combined runner passed 104/105 CTests; the gateway's
+replacement-server test timed out while waiting for its initial running task,
+before replacing any server. Other required runner checks passed. This failed
+attempt remains under `20261107-temporal-tail/simulation-final/`.
+
+That test disabled result transport before admission and assumed exactly one
+initial send. A legitimate startup safety pause can require a confirmed stop
+and resume before the task under test is running. The fixture now establishes
+that the current goal is executing before losing its result transport, cancels
+the already pending result request as part of that injected loss, and compares
+against the sends observed at the fault boundary. It waits for the current
+goal's completion rather than any earlier cancellation. An additional case
+forces a startup permission loss and confirmed stop/resume before the same
+replacement-server/no-replay assertions. Production recovery and leases are
+unchanged.
+
+The run also reported gateway-executor teardown races. Its fixture now stops
+and joins the spin loop before destroying the executor's guard condition,
+including at restart. All 102 gateway tests passed with unhandled-thread
+warnings treated as errors; no such warnings were suppressed.

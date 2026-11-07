@@ -148,7 +148,20 @@ def system(tmp_path):
     thread.start()
     gateway_executor = SingleThreadedExecutor(context=context)
     gateway_executor.add_node(gateway)
-    gateway_thread = threading.Thread(target=gateway_executor.spin, daemon=True)
+    gateway_stopped = threading.Event()
+
+    def spin_gateway():
+        while not gateway_stopped.is_set():
+            gateway_executor.spin_once(timeout_sec=0.05)
+
+    def stop_gateway():
+        gateway_stopped.set()
+        gateway_executor.wake()
+        gateway_thread.join(timeout=5)
+        assert not gateway_thread.is_alive(), 'gateway executor did not stop'
+        assert gateway_executor.shutdown(timeout_sec=5)
+
+    gateway_thread = threading.Thread(target=spin_gateway, daemon=True)
     gateway_thread.start()
     submit = client.create_client(SubmitTask, '/robot/tasks/submit')
     get = client.create_client(GetTask, '/robot/tasks/get')
@@ -171,15 +184,15 @@ def system(tmp_path):
 
     def restart(allow_navigation=True):
         nonlocal gateway, gateway_executor, gateway_thread
-        gateway_executor.shutdown(timeout_sec=5)
-        gateway_thread.join(timeout=5)
+        stop_gateway()
         gateway.destroy_node()
         gateway = TaskGateway(context=context, parameter_overrides=[
             Parameter('database_path', value=path), Parameter('allow_navigation', value=allow_navigation)])
         peers.gateway = gateway
         gateway_executor = SingleThreadedExecutor(context=context)
         gateway_executor.add_node(gateway)
-        gateway_thread = threading.Thread(target=gateway_executor.spin, daemon=True)
+        gateway_stopped.clear()
+        gateway_thread = threading.Thread(target=spin_gateway, daemon=True)
         gateway_thread.start()
         wait(submit.service_is_ready)
 
@@ -197,8 +210,7 @@ def system(tmp_path):
     peers.on_gateway = on_gateway
     yield peers, start, status, stop, restart
     peers.finish = True
-    gateway_executor.shutdown(timeout_sec=5)
-    gateway_thread.join(timeout=5)
+    stop_gateway()
     executor.shutdown(timeout_sec=5)
     thread.join(timeout=5)
     for node in (gateway, client, peers, guard):
@@ -610,14 +622,40 @@ def test_cancel_and_restart_while_navigation_is_safely_paused(system, cancel):
         wait(lambda: status().state == 'canceled')
 
 
-@pytest.mark.parametrize('capability,child_active', [('explore', False), ('navigate', False), ('navigate', True)])
-def test_replacement_server_reconciles_forgotten_task_without_replay(system, capability, child_active):
+@pytest.mark.parametrize('capability,child_active,startup_pause', [
+    ('explore', False, False), ('navigate', False, False),
+    ('navigate', True, False), ('navigate', True, True)])
+def test_replacement_server_reconciles_forgotten_task_without_replay(system, capability, child_active, startup_pause):
     peers, start, status, _, _ = system
     gateway = peers.gateway
-    lookup = gateway._lookup_result
-    gateway._lookup_result = lambda _: None  # Simulate unavailable result transport.
+    if startup_pause:
+        execute = peers.execute
+
+        def pause_first_goal(goal, result, feedback):
+            if not peers.received:
+                peers.permission = False
+            return execute(goal, result, feedback)
+
+        peers.execute = pause_first_goal
     assert start(capability, '{"x":1,"y":2}' if capability == 'navigate' else '{}').accepted
-    wait(lambda: len(peers.received) == 1 and status().state == 'running')
+    if startup_pause:
+        wait(lambda: peers.journal_row('task-1')['navigation_stopped'])
+        peers.permission = True
+    wait(lambda: status().state == 'running' and peers.journal_row('task-1')['goal_id'] in peers.received)
+    received = list(peers.received)
+    assert not startup_pause or len(received) >= 2
+    running_goal = peers.journal_row('task-1')['goal_id']
+    lookup = gateway._lookup_result
+
+    def lose_results():
+        # Lose transport after admission, including the already pending result.
+        gateway._lookup_result = lambda _: None
+        pending = gateway._pending.pop(('result', 'task-1'), None)
+        if pending is not None:
+            gateway._result_clients[capability].remove_pending_request(pending)
+            pending.cancel()
+
+    peers.on_gateway(lose_results)
     if capability == 'navigate':
         wait(lambda: bool(peers.guard._active))
         peers.guard._status = lambda *_: None  # Lose terminal status, as with a crashed Nav2 server.
@@ -631,7 +669,7 @@ def test_replacement_server_reconciles_forgotten_task_without_replay(system, cap
         child.publish(GoalStatusArray(status_list=[GoalStatus(status=GoalStatus.STATUS_EXECUTING)]))
         wait(gateway._children.busy)
     peers.finish = True
-    wait(lambda: bool(peers.completed))
+    wait(lambda: running_goal in peers.completed)
     server = 'navigation' if capability == 'navigate' else 'exploration'
     getattr(peers, server).destroy()
     setattr(peers, server, ActionServer(
@@ -653,7 +691,7 @@ def test_replacement_server_reconciles_forgotten_task_without_replay(system, cap
     assert result['outcome_known'] is False
     assert result['termination_confirmed'] is True
     assert '_task' in result
-    assert len(peers.received) == 1
+    assert peers.received == received
     assert start(identifier='task-2').accepted
 
 
