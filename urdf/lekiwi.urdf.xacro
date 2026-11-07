@@ -336,7 +336,7 @@
       </plugin>
       <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
         <joint_name>arm_wrist_roll</joint_name><topic>/sim/arm/arm_wrist_roll/native_cmd_pos</topic><initial_position>0</initial_position>
-        <p_gain>12</p_gain><i_gain>0.1</i_gain><d_gain>0.4</d_gain><cmd_min>-2</cmd_min><cmd_max>2</cmd_max>
+        <p_gain>12</p_gain><i_gain>0.1</i_gain><d_gain>0.02</d_gain><cmd_min>-2</cmd_min><cmd_max>2</cmd_max>
       </plugin>
       <plugin filename="gz-sim-joint-position-controller-system" name="gz::sim::systems::JointPositionController">
         <joint_name>arm_gripper</joint_name><topic>/sim/arm/arm_gripper/native_cmd_pos</topic><initial_position>0</initial_position>
