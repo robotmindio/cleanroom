@@ -57,6 +57,19 @@ voxels and grazing contacts block visibility. Map resolution must resolve
 `search_min_object_m`; malformed, oversized, stale or replayed maps earn no
 coverage. `missing_3d_geometry` reports captures without an eligible proof.
 
+When the tracked `allow_search` switch is enabled, bringup also enables
+RTAB-Map's 3D depth-image ray tracing. On real hardware it uses only the
+native Astra RGB-D stream for mapping occupancy, excluding the front view's
+depth reprojected from the merged navigation cloud. A real deployment without
+the Astra refuses this mode. In simulation the depth projection uses only
+the front depth camera's own point cloud, without filling holes. The ordinary
+search-disabled mapping configuration is unchanged. Mapping also updates
+while stationary, so new depth frames can produce fresh geometry during a
+search dwell. Camera calibration and the resulting free-space coverage still
+require physical acceptance. Previously flattened map cells do not become
+3D evidence merely by enabling the switch; record a 3D map or independently
+validate regeneration before accepting coverage.
+
 When SLAM revises the map, every anchored capture in the log is projected into
 the new revision and the query's coverage and prior sightings are rebuilt from
 them, so evidence moves with the corrected map. Captures without a recorded map
@@ -112,6 +125,9 @@ searched. A sighting from before the search start is a prior, never a result.
   few sampled rays. Physical scene and sensor accuracy still require qualification.
 - Reprojection moves coverage with the graph node each capture was anchored to;
   anchor-pose uncertainty is not added to the evidence.
+- A fresh map publication does not date each voxel. Global occupancy assumes
+  static occluders; dynamic scenes require separate live qualification and
+  per-frame depth evidence before relying on negative coverage.
 - Travel cost is a straight line; Nav2 validates the real route.
 - `search_min_object_px` is an uncalibrated default; it is fitted by
   [threshold calibration](threshold-calibration.md) once the recorded corpus exists.

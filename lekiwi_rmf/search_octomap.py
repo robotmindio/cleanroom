@@ -13,6 +13,7 @@ import numpy as np
 from lekiwi_rmf.coverage_search import inside_frustum, optical_axes
 
 MAX_MAP_BYTES = 2 * 1024 * 1024
+# shortcut: global voxels assume static occluders; use per-frame depth before admitting dynamic scenes.
 TREE_DEPTH = 16
 KEY_OFFSET = 1 << (TREE_DEPTH - 1)
 MAX_RAY_NODES = 4096

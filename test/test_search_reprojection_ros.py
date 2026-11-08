@@ -13,7 +13,7 @@ from octomap_msgs.msg import Octomap
 
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.context import Context
-from rclpy.executors import MultiThreadedExecutor
+from rclpy.executors import MultiThreadedExecutor, SingleThreadedExecutor
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 from rclpy.qos import DurabilityPolicy, QoSProfile
@@ -35,6 +35,101 @@ from test_coverage_search import capture
 
 MODEL = 'ab' * 32
 PROFILE_REVISION = 'e' * 64
+
+
+def test_native_mapper_publishes_known_free_3d_geometry_with_the_graph_stamp(tmp_path, monkeypatch):
+    """Exercise the configured producer, not a hand-encoded OctoMap message."""
+    import signal
+    import subprocess
+    import time
+    from pathlib import Path
+
+    import numpy as np
+    import yaml
+    from ament_index_python.packages import get_package_prefix
+    from cv_bridge import CvBridge
+    from sensor_msgs.msg import Image
+    from tf2_ros import StaticTransformBroadcaster
+
+    from launch_snapshot import find_node, resolve_launch
+    from lekiwi_rmf.search_octomap import SearchOctomap
+    from test_launch_validation import search_configuration
+
+    search_configuration(monkeypatch, True)
+    parameters = find_node(resolve_launch(profile='sim')[0], name='rtabmap')['parameters']
+    parameters.update(use_sim_time=False, database_path=str(tmp_path / 'map.db'),
+                      subscribe_scan_cloud=False, **{'Reg/Strategy': '0'})
+    config = tmp_path / 'mapper.yaml'
+    config.write_text(yaml.safe_dump({'/**': {'ros__parameters': parameters}}))
+    context = Context()
+    rclpy.init(context=context)
+    assert context.get_domain_id() != 0, 'synthetic geometry must never enter the physical domain'
+    node = Node('depth_geometry_producer_probe', context=context)
+    executor = SingleThreadedExecutor(context=context)
+    executor.add_node(node)
+    image = node.create_publisher(Image, '/geometry_probe/rgb', 10)
+    depth = node.create_publisher(Image, '/geometry_probe/depth', 10)
+    info = node.create_publisher(CameraInfo, '/geometry_probe/info', 10)
+    maps, graphs = [], []
+    node.create_subscription(Octomap, '/geometry_probe/octomap_binary', maps.append, 10)
+    node.create_subscription(MapGraph, '/geometry_probe/mapGraph', graphs.append, 10)
+    broadcaster = StaticTransformBroadcaster(node)
+    camera = TransformStamped()
+    camera.header.frame_id, camera.child_frame_id = 'base_footprint', 'probe_optical'
+    camera.transform.translation.x = camera.transform.translation.y = .025
+    camera.transform.translation.z = .325
+    camera.transform.rotation.x, camera.transform.rotation.y = -.5, .5
+    camera.transform.rotation.z, camera.transform.rotation.w = -.5, .5
+    odom = TransformStamped()
+    odom.header.frame_id, odom.child_frame_id = 'odom', 'base_footprint'
+    odom.transform.rotation.w = 1.
+    broadcaster.sendTransform([camera, odom])
+    bridge = CvBridge()
+    pixels = np.random.default_rng(4).integers(0, 256, (240, 320, 3), dtype=np.uint8)
+    rgb = bridge.cv2_to_imgmsg(pixels, 'bgr8')
+    wall = bridge.cv2_to_imgmsg(np.full((240, 320), 2., np.float32), '32FC1')
+    calibration = CameraInfo(width=320, height=240, distortion_model='plumb_bob', d=[0.] * 5)
+    calibration.k = [300., 0., 160., 0., 300., 120., 0., 0., 1.]
+    calibration.r = [1., 0., 0., 0., 1., 0., 0., 0., 1.]
+    calibration.p = [300., 0., 160., 0., 0., 300., 120., 0., 0., 0., 1., 0.]
+    binary = Path(get_package_prefix('rtabmap_slam')) / 'lib/rtabmap_slam/rtabmap'
+    with (tmp_path / 'mapper.log').open('w+') as log:
+        process = subprocess.Popen([str(binary), '--ros-args', '-r', '__ns:=/geometry_probe',
+                                    '--params-file', str(config), '-r', 'rgb/image:=/geometry_probe/rgb',
+                                    '-r', 'depth/image:=/geometry_probe/depth',
+                                    '-r', 'rgb/camera_info:=/geometry_probe/info'],
+                                   stdout=log, stderr=subprocess.STDOUT)
+        try:
+            deadline = time.monotonic() + 20
+            while time.monotonic() < deadline and not (len(maps) >= 2 and len(graphs) >= 2):
+                stamp = node.get_clock().now().to_msg()
+                for message in (rgb, wall, calibration):
+                    message.header.stamp, message.header.frame_id = stamp, 'probe_optical'
+                image.publish(rgb)
+                depth.publish(wall)
+                info.publish(calibration)
+                executor.spin_once(timeout_sec=.1)
+            log.flush()
+            assert len(maps) >= 2 and graphs, (tmp_path / 'mapper.log').read_text()[-6000:]
+            assert maps[-1].header.stamp != maps[0].header.stamp
+            assert any(m.header.stamp == g.header.stamp for m in maps for g in graphs)
+            scene = SearchOctomap.from_binary(maps[-1].data, maps[-1].resolution)
+            (tmp_path / 'scene.bin').write_bytes(memoryview(maps[-1].data).cast('B'))
+            assert maps[-1].binary and maps[-1].header.frame_id == 'map'
+            # Verify free voxels above the lidar plane; sparse native rays need not clear a whole column.
+            assert any(scene.ray_free((x, .025, z), (x + .005, .025, z))
+                       for x in (.225, .525, .975, 1.475) for z in (.225, .325, .425))
+            assert not scene.ray_free((.075, .025, .325), (3.025, .025, .325))
+        finally:
+            process.send_signal(signal.SIGINT)
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+            executor.shutdown(timeout_sec=5)
+            node.destroy_node()
+            context.try_shutdown()
 
 
 class Store(Node):

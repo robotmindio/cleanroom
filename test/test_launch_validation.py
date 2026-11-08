@@ -1,9 +1,62 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
+import yaml
 
 from lekiwi_rmf.launch_validation import astra_serial_from_hardware_config, validate_launch_arguments
 from launch_snapshot import find_node, find_nodes, gate_stage, resolve_bringup, resolve_launch
+
+
+def search_configuration(monkeypatch, enabled):
+    read_text = Path.read_text
+    def read(filename, *args, **kwargs):
+        text = read_text(filename, *args, **kwargs)
+        if filename.name == 'exploration.yaml':
+            document = yaml.safe_load(text)
+            document['robot_explorer']['ros__parameters']['allow_search'] = enabled
+            return yaml.safe_dump(document)
+        return text
+    monkeypatch.setattr(Path, 'read_text', read)
+
+
+@pytest.mark.parametrize('profile', ['sim', 'wired', 'split'])
+def test_search_requires_3d_ray_tracing_from_a_real_camera_origin(monkeypatch, profile):
+    search_configuration(monkeypatch, True)
+    records, _ = resolve_launch(profile=profile)
+    mapper = find_node(records, name='rtabmap')
+    parameters = mapper['parameters']
+    assert (parameters['Grid/3D'], parameters['Grid/Sensor'], parameters['Grid/RayTracing']) == ('true', '1', 'true')
+    assert parameters['rgbd_cameras'] == 1
+    assert parameters['map_always_update'] is True
+    depth = find_node(records, name='slam_front_depth')
+    assert depth['parameters']['fill_holes_size'] == depth['parameters']['fill_iterations'] == 0
+    if profile == 'sim':
+        assert ['cloud', '/camera/depth/points'] in depth['remappings']
+    else:
+        assert parameters['subscribe_rgbd'] and not parameters['subscribe_depth']
+        assert ['rgbd_image', '/slam/astra/rgbd_image'] in mapper['remappings']
+
+
+def test_search_refuses_inferred_front_depth_without_the_astra(monkeypatch):
+    search_configuration(monkeypatch, True)
+    with pytest.raises(ValueError, match='native RGB-D'):
+        resolve_launch(profile='wired', publish_astra='false')
+
+
+@pytest.mark.parametrize('value', ['false', 1, None])
+def test_search_switch_cannot_silently_enable_3d_mapping_by_truthiness(monkeypatch, value):
+    search_configuration(monkeypatch, value)
+    with pytest.raises(ValueError, match='YAML boolean'):
+        resolve_launch(profile='split')
+
+
+def test_static_map_does_not_enable_search_geometry_when_exploration_is_disabled(monkeypatch):
+    search_configuration(monkeypatch, True)
+    records, _ = resolve_launch(profile='sim', static_map='true', map_bundle_approved=True)
+    mapper = find_node(records, name='rtabmap')['parameters']
+    assert mapper['Grid/3D'] == 'false' and mapper['Grid/Sensor'] == '0'
 
 
 @pytest.mark.parametrize("profile,mode,source,laser", [
