@@ -1,0 +1,200 @@
+{
+  "source_domain": 0,
+  "test_domain": 222,
+  "injection": "process-local ProviderUnavailable; no server or network interruption",
+  "settings": {
+    "model_name": "grounding_dino_tiny_gpu",
+    "fallback_model_name": "rtdetr_v2_r18",
+    "max_rate_hz": 2.0,
+    "max_source_age_sec": 2.0
+  },
+  "phases": {
+    "normal": {
+      "elapsed_sec": 60.0855196150078,
+      "counts": {
+        "front": {
+          "received": 298,
+          "published": 51,
+          "rejected": 0,
+          "fallback_published": 0
+        },
+        "wrist": {
+          "received": 298,
+          "published": 51,
+          "rejected": 0,
+          "fallback_published": 0
+        }
+      },
+      "latency": {
+        "operation": "perception",
+        "max_age_sec": 2.0,
+        "fresh": 102,
+        "late": 0,
+        "invalid": 0,
+        "late_in_window": 0,
+        "window": 102,
+        "stages": {
+          "sensor_age": {
+            "count": 596,
+            "budget_p95_sec": 0.3,
+            "p50_sec": 0.03692257,
+            "p95_sec": 0.056913815,
+            "p99_sec": 0.061554325
+          },
+          "queue": {
+            "count": 102,
+            "budget_p95_sec": 0.5,
+            "p50_sec": 0.12531857200914062,
+            "p95_sec": 0.3305626229995582,
+            "p99_sec": 0.36264664199256336
+          },
+          "inference": {
+            "count": 102,
+            "budget_p95_sec": 0.9,
+            "p50_sec": 0.4824,
+            "p95_sec": 0.51913,
+            "p99_sec": 0.52613
+          },
+          "network": {
+            "count": 102,
+            "budget_p95_sec": 0.3,
+            "p50_sec": 0.269657160995854,
+            "p95_sec": 0.5219562359970062,
+            "p99_sec": 0.5370903839995899
+          }
+        },
+        "over_budget": [
+          "network"
+        ]
+      },
+      "passed": true
+    },
+    "provider_loss": {
+      "elapsed_sec": 60.08893904698198,
+      "counts": {
+        "front": {
+          "received": 299,
+          "published": 51,
+          "rejected": 0,
+          "fallback_published": 51
+        },
+        "wrist": {
+          "received": 299,
+          "published": 51,
+          "rejected": 0,
+          "fallback_published": 51
+        }
+      },
+      "latency": {
+        "operation": "perception",
+        "max_age_sec": 2.0,
+        "fresh": 102,
+        "late": 0,
+        "invalid": 0,
+        "late_in_window": 0,
+        "window": 102,
+        "stages": {
+          "sensor_age": {
+            "count": 598,
+            "budget_p95_sec": 0.3,
+            "p50_sec": 0.03805269,
+            "p95_sec": 0.059230867,
+            "p99_sec": 0.066414517
+          },
+          "queue": {
+            "count": 102,
+            "budget_p95_sec": 0.5,
+            "p50_sec": 0.005314296984579414,
+            "p95_sec": 0.20327943199663423,
+            "p99_sec": 0.20798113802447915
+          },
+          "inference": {
+            "count": 102,
+            "budget_p95_sec": 0.9,
+            "p50_sec": 0.4322856900107581,
+            "p95_sec": 0.682665842003189,
+            "p99_sec": 0.8778815330006182
+          },
+          "network": {
+            "count": 0,
+            "budget_p95_sec": 0.3,
+            "p50_sec": null,
+            "p95_sec": null,
+            "p99_sec": null
+          }
+        },
+        "over_budget": []
+      },
+      "passed": true
+    },
+    "recovery": {
+      "elapsed_sec": 60.040674999007024,
+      "counts": {
+        "front": {
+          "received": 298,
+          "published": 49,
+          "rejected": 0,
+          "fallback_published": 21
+        },
+        "wrist": {
+          "received": 298,
+          "published": 49,
+          "rejected": 0,
+          "fallback_published": 20
+        }
+      },
+      "latency": {
+        "operation": "perception",
+        "max_age_sec": 2.0,
+        "fresh": 98,
+        "late": 0,
+        "invalid": 0,
+        "late_in_window": 0,
+        "window": 98,
+        "stages": {
+          "sensor_age": {
+            "count": 596,
+            "budget_p95_sec": 0.3,
+            "p50_sec": 0.038450391,
+            "p95_sec": 0.072504669,
+            "p99_sec": 0.419549449
+          },
+          "queue": {
+            "count": 98,
+            "budget_p95_sec": 0.5,
+            "p50_sec": 0.1772833070008829,
+            "p95_sec": 0.3577001210046653,
+            "p99_sec": 0.4438954009825923
+          },
+          "inference": {
+            "count": 98,
+            "budget_p95_sec": 0.9,
+            "p50_sec": 0.49839,
+            "p95_sec": 0.7132837260141969,
+            "p99_sec": 0.7568602520041168
+          },
+          "network": {
+            "count": 57,
+            "budget_p95_sec": 0.3,
+            "p50_sec": 0.2713252909916267,
+            "p95_sec": 0.7724472080093902,
+            "p99_sec": 0.8004967320193723
+          }
+        },
+        "over_budget": [
+          "network"
+        ]
+      },
+      "passed": true
+    }
+  },
+  "passed": true,
+  "models": {
+    "primary": "6ec9eb1f5a01c271a5b0b6ce6d95432148f94d33c16b1ad6a4ccca6ee2f5636f",
+    "fallback": "81778a0ac0300bfd3c885954d983f02a86ee3ce4469ef2a76b1a00100ddb3869"
+  },
+  "runtime_release": "7f51fed145694a51aa13afdb0b613069653bb5c6",
+  "observed_utc_date": "2026-11-08",
+  "scope": "Live image relay; process-local provider-loss injection. No real server/network interruption, navigation, skills, corpus acceptance or independent GPU saturation.",
+  "harness_provenance": "Measurement logic matches 37c7dc7; run began before script_sha256/error metadata fields were added."
+}

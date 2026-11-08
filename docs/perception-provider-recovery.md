@@ -64,3 +64,13 @@ This establishes live inference failover and measures the observed load. It
 does not establish detector accuracy, independent GPU saturation, a real
 transport outage, navigation/skill latency or replacement production budgets
 for #102. Run under an external bounded process supervisor for crash cleanup.
+
+The [2026-11-08 live measurement](evidence/perception-failover-20261108.json)
+passed all three phases: 102 fresh primary results during normal operation,
+102 fresh fallback results during injected loss, and 98 fresh results during
+recovery (57 primary, 41 fallback). No measured-phase answer expired. Actual
+provider transport interruptions during recovery account for continued
+fallback use; recovery does not require every later frame to use the primary.
+Normal network p95 was 522 ms and recovery p95 772 ms, exceeding the diagnostic
+300 ms budget. The two-second age gate and production budgets are unchanged;
+this single configuration/load does not qualify a budget replacement.
