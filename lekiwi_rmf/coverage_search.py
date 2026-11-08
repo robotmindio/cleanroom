@@ -64,17 +64,35 @@ class Profile:
         return {'min_object_m': self.min_object_m, 'min_object_px': self.min_object_px,
                 'max_range_m': self.max_range_m, 'height_band_m': [self.min_height_m, self.max_height_m],
                 'max_age_sec': self.max_age_sec, 'require_stationary': self.require_stationary,
-                'occlusion': '2d_occupancy_ray_cast'}
+                'occlusion': 'known_free_octomap_3d'}
 
 
 @dataclass(frozen=True)
 class Pose:
-    """Optical centre and axis in map: yaw of the axis, pitch positive upwards."""
+    """Optical centre and orientation in map; pitch is positive upwards."""
     x: float
     y: float
     z: float
     yaw: float
     pitch: float
+    roll: float = 0.0
+
+
+def optical_axes(yaw, pitch, roll=0.):
+    """Optical forward/right/down axes in map, including camera roll."""
+    cy, sy, cp, sp, cr, sr = (math.cos(yaw), math.sin(yaw), math.cos(pitch), math.sin(pitch),
+                             math.cos(roll), math.sin(roll))
+    forward, right, down = (cp * cy, cp * sy, sp), (sy, -cy, 0.), (sp * cy, sp * sy, -cp)
+    return (forward, tuple(cr * a + sr * b for a, b in zip(right, down)),
+            tuple(-sr * a + cr * b for a, b in zip(right, down)))
+
+
+def inside_frustum(points, pose, camera, limit):
+    vector = points - np.asarray((pose.x, pose.y, pose.z))
+    forward, right, down = (np.sum(vector * axis, axis=-1) for axis in optical_axes(pose.yaw, pose.pitch, pose.roll))
+    return ((forward > 0) & (np.sum(vector * vector, axis=-1) <= limit * limit)
+            & (right >= -math.tan(camera.left) * forward) & (right <= math.tan(camera.right) * forward)
+            & (down >= -math.tan(camera.up) * forward) & (down <= math.tan(camera.down) * forward))
 
 
 def pose_from_transform(translation, rotation):
@@ -86,14 +104,13 @@ def pose_from_transform(translation, rotation):
     # Third column of the rotation matrix: the optical +Z axis expressed in map.
     forward = (2 * (x * z + w * y), 2 * (y * z - w * x), 1 - 2 * (x * x + y * y))
     yaw = math.atan2(forward[1], forward[0])
-    if math.hypot(forward[0], forward[1]) < 1e-6:
-        raise ValueError('coverage does not support a vertical optical axis')
     right = (1 - 2 * (y * y + z * z), 2 * (x * y + w * z), 2 * (x * z - w * y))
-    # The 2D fan cannot represent optical roll; refuse it rather than invent negative evidence (#88).
-    if not math.isclose(right[0] * math.sin(yaw) - right[1] * math.cos(yaw), 1., rel_tol=0., abs_tol=1e-9):
-        raise ValueError('coverage does not support optical roll')
+    pitch = math.atan2(forward[2], math.hypot(forward[0], forward[1]))
+    _, unrolled_right, unrolled_down = optical_axes(yaw, pitch)
+    roll = math.atan2(sum(a * b for a, b in zip(right, unrolled_down)),
+                      sum(a * b for a, b in zip(right, unrolled_right)))
     return Pose(float(translation[0]), float(translation[1]), float(translation[2]),
-                yaw, math.atan2(forward[2], math.hypot(forward[0], forward[1])))
+                yaw, pitch, roll)
 
 
 @dataclass(frozen=True)
@@ -154,8 +171,7 @@ def _band_visible(distances, pose, camera, profile):
 
 def _fan(grid, resolution, origin, pose, camera, profile, offsets, step):
     """Sample rays at relative azimuths; return flat cells, visibility and sample distances."""
-    # DEBT: occlusion is the 2D occupancy map, so furniture above or below the lidar plane can hide an object
-    # inside "covered" cells; replace with RTAB-Map 3D geometry before enabling search in production (#88).
+    # Conservative 2D candidates only; evidence of absence also requires known-free 3D rays.
     limit = profile.range_limit(camera)
     distances = np.arange(step, limit + 1e-9, step)
     angles = pose.yaw + offsets
@@ -168,21 +184,39 @@ def _fan(grid, resolution, origin, pose, camera, profile, offsets, step):
     index = np.arange(len(distances))[None, :]
     open_ray = index < first[:, None]
     surface = (index == first[:, None]) & (values > OCCUPIED)
-    banded = _band_visible(distances, pose, camera, profile)[None, :] & inside
+    tilted = abs(pose.roll) > 1e-9 or abs(math.cos(pose.pitch)) < 1e-6
+    banded = inside if tilted else _band_visible(distances, pose, camera, profile)[None, :] & inside
     seen = (open_ray | surface) & banded
     occluded = ~open_ray & ~surface & banded & (values >= 0)
     return flat, seen, occluded, distances
 
 
-def observed_cells(grid, resolution, origin, pose, camera, profile):
-    """Cells a capture resolved, as (flat cells, relative azimuth per sample, occluded cell count)."""
+def observed_cells(grid, resolution, origin, pose, camera, profile, geometry=None):
+    """Candidate cells, filtered by known-free 3D geometry when supplied.
+
+    The 2D-only form is a viewpoint heuristic; QueryCoverage requires geometry
+    before it can turn these candidates into evidence of absence.
+    """
     limit = profile.range_limit(camera)
     if limit <= resolution:
         return np.empty(0, np.int64), np.empty(0), 0
     step = resolution / 2
     # Ray spacing at the range limit is half a cell, so no resolved cell is skipped.
-    offsets = np.arange(-camera.right, camera.left + 1e-12, step / limit)
+    tilted = abs(pose.roll) > 1e-9 or abs(math.cos(pose.pitch)) < 1e-6
+    low, high = (-math.pi, math.pi) if tilted else (-camera.right, camera.left)
+    offsets = np.arange(low, high + 1e-12, step / limit)
     flat, seen, occluded, _ = _fan(grid, resolution, origin, pose, camera, profile, offsets, step)
+    if tilted:
+        ys, xs = np.divmod(flat, grid.shape[1])
+        wx, wy = cell_to_world(xs, ys, resolution, origin)
+        points = np.empty((*flat.shape, 2, 3))
+        points[..., 0], points[..., 1] = wx[..., None], wy[..., None]
+        points[..., 2] = (profile.min_height_m, profile.max_height_m)
+        seen &= inside_frustum(points, pose, camera, limit).all(axis=-1)
+    if geometry is not None:
+        visible = geometry.visible_columns(np.unique(flat[seen]), grid.shape, resolution, origin, pose, camera, profile)
+        blocked = seen & ~np.isin(flat, visible)
+        seen &= ~blocked
     azimuths = np.broadcast_to(offsets[:, None], flat.shape)
     return flat[seen], azimuths[seen], int(np.setdiff1d(np.unique(flat[occluded]), flat[seen]).size)
 
@@ -216,7 +250,7 @@ class QueryCoverage:
         self.viewpoints = deque(maxlen=REPORT_ITEMS)
         self.cameras = set()
         self.counts = {'captures': 0, 'negative_captures': 0, 'other_model': 0, 'other_profile': 0, 'other_query': 0,
-                       'moving': 0, 'occluded_cells': 0}
+                       'moving': 0, 'occluded_cells': 0, 'no_geometry': 0}
         self.by_model = {}
         self.span = [math.inf, -math.inf]
 
@@ -242,7 +276,7 @@ class QueryCoverage:
         self.resolution, self.origin = resolution, origin
         return not aligned
 
-    def add(self, capture, grid):
+    def add(self, capture, grid, geometry=None):
         """Integrate one capture; return its detections of this label."""
         self.counts['captures'] += 1
         if capture.model_sha256 not in self.models:
@@ -256,18 +290,24 @@ class QueryCoverage:
             # An open inference that was not asked for this label is equally silent about it.
             self.counts['other_query'] += 1
             return []
-        if capture.pose is None:
+        if geometry is None:
+            self.counts['no_geometry'] += 1
+        if capture.pose is None or geometry is None:
             flat, azimuths, occluded = np.empty(0, np.int64), np.empty(0), 0
         else:
             flat, azimuths, occluded = observed_cells(grid, self.resolution, self.origin, capture.pose,
-                                                      capture.camera, self.profile)
+                                                      capture.camera, self.profile, geometry)
         matches = [d for d in capture.detections if d.label == self.label]
         bearing = np.zeros(flat.shape, dtype=bool)
         margin = self.resolution / max(self.profile.range_limit(capture.camera), self.resolution)
         for detection in matches:
             if detection.map_xyz is None:
                 # Without depth an image box is a bearing: every cell along it may hold the object.
-                bearing |= (azimuths <= detection.left + margin) & (azimuths >= detection.right - margin)
+                if capture.pose is not None and (abs(capture.pose.roll) > 1e-9 or abs(capture.pose.pitch) > 1e-9):
+                    # A horizontal image interval alone cannot locate a box in a tilted frustum.
+                    bearing[:] = True
+                else:
+                    bearing |= (azimuths <= detection.left + margin) & (azimuths >= detection.right - margin)
         sighted = np.union1d(np.unique(flat[bearing]), self._point_cells([d for d in matches if d.map_xyz is not None]))
         self.sighting.reshape(-1)[sighted] = np.maximum(self.sighting.reshape(-1)[sighted], capture.stamp)
         if self.profile.require_stationary and not capture.stationary:
@@ -317,6 +357,7 @@ class Mount:
     z: float
     pitch: float
     yaw_offset: float
+    roll: float = 0.0
 
 
 def heading_gains(weights, grid, resolution, origin, position, mount, profile, headings):
@@ -326,10 +367,23 @@ def heading_gains(weights, grid, resolution, origin, position, mount, profile, h
         return np.zeros(headings)
     rays = max(8, math.ceil(2 * math.pi * limit / resolution))
     offsets = np.arange(rays) * (2 * math.pi / rays)
-    pose = Pose(position[0], position[1], mount.z, 0.0, mount.pitch)
+    pose = Pose(position[0], position[1], mount.z, 0.0, mount.pitch, mount.roll)
     flat, seen, _, distances = _fan(grid, resolution, origin, pose, mount.camera, profile, offsets, resolution)
     # Each sample represents d·Δθ·step of area, so near cells sampled by many rays are not overcounted.
     area = distances[None, :] * (2 * math.pi / rays) * resolution / resolution ** 2
+    if abs(mount.roll) > 1e-9 or abs(math.cos(mount.pitch)) < 1e-6:
+        points = np.empty((*flat.shape, 2, 3))
+        points[..., 0] = (position[0] + np.cos(offsets)[:, None] * distances)[..., None]
+        points[..., 1] = (position[1] + np.sin(offsets)[:, None] * distances)[..., None]
+        points[..., 2] = (profile.min_height_m, profile.max_height_m)
+        mass = weights.reshape(-1)[flat] * area
+        result = []
+        for index in range(headings):
+            heading = Pose(position[0], position[1], mount.z, index * 2 * math.pi / headings + mount.yaw_offset,
+                           mount.pitch, mount.roll)
+            visible = seen & inside_frustum(points, heading, mount.camera, limit).all(axis=-1)
+            result.append(float(np.where(visible, mass, 0.).sum()))
+        return np.asarray(result)
     per_ray = np.where(seen, weights.reshape(-1)[flat] * area, 0.0).sum(axis=1)
     cumulative = np.concatenate(([0.0], np.cumsum(np.concatenate((per_ray, per_ray)))))
     result = np.empty(headings)
@@ -353,7 +407,7 @@ class Viewpoint:
 
 
 def viewpoint_gain(viewpoint, weights, grid, resolution, origin, mount, profile):
-    pose = Pose(viewpoint.x, viewpoint.y, mount.z, viewpoint.yaw + mount.yaw_offset, mount.pitch)
+    pose = Pose(viewpoint.x, viewpoint.y, mount.z, viewpoint.yaw + mount.yaw_offset, mount.pitch, mount.roll)
     flat, _, _ = observed_cells(grid, resolution, origin, pose, mount.camera, profile)
     return float(weights.reshape(-1)[np.unique(flat)].sum()) if flat.size else 0.0
 
@@ -458,7 +512,7 @@ class SearchSession:
             self.discarded_rebases += 1
             self.revise('map raster changed; earlier coverage discarded', [])
 
-    def reproject(self, captures, grid, revision):
+    def reproject(self, captures, grid, revision, geometry_for=None):
         """Rebuild coverage from the capture log after spatial memory moved it into a new map revision.
 
         Sightings during the search keep their record; coverage and prior
@@ -474,17 +528,18 @@ class SearchSession:
         known = {record['observation_id'] for record in self.found}
         self.found = []
         for capture in captures:
-            self.integrate(capture, grid)
+            self.integrate(capture, grid, geometry_for(capture) if geometry_for is not None else None)
         self.revise(f'map revision {revision}: coverage reprojected from {len(captures)} anchored captures', [])
         return any(record['observation_id'] not in known for record in self.found)
 
-    def integrate(self, capture, grid):
+    def integrate(self, capture, grid, geometry=None):
         """Return True when this capture found the label during the search."""
-        matches = self.coverage.add(capture, grid)
+        matches = self.coverage.add(capture, grid, geometry)
         if not matches:
             return False
         record = {'observation_id': capture.observation_id, 'camera_id': capture.camera_id, 'stamp': capture.stamp,
-                  'detections': [{'score': round(d.score, 4), 'bearing_rad': None if capture.pose is None else
+                  'detections': [{'score': round(d.score, 4), 'bearing_rad': None if capture.pose is None or
+                                  abs(capture.pose.roll) > 1e-9 or abs(capture.pose.pitch) > 1e-9 else
                                   [round(capture.pose.yaw + d.right, 4), round(capture.pose.yaw + d.left, 4)],
                                   'map_xyz': d.map_xyz, 'map_uncertainty_m': d.map_uncertainty_m or None}
                                  for d in matches]}
@@ -562,6 +617,7 @@ class SearchSession:
                                   'ignored_other_profile': self.coverage.counts['other_profile'],
                                   'ignored_other_query': self.coverage.counts['other_query'],
                                   'rejected_moving': self.coverage.counts['moving'],
+                                  'missing_3d_geometry': self.coverage.counts['no_geometry'],
                                   'occluded_cells_observed_behind_obstacles': self.coverage.counts['occluded_cells']},
             'found': {'evidence_ids': self.evidence_ids(), 'observations': self.found},
             'prior_sightings': {'count': self.prior_count, 'recent': list(self.prior_sightings)},

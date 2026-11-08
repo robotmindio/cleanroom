@@ -164,7 +164,10 @@ class RobotExplorer(Node):
             raise ValueError("search height band must be increasing")
         if self.config["allow_exploration"] and self.config["allow_search"]:
             # Search observes by moving the base, so it shares exploration's guarded Nav2 path and limits.
-            self._evidence = SearchEvidence(self, self._tf, self._group, self.config["search_capture_log"])
+            self._evidence = SearchEvidence(
+                self, self._tf, self._group, self.config["search_capture_log"],
+                geometry_topic=self.config["search_geometry_topic"],
+                geometry_max_age_sec=self.config["search_geometry_max_age_sec"])
             self._odometry = NavigationDistance()
             self.create_subscription(Odometry, "/odom", self._odometry.update, 1)
             self.create_publisher(String, "/robot/search/defaults", QoSProfile(
@@ -790,14 +793,15 @@ class RobotExplorer(Node):
                 # SLAM revised the map: earlier evidence moves with it before new captures are added.
                 state["generation"] = generation
                 state["serial"] = log[-1][0] if log else state["serial"]
-                if session.reproject([capture for _, capture in log], self._map[0], revision):
+                if session.reproject([capture for _, capture in log], self._map[0], revision,
+                                     geometry_for=self._evidence.geometry_for):
                     raise SearchEnded("found", f'found "{session.label}"; see evidence_ids')
                 if state["plan"] is not None:
                     raise Replan("map revised by SLAM optimization; coverage reprojected")
             fresh = self._evidence.since(state["serial"])
             for serial, capture in fresh:
                 state["serial"] = serial
-                if session.integrate(capture, self._map[0]):
+                if session.integrate(capture, self._map[0], self._evidence.geometry_for(capture)):
                     raise SearchEnded("found", f'found "{session.label}"; see evidence_ids')
                 dwell = state["dwell"]
                 if (dwell and capture.camera_id == dwell[0] and capture.stamp >= dwell[1]

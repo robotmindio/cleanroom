@@ -141,7 +141,8 @@ class SpatialMemory(Node):
         self._loop_closure = False
         self._reason = ''
         self._revisions.publish(String(data=json.dumps(
-            {**revision.to_dict(), 'session': self._store.session_state()}, allow_nan=False)))
+            {**revision.to_dict(), 'session': self._store.session_state(),
+             'graph_stamp_unix_sec': created}, allow_nan=False)))
 
     def _current(self):
         latest = self._store.latest()

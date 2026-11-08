@@ -10,6 +10,7 @@ import time
 from action_msgs.msg import GoalStatus
 from geometry_msgs.msg import TransformStamped
 from nav_msgs.msg import Odometry
+from octomap_msgs.msg import Octomap
 import pytest
 import rclpy
 from ros_test_utils import release_graph
@@ -29,6 +30,7 @@ from lekiwi_rmf.action import Search
 from lekiwi_rmf.exploration_node import RobotExplorer
 from lekiwi_rmf.exploration_owner_guard import ExplorationOwnerGuard
 from lekiwi_rmf.object_cameras import camera_bindings
+from lekiwi_rmf.spatial_anchors import SCHEMA as SPATIAL_SCHEMA
 from lekiwi_rmf.srv import QueryObservations
 from test_exploration_ros import RobotPeers, response, wait
 
@@ -98,6 +100,8 @@ class Perception(Node):
                 {'role': 'fallback', 'model_sha256': FALLBACK, 'model_name': 'fake_closed',
                  'profile': {'revision': PROFILE_REVISION}, 'labels': ['chair'], 'open_vocabulary': False}]})))
         self.info = self.create_publisher(CameraInfo, '/camera/front/camera_info', 10)
+        self.geometry = self.create_publisher(Octomap, '/octomap_binary', latched)
+        self.revisions = self.create_publisher(String, '/robot/spatial/revision', latched)
         self.create_service(QueryObservations, '/robot/observations/query', self.query)
         self.static = StaticTransformBroadcaster(self)
         mount = TransformStamped()
@@ -114,6 +118,11 @@ class Perception(Node):
         info.k = [FX, 0.0, WIDTH / 2, 0.0, FX, HEIGHT / 2, 0.0, 0.0, 1.0]
         self.info.publish(info)
         stamp = (self.get_clock().now() - Duration(seconds=0.15)).to_msg()
+        self.revisions.publish(String(data=json.dumps({
+            'schema': SPATIAL_SCHEMA, 'map_ref': 'search-test-map', 'revision': 'search-test-revision',
+            'graph_stamp_unix_sec': stamp.sec + stamp.nanosec * 1e-9})))
+        self.geometry.publish(Octomap(header=Header(stamp=stamp, frame_id='map'),
+                                     binary=True, id='OcTree', resolution=.05, data=[0x55, 0x55]))
         x, y, yaw = (*self.peers.position, self.peers.yaw)
         cx, cy = x + MOUNT[0] * math.cos(yaw), y + MOUNT[0] * math.sin(yaw)
         detections = []
@@ -226,7 +235,9 @@ def test_absent_label_ends_at_stated_coverage_without_claiming_absence(search_gr
     result = outcome.result
     assert outcome.status == GoalStatus.STATUS_SUCCEEDED, result.message
     assert result.outcome == 'coverage_reached' and not result.found and not result.evidence_ids
-    assert result.coverage_fraction >= 0.6 and result.viewpoints_visited >= 1
+    assert result.coverage_fraction >= 0.6 and peers.nav_count >= 1
+    # Fresh evidence can refute a view en route, before its arrival is acknowledged.
+    assert result.viewpoints_visited <= peers.nav_count
     report = json.loads(result.report_json)
     assert 'not found in the inspected zones' in report['statement']
     assert 'not evidence of absence there' in report['statement']

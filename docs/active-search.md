@@ -30,26 +30,43 @@ report it:
 
 - has a capture-time `map` pose for its optical frame and the camera's intrinsics;
 - was taken while the base (and, for the wrist camera, the arm) was stationary;
-- saw the cell unoccluded in the occupancy map, inside the horizontal field of
-  view, within `f·search_min_object_m / search_min_object_px` and
-  `search_max_range_m`, with the whole `search_min_height_m`..`search_max_height_m`
-  band inside the vertical field of view;
+- saw the entire cell and `search_min_height_m`..`search_max_height_m` volume
+  inside the camera's full optical frustum, within
+  `f·search_min_object_m / search_min_object_px` and `search_max_range_m`,
+  with the camera-to-cell volume known free in capture-time 3D geometry;
 - had no detection of the label on that bearing; and
 - is newer than `search_max_age_sec` and newer than any sighting of the label there.
 
-A visit, a provider failure, a frame without pose, or a capture from another
-model proves nothing. An image box without depth is a bearing, so every cell
-along it remains a possible location. Coverage is a per-query grid bounded by
+A visit, a provider failure, a frame without pose or 3D geometry, or a capture
+from another model proves nothing. An image box without depth is a bearing, so
+every cell along it remains a possible location. With optical pitch or roll,
+the horizontal box interval alone is ambiguous: all visible cells remain
+possible locations for that label. Positive detections still count.
+Coverage is a per-query grid bounded by
 the map's cell limit, built from a bounded log of posed captures
 (`search_capture_log`). A capture's pose is its recorded capture-time `map_pose`,
 projected by [spatial memory](spatial-memory.md) into the current map revision.
 A record without one falls back to TF while TF still holds its time.
+
+The 2D occupancy fan ranks candidate viewpoints; negative evidence additionally
+requires a fresh binary `OcTree` or `ColorOcTree` on `search_geometry_topic`
+(default `/octomap_binary`) in frame `map`. Its timestamp must match the graph
+publication in `/robot/spatial/revision`, precede the image, and be no older
+than `search_geometry_max_age_sec` (default 1 second). Unknown voxels, occupied
+voxels and grazing contacts block visibility. Map resolution must resolve
+`search_min_object_m`; malformed, oversized, stale or replayed maps earn no
+coverage. `missing_3d_geometry` reports captures without an eligible proof.
 
 When SLAM revises the map, every anchored capture in the log is projected into
 the new revision and the query's coverage and prior sightings are rebuilt from
 them, so evidence moves with the corrected map. Captures without a recorded map
 pose cannot be placed in the new revision and leave the log
 (`unanchored_after_revision` in the rejection counts).
+Each geometric proof retains its original camera pose and references a shared
+capture-time map, so the occluders move with that camera's corrected anchor.
+The map cache is bounded to 32 MiB of binary data and four decoded trees;
+each payload is at most 2 MiB. Evicted evidence becomes unobserved rather than
+being reconstructed against a newer scene.
 
 ## Choosing viewpoints
 
@@ -90,12 +107,11 @@ searched. A sighting from before the search start is a prior, never a result.
 
 ## Limits
 
-- Occlusion uses the 2D occupancy map at integration time. Objects above or
-  below the lidar plane can be hidden by furniture the map does not contain.
+- Unknown or incomplete 3D mapping reduces coverage. Conservative volume
+  intersection can reject a clear view; it must not infer clearance from a
+  few sampled rays. Physical scene and sensor accuracy still require qualification.
 - Reprojection moves coverage with the graph node each capture was anchored to;
   anchor-pose uncertainty is not added to the evidence.
-- Rolled and vertically aimed camera transforms are refused: the 2D fan cannot
-  represent their frustum. They contribute no negative coverage or viewpoints.
 - Travel cost is a straight line; Nav2 validates the real route.
 - `search_min_object_px` is an uncalibrated default; it is fitted by
   [threshold calibration](threshold-calibration.md) once the recorded corpus exists.

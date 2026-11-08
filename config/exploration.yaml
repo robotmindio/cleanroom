@@ -39,6 +39,9 @@ robot_explorer:
     # Objects move; older negative evidence is stale and searched again.
     search_max_age_sec: 900.0
     search_require_stationary: true
+    # Negative coverage requires known-free 3D voxels, matched to the optimized graph.
+    search_geometry_topic: /octomap_binary
+    search_geometry_max_age_sec: 1.0
     # Heuristic utility = expected newly resolved cells / (travel + overhead).
     search_viewpoint_spacing_m: 0.5
     search_headings: 12

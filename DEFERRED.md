@@ -274,6 +274,13 @@ recall, occlusion uses 3D scene geometry and coverage reprojection is checked
 on a live SLAM optimization; only then set `allow_search: true` in `config/exploration.yaml`.
 Tracked in [#88](https://github.com/robotmindio/cleanroom/issues/88).
 
+Software now requires capture-time known-free OctoMap volumes for negative
+evidence, supports optical roll and vertical views, and retains bounded
+geometry proofs through anchor reprojection. Native-writer fixtures and ROS
+tests cover overhangs, missing/stale/replayed geometry and corrected anchors.
+This does not replace measured detector recall or the live trials above;
+`allow_search` remains false.
+
 ## Spatial memory qualification
 
 Owner: robot integrator with SLAM running at the deployment site.
