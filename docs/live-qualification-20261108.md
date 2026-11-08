@@ -14,7 +14,7 @@ verified before admission. In daylight, all three consecutive objectives
 finished `done/found`; admission to verification took 6.28, 4.13 and 5.46 seconds.
 
 Each result contains two distinct, stationary captures. Their verification
-ages were 1.45–1.85 seconds, separations 0.40–0.61 seconds and scores 0.728–0.748.
+ages were 0.88–1.85 seconds, separations 0.40–0.61 seconds and scores 0.728–0.748.
 All six original JPEGs were downloaded through the goal evidence endpoint;
 independently computed SHA-256 hashes matched their immutable receipts.
 Retrying each request returned the same goal. The canary was disabled and
