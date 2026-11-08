@@ -97,6 +97,8 @@
      "revisit_spacing_m": 1.0,
      "search_capture_log": 2000,
      "search_dwell_sec": 4.0,
+     "search_geometry_max_age_sec": 1.0,
+     "search_geometry_topic": "/octomap_binary",
      "search_headings": 12,
      "search_max_age_sec": 900.0,
      "search_max_candidates": 200,
