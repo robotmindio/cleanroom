@@ -9,6 +9,7 @@ are unchanged. This measures failover, not a network/server outage.
 
 import argparse
 from collections import defaultdict
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -23,6 +24,7 @@ from lekiwi_rmf.object_recognition import ProviderUnavailable, use_model_runtime
 class ProviderLoss:
     def __init__(self, provider):
         self.provider = provider
+        self.timeout = provider.timeout
         self.unavailable = threading.Event()
 
     def infer(self, body):
@@ -68,6 +70,7 @@ def main():
     executor = MultiThreadedExecutor(num_threads=4, context=test_context)
     executor.add_node(relay)
     report = {'source_domain': args.source_domain, 'test_domain': args.test_domain,
+              'script_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
               'injection': 'process-local ProviderUnavailable; no server or network interruption',
               'settings': parameters, 'phases': {}, 'passed': False}
     worker = None
@@ -149,6 +152,9 @@ def main():
                                      'latency': measured, 'passed': fresh_outputs and role_ok}
             print(json.dumps({'phase': name, 'counts': counts, 'passed': fresh_outputs and role_ok}), flush=True)
         report['passed'] = all(row['passed'] for row in report['phases'].values())
+    except Exception as error:
+        report['error'] = str(error)
+        raise
     finally:
         executor.shutdown(timeout_sec=15)
         if worker:

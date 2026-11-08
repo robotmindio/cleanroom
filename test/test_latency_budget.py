@@ -23,7 +23,8 @@ def qualification():
 def test_provider_loss_is_local_reversible_and_preserves_real_responses():
     calls = []
     response = {'real': True}
-    loss = qualification().ProviderLoss(SimpleNamespace(infer=lambda body: (calls.append(body), response)[1]))
+    loss = qualification().ProviderLoss(SimpleNamespace(timeout=1.5, infer=lambda body: (calls.append(body), response)[1]))
+    assert loss.timeout == 1.5
     assert loss.infer({'request': 1}) is response
     loss.unavailable.set()
     with pytest.raises(RuntimeError, match='injected provider loss'):
