@@ -78,7 +78,8 @@ def _slam(context):
             "rgbd_cameras": 0 if dual_rgbd and not search else 1,
             "subscribe_scan_cloud": lidar_on,
             # A merged base-frame cloud has no single physical sensor origin for 3D free rays.
-            **({"Grid/3D": "true", "Grid/Sensor": "1", "Grid/RayTracing": "true"} if search else {}),
+            **({"Grid/3D": "true", "Grid/Sensor": "1", "Grid/RayTracing": "true",
+                "map_always_update": True} if search else {}),
             "Rtabmap/MemoryThr": ParameterValue(LaunchConfiguration("rtabmap_wm_nodes"), value_type=str),
             "Mem/IncrementalMemory": str(topology.slam_mapping),
             # ICP proximity closure only searches working memory. Reload the

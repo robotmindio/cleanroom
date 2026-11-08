@@ -63,8 +63,12 @@ native Astra RGB-D stream for mapping occupancy, excluding the front view's
 depth reprojected from the merged navigation cloud. A real deployment without
 the Astra refuses this mode. In simulation the depth projection uses only
 the front depth camera's own point cloud, without filling holes. The ordinary
-search-disabled mapping configuration is unchanged. Camera calibration and
-the resulting free-space coverage still require physical acceptance.
+search-disabled mapping configuration is unchanged. Mapping also updates
+while stationary, so new depth frames can produce fresh geometry during a
+search dwell. Camera calibration and the resulting free-space coverage still
+require physical acceptance. Previously flattened map cells do not become
+3D evidence merely by enabling the switch; record a 3D map or independently
+validate regeneration before accepting coverage.
 
 When SLAM revises the map, every anchored capture in the log is projected into
 the new revision and the query's coverage and prior sightings are rebuilt from

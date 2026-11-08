@@ -29,6 +29,7 @@ def test_search_requires_3d_ray_tracing_from_a_real_camera_origin(monkeypatch, p
     parameters = mapper['parameters']
     assert (parameters['Grid/3D'], parameters['Grid/Sensor'], parameters['Grid/RayTracing']) == ('true', '1', 'true')
     assert parameters['rgbd_cameras'] == 1
+    assert parameters['map_always_update'] is True
     depth = find_node(records, name='slam_front_depth')
     assert depth['parameters']['fill_holes_size'] == depth['parameters']['fill_iterations'] == 0
     if profile == 'sim':

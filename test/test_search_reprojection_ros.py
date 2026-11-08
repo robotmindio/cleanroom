@@ -101,7 +101,7 @@ def test_native_mapper_publishes_known_free_3d_geometry_with_the_graph_stamp(tmp
                                    stdout=log, stderr=subprocess.STDOUT)
         try:
             deadline = time.monotonic() + 20
-            while time.monotonic() < deadline and not (maps and graphs):
+            while time.monotonic() < deadline and not (len(maps) >= 2 and len(graphs) >= 2):
                 stamp = node.get_clock().now().to_msg()
                 for message in (rgb, wall, calibration):
                     message.header.stamp, message.header.frame_id = stamp, 'probe_optical'
@@ -110,7 +110,8 @@ def test_native_mapper_publishes_known_free_3d_geometry_with_the_graph_stamp(tmp
                 info.publish(calibration)
                 executor.spin_once(timeout_sec=.1)
             log.flush()
-            assert maps and graphs, (tmp_path / 'mapper.log').read_text()[-6000:]
+            assert len(maps) >= 2 and graphs, (tmp_path / 'mapper.log').read_text()[-6000:]
+            assert maps[-1].header.stamp != maps[0].header.stamp
             assert any(m.header.stamp == g.header.stamp for m in maps for g in graphs)
             scene = SearchOctomap.from_binary(maps[-1].data, maps[-1].resolution)
             (tmp_path / 'scene.bin').write_bytes(memoryview(maps[-1].data).cast('B'))
