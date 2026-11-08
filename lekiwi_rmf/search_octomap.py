@@ -158,14 +158,6 @@ class SearchOctomap:
             old_forward, old_right, old_down = optical_axes(*self.reference_pose[3:])
             rotation = np.asarray((old_right, old_down, old_forward)).T @ np.asarray((right, down, forward))
 
-        def boundary(value, upper=False):
-            scaled = value / self.resolution
-            nearest = round(scaled)
-            # Normalize affine-transform roundoff at half-open voxel boundaries.
-            if abs(scaled - nearest) < 1e-9:
-                scaled = nearest
-            return math.ceil(scaled) - 1 if upper else math.floor(scaled)
-
         limit = profile.range_limit(camera)
         for flat in cells:
             row, column = divmod(int(flat), shape[1])
@@ -178,10 +170,6 @@ class SearchOctomap:
                 continue
             if rotation is not None:
                 corners = (corners - start) @ rotation.T + source_start
-            low = [boundary(value) for value in corners.min(axis=0)]
-            high = [boundary(value, upper=True) for value in corners.max(axis=0)]
-            if math.prod(b - a + 1 for a, b in zip(low, high)) > 4096:
-                continue
             if self.volume_free(source_start, corners.min(axis=0), corners.max(axis=0)):
                 visible.append(flat)
         return np.asarray(visible, dtype=np.int64)
