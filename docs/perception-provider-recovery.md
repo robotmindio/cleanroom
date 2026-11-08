@@ -37,3 +37,40 @@ compression. The JPEG and the model's decoded pixels are unchanged. The peer mus
 bound both compressed and decoded bodies; this requires the matching provider
 implementation. This transport study alone does not qualify positive robot
 goals under the two-second final evidence limit.
+
+## Live failover measurement
+
+After sourcing `scripts/setup.bash`, run:
+
+```bash
+scripts/test-perception-latency.py --output /path/to/provider-failover.json
+```
+
+The script relays real front/wrist images unchanged from source domain 0 into
+an otherwise unused test domain 222. All inference publishers and services
+remain in the isolated domain; it sends no robot commands and writes no
+observations. It uses the tracked remote model, CPU fallback, total request
+rate and freshness limits. Install both pinned models before running it.
+
+After warmup, it measures normal operation, process-local provider failure
+and recovery for 60 seconds each, excluding 12-second transition windows.
+The failure is injected at the remote adapter boundary as `ProviderUnavailable`;
+it does not interrupt the server or network. The report records stage sample
+counts and p50/p95/p99, fresh/late answers and per-camera output/fallback counts.
+Both cameras must produce fresh outputs in each phase, with fallback-only
+outputs during injected loss and primary outputs after recovery.
+
+This establishes live inference failover and measures the observed load. It
+does not establish detector accuracy, independent GPU saturation, a real
+transport outage, navigation/skill latency or replacement production budgets
+for #102. Run under an external bounded process supervisor for crash cleanup.
+
+The [2026-11-08 live measurement](evidence/perception-failover-20261108.json)
+passed all three phases: 102 fresh primary results during normal operation,
+102 fresh fallback results during injected loss, and 98 fresh results during
+recovery (57 primary, 41 fallback). No measured-phase answer expired. Actual
+provider transport interruptions during recovery account for continued
+fallback use; recovery does not require every later frame to use the primary.
+Normal network p95 was 522 ms and recovery p95 772 ms, exceeding the diagnostic
+300 ms budget. The two-second age gate and production budgets are unchanged;
+this single configuration/load does not qualify a budget replacement.
