@@ -5,6 +5,10 @@ maps with, the merged lidar/Astra cloud whenever there is a laser, so one
 sensor dropping off USB never holds the map (and Nav2) back.
 """
 
+from pathlib import Path
+
+import yaml
+
 from launch import LaunchDescription
 from launch.actions import LogInfo, OpaqueFunction
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
@@ -36,6 +40,13 @@ def _slam(context):
     package = FindPackageShare("lekiwi_rmf")
     database = LaunchConfiguration("rtabmap_database")
     camera_on, lidar_on, dual_rgbd = topology.camera_on, topology.lidar_on, topology.dual_rgbd
+    exploration = yaml.safe_load((Path(package.perform(context)) / 'config/exploration.yaml').read_text())
+    search = exploration['robot_explorer']['ros__parameters']['allow_search']
+    if type(search) is not bool:
+        raise ValueError('allow_search must be a YAML boolean')
+    search = search and not (topology.static_map or topology.start_rmf)
+    if search and not (camera_on and (topology.sim or dual_rgbd)):
+        raise ValueError('search geometry requires native RGB-D: enable the Astra or use simulation')
     wait_for_loop = rtabmap_waits_for_loop(context)
     actions = [] if wait_for_loop else [LogInfo(
         msg="RTAB-Map mapping starts a new session immediately; "
@@ -64,8 +75,10 @@ def _slam(context):
             "Vis/EstimationType": "0" if dual_rgbd else "1",
             "subscribe_depth": camera_on and not dual_rgbd,
             "subscribe_rgbd": dual_rgbd,
-            "rgbd_cameras": 0 if dual_rgbd else 1,
+            "rgbd_cameras": 0 if dual_rgbd and not search else 1,
             "subscribe_scan_cloud": lidar_on,
+            # A merged base-frame cloud has no single physical sensor origin for 3D free rays.
+            **({"Grid/3D": "true", "Grid/Sensor": "1", "Grid/RayTracing": "true"} if search else {}),
             "Rtabmap/MemoryThr": ParameterValue(LaunchConfiguration("rtabmap_wm_nodes"), value_type=str),
             "Mem/IncrementalMemory": str(topology.slam_mapping),
             # ICP proximity closure only searches working memory. Reload the
@@ -79,6 +92,8 @@ def _slam(context):
             ("rgb/image", FRONT_RGB), ("rgb/camera_info", FRONT_CAMERA_INFO),
             ("depth/image", FRONT_DEPTH),
             ("rgbd_images", "/slam/rgbd_images"),
+            # Use the native Astra depth, excluding the front view's reprojected merged cloud.
+            *([("rgbd_image", "/slam/astra/rgbd_image")] if search and dual_rgbd else []),
             # Whoever owns /map owns what Nav2 plans against: the map server when
             # a floor plan is supplied, RTAB-Map's own grid when the robot draws one.
             ("odom", "/odom"), ("scan_cloud", "/slam/cloud"),
@@ -132,14 +147,16 @@ def _slam(context):
             parameters=[{
                 "use_sim_time": topology.sim,
                 "fixed_frame_id": "odom", "approx": True,
-                "decimation": 2, "fill_holes_size": 2, "fill_iterations": 1,
+                "decimation": 2, "fill_holes_size": 0 if search else 2,
+                "fill_iterations": 0 if search else 1,
                 "fill_holes_error": 0.05, "wait_for_transform": 0.1,
                 "qos": 1, "qos_camera_info": 1,
                 # 25 Hz calibration must survive the slower range/image
                 # interval; five metadata samples cover only 0.2 seconds.
                 "topic_queue_size": 5, "sync_queue_size": 30,
             }],
-            remappings=[("cloud", "/slam/cloud"), ("camera_info", FRONT_CAMERA_INFO),
+            remappings=[("cloud", "/camera/depth/points" if search and topology.sim else "/slam/cloud"),
+                        ("camera_info", FRONT_CAMERA_INFO),
                         ("image_raw", FRONT_DEPTH)],
             output="screen",
         ))
