@@ -1,9 +1,15 @@
 """Search evidence follows SLAM revisions: anchored captures are reprojected, unanchored ones leave (T-26)."""
 
 import hashlib
+from array import array
+from dataclasses import replace
 import json
 import math
 import threading
+from types import SimpleNamespace
+
+import pytest
+from octomap_msgs.msg import Octomap
 
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.context import Context
@@ -11,6 +17,7 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 from rclpy.qos import DurabilityPolicy, QoSProfile
+from rclpy.time import Time as RosTime
 import rclpy
 from geometry_msgs.msg import TransformStamped
 from rtabmap_msgs.msg import MapGraph
@@ -19,10 +26,12 @@ from std_msgs.msg import String
 from tf2_ros import Buffer
 
 from lekiwi_rmf.object_cameras import camera_bindings
+from lekiwi_rmf.spatial_anchors import SCHEMA as SPATIAL_SCHEMA
 from lekiwi_rmf.search_evidence import SearchEvidence
 from lekiwi_rmf.spatial_memory_node import SpatialMemory
 from lekiwi_rmf.srv import QueryObservations
 from test_spatial_memory_ros import graph, rtabmap_database, stop, wait
+from test_coverage_search import capture
 
 MODEL = 'ab' * 32
 PROFILE_REVISION = 'e' * 64
@@ -137,3 +146,112 @@ def test_loop_closure_reprojects_the_capture_log(tmp_path):
         assert evidence.rejected['unanchored_after_revision'] == 1
     finally:
         stop(executor, thread, (spatial, store, host), context)
+
+
+@pytest.fixture
+def geometry_log(monkeypatch):
+    context = Context()
+    rclpy.init(context=context)
+    node = Node('search_geometry_contract', context=context)
+    now = [100.]
+    evidence = SearchEvidence(node, Buffer(), ReentrantCallbackGroup(), 8)
+    monkeypatch.setattr(node, 'get_clock', lambda: SimpleNamespace(
+        now=lambda: RosTime(nanoseconds=round(now[0] * 1e9))))
+    try:
+        yield evidence, now
+    finally:
+        node.destroy_node()
+        context.try_shutdown()
+
+
+def geometry_revision(evidence, stamp, revision='r1'):
+    evidence._on_revision(String(data=json.dumps({
+        'schema': SPATIAL_SCHEMA, 'map_ref': 'test-map', 'revision': revision, 'graph_stamp_unix_sec': stamp})))
+    evidence._poll()
+
+
+def octomap_message(stamp, payload=b'\x55\x55', **overrides):
+    message = Octomap(binary=True, id='OcTree', resolution=.05, data=array('b', payload))
+    message.header.frame_id = 'map'
+    message.header.stamp = RosTime(nanoseconds=round(stamp * 1e9)).to_msg()
+    for key, value in overrides.items():
+        setattr(message, key, value)
+    return message
+
+
+@pytest.mark.parametrize('map_first', [False, True])
+def test_3d_map_and_graph_bind_in_either_order(geometry_log, map_first):
+    evidence, _ = geometry_log
+    geometry_revision(evidence, 99.9)
+    if map_first:
+        evidence._on_geometry(octomap_message(100.))
+        assert evidence.geometry_for(capture(stamp=100.1)) is None
+        geometry_revision(evidence, 100.)
+    else:
+        geometry_revision(evidence, 100.)
+        evidence._on_geometry(octomap_message(100.))
+    assert evidence.geometry_for(capture(stamp=100.1)) is not None
+
+
+@pytest.mark.parametrize('fault', ['old', 'future', 'zero_stamp', 'frame', 'full', 'type', 'truncated', 'resolution'])
+def test_invalid_or_stale_3d_map_never_admits_negative_geometry(geometry_log, fault):
+    evidence, _ = geometry_log
+    geometry_revision(evidence, 100.)
+    message = octomap_message(100.)
+    if fault in ('old', 'future', 'zero_stamp'):
+        message = octomap_message({'old': 98., 'future': 100.2, 'zero_stamp': 0.}[fault])
+    elif fault == 'frame':
+        message.header.frame_id = 'odom'
+    elif fault == 'full':
+        message.binary = False
+    elif fault == 'type':
+        message.id = 'UnsupportedTree'
+    elif fault == 'truncated':
+        message.data = array('b', b'\x55')
+    else:
+        message.resolution = math.nan
+    evidence._on_geometry(message)
+    assert evidence.geometry_for(capture(stamp=100.1)) is None
+    assert evidence.rejected['invalid_3d_geometry'] == 1
+
+
+def test_future_scene_is_not_retroactively_used_for_an_older_image(geometry_log):
+    evidence, _ = geometry_log
+    geometry_revision(evidence, 100.02)
+    evidence._on_geometry(octomap_message(100.02))
+    assert evidence.geometry_for(capture(stamp=100.01)) is None
+    assert evidence.geometry_for(capture(identifier='b' * 64, stamp=100.03)) is not None
+    assert evidence.geometry_for(capture(identifier='c' * 64, stamp=102.)) is None
+
+
+def test_new_revision_rejects_same_stamp_replay_but_preserves_capture_time_proof(geometry_log):
+    evidence, now = geometry_log
+    geometry_revision(evidence, 100.)
+    evidence._on_geometry(octomap_message(100.))
+    original = capture(stamp=100.01)
+    assert evidence.geometry_for(original) is not None
+    geometry_revision(evidence, 99.)  # An older notification cannot weaken the replay boundary.
+    geometry_revision(evidence, 100., 'r2')
+    evidence._on_geometry(octomap_message(100.))
+    assert evidence.geometry_for(capture(identifier='b' * 64, stamp=100.02)) is None
+    moved = replace(original, pose=replace(original.pose, y=.5))
+    assert evidence.geometry_for(moved).reference_pose == (0., 0., .2, 0., 0., 0.)
+    now[0] = 100.2
+    geometry_revision(evidence, 100.2, 'r2')
+    evidence._on_geometry(octomap_message(100.2))
+    assert evidence.geometry_for(capture(identifier='c' * 64, stamp=100.21)) is not None
+
+
+def test_evicted_capture_geometry_cannot_be_replaced_with_a_newer_map(geometry_log, monkeypatch):
+    from lekiwi_rmf import search_evidence
+    evidence, now = geometry_log
+    monkeypatch.setattr(search_evidence, 'GEOMETRY_CACHE_BYTES', 2)
+    geometry_revision(evidence, 100.)
+    evidence._on_geometry(octomap_message(100.))
+    original = capture(stamp=100.01)
+    assert evidence.geometry_for(original) is not None
+    now[0] = 100.2
+    geometry_revision(evidence, 100.2)
+    evidence._on_geometry(octomap_message(100.2, resolution=.025))
+    assert evidence._geometry_bytes <= 2
+    assert evidence.geometry_for(original) is None

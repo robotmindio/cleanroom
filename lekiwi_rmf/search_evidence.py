@@ -8,9 +8,10 @@ without a recorded map pose falls back to TF while TF still holds its time and
 is dropped at the next revision, because nothing can place it there.
 """
 
-from collections import deque
+from collections import OrderedDict, deque
 from dataclasses import replace
 import json
+import hashlib
 import math
 import threading
 import time
@@ -19,6 +20,7 @@ from rclpy.clock import Clock, ClockType
 from rclpy.qos import DurabilityPolicy, QoSProfile, qos_profile_sensor_data
 from rclpy.time import Time
 from sensor_msgs.msg import CameraInfo
+from octomap_msgs.msg import Octomap
 from std_msgs.msg import String
 from tf2_ros import TransformException
 
@@ -26,14 +28,17 @@ from lekiwi_rmf.coverage_search import (
     Capture, Mount, camera_from_info, detections_from_record, pose_from_transform,
 )
 from lekiwi_rmf.object_cameras import camera_bindings
+from lekiwi_rmf.search_octomap import MAX_MAP_BYTES, SearchOctomap
+from lekiwi_rmf.motion_guards import FUTURE_STAMP_TOLERANCE_NS
 from lekiwi_rmf.object_observations import valid_id
-from lekiwi_rmf.spatial_anchors import Transform
+from lekiwi_rmf.spatial_anchors import Transform, valid_ref
 from lekiwi_rmf.spatial_anchors import SCHEMA as SPATIAL_SCHEMA
 from lekiwi_rmf.srv import QueryObservations, QuerySpatial
 
 PAGE = 100
 # Captures per spatial projection request; the service accepts up to 100.
 PROJECT_BATCH = 100
+GEOMETRY_CACHE_BYTES = 32 * 1024 * 1024
 
 
 def parse_profile(text):
@@ -90,7 +95,10 @@ def profile_revision(record):
 class SearchEvidence:
     """Bounded log of captures with their map pose; the log is the search's only memory."""
 
-    def __init__(self, node, transforms, callback_group, capacity):
+    def __init__(self, node, transforms, callback_group, capacity, *,
+                 geometry_topic='/octomap_binary', geometry_max_age_sec=1.0):
+        if not math.isfinite(geometry_max_age_sec) or geometry_max_age_sec <= 0:
+            raise ValueError('search geometry age must be finite and positive')
         self._node, self._tf, self._group = node, transforms, callback_group
         # Re-entrant: projection callbacks rebuild captures while holding the log.
         self._lock = threading.RLock()
@@ -111,12 +119,22 @@ class SearchEvidence:
         self.generation = 0
         self._target = None
         self._reprojection = None
+        self._geometry_max_age = geometry_max_age_sec
+        # Never retain a whole 3D map per capture in the much larger capture log.
+        self._geometry = deque(maxlen=4)
+        self._geometry_candidate = None
+        self._graph_stamp = self._geometry_after = 0.0
+        self._geometry_store, self._geometry_decoded = OrderedDict(), OrderedDict()
+        self._geometry_bytes = 0
+        self._geometry_proofs = {}
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         node.create_subscription(String, '/robot/perception/profile', self._on_profile, latched,
                                  callback_group=callback_group)
         node.create_subscription(String, '/robot/map_context', self._on_map_context, latched,
                                  callback_group=callback_group)
         node.create_subscription(String, '/robot/spatial/revision', self._on_revision, latched,
+                                 callback_group=callback_group)
+        node.create_subscription(Octomap, geometry_topic, self._on_geometry, QoSProfile(depth=1),
                                  callback_group=callback_group)
         self._query = node.create_client(QueryObservations, '/robot/observations/query', callback_group=callback_group)
         self._spatial = node.create_client(QuerySpatial, '/robot/spatial/query', callback_group=callback_group)
@@ -169,14 +187,100 @@ class SearchEvidence:
             if not isinstance(value, dict) or value.get('schema') != SPATIAL_SCHEMA:
                 raise ValueError('invalid spatial revision')
             target = {'map_ref': value['map_ref'], 'revision': value['revision']}
+            if not all(valid_ref(item) for item in target.values()):
+                raise ValueError('invalid spatial revision identity')
         except (ValueError, KeyError, TypeError, RecursionError):
             self._reject('invalid_spatial_revision')
             return
         with self._lock:
             if target != self._target:
+                self._geometry_after = max(self._geometry_after, self._graph_stamp,
+                                           self._geometry[-1][1] if self._geometry else 0.)
+                self._geometry.clear()
+                self._geometry_candidate = None
                 self._target = target
                 # Reproject the whole log under the new revision before more captures are added.
                 self._reprojection = None
+            stamp = value.get('graph_stamp_unix_sec')
+            self._graph_stamp = float(stamp) if type(stamp) in (int, float) and math.isfinite(stamp) else 0.0
+            self._bind_geometry()
+
+    def _on_geometry(self, message):
+        stamp = message.header.stamp.sec + message.header.stamp.nanosec * 1e-9
+        now = self._node.get_clock().now().nanoseconds * 1e-9
+        try:
+            if (message.header.frame_id != 'map' or not message.binary
+                    or message.id not in ('OcTree', 'ColorOcTree') or stamp <= 0
+                    or not -FUTURE_STAMP_TOLERANCE_NS * 1e-9 <= now - stamp <= self._geometry_max_age
+                    or len(message.data) > MAX_MAP_BYTES):
+                raise ValueError('3D geometry must be a fresh binary octomap in map')
+            raw = memoryview(message.data).cast('B').tobytes()
+            tree = SearchOctomap.from_binary(raw, message.resolution)
+            key = hashlib.sha256(tree.resolution.hex().encode() + b'\0' + raw).hexdigest()
+        except (ValueError, TypeError, OverflowError) as error:
+            with self._lock:
+                self._geometry.clear()
+                self._geometry_candidate = None
+            self._reject('invalid_3d_geometry')
+            self._node.get_logger().warning(f'search geometry rejected: {error}', throttle_duration_sec=10)
+            return
+        with self._lock:
+            if key not in self._geometry_store:
+                self._geometry_store[key] = (raw, tree.resolution)
+                self._geometry_bytes += len(raw)
+            self._geometry_store.move_to_end(key)
+            self._geometry_decoded[key] = tree
+            self._geometry_decoded.move_to_end(key)
+            while len(self._geometry_decoded) > 4:
+                self._geometry_decoded.popitem(last=False)
+            while (self._geometry_bytes > GEOMETRY_CACHE_BYTES
+                   or len(self._geometry_store) > self._captures.maxlen):
+                removed, (payload, _) = self._geometry_store.popitem(last=False)
+                self._geometry_bytes -= len(payload)
+                self._geometry_decoded.pop(removed, None)
+            self._geometry_candidate = (key, stamp)
+            self._bind_geometry()
+
+    def _bind_geometry(self):
+        """Bind matching graph/map publications in either arrival order, under the log lock."""
+        if self._target is None or self._geometry_candidate is None:
+            return
+        key, stamp = self._geometry_candidate
+        if (stamp <= self._geometry_after or abs(stamp - self._graph_stamp) > 1e-6
+                or (self._geometry and stamp <= self._geometry[-1][1])):
+            return
+        self._geometry.append((key, stamp, dict(self._target)))
+        self._geometry_candidate = None
+
+    def geometry_for(self, capture):
+        """Preserve the capture's known-free rays when its anchor moves with SLAM."""
+        if capture.pose is None:
+            return None
+        with self._lock:
+            if self.revision != self._target:
+                return None
+            proof = self._geometry_proofs.get(capture.observation_id)
+            if proof is None:
+                for key, stamp, revision in reversed(self._geometry):
+                    if revision == self.revision and 0 <= capture.stamp - stamp <= self._geometry_max_age:
+                        p = capture.pose
+                        proof = (key, (p.x, p.y, p.z, p.yaw, p.pitch, p.roll))
+                        self._geometry_proofs[capture.observation_id] = proof
+                        break
+            if proof is None:
+                return None
+            key, reference_pose = proof
+            if key not in self._geometry_store:
+                return None  # Evicted evidence is unobserved, never reconstructed from a newer scene.
+            self._geometry_store.move_to_end(key)
+            tree = self._geometry_decoded.get(key)
+            if tree is None:
+                tree = SearchOctomap.from_binary(*self._geometry_store[key])
+                self._geometry_decoded[key] = tree
+                while len(self._geometry_decoded) > 4:
+                    self._geometry_decoded.popitem(last=False)
+            self._geometry_decoded.move_to_end(key)
+            return replace(tree, reference_pose=reference_pose)
 
     def _reject(self, reason):
         with self._lock:
@@ -355,6 +459,9 @@ class SearchEvidence:
             if len(self._anchors) > 2 * self._captures.maxlen:
                 live = {item.observation_id for _, item in self._captures}
                 self._anchors = {key: value for key, value in self._anchors.items() if key in live}
+            if len(self._geometry_proofs) > 2 * self._captures.maxlen:
+                live = {item.observation_id for _, item in self._captures}
+                self._geometry_proofs = {key: value for key, value in self._geometry_proofs.items() if key in live}
             self._last_capture = time.monotonic()
 
     def _capture(self, record, points, projected):
@@ -438,5 +545,5 @@ class SearchEvidence:
             except ValueError:
                 continue
             if math.isfinite(relative.z):
-                result.append(Mount(name, camera, relative.z, relative.pitch, relative.yaw))
+                result.append(Mount(name, camera, relative.z, relative.pitch, relative.yaw, relative.roll))
         return result
