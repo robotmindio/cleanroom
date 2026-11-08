@@ -1,6 +1,9 @@
 """Per-stage latency budgets: tracked configuration, percentiles, the control age gate and bounded diagnostics."""
 
 import json
+import importlib.util
+from pathlib import Path
+from types import SimpleNamespace
 
 from diagnostic_msgs.msg import DiagnosticStatus
 import pytest
@@ -8,6 +11,35 @@ import yaml
 
 from lekiwi_rmf.latency_budget import QUANTILES, LatencyBudget, load_budgets, quantile
 from lekiwi_rmf.object_cameras import config_directory
+
+
+def qualification():
+    spec = importlib.util.spec_from_file_location('perception_latency', Path(__file__).parents[1] / 'scripts/test-perception-latency.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_provider_loss_is_local_reversible_and_preserves_real_responses():
+    calls = []
+    response = {'real': True}
+    loss = qualification().ProviderLoss(SimpleNamespace(infer=lambda body: (calls.append(body), response)[1]))
+    assert loss.infer({'request': 1}) is response
+    loss.unavailable.set()
+    with pytest.raises(RuntimeError, match='injected provider loss'):
+        loss.infer({'request': 2})
+    assert calls == [{'request': 1}]
+    loss.unavailable.clear()
+    assert loss.infer({'request': 3}) is response
+    assert calls == [{'request': 1}, {'request': 3}]
+
+
+@pytest.mark.parametrize('domain', ['0', '1', '100', '231', '233'])
+def test_latency_qualification_refuses_physical_or_reserved_test_domains(monkeypatch, tmp_path, domain):
+    monkeypatch.setattr('sys.argv', ['probe', '--test-domain', domain, '--output', str(tmp_path / 'report.json')])
+    with pytest.raises(SystemExit) as error:
+        qualification().main()
+    assert error.value.code == 2
 
 
 def tracked(name, node):

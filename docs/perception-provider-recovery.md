@@ -37,3 +37,30 @@ compression. The JPEG and the model's decoded pixels are unchanged. The peer mus
 bound both compressed and decoded bodies; this requires the matching provider
 implementation. This transport study alone does not qualify positive robot
 goals under the two-second final evidence limit.
+
+## Live failover measurement
+
+After sourcing `scripts/setup.bash`, run:
+
+```bash
+scripts/test-perception-latency.py --output /path/to/provider-failover.json
+```
+
+The script relays real front/wrist images unchanged from source domain 0 into
+an otherwise unused test domain 222. All inference publishers and services
+remain in the isolated domain; it sends no robot commands and writes no
+observations. It uses the tracked remote model, CPU fallback, total request
+rate and freshness limits. Install both pinned models before running it.
+
+After warmup, it measures normal operation, process-local provider failure
+and recovery for 60 seconds each, excluding 12-second transition windows.
+The failure is injected at the remote adapter boundary as `ProviderUnavailable`;
+it does not interrupt the server or network. The report records stage sample
+counts and p50/p95/p99, fresh/late answers and per-camera output/fallback counts.
+Both cameras must produce fresh outputs in each phase, with fallback-only
+outputs during injected loss and primary outputs after recovery.
+
+This establishes live inference failover and measures the observed load. It
+does not establish detector accuracy, independent GPU saturation, a real
+transport outage, navigation/skill latency or replacement production budgets
+for #102. Run under an external bounded process supervisor for crash cleanup.
