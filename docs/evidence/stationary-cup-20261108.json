@@ -1,0 +1,109 @@
+{
+  "observed_utc_date": "2026-11-08",
+  "runtime_release": "7f51fed145694a51aa13afdb0b613069653bb5c6",
+  "scope": "Three positive trials, one stationary image-only daylight wrist view of the same cup; no general recognition, metric grounding or physical search acceptance.",
+  "camera_id": "wrist",
+  "model_sha256": "6ec9eb1f5a01c271a5b0b6ce6d95432148f94d33c16b1ad6a4ccca6ee2f5636f",
+  "profile_revision": "dd4f8f1c82020dabf74c6a6700056b6654730624f9f003ea94984ad1e5429b40",
+  "profile_name": "near_field",
+  "limits": {
+    "minimum_score": 0.5,
+    "max_evidence_age_sec": 2.0,
+    "confirmation_window_sec": 2.0,
+    "max_duration_sec": 15.0,
+    "max_travel_m": 0.12
+  },
+  "passed": true,
+  "idempotent_retry": true,
+  "profile_disabled": true,
+  "downloaded_jpegs_sha256_independently_verified": 6,
+  "cases": [
+    {
+      "case": "positive_0",
+      "goal_id": "7e42b6c2-2205-5188-ba50-31ba27ff85d8",
+      "state": "done",
+      "outcome": "found",
+      "admitted_at": 1794114825.538695,
+      "verified_at": 1794114831.815234,
+      "admission_to_verification_sec": 6.276538848876953,
+      "verifier_version": 3,
+      "policy_hash": "319b6841df899d8d46cc655cde91dd41b1035f31cd2e8aca59ba531e2b765c9b",
+      "evidence": [
+        {
+          "observation_id": "f35e36f9943111eed30b5fc18275b5e47d32995821e5a012ee22ed165c7aa372",
+          "captured_at": 1794114829.962947,
+          "age_at_verification_sec": 1.8522870540618896,
+          "score": 0.7281237244606018,
+          "sha256": "ed9784270aae9416af98a97a27e98cbfc503f7490b4a3948f0bc1f9ab406d207",
+          "size": 16218
+        },
+        {
+          "observation_id": "7d235ed7c03c9ae6be98bfa93f096bd42cdb80c3b7e23bfb96dd4c223cfe1776",
+          "captured_at": 1794114830.3669765,
+          "age_at_verification_sec": 1.4482574462890625,
+          "score": 0.735150158405304,
+          "sha256": "c616fbfbaabf3887fb73db16dfac1d76b9c84e99f6c66cca3eb830604fd4dabd",
+          "size": 16255
+        }
+      ]
+    },
+    {
+      "case": "positive_1",
+      "goal_id": "f25ded74-0c16-5b3a-812f-30d7f17d4bad",
+      "state": "done",
+      "outcome": "found",
+      "admitted_at": 1794114836.151486,
+      "verified_at": 1794114840.278394,
+      "admission_to_verification_sec": 4.12690806388855,
+      "verifier_version": 3,
+      "policy_hash": "319b6841df899d8d46cc655cde91dd41b1035f31cd2e8aca59ba531e2b765c9b",
+      "evidence": [
+        {
+          "observation_id": "58839b83e399eaaf5c90e2b5b4ff74b934e8b285bfc2005b06ebc3213c7304b4",
+          "captured_at": 1794114838.6114333,
+          "age_at_verification_sec": 1.6669607162475586,
+          "score": 0.7400547862052917,
+          "sha256": "37dd39a30ab635036fa83c74ae0f315799996d996cf0b03b9986bd9607d3535e",
+          "size": 16222
+        },
+        {
+          "observation_id": "5a231fec0dc4fdeb222297df1c39cdf2c39cd4914676b15ed764be1052f1f701",
+          "captured_at": 1794114839.219507,
+          "age_at_verification_sec": 1.058887004852295,
+          "score": 0.7476794719696045,
+          "sha256": "71088d30f82c793e59fe3e6d0926dae9bfb0850e05b955507ba482557706ff8e",
+          "size": 16227
+        }
+      ]
+    },
+    {
+      "case": "positive_2",
+      "goal_id": "ee1939c6-a0b8-5030-9e58-91cb3e70bcbb",
+      "state": "done",
+      "outcome": "found",
+      "admitted_at": 1794114843.89687,
+      "verified_at": 1794114849.351952,
+      "admission_to_verification_sec": 5.455082178115845,
+      "verifier_version": 3,
+      "policy_hash": "319b6841df899d8d46cc655cde91dd41b1035f31cd2e8aca59ba531e2b765c9b",
+      "evidence": [
+        {
+          "observation_id": "48f1a5bb3075245ce9f7ca77dc7f41304bbba22582c31e77f30d13230d5e4518",
+          "captured_at": 1794114847.868065,
+          "age_at_verification_sec": 1.483886957168579,
+          "score": 0.7449631094932556,
+          "sha256": "e93231a7640544cbf1051665c86c8b9fc2e5519b5552366495fc960320692e11",
+          "size": 16228
+        },
+        {
+          "observation_id": "31e84152fc4a2c0c7ac5486e325a02daeab290a72b7af1985a0f611b8a087efa",
+          "captured_at": 1794114848.472042,
+          "age_at_verification_sec": 0.8799099922180176,
+          "score": 0.7291368842124939,
+          "sha256": "330482028c3bdb16172f26b6ee5581178dbd66eb520414dd7a13028717e37df7",
+          "size": 16168
+        }
+      ]
+    }
+  ]
+}
