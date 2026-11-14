@@ -184,10 +184,15 @@ def test_clock_profiles_share_reference_across_lan_changes_without_clock_steps()
         'server andres-Lenovo.local iburst minpoll 2 maxpoll 3 xleave prefer',
         'server 100.87.252.60 iburst minpoll 2 maxpoll 3',
     ]
-    for profile in (compute, device):
-        directives = [line.split()[0] for line in profile.splitlines()
-                      if line.strip() and not line.startswith('#')]
-        assert not {'makestep', 'initstepslew', 'local'} & set(directives)
+    # The RTC-less device steps its first three updates after boot (it restarts
+    # weeks behind); the compute host has no RTC drift to recover from and never
+    # steps a live sensor clock.
+    directives = {line.split()[0]: line for line in device.splitlines()
+                  if line.strip() and not line.startswith('#')}
+    assert directives['makestep'].split()[1:] == ['1.0', '3']
+    compute_directives = [line.split()[0] for line in compute.splitlines()
+                          if line.strip() and not line.startswith('#')]
+    assert not {'makestep', 'initstepslew', 'local'} & set(compute_directives)
     assert not any(line.startswith(('pool ', 'peer ')) for line in device.splitlines())
 
 

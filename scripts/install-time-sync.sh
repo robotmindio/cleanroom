@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Install the split robot's shared time reference without stepping live clocks.
+# Install the split robot's shared time reference. chrony steps only during the
+# first updates after boot (makestep limit 3); later corrections slew.
 set -Eeuo pipefail
 PROJECT_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck source=/dev/null
