@@ -25,6 +25,7 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.clock import Clock, ClockType
 from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from rclpy.node import Node
+from rclpy.parameter import Parameter
 from rclpy.parameter_client import AsyncParameterClient
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from rclpy.signals import SignalHandlerOptions
@@ -114,6 +115,9 @@ class RobotExplorer(Node):
         self._rejection = ""
         self._map = None
         self._inputs = {}
+        self._slam_seen = 0.0
+        self._slam_reference = None
+        self._slam_stamp_age = 0.0
         self._collision_clear_after = 0.0
         self._collision_stop_name = ""
         self._mapping = None
@@ -200,6 +204,10 @@ class RobotExplorer(Node):
         self._inputs[name] = (value, now)
 
     def _on_slam(self, message):
+        # The frame's own lateness, fixed at arrival: a quiet pipeline is the
+        # arrival check's business, a lagging one is this stamp's.
+        stamp = rclpy.time.Time.from_msg(message.header.stamp)
+        self._slam_stamp_age = (self.get_clock().now() - stamp).nanoseconds / 1e9
         self._record("slam", message.header)
         if message.loop_closure_id or message.proximity_detection_id:
             # An optimized graph moves earlier map coordinates; plans built on them are revalidated.
@@ -336,6 +344,24 @@ class RobotExplorer(Node):
         pose.pose.orientation = q
         return pose
 
+    def _slam_window(self, received, now):
+        """Seconds of SLAM status latency allowed now.
+
+        RTAB-Map processes observations, so a parked robot legitimately goes
+        quiet for several seconds. Currency only degrades while the robot moves
+        away from the pose the last observation was taken at.
+        """
+        pose = self._pose()
+        if received > self._slam_seen or self._slam_reference is None:
+            self._slam_seen, self._slam_reference = received, pose
+        here, then = pose.pose, self._slam_reference.pose
+        moved = (math.hypot(here.position.x - then.position.x, here.position.y - then.position.y)
+                 > self.config["slam_motion_tolerance_m"]
+                 or abs(math.remainder(2 * math.atan2(here.orientation.z, here.orientation.w)
+                                       - 2 * math.atan2(then.orientation.z, then.orientation.w),
+                                       2 * math.pi)) > self.config["slam_motion_tolerance_rad"])
+        return self.config["slam_timeout_sec"] if moved else self.config["slam_idle_timeout_sec"]
+
     def _healthy(self, require_permission=True):
         now = time.monotonic()
         if self._map is None:
@@ -344,9 +370,10 @@ class RobotExplorer(Node):
             if name == "base_motion_permitted" and not require_permission:
                 continue
             value, received = self._inputs.get(name, (None, 0))
-            timeout = self.config["slam_timeout_sec"] if name == "slam" else self.config["data_timeout_sec"]
             if value is None:
                 raise Paused(f"missing {name}")
+            timeout = (self._slam_window(received, now) if name == "slam"
+                       else self.config["data_timeout_sec"])
             if now - received > timeout:
                 raise Paused(f"stale {name}")
             if not value:
@@ -354,8 +381,8 @@ class RobotExplorer(Node):
                 detail = f": {reason}" if name == "base_motion_permitted" and reason and now - seen <= timeout else ""
                 raise Paused(f"denied {name}{detail}")
             if name == "slam":
-                age = (self.get_clock().now() - rclpy.time.Time.from_msg(value.stamp)).nanoseconds / 1e9
-                if not -0.3 <= age <= timeout:
+                # The pipeline delay measured when the frame arrived, not its age now.
+                if not -0.3 <= self._slam_stamp_age <= self.config["slam_timeout_sec"]:
                     raise Paused("SLAM observations are stale")
         if self._mapping is None or now - self._mode_at > self.config["service_timeout_sec"]:
             raise Paused("mapping mode is unknown or stale")
@@ -511,6 +538,15 @@ class RobotExplorer(Node):
         client = self._mapping_client if mapping else self._localization_client
         if not client.service_is_ready():
             raise RuntimeError("mapping mode service is unavailable")
+        # The launch sets StartNewMapOnLoopClosure for its own mode, so a stack
+        # started in localization keeps waiting for a global closure. Inherited
+        # into this runtime mapping session it makes RTAB-Map ignore every
+        # location in a populated database and the map never grows.
+        results = self._wait(self._mapping_parameters.set_parameters([
+            Parameter("Rtabmap/StartNewMapOnLoopClosure", value=str(not mapping).lower())]),
+            self.config["service_timeout_sec"]).results
+        if not all(result.successful for result in results):
+            raise RuntimeError("RTAB-Map rejected the mapping session policy")
         self._wait(client.call_async(Empty.Request()), self.config["service_timeout_sec"])
         requested_at = time.monotonic()
         response = self._mapping_parameters.get_parameters(["Mem/IncrementalMemory"])
@@ -992,7 +1028,10 @@ class RobotExplorer(Node):
         if (live.shape != grid.shape or abs(live_resolution - resolution) > 1e-6
                 or not np.allclose(live_origin, origin, atol=1e-4, rtol=0)):
             raise Paused("navigation and SLAM maps are not aligned yet")
-        grid = np.where((live < 0) | (live == 100), live, grid)
+        # The costmap reports unknown space as lethal (inflate_around_unknown), so
+        # only the SLAM grid tells unknown from free: live obstacles block known
+        # space, and SLAM's unknown cells stay unknown for frontier selection.
+        grid = np.where((live == 100) & (grid >= 0), 100, grid)
         # Cells under the robot's own body are free: it is standing there.
         return (with_body_free(grid, resolution, origin, (pose.pose.position.x, pose.pose.position.y),
                                2 * math.atan2(q.z, q.w), self._footprint), resolution, origin)

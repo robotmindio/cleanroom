@@ -189,11 +189,22 @@ def test_unknown_or_unsafe_start_and_blocked_regions_are_not_traversed():
     second = choose(grid, blocked=[first])[0]
     assert second is None or math.dist(first, second) >= 0.5
     grid[40, 40] = 100
-    with pytest.raises(ValueError, match="clearance"):
+    with pytest.raises(ValueError, match="known free space"):
         choose(grid)
     grid[:] = -1
-    with pytest.raises(ValueError, match="known space"):
+    with pytest.raises(ValueError, match="known free space"):
         choose(grid)
+
+
+def test_free_start_without_clearance_still_explores():
+    grid = np.zeros((80, 80), dtype=np.int16)
+    grid[38:43, 43:47] = -1  # Unknown beside the body: too close for the 0.22 m prefilter.
+    position = (0.025, 0.025)
+    assert not known_safe_cells(grid, 0.05, 0.22, 20)[40, 40]
+    target, stage, _ = choose(grid, position=position)
+    assert target is not None and stage == "exploring_frontiers"
+    yaw = math.atan2(target[1] - position[1], target[0] - position[0])
+    assert footprint_is_free(grid, 0.05, (-2, -2, 0), target, yaw, FOOTPRINT, 20)
 
 
 def test_rotated_map_origin_round_trip():

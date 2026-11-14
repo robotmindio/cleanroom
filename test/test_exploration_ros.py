@@ -17,6 +17,7 @@ from nav2_msgs.srv import GetCostmap
 from nav_msgs.msg import OccupancyGrid, Path
 import pytest
 import rclpy
+from rcl_interfaces.msg import SetParametersResult
 from ros_test_utils import release_graph
 from rclpy.action import ActionClient, ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
@@ -58,6 +59,9 @@ class RobotPeers(Node):
     def __init__(self, context, *, native_navigation=False):
         super().__init__("rtabmap", context=context)
         self.declare_parameter("Mem/IncrementalMemory", "false")
+        self.declare_parameter("Rtabmap/StartNewMapOnLoopClosure", "true")
+        self.session_policies = []
+        self.add_on_set_parameters_callback(self.session_policy_set)
         self.mapping_requests = []
         self.permitted = True
         self.collision = CollisionMonitorState()
@@ -88,6 +92,7 @@ class RobotPeers(Node):
         self.costmap = None
         self.plan_error = 0
         self.costmap_free_cost = 0
+        self.costmap_unknown_cost = 255
         self.costmap_service = self.create_service(GetCostmap, "/global_costmap/get_costmap",
                                                    self.get_costmap, callback_group=self.group)
         self.base_pub = self.create_publisher(Bool, "/safety/base_motion_permitted", latched)
@@ -111,13 +116,20 @@ class RobotPeers(Node):
         result.map.metadata = CostmapMetaData(
             resolution=source.info.resolution, size_x=source.info.width,
             size_y=source.info.height, origin=source.info.origin)
-        result.map.data = [255 if v < 0 else 254 if v == 100 else self.costmap_free_cost for v in source.data]
+        result.map.data = [self.costmap_unknown_cost if v < 0 else 254 if v == 100
+                           else self.costmap_free_cost for v in source.data]
         return result
 
     def set_mode(self, mapping, result):
         self.mapping_requests.append(mapping)
         self.set_parameters([Parameter("Mem/IncrementalMemory", value=str(mapping).lower())])
         return result
+
+    def session_policy_set(self, parameters):
+        for parameter in parameters:
+            if parameter.name == "Rtabmap/StartNewMapOnLoopClosure":
+                self.session_policies.append(parameter.value)
+        return SetParametersResult(successful=True)
 
     def publish(self):
         stamp = self.get_clock().now().to_msg()
@@ -247,6 +259,8 @@ def test_cancel_stops_navigation_restores_mode_and_rejects_concurrent_goal(graph
     values = response(parameters.get_parameters(["slam_timeout_sec"]))
     assert values.values[0].double_value == 4.0
     assert peers.mapping_requests == [True]
+    # Mapping must not inherit localization's wait for a global closure.
+    assert peers.session_policies == ["false"]
     other = response(client.send_goal_async(Explore.Goal()))
     assert not other.accepted
     response(handle.cancel_goal_async())
@@ -254,6 +268,7 @@ def test_cancel_stops_navigation_restores_mode_and_rejects_concurrent_goal(graph
     assert result.status == GoalStatus.STATUS_CANCELED
     assert peers.nav_canceled == 1 and not peers.nav_active
     assert peers.mapping_requests[-1] is False and explorer._mapping is False
+    assert peers.session_policies == ["false", "true"]
 
 
 def test_success_confirms_visited_target_and_retains_database(graph):
@@ -300,6 +315,20 @@ def test_target_selection_uses_live_obstacles_without_treating_inflation_as_a_wa
     response(handle.cancel_goal_async())
     result = response(handle.get_result_async())
     assert result.status == GoalStatus.STATUS_CANCELED and result.result.unreachable_targets == 0
+
+
+def test_costmap_unknown_reported_as_lethal_does_not_erase_slam_frontiers(graph):
+    peers, explorer, _ = graph
+    # nav2's inflate_around_unknown reports unknown space as lethal, which must
+    # not turn the SLAM map's frontier cells into obstacles.
+    peers.costmap_unknown_cost = 254
+    handle = start(graph)
+    assert peers.nav_active
+    assert peers.navigation_goals
+    response(handle.cancel_goal_async())
+    result = response(handle.get_result_async())
+    assert result.status == GoalStatus.STATUS_CANCELED
+    assert result.result.visited_targets + result.result.unreachable_targets == 0
 
 
 @pytest.mark.parametrize("invalid", ["frame", "geometry"])
@@ -399,7 +428,9 @@ def test_quota_duration_or_mode_change_ends_and_cancels_the_owned_navigation_goa
 def test_recoverable_fault_stops_the_robot_then_resumes_instead_of_aborting(graph, fault):
     peers, explorer, client = graph
     if fault == "slam":
+        # The simulated robot never moves, so an idle SLAM outage uses the idle window.
         explorer.config["slam_timeout_sec"] = 1.0
+        explorer.config["slam_idle_timeout_sec"] = 1.0
     feedback = []
     handle = response(client.send_goal_async(
         Explore.Goal(max_duration_sec=TEST_TASK_DURATION, max_radius_m=2.5),
@@ -423,6 +454,26 @@ def test_recoverable_fault_stops_the_robot_then_resumes_instead_of_aborting(grap
     result = response(handle.get_result_async())
     assert result.status == GoalStatus.STATUS_CANCELED
     assert not peers.nav_active and explorer._mapping is False
+
+
+def test_slam_silence_is_tolerated_until_the_robot_moves(graph):
+    peers, explorer, client = graph
+    feedback = []
+    handle = response(client.send_goal_async(
+        Explore.Goal(max_duration_sec=TEST_TASK_DURATION, max_radius_m=2.5),
+        feedback_callback=lambda message: feedback.append(message.feedback.stage)))
+    wait(lambda: peers.nav_active)
+    peers.publish_slam = False
+    time.sleep(explorer.config["slam_timeout_sec"] + 0.5)
+    # A parked robot adds no observations, so a quiet pipeline is not a stale map.
+    assert explorer._busy and not any(stage.startswith("paused: ") for stage in feedback)
+    peers.position = (peers.position[0] + 0.2, peers.position[1])
+    wait(lambda: any("slam" in stage for stage in feedback))
+    wait(lambda: not peers.nav_active)
+    peers.publish_slam = True
+    wait(lambda: peers.nav_active)
+    response(handle.cancel_goal_async())
+    assert response(handle.get_result_async()).status == GoalStatus.STATUS_CANCELED
 
 
 def test_a_mapped_cell_under_the_robot_neither_blocks_a_goal_nor_pauses_it(graph):

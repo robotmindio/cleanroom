@@ -232,18 +232,21 @@ def select_target(grid, resolution, origin, position, center, radius, visited, b
     safe = known_safe_cells(grid, resolution, clearance, free_threshold)
     safe &= region.astype(np.uint8)
     x, y = world_to_cell(position, resolution, origin)
-    if not (0 <= y < grid.shape[0] and 0 <= x < grid.shape[1] and safe[y, x]):
-        raise ValueError("robot pose is outside known space with the configured clearance")
-    connected = safe.copy()
+    if not (0 <= y < grid.shape[0] and 0 <= x < grid.shape[1] and free[y, x]):
+        raise ValueError("robot pose is outside known free space")
+    # The clearance mask is only a prefilter: in narrow or newly entered space
+    # the exact oriented-footprint check below still admits reachable targets.
+    connected = (safe if safe[y, x] else (free & region.astype(np.uint8))).copy()
     cv2.floodFill(connected, None, (x, y), 2, flags=4)
     reachable = connected == 2
     unknown_neighbor = cv2.dilate((grid == -1).astype(np.uint8), np.array(
         [[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=np.uint8))
     connected_free = free.copy()
     cv2.floodFill(connected_free, None, (x, y), 2, flags=4)
-    frontier = (connected_free == 2).astype(np.uint8) & unknown_neighbor
+    connected_free = connected_free == 2
+    frontier = connected_free.astype(np.uint8) & unknown_neighbor
     candidates = reachable & (cv2.dilate(frontier, disk(observation_distance, resolution)) != 0)
-    available = reachable & ((wx - position[0]) ** 2 + (wy - position[1]) ** 2 >= spacing ** 2)
+    available = connected_free & region & ((wx - position[0]) ** 2 + (wy - position[1]) ** 2 >= spacing ** 2)
     for vx, vy in (*visited, *blocked):
         available &= (wx - vx) ** 2 + (wy - vy) ** 2 >= spacing ** 2
     candidates &= available

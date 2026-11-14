@@ -14,6 +14,12 @@ robot_explorer:
     data_timeout_sec: 1.0
     # Camera acquisition/transport plus gaps between status updates exceeded 2.5 s live.
     slam_timeout_sec: 4.0
+    # RTAB-Map processes observations, so a parked robot legitimately goes quiet.
+    # Idle status may lag this long; once the robot moves again the motion window
+    # above applies. Measured stalls at rest reached ~10 s.
+    slam_idle_timeout_sec: 30.0
+    slam_motion_tolerance_m: 0.04
+    slam_motion_tolerance_rad: 0.1
     service_timeout_sec: 3.0
     navigation_timeout_sec: 180.0
     settle_sec: 1.0

@@ -57,6 +57,8 @@ def test_operator_waits_for_recovering_startup_inputs_without_a_rejected_goal(gr
     from lekiwi_rmf.explore_client import ExploreClient
 
     peers, explorer, _ = graph
+    # The simulated robot never moves, so an idle SLAM outage uses the idle window.
+    explorer.config['slam_idle_timeout_sec'] = explorer.config['slam_timeout_sec']
     peers.publish_slam = False
     wait(lambda: 'slam' in explorer._readiness_reason())
     interrupted = threading.Event()
@@ -224,6 +226,8 @@ def test_completed_duration_quota_does_not_poison_the_next_explore_goal(graph):
 
 def test_pause_reports_a_changed_blocking_reason(graph):
     peers, explorer, client = graph
+    # The simulated robot never moves, so an idle SLAM outage uses the idle window.
+    explorer.config['slam_idle_timeout_sec'] = explorer.config['slam_timeout_sec']
     feedback = []
     handle = response(client.send_goal_async(Explore.Goal(max_radius_m=2.5),
                       feedback_callback=lambda msg: feedback.append(msg.feedback.stage)))
