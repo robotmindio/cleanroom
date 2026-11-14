@@ -67,6 +67,24 @@ stopped (`systemctl status lekiwi-lidar.service lekiwi-astra.service`), and rest
 the stack. Startup waits for `/slam/cloud` before it starts RTAB-Map. Old RTAB
 databases are archived for 14 days and then automatically pruned at startup.
 
+## The LD06 reports `get ldlidar data is time out` while its port exists
+
+The CP210x adapter can keep its `/dev/serial/by-id/...` node and its
+`lekiwi-lidar.service` process alive while delivering no bytes; the self-heal
+watcher only notices a replaced node, so `/scan` goes stale silently and base
+permission is withdrawn with `scan: stale`. Power-cycle that USB port, and let the
+unit reopen the re-enumerated device. Find the port with
+`udevadm info -q path -n /dev/ttyUSB0` (the `1-1.3` in `/devices/.../1-1.3/...`),
+then run:
+
+```bash
+sudo sh -c 'echo 0 > /sys/bus/usb/devices/1-1.3/authorized; sleep 2; echo 1 > /sys/bus/usb/devices/1-1.3/authorized'
+```
+
+Confirm `ldlidar communication is normal.` in `journalctl -u lekiwi-lidar.service`
+and `ros2 topic hz /scan` near 10 Hz. Restarting only the service does not clear
+this state.
+
 ## Wrist or front camera disconnects while the arm moves
 
 `Error dequeueing buffer: No such device (19)` means the USB camera reset or
