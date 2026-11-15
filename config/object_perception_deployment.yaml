@@ -1,4 +1,5 @@
-# Enable only after the selected camera/model operating point is qualified.
-start: false
+# Enabled for observation only: search and reach stay off, and recognition
+# accuracy remains unqualified for any claim beyond the tracked label set.
+start: true
 # Start with one qualified image-only camera; all selected streams must be fresh.
 cameras: [front]

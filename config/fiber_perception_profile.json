@@ -4,8 +4,14 @@
   "camera_id": "front",
   "camera_sha256": "58836269f27778b37cb56ecd77c02559778544bda649f9148a35f520390d0888",
   "model_sha256": "6ec9eb1f5a01c271a5b0b6ce6d95432148f94d33c16b1ad6a4ccca6ee2f5636f",
-  "profile_revision": "dd4f8f1c82020dabf74c6a6700056b6654730624f9f003ea94984ad1e5429b40",
-  "enabled": false,
+  "profile_revision": "ce69c42891b6489b2e87209d320e4fb43db93aebd10bec618b0cb58fc2f6ca3b",
+  "additional_recognizers": [
+    {
+      "model_sha256": "81778a0ac0300bfd3c885954d983f02a86ee3ce4469ef2a76b1a00100ddb3869",
+      "profile_revision": "54bbe58b1930f5f20b0371509bd5058c5b14c8101bf7ac4d4c002577deda0f2a"
+    }
+  ],
+  "enabled": true,
   "allow_search": false,
   "allow_any_color": true,
   "views": [],
@@ -15,5 +21,5 @@
   "max_evidence_age_sec": 2,
   "confirmation_window_sec": 2,
   "labels": ["cup", "green spiky ball"],
-  "open_vocabulary": false
+  "open_vocabulary": true
 }

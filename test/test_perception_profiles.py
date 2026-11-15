@@ -17,11 +17,10 @@ from test_perception_query import DEFAULT, Harness, closed_recognizer, open_reco
 
 
 @pytest.mark.parametrize('filename,camera,proposal', [
-    ('fiber_perception_profile.json', 'front', 'near_field'),
     ('fiber_perception_wrist_canary.json', 'wrist', 'near_field'),
     ('fiber_perception_front_canary.json', 'front', 'standard'),
 ])
-def test_fiber_stationary_profile_matches_the_tracked_camera_and_proposal(filename, camera, proposal):
+def test_fiber_canary_profile_matches_the_tracked_camera_and_proposal(filename, camera, proposal):
     from lekiwi_rmf.object_cameras import camera_bindings
 
     root = Path(__file__).resolve().parents[1]
@@ -30,6 +29,28 @@ def test_fiber_stationary_profile_matches_the_tracked_camera_and_proposal(filena
     assert profile['profile_revision'] == tracked_profiles()[1]['remote_grounding_dino'][proposal].revision
     assert not profile['enabled'] and not profile['allow_search'] and not profile['views']
     assert profile['max_evidence_age_sec'] == profile['confirmation_window_sec'] == 2
+
+
+def test_fiber_stationary_profile_is_the_enabled_open_vocabulary_observation_point():
+    from lekiwi_rmf.object_cameras import camera_bindings
+
+    root = Path(__file__).resolve().parents[1]
+    profile = json.loads((root / 'config/fiber_perception_profile.json').read_text())
+    assert profile['camera_sha256'] == camera_bindings(['front'])['front']['sha256']
+    # The runtime's default proposal profile, not a canary's stricter one.
+    assert profile['profile_revision'] == default_profile('remote_grounding_dino').revision
+    # Fingerprints of the deployed runtime (`scripts/object-perception.sh --describe`), where
+    # the private interpreter fixes the library versions the identity hashes include.
+    assert profile['model_sha256'] == '6ec9eb1f5a01c271a5b0b6ce6d95432148f94d33c16b1ad6a4ccca6ee2f5636f'
+    # The CPU fallback still answers only for the qualified native labels.
+    assert profile['additional_recognizers'] == [{
+        'model_sha256': '81778a0ac0300bfd3c885954d983f02a86ee3ce4469ef2a76b1a00100ddb3869',
+        'profile_revision': default_profile('rtdetr_v2').revision}]
+    # Observation only: no search, no surveyed views, no motion, no metric claim.
+    assert profile['enabled'] and profile['open_vocabulary']
+    assert not profile['allow_search'] and not profile['views']
+    assert profile['max_evidence_age_sec'] == profile['confirmation_window_sec'] == 2
+
 
 def test_local_yolox_canary_keeps_the_wrist_binding_and_existing_safety_bounds():
     from lekiwi_rmf.object_cameras import camera_bindings

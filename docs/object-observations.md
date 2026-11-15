@@ -28,8 +28,8 @@ An earlier local **development** benchmark used RT-DETRv2-R18 at 384×384 and a
 0.50 score threshold. It detected the three retained patterned-mug frames at
 0.693–0.706, where YOLOX missed them. Warm processing was approximately 0.89 s;
 the first measured frame took 6.76 s. This one scene establishes a reproducible
-improvement, not site qualification. Production start remains disabled in
-`config/object_perception_deployment.yaml`.
+improvement, not site qualification. Production start is enabled for observation
+only in `config/object_perception_deployment.yaml`; search and reach stay off.
 
 `model_sha256` identifies pinned artifacts, backend, input size, preprocessing
 revision, label output (`native`, or `query` for open-vocabulary recognizers) and
@@ -84,7 +84,8 @@ local; a deployed Fiber verifier still has its own transport latency.
 `config/fiber_perception_local_profile.json` is a disabled, cup-only image profile
 for this mode. It retains the 0.5 minimum score, 2 s evidence age, 2 s confirmation
 window, and no moving search. Read the actual descriptor before admitting its
-runtime identity. Production perception start remains disabled.
+runtime identity. Production perception runs the remote operating point; the
+local mode stays a canary.
 
 A 2026-10-30 qualification harness completed three cup goals against live camera
 observations, real immutable pins and both JPEG hashes. The oldest evidence at
