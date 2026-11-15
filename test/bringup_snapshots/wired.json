@@ -101,6 +101,9 @@
      "search_viewpoint_spacing_m": 0.5,
      "service_timeout_sec": 3.0,
      "settle_sec": 1.0,
+     "slam_idle_timeout_sec": 30.0,
+     "slam_motion_tolerance_m": 0.04,
+     "slam_motion_tolerance_rad": 0.1,
      "slam_timeout_sec": 4.0,
      "target_spacing_m": 0.5,
      "use_sim_time": false
@@ -321,6 +324,56 @@
   "remappings": [],
   "respawn": true,
   "respawn_delay": 2.0,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {
+   "PYTHONNOUSERSITE": "1"
+  },
+  "name": "object_detector",
+  "namespace": "",
+  "node": "lekiwi_rmf/object_detector",
+  "output": "screen",
+  "parameters": {
+   "camera_ids": [
+    "front"
+   ],
+   "fallback_model_name": "rtdetr_v2_r18",
+   "max_rate_hz": 2.0,
+   "max_source_age_sec": 2.0,
+   "model_name": "grounding_dino_tiny_gpu",
+   "use_sim_time": false
+  },
+  "remappings": [],
+  "respawn": false,
+  "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {
+   "PYTHONNOUSERSITE": "1"
+  },
+  "name": "object_observations",
+  "namespace": "",
+  "node": "lekiwi_rmf/object_observations",
+  "output": "screen",
+  "parameters": {
+   "camera_ids": [
+    "front"
+   ],
+   "fallback_model_name": "rtdetr_v2_r18",
+   "max_bytes": 2147483648,
+   "max_records": 100000,
+   "max_source_age_sec": 2.0,
+   "model_name": "grounding_dino_tiny_gpu",
+   "retention_sec": 604800.0,
+   "use_sim_time": false
+  },
+  "remappings": [],
+  "respawn": false,
+  "respawn_delay": null,
   "ros_arguments": []
  },
  {

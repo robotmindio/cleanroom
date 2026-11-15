@@ -379,8 +379,10 @@ def _stack(context):
                 output="screen",
             ),
         ])
-    actions.extend(_include(launch_file("object_perception.launch.py"), flag("start_object_perception"),
-        use_sim_time=use_sim_time))
+    # Simulation keeps its scripted scene: the tracked perception deployment is a
+    # real-camera operating point, and starting it there would only call the GPU provider.
+    actions.extend(_include(launch_file("object_perception.launch.py"),
+        flag("start_object_perception") and not sim, use_sim_time=use_sim_time))
     actions.extend([
         *_include(launch_file("slam.launch.py"), topology.visual_slam, navigation_params_file=params_file),
         *gated(
