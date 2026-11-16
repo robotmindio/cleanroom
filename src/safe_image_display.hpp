@@ -11,6 +11,12 @@ public:
   ~SafeImageDisplay() override { unsubscribe(); }
 
 protected:
+  void onDisable() override
+  {
+    unsubscribe();
+    ImageDisplay::onDisable();
+  }
+
   void unsubscribe() override
   {
     if (subscription_) ITDClass::unsubscribe();

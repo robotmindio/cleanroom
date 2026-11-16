@@ -4,20 +4,20 @@
     "message_filters image disconnect called after its filter was destroyed",
     "DDS receive worker executing while rmw_implementation finalizer unloaded its shared library"
   ],
-  "plugin_sha256": "0e34020fb4130823fd7d801b643990d984755c39860ec944fae128c4ac803d1c",
+  "plugin_sha256": "b6a16876ac9cc53e3c8f17687888cd7af962e105f9984913b6fd5a288ef477bf",
   "checks": [
     {
       "signal": "SIGTERM",
       "returncode": 0,
       "timed_out": false,
-      "shutdown_sec": 5.363861494995945,
+      "shutdown_sec": 7.051327847999346,
       "new_plugin_mapped": true
     },
     {
       "signal": "SIGINT",
       "returncode": 0,
       "timed_out": false,
-      "shutdown_sec": 1.6814920789984171,
+      "shutdown_sec": 2.795947917999001,
       "new_plugin_mapped": true
     }
   ],
@@ -29,5 +29,6 @@
   "limitations": [
     "two signal trials; not GUI endurance qualification",
     "Cyclone process-lifetime preload remains a tracked workaround for upstream finalization"
-  ]
+  ],
+  "native_registration": "ament isolated-domain runner; isolation policy regression passes"
 }
