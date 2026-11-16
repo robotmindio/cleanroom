@@ -417,6 +417,24 @@ def test_3d_overhang_blocks_negative_evidence_even_with_an_empty_2d_map():
     assert len(blocked) < len(plain)
 
 
+def test_many_visibility_candidates_preserve_order_and_reject_occluded_volumes():
+    grid = free_grid()
+    pose = Pose(.025, .025, .225, 0., 0.)
+
+    def cell(x, y):
+        column, row = world_to_cell((x, y), RESOLUTION, ORIGIN)
+        return row * grid.shape[1] + column
+
+    first, second = cell(.525, .025), cell(.525, .075)
+    hidden, behind = cell(1.1, .025), cell(-.3, .025)
+    # Repeated, unsorted input spans several temporary-array batches. The
+    # native overhang still blocks the full volume; a camera-facing filter
+    # alone would wrongly admit hidden cells as evidence of absence.
+    candidates = np.tile([first, hidden, second, behind], 513)
+    visible = native_octomap().visible_columns(candidates, grid.shape, RESOLUTION, ORIGIN, pose, CAMERA, PROFILE)
+    assert np.array_equal(visible, np.tile([first, second], 513))
+
+
 def test_capture_time_3d_visibility_follows_the_corrected_camera_anchor():
     grid = free_grid()
     original = Pose(.025, .025, .225, 0., 0.)

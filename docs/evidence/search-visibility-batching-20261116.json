@@ -1,0 +1,158 @@
+{
+  "date_utc": "2026-11-16",
+  "baseline_revision": "0bff4a22d711c9b99c08892613e1e65e7eb41980",
+  "benchmark": {
+    "method": "One scalar and one batched call in the same process per scenario, 14400 candidate cells on a 120x120 map. Includes cells outside the camera frustum; this is not a live-robot latency measurement.",
+    "temporary_batch_cells": 1024,
+    "runs_per_scenario": 1,
+    "comparisons": [
+      {
+        "native_obstacles": false,
+        "pose": [
+          0,
+          0,
+          0.2,
+          0,
+          0,
+          0.0
+        ],
+        "equal": true,
+        "cells": 604,
+        "scalar_sec": 0.8707769710017601,
+        "batched_sec": 0.024848011998983566
+      },
+      {
+        "native_obstacles": false,
+        "pose": [
+          0.025,
+          0.025,
+          0.225,
+          0,
+          0,
+          0.0
+        ],
+        "equal": true,
+        "cells": 597,
+        "scalar_sec": 0.8504543989984086,
+        "batched_sec": 0.028796841004805174
+      },
+      {
+        "native_obstacles": false,
+        "pose": [
+          0.025,
+          0.525,
+          0.225,
+          1.57,
+          -0.15,
+          0.3
+        ],
+        "equal": true,
+        "cells": 584,
+        "scalar_sec": 0.8286609679998946,
+        "batched_sec": 0.031255325993697625
+      },
+      {
+        "native_obstacles": false,
+        "pose": [
+          0,
+          0,
+          0.2,
+          0.9,
+          -0.4,
+          1.57
+        ],
+        "equal": true,
+        "cells": 345,
+        "scalar_sec": 1.1302499000012176,
+        "batched_sec": 0.03321144100482343
+      },
+      {
+        "native_obstacles": true,
+        "pose": [
+          0,
+          0,
+          0.2,
+          0,
+          0,
+          0.0
+        ],
+        "equal": true,
+        "cells": 62,
+        "scalar_sec": 2.854056389995094,
+        "batched_sec": 1.4211182550061494
+      },
+      {
+        "native_obstacles": true,
+        "pose": [
+          0.025,
+          0.025,
+          0.225,
+          0,
+          0,
+          0.0
+        ],
+        "equal": true,
+        "cells": 22,
+        "scalar_sec": 2.1542330619995482,
+        "batched_sec": 1.4909348689980106
+      },
+      {
+        "native_obstacles": true,
+        "pose": [
+          0.025,
+          0.525,
+          0.225,
+          1.57,
+          -0.15,
+          0.3
+        ],
+        "equal": true,
+        "cells": 17,
+        "scalar_sec": 2.0468825269999797,
+        "batched_sec": 1.129343638996943
+      },
+      {
+        "native_obstacles": true,
+        "pose": [
+          0,
+          0,
+          0.2,
+          0.9,
+          -0.4,
+          1.57
+        ],
+        "equal": true,
+        "cells": 24,
+        "scalar_sec": 1.9300001859955955,
+        "batched_sec": 0.7689927200044622
+      }
+    ]
+  },
+  "preserved_checks": [
+    "All eight corners inside the camera frustum and range",
+    "Complete camera-to-cell height volume known free in the native octree",
+    "Capture-time anchor rotation and translation",
+    "Unknown, occupied and out-of-bounds geometry blocks absence evidence"
+  ],
+  "validation": {
+    "search_ros": {
+      "passed": 7,
+      "pytest_elapsed_sec": 41.29,
+      "notes": [
+        "A Destroyable teardown-future warning was emitted after the passing suite."
+      ]
+    },
+    "scalar_batched_output_comparisons": {
+      "passed": 8,
+      "candidates_per_case": 14400
+    },
+    "coverage_geometry": {
+      "passed": 55,
+      "pytest_elapsed_sec": 16.38
+    },
+    "search_reprojection_ros": {
+      "passed": 16,
+      "pytest_elapsed_sec": 19.22
+    }
+  }
+}
