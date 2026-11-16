@@ -203,7 +203,7 @@ class TaskGateway(Node):
         self.declare_parameter('allow_skills', False)
         # Arm motion to a solved joint target; off until arm planning is qualified on this body.
         self.declare_parameter('allow_reach', False)
-        # The explorer's tracked allow_search keeps the action server itself off by default.
+        # The explorer's tracked allow_search owns availability of the action server.
         self.declare_parameter('allow_search', True)
         self.declare_parameter('map_bundle', '')
         self._enabled = {'navigate': self.get_parameter('allow_navigation').value,

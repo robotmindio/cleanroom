@@ -1,4 +1,4 @@
-# Enabled for observation only: search and reach stay off, and recognition
+# Enables observation; native search has its own exploration switch, reach stays off. Recognition
 # accuracy remains unqualified for any claim beyond the tracked label set.
 start: true
 # Start with one qualified image-only camera; all selected streams must be fresh.

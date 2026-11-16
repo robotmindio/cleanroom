@@ -5,9 +5,11 @@ detector profile in force. It is served by `robot_explorer`, so every viewpoint
 is driven through exploration's guarded Nav2 path: the owner-guard lease, the
 known-space planner, the whole-footprint route check, the collision monitor,
 the base-motion permission, the arm-stow gate and the region stopping margin.
-Search adds no motion channel and changes no limit. It is off until
-`allow_search: true` in `config/exploration.yaml`, and it needs object perception
-running (`start_object_perception`).
+Search adds no motion channel and changes no limit. The tracked
+`allow_search: true` in `config/exploration.yaml` enables it when native RGB-D
+is available and exploration is allowed. It stays idle until an explicit goal
+and needs object perception running (`start_object_perception`). This enables
+attended operation; the physical qualification below remains outstanding.
 
 ## What counts as searched
 
@@ -61,7 +63,8 @@ When the tracked `allow_search` switch is enabled, bringup also enables
 RTAB-Map's 3D depth-image ray tracing. On real hardware it uses only the
 native Astra RGB-D stream for mapping occupancy, excluding the front view's
 depth reprojected from the merged navigation cloud. A real deployment without
-the Astra refuses this mode. In simulation the depth projection uses only
+the Astra keeps search unavailable and retains its ordinary mapping mode.
+In simulation the depth projection uses only
 the front depth camera's own point cloud, without filling holes. The ordinary
 search-disabled mapping configuration is unchanged. Mapping also updates
 while stationary, so new depth frames can produce fresh geometry during a

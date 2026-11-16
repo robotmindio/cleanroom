@@ -44,9 +44,7 @@ def _slam(context):
     search = exploration['robot_explorer']['ros__parameters']['allow_search']
     if type(search) is not bool:
         raise ValueError('allow_search must be a YAML boolean')
-    search = search and not (topology.static_map or topology.start_rmf)
-    if search and not (camera_on and (topology.sim or dual_rgbd)):
-        raise ValueError('search geometry requires native RGB-D: enable the Astra or use simulation')
+    search = search and not (topology.static_map or topology.start_rmf) and camera_on and (topology.sim or dual_rgbd)
     wait_for_loop = rtabmap_waits_for_loop(context)
     actions = [] if wait_for_loop else [LogInfo(
         msg="RTAB-Map mapping starts a new session immediately; "
@@ -113,6 +111,7 @@ def _slam(context):
             "mapping_max_bytes": ParameterValue(LaunchConfiguration("rtabmap_mapping_max_bytes"), value_type=int),
             "mapping_max_seconds": ParameterValue(LaunchConfiguration("rtabmap_mapping_max_seconds"), value_type=float),
             "allow_exploration": not (topology.static_map or topology.start_rmf),
+            "allow_search": search,
         }],
         # Keep watching mapping transitions even when startup selected localization.
         additional_env={"OPENBLAS_NUM_THREADS": "1", "OMP_NUM_THREADS": "1"},

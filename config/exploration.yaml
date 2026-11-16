@@ -29,8 +29,8 @@ robot_explorer:
     mapping_max_bytes: 17179869184
     mapping_max_seconds: 14400.0
     # Active search (/robot/search) reuses this node's guarded Nav2 path and limits.
-    # Off until the object perception operating point is qualified on the robot.
-    allow_search: false
+    # Explicit goals use native RGB-D geometry and the existing guarded Nav2 path.
+    allow_search: true
     search_max_travel_m: 60.0
     search_target_coverage: 0.9
     # Evidence of absence: an object of this size must span this many pixels,
