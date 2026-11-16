@@ -547,3 +547,12 @@ scripts/workstation-up.sh localization:=visual_slam slam_mode:=localization \
 ```
 
 Then dispatch Nav2 goals. RMF tasks additionally need `localization:=amcl` and an approved map bundle (see [Immutable map bundles](../README.md#immutable-map-bundles)).
+
+
+RViz camera teardown uses `lekiwi_rmf/Image` for the three tracked image panels.
+It clears the filter connection before base destruction can disconnect it again.
+`scripts/rviz.sh` keeps the configured Cyclone implementation loaded for the process
+lifetime because its ROS loader finalizer can otherwise unload code under a live
+DDS worker. This workaround retains the normal signal/exit result; it does not
+hide shutdown failures. Two real-camera SIGINT/SIGTERM checks exited zero; see
+[evidence/rviz-shutdown-20261116.json](evidence/rviz-shutdown-20261116.json).

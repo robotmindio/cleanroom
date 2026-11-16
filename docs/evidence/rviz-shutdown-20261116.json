@@ -1,0 +1,33 @@
+{
+  "scope": "Real RViz with tracked camera layout, live camera topics and MoveIt, using the newly built guarded image plugin and the same Cyclone preload as scripts/rviz.sh. No robot commands or robot-service restarts.",
+  "failures_before_fix": [
+    "message_filters image disconnect called after its filter was destroyed",
+    "DDS receive worker executing while rmw_implementation finalizer unloaded its shared library"
+  ],
+  "plugin_sha256": "0e34020fb4130823fd7d801b643990d984755c39860ec944fae128c4ac803d1c",
+  "checks": [
+    {
+      "signal": "SIGTERM",
+      "returncode": 0,
+      "timed_out": false,
+      "shutdown_sec": 5.363861494995945,
+      "new_plugin_mapped": true
+    },
+    {
+      "signal": "SIGINT",
+      "returncode": 0,
+      "timed_out": false,
+      "shutdown_sec": 1.6814920789984171,
+      "new_plugin_mapped": true
+    }
+  ],
+  "native_disconnect_paths": [
+    "repeated disconnect",
+    "direct destruction",
+    "ImageDisplay qualified-base disable"
+  ],
+  "limitations": [
+    "two signal trials; not GUI endurance qualification",
+    "Cyclone process-lifetime preload remains a tracked workaround for upstream finalization"
+  ]
+}

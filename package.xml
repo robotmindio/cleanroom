@@ -18,6 +18,7 @@
   <depend>pluginlib</depend>
   <depend>moveit_ros_visualization</depend>
   <depend>rviz_common</depend>
+  <depend>rviz_default_plugins</depend>
 
   <depend>geometry_msgs</depend>
   <exec_depend>ament_index_python</exec_depend>
