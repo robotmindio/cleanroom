@@ -8,7 +8,8 @@ import xml.etree.ElementTree as ET
 import pytest
 import yaml
 
-from launch_snapshot import find_node, resolve_bringup
+from launch_snapshot import find_node, resolve_bringup, resolve_launch
+from test_launch_validation import search_configuration
 
 
 ROOT = Path(__file__).parents[1]
@@ -28,8 +29,10 @@ def test_astra_pro_publishes_registered_rgbd_in_the_robot_camera_frame():
     assert parameters["depth_optical_frame_id"] == "astra_camera_optical_frame"
 
 
-def test_real_bringup_maps_both_calibrated_views_with_measured_depth():
-    records = resolve_bringup(profile="wired")
+@pytest.mark.parametrize('search', [False, True])
+def test_real_bringup_selects_native_or_dual_rgbd_for_mapping(monkeypatch, search):
+    search_configuration(monkeypatch, search)
+    records, _ = resolve_launch(profile="wired")
     astra = find_node(records, node="astra_camera/astra_camera_node")
     assert ["/color/image_raw", "/camera/astra/color/image_raw"] in astra["remappings"]
     assert ["/depth/image_raw", "/camera/astra/depth/image_raw"] in astra["remappings"]
@@ -43,7 +46,9 @@ def test_real_bringup_maps_both_calibrated_views_with_measured_depth():
     assert remappings["rgbd_images"] == "/slam/rgbd_images"
     parameters = mapper["parameters"]
     assert (parameters["subscribe_rgbd"], parameters["rgbd_cameras"], parameters["Vis/EstimationType"]) == (
-        True, 0, "0")
+        True, 1 if search else 0, "0")
+    if search:
+        assert remappings['rgbd_image'] == '/slam/astra/rgbd_image'
     assert "qos_depth" not in parameters
     assert yaml.safe_load((ROOT / "config/rtabmap.yaml").read_text())["rtabmap"]["ros__parameters"]["qos_image"] == 1
     views = find_node(records, node="lekiwi_rmf/slam_views")
@@ -61,7 +66,7 @@ def test_real_bringup_maps_both_calibrated_views_with_measured_depth():
         assert (parameters["topic_queue_size"], parameters["sync_queue_size"]) == (5, 30)
 
     # Without the Astra the front camera alone feeds RTAB-Map's RGB-D inputs.
-    mapper = find_node(resolve_bringup(profile="wired", publish_astra="false"), name="rtabmap")
+    mapper = find_node(resolve_launch(profile="wired", publish_astra="false")[0], name="rtabmap")
     assert (mapper["parameters"]["subscribe_rgbd"], mapper["parameters"]["rgbd_cameras"],
             mapper["parameters"]["Vis/EstimationType"]) == (False, 1, "1")
     assert ["rgb/image", "/camera/front/image_raw"] in mapper["remappings"]
