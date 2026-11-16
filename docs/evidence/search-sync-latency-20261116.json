@@ -1,0 +1,53 @@
+{
+  "domain": 1,
+  "input_counts_duplicated": {
+    "odom": 2984,
+    "rgbd_image": 186,
+    "scan_cloud": 976
+  },
+  "variants": {
+    "baseline": {
+      "maps": 30,
+      "first_map_sec": 5.067689102004806,
+      "age_sec_quantiles": [
+        0.24566924571990967,
+        0.4548012971878051,
+        0.9220988750457764
+      ],
+      "gap_sec_quantiles": [
+        1.104294120996201,
+        3.2843862836001785,
+        3.759115243999986
+      ],
+      "last_binary_bytes": 4904
+    },
+    "bounded": {
+      "maps": 49,
+      "first_map_sec": 5.4193677170042065,
+      "age_sec_quantiles": [
+        0.4100513458251953,
+        0.9072021484374999,
+        1.0747077465057373
+      ],
+      "gap_sec_quantiles": [
+        0.9768718915001955,
+        1.5472776862483442,
+        1.78603466200002
+      ],
+      "last_binary_bytes": 4996
+    }
+  },
+  "scope": "Two isolated native mappers with relayed unchanged live RGB-D, range, odometry and TF. Empty private databases; no commands to the robot.",
+  "parameters": {
+    "baseline": {
+      "sync_queue_size": 5,
+      "approx_sync_max_interval": 0.0
+    },
+    "bounded": {
+      "sync_queue_size": 15,
+      "approx_sync_max_interval": 0.15
+    }
+  },
+  "physical_calibration_qualified": false,
+  "continuous_one_second_freshness_qualified": false
+}
