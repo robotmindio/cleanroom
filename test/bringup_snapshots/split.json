@@ -64,7 +64,7 @@
     "output": "screen",
     "parameters": {
      "allow_exploration": true,
-     "allow_search": false,
+     "allow_search": true,
      "clearance_m": 0.22,
      "data_timeout_sec": 1.0,
      "database_path": "$(env HOME)/.ros/lekiwi_rtabmap_floor_v2.db",
@@ -143,14 +143,14 @@
     "node": "rtabmap_slam/rtabmap",
     "output": "screen",
     "parameters": {
-     "Grid/3D": "false",
+     "Grid/3D": "true",
      "Grid/CellSize": "0.05",
      "Grid/MaxGroundHeight": "0.05",
      "Grid/MaxObstacleHeight": "1.0",
      "Grid/NormalsSegmentation": "false",
      "Grid/RangeMax": "3.0",
      "Grid/RayTracing": "true",
-     "Grid/Sensor": "0",
+     "Grid/Sensor": "1",
      "Icp/MaxCorrespondenceDistance": "0.1",
      "Icp/PointToPlane": "false",
      "Icp/VoxelSize": "0.05",
@@ -175,6 +175,7 @@
      "approx_sync": true,
      "database_path": "$(env HOME)/.ros/lekiwi_rtabmap_floor_v2.db",
      "frame_id": "base_footprint",
+     "map_always_update": true,
      "map_frame_id": "map",
      "odom_frame_id": "odom",
      "odom_sensor_sync": true,
@@ -183,7 +184,7 @@
      "qos_image": 1,
      "qos_odom": 1,
      "qos_scan": 1,
-     "rgbd_cameras": 0,
+     "rgbd_cameras": 1,
      "subscribe_depth": false,
      "subscribe_odom_info": false,
      "subscribe_rgb": false,
@@ -210,6 +211,10 @@
      [
       "rgbd_images",
       "/slam/rgbd_images"
+     ],
+     [
+      "rgbd_image",
+      "/slam/astra/rgbd_image"
      ],
      [
       "odom",
@@ -613,8 +618,8 @@
    "approx": true,
    "decimation": 2,
    "fill_holes_error": 0.05,
-   "fill_holes_size": 2,
-   "fill_iterations": 1,
+   "fill_holes_size": 0,
+   "fill_iterations": 0,
    "fixed_frame_id": "odom",
    "qos": 1,
    "qos_camera_info": 1,

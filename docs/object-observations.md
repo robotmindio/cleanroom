@@ -29,7 +29,8 @@ An earlier local **development** benchmark used RT-DETRv2-R18 at 384×384 and a
 0.693–0.706, where YOLOX missed them. Warm processing was approximately 0.89 s;
 the first measured frame took 6.76 s. This one scene establishes a reproducible
 improvement, not site qualification. Production start is enabled for observation
-only in `config/object_perception_deployment.yaml`; search and reach stay off.
+only in `config/object_perception_deployment.yaml`. Native search availability
+is configured separately in `config/exploration.yaml`; reach stays off.
 
 `model_sha256` identifies pinned artifacts, backend, input size, preprocessing
 revision, label output (`native`, or `query` for open-vocabulary recognizers) and

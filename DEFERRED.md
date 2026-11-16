@@ -271,7 +271,9 @@ Done when a live `/robot/search` run finds a placed object outside the initial
 view, an absent-object run's reported covered cells match a site check of what
 the cameras saw, the evidence-of-absence criteria come from measured detector
 recall, occlusion uses 3D scene geometry and coverage reprojection is checked
-on a live SLAM optimization; only then set `allow_search: true` in `config/exploration.yaml`.
+on a live SLAM optimization. `allow_search: true` in `config/exploration.yaml`
+now enables explicitly requested attended trials with native RGB-D; it does
+not close these qualification gates or qualify unattended operation.
 Tracked in [#88](https://github.com/robotmindio/cleanroom/issues/88).
 
 Software now requires capture-time known-free OctoMap volumes for negative

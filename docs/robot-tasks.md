@@ -30,8 +30,9 @@ published on `/robot/perception/profile`), an optional map-frame `region`
 `{x, y, radius_m}`, and `max_duration_sec`, `max_travel_m` and
 `target_coverage`; see [active search](active-search.md). It runs in the Explorer
 on the same guarded Nav2 path, so it is unavailable wherever exploration is, and
-`allow_search` in `config/exploration.yaml` keeps it off until the perception
-operating point is qualified. A search `succeeded` only when it found the label
+`allow_search` in `config/exploration.yaml` enables attended search with native
+RGB-D; unsupported sensor and fleet topologies keep it unavailable. Physical
+qualification remains open. A search `succeeded` only when it found the label
 or reached its target coverage; budget, inaccessible space and missing
 instruments are `failed` with the outcome and an honest coverage report.
 
@@ -226,6 +227,11 @@ approval wait. Role scopes, exact service allow-lists and local safety still app
 The connector's exact service allow-list must include the four services above;
 add the `/robot/tasks/v2/*` services for schema 2. Without them, or on a robot
 that does not advertise schema 2, the connector uses schema 1.
+Apply `config/fiber_perception_integration.json` to the owning tenant's
+integration, preserving its full existing configuration and credentials. Agent
+Organization integrations and the historical `default` integration are separate;
+updating one does not update the other. Verify `rosbridge.tasks.validate`,
+`rosbridge.tasks.events`, odometry and spatial reads using the agents' own tenant.
 Rosbridge itself retains its general ROS functionality for other clients.
 
 Enable the existing tailnet binding with

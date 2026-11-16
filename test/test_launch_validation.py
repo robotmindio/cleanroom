@@ -27,6 +27,7 @@ def test_search_requires_3d_ray_tracing_from_a_real_camera_origin(monkeypatch, p
     records, _ = resolve_launch(profile=profile)
     mapper = find_node(records, name='rtabmap')
     parameters = mapper['parameters']
+    assert find_node(records, name='robot_explorer')['parameters']['allow_search']
     assert (parameters['Grid/3D'], parameters['Grid/Sensor'], parameters['Grid/RayTracing']) == ('true', '1', 'true')
     assert parameters['rgbd_cameras'] == 1
     assert parameters['map_always_update'] is True
@@ -39,10 +40,12 @@ def test_search_requires_3d_ray_tracing_from_a_real_camera_origin(monkeypatch, p
         assert ['rgbd_image', '/slam/astra/rgbd_image'] in mapper['remappings']
 
 
-def test_search_refuses_inferred_front_depth_without_the_astra(monkeypatch):
+def test_search_is_unavailable_without_native_rgbd(monkeypatch):
     search_configuration(monkeypatch, True)
-    with pytest.raises(ValueError, match='native RGB-D'):
-        resolve_launch(profile='wired', publish_astra='false')
+    records, _ = resolve_launch(profile='wired', publish_astra='false')
+    assert not find_node(records, name='robot_explorer')['parameters']['allow_search']
+    mapper = find_node(records, name='rtabmap')['parameters']
+    assert mapper['Grid/3D'] == 'false' and mapper['Grid/Sensor'] == '0'
 
 
 @pytest.mark.parametrize('value', ['false', 1, None])
@@ -57,6 +60,7 @@ def test_static_map_does_not_enable_search_geometry_when_exploration_is_disabled
     records, _ = resolve_launch(profile='sim', static_map='true', map_bundle_approved=True)
     mapper = find_node(records, name='rtabmap')['parameters']
     assert mapper['Grid/3D'] == 'false' and mapper['Grid/Sensor'] == '0'
+    assert not find_node(records, name='robot_explorer')['parameters']['allow_search']
 
 
 @pytest.mark.parametrize("profile,mode,source,laser", [
@@ -98,7 +102,7 @@ def test_legacy_real_topology_also_reuses_the_saved_map():
 
 
 @pytest.mark.parametrize("profile,publish_astra,strategy,visual,rgb,depth,rgbd,cameras", [
-    ("split", "true", "2", "0", False, False, True, 0),
+    ("split", "true", "2", "0", False, False, True, 1),
     ("wired", "false", "2", "1", True, True, False, 1),
     ("sim", "true", "2", "1", True, True, False, 1),
 ])
