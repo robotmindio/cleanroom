@@ -84,6 +84,15 @@ The map cache is bounded to 32 MiB of binary data and four decoded trees;
 each payload is at most 2 MiB. Evicted evidence becomes unobserved rather than
 being reconstructed against a newer scene.
 
+Exploration does not require search coverage or a previously saved map. An explicit
+Explore goal with no `/map` enables native RTAB-Map mapping immediately, even when
+bringup selected localization and Nav2 is still waiting for that first map. It then
+uses the first sensor-built grid and real map transform. Before any navigation it
+requires the ordinary fresh permission, stow, SLAM, collision and ownership checks;
+unknown space is never fabricated as free. Cancellation remains effective while
+waiting for initial sensors. Missing first observations terminate at the requested
+task deadline rather than leaving an uncancelable startup.
+
 ## Choosing viewpoints
 
 Each step weights searchable cells (mapped open cells and obstacle surfaces in

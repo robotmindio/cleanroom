@@ -485,10 +485,18 @@ class RobotExplorer(Node):
                 return "exploration server is shutting down"
             if not self.config["allow_exploration"]:
                 return "exploration disabled for fixed-map/RMF operation"
-            self._healthy(require_permission=require_permission)
-            self._pose()
-            if (not self._navigation.server_is_ready() or not self._planner.server_is_ready()
-                    or not self._costmap.service_is_ready()
+            # Nav2 starts after the first map. Admit mapping initialization before
+            # that map exists; every drive still requires the full checkpoint.
+            initializing = mapping_quota and self._map is None
+            if initializing:
+                if self._mapping is None or time.monotonic() - self._mode_at > self.config["service_timeout_sec"]:
+                    return "mapping mode is unknown or stale"
+            else:
+                self._healthy(require_permission=require_permission)
+                self._pose()
+            if ((not initializing and (not self._navigation.server_is_ready()
+                                       or not self._planner.server_is_ready()
+                                       or not self._costmap.service_is_ready()))
                     or not self._mapping_client.service_is_ready()
                     or not self._localization_client.service_is_ready()):
                 return "Nav2 or mapping services are unavailable"
@@ -516,7 +524,7 @@ class RobotExplorer(Node):
         self._healthy()
         pose = self._pose()
         xy = pose.pose.position
-        if math.hypot(xy.x - center[0], xy.y - center[1]) >= radius - self._region_margin:
+        if center is not None and math.hypot(xy.x - center[0], xy.y - center[1]) >= radius - self._region_margin:
             raise RuntimeError("exploration region stopping margin reached")
         return pose
 
@@ -636,9 +644,26 @@ class RobotExplorer(Node):
         try:
             duration, radius = task_limits(goal.request.max_duration_sec, goal.request.max_radius_m,
                                            self.config["max_duration_sec"], self.config["max_radius_m"])
-            pose = self._pose()
-            center = (pose.pose.position.x, pose.pose.position.y)
             deadline = task_time() + duration
+            mapping_confirmed = False
+            if self._map is None:
+                # Localization in an unknown room cannot produce the first map.
+                # Start native mapping now, without inventing free space or TF.
+                mapping_requested = True
+                self._set_mapping(True)
+                mapping_confirmed = True
+
+                def starting_check():
+                    return self._checkpoint(goal, deadline, None, radius)
+
+                try:
+                    pose = starting_check()
+                except Paused as reason:
+                    self._pause(goal, starting_check, reason, lambda: {})
+                    pose = starting_check()
+            else:
+                pose = self._pose()
+            center = (pose.pose.position.x, pose.pose.position.y)
             if goal.request.resume_task_id:
                 state = self._resume_task(goal.request.resume_task_id)
                 center, radius, deadline = state["center"], state["radius"], state["deadline"]
@@ -651,8 +676,6 @@ class RobotExplorer(Node):
                          "center": center, "radius": radius, "deadline": deadline,
                          "revisit_known": goal.request.revisit_known, "retrying": False,
                          "previous_mapping": previous_mapping}
-            mapping_confirmed = False
-
             def check():
                 current = self._checkpoint(goal, deadline, center, radius)
                 if mapping_confirmed and self._mapping is not True:
