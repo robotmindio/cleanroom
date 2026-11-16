@@ -1,0 +1,131 @@
+diff --git a/rtabmap_sync/include/rtabmap_sync/CommonDataSubscriberDefines.h b/rtabmap_sync/include/rtabmap_sync/CommonDataSubscriberDefines.h
+index c5082f5..00e7bcb 100644
+--- a/rtabmap_sync/include/rtabmap_sync/CommonDataSubscriberDefines.h
++++ b/rtabmap_sync/include/rtabmap_sync/CommonDataSubscriberDefines.h
+@@ -144,6 +144,11 @@ auto getTopicName(T const& obj)
+ 		{ \
+ 			PREFIX##ApproximateSync_ = new message_filters::Synchronizer<PREFIX##ApproximateSyncPolicy>( \
+ 					PREFIX##ApproximateSyncPolicy(QUEUE_SIZE), SUB0, SUB1); \
++			const double maxInterval = node.get_parameter("approx_sync_max_interval").as_double(); \
++			if(maxInterval > 0.0) \
++			{ \
++				PREFIX##ApproximateSync_->setMaxIntervalDuration(rclcpp::Duration::from_seconds(maxInterval)); \
++			} \
+ 			PREFIX##ApproximateSync_->registerCallback(std::bind(&CLASS::PREFIX##Callback, this, std::placeholders::_1, std::placeholders::_2)); \
+ 		} \
+ 		else \
+@@ -163,6 +168,11 @@ auto getTopicName(T const& obj)
+ 		{ \
+ 			PREFIX##ApproximateSync_ = new message_filters::Synchronizer<PREFIX##ApproximateSyncPolicy>( \
+ 					PREFIX##ApproximateSyncPolicy(QUEUE_SIZE), SUB0, SUB1, SUB2); \
++			const double maxInterval = node.get_parameter("approx_sync_max_interval").as_double(); \
++			if(maxInterval > 0.0) \
++			{ \
++				PREFIX##ApproximateSync_->setMaxIntervalDuration(rclcpp::Duration::from_seconds(maxInterval)); \
++			} \
+ 			PREFIX##ApproximateSync_->registerCallback(std::bind(&CLASS::PREFIX##Callback, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3)); \
+ 		} \
+ 		else \
+@@ -183,6 +193,11 @@ auto getTopicName(T const& obj)
+ 		{ \
+ 			PREFIX##ApproximateSync_ = new message_filters::Synchronizer<PREFIX##ApproximateSyncPolicy>( \
+ 					PREFIX##ApproximateSyncPolicy(QUEUE_SIZE), SUB0, SUB1, SUB2, SUB3); \
++			const double maxInterval = node.get_parameter("approx_sync_max_interval").as_double(); \
++			if(maxInterval > 0.0) \
++			{ \
++				PREFIX##ApproximateSync_->setMaxIntervalDuration(rclcpp::Duration::from_seconds(maxInterval)); \
++			} \
+ 			PREFIX##ApproximateSync_->registerCallback(std::bind(&CLASS::PREFIX##Callback, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4)); \
+ 		} \
+ 		else \
+@@ -204,6 +219,11 @@ auto getTopicName(T const& obj)
+ 		{ \
+ 			PREFIX##ApproximateSync_ = new message_filters::Synchronizer<PREFIX##ApproximateSyncPolicy>( \
+ 					PREFIX##ApproximateSyncPolicy(QUEUE_SIZE), SUB0, SUB1, SUB2, SUB3, SUB4); \
++			const double maxInterval = node.get_parameter("approx_sync_max_interval").as_double(); \
++			if(maxInterval > 0.0) \
++			{ \
++				PREFIX##ApproximateSync_->setMaxIntervalDuration(rclcpp::Duration::from_seconds(maxInterval)); \
++			} \
+ 			PREFIX##ApproximateSync_->registerCallback(std::bind(&CLASS::PREFIX##Callback, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5)); \
+ 		} \
+ 		else \
+@@ -226,6 +246,11 @@ auto getTopicName(T const& obj)
+ 		{ \
+ 			PREFIX##ApproximateSync_ = new message_filters::Synchronizer<PREFIX##ApproximateSyncPolicy>( \
+ 					PREFIX##ApproximateSyncPolicy(QUEUE_SIZE), SUB0, SUB1, SUB2, SUB3, SUB4, SUB5); \
++			const double maxInterval = node.get_parameter("approx_sync_max_interval").as_double(); \
++			if(maxInterval > 0.0) \
++			{ \
++				PREFIX##ApproximateSync_->setMaxIntervalDuration(rclcpp::Duration::from_seconds(maxInterval)); \
++			} \
+ 			PREFIX##ApproximateSync_->registerCallback(std::bind(&CLASS::PREFIX##Callback, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5, std::placeholders::_6)); \
+ 		} \
+ 		else \
+@@ -249,6 +274,11 @@ auto getTopicName(T const& obj)
+ 		{ \
+ 			PREFIX##ApproximateSync_ = new message_filters::Synchronizer<PREFIX##ApproximateSyncPolicy>( \
+ 					PREFIX##ApproximateSyncPolicy(QUEUE_SIZE), SUB0, SUB1, SUB2, SUB3, SUB4, SUB5, SUB6); \
++			const double maxInterval = node.get_parameter("approx_sync_max_interval").as_double(); \
++			if(maxInterval > 0.0) \
++			{ \
++				PREFIX##ApproximateSync_->setMaxIntervalDuration(rclcpp::Duration::from_seconds(maxInterval)); \
++			} \
+ 			PREFIX##ApproximateSync_->registerCallback(std::bind(&CLASS::PREFIX##Callback, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5, std::placeholders::_6, std::placeholders::_7)); \
+ 		} \
+ 		else \
+@@ -273,6 +303,11 @@ auto getTopicName(T const& obj)
+ 		{ \
+ 			PREFIX##ApproximateSync_ = new message_filters::Synchronizer<PREFIX##ApproximateSyncPolicy>( \
+ 					PREFIX##ApproximateSyncPolicy(QUEUE_SIZE), SUB0, SUB1, SUB2, SUB3, SUB4, SUB5, SUB6, SUB7); \
++			const double maxInterval = node.get_parameter("approx_sync_max_interval").as_double(); \
++			if(maxInterval > 0.0) \
++			{ \
++				PREFIX##ApproximateSync_->setMaxIntervalDuration(rclcpp::Duration::from_seconds(maxInterval)); \
++			} \
+ 			PREFIX##ApproximateSync_->registerCallback(std::bind(&CLASS::PREFIX##Callback, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, std::placeholders::_4, std::placeholders::_5, std::placeholders::_6, std::placeholders::_7, std::placeholders::_8)); \
+ 		} \
+ 		else \
+diff --git a/rtabmap_sync/src/CommonDataSubscriber.cpp b/rtabmap_sync/src/CommonDataSubscriber.cpp
+index c8cbfb0..23671a4 100644
+--- a/rtabmap_sync/src/CommonDataSubscriber.cpp
++++ b/rtabmap_sync/src/CommonDataSubscriber.cpp
+@@ -27,6 +27,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ 
+ #include <rtabmap_sync/CommonDataSubscriber.h>
+ #include <rtabmap/utilite/ULogger.h>
++#include <cmath>
++#include <stdexcept>
+ 
+ namespace rtabmap_sync {
+ 
+@@ -394,6 +396,16 @@ CommonDataSubscriber::CommonDataSubscriber(rclcpp::Node & node, bool gui) :
+ 				 "\"sync_queue_size\".", syncQueueSize_);
+ 	}
+ 	syncQueueSize_ = node.declare_parameter("sync_queue_size", syncQueueSize_);
++	// Read at synchronizer construction; keep it immutable rather than advertise
++	// a runtime update that would leave the existing policies unchanged.
++	rcl_interfaces::msg::ParameterDescriptor intervalDescriptor;
++	intervalDescriptor.read_only = true;
++	intervalDescriptor.description = "Maximum approximate-sync stamp span in seconds; 0 disables the bound";
++	const double maxInterval = node.declare_parameter("approx_sync_max_interval", 0.0, intervalDescriptor);
++	if(!std::isfinite(maxInterval) || maxInterval < 0.0)
++	{
++		throw std::invalid_argument("approx_sync_max_interval must be finite and nonnegative");
++	}
+ 	imageTransport_ = node.declare_parameter("image_transport", imageTransport_);
+ 	depthTransport_ = node.declare_parameter("depth_transport", depthTransport_);
+ 
+diff --git a/rtabmap_sync/src/nodelets/rgbdx_sync.cpp b/rtabmap_sync/src/nodelets/rgbdx_sync.cpp
+index e237751..e107809 100644
+--- a/rtabmap_sync/src/nodelets/rgbdx_sync.cpp
++++ b/rtabmap_sync/src/nodelets/rgbdx_sync.cpp
+@@ -42,6 +42,8 @@ RGBDXSync::RGBDXSync(const rclcpp::NodeOptions & options) :
+ 	SYNC_INIT(rgbd7),
+ 	SYNC_INIT(rgbd8)
+ {
++	// Shared synchronization macros use a node reference; this component is the node.
++	rclcpp::Node & node = *this;
+ 	int topicQueueSize = 10;
+ 	int syncQueueSize = 10;
+ 	bool approxSync = true;

@@ -14,8 +14,8 @@ workspace=$3
   git -C "$source_root" ls-tree -r HEAD -- scripts/dependency-overlay-key.sh scripts/build-native.sh \
     scripts/build-lekiwi.sh scripts/thirdparty-common.sh scripts/lib/runtime-common.sh \
     scripts/lib/build-common.sh thirdparty/class_loader thirdparty/rclcpp thirdparty/navigation2 \
-    thirdparty/rviz thirdparty/ldlidar_stl_ros2 thirdparty/ros2_astra_camera
-  for dependency in ament_cmake class_loader rclcpp navigation2 rviz ldlidar_stl_ros2 ros2_astra_camera; do
+    thirdparty/rviz thirdparty/rtabmap_ros thirdparty/ldlidar_stl_ros2 thirdparty/ros2_astra_camera
+  for dependency in ament_cmake class_loader rclcpp navigation2 rviz rtabmap_ros ldlidar_stl_ros2 ros2_astra_camera; do
     printf '%s=%s\n' "$dependency" "$(git -C "$workspace/src/$dependency" rev-parse HEAD 2>/dev/null || echo absent)"
   done
 } | sha256sum | cut -c1-32

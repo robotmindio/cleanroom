@@ -107,6 +107,10 @@ if(BUILD_TESTING)
     find_package(rclcpp REQUIRED)
     find_package(rclcpp_action REQUIRED)
     find_package(control_msgs REQUIRED)
+    find_package(rtabmap_sync REQUIRED)
+    add_executable(test_rtabmap_sync_interval test/test_rtabmap_sync_interval.cpp)
+    target_compile_features(test_rtabmap_sync_interval PUBLIC cxx_std_17)
+    ament_target_dependencies(test_rtabmap_sync_interval rtabmap_sync)
     add_executable(test_native_waitable test/test_native_waitable.cpp)
     ament_target_dependencies(test_native_waitable rclcpp rclcpp_action control_msgs)
     find_package(nav2_smac_planner REQUIRED)
@@ -194,6 +198,11 @@ if(BUILD_TESTING)
       RUNNER "${test_isolated_runner}"
       GENERATE_RESULT_FOR_RETURN_CODE_ZERO)
     isolate_lekiwi_test(test_rviz_image_disconnect)
+    ament_add_test(test_rtabmap_sync_interval
+      COMMAND "$<TARGET_FILE:test_rtabmap_sync_interval>"
+      RUNNER "${test_isolated_runner}"
+      GENERATE_RESULT_FOR_RETURN_CODE_ZERO)
+    isolate_lekiwi_test(test_rtabmap_sync_interval)
     ament_add_test(test_native_waitable
       COMMAND "$<TARGET_FILE:test_native_waitable>"
       RUNNER "${test_isolated_runner}"

@@ -60,7 +60,7 @@ jobs:
             # ls-files skips helpers this revision does not have.
             git ls-files -z scripts/build-native.sh scripts/thirdparty-common.sh \
               scripts/lib/runtime-common.sh scripts/lib/build-common.sh \
-              thirdparty/class_loader thirdparty/rclcpp thirdparty/navigation2 thirdparty/rviz |
+              thirdparty/class_loader thirdparty/rclcpp thirdparty/navigation2 thirdparty/rviz thirdparty/rtabmap_ros |
               xargs -0 cat
           } | sha256sum | awk '{print "key=native-overlay-" substr($1, 1, 32)}' >> "$GITHUB_OUTPUT"
       - name: Restore the native overlay

@@ -69,6 +69,7 @@ def inventory(release, role):
         raise ValueError("native overlay revision does not match release source")
     native_artifacts = (
         "rclcpp/lib/librclcpp.so", "class_loader/lib/libclass_loader.so",
+        "rtabmap_sync/lib/librtabmap_sync.so",
         "nav2_lifecycle_manager/lib/nav2_lifecycle_manager/lifecycle_manager",
         "nav2_smac_planner/lib/libnav2_smac_planner_lattice.so",
         "rviz_ogre_vendor/opt/rviz_ogre_vendor/lib/OGRE/RenderSystem_GL.so",

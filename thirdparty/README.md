@@ -33,6 +33,16 @@ split deployer and CI invoke the same builder.
   premature validation; actual link status and OpenGL error reporting remain.
   Shader code, palette textures and map rendering are unchanged.
 
+- **RTAB-Map sync 0.23.13**, commit
+  `cb2117f1ed6674cf7cfc644d7bb4ffc0b567b364`:
+  CommonDataSubscriber now declares the immutable `approx_sync_max_interval`
+  parameter and applies it to every approximate synchronizer (two through eight
+  inputs). Zero preserves the upstream unbounded default; nonfinite or negative
+  values fail startup. Exact synchronization is unchanged. No members or virtual
+  methods are added, preserving the packaged mapper's ABI. The native regression
+  sends RGB-D/scan pairs through the actual subscriber and checks both admission
+  inside the bound and rejection outside it.
+
 The builder also bootstraps **ament_cmake_vendor_package 2.5.6**, commit
 `5741cff5b9f83253bf3521bd8f44108fde3504ad`, into the same user-owned workspace.
 This is a CMake build tool missing from runtime-only ROS installations; it
