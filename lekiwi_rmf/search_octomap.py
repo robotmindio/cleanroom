@@ -160,17 +160,24 @@ class SearchOctomap:
             rotation = np.asarray((old_right, old_down, old_forward)).T @ np.asarray((right, down, forward))
 
         limit = profile.range_limit(camera)
-        for flat in cells:
-            row, column = divmod(int(flat), shape[1])
-            corners = [(origin[0] + resolution * (c * x - s * y),
-                        origin[1] + resolution * (s * x + c * y))
-                       for x, y in product((column, column + 1), (row, row + 1))]
-            corners = np.asarray([(x, y, z) for x, y in corners
-                                  for z in (profile.min_height_m, profile.max_height_m)])
-            if not inside_frustum(corners, pose, camera, limit).all():
-                continue
+        offsets = np.asarray(list(product((0, 1), (0, 1),
+                                          (profile.min_height_m, profile.max_height_m))))
+        # Batch the repeated camera projection; each admitted cell still needs
+        # the same complete camera-to-volume proof against the octree below.
+        # Bound temporary arrays independently of the size of the input map.
+        for begin in range(0, len(cells), 1024):
+            batch = np.asarray(cells[begin:begin + 1024], dtype=np.int64)
+            rows, columns = np.divmod(batch, shape[1])
+            x, y = columns[:, None] + offsets[:, 0], rows[:, None] + offsets[:, 1]
+            corners = np.empty((len(batch), 8, 3))
+            corners[..., 0] = origin[0] + resolution * (c * x - s * y)
+            corners[..., 1] = origin[1] + resolution * (s * x + c * y)
+            corners[..., 2] = offsets[:, 2]
+            in_view = inside_frustum(corners, pose, camera, limit).all(axis=1)
+            batch, corners = batch[in_view], corners[in_view]
             if rotation is not None:
                 corners = (corners - start) @ rotation.T + source_start
-            if self.volume_free(source_start, corners.min(axis=0), corners.max(axis=0)):
-                visible.append(flat)
+            for flat, low, high in zip(batch, corners.min(axis=1), corners.max(axis=1)):
+                if self.volume_free(source_start, low, high):
+                    visible.append(flat)
         return np.asarray(visible, dtype=np.int64)
