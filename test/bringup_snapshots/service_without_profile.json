@@ -190,6 +190,7 @@
      "Rtabmap/StartNewMapOnLoopClosure": "true",
      "Vis/EstimationType": "0",
      "approx_sync": true,
+     "approx_sync_max_interval": 0.15,
      "database_path": "$(env HOME)/.ros/lekiwi_rtabmap_floor_v2.db",
      "frame_id": "base_footprint",
      "map_always_update": true,
@@ -208,7 +209,7 @@
      "subscribe_rgbd": true,
      "subscribe_scan": false,
      "subscribe_scan_cloud": true,
-     "sync_queue_size": 5,
+     "sync_queue_size": 15,
      "topic_queue_size": 5,
      "use_sim_time": false
     },

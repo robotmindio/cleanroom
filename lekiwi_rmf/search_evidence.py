@@ -121,7 +121,9 @@ class SearchEvidence:
         self._reprojection = None
         self._geometry_max_age = geometry_max_age_sec
         # Never retain a whole 3D map per capture in the much larger capture log.
-        self._geometry = deque(maxlen=4)
+        # Recognition can finish after several newer maps. Keep capture-time
+        # metadata with the bounded log; payload bytes and decoded trees stay capped.
+        self._geometry = deque(maxlen=capacity)
         self._geometry_candidate = None
         self._graph_stamp = self._geometry_after = 0.0
         self._geometry_store, self._geometry_decoded = OrderedDict(), OrderedDict()

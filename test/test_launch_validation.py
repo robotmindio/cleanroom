@@ -31,6 +31,9 @@ def test_search_requires_3d_ray_tracing_from_a_real_camera_origin(monkeypatch, p
     assert (parameters['Grid/3D'], parameters['Grid/Sensor'], parameters['Grid/RayTracing']) == ('true', '1', 'true')
     assert parameters['rgbd_cameras'] == 1
     assert parameters['map_always_update'] is True
+    if parameters['subscribe_scan_cloud']:
+        assert parameters['sync_queue_size'] == 15
+        assert parameters['approx_sync_max_interval'] == .15
     depth = find_node(records, name='slam_front_depth')
     assert depth['parameters']['fill_holes_size'] == depth['parameters']['fill_iterations'] == 0
     if profile == 'sim':
@@ -122,9 +125,10 @@ def test_mapper_yaml_and_dynamic_view_parameters_preserve_behavior(
         "RGBD/LoopCovLimited": "true", "RGBD/LinearUpdate": "0.04",
         "RGBD/ProximityMaxGraphDepth": "0", "RGBD/ProximityOdomGuess": "true",
         "Rtabmap/ImagesAlreadyRectified": "false", "Mem/NotLinkedNodesKept": "false",
-        "odom_sensor_sync": True, "qos_image": 1, "sync_queue_size": 5, "topic_queue_size": 5,
+        "odom_sensor_sync": True, "qos_image": 1, "topic_queue_size": 5,
     }.items():
         assert parameters[key] == expected
+    assert parameters['sync_queue_size'] == (5 if publish_astra == 'false' else 15)
 
 
 @pytest.mark.parametrize("profile,local", [("wired", True), ("split", False), ("sim", False)])

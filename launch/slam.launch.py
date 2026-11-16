@@ -78,6 +78,9 @@ def _slam(context):
             # A merged base-frame cloud has no single physical sensor origin for 3D free rays.
             **({"Grid/3D": "true", "Grid/Sensor": "1", "Grid/RayTracing": "true",
                 "map_always_update": True} if search else {}),
+            # Slow RGB-D must match its capture-time scan, rather than wait for
+            # an unbounded approximate-sync candidate while short scan queues drain.
+            **({"sync_queue_size": 15, "approx_sync_max_interval": 0.15} if search and lidar_on else {}),
             "Rtabmap/MemoryThr": ParameterValue(LaunchConfiguration("rtabmap_wm_nodes"), value_type=str),
             "Mem/IncrementalMemory": str(topology.slam_mapping),
             # ICP proximity closure only searches working memory. Reload the
