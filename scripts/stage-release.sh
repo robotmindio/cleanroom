@@ -61,7 +61,7 @@ if [[ $(cat "$overlay/.complete" 2>/dev/null || true) != "$key" ]]; then
   mkdir -p "$overlay/install" "$overlay/src"
   printf 'source %q\n' "$workspace/install/setup.bash" > "$overlay/install/setup.bash"
   dependencies=(ldlidar_stl_ros2 ros2_astra_camera)
-  [[ $role != compute ]] || dependencies+=(class_loader rclcpp navigation2 rviz ament_cmake)
+  [[ $role != compute ]] || dependencies+=(class_loader rclcpp navigation2 rviz rtabmap_ros ament_cmake)
   for dependency in "${dependencies[@]}"; do
     if [[ -d $workspace/src/$dependency/.git ]]; then
       # Installer caches are partial clones; copying their full history can ask

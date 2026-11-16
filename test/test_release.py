@@ -164,7 +164,7 @@ def release_fixture(tmp_path):
 [[ ${LEKIWI_TEST_BUILD_FAIL:-0} != 1 ]] || exit 42
 [[ -z ${LEKIWI_TEST_BUILD_LOG:-} ]] || echo native >> "$LEKIWI_TEST_BUILD_LOG"
 git -C "$(dirname "$0")/.." rev-parse HEAD > "$LEKIWI_WS/install/.lekiwi-native-revision"
-for file in rclcpp/lib/librclcpp.so class_loader/lib/libclass_loader.so nav2_lifecycle_manager/lib/nav2_lifecycle_manager/lifecycle_manager nav2_smac_planner/lib/libnav2_smac_planner_lattice.so rviz_ogre_vendor/opt/rviz_ogre_vendor/lib/OGRE/RenderSystem_GL.so; do
+for file in rclcpp/lib/librclcpp.so class_loader/lib/libclass_loader.so rtabmap_sync/lib/librtabmap_sync.so nav2_lifecycle_manager/lib/nav2_lifecycle_manager/lifecycle_manager nav2_smac_planner/lib/libnav2_smac_planner_lattice.so rviz_ogre_vendor/opt/rviz_ogre_vendor/lib/OGRE/RenderSystem_GL.so; do
   mkdir -p "$LEKIWI_WS/install/${file%/*}"
   printf artifact > "$LEKIWI_WS/install/$file"
 done
@@ -263,7 +263,8 @@ def test_release_sealing_refuses_failed_or_missing_source_tests(tmp_path):
         checker.check_release(release, revision, "compute")
 
 
-def test_releases_reuse_a_dependency_overlay_until_its_inputs_change(tmp_path):
+@pytest.mark.parametrize("dependency", ["rclcpp", "rtabmap_ros"])
+def test_releases_reuse_a_dependency_overlay_until_its_inputs_change(tmp_path, dependency):
     repo, workspace, first, environment = release_fixture(tmp_path)
     log = tmp_path / "builds"
     environment = {**environment, "LEKIWI_TEST_BUILD_LOG": str(log)}
@@ -290,7 +291,7 @@ def test_releases_reuse_a_dependency_overlay_until_its_inputs_change(tmp_path):
     second_release = stage(second)
     assert [line for line in log.read_text().splitlines() if line in ("native", "drivers")] == ["native", "drivers"]
     assert overlay_of(first_release) == overlay_of(second_release)
-    third_release = stage(commit("thirdparty/rclcpp/fix.patch", "dependency change"))
+    third_release = stage(commit(f"thirdparty/{dependency}/fix.patch", "dependency change"))
     assert [line for line in log.read_text().splitlines() if line in ("native", "drivers")] == ["native", "drivers"] * 2
     assert overlay_of(third_release) != overlay_of(second_release)
     # An interrupted overlay build is rebuilt, never reused.

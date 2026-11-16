@@ -91,6 +91,7 @@
   <exec_depend>visualization_msgs</exec_depend>
   <exec_depend>v4l-utils</exec_depend>
 
+  <test_depend>rtabmap_sync</test_depend>
   <test_depend>ament_cmake_pytest</test_depend>
   <test_depend>ament_cmake_ros</test_depend>
   <test_depend>python3-scipy</test_depend>
