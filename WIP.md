@@ -1,5 +1,9 @@
 # Autonomous exploration follow-up, 2026-11-16
 
+Current continuation guide: [HANDOFF-2026-11-16-autonomia.md](HANDOFF-2026-11-16-autonomia.md).
+The user requested this handoff before completion of staging/CI. The new release
+has not been deployed; inspect the live staging units before continuing.
+
 Completed: reviewed and merged exploration bootstrap PR #184 (main 0d706b5).
 It initializes native mapping before requiring a first map/pose, including an
 unlocalized saved map, and retains all driving checks. Final ROS/recovery matrix
