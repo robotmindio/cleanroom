@@ -20,7 +20,8 @@ corrected and ten policy checks plus the native isolated regression pass.
 Source and failure evidence are retained; no robot-service restart occurred.
 
 Combined clean candidate: release/robot-autonomy-20261116,
-a27b65745539c05ce6ed9a45a598fa90b5738750. Both role staging units are running;
+a27b65745539c05ce6ed9a45a598fa90b5738750. Device staging passed 16/16 and its
+sealed inventory verification passes. Compute staging is running (71/106 started);
 compute log ~/.ros/lekiwi/stage-autonomy-a27b657.log, device log
 ~/.ros/lekiwi/stage-device-autonomy-a27b657.log. Older candidate 725a519 compute
 staging was stopped before activation; its device 16/16 passed. Next: seal both roles;
@@ -36,10 +37,13 @@ Intermittent StopZone points remain at 298.81 deg / 0.197–0.200 m, just outsid
 old mask edge. Exact CAD does not identify the observed range: do not broaden
 self-filtering or weaken collision/freshness gates. Recheck live exploration and
 capture-time search evidence after deployment. No managed task is held.
-A diagnostic turn was NOT submitted: no fresh clear readiness was seen; the latest
-scan sample no longer contains the earlier 298.81-degree edge hit, and StopZone
-is now persistently active for a different nearby return. Current camera/scan
-evidence is being captured before any motion or filter changes.
+A diagnostic turn was NOT submitted. The nearby black block/cable was identified
+by the operator as the connected charger. The operator disconnected it and cleared
+the cable. A new read-only eight-second sample then had 80 scans, zero intrusions
+and 160 clear monitor states. No self-filter changes were made. Fresh travel_stow
+also passed. Repeat fresh safety readiness after deployment before movement.
+PR #186 final diff review is posted; hosted build/test/lint remains in progress
+on exact head 1d369a1. No blocking review finding; merge only on green checks.
 
 Private evidence: ~/.ros/lekiwi/qualification/20261116-bootstrap/.
 Remove WIP before final delivery; all task source branches are pushed/clean.
