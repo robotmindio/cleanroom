@@ -4,6 +4,20 @@ Current continuation guide: [HANDOFF-2026-11-16-autonomia.md](HANDOFF-2026-11-16
 The user requested this handoff before completion of staging/CI. The new release
 has not been deployed; inspect the live staging units before continuing.
 
+Continuation, 2026-11-16 12:28 UTC: PR #186's exact reviewed head passed all five
+hosted checks and was squash-merged as `0bff4a22d711c9b99c08892613e1e65e7eb41980`.
+Main was fast-forwarded; its tree equals the a27b657 candidate. Device inventory
+verification still passes. Both current pointers still select 2d87543.
+Compute staging finished with 104/106 passing: test_perception_training timed out
+at 300 s, and the first two test_search_ros cases exceeded their action-result
+deadlines amid costmap freshness/service pauses. Deployment is blocked.
+The original staging log, LastTest.log and complete CTest report are preserved in
+the private `20261116-bootstrap/staging-a27b657-failed/` directory. Isolated
+diagnostics use a separate clean `fix/autonomy-staging-fixes` worktree and private
+outputs, without changing any release. Substantial CPU and I/O contention is
+observed, but the cause of either failure is not yet established. No timeout,
+freshness, collision or stow limit has been changed.
+
 Completed: reviewed and merged exploration bootstrap PR #184 (main 0d706b5).
 It initializes native mapping before requiring a first map/pose, including an
 unlocalized saved map, and retains all driving checks. Final ROS/recovery matrix

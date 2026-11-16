@@ -5,6 +5,12 @@
 - PRs #180–#183 merged with green hosted checks. Tracked `allow_search` is
   effective in supported native Astra mapping topologies, in both SLAM and
   Explorer. Earlier SLAM PRs #118, #176 and #179 were already merged.
+- PRs #184–#186 are also merged. Explore starts mapping before requiring an
+  initial map/localized pose; search retains capture-time geometry metadata
+  across inference latency and bounds RGB-D/range synchronization; RViz releases
+  image callbacks safely and keeps Cyclone loaded through shutdown. All final
+  hosted checks passed before each merge. Main `0bff4a2` has the same tree as
+  the staged autonomy candidate `a27b657`.
 - Applied the tracked Fiber service union to the actual organization tenant,
   preserving existing settings, and created its missing default stationary
   profile. Verified schema-2 calls and scoped stationary goal completion.
@@ -46,8 +52,17 @@
 - High-level mobile find goals still require an approved map ID and surveyed
   views. Physical calibration, broader perception/navigation acceptance and trained
   arm skills remain open; native search enablement does not qualify them.
-- Investigate the observed RViz shutdown crash separately before claiming clean
-  UI teardown. No robot service was stopped during this UI check.
+- The final RViz fix passed native regression and two real-camera signal exits
+  (SIGTERM/SIGINT, zero exit status); endurance qualification remains open.
+  No robot service was stopped during these UI checks.
+- The combined autonomy candidate is not deployed: device staging passed 16/16
+  and its sealed inventory verifies, but compute staging passed 104/106.
+  `test_perception_training` timed out at 300 s; two `test_search_ros` cases
+  exceeded their action-result deadlines with costmap pauses. The original
+  evidence is preserved privately under
+  `20261116-bootstrap/staging-a27b657-failed/`. Investigate and obtain a complete
+  passing compute qualification before selection; do not expand deadlines or
+  safety limits to pass. A fresh post-deployment Explore test is still pending.
 
 Private proofs and a consistent pre-activation map backup are in
 `~/.ros/lekiwi/qualification/20261116-agent-search/`. Canonical deployment log is
