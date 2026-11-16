@@ -52,6 +52,14 @@
   **not verified as effective**. The live parameter probe preserves null and fails
   its assertion. The standalone RGB-D synchronizer's separate interval setting
   does not prove the mapper's RGB-D/scan interval is bounded.
+- Draft PR #189 (cef62ca) implements the missing native interval without changing
+  the subscriber ABI. Native message regressions and an isolated packaged-mapper
+  ABI/parameter probe pass. Complete compute staging and hosted CI are active;
+  Pi staging and deployment await connectivity. The fix is not selected.
+- The Pi subsequently became unreachable over both tailnet and LAN, and a fresh
+  eight-second probe received no joints/images. The user has been asked about
+  power/Wi-Fi without powering off. Restore connection and verify fresh stow,
+  scene, odometry/localization and readiness before any torque cut or movement.
 - High-level mobile find still needs an approved map ID and surveyed views.
   Physical calibration, useful-view search evidence, broader navigation/perception
   acceptance, mapless physical exploration and trained arm skills remain open.
@@ -67,6 +75,8 @@ serialization and supplies no physical odometry proof. Failed staging attempts,
 the guarded Pi retirement receipts and successful replacement qualification are
 preserved separately.
 
-Robot remains ARMED in travel_stow, stopped, with no managed task held. No own
-staging, deployment or recorder process remains active. Source branches are clean
+Robot has no managed task held. Its last confirmed ARMED/travel_stow state is
+historical; current posture/torque cannot be verified during the outage. Own native
+diagnostic build and compute staging remain active; no deployment or recorder is
+active. Source branches are clean
 and pushed; the operational handoff/WIP records the remaining follow-up.

@@ -1,5 +1,53 @@
 # Handoff de autonomía del robot y Fiber
 
+## Continuación, 16 de noviembre de 2026, 14:47 UTC
+
+La Pi dejó de responder: Tailscale ping/SSH agotan plazo y la dirección LAN
+192.168.110.229 no responde a ICMP ni ARP (neighbor INCOMPLETE; SSH sin ruta).
+El driver registró silencio de telemetría a las 14:23:05 UTC. El probe de ocho
+segundos `waiting-clearance-fa91885.json` recibió **cero joint_states e imágenes**,
+160 invalid source y permisos falsos. **La postura/torque actuales no están
+confirmados; ARMED y stow de abajo son la última medición histórica, no frescura
+actual.** No reiniciar, disarmar ni cortar torque sin recuperar joint_states y
+verificar travel_stow. Se pidió al usuario confirmar alimentación/Wi-Fi sin apagar;
+también sigue pendiente el despeje físico. No se intentó ningún nuevo movimiento.
+Fiber responde desde compute y sus tres recursos siguen libres; available=true
+en capabilities no demuestra readiness física. Evidencia `network-loss-20261116-1440.txt`
+y `offline-pi-capabilities-cef62ca.json`. Revisar odometría/TF/localización tras
+recuperar enlace: los warnings muestran predicción de costmap durante el silencio.
+
+Se implementó la corrección real del intervalo nativo en **draft
+[PR #189](https://github.com/robotmindio/cleanroom/pull/189)**, head
+`cef62caca2f749d18635cced4a4b07cd896f3fae`, rama limpia/subida
+`fix/rtabmap-sync-interval`, worktree bloqueado
+`/home/nex/roboto/cleanroom-worktrees/rtabmap-sync-interval-20261116`.
+Construye rtabmap_sync 0.23.13 fijado a cb2117f y parchea las siete macros de
+sync aproximado (2–8 entradas) sin añadir miembros ni métodos virtuales. Declara
+approx_sync_max_interval como inmutable; cero mantiene el default previo y los
+valores negativos/no finitos fallan al construir. Build, keys, staging e inventario
+incluyen la dependencia. No cambia ningún límite de colisión/frescura ni fuente CAD.
+
+La regresión C++ aislada pasó seis escenarios de sincronización y tres límites
+inválidos. Con el mismo binario compilado contra headers empaquetados, la biblioteca
+vieja falla por parámetro ignorado y la nueva pasa. Callbacks observados:
+sin límite/0.4 s=11; límite 0.15/0.4 s=0; 0.15/0.05 s=11; 0.15/0.15 s=11;
+exacto/sellos iguales=12; exacto/0.05 s=0. El mapper empaquetado real, en dominio
+aislado y sin entradas del robot, cargó la biblioteca nueva (comprobado en /proc),
+devolvió 0.15/queue=15/read_only=true y salió cero por SIGINT. Logs privados
+`native-sync-regression-{baseline-head,patched}.log` y
+`native-sync-mapper-abi-cef62ca.{json,log}`. La compilación diagnóstica completa
+(incluidos plugins standalone) aún sigue; la biblioteca principal ya pasó.
+126 checks iniciales de servicios/releases, diez de política y ambos casos de
+invalidación de overlay pasaron, igual que ShellCheck y Ruff.
+
+**Staging compute canónico nuevo activo:** `lekiwi-stage-sync-cef62ca.service`,
+log `~/.ros/lekiwi/stage-sync-cef62ca.log`; wrapper privado
+`20261116-bootstrap/stage-sync-cef62ca.sh`. Fuente de release bloqueada; no tocar
+su build ni ejecutar otro staging. CI hosted sigue activo. Device staging no se
+ha intentado mientras la Pi esté inaccesible. No mergear/seleccionar cef62ca sin
+calificación completa de ambos roles y CI final verde. Current y marcadores
+siguen en fa91885; no se desplegó #189 ni se reinició ningún servicio por ese PR.
+
 ## Continuación, 16 de noviembre de 2026, 14:30 UTC
 
 **Desplegado y verificado en ambos equipos: `fa91885a069d92d48e9d247811fd0010763033d4`.**
