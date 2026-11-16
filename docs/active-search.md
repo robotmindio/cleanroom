@@ -83,6 +83,11 @@ capture-time map, so the occluders move with that camera's corrected anchor.
 The map cache is bounded to 32 MiB of binary data and four decoded trees;
 each payload is at most 2 MiB. Evicted evidence becomes unobserved rather than
 being reconstructed against a newer scene.
+Capture-time geometry metadata is retained up to the bounded capture-log capacity,
+so inference finishing after several newer map updates can still use its original
+scene. The one-second capture-to-geometry bound and revision checks remain enforced.
+With range/RGB-D synchronization, the mapper keeps 15 synchronization candidates
+and pairs stamps at most 150 ms apart; the five-message transport queue stays short.
 
 ## Choosing viewpoints
 

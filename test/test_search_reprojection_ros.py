@@ -319,6 +319,24 @@ def test_future_scene_is_not_retroactively_used_for_an_older_image(geometry_log)
     assert evidence.geometry_for(capture(identifier='c' * 64, stamp=102.)) is None
 
 
+def test_delayed_recognition_uses_its_capture_time_scene_after_newer_updates(geometry_log):
+    evidence, now = geometry_log
+    for index in range(7):
+        now[0] = 100. + index * .5
+        geometry_revision(evidence, now[0])
+        evidence._on_geometry(octomap_message(now[0]))
+    # Inference completed three seconds later, but geometry was fresh at capture.
+    assert evidence.geometry_for(capture(stamp=100.1)) is not None
+    assert evidence.geometry_for(capture(identifier='b' * 64, stamp=99.9)) is None
+    assert len(evidence._geometry_decoded) <= 4
+    for index in range(7, 10):
+        now[0] = 100. + index * .5
+        geometry_revision(evidence, now[0])
+        evidence._on_geometry(octomap_message(now[0]))
+    # Once bounded history is gone, a newer scene cannot replace it.
+    assert evidence.geometry_for(capture(identifier='c' * 64, stamp=100.1)) is None
+
+
 def test_new_revision_rejects_same_stamp_replay_but_preserves_capture_time_proof(geometry_log):
     evidence, now = geometry_log
     geometry_revision(evidence, 100.)
