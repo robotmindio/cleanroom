@@ -1,5 +1,87 @@
 # Handoff de autonomía del robot y Fiber
 
+## Continuación, 16 de noviembre de 2026, 14:30 UTC
+
+**Desplegado y verificado en ambos equipos: `fa91885a069d92d48e9d247811fd0010763033d4`.**
+Esta sección sustituye todos los estados pendientes históricos de abajo. Main y
+origin/main están en `dbe89b6c0b181c84be43f4363b649f7adde7e673`; su árbol coincide
+con la release. #186, #187 y #188 se revisaron y mergearon con guardia de SHA tras
+sus cinco checks finales verdes. Las revisiones publicadas se identificaron como
+revisión propia, no aprobación independiente.
+
+La candidata final pasó staging canónico **106/106 compute** (1239.10 s) y
+**16/16 Pi**, con ambos inventarios sellados y verificados. Entrenamiento pasó
+en 125.23 s y búsqueda ROS en 31.12 s. El ENOSPC Pi de abajo se conserva como
+fallo histórico; su retry terminó correctamente. No ampliar plazos ni reutilizar
+como calificación diagnósticos interrumpidos o builds retirados.
+
+El primer despliegue fa91885 falló en la comprobación posterior al reinicio:
+esperaba DISARMED y observó LINK_LOST transitorio. Los checks de stow y las
+peticiones de disarm habían pasado; no se cambió ningún límite. El probe posterior
+confirmó DISARMED, travel_stow fresco y readiness. Un único retry canónico desde
+la misma release sellada terminó correctamente, pasó readiness dos veces y rearmó.
+Logs `~/.ros/lekiwi/deploy-autonomy-fa91885.log` y
+`~/.ros/lekiwi/deploy-autonomy-fa91885-retry.log`. Current y los marcadores
+deployed-revision de compute/Pi son fa91885; previous en ambos sigue en 2d87543.
+
+Se ejecutaron dos tareas Explore nuevas, con una sola admisión/dispatch por ID,
+25 s de presupuesto activo, plazo de pared y reconciliación de cancelación:
+
+- `qualification-explore-autonomy-fa91885-20261116-1`, generación 53, radio 1.5 m:
+  succeeded inmediatamente, «no further reachable observation targets», visited=0.
+  El margen de parada existente de 1.1 m dejaba sólo 0.4 m útiles; no es prueba
+  de exploración física. El recorder falló al serializar DiagnosticStatus.level
+  como bytes: no hay recibo de odometría de esta primera tarea.
+- `qualification-explore-autonomy-fa91885-20261116-2`, generación 54, radio 2 m:
+  hubo movimiento y pausas StopZone/depth stale; se canceló al alcanzar el plazo.
+  Estado final canceled, stop=confirmed, holding_resources=false; los tres
+  recursos quedaron libres. Las 2075 muestras de odometría entre admisión y fin
+  registraron **0.251153 m de recorrido integrado y 0.165840 m de desplazamiento**,
+  giro neto -0.316195 rad y edad máxima de sello 0.0114 s. visited=0, complete=false.
+  mapped_area=2.5575 m² es la métrica de la región de radio 2 m, no crecimiento
+  demostrado frente a los 0.52 m² de la tarea de radio distinto.
+
+El recorder privado se corrigió, se verificó con un smoke de 3 s y ahora guarda
+JSONL incremental además del JSON final. Terminó limpiamente después de la tarea.
+Recibos privados `explore-fa91885-trial2-summary.json`, ambos `*-fiber.json`,
+`qualification-explore-autonomy-fa91885-20261116-2-odometry.json{,l}` y
+`live-explore-map-fa91885.{json,npz}`. No volver a ejecutar los wrappers de las
+identidades 1/2; ante dudas consultar esas mismas identidades.
+
+**Parado, armado y sin tarea retenida.** El último probe de ocho segundos
+(`posttrial2-fa91885.json`) confirmó travel_stow fresco, error máximo 0.009253 rad,
+pero contó 122 StopZone y 38 estados libres. El muestreo de escena tuvo 45/80
+scans con retornos a 0.206–0.234 m, entre 157.00 y 298.94 grados. La cámara muestra
+ruedas de silla cercanas; no atribuir todos los retornos a la silla o al robot.
+Se pidió al usuario apartar la silla y objetos cercanos; **respuesta pendiente**.
+Mantener la base parada y repetir escena/frescura/permisos tras su confirmación.
+No cambiar StopZone, máscaras ni las protecciones para permitir el ensayo.
+
+Dos límites nuevos de verificación deben conservarse explícitos:
+
+- En vivo, allow_search=true, search_geometry_max_age_sec=1.0 y
+  search_max_candidates=200. RTAB-Map recibe sync_queue_size=15 y topic_queue_size=5,
+  Astra RGBD única y ray tracing nativo. Sin embargo el RTAB-Map principal instalado
+  **no declara `approx_sync_max_interval`**: la consulta devuelve not-set/null.
+  El 0.15 pasado en launch NO demuestra un límite efectivo. El helper
+  `postdeploy-native-parameters.py` falla su assertion correctamente; el JSON
+  registra el valor real. No hay corrección nueva implementada ni override manual.
+- La muestra estacionaria de 30 s posterior al despliegue conserva una interrupción
+  conjunta de sensores: edades hasta 16.9 s, huecos de llegada hasta 17.4 s y
+  mapas hasta 19.34 s; 336 estados invalid source. NTP/chrony no mostraron un
+  error de reloj relevante. Tailscale usa DERP sin conexión directa y la Pi falla
+  resolución DNS/controlplane; no está demostrada una causa única. ICMP LAN es
+  rápido pero TCP LAN falla. El motor_guard permite sus puertos sólo por lo o
+  tailscale0: **no ampliar esa regla para forzar LAN**. No se cambió DNS/firewall.
+
+Fuentes y worktrees propios siguen limpios/subidos; no hay staging, despliegue,
+recorder ni tarea de movimiento propios activos. Las unidades fallidas históricas
+conservan su evidencia. La rama operativa guarda este checkpoint; no limpiar
+worktrees o releases ajenos. Los worktrees nuevos bajo cleanroom-worktrees y las
+fuentes de release fa91885 están bloqueados. Siguiente paso físico: confirmación
+de despeje, probe fresco y, si es seguro, otro ensayo acotado con ID nuevo. Los
+límites de calibración, find móvil y habilidades de brazo del final siguen abiertos.
+
 ## Continuación, 16 de noviembre de 2026, 13:11 UTC
 
 **Candidata vigente: `fa91885a069d92d48e9d247811fd0010763033d4`.**
