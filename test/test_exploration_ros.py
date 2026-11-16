@@ -67,7 +67,7 @@ class RobotPeers(Node):
         self.collision = CollisionMonitorState()
         self.publish_collision = True
         self.publish_slam = True
-        self.publish_map = True
+        self.publish_map = self.publish_pose = True
         self.slam_delay = 0.0
         self.nav_mode = "hold"
         self.nav_active = False
@@ -150,7 +150,7 @@ class RobotPeers(Node):
         transform.header.stamp = stamp
         transform.transform.translation.x, transform.transform.translation.y = self.position
         transform.transform.rotation.w = 1.0
-        if self.publish_map:
+        if self.publish_pose:
             self.tf_pub.sendTransform(transform)
 
     def plan(self, goal):
@@ -208,9 +208,10 @@ def graph(tmp_path, request):
     context = Context()
     rclpy.init(context=context)
     peers = RobotPeers(context)
-    cold_start = getattr(request, 'param', '') == 'cold_start'
+    cold_start = getattr(request, 'param', '') in ('cold_start', 'unlocalized')
     if cold_start:
-        peers.publish_map = peers.publish_slam = False
+        peers.publish_map = getattr(request, 'param', '') == 'unlocalized'
+        peers.publish_pose = peers.publish_slam = False
     guard = ExplorationOwnerGuard(context=context)
     # Non-deadline scenarios must survive coverage instrumentation and slow CI scheduling.
     explorer = RobotExplorer(context=context, parameter_overrides=[
@@ -259,23 +260,23 @@ def start(graph, duration=TEST_TASK_DURATION, revisit=False):
     return handle
 
 
-@pytest.mark.parametrize('graph', ['cold_start'], indirect=True)
+@pytest.mark.parametrize('graph', ['cold_start', 'unlocalized'], indirect=True)
 @pytest.mark.parametrize('cancel_before_map', [False, True])
 def test_exploration_starts_mapping_without_a_prior_map_or_pose(graph, monkeypatch, cancel_before_map):
     peers, explorer, client = graph
-    assert explorer._map is None and 'slam' not in explorer._inputs
+    assert (explorer._map is not None) == peers.publish_map and 'slam' not in explorer._inputs
     assert not explorer._tf.can_transform('map', 'base_footprint', rclpy.time.Time())
     # Production Nav2 is gated by /map; its absence must not block mapping admission.
-    monkeypatch.setattr(explorer._navigation, 'server_is_ready', lambda: peers.publish_map)
+    monkeypatch.setattr(explorer._navigation, 'server_is_ready', lambda: peers.publish_pose)
     assert explorer._readiness_reason() == ''
     handle = response(client.send_goal_async(Explore.Goal(max_radius_m=2.5)))
     assert handle.accepted
     wait(lambda: peers.mapping_requests == [True])
     assert peers.session_policies == ['false'] and peers.nav_count == 0
-    assert explorer._map is None and not explorer._task_file.exists()
+    assert not explorer._task_file.exists()
     if not cancel_before_map:
         # First real sensor map unlocks guarded navigation; no coverage record is needed.
-        peers.publish_map = peers.publish_slam = True
+        peers.publish_map = peers.publish_pose = peers.publish_slam = True
         wait(lambda: peers.nav_active)
         assert explorer._task_file.exists()
     response(handle.cancel_goal_async())
@@ -291,7 +292,7 @@ def test_first_map_does_not_bypass_collision_stop(graph):
     handle = response(client.send_goal_async(Explore.Goal(max_radius_m=2.5)))
     assert handle.accepted
     wait(lambda: peers.mapping_requests == [True])
-    peers.publish_map = peers.publish_slam = True
+    peers.publish_map = peers.publish_pose = peers.publish_slam = True
     wait(lambda: 'StopZone' in explorer._stage)
     assert peers.nav_count == 0
     peers.collision = CollisionMonitorState()

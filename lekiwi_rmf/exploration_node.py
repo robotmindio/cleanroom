@@ -487,7 +487,9 @@ class RobotExplorer(Node):
                 return "exploration disabled for fixed-map/RMF operation"
             # Nav2 starts after the first map. Admit mapping initialization before
             # that map exists; every drive still requires the full checkpoint.
-            initializing = mapping_quota and self._map is None
+            initializing = mapping_quota and (self._map is None or (
+                self._mapping is False and not self._tf.can_transform(
+                    "map", "base_footprint", rclpy.time.Time())))
             if initializing:
                 if self._mapping is None or time.monotonic() - self._mode_at > self.config["service_timeout_sec"]:
                     return "mapping mode is unknown or stale"
@@ -645,24 +647,19 @@ class RobotExplorer(Node):
             duration, radius = task_limits(goal.request.max_duration_sec, goal.request.max_radius_m,
                                            self.config["max_duration_sec"], self.config["max_radius_m"])
             deadline = task_time() + duration
-            mapping_confirmed = False
-            if self._map is None:
-                # Localization in an unknown room cannot produce the first map.
-                # Start native mapping now, without inventing free space or TF.
-                mapping_requested = True
-                self._set_mapping(True)
-                mapping_confirmed = True
+            # Localization in an unknown room cannot produce the first map/pose.
+            # Start native mapping without inventing free space or a transform.
+            mapping_requested = True
+            self._set_mapping(True)
 
-                def starting_check():
-                    return self._checkpoint(goal, deadline, None, radius)
+            def starting_check():
+                return self._checkpoint(goal, deadline, None, radius)
 
-                try:
-                    pose = starting_check()
-                except Paused as reason:
-                    self._pause(goal, starting_check, reason, lambda: {})
-                    pose = starting_check()
-            else:
-                pose = self._pose()
+            try:
+                pose = starting_check()
+            except Paused as reason:
+                self._pause(goal, starting_check, reason, lambda: {})
+                pose = starting_check()
             center = (pose.pose.position.x, pose.pose.position.y)
             if goal.request.resume_task_id:
                 state = self._resume_task(goal.request.resume_task_id)
@@ -678,7 +675,7 @@ class RobotExplorer(Node):
                          "previous_mapping": previous_mapping}
             def check():
                 current = self._checkpoint(goal, deadline, center, radius)
-                if mapping_confirmed and self._mapping is not True:
+                if self._mapping is not True:
                     raise RuntimeError("mapping mode changed during exploration")
                 return current
 
@@ -693,11 +690,6 @@ class RobotExplorer(Node):
             save()
             while True:
                 try:
-                    if not mapping_confirmed:
-                        check()
-                        mapping_requested = True
-                        self._set_mapping(True)
-                        mapping_confirmed = True
                     if not self._explore_step(goal, check, center, radius, visited, blocked, result):
                         if blocked and not state["retrying"]:
                             # Retry once after other observations; temporary obstacles can clear.
