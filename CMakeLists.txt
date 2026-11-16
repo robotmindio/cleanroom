@@ -161,12 +161,12 @@ if(BUILD_TESTING)
     OUTPUT_QUIET ERROR_QUIET)
   function(add_lekiwi_pytest name)
     set(timeout_args)
-    # Expanded exploration action and restart matrices exceed one minute.
+    # Complete restart matrices exceed two minutes beside other builds; scenario deadlines stay unchanged.
     if(name STREQUAL "test_exploration_owner_guard" OR name STREQUAL "test_exploration_recovery"
         OR name STREQUAL "test_exploration_ros" OR name STREQUAL "test_task_gateway"
         OR name STREQUAL "test_task_execution"
         OR name STREQUAL "test_search_ros")
-      set(timeout_args TIMEOUT 120)
+      set(timeout_args TIMEOUT 300)
     elseif(name STREQUAL "test_perception_training")
       # Where the perception model is installed, one test trains and exports the real
       # detector on CPU: about two minutes alone, longer beside a parallel CTest run.
