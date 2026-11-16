@@ -18,6 +18,53 @@ import pytest
 ROOT = pathlib.Path(__file__).parents[1]
 
 
+@pytest.mark.parametrize('stow_checks,rpc_failures,invocations,expected,events', [
+    ('0', 0, 1, 0, ['stow', 'cut']),
+    ('0 0', 0, 2, 0, ['stow', 'cut', 'stow', 'cut']),
+    ('0 1', 0, 2, 1, ['stow', 'cut', 'stow']),
+    ('0 0', 1, 1, 0, ['stow', 'cut', 'stow', 'cut']),
+    ('0 1', 1, 1, 1, ['stow', 'cut', 'stow']),
+    ('1', 0, 1, 1, ['stow']),
+])
+def test_every_deployment_torque_cut_rechecks_fresh_stow(
+        tmp_path, stow_checks, rpc_failures, invocations, expected, events):
+    source = (ROOT / 'scripts/deploy-split.sh').read_text()
+    start = source.index('disarm() {')
+    function = source[start:source.index('\n}\n', start) + 3]
+    calls = tmp_path / 'calls'
+    checks = tmp_path / 'checks'
+    checks.write_text(stow_checks.replace(' ', '\n') + '\n')
+    harness = r'''
+set -euo pipefail
+PROJECT_ROOT=/qualified/source
+wait_for() { return 0; }
+die() { echo "$*" >&2; exit 1; }
+sleep() { :; }
+python3() {
+  [[ $* == '/qualified/source/scripts/check-travel-stow.py --max-age 0.5' ]]
+  printf 'stow\n' >> "$LEKIWI_TEST_CALLS"
+  local check
+  check=$(head -n 1 "$LEKIWI_TEST_CHECKS")
+  sed -i '1d' "$LEKIWI_TEST_CHECKS"
+  [[ $check == 0 ]]
+}
+timeout() {
+  [[ $* == "30 ros2 service call /safety/disarm std_srvs/srv/Trigger {}" ]]
+  printf 'cut\n' >> "$LEKIWI_TEST_CALLS"
+  local attempts
+  attempts=$(grep -c '^cut$' "$LEKIWI_TEST_CALLS")
+  (( attempts > LEKIWI_TEST_RPC_FAILURES )) || return 1
+  printf 'success=True\n'
+}
+'''
+    env = {**os.environ, 'LEKIWI_TEST_CALLS': str(calls), 'LEKIWI_TEST_CHECKS': str(checks),
+           'LEKIWI_TEST_RPC_FAILURES': str(rpc_failures)}
+    result = subprocess.run(['bash', '-c', harness + function + '\n' + 'disarm\n' * invocations],
+                            env=env, text=True, capture_output=True, timeout=5)
+    assert result.returncode == expected, result.stderr
+    assert calls.read_text().splitlines() == events
+
+
 @pytest.mark.parametrize('response,cli_status,expected', [
     ("std_srvs.srv.Trigger_Response(success=True, message='armed')", 0, 0),
     ("std_srvs.srv.Trigger_Response(success=False, message='permission denied')", 0, 1),
