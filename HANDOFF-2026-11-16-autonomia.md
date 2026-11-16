@@ -1,5 +1,54 @@
 # Handoff de autonomía del robot y Fiber
 
+## Continuación, 16 de noviembre de 2026, 13:11 UTC
+
+**Candidata vigente: `fa91885a069d92d48e9d247811fd0010763033d4`.**
+PR #187 pasó todos los checks y se mergeó como `5c7cfc0`; main se actualizó y
+su árbol coincidió con 9bd408f. Esa candidata pasó 106/106 compute y 16/16 Pi,
+se selló y ambos inventarios verificaron. Entrenamiento pasó en 250.92 s y
+búsqueda ROS en 29.20 s. Queda sellada, sin seleccionar, ahora supersedida.
+
+La última revisión antes de desplegar detectó que deploy-split comprobaba stow
+antes del primer corte, pero volvía a disarm después del reinicio sin comprobar
+otra muestra fresca; el driver puede rearmarse al arrancar. No se ejecutó ningún
+despliegue. [PR #188](https://github.com/robotmindio/cleanroom/pull/188) corrige
+el helper común: antes de cada petición de corte, también en reintentos y llamadas
+posteriores, exige travel_stow SRDF dentro de 0.02 rad con muestra de edad <=0.5 s.
+Un fallo termina el despliegue conservando torque. Pasaron 94 comprobaciones de
+servicios, incluidos seis casos nuevos que ejecutan el helper con ROS simulado;
+shellcheck, Ruff y flake8 también pasan. Revisión propia publicada; CI pendiente.
+
+Rama subida/limpia `fix/deploy-fresh-stow-check`, worktree bloqueado:
+`/home/nex/roboto/cleanroom-worktrees/deploy-fresh-stow-20261116`.
+`.env` privada copiada con modo 600, ignorada. Nuevos stagings completos activos
+en ambos equipos, unidad `lekiwi-stage-autonomy-fa91885.service`; logs:
+`~/.ros/lekiwi/stage-autonomy-fa91885.log` y
+`~/.ros/lekiwi/stage-device-autonomy-fa91885.log`. Se transfirió el commit
+subido por el helper bundle/SSH; las dos fuentes de release están bloqueadas.
+No tocar releases selladas ni repetir staging si la unidad sigue activa.
+
+Después de 106/106 + 16/16, sellos verificados y CI final válida, mergear #188
+con guardia de SHA, actualizar main y comprobar igualdad de árboles. El wrapper
+privado **aún no ejecutado** es
+`20261116-bootstrap/deploy-autonomy-fa91885.sh`; revisa head/limpieza/árbol/sello
+compute y abre/cierra un ssh-agent temporal. Hace el despliegue canónico con el
+nuevo helper protegido. Repetir stow fresco antes de ejecutarlo.
+
+Los helpers privados preparados (aún sin movimiento) son
+`stationary-preflight.py`, `postdeploy-native-parameters.py`,
+`sensor-cadence-post-fa91885.py`, `record-explore-odometry.py` y
+`run-bounded-explore-fa91885.py`. El último exige marcador/current fa91885 y
+recorder.ready; usa el tenant de agentes, valida y envía una sola identidad
+`qualification-explore-autonomy-fa91885-20261116-1`, 25 s activos y radio 1.5 m,
+observa hasta 60 s de pared y cancela/reconcilia si sigue activo. Revisarlo antes
+de uso. No repetir la admisión si ya existe su JSON; consultar el mismo task_id.
+El recorder usa SIGUSR1 para finalizar y guardar; también termina solo en 150 s.
+Luego verificar terminal, stop=confirmed, recursos libres y odometría/journal.
+
+Ambos current y marcadores siguen en 2d87543. El probe precut-9bd408f confirmó
+ARMED, 160 estados de colisión libres y travel_stow fresco (máx. 0.009254 rad),
+pero esa muestra ya es histórica. No hubo cortes de torque ni movimientos.
+
 ## Continuación, 16 de noviembre de 2026, 12:44 UTC
 
 Esta sección sustituye los estados pendientes de la foto original de abajo.

@@ -1,6 +1,13 @@
 # Autonomous exploration follow-up, 2026-11-16
 
 Current continuation guide: [HANDOFF-2026-11-16-autonomia.md](HANDOFF-2026-11-16-autonomia.md).
+The 13:11 UTC continuation is current: #187 merged; 9bd408f passed/sealed both
+roles but remains unselected. #188 closes a final deployment safety gap: fresh
+travel_stow before every torque cut, including post-restart calls and retries.
+New head fa91885 is staging fully on both hosts from the locked worktree
+`/home/nex/roboto/cleanroom-worktrees/deploy-fresh-stow-20261116`.
+Both units are `lekiwi-stage-autonomy-fa91885.service`; CI is pending.
+No torque cuts, deployment or movement have been attempted in this continuation.
 Its new 12:44 UTC continuation supersedes the original staging snapshot: #186
 is merged; #187 head 9bd408f is in complete compute/device staging from the
 locked worktree `/home/nex/roboto/cleanroom-worktrees/autonomy-staging-20261116`.
