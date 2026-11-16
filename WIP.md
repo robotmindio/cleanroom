@@ -1,40 +1,30 @@
-# Autonomous exploration follow-up, 2026-11-16
+# Autonomous exploration follow-up
 
-Current state: [HANDOFF-2026-11-16-autonomia.md](HANDOFF-2026-11-16-autonomia.md),
-14:47 UTC continuation with the 14:54 UTC update. PRs #184–#188 merged with green final checks.
-Release fa91885 passed canonical compute 106/106 and Pi 16/16, sealed/verified,
-and is selected with verified deployment markers on both hosts. Main dbe89b6
-has the same source tree. The successful canonical retry rearmed the robot;
-the first post-restart LINK_LOST failure is preserved in its original log.
+Current checkpoint: [HANDOFF-2026-11-16-autonomia.md](HANDOFF-2026-11-16-autonomia.md),
+17 November 00:07 MYT / 16 November 16:07 UTC.
 
-Explore generation 53 (radius 1.5 m) returned immediately with no targets.
-Generation 54 (radius 2 m) physically moved: interval odometry measured 0.251153 m
-integrated travel, 0.165840 m net displacement. It paused on StopZone/depth freshness
-and was canceled with stop confirmed and all resources free. Neither task visited
-a target. Do not replay either ID or interpret region area as map growth.
+PRs #186–#189 merged. Main b8984e4 has the same tree as candidate 9503b92.
+The native synchronization fix passed all five hosted checks, complete native
+build and packaged-mapper ABI/parameter probes. Canonical compute 107/107 passed
+in 806.34 s; sealed inventory verification passed. Actual device qualification
+and deployment of 9503b92 remain pending because the Pi is unreachable.
 
-The Pi is now unreachable through tailnet and LAN, with no fresh joints/images.
-Last confirmed ARMED/travel_stow (0.009253 rad) is historical; current torque and
-posture are unconfirmed. No restart/disarm/torque cut until fresh stow is verified.
-The user has also been asked about power/Wi-Fi status without powering off.
-StopZone remains intermittent; nearby chair casters are visible. A user request
-to clear the chair/nearby objects is pending. Keep motion stopped until clearance
-and fresh readiness checks. No collision masks, margins or freshness gates changed.
+The previous fa91885 release was deployed to both hosts after 106/106 + 16/16.
+Compute still selects it; Pi pointers/markers are last verified before the outage.
+Its mapper still ignores approx_sync_max_interval; the merged fix is not live.
+Bounded Explore generation 54 logged 0.251153 m odometry travel and 0.165840 m net,
+visited zero targets, then canceled with stop confirmed and resources released.
 
-Remaining technical findings: multi-stream transport gaps up to 17.4 s and map
-gaps of 19.34 s, Pi DNS failures/DERP relay, and the installed main RTAB-Map node
-does not declare the launch-provided approx_sync_max_interval=0.15. Queue depth
-15 is effective, but the interval bound is unverified/ineffective in the live release.
-Draft PR #189, pushed head 9503b92, implements the native interval with a pinned
-ABI-preserving RTAB-Map sync patch. Six synchronization scenarios, three invalid
-values and an isolated packaged-mapper ABI/parameter probe passed. Compute staging
-is active in lekiwi-stage-sync-9503b92.service; hosted CI is active. Pi staging has
-not started while it is unreachable. No new deployment or manual parameter/network
-override was applied. The explicit LAN motor
-firewall restriction stays intact.
+Final read-only probe: no joints/images, invalid sources, arm/base permissions
+false. Current arm posture/torque cannot be verified. Do not cut torque without
+fresh SRDF travel_stow. User power/Wi-Fi and nearby-object clearance checks are
+pending. Keep collision/freshness/stow limits and the tailnet motor guard intact.
 
-Private evidence: ~/.ros/lekiwi/qualification/20261116-bootstrap/.
-No task-owned movement, recorder or deployment process remains active. The complete native
-diagnostic build passed; canonical compute staging is active and must be monitored.
-Source branches are clean and pushed. Keep WIP while physical/technical follow-up
-remains; remove at completed delivery and update ROLLOUT.md with final results.
+Next: restore connection, check Pi disk/readiness, stage and verify device 9503b92,
+then canonical deployment from the exact qualified source with fresh stow checks.
+Verify the launched mapper's actual 0.15 value, repeat cadence/scene/localization
+checks, then another bounded physical trial if conditions permit.
+
+No own temporary process or motion task remains active; Fiber resources are free.
+Compute robot services remain active. Source branches and this checkpoint are
+committed/pushed. Keep WIP until the physical/deployment follow-up is completed.

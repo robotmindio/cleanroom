@@ -1,83 +1,76 @@
-# Agent search rollout, 2026-11-16
+# Agent search rollout
+
+Checkpoint: 17 November 2026, 00:07 MYT / 16 November, 16:07 UTC.
 
 ## Delivered
 
 - PRs #180–#188 merged with green final hosted checks. Search enablement is tracked
   in supported native Astra mapping topologies. Explore initializes mapping before
-  requiring an initial map/localized pose. Search preserves capture-time geometry
-  through inference latency; frustum projection batching retains the full octree
+  requiring a first map/localized pose. Search preserves capture-time geometry
+  across inference and batches frustum projection while retaining the full octree
   volume proof. RViz safely disconnects image filters and retains Cyclone at exit.
-  Deployment now requires fresh SRDF travel_stow before every torque cut, including
-  post-restart disarm and retries, within the unchanged 0.02 rad tolerance.
-- Applied the tracked Fiber service union to the actual organization tenant,
-  preserving settings, and created its missing default stationary profile.
-  Verified schema-2 calls and scoped stationary goal completion.
-- PR #183 records the operator-measured supported_rest and recognizes existing
-  MechanicalRest pairs around either reference within unchanged pair-relative
-  bounds. A guarded physical MoveIt recovery returned the arm to travel_stow.
+  Deployment requires fresh SRDF travel_stow before every torque cut, including
+  retries and post-restart disarm, within the unchanged 0.02 rad tolerance.
+- Applied the tracked Fiber service union to the actual tenant, preserved settings
+  and created its missing default stationary profile. Verified schema-2 calls,
+  scoped stationary goal completion, fencing and cancellation/resource receipts.
+- PR #183 records operator-measured supported_rest within unchanged MechanicalRest
+  pair bounds. A guarded physical MoveIt recovery returned the arm to travel_stow.
   Actual RViz MotionPlanning widgets and move_group received the semantic and
-  selected RestFCL library. RViz's later shutdown fix passed native regression
-  and real-camera SIGTERM/SIGINT probes with zero exit status.
-- Release `fa91885a069d92d48e9d247811fd0010763033d4` passed canonical **106/106
-  compute and 16/16 device**, sealed inventory verification and canonical split
-  deployment. Both current pointers and verified deployed-revision markers select
-  fa91885; previous is 2d87543 on both hosts. Main dbe89b6 has the same source tree.
-  The first deployment failed a post-restart DISARMED check on transient LINK_LOST;
-  after read-only recovery/readiness checks, one canonical retry succeeded and
-  rearmed. Both attempts are preserved; no safety limit was relaxed.
-- Two post-deployment Explore tasks were admitted/dispatched exactly once. Radius
-  1.5 m returned immediately with no target; the existing 1.1 m stopping margin
-  leaves only 0.4 m useful radius. Radius 2 m produced physical movement, then
-  StopZone/depth freshness pauses. It was canceled with stop confirmed, no retained
-  resources and no target visited. Odometry over its admission-to-terminal interval
-  measured **0.251153 m integrated travel and 0.165840 m net displacement**.
-  This establishes bounded movement and cancellation, not completed exploration.
-- The earlier Fiber search trial returned no_coverage and was canceled with stop
-  confirmed. Repeated cancel retained its receipt; resubmission of that same ID
-  was not admitted. Zero usable coverage is not evidence of object absence.
+  RestFCL library. The later shutdown fix passed native and real-camera signal probes.
+- Release fa91885 passed canonical **106/106 compute + 16/16 Pi**, sealed inventories
+  and canonical split deployment. Both markers/pointers were verified; previous was
+  2d87543. One post-restart LINK_LOST failure and its successful canonical retry are
+  preserved. The successful deployment rearmed; no safety limit was relaxed.
+- Two post-deployment Explore tasks were admitted/dispatched once each. Radius 1.5 m
+  returned no targets; the existing 1.1 m stopping margin leaves 0.4 m useful radius.
+  Radius 2 m moved, then paused on StopZone/depth freshness and was canceled with
+  stop confirmed and all resources free. Interval odometry measured **0.251153 m
+  travel and 0.165840 m net displacement**, with zero targets visited. This proves
+  bounded movement/cancellation, not completed exploration or map growth.
+- **PR #189 merged as b8984e4** after all five hosted checks and canonical compute
+  **107/107** (806.34 s), sealing and independent inventory verification. Its tree
+  equals qualified head 9503b92. Pinned RTAB-Map sync now enforces the previously
+  ignored 0.15 s interval without changing the subscriber ABI. Six native sync
+  scenarios, three invalid-value cases and the real packaged-mapper ABI/parameter
+  probe passed. This fix is merged but **not deployed**; actual Pi qualification
+  remains required before selection. Author reviews were labeled self-review.
 
 ## Remaining acceptance
 
-- StopZone remains intermittent. The latest stationary scene includes 0.206–0.234 m
-  returns and nearby chair casters; their identity is not fully established.
-  The user has been asked to clear nearby objects. Keep motion stopped pending
-  clearance and fresh checks. Do not shrink the polygon or mask unverified returns.
-- Continuous capture-time search geometry remains unqualified. A post-deployment
-  30 s stationary sample caught multi-stream gaps up to 17.4 s, map gaps of 19.34 s
-  and invalid-source stops. Pi DNS/controlplane resolution fails and Tailscale
-  uses DERP; clock checks were healthy. No single cause is established and no
-  DNS/firewall configuration changed. The explicit tailnet motor guard remains.
-- Main RTAB-Map's live sync_queue_size is 15, but its installed implementation does
-  not declare approx_sync_max_interval. The launch-provided 0.15 value is therefore
-  **not verified as effective**. The live parameter probe preserves null and fails
-  its assertion. The standalone RGB-D synchronizer's separate interval setting
-  does not prove the mapper's RGB-D/scan interval is bounded.
-- Draft PR #189 (9503b92) implements the missing native interval without changing
-  the subscriber ABI. Native message regressions and an isolated packaged-mapper
-  ABI/parameter probe pass, as does the complete native package build. Compute
-  staging and hosted CI are active;
-  Pi staging and deployment await connectivity. The fix is not selected.
-- The Pi subsequently became unreachable over both tailnet and LAN, and a fresh
-  eight-second probe received no joints/images. The user has been asked about
-  power/Wi-Fi without powering off. Restore connection and verify fresh stow,
-  scene, odometry/localization and readiness before any torque cut or movement.
-- High-level mobile find still needs an approved map ID and surveyed views.
-  Physical calibration, useful-view search evidence, broader navigation/perception
-  acceptance, mapless physical exploration and trained arm skills remain open.
-  Production map data was not erased for a test. RViz endurance remains open.
+- The Pi is unreachable over tailnet and LAN. Final stationary probe received no
+  joints/images, invalid sensor sources and false motion permissions. Current arm
+  posture/torque cannot be verified. Restore connectivity and verify fresh travel_stow
+  before any torque cut, motor/Astra/host restart or deployment. The user has been
+  asked about power/Wi-Fi without powering off, and clearing nearby objects.
+- Before the outage, StopZone saw 0.206–0.234 m returns and camera-visible chair
+  casters. Their full identity remains unestablished. Do not shrink the polygon,
+  mask unverified returns or bypass freshness/stow/permission gates.
+- Stage device 9503b92 completely and verify both role seals before canonical deploy.
+  Check Pi disk space first; preserve current/previous and active releases. Then
+  verify the newly launched mapper reports 0.15 and uses the new native library.
+  The selected fa91885 mapper still does not declare that parameter.
+- Continuous capture-time geometry remains unqualified. A post-deployment sample
+  caught multi-stream gaps up to 17.4 s and map gaps of 19.34 s. Pi DNS/controlplane
+  failures and DERP relay were observed, while earlier clock checks were healthy;
+  no single cause is established. No DNS/firewall changes were made. Keep the
+  explicit tailnet motor guard. Recheck cadence, odometry/TF/localization and scene
+  after connection returns, before another bounded physical trial.
+- The earlier search trial credited no usable coverage; no_coverage is not evidence
+  of object absence. Useful-view search, physical calibration, broader navigation,
+  mapless physical exploration and trained arm skills remain open. High-level mobile
+  find needs an approved map ID and surveyed views. Production map data was retained.
 
-Current private evidence is under
-`~/.ros/lekiwi/qualification/20261116-bootstrap/`; earlier search proofs and the
-consistent pre-activation map backup are under `20261116-agent-search/`.
-Deployment logs are `~/.ros/lekiwi/deploy-autonomy-fa91885{,-retry}.log`.
-`explore-fa91885-trial2-summary.json` links the terminal task/odometry metrics;
-the raw JSONL and task journals are retained. The first trial's recorder failed
-serialization and supplies no physical odometry proof. Failed staging attempts,
-the guarded Pi retirement receipts and successful replacement qualification are
-preserved separately.
+Current proofs are under ~/.ros/lekiwi/qualification/20261116-bootstrap/; earlier
+search proofs and a consistent map backup are under 20261116-agent-search/.
+Deployment logs are ~/.ros/lekiwi/deploy-autonomy-fa91885{,-retry}.log.
+The new sealed compute log is ~/.ros/lekiwi/stage-sync-9503b92.log; its unit exited
+zero and is inactive. The first Explore recorder failed serialization; only the
+second task has complete interval odometry/JSONL proof. Original failures and
+retirement receipts are preserved.
 
-Robot has no managed task held. Its last confirmed ARMED/travel_stow state is
-historical; current posture/torque cannot be verified during the outage. Own compute staging
-remains active; no deployment or recorder is
-active. Source branches are clean
-and pushed; the operational handoff/WIP records the remaining follow-up.
+Fiber's final resource snapshot is free, with no own movement task or temporary
+staging/deployment/recorder process active. Compute robot services remain active
+on fa91885. Pi selection/armed/stow observations are historical pending reconnection.
+Own source changes and operational checkpoint are committed and pushed. WIP remains
+for the physical/device/deployment follow-up.

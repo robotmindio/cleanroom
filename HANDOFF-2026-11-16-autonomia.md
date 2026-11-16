@@ -1,5 +1,93 @@
 # Handoff de autonomía del robot y Fiber
 
+## Checkpoint, 17 de noviembre de 2026, 00:07 MYT / 16 de noviembre, 16:07 UTC
+
+**Trabajo de software completado y subido; despliegue de #189 bloqueado por Pi
+inaccesible.** Esta sección sustituye todos los estados pendientes anteriores.
+
+- PRs #186–#189 mergeados con guardia del head y checks finales verdes. #189 se
+  mergeó como **b8984e4a45f9f11ee102d252007f9cce70321e08** desde head
+  **9503b92f275cbbdb4fc7652947eaa27c7dff5f1a**. Main/origin/main están en b8984e4,
+  limpios, y su árbol coincide exactamente con la candidata 9503b92.
+- #189 obtuvo los cinco checks hosted verdes, incluidos build/test/lint y coverage.
+  El staging compute canónico terminó **107/107**, cero fallos, en **806.34 s**,
+  se selló y una verificación independiente del inventario pasó. Entrenamiento:
+  nueve casos, cero skips, 37.10 s. Búsqueda ROS: siete casos, 26.95 s. Nueva
+  regresión nativa de sync: 3.65 s. No se cambió ningún plazo ni límite de seguridad.
+- Unidad **lekiwi-stage-sync-9503b92.service**: inactive, Result=success,
+  ExecMainStatus=0. Log `~/.ros/lekiwi/stage-sync-9503b92.log`. Release compute
+  `~/lekiwi_ws/releases/9503b92f275cbbdb4fc7652947eaa27c7dff5f1a/`; fuente bloqueada.
+  Overlay completo: `~/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/`.
+  No reconstruir ni modificar esta release sellada. Se preservó el intento cef62ca
+  interrumpido y el fallo diagnóstico previo de RGBDX; ninguno es calificación.
+- Se completó el merge de software con CI compute/device y la calificación real
+  de compute, donde cambia el runtime. La calificación real de **device sigue
+  siendo requisito antes de seleccionar/desplegar**; no se intentó estando offline.
+  Las revisiones publicadas se identifican como revisión propia, no independiente.
+
+La release **fa91885** sí se desplegó y verificó antes de la pérdida de enlace,
+con 106/106 compute y 16/16 Pi. Compute aún selecciona fa91885 y conserva su
+marcador; previous es 2d87543. En Pi, esos mismos valores son la última verificación
+histórica, no una consulta actual. #189 no se desplegó ni reinició servicios.
+La prueba Explore de generación 54 registró 0.251153 m de recorrido odométrico,
+0.165840 m netos y cero objetivos visitados, y terminó canceled, stop=confirmed,
+sin recursos retenidos. No repetir sus IDs ni afirmar exploración completada.
+
+**Bloqueo físico actual:** SSH tailnet volvió a agotar plazo y la LAN no resuelve
+ARP (FAILED / Destination Host Unreachable). El probe final de ocho segundos
+`final-sync-9503b92.json` recibió cero joints, cero imágenes, 159 invalid source
+y permisos de brazo/base falsos. Postura y torque actuales **no verificables**;
+la última muestra ARMED/travel_stow de abajo es histórica. No disarmar, reiniciar
+motor/Astra/host ni cortar alimentación sin travel_stow confirmado desde joints
+frescos, dentro de 0.02 rad. No se intentó ningún corte durante esta pérdida de
+telemetría. Se pidió al usuario comprobar alimentación/Wi-Fi manteniendo la
+alimentación y despejar la silla/objetos cercanos; ambas respuestas siguen pendientes.
+No atribuir todos los retornos a la silla o al chasis ni ampliar máscaras/StopZone.
+
+Fiber sigue respondiendo desde compute. El recibo final
+`final-sync-9503b92-capabilities.json` conserva el mismo journal y muestra base,
+arm y perception_query libres. available=true indica capacidad del servidor,
+no readiness física. El stack compute sigue activo; no hay tareas de movimiento,
+recorders, diagnósticos, staging o despliegues propios activos. Las unidades
+fallidas históricas y los recibos originales se conservan. El push a main puede
+lanzar su CI automático; el head de PR calificado es 9503b92 y su árbol ya se
+comparó con el merge, sin nuevas diferencias de fuente.
+
+### Siguiente paso al recuperar conexión
+
+1. Confirmar current/previous/marcadores Pi, servicios, disco disponible y joints
+   frescos. El espacio Pi era escaso tras fa91885: comprobarlo antes del nuevo
+   overlay, sin borrar current/previous, fuentes, .env ni evidencia. Mantener el
+   motor_guard tailnet; no forzar LAN abriendo sus puertos.
+2. Calificar **device 9503b92** con staging canónico completo, 16/16 y sello
+   verificado. Rama limpia/subida y worktree bloqueado:
+   `/home/nex/roboto/cleanroom-worktrees/rtabmap-sync-interval-20261116`.
+   Su .env privada está ignorada y en modo 600. Usar el helper bundle/SSH si
+   GitHub aún no resuelve en Pi; no mutar releases selladas ni repetir staging activo.
+3. Desde ese worktree exacto, verificar árbol de main y ambos sellos y preparar
+   el wrapper canónico siguiendo `deploy-autonomy-fa91885.sh`, con head 9503b92
+   y ssh-agent propio temporal para id_ed25519. Verificar travel_stow fresco antes
+   de cada corte; no usar supported_rest como sustituto. No ejecutar el wrapper
+   viejo de fa91885 para desplegar la nueva versión.
+4. Tras deploy, comprobar marcadores/current de ambos roles y **valor real 0.15**
+   en el mapper recién lanzado, prefijo de biblioteca y queue=15. En fa91885 el
+   intervalo sigue sin declararse; el JSON null y la assertion fallida son evidencia
+   válida del defecto, no un valor ya corregido en vivo. Repetir cadencia de sensores
+   y geometría, escena/StopZone y odometría/TF/localización tras el silencio largo.
+5. Sólo con las condiciones físicas y frescura resueltas, validar y enviar otro
+   Explore acotado con ID nuevo, recorder incremental iniciado antes de admisión,
+   plazo de pared y cancelación reconciliada. Radio 2 m permite un objetivo dentro
+   del margen de parada existente de 1.1 m; no reducir ese margen. Conservar journal,
+   terminal/stop/recursos y odometría del intervalo real. La calibración, views/map
+   aprobados para find móvil, evidencia útil de búsqueda y skills entrenados siguen
+   sin calificarse. Actualizar ROLLOUT y retirar WIP al completar esa entrega.
+
+Fuentes propias limpias y subidas. El recibo de ajuste de I/O sólo del cgroup de
+staging es `stage-sync-9503b92-io-scheduling.json`; mantuvo un compilador, Nice=10
+y cambió idle a best-effort 7 para evitar inanición por otros lectores. No se
+cambió configuración de runtime, DNS, firewall, frescura, colisiones ni stow.
+La evidencia privada sigue en `~/.ros/lekiwi/qualification/20261116-bootstrap/`.
+
 ## Continuación, 16 de noviembre de 2026, 14:47 UTC
 
 Actualización **14:54 UTC**: head vigente de #189 es
