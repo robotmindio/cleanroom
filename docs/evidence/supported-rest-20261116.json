@@ -1,0 +1,32 @@
+{
+  "scope": "additional collision reference for an operator-confirmed supported posture",
+  "captured_on": "2026-11-16",
+  "fresh_joint_samples": 120,
+  "maximum_joint_spread_rad": 0.0,
+  "joint_positions_rad": {
+    "arm_shoulder_pan": 1.3978,
+    "arm_shoulder_lift": -1.4223,
+    "arm_elbow_flex": 1.6203,
+    "arm_wrist_flex": 1.0342,
+    "arm_wrist_roll": -0.0061,
+    "arm_gripper": 0.2108
+  },
+  "operator_reported_natural_support": true,
+  "cad_arm_bounds_m": {
+    "minimum_xyz": [0.02282408, -0.13829689, 0.07723610],
+    "maximum_xyz": [0.11726992, 0.10204744, 0.27053999]
+  },
+  "inside_tracked_navigation_polygon_with_5mm_margin_at_measured_pose": true,
+  "original_cad_mesh_contact_penetrations_m": {
+    "shoulder_motor_collision_proxy/forearm_holder_collision_proxy": 0.000329325,
+    "shoulder_motor_collision_proxy/forearm_link_collision_proxy": 0.000757143,
+    "shoulder_collision_proxy/roll_holder_collision_proxy": 0.000163015
+  },
+  "unchanged_mechanical_rest_bounds": {
+    "relative_translation_m": 0.025,
+    "relative_rotation_rad": 0.10
+  },
+  "travel_stow_changed": false,
+  "transport_acceptance_granted": false,
+  "physical_trajectory_qualified": false
+}

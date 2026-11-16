@@ -56,7 +56,7 @@ int main(int argc, char** argv)
     if (result.collision) throw std::runtime_error("loaded pose failed complete self-collision check");
   }
   state.setToDefaultValues(model->getJointModelGroup("arm"), "travel_stow");
-  state.setVariablePosition("arm_shoulder_lift", state.getVariablePosition("arm_shoulder_lift") + 0.4);
+  state.setVariablePosition("arm_shoulder_lift", state.getVariablePosition("arm_shoulder_lift") + 0.8);
   state.update();
   guarded = detector.guardedMatrix(state, only_rest);
   if (!guarded.getEntry("shoulder_motor_collision_proxy", "forearm_link_collision_proxy", type) ||
@@ -67,6 +67,35 @@ int main(int argc, char** argv)
   if (!guarded.getEntry("arm_ground_keepout_proxy", "roll_holder_collision_proxy", type) ||
       type != collision_detection::AllowedCollision::NEVER)
     throw std::runtime_error("floor collision permission changed");
+  if (!state.setToDefaultValues(model->getJointModelGroup("arm"), "supported_rest")) return 5;
+  state.update();
+  result.clear();
+  detector.checkSelfCollision(request, result, state, collision_detection::AllowedCollisionMatrix(*srdf));
+  if (result.collision) throw std::runtime_error("measured gravity-supported posture was rejected");
+  // Moving the wrist cannot revoke forearm support, but it must revoke roll support.
+  state.setVariablePosition("arm_wrist_roll", state.getVariablePosition("arm_wrist_roll") + 0.15);
+  state.update();
+  guarded = detector.guardedMatrix(state, only_rest);
+  if (!guarded.getEntry("shoulder_motor_collision_proxy", "forearm_link_collision_proxy", type) ||
+      type != collision_detection::AllowedCollision::ALWAYS)
+    throw std::runtime_error("unrelated roll revoked measured forearm support");
+  if (!guarded.getEntry("shoulder_collision_proxy", "roll_holder_collision_proxy", type) ||
+      type != collision_detection::AllowedCollision::NEVER)
+    throw std::runtime_error("rotated roll holder retained measured resting permission");
+  state.setToDefaultValues(model->getJointModelGroup("arm"), "supported_rest");
+  state.setVariablePosition("arm_shoulder_lift", state.getVariablePosition("arm_shoulder_lift") + 0.8);
+  state.update();
+  guarded = detector.guardedMatrix(state, only_rest);
+  if (!guarded.getEntry("shoulder_motor_collision_proxy", "forearm_link_collision_proxy", type) ||
+      type != collision_detection::AllowedCollision::NEVER)
+    throw std::runtime_error("distant pose retained measured resting permission");
+  state.setToDefaultValues(model->getJointModelGroup("arm"), "travel_stow");
+  state.setVariablePosition("arm_shoulder_lift", state.getVariablePosition("arm_shoulder_lift") + 0.185);
+  state.update();
+  guarded = detector.guardedMatrix(state, only_rest);
+  if (!guarded.getEntry("shoulder_motor_collision_proxy", "forearm_link_collision_proxy", type) ||
+      type != collision_detection::AllowedCollision::NEVER)
+    throw std::runtime_error("separate support references admitted an unmeasured intermediate contact");
   state.setToDefaultValues(model->getJointModelGroup("arm"), "travel_stow");
   const double lift = state.getVariablePosition("arm_shoulder_lift");
   const double elbow = state.getVariablePosition("arm_elbow_flex");

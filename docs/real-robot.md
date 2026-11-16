@@ -282,8 +282,22 @@ When the target release, service configuration, deployed revision markers, and
 running services already match, deployment exits without stopping the robot.
 Builders refuse to rebuild sealed releases or the bootstrap workspace once
 `current` exists: use the deployer to stage the next release instead. Tools that
-rebuild an existing install, including `reload-moveit.py`, are development
-workflows; deploy tracked planner changes as a new release once staging is in use.
+rebuild an existing install are development workflows; deploy tracked planner
+changes as a new release once staging is in use.
+
+For recovery from a supported posture with the driver already disarmed,
+`reload-moveit.py --release /absolute/workspace/releases/REVISION` can select a
+sealed compute release containing only collision-rule, support-reference,
+reload-tool, test and documentation changes. It verifies both seals, identical
+dependency/settings records, the managed planner's `current` paths and fresh
+disarmed state under the deployment lock. It refreshes the tracked support
+reference while preserving live calibrated poses and verifies the replacement
+planner actually mapped the selected collision library. Motor/device services
+keep running and the tool makes no torque request. It retains deployment
+markers; after a guarded return to accepted `travel_stow`, finish with
+`deploy-split.sh` to qualify both running roles and re-arm normally. A failed
+planner recovery remains unverified and does not automatically roll back or
+resume motion.
 
 A cutover or runtime verification failure does not automatically roll back or
 resume motion. Both release directories and the original bootstrap installation

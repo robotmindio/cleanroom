@@ -1,6 +1,7 @@
 """Regression checks for the conservative CAD-backed MoveIt collision model."""
 
 import math
+import json
 import pathlib
 import subprocess
 import xml.etree.ElementTree as ET
@@ -406,6 +407,20 @@ def test_resting_contacts_only_exempt_the_confirmed_parts():
     for shoulder in ("shoulder_collision_proxy", "shoulder_motor_collision_proxy", "shoulder_holder_collision_proxy"):
         for motor in ("forearm_collision_proxy", "roll_collision_proxy"):
             assert frozenset((shoulder, motor)) not in exemptions
+
+
+def test_supported_rest_matches_the_measured_reference_without_replacing_transport_stow():
+    semantic = ET.parse(ROOT / 'config/lekiwi.srdf').getroot()
+    evidence = json.loads((ROOT / 'docs/evidence/supported-rest-20261116.json').read_text())
+    supported = {j.get('name'): float(j.get('value')) for j in semantic.findall(
+        "group_state[@name='supported_rest'][@group='arm']/joint")}
+    assert supported == {name: evidence['joint_positions_rad'][name] for name in JOINT_LIMITS if name != 'arm_gripper'}
+    assert all(JOINT_LIMITS[name][0] <= value <= JOINT_LIMITS[name][1] for name, value in supported.items())
+    production = yaml.safe_load((ROOT / 'config/safety_production.yaml').read_text())['safety_supervisor']['ros__parameters']
+    accepted = yaml.safe_load((ROOT / 'config/safety_acceptance.yaml').read_text())['accepted_stow_joint_positions']
+    transport = {j.get('name'): float(j.get('value')) for j in semantic.findall("group_state[@name='travel_stow']/joint")}
+    assert transport == accepted == dict(zip(production['stow_joint_names'], production['stow_joint_positions']))
+    assert any(abs(supported[name] - transport[name]) > production['stow_tolerance'] for name in supported)
 
 
 @pytest.mark.parametrize('qualification',[False,True])

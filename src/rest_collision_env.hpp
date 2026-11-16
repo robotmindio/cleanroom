@@ -3,8 +3,10 @@
 #include <moveit/collision_detection/collision_detector_allocator.hpp>
 #include <moveit/collision_detection_fcl/collision_env_fcl.hpp>
 #include <moveit/robot_state/robot_state.hpp>
+#include <array>
 #include <cmath>
 #include <stdexcept>
+#include <string>
 
 namespace lekiwi_rmf
 {
@@ -19,24 +21,35 @@ public:
       const moveit::core::RobotState& state,
       const collision_detection::AllowedCollisionMatrix& original) const
   {
-    moveit::core::RobotState rest(state.getRobotModel());
+    std::array<moveit::core::RobotState, 2> rests{
+        moveit::core::RobotState(state.getRobotModel()), moveit::core::RobotState(state.getRobotModel())};
     const auto* arm = state.getRobotModel()->getJointModelGroup("arm");
-    if (!arm || !rest.setToDefaultValues(arm, "travel_stow"))
-      throw std::runtime_error("MechanicalRest requires the named arm travel_stow pose");
-    rest.update();
+    const std::array<const char*, 2> names{"travel_stow", "supported_rest"};
+    for (std::size_t i = 0; i < rests.size(); ++i)
+    {
+      if (!arm || !rests[i].setToDefaultValues(arm, names[i]))
+        throw std::runtime_error(std::string("MechanicalRest requires the named arm pose ") + names[i]);
+      rests[i].update();
+    }
     auto guarded = original;
     for (const auto& pair : state.getRobotModel()->getSRDF()->getDisabledCollisionPairs())
       if (pair.reason_ == "MechanicalRest")
       {
-        const Eigen::Isometry3d expected = rest.getGlobalLinkTransform(pair.link1_).inverse() *
-                                          rest.getGlobalLinkTransform(pair.link2_);
         const Eigen::Isometry3d actual = state.getGlobalLinkTransform(pair.link1_).inverse() *
                                         state.getGlobalLinkTransform(pair.link2_);
-        // Confirmed folded/release poses shift these frames by at most 17 mm.
-        // Keep an 8 mm margin around that observation; retain the 0.10 rad bound
-        // on the parts' relative orientation, not on unrelated joint angles.
-        const bool resting = (actual.translation() - expected.translation()).norm() <= 0.025 &&
-            Eigen::AngleAxisd(expected.linear().transpose() * actual.linear()).angle() <= 0.10;
+        bool resting = false;
+        for (const auto& rest : rests)
+        {
+          const Eigen::Isometry3d expected = rest.getGlobalLinkTransform(pair.link1_).inverse() *
+                                            rest.getGlobalLinkTransform(pair.link2_);
+          // Each measured support keeps the same relative-placement bounds.
+          if ((actual.translation() - expected.translation()).norm() <= 0.025 &&
+              Eigen::AngleAxisd(expected.linear().transpose() * actual.linear()).angle() <= 0.10)
+          {
+            resting = true;
+            break;
+          }
+        }
         guarded.setEntry(pair.link1_, pair.link2_, resting);
       }
     return guarded;

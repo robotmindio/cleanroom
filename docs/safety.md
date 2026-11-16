@@ -186,6 +186,17 @@ The 10 Hz rate and minimum valid-point requirement are unchanged.
 
 ## Motor-host motion limits
 
+MoveIt's `LeKiwiRestFCL` recognizes the measured `travel_stow` and
+`supported_rest` references for the four SRDF `MechanicalRest` pairs. Each pair
+must remain within 25 mm and 0.10 rad of its relative placement at either
+reference; other self-collisions and obstacles keep their ordinary checks.
+The supported reference records the stable posture the assembled arm settled
+into, with the operator reporting physical support; capture and CAD measurements
+are in [the evidence record](evidence/supported-rest-20261116.json).
+It permits that resting contact to be considered by the planner. Base motion and
+torque-off still require the accepted `travel_stow` posture within 0.02 rad;
+this record grants no new transport or physical trajectory acceptance.
+
 The motor host validates every streamed or locally sampled action before writing
 it to LeRobot. Base commands are checked against the tracked Nav2 limits after
 applying the saved wheel scales. Arm commands use the tracked joint limits and
