@@ -3,6 +3,23 @@
 ## Continuación, 16 de noviembre de 2026, 13:11 UTC
 
 **Candidata vigente: `fa91885a069d92d48e9d247811fd0010763033d4`.**
+Actualización 13:22 UTC: compute pasó 47/106 y sigue activo. El primer build
+Pi de fa91885 falló por ENOSPC al escribir los scripts de entorno de colcon;
+no llegó a las pruebas ni obtuvo sello. Log y tar de logs conservados como
+`device-fa91885-disk-full.log` y `device-fa91885-disk-full-build-logs.tar.gz`.
+El prune protegido retiró sólo los builds Pi supersedidos 725a519, a27b657 y
+9bd408f, preservando fuentes, .env y pruebas archivadas; current y previous no
+cambiaron. Esos tres builds Pi ya no están sellados ni son candidatos activables.
+Recibo privado `device-fa91885-prune-receipts.json`. El usuario normal no podía
+inspeccionar /proc del systemd de usuario; el dry-run rechazó correctamente la
+operación. Se repitió con el sudo existente y el mismo LEKIWI_LOGS para mantener
+ambos locks, con todas las protecciones, y se devolvieron los recibos a nex.
+Se borraron sólo los generados del intento fa91885 propio, fallido y sin sello,
+tras archivar logs y confirmar fuente limpia, ningún proceso, current/previous
+y locks. Rebuild Pi limpio activo: **`lekiwi-stage-autonomy-fa91885-retry.service`**,
+log `~/.ros/lekiwi/stage-device-autonomy-fa91885-retry.log`; quedaron 572 MiB
+libres antes de reconstruir. No reiniciar el primer unit ni duplicar staging.
+
 PR #187 pasó todos los checks y se mergeó como `5c7cfc0`; main se actualizó y
 su árbol coincidió con 9bd408f. Esa candidata pasó 106/106 compute y 16/16 Pi,
 se selló y ambos inventarios verificaron. Entrenamiento pasó en 250.92 s y

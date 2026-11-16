@@ -6,7 +6,10 @@ roles but remains unselected. #188 closes a final deployment safety gap: fresh
 travel_stow before every torque cut, including post-restart calls and retries.
 New head fa91885 is staging fully on both hosts from the locked worktree
 `/home/nex/roboto/cleanroom-worktrees/deploy-fresh-stow-20261116`.
-Both units are `lekiwi-stage-autonomy-fa91885.service`; CI is pending.
+Compute unit is `lekiwi-stage-autonomy-fa91885.service`; Pi retry is
+`lekiwi-stage-autonomy-fa91885-retry.service` after an archived ENOSPC build
+failure. Only three superseded Pi candidate builds were retired with the guarded
+tool, preserving sources/evidence and current/previous. CI is pending.
 No torque cuts, deployment or movement have been attempted in this continuation.
 Its new 12:44 UTC continuation supersedes the original staging snapshot: #186
 is merged; #187 head 9bd408f is in complete compute/device staging from the
