@@ -116,3 +116,16 @@ index c8cbfb0..23671a4 100644
  	imageTransport_ = node.declare_parameter("image_transport", imageTransport_);
  	depthTransport_ = node.declare_parameter("depth_transport", depthTransport_);
  
+diff --git a/rtabmap_sync/src/nodelets/rgbdx_sync.cpp b/rtabmap_sync/src/nodelets/rgbdx_sync.cpp
+index e237751..e107809 100644
+--- a/rtabmap_sync/src/nodelets/rgbdx_sync.cpp
++++ b/rtabmap_sync/src/nodelets/rgbdx_sync.cpp
+@@ -42,6 +42,8 @@ RGBDXSync::RGBDXSync(const rclcpp::NodeOptions & options) :
+ 	SYNC_INIT(rgbd7),
+ 	SYNC_INIT(rgbd8)
+ {
++	// Shared synchronization macros use a node reference; this component is the node.
++	rclcpp::Node & node = *this;
+ 	int topicQueueSize = 10;
+ 	int syncQueueSize = 10;
+ 	bool approxSync = true;

@@ -1,0 +1,2 @@
+# Unified diff context retains the upstream tab after its leading space.
+thirdparty/rtabmap_ros/*.patch whitespace=-space-before-tab
