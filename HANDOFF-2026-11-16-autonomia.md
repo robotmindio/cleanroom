@@ -1,5 +1,59 @@
 # Handoff de autonomía del robot y Fiber
 
+## Continuación, 16 de noviembre de 2026, 12:44 UTC
+
+Esta sección sustituye los estados pendientes de la foto original de abajo.
+PR #186 pasó todos los checks de su head revisado y se mergeó como `0bff4a2`.
+Main se actualizó y su árbol coincidió con la candidata a27b657.
+El staging compute de esa candidata terminó **104/106**: timeout de entrenamiento
+a 300 s y dos escenarios de búsqueda sin resultado antes de sus plazos.
+La evidencia original disponible (log completo, informe CTest y resultados XML)
+se conserva en `20261116-bootstrap/staging-a27b657-failed/`. El LastTest.log
+archivado quedó vacío por una consulta posterior de CTest; usar el log de staging.
+
+El diagnóstico de entrenamiento pasó sus nueve casos en 179.60 s, sin ampliar
+el plazo; el primer wrapper de diagnóstico tuvo un desajuste de nombre de XML,
+por lo que el recibo fiable es el XML real de pytest y su salida cero, no el
+resultado de ese wrapper. Durante los diagnósticos otro proceso de limpieza
+eliminó el worktree limpio y la release compute a27b657 sin seleccionar.
+El usuario contestó «all yours» al aviso de coordinación. Current no cambió.
+No usar el diagnóstico de búsqueda interrumpido como calificación.
+
+Nuevo fix en [PR #187](https://github.com/robotmindio/cleanroom/pull/187), head
+**`9bd408f2e54652c788266b3f1942ec7120acb606`**, rama subida y limpia
+`fix/autonomy-staging-fixes`, worktree persistente y bloqueado:
+`/home/nex/roboto/cleanroom-worktrees/autonomy-staging-20261116`.
+Agrupa la proyección de frusta en bloques de 1024 celdas y conserva la prueba
+completa de volumen de cada celda contra el octree. No cambia frescura, límites,
+colisiones ni postura. Ocho comparaciones con el código escalar anterior dieron
+exactamente las mismas celdas; evidencia versionada en
+`docs/evidence/search-visibility-batching-20261116.json`.
+Pasaron 55 pruebas de geometría, 16 de reproyección ROS y siete de búsqueda ROS
+(suite completa 41.29 s), además de Ruff/flake8. Se observó un warning de un
+future Destroyable durante el teardown, tras los siete pases. Revisión propia
+publicada, explícitamente no independiente; CI de build/test sigue en curso.
+
+Staging canónico nuevo en ambos equipos, unidad de usuario
+`lekiwi-stage-autonomy-9bd408f.service`. Logs compute y Pi respectivamente:
+`~/.ros/lekiwi/stage-autonomy-9bd408f.log` y
+`~/.ros/lekiwi/stage-device-autonomy-9bd408f.log`.
+La Pi no resolvía GitHub; se transfirió el commit ya subido con el helper
+`transfer_device_revision` y SSH explícito antes de arrancar staging.
+Los worktrees de fuente de ambas releases nuevas están bloqueados contra
+limpieza accidental. Aún no hay selección ni despliegue nuevo.
+Esperar 106/106 compute y 16/16 device, verificar sellos, y mergear #187 sólo
+con CI final verde del mismo head antes del despliegue canónico desde este
+worktree. La candidata a27b657 está supersedida.
+
+La consulta Fiber real mediante la API autenticada del tenant de agentes dejó
+libres base, arm y perception_query; explore/navigate/search disponibles.
+El helper privado `20261116-bootstrap/fiber-action.py` captura el JWT en memoria
+y usa las acciones rosbridge, sin imprimir ni persistir credenciales.
+El probe `stationary-preflight.py --prefix predeploy-9bd408f` confirmó ARMED,
+permisos, 161 estados de colisión libres y travel_stow fresco, error máximo
+0.009254 rad; repetir justo antes de cortar torque. Las escenas guardadas se
+inspeccionaron: no se ve el cargador/cable previo. No se ha enviado movimiento.
+
 Estado consultado el 16 de noviembre de 2026 a las 10:50 UTC. Repositorio:
 `/home/nex/roboto/cleanroom`, GitHub `robotmindio/cleanroom`.
 

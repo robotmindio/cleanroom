@@ -1,6 +1,10 @@
 # Autonomous exploration follow-up, 2026-11-16
 
 Current continuation guide: [HANDOFF-2026-11-16-autonomia.md](HANDOFF-2026-11-16-autonomia.md).
+Its new 12:44 UTC continuation supersedes the original staging snapshot: #186
+is merged; #187 head 9bd408f is in complete compute/device staging from the
+locked worktree `/home/nex/roboto/cleanroom-worktrees/autonomy-staging-20261116`.
+No new release is selected. Both units are `lekiwi-stage-autonomy-9bd408f.service`.
 The user requested this handoff before completion of staging/CI. The new release
 has not been deployed; inspect the live staging units before continuing.
 
