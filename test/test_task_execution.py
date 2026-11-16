@@ -149,7 +149,8 @@ def robot(tmp_path):
 
 
 def running(robot, task_id='task-1'):
-    wait(lambda: robot.status(task_id)['execution']['phase'] == 'running')
+    # The execution phase includes dispatch before the action acceptance reply.
+    wait(lambda: robot.status(task_id)['state'] == 'running')
 
 
 def test_capabilities_declare_resources_effects_and_the_negotiated_schema(robot):
