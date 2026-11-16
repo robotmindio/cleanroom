@@ -87,8 +87,15 @@ disarm() {
   # Starting the Astra resets the USB hub it shares with the motor-bus adapter, which
   # leaves the host's torque endpoint silent for up to ~15 s. Disarming is idempotent,
   # so retry through that window instead of failing the deployment on it.
-  until response=$(timeout 30 ros2 service call /safety/disarm std_srvs/srv/Trigger '{}' 2>&1) &&
-    [[ $response == *"success=True"* ]]; do
+  while true; do
+    # Startup can re-arm the driver. Every cut, including post-restart calls
+    # and retries, needs a new measured travel_stow check.
+    python3 "$PROJECT_ROOT/scripts/check-travel-stow.py" --max-age 0.5 || \
+      die "move the arm to travel_stow before cutting torque"
+    if response=$(timeout 30 ros2 service call /safety/disarm std_srvs/srv/Trigger '{}' 2>&1) &&
+      [[ $response == *"success=True"* ]]; then
+      break
+    fi
     (( SECONDS < deadline )) || die "motor host did not confirm torque-off: $response"
     sleep 3
   done
