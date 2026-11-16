@@ -159,8 +159,8 @@ def test_every_ctest_dds_test_gets_an_isolated_domain_below_ephemeral_ports():
         r"ament_add_ros_isolated_pytest_test)\(", cmake, flags=re.MULTILINE)
     assert sorted(registrations) == [
         "add_launch_test", "add_test", "ament_add_ros_isolated_pytest_test",
-        "ament_add_test", "ament_add_test"]
-    assert cmake.count('RUNNER "${test_isolated_runner}"') == 3
+        "ament_add_test", "ament_add_test", "ament_add_test"]
+    assert cmake.count('RUNNER "${test_isolated_runner}"') == 4
     assert "ROS_DOMAIN_ID=unset:;DISABLE_ROS_ISOLATION=unset:" in cmake
     # The coordinator hands out domains 1-100; Cyclone's highest discovery
     # port for domain 100 stays below Linux's ephemeral range.

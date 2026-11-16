@@ -20,6 +20,7 @@ if(LEKIWI_BUILD_COMPUTE)
   find_package(pluginlib REQUIRED)
   find_package(moveit_ros_visualization REQUIRED)
   find_package(rviz_common REQUIRED)
+  find_package(rviz_default_plugins REQUIRED)
 
   add_library(lekiwi_rest_collision SHARED src/rest_collision_plugin.cpp)
   target_compile_features(lekiwi_rest_collision PUBLIC cxx_std_17)
@@ -27,9 +28,9 @@ if(LEKIWI_BUILD_COMPUTE)
   pluginlib_export_plugin_description_file(moveit_core config/rest_collision_plugin.xml)
   install(TARGETS lekiwi_rest_collision LIBRARY DESTINATION lib)
 
-  add_library(lekiwi_rest_motion_planning SHARED src/rest_motion_planning_display.cpp)
+  add_library(lekiwi_rest_motion_planning SHARED src/rest_motion_planning_display.cpp src/safe_image_display.cpp)
   target_compile_features(lekiwi_rest_motion_planning PUBLIC cxx_std_17)
-  ament_target_dependencies(lekiwi_rest_motion_planning moveit_ros_visualization rviz_common pluginlib)
+  ament_target_dependencies(lekiwi_rest_motion_planning moveit_ros_visualization rviz_common rviz_default_plugins pluginlib)
   target_link_libraries(lekiwi_rest_motion_planning moveit_ros_visualization::moveit_motion_planning_rviz_plugin_core)
   pluginlib_export_plugin_description_file(rviz_common config/rest_motion_planning_plugin.xml)
   install(TARGETS lekiwi_rest_motion_planning LIBRARY DESTINATION lib)
@@ -100,6 +101,9 @@ install(DIRECTORY config launch maps urdf worlds DESTINATION share/${PROJECT_NAM
 if(BUILD_TESTING)
   find_package(Python3 REQUIRED COMPONENTS Interpreter)
   if(LEKIWI_BUILD_COMPUTE)
+    add_executable(test_rviz_image_disconnect test/test_rviz_image_disconnect.cpp)
+    target_compile_features(test_rviz_image_disconnect PUBLIC cxx_std_17)
+    ament_target_dependencies(test_rviz_image_disconnect rviz_default_plugins)
     find_package(rclcpp REQUIRED)
     find_package(rclcpp_action REQUIRED)
     find_package(control_msgs REQUIRED)
@@ -185,6 +189,11 @@ if(BUILD_TESTING)
     isolate_lekiwi_test(test_${name}.py)
   endfunction()
   if(LEKIWI_BUILD_COMPUTE)
+    ament_add_test(test_rviz_image_disconnect
+      COMMAND "$<TARGET_FILE:test_rviz_image_disconnect>"
+      RUNNER "${test_isolated_runner}"
+      GENERATE_RESULT_FOR_RETURN_CODE_ZERO)
+    isolate_lekiwi_test(test_rviz_image_disconnect)
     ament_add_test(test_native_waitable
       COMMAND "$<TARGET_FILE:test_native_waitable>"
       RUNNER "${test_isolated_runner}"

@@ -178,6 +178,13 @@ exec 9>&-
 # Supply them as explicit process overrides as well as in the generated YAML; the
 # RViz node then has them declared when MotionPlanningFrame reads them.
 printf '%s\n' "$$" > "$rviz_pid_file"
+# shortcut: RViz can retain DDS workers past ROS's runtime-loader finalizer;
+# keep its implementation mapped until exit, until upstream teardown is verified.
+[[ -r /opt/ros/jazzy/lib/librmw_cyclonedds_cpp.so ]] || {
+  echo "rviz: the configured Cyclone DDS implementation is missing" >&2
+  exit 1
+}
+export LD_PRELOAD="/opt/ros/jazzy/lib/librmw_cyclonedds_cpp.so${LD_PRELOAD:+:$LD_PRELOAD}"
 exec rviz2 -d "$run_config" "$@" --ros-args --params-file "$run_params" \
   -p "robot_description_planning.default_velocity_scaling_factor:=$velocity_scale" \
   -p "robot_description_planning.default_acceleration_scaling_factor:=$acceleration_scale"

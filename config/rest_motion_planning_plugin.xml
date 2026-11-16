@@ -2,4 +2,7 @@
   <class name="lekiwi_rmf/MotionPlanning" type="lekiwi_rmf::RestMotionPlanningDisplay" base_class_type="rviz_common::Display">
     <description>MoveIt planning with posture-dependent resting contacts.</description>
   </class>
+  <class name="lekiwi_rmf/Image" type="lekiwi_rmf::SafeImageDisplay" base_class_type="rviz_common::Display">
+    <description>Camera display with idempotent image-filter disconnection on shutdown.</description>
+  </class>
 </library>
