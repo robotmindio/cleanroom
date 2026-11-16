@@ -1,4 +1,4 @@
-# Agent search rollout: physical depth blocks final verification
+# Agent search rollout: supported-rest recovery
 
 ## Completed
 
@@ -18,12 +18,20 @@
 
 ## Blocker and current state
 
-The physical Astra publishes color but all 76,800 depth pixels are zero, including
-after a guarded service restart. Matching ColorOcTree publications have empty
-payloads; previous flattened local grids cannot establish 3D coverage. The safety
-supervisor denies arm permission for invalid depth and an unhealthy arm workspace
-monitor. The driver is DISARMED, the arm is stowed, and no managed resource is held.
-Do not bypass those guards or credit negative coverage.
+The Astra depth obstruction was removed: a direct read now has about 17,400 valid
+pixels per 320x240 frame. The disarmed arm settled into a different stable posture,
+confirmed by the operator as supported. Its 120 fresh joint samples have zero
+spread. It fits the tracked footprint in CAD, but the installed RestFCL only knows
+transport stow and rejects three existing MechanicalRest interfaces there. The
+arm is NOT in travel_stow; do not cut torque or restart motor/device services.
+
+PR #183, branch `fix/measured-supported-rest`, commit
+`2d87543c0c3e770e68b969c6e531d01fc71c27f7`, adds the measured supported_rest
+reference with the same bounded pair-relative tolerances. It preserves transport
+stow/acceptance and adds a sealed planner-only reload path without torque changes.
+81 targeted Python tests, native collision regression and repository lint pass.
+Hosted CI and full compute release staging are running. No runtime changes from
+this PR have been applied.
 
 Canonical deployment therefore failed its required re-arm and did not update
 either `deployed-revision` marker; both still record `f503b96`. The selected source
@@ -38,19 +46,26 @@ fixed by rerunning.
 
 ## Next
 
-1. Obtain valid physical depth with the Astra view clear in suitable lighting.
-   The user was asked to put the robot in interior/shade, preserving travel_stow.
-2. From the clean, pushed `fix/qualification-matrix-budget` worktree, rerun
+1. Finish sealed compute/device qualification and hosted CI for #183; merge the
+   exact green head. Do not rebuild any selected/sealed release.
+2. With fresh DISARMED state, use the tracked new `reload-moveit.py --release`
+   against its qualified compatible compute release. It locks deployment,
+   verifies both seals/settings/dependencies and restricted source changes,
+   checks managed current paths and verifies the replacement's mapped library.
+   Require the actual supported pose to pass MoveIt; rearm only through the
+   existing permission gate, then plan/execute a guarded return to the unchanged
+   accepted travel_stow. Confirm that posture with fresh joint states.
+3. From the clean, pushed `fix/measured-supported-rest` worktree, rerun
    `scripts/deploy-split.sh nex@100.107.20.66 --workspace /home/nex/lekiwi_ws --rosbridge-tailnet`.
    Both release seals already exist. Restore SSH authentication using the existing
    key without exposing it. Before any torque cut, require fresh travel_stow again.
-3. Require canonical armed readiness and matching deployment markers. Run the
+4. Require canonical armed readiness and matching deployment markers. Run the
    read-only `check-search-runtime.py` in the evidence directory against current:
    native parameters, nonempty free/occupied voxels, matching graph stamps and
    geometry no older than one second must pass.
-4. Submit one explicitly identified, bounded native search through Fiber, cancel
+5. Submit one explicitly identified, bounded native search through Fiber, cancel
    that same task, poll to terminal stop confirmation and check journal/idempotency.
    Never interpret admission or a cancel receipt as completion.
-5. Remove this WIP record before final delivery. Keep the physical calibration,
+6. Remove this WIP record before final delivery. Keep the physical calibration,
    approved site-map/views for high-level mobile goals and trained arm skills
    outstanding until their real acceptance evidence exists.
