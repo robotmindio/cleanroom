@@ -52,9 +52,10 @@
   **not verified as effective**. The live parameter probe preserves null and fails
   its assertion. The standalone RGB-D synchronizer's separate interval setting
   does not prove the mapper's RGB-D/scan interval is bounded.
-- Draft PR #189 (cef62ca) implements the missing native interval without changing
+- Draft PR #189 (9503b92) implements the missing native interval without changing
   the subscriber ABI. Native message regressions and an isolated packaged-mapper
-  ABI/parameter probe pass. Complete compute staging and hosted CI are active;
+  ABI/parameter probe pass, as does the complete native package build. Compute
+  staging and hosted CI are active;
   Pi staging and deployment await connectivity. The fix is not selected.
 - The Pi subsequently became unreachable over both tailnet and LAN, and a fresh
   eight-second probe received no joints/images. The user has been asked about
@@ -76,7 +77,7 @@ the guarded Pi retirement receipts and successful replacement qualification are
 preserved separately.
 
 Robot has no managed task held. Its last confirmed ARMED/travel_stow state is
-historical; current posture/torque cannot be verified during the outage. Own native
-diagnostic build and compute staging remain active; no deployment or recorder is
+historical; current posture/torque cannot be verified during the outage. Own compute staging
+remains active; no deployment or recorder is
 active. Source branches are clean
 and pushed; the operational handoff/WIP records the remaining follow-up.

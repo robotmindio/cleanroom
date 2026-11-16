@@ -2,6 +2,21 @@
 
 ## Continuación, 16 de noviembre de 2026, 14:47 UTC
 
+Actualización **14:54 UTC**: head vigente de #189 es
+**9503b92f275cbbdb4fc7652947eaa27c7dff5f1a**. El build completo encontró que
+RGBDXSync también usa las macros compartidas y carecía de la referencia local
+node; se añadió esa referencia. El intento cef62ca se detuvo antes de pruebas y
+selección; no es calificación. Log de error completo conservado. El rebuild
+completo pasó, incluidos todos los plugins/ejecutables standalone, en 3 min 12 s
+incrementales. La regresión de seis escenarios/tres valores inválidos y el probe
+ABI del mapper empaquetado pasaron de nuevo con la biblioteca ya instalada.
+Recibos `native-sync-regression-installed-9503b92.log`,
+`native-sync-mapper-abi-9503b92.json` y `native-sync-diagnostic-build-nodelet-fix.log`.
+El staging canónico ahora activo es **lekiwi-stage-sync-9503b92.service**, log
+`~/.ros/lekiwi/stage-sync-9503b92.log`, wrapper `stage-sync-9503b92.sh` privado.
+El diagnóstico ya terminó; no repetirlo. CI final activa sobre 9503b92. La Pi
+sigue inaccesible; no hay calificación device ni despliegue de #189.
+
 La Pi dejó de responder: Tailscale ping/SSH agotan plazo y la dirección LAN
 192.168.110.229 no responde a ICMP ni ARP (neighbor INCOMPLETE; SSH sin ruta).
 El driver registró silencio de telemetría a las 14:23:05 UTC. El probe de ocho
