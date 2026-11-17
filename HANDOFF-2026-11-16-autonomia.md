@@ -1,3 +1,51 @@
+## Corrección activa — 17 noviembre 2026, 12:44 MYT / 04:44 UTC
+
+El usuario rechazó expresamente dar por terminada la autonomía con cero targets
+alcanzables. **La aceptación física sigue abierta; no cerrar con ese resultado.**
+
+- PR #192 draft: https://github.com/robotmindio/cleanroom/pull/192, head
+  **e62411f7a7ea1fe50f675eaa2d904e8845217020**, rama limpia/subida y worktree locked
+  `/home/nex/roboto/cleanroom-worktrees/exploration-active-bootstrap-20261117`.
+  Corrige `target=None => complete=true`: frontera desconocida o borde de primer
+  mapa exige observación. Spin 45° bajo padre NavigateToPose con lease; tras ocho
+  vistas, avance o retroceso 15 cm a 5 cm/s sólo sobre rayos láser medidos libres.
+  Giros usan el costmap local fresco, todos los movimientos verifican huella barrida,
+  y quedan activos collision monitor, stow, freshness, región y presupuesto originales.
+  No cambia límites, 3D search evidence ni el mapa global para fabricar free space.
+- Diagnóstico readonly real: costmap local sin obstáculos; los rayos medidos
+  permiten **retroceso** de .15 m. La zona frontal del scan contiene rayos ausentes
+  o tapados por el cuerpo y sigue desconocida para la traslación conservadora.
+  Evidencia `bootstrap-local-grid-measured-v2-20261117.{json,npz}` en bootstrap.
+- Pruebas focalizadas: 38 pure; 50 ROS existentes; 12 casos del navegador nativo
+  (incluye tres nuevos, ahora registrados en bootstrap); owner restart con primer
+  mapa y guard reiniciado; finalmente **20 bootstrap, 121.28 s, cero fallos**.
+  Se preservan dos fallos intermedios de aserción de número exacto de giros: bajo
+  carga se pausó correctamente por copia vieja del scan. Ahora se usa/valida el
+  scan más reciente tras responder el costmap y se revela el mapa en el test por
+  la traslación efectiva, sin relajar freshness. Ruff completo pasa.
+- Calificación canónica **en curso, no sellada aún**: unidad compute
+  `lekiwi-stage-bootstrap-e62411f.service`, log `~/.ros/lekiwi/stage-bootstrap-e62411f.log`;
+  Pi `lekiwi-stage-device-bootstrap-e62411f.service`, log homónimo `stage-device-*`.
+  Entry Pi byte-exacto de stage-release (SHA c6d8665c...); fuentes detach/locked.
+  Reusa overlays nativos; se esperan 110 suites compute y 16 Pi. CI PR en curso.
+- **Runtime compute temporalmente parado para liberar recursos**, selección de
+  ambos hosts sigue e74683f, sin deploy nuevo. Antes de parar: fresh travel_stow
+  .5 s pasó, `/safety/disarm` success=True confirmó todos los servos torque-off,
+  segundo fresh travel_stow pasó. Unidad compute inactive. Pi conserva sus cinco
+  servicios activos. Root Pi ~2.2G después de comenzar build. Restaurar compute y
+  rearmar e746 antes del deploy canónico; no dejar este estado como final.
+- Wrapper preparado **no ejecutado** `bootstrap/deploy-bootstrap-e62411f-20261117.sh`.
+  Ensayo preparado **no admitido** `run-bounded-explore-bootstrap-e62411f-20261117.py`,
+  ID nuevo `qualification-explore-bootstrap-e62411f-20261117-1`, 120 s activos/radio2.5m,
+  fence e624, recorder requerido, wall180s con cancel/reconcile y stop confirmado.
+  Medir giro, traslación y observaciones reales; no basta el resultado terminal.
+
+Próximo: terminar/verificar los dos sellos y CI; revisión propia/merge con expected
+head e624; restaurar runtime/rearm; deploy canónico con stow fresco, readiness;
+ensayo único con recorder y validar exploración útil, corrigiendo lo que falle.
+
+---
+
 ## Estado final — 17 noviembre 2026, 11:07 MYT / 03:07 UTC
 
 Este bloque sustituye los pendientes de calificación/deploy y wrist de abajo.
