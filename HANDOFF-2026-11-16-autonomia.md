@@ -1,3 +1,42 @@
+## Candidata final 2dc7fca — calificación completa en curso
+
+PR #194 sigue en borrador; head limpio y publicado:
+`2dc7fcaf087189094583319906b4d3442a814bd5`.
+Compute/Pi siguen ejecutando `216516d`, con torque mantenido. Gen60 está cancelada,
+parada confirmada y recursos libres. No hay grabación ni movimiento propios activos.
+
+La revisión anterior c50 pasó 110/111 suites compute. El único fallo fue el caso
+MoveIt de un punto inalcanzable: agotó su presupuesto de búsqueda de 10 s mientras
+otro lanzamiento MoveIt corría en paralelo. El reporte original y XML fallido están
+preservados en `c50-first-qualification/`; una repetición aislada, con idéntico
+presupuesto y prioridad, pasó. Esa repetición NO se usó para sellar c50.
+La candidata 2dc solo añade RUN_SERIAL a esa suite en CMake; no cambia límites ni
+código del robot. Se repite la calificación canónica completa, sin excepciones.
+
+- Compute: unidad de usuario `lekiwi-stage-cad-final-serial-20261117.service`,
+  log privado `stage-compute-final-serial.log`; seguía activa al consultar.
+- Pi: unidad `lekiwi-stage-cad-device-final-serial-20261117.service`, terminó
+  16/16 en 102.43 s. Sello device 2dc verificado independientemente.
+- CI de este head: run 44069672890; build/test, device y validación estática verdes,
+  coverage todavía en curso al consultar.
+- Pi: se archivaron íntegramente y verificaron CRC/SHA las tres candidatas propias
+  nunca seleccionadas 2d51/51ef/c50 antes de retirarlas. Archivos privados en
+  `device-release-archives/`. Quedan intactos current216, previousffc y candidata2dc.
+  Espacio libre pasó a 1.2 GB. No borrar otras releases o worktrees.
+
+`deploy-final.sh` y `verify-runtime.py` ahora esperan 2dc y horizonte de 5 s.
+Esperar 111/111 compute y verificar ambos sellos antes del despliegue canónico.
+Después: parámetros efectivos, retirada Nav2 de 15 cm, Explore y Search nativas
+con muñeca ausente, con grabaciones y reconciliación de cada tarea. Para Explore
+usar grabación de 480 s; la autenticación y las pausas consumen tiempo de pared.
+El helper con renovación JWT es `run-bounded-task.py`; no usar runners antiguos.
+
+Toda la evidencia privada sigue en
+`~/.ros/lekiwi/qualification/20261117-cad-collision/`.
+No mergear por CI verde solamente: falta aceptación física de la cota direccional.
+
+---
+
 ## Candidata direccional c50fb40 — publicada y calificando
 
 - PR194draft/head **c50fb4090252e1d20c094dc4d22fbbdf735932e2**, branch limpia/subida.
