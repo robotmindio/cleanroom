@@ -110,6 +110,9 @@ runs beneath the same leased `NavigateToPose` parent, so cancellation, owner
 failure, sensor freshness, collision monitoring, arm stow and the original time
 and region bounds apply. New map observations are awaited before selecting again.
 If no safe local observation motion exists, the result remains incomplete.
+The same recovery runs when the global planner reports an occupied starting
+footprint. Observation progress is retained while candidates exist, so repeated
+global rejections can still lead to a measured local step; untried targets stay eligible.
 Resuming a task repeats observation at its measured pose within the saved bounds.
 
 The `ExploreKnown` Nav2 planner and the tracked `explore_nav_to_pose.xml` behavior

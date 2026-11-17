@@ -157,6 +157,27 @@ def test_continuing_observation_retains_the_original_duration_bound(graph):
     assert peers.observation_goals and not peers.planner_ids and not peers.nav_active
 
 
+def test_persistent_occupied_global_start_observes_and_translates_before_retrying_the_target(graph):
+    from nav2_msgs.action import ComputePathToPose
+
+    peers, _, client = graph
+    peers.plan_error = ComputePathToPose.Result.START_OCCUPIED
+    peers.nav_mode = 'success'
+    navigate = peers.navigate
+
+    def recover_start(goal):
+        if goal.request.behavior_tree.endswith('explore_bootstrap.xml'):
+            peers.plan_error = 0
+        return navigate(goal)
+
+    peers.navigator._execute_callback = recover_start
+    handle = response(client.send_goal_async(Explore.Goal(max_radius_m=2.5)))
+    result = response(handle.get_result_async(), timeout=20)
+    assert result.status == GoalStatus.STATUS_SUCCEEDED
+    assert peers.observation_goals == ['explore_observe.xml'] * 8 + ['explore_bootstrap.xml']
+    assert result.result.visited_targets == 1 and result.result.unreachable_targets == 0
+
+
 @pytest.mark.parametrize('fault', ['scan', 'obstacle', 'permission', 'collision'])
 def test_bootstrap_cancels_its_owned_motion_when_live_guards_fail(graph, fault):
     from nav2_msgs.msg import CollisionMonitorState

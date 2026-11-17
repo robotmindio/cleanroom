@@ -536,14 +536,14 @@ def test_occupied_start_does_not_discard_untried_targets(graph):
     handle = response(client.send_goal_async(Explore.Goal(max_radius_m=2.5),
                       feedback_callback=lambda msg: feedback.append(msg.feedback)))
     assert handle.accepted
-    wait(lambda: explorer._stage == 'paused: navigation starting footprint is occupied')
-    assert peers.nav_count == 0 and not handle.get_result_async().done()
+    wait(lambda: peers.nav_active and explorer._stage == 'observing_without_frontier')
+    assert peers.observation_goals == ['explore_observe.xml'] and not handle.get_result_async().done()
     assert feedback and all(f.unreachable_targets == 0 for f in feedback)
     peers.plan_error = 0
-    wait(lambda: peers.nav_active)
-    response(handle.cancel_goal_async())
+    peers.nav_mode = 'success'
     result = response(handle.get_result_async())
-    assert result.status == GoalStatus.STATUS_CANCELED and result.result.unreachable_targets == 0
+    assert result.status == GoalStatus.STATUS_SUCCEEDED and result.result.unreachable_targets == 0
+    assert result.result.visited_targets == 1
 
 
 @pytest.mark.parametrize("failure", [Paused, InterruptedError, ResponseTimeout])

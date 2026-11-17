@@ -61,6 +61,10 @@ class MappingStarting(Paused):
     """Expected mapping initialization, before any navigation is dispatched."""
 
 
+class StartingFootprintBlocked(Paused):
+    """The global map cannot yet support a route from the measured starting body."""
+
+
 class Replan(Exception):
     """New evidence or a map revision invalidated the viewpoint being driven to."""
 
@@ -1143,7 +1147,7 @@ class RobotExplorer(Node):
             while time.monotonic() < until:
                 check()
                 time.sleep(0.05)
-            raise Paused("navigation starting footprint is occupied")
+            raise StartingFootprintBlocked("navigation starting footprint is occupied")
         if (route.status != GoalStatus.STATUS_SUCCEEDED or route.result.error_code
                 or route.result.path.header.frame_id != "map" or not route.result.path.poses):
             return False
@@ -1209,15 +1213,22 @@ class RobotExplorer(Node):
             result.complete = not blocked
             result.message = "reachable region observed" if not blocked else "remaining targets failed navigation"
             return False
-        self._observation_turns = 0
         yaw = math.atan2(target[1] - pose.pose.position.y, target[0] - pose.pose.position.x)
         destination = self._destination(*target, yaw)
         feedback = Explore.Feedback(stage=stage, current_pose=pose, visited_targets=len(visited),
                                     unreachable_targets=len(blocked), mapped_area_m2=result.mapped_area_m2)
         goal.publish_feedback(feedback)
-        if not self._route(check, pose, destination, grid, center, radius):
+        try:
+            route_clear = self._route(check, pose, destination, grid, center, radius)
+        except StartingFootprintBlocked:
+            # Repeating the same global route cannot clear an unobserved start.
+            # Keep the observation progress even when a candidate now exists,
+            # so a locally checked step can establish a usable starting body.
+            return self._observe_step(goal, check, center, radius, visited, blocked, result)
+        if not route_clear:
             blocked.append(target)
             return True
+        self._observation_turns = 0
         reached = self._drive(check, destination, stage, lambda current: goal.publish_feedback(Explore.Feedback(
             stage=stage, current_pose=current, visited_targets=len(visited),
             unreachable_targets=len(blocked), mapped_area_m2=result.mapped_area_m2)))
