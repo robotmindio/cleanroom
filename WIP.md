@@ -1,23 +1,23 @@
 # Autonomous exploration follow-up
 
 Current checkpoint: [HANDOFF-2026-11-16-autonomia.md](HANDOFF-2026-11-16-autonomia.md),
-17 November 10:35 MYT / 02:35 UTC.
+17 November 11:07 MYT / 03:07 UTC.
 
-The robot runs qualified 9503b92 on both hosts, armed in travel_stow. Native 0.15
-sync is live. VL805 kernel repair is persistent, Astra/lidar recovered, and #190
-merged after all five checks (main 2ab33a0). Guarded MoveIt returned the supported
-pose to nominal without further manual adjustment. All strict safety gates remain.
+PRs #190 and #191 are merged. Main 5f0b79f is clean and has the qualified e74683f
+source tree. e74683f is deployed on compute and Pi after canonical 109/109 + 16/16,
+sealed inventory checks, all five hosted checks, fresh stow gates, readiness and
+rearm. Previous is 9503b92. The native mapper enforces 0.15 s sync.
 
-PR #191 at e74683f fixes exploration's localization->mapping startup-frame race.
-Source is clean/pushed/locked. Canonical Pi qualification passed 16/16, sealed and verified. Compute
-lekiwi-stage-mapping-start-e74683f.service is running the 109-suite matrix.
-All five hosted checks passed. Reproduction and targeted recovery cases pass, but final
-full qualification/seals/merge/deploy are still pending. Do not restart staging
-or modify selected/sealed releases. Prepared deploy wrapper is not executed yet.
+VL805 kernel DMA repair survived a guarded reboot and restored Astra, lidar and
+wrist camera. Final state: ARMED/travel_stow (.012322 rad error), fresh front,
+wrist/Astra and scan/depth, clear collision monitor, all resources free. The
+supported pose needed no more manual nudging; MoveIt returned it to nominal.
 
-The generation-55 trial stopped before base movement; stop/resources confirmed.
-No own movement task/recorder/archive process remains active. A verified 92-file
-journal backup enabled 2.1G safe vacuum; Pi has space for the candidate. Current
-map snapshot is valid and retains all 56 earlier node IDs. A guarded Pi reboot verified automatic DMA=40 controller startup and recovered
-the wrist camera too. Normal rearm succeeded; all three camera feeds, scan,
-stow and permissions are fresh/healthy. Runtime remains 9503b92.
+Generation 56 exercised fixed mapping initialization and succeeded with no
+reachable observation targets: 0 targets visited and exactly 0 m odometry travel.
+This verifies startup/termination; useful base-motion/exploration/search acceptance
+remains open for the observed map. Keep all footprint, stow, collision and freshness
+limits. Do not claim room coverage or map growth. Reach/skills policy stays off.
+
+No own temporary process, motion task, recorder, archive or staging job remains
+active. Backups, receipts, raw trial traces and sealed releases are preserved.

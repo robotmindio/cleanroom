@@ -1,3 +1,77 @@
+## Estado final — 17 noviembre 2026, 11:07 MYT / 03:07 UTC
+
+Este bloque sustituye los pendientes de calificación/deploy y wrist de abajo.
+
+- **PR #191 mergeado** con expected head
+  **e74683fce67a464377fd5e28411f1412af3b7672**. Merge/main/origin-main:
+  **5f0b79f2bf55bbf6d814e373c480db4207d72fad**, limpio, árbol igual a e74683f.
+  #190 está mergeado como 2ab33a0; ambos fixes están en main.
+- Calificación canónica e746: **109/109 compute**, cero fallos, **1637.01 s**;
+  **16/16 Pi**, cero fallos, **91.36 s**. Ambos sellos verificados. Compute incluyó
+  **50 casos exploration_ros** y **9 casos de entrenamiento**, cero skips.
+  Los cinco checks hosted pasaron (build-test-lint 22m45s; CodeQL). Se conservaron
+  los diagnósticos fallidos previos, sin cambiar deadlines ni límites de seguridad.
+  Entrenamiento pasó en 259.62 s dentro de su límite existente; hubo una breve
+  parada de compute por presión de recursos, con dos gates stow frescos y disarm
+  RPC success. Se restauró 9503b92 a ARMED antes del deploy canónico de e746.
+- **e74683f está desplegada en compute y Pi**. Current y marcadores de ambos roles
+  coinciden; **previous=9503b92** en ambos. Deploy canónico pasó sin retry, hizo los
+  checks travel_stow antes de cortes/reintentos, readiness dos veces y rearm.
+  Log: `bootstrap/deploy-mapping-start-e74683f-20261117.log`.
+- Estado final fresco: **ARMED**, arm/base permissions y arm_stowed true;
+  max error SRDF travel_stow **0.012322 rad**, dentro de 0.02. Front GENERAL,
+  wrist JYU2C y Astra frescos; lidar/depth sanos; collision clear. Pi kernel
+  **6.8.0-1068-raspi, DMA=40**, módulo persistente y arranque verificado, cinco
+  servicios activos. Runtime compute activo. Root Pi ~2.3G libre.
+- Mapper vivo: **approx_sync_max_interval=0.15**, queue=15, nuevo prefijo nativo
+  ya verificado; allow_search=true y search_geometry_max_age_sec=1.0. Cadencia
+  post-e746 de 30 s: 300 scans, 277 depth clouds, 56 RGBD, 33 maps/graphs/octrees;
+  scan max age .1112 s, depth .0332 s, RGBD .5953 s, mapas .6583 s. 600 estados
+  collision clear, cero intrusiones. Es evidencia de ese intervalo, no de horas.
+- **Explore generación 56**, ID
+  `qualification-explore-autonomy-e74683f-20261117-1`, admitido una sola vez con
+  25 s activos/radio 2 m. Mostró `starting: waiting for mapping pose to settle`,
+  capturó centro **(-0.4730558, 0.0174737)** después de inicializar y terminó
+  **succeeded, complete=true**, mensaje `no further reachable observation targets`,
+  **visited_targets=0**, stop=confirmed, recursos liberados. Entre admisión y
+  terminal: **129 muestras odom, recorrido=0 m, desplazamiento=0 m**, max stamp age
+  .003244 s; 43 muestras map/TF y checkpoint. Esto verifica inicialización y fin,
+  **no movimiento de base ni exploración útil/cobertura de la sala**. El .805 m²
+  es el área regional del resultado; no llamarlo crecimiento de mapa.
+- El inspector readonly tampoco encontró targets en el mapa de localización para
+  radios 2, 2.5, 3 o 4 m, manteniendo footprint/clearance/margen. No se amplió el
+  radio del ensayo ni se marcó espacio desconocido como libre. La aceptación de
+  movimiento/exploración útil sigue abierta: investigar conectividad del espacio
+  conocido alrededor de la huella y coherencia/posición del mapa. No forzar drive
+  crudo ni reducir máscaras/StopZone/freshness para obtener movimiento.
+- Snapshot final: `continue-20261117-final-e74683f.json` y tres JPGs; Fiber
+  `final-e74683f-capabilities-20261117.json` confirma base/arm/perception_query libres.
+  Trial completo y resumen: prefijo `qualification-explore-autonomy-e74683f-20261117-1`.
+  Recorder incluyendo map/TF terminó exit0; no tareas de movimiento, recorders,
+  archivadores, timer USB ni staging propios activos. La unidad compute terminó
+  inactive/result0; el staging Pi terminó antes del reboot. CI automático de main
+  puede ejecutarse por los merges; los heads revisados/calificados ya pasaron.
+
+### Continuación y fuentes conservadas
+
+- Worktree limpio/subido/bloqueado de #191:
+  `/home/nex/roboto/cleanroom-worktrees/exploration-mapping-startup-20261117`.
+  #190: `/home/nex/roboto/cleanroom-worktrees/verified-usb-recovery-20261117`,
+  head 67530c3, limpio/subido/bloqueado. No editar releases seleccionadas/selladas.
+- Handoff/WIP/ROLLOUT de ops se actualizan en este checkpoint; mantener WIP para
+  aceptación física real de explore/find, calibración y skills entrenadas.
+  Reach y skills generales siguen deshabilitados; no se cambió esa política.
+- No pedir más ajustes manuales a esa postura apoyada. El recovery USB admite
+  poses estables con **los nueve motores ya torque-off**, sin cortar torque de
+  un brazo alimentado; el builder recupera sólo un PCI controlador no usado,
+  separado del motor. Cortes alimentados/deploy/reboot conservan fresh travel_stow
+  estricto. El retorno nominal ya se hizo por MoveIt 0.1 scaling, SUCCESS.
+- Backups/evidencia del Pi, snapshot SQLite válido con 56/56 IDs previos retenidos,
+  recibos de prune y archivo verificado de 92 journals siguen en bootstrap. Root
+  source/.env, current/previous, CAD y configuraciones de seguridad se preservan.
+
+---
+
 ## Verificación de arranque — 17 noviembre 2026, 10:35 MYT / 02:35 UTC
 
 - El Pi se reinició de forma controlada para verificar persistencia del fix. Gate
