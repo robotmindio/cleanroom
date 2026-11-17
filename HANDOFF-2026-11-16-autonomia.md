@@ -1,3 +1,46 @@
+## Candidata 216516d — última revisión de fixtures, sin deploy todavía
+
+- Head PR194 **216516db07bb105bc5be9318b248ee92fa713fb4** limpio/subido; cambios
+  sobre51ef son SOLO pruebas. Runtime sigueffc9566 y mainaf9e42e.
+- Compute51ef terminó todas las111 suites:109pasaron, fallaron bootstrap (una
+  carrera del fixture: nav_canceled incrementa antes de nav_active=false) y planner
+  (2casos esperaban yaw0 exacto al retroceder en el pasillo viejo ancho).
+  Logs/XML completos preservados, NO sellar ni desplegar51ef compute.
+  Pi51ef16/16serial107.44s, sello verificado independientemente, nunca seleccionada.
+- 216 espera cancelación Y parada del fixture dentro del mismo deadline10s.
+  La fixture del planner usa pasillo0.40m para el CAD0.409m de largo y comprueba
+  desplazamiento contra el rumbo del robot, admitiendo holonomía, conservando
+  el chequeo completo de huellas/ruta. Pasan4casos de cancelación y12planner.
+  No cambios de runtime, seguridad, tolerancias, tiempos ni geometría respecto51ef.
+- Calificación216: compute user `lekiwi-stage-cad-v3-20261117.service`, log
+  `~/.ros/lekiwi/qualification/20261117-cad-collision/stage-compute-v3.log`;
+  Pi user `lekiwi-stage-cad-device-v3-20261117.service`, log
+  `~/.ros/lekiwi/stage-cad-device-v3-20261117.log`. Computej2/Pij1, fuentes locked.
+  CI run **44058959385**. Esperar/verificar AMBOS sellos antes de desplegar.
+- Helper privado `deploy-final.sh` actualizado a216: carga SSH-agent id_ed25519 y
+  ejecuta scripts/deploy-split.sh canónico --rosbridge-tailnet (todos gates activos).
+  `verify-runtime.py` comprobará costmaps, collision_monitor, horizon3.3s,
+  robot_explorer.clearance_m=.136, frontal/Astra/scan/joints frescos y perfilfront.
+  La muñeca NO es prerrequisito; su ausencia se registra, nunca se exige reparar.
+- Después del deploy, capture-after.py y prueba Explore única preparada:
+  **qualification-explore-cad-footprint-216516d-20261117-1**,240s/radio3/wall300.
+  Iniciar `record.py --prefix ID --duration360` antes de `run-explore.py` y esperar
+  marker ready. Reconciliar el mismo ID/gen hasta terminal, stop confirmado y
+  recursos libres. No afirmar habitación completa por esta prueba acotada.
+- Luego search nativa desde Fiber preparada en `run-search.py`, ID
+  **qualification-search-cad-footprint-216516d-20261117-1**, querycup,90s/1m/coverage.1,
+  wall150, recorder180. No llamar ausencia a no_coverage ni prometer hallazgo.
+  Este Search nativo no inventa aprobación de mapa/vistas para find de alto nivel.
+- Review propia COMMENT publicada PR194 sobre51ef (5936092499), pendientes CI,
+  física, actualizar descripción/resultados, ready/merge al head216 exacto y
+  comprobar árbol main==candidata desplegada. No redeploy por hash de merge si igual.
+
+No hay tareas físicas ni recorders propios activos; ningún torque cut/restart
+real desde este seguimiento. Backup primario antes del ensayo está íntegro y
+conserva SHA0110e8...538c5. Evidencia y helpers bajo el directorio privado CAD.
+
+---
+
 ## Candidata final CAD 51ef796 — calificación en curso
 
 - PR194 head **51ef79643d03b67ecbdcbb4467d9ad084660b1ac**, limpio/subido.
