@@ -311,3 +311,23 @@ recovers the saved map.
 Recalibrate wheel scale and check the LD06 mount offsets first, then remap with slower
 motion. Long uniform walls leave ICP unconstrained along the wall, and repetitive
 cleanroom geometry can produce false proximity or ICP matches.
+
+## Pi 5 USB recovery while already disarmed
+
+If the Astra is absent from `lsusb`, a driver restart cannot reconnect it. Pi 5
+onboard USB sockets [share their switched power supply](https://github.com/mvp/uhubctl#raspberry-pi-5), including the motor USB
+adapter. From the compute host with the selected real-robot ROS setup sourced,
+run `scripts/recover-device-usb.py --ssh-host nex@<pi> --uhubctl /absolute/pi/path/to/uhubctl`
+for a read-only preflight. Add `--identity /path/to/key` if needed, and `--cycle`
+to explicitly recover USB power.
+
+This recovery accepts any stable supported pose **only when all nine motors are
+already measured torque-off**, the driver is DISARMED, both motion permissions
+are false, and the task gateway reports every resource free. It checks fresh
+source stamps and every servo before each OFF command, refuses USB storage or
+network interfaces, and schedules Pi-local power restoration before switching.
+It never disarms, arms, moves the robot, or changes safety gates. If powered,
+first use the normal guarded motion path to reach `travel_stow`; all existing
+powered-arm shutdown and deployment checks retain their 0.02 rad tolerance.
+After recovery, actual fresh perception and normal safety permissions are still
+required before arming or moving to the nominal pose.
