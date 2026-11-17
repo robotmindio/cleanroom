@@ -1,3 +1,63 @@
+## 216 desplegada; aceptación física incompleta; cota direccional en preparación
+
+**No mergear PR194/head216 todavía por CI verde: la prueba física detectó una
+segunda sobreestimación geométrica. Seguir resolviendo; el usuario exige actuar.**
+
+- 216516db07bb105bc5be9318b248ee92fa713fb4 pasó111/111compute618.93s y16/16Pi114.80s,
+  ambos sellos verificados independientemente. Deploy canónico exit0, tres stow
+  frescos, readiness dos veces, defaultARMED. Current/marcadores216 en ambos; main
+  sigueaf9e42e. PR194draft, CI44058959385 estaba en coverage al último sondeo.
+- Parámetros reales verificados de costmaps,monitor y explorer: huella216,
+  horizonte3.3s,clearance.136.242estadosclear/12s; scan121,joints180,front60,Astra23,
+  muñeca0. Stowfresco .009253rad; before160STOP/8s vsafter160clear/8s conservando los
+  siete retornos externos. Capturas before/after/runtime-after y CADguardados.
+- Gen60 Explore admitida UNA VEZ:
+  `qualification-explore-cad-footprint-216516d-20261117-1`,240s/radio3. Avanzó cerca
+  de8cm y giró8grados, luego StopZone por un punto(.1817114438,.0684261009)m,
+  láser281.32451deg/.323m. Es externo al CAD medido: max(x+y)CAD=.2229408573m vs
+  punto=.2501375447m. La cota L2 isotrópica de todos los joints aún sobreestima.
+  No llamar esto navegación útil ni habitación completa:0targets, viaje total
+  grabado.256737m incluye larga deriva/baseline, rawárea23.4425→22.6375m².
+- JWT operador expiró durante la pausa y el runner viejo falló401 también al
+  cancelar. **Gen60 YA reconciliada/cancelada con auth renovada** por
+  `reconcile-gen60.py`:canceled/stopconfirmed/recursosbase-arm-querynull.
+  Proof/eventsactualizados, no resubmit. Recorder360s terminó, nada físico propio
+  activo. Robot queda ARMED/stowed, StopZone activa en esa posición.
+- Source branch `fix/cad-navigation-footprint` tiene cambios SINCOMMIT de cota
+  direccional: Jacobianos por vértice + restoTaylor certificado. Para j<=k,
+  Hjk=axisj×Jk, norma<=radioperpendiculardistalk más desplazamientos distales;
+  resto=.5*tolerance²*sum((2k+1)*reach_bound[k]). Conserva.02rad+5mm completos,
+  no tocaCAD ni máscara ni gates. Resto máx.000897m, radio.2361270996m, inscrito.136,
+  soporte45deg=.17m; puntoqueparó quedaFUERA. Certificado/docs/configactualizados.
+  Horizonte5s ahora reserva separada la latencia1.524829s, además de las distancias
+  e incertidumbreoriginales. No se reduce ningún límite de seguridad.
+- Regresiones direccionales:223casospasaron158.33s (CAD,corners,monitorincluye
+  punto de pausa quieto/reversa y frena hacia él,planner,supervisor,launch).
+  Se deduplicaron vértices STL exactos después para evitar calcular Jacobianos
+  repetidos. Pruebas finales pendientes en sesiones2116(CAD+snapshots16casos)
+  y98442(rutas6); logs directional-final-metadata.log y directional-routes.log.
+  Esperar verdes, revisar/Ruff, commit/push y calificar AMBOS roles otra vez.
+  Worktree: /home/nex/roboto/cleanroom-worktrees/cad-navigation-footprint-20261117.
+- Helper nuevo recomendado `run-bounded-task.py ID REVISION explore|search`:
+  espera recorderready/PID vivo ANTESdeauth/admitir y renuevaJWTtras401 usando
+  MISMAidempotencykey, ID/generación. Explore240s/radio3/wall300; searchcup90s/1m/.1,
+  wall150. **No usar runners viejos sin refresh**, no repetirgen60.
+  `deploy-final.sh` y `verify-runtime.py` aún esperan216/horizonte3.3: actualizarlos
+  al NUEVOhead y5s tras commit. Recorder `record.py --prefix ID --duration360`
+  debe iniciar antes del runner; para search180s. Guardar nuevas pruebas con IDs
+  nuevos sin sobrescribir before/after/pause/gen60 ni respaldo.
+- Próximo: cerrar pruebas/commit/refinar/review+stagingcanónico111/16, deploycanónico
+  con freshstow; releer parámetros/gates. Probar retirada por Nav2 si hace falta
+  desde la pose cercana actual, sin bypass ni cmd_vel directo; luego Explore y
+  Search nativa desdeFiber. No inventar aprobación mapa/vistas parafindalto nivel.
+  Calibración/skills entrenadas siguenpendientes y reach/skillsoff.
+
+Evidencia/herramientas: ~/.ros/lekiwi/qualification/20261117-cad-collision/.
+Mapa primario y backup consistente previos conservados; no restaurar una DB
+vieja sobre progreso nuevo. Armstow/tolerancias/defaulttorque siguenintactos.
+
+---
+
 ## Candidata 216516d — última revisión de fixtures, sin deploy todavía
 
 - Head PR194 **216516db07bb105bc5be9318b248ee92fa713fb4** limpio/subido; cambios
