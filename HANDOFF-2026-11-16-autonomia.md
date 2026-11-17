@@ -1,3 +1,37 @@
+## ffc calificada / deploy de candidata — 17 noviembre 2026, 13:40 MYT / 05:40 UTC
+
+- **ffc9566 calificada y sellada**: 110/110 compute,485.85s;16/16Pi,128.92s,
+  ambos sellos verificados independientemente exit0. Bootstrap21 y ROS50 pasan;
+  recovery24/owner6 y entrenamiento9 sin skips. Unit compute inactive/result0.
+- Runtime0aa se restauró, arm RPC success/readiness exit0. Probe inicial
+  `restored-before-start-footprint-ffc9566-20261117.json` tomó fase DISARMED durante
+  arranque; después se armó normalmente. Fresh stow.012322, tres cámaras frescas.
+- **Deploy canónico ffc EN CURSO** desde la rama exacta, limpia y subida, antes del
+  merge para probar físicamente cuanto antes. Se avisó al usuario de este cambio
+  de orden: el merge espera prueba física + cierre CI. El wrapper privado ahora
+  fija origin/main21dd y upstream de la candidata==ffc en vez de exigir tree equal
+  con main; el deploy-split tracked conserva todos sus preflights y los dos sellos.
+  PID/session toolkit94825; log
+  `bootstrap/deploy-start-footprint-ffc9566-20261117.log`. No repetir mientras siga.
+- PR193 draft/headffc. Hosted build/test/device/static pasan, CodeQL verdes,
+  cobertura en curso (run44024126766). Main/local/origin siguen21dd444.
+  No usar expected-head0aa ni asumir que193 ya se mergeó.
+- Tras deploy: preflight8s y recorder nuevo prefijo
+  `qualification-explore-start-footprint-ffc9566-20261117-1`, duración300;
+  admitir UNA VEZ con helper `run-bounded-explore-start-footprint-ffc9566-20261117.py`
+  (180activos/radio2/wall240), reconciliar hasta stop confirmado + recursos libres.
+  Buscar traslación/navegación útiles, no sólo giro. Primer ensayo0aa/gen57 ya
+  terminal/cancelado y recorder terminado; pruebas+assessment conservadas.
+- Después hace falta el ensayo **con DB nueva separada**, helpers ffc preparados
+  descritos abajo (240activos/radio2/wall300, recorder360 + checkpoint de freshDB).
+  Todavía NO se inició esa unidad ni se admitió el ensayo fresco.
+- Si física+CI pasan: ready/review y merge193 con expected headffc; fetch main y
+  comprobar árbol igual a ffc ya desplegada. No hace falta otro restart del mismo
+  árbol. Finalizar con runtime primario ARMED, cámaras/sensores sanos y recursos
+  libres; actualizar HANDOFF/WIP/ROLLOUT con evidencia física real.
+
+---
+
 ## Ensayo físico y segundo bloqueo — 17 noviembre 2026, 13:30 MYT / 05:30 UTC
 
 **Seguir hasta demostrar navegación útil y arranque con mapa nuevo. No darlo por cerrado.**
