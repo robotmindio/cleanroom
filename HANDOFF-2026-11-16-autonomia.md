@@ -1,3 +1,47 @@
+## Candidata direccional c50fb40 — publicada y calificando
+
+- PR194draft/head **c50fb4090252e1d20c094dc4d22fbbdf735932e2**, branch limpia/subida.
+  Runtime/current/marcadores siguen216; mainaf9e42e. NO mergear216 por CIverde.
+- La cota nueva usa derivadasdireccionales porvértice y restoHessian certificado,
+  conservaTODOS los.02rad+5mm. Certificado radio.2361270996m,inscrito.136,
+  resto<=.000897m; deduplica exactamente vérticesSTL por rendimiento. Punto de
+  pausagen60queda fuera. Horizonte5s también reserva latencia1.524829s original.
+  Región1.10m,speeds,stow,gates,scanmaskevidencia siguenintactos.
+- Verificaciónlocal:223casos158.33s CAD/monitor/planner/safety/launch; luego16casos
+  regeneraciónCAD+snapshots33.74s y6rutas4.07s con dedup final; Ruff/diffcheck verdes.
+  Fixture monitor prueba el punto real:quieto/reversa pasan, haciaobstáculo reduce.
+- Stagingcompute user `lekiwi-stage-cad-directional-20261117.service`, logprivado
+  `.../20261117-cad-collision/stage-compute-directional.log`, j2. Todavía en curso.
+  Pi user `lekiwi-stage-cad-device-directional-20261117.service`, log
+  `~/.ros/lekiwi/stage-cad-device-directional-20261117.log`, serial: **16/16,147.01s**,
+  terminado/sellado; verificar sello independientemente. Sourcec50lockedambos.
+  Piroot689MBfree (no borrar releases activas/evidencia por conveniencia).
+  CIrun **44066347190**. PRbodyya refleja cota direccional y aceptación pendiente.
+- Backupnuevo `map-before-directional-trial/rtabmap.db`,22,351,872bytes,
+  SHAe4d453fa7348f0473a6dc28192db214cf65bf77996b42ddb483e50818b54eba7,integrityok.
+  Preservarambos respaldos y progresonuevo; NO restaurarbackupviejosobrelaDBactiva.
+- `deploy-final.sh` actualizado ac50 y `verify-runtime.py` ac50/horizonte5,
+  outputnuevo `runtime-directional.json`. Esperarambos sellos antes decanónico.
+  Helpersviejosrun-explore/run-search están obsoletos:usar **run-bounded-task.py**.
+- Commonhelper `run-bounded-task.py ID REVISION explore|search|navigate [PARAMS_JSON]`
+  espera recorderready/PIDvivo antesdeadmitir, renuevaJWT401conmismakey/ID/gen.
+  Explore240s/radio3/wall300; searchcup90s/1m/.1/wall150; navigate lee JSONparams,
+  añade deadlineUnixnow+45 siomitido y wall90. Noinventaaprobaciónmap/vistas.
+- `withdraw-target.py REVISION` todavíaNOejecutado:requierecurrent==REVISION,
+  TFmapbasefresh<=.5s; guarda `withdraw-target.json` con objetivo15cm detrás en
+  mapa,mismo yaw,maxtravel.25. Si hacefaltaretirada trasnuevo deploy, lanzar
+  recorderprefix `qualification-withdraw-cad-c50fb40-20261117-1` duration150;
+  luego commonhelper navigate coneseJSON. Todo porTaskGateway/Nav2/guards activos,
+  jamáscmdveldirectoni desactivarstop. Despuésexplorenativo ysearch desdeFiber.
+- Para nuevosensayosusarIDs c50nunca216/gen60. Recorder360paraExplore,180search.
+  Gen60YAestácanceled/stopconfirmed/resourcesfree trasrenovarJWT; nadafísicopropio
+  activoahora. RobotARMED/stowed y StopZone216aúnactiva enposicióncercana.
+
+Evidencia yhelpers bajo ~/.ros/lekiwi/qualification/20261117-cad-collision/.
+No cortar torque sin nuevo stowfresco estricto; canonicaldeployloexige.
+
+---
+
 ## 216 desplegada; aceptación física incompleta; cota direccional en preparación
 
 **No mergear PR194/head216 todavía por CI verde: la prueba física detectó una
