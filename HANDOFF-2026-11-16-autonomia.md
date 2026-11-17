@@ -1,3 +1,31 @@
+## Recalificación 2dc en serie — sin despliegue nuevo
+
+El primer staging compute 2dc terminó 107/111 en 1034.77 s. Hubo timeouts de
+training (300 s), Nav2 (60 s) y simulación física (60 s; dx 0.065 m), y MoveIt
+agotó su búsqueda de 10 s (993 evaluaciones). Había carga de aproximadamente
+60 procesos para 16 CPU. Se conserva TODO el reporte original y resultados en
+`2dc-first-qualification/`, incluido el caso Nav2 y recibo de programación.
+No se hizo seal ni se seleccionó la candidata fallida.
+
+Está corriendo una repetición CANÓNICA COMPLETA, mismo head y mismos plazos,
+con un worker CTest y Nice=0 (prioridad normal): unidad de usuario
+`lekiwi-stage-cad-single-worker-20261117.service`; log
+`stage-compute-single-worker.log`. No lanzar otra calificación simultánea.
+Pi 16/16 y sello device 2dc verificado se mantienen válidos.
+
+Fiber volvió a responder tras un fallo transitorio de autenticación. La consulta
+`fiber-pre-directional-deploy.json` confirmó recursos libres y navigate/explore/
+search disponibles. Preflight estacionario: ARMED, stow fresco, máximo error
+0.010712 rad; cámaras front/Astra presentes, muñeca ausente. Runtime sigue216.
+Capturas y log `pre-directional-stationary.log` guardados. No hay tarea admitida.
+
+Siguiente paso: esperar TODAS las pruebas; revisar cualquier fallo real antes de
+más acciones. Al pasar, verificar ambos sellos, deploy canónico de2dc, parámetros
+efectivos, retirada15cm, Explore/Search con recorder y parada confirmada. El wrapper
+privado `deploy-final.sh` ya apunta a2dc; no tocar releases selladas ni los backups.
+
+---
+
 ## Candidata final 2dc7fca — calificación completa en curso
 
 PR #194 sigue en borrador; head limpio y publicado:
