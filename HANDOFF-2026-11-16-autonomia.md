@@ -1,3 +1,90 @@
+## Checkpoint actual — 17 noviembre 2026, 09:51 MYT / 01:51 UTC
+
+Este bloque sustituye el estado offline y los pendientes de device/deploy de abajo.
+
+- **9503b92f275cbbdb4fc7652947eaa27c7dff5f1a está desplegada en compute y Pi**, con
+  current/marcadores verificados y previous=fa91885. La candidata pasó 107/107 compute
+  y ahora **16/16 device**; ambos sellos verificados antes del deploy canónico.
+  Deploy sin retry, readiness dos veces, rearmado. Log privado:
+  `~/.ros/lekiwi/qualification/20261116-bootstrap/deploy-native-sync-9503b92-20261117.log`.
+  El mapper vivo declara **approx_sync_max_interval=0.15**, queue=15 y carga la
+  biblioteca de `compute-f1a97b18aab5517c92f3726350697741`. Search sigue enabled.
+- Se recuperó el enlace Pi directo por tailnet/LAN. La falta de Astra **y lidar**
+  era una regresión del kernel Ubuntu 6.8.0-1068 frente a 1065: el VIA VL805 PCIe
+  `1106:3483`, dirección `0000:01:00.0`, fallaba probe con `can't setup: -12` y DMA=36.
+  RAM está en la ventana PCIe de 37 bits. Se aplicó el cambio upstream a DMA=40,
+  compilado con headers/compiler exactos y fuentes Ubuntu verificadas por SHA256.
+  Cargó sin reboot ni reiniciar motores; Astra y CP2102 aparecieron inmediatamente.
+  Se instaló override `/lib/modules/6.8.0-1068-raspi/updates/lekiwi/xhci-pci.ko`,
+  depmod y update-initramfs completados; initrd root y firmware coinciden e incluyen
+  el módulo. SHA256 módulo: c5839240b45b01194962b7b8e3b7cde01dfa909e730e6e7cd26079720b65457b.
+  No volver a usar --activate con ese controlador ya bound/en uso.
+- **PR #190 draft**: https://github.com/robotmindio/cleanroom/pull/190, head
+  **67530c3a14c11ba5e67a30fb8142d71683de02f4**, rama subida/limpia
+  `fix/verified-usb-recovery`, worktree bloqueado
+  `/home/nex/roboto/cleanroom-worktrees/verified-usb-recovery-20261117`.
+  Incluye builder del backport exacto y recovery USB verificado torque-off. 139
+  pruebas locales relevantes y Ruff completo pasan. Los checks CodeQL pasaron;
+  build-test-lint de este head sigue en curso. Main sigue b8984e4; no mergear hasta
+  inspeccionar CI final. El backport de sistema ya está aplicado y documentado.
+- El usuario confirmó la postura apoyada como válida y pidió no más ajustes a mano.
+  Se verificaron los nueve servos **ya torque-off**, DISARMED, joints estables,
+  permisos falsos y recursos libres. Recovery acepta esa situación sin exigir
+  coincidencia angular nominal: no corta torque de un brazo alimentado. Los checks
+  de torque cut/deploy siguen en 0.02 rad. Hubo dos aborts previos antes de OFF por
+  recolección temporal; se añadieron regresiones. Un ciclo interrumpido por el
+  timer anterior no probó VBUS completo; el **ciclo 4** sí verificó todos los hubs
+  OFF y restauración. No arregló el VL805 porque éste es otro controlador PCIe.
+- Tras recuperar percepción, el driver rearmó por política normal. MoveIt planificó
+  y ejecutó a **0.1 velocity/acceleration** desde la postura medida a travel_stow;
+  ambos resultados SUCCESS, después gate estricto pasó. Tras deploy max error
+  0.012322 rad, ARMED, permisos arm/base y arm_stowed true. No se amplió tolerancia.
+  El intento Fiber `reach` se detuvo antes de admisión porque allow_reach=false;
+  esa política permanece intacta. El retorno fue la operación MoveIt de operador.
+- El usuario movió Astra del puerto 1 al 2 del hub de expansión. Ambas funciones
+  siguen detectadas (ahora 6-1.2.1/.2; no fijar estos números). **Front=GENERAL**
+  está funcionando. **Wrist=JYU2C** dejó de enumerar con errores USB -71; no confundir
+  sus roles. Cámara de muñeca no requerida para este ensayo de base, sí pendiente
+  para manipulación. Astra, depth cloud y lidar están sanos.
+- Cadencia postdeploy de 30 s: 301 scans, 279 depth clouds, 56 pares RGBD; scan age
+  max .1135 s, depth cloud .0493 s, RGBD .5998 s, mapas .6841 s. 600 estados clear,
+  cero intrusiones. Son datos de ese intervalo, no calificación continua de horas.
+- **Explore generación 55**, ID `qualification-explore-autonomy-9503b92-20261117-1`,
+  duración activa 25 s/radio 2 m: admitido/dispatched una vez, terminó FAILED con
+  `exploration region stopping margin reached`, stop=confirmed, recursos libres.
+  **No movimiento físico**: 86 muestras odom entre admisión y terminal, recorrido
+  ~8.9e-11 m. Durante el cambio localization->mapping, map/costmap cambió de marco
+  antes de capturar/usar un centro coherente. Nav2 rechazó start fuera de bounds;
+  spatial_memory registró nueva identidad RTAB. Investigar transición; no ampliar
+  radio/margen ni reintentar sin entenderlo. Recorder detenido, no goal propio activo.
+
+### Trabajo activo y siguiente paso
+
+1. Terminar y verificar el archivo privado de journals del Pi antes de vacuum:
+   `pi-journal-before-vacuum-20261117.export.gz` en bootstrap. Proceso compute SSH
+   237859; Pi journalctl 74588 (nice 15), gzip 74587. Exporta ~3.1G de journal;
+   aún activo al checkpoint. Validar gzip/exit0, conservar hash, luego vacuum-size
+   para recuperar espacio. No borrar fuentes, releases activas o pruebas.
+2. Comprobar CI final de #190, revisión propia explícita y merge con expected head
+   si pasa. No reconstruir ni modificar 9503b92 sellada/seleccionada. El tool nuevo
+   es mantenimiento; el runtime ROS seleccionado sigue 9503b92.
+3. Diagnosticar coherencia al iniciar mapping. `_execute` llama `_set_mapping(True)`
+   y captura enseguida `_pose()` con TF aún válido pero previo; en ~0.5 s cambian
+   mapa y pose. Leer callbacks RTAB y fixtures `test_exploration_ros.py`; añadir
+   prueba que reproduzca transición con mapa/TF previos antes de cambiar runtime.
+   No se ha escrito aún ningún cambio de exploración. No tarea física pendiente.
+4. Repetir sólo con nuevo ID, recorder antes de admisión y cancel/reconcile con
+   recursos libres. No afirmar exploración completada ni crecimiento de mapa.
+
+Evidencia nueva: prefijos `continue-20261117-*`, `operator-return-stow-vl805-*`,
+`sensor-cadence-post-9503b92-20261117.*` y `qualification-explore-autonomy-9503b92-*`
+en `~/.ros/lekiwi/qualification/20261116-bootstrap/`. Build/receipt del módulo en
+Pi `~/.ros/lekiwi/qualification/20261117-vl805-build/`; copia de receipt en compute.
+Se retiraron sólo cuatro builds sellados superseded mediante el script tracked,
+con manifest/evidencia archivados; recibos `device-sync-9503b92-prune-20261117.*`.
+
+---
+
 # Handoff de autonomía del robot y Fiber
 
 ## Checkpoint, 17 de noviembre de 2026, 00:07 MYT / 16 de noviembre, 16:07 UTC

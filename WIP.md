@@ -1,30 +1,27 @@
 # Autonomous exploration follow-up
 
 Current checkpoint: [HANDOFF-2026-11-16-autonomia.md](HANDOFF-2026-11-16-autonomia.md),
-17 November 00:07 MYT / 16 November 16:07 UTC.
+17 November 09:51 MYT / 01:51 UTC.
 
-PRs #186–#189 merged. Main b8984e4 has the same tree as candidate 9503b92.
-The native synchronization fix passed all five hosted checks, complete native
-build and packaged-mapper ABI/parameter probes. Canonical compute 107/107 passed
-in 806.34 s; sealed inventory verification passed. Actual device qualification
-and deployment of 9503b92 remain pending because the Pi is unreachable.
+9503b92 is now qualified (107 compute + 16 Pi), sealed and deployed on both hosts;
+previous is fa91885. Native mapper 0.15 sync interval and library prefix verified.
+The Pi kernel regression was repaired: failed VL805 PCIe USB DMA mask 36 -> 40,
+exact-kernel module built, activated, persisted and included in matching initramfs.
+Astra/lidar streams recovered without reboot. The supported arm pose was returned
+to travel_stow by collision-checked MoveIt at 0.1 scaling; fresh strict gate passed.
+Default armed policy and all safety limits remain active.
 
-The previous fa91885 release was deployed to both hosts after 106/106 + 16/16.
-Compute still selects it; Pi pointers/markers are last verified before the outage.
-Its mapper still ignores approx_sync_max_interval; the merged fix is not live.
-Bounded Explore generation 54 logged 0.251153 m odometry travel and 0.165840 m net,
-visited zero targets, then canceled with stop confirmed and resources released.
+PR #190 (head 67530c3) contains reproducible recovery tools, documentation and
+139 passing local tests. Ruff passes. Hosted build-test-lint is still running;
+CodeQL passed. Branch clean/pushed; PR remains draft pending final CI/review.
 
-Final read-only probe: no joints/images, invalid sources, arm/base permissions
-false. Current arm posture/torque cannot be verified. Do not cut torque without
-fresh SRDF travel_stow. User power/Wi-Fi and nearby-object clearance checks are
-pending. Keep collision/freshness/stow limits and the tailnet motor guard intact.
+The first new Explore trial (generation 55) terminated safely with region stopping
+margin reached during mapping-frame transition, stop confirmed, resources free,
+no physical base movement. No further motion task or recorder remains active.
+Diagnose and reproduce coherent map/TF startup before another bounded trial.
+Do not widen region/freshness limits. Wrist JYU2C USB camera is missing (-71);
+front GENERAL, Astra, scan and depth are functioning.
 
-Next: restore connection, check Pi disk/readiness, stage and verify device 9503b92,
-then canonical deployment from the exact qualified source with fresh stow checks.
-Verify the launched mapper's actual 0.15 value, repeat cadence/scene/localization
-checks, then another bounded physical trial if conditions permit.
-
-No own temporary process or motion task remains active; Fiber resources are free.
-Compute robot services remain active. Source branches and this checkpoint are
-committed/pushed. Keep WIP until the physical/deployment follow-up is completed.
+A private Pi journal export is still running (compute SSH 237859, Pi journalctl
+74588 nice 15/gzip74587). Verify it completes before vacuuming archived journals.
+Preserve selected/previous releases, .env and qualification evidence.

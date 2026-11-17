@@ -1,3 +1,21 @@
+# Current rollout checkpoint — 17 November 2026, 09:51 MYT
+
+9503b92 is live on compute/Pi after complete 107/107 + 16/16 qualification and
+canonical deployment with fresh stow checks and two successful readiness checks.
+Native 0.15 sync interval is now enforced. VL805 kernel regression is repaired
+and persistent. MoveIt returned the supported pose to exact travel_stow without
+further manual adjustment. See the handoff for source IDs, receipts and limitations.
+
+PR #190 is draft at 67530c3 with 139 passing relevant local tests and Ruff; final
+hosted build-test-lint is pending. The new Explore trial generation 55 stopped
+before motion because localization->mapping changed map coordinates; stop and
+resource release confirmed. That startup-frame issue and wrist camera USB -71
+remain open. A Pi journal archive is the only own ongoing diagnostic process.
+
+The following earlier checkpoint is retained as history and is superseded above.
+
+---
+
 # Agent search rollout
 
 Checkpoint: 17 November 2026, 00:07 MYT / 16 November, 16:07 UTC.
