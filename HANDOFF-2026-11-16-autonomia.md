@@ -1,3 +1,79 @@
+## Corrección terminada / hardware en espera — 17 noviembre 2026, 14:42 MYT
+
+- **PRs #192 y #193 mergeados**. Main/local/originmain limpios:
+  **af9e42eba0f7c025710726975bf4455db2d4f8be**, árbol idéntico a candidata
+  **ffc9566d6834ec8100475de1b81332183d13376d**. Current y marcadores compute/Pi son
+  ffc9566; previous0aa796b. Deploy canónico ffc pasó, con gates stow, readiness
+  dos veces y rearm. No hace falta volver a desplegar el mismo árbol tras el merge.
+- El defecto solicitado **queda corregido y probado físicamente**: sin targets,
+  observa y puede avanzar/retroceder .15m por espacio láser medido; si el planner
+  responde START_OCCUPIED, mantiene ese progreso de observación en vez de repetir
+  eternamente la ruta global. No se cambió ningún límite de colisión, stow,
+  freshness, Nav2 o región, ni CAD ni política default ARMED.
+- Calificación final ffc: **110/110 compute,485.85s;16/16Pi,128.92s**, sellos
+  verificados independientemente. Bootstrap21/ROS50/recovery24/owner6 pasan;
+  entrenamiento9 sin skips. Cinco checks hosted verdes (build-test-lint21m58s).
+- **Gen58**, `qualification-explore-start-footprint-ffc9566-20261117-1`:
+  radio2m/180s; **2.42923m acumulados**, net.717996m, un target alcanzado, uno
+  unreachable, área raw conocida **5.8675→22.4925m²**. Terminó failed/incomplete
+  por **exploration region stopping margin reached**, stop confirmed, recursos
+  libres. Esto demuestra navegación útil con los límites activos; no llamarlo
+  cobertura completa de la habitación. Assessment y todos los streams guardados.
+- **Gen59**, `qualification-explore-fresh-map-ffc9566-20261117-1`:
+  DB nueva independiente, radio2m/240s, empezó `observing_without_frontier`,
+  se recuperó de un TF futuro de13ms y luego navegó: **3.68352m acumulados**,
+  net.416284m, **2targets alcanzados/1unreachable**, área raw **1.015→13.990m²**.
+  Se canceló intencionalmente tras aceptación: canceled/incomplete, stop confirmed,
+  recursos libres. No hay ninguna tarea de movimiento propia activa.
+  El monitor HTTP original terminó con SIGTERM/143; se canceló por ID/gen59 y
+  `reconcile-fresh-map-gen59-20261117.py` verificó terminal/recursos. No se repitió
+  la admisión. El recorder completó y se conservó toda la evidencia.
+- Primer arranque frío de prueba (DB separada attempt1) tuvo un timeout de
+  get_state del planner y dejó Nav2 parcialmente configurada. Sondeos posteriores
+  confirmaron que todos respondían. Se conservó esa DB/log; se repitió con otra
+  DB **vacía** y el mismo launcher/configuración. La comprobación de readiness
+  fue limitada a4Hz (mismos criterios/deadline120) para evitar el bucle rápido de
+  consultas del diagnóstico. Ese segundo arranque frío pasó y es el de gen59.
+  No se modificó runtime ni Nav2 para esa comprobación. Posible seguimiento:
+  limitar las consultas de `stack_readiness.py` en el repositorio; no afirmar
+  que se arregló la fiabilidad de cada RPC de startup con este PR.
+- **Mapa primario restaurado**; SHA raw se verificó idéntico antes de reabrirlo.
+  Tras reabrir conserva **107/107 IDs Node**, sin pérdidas. Backup inmediatamente
+  anterior al ensayo:21,250,048bytes, SHA
+  **0110e8ca266dd0a08f14cfab5f2edb6e2363c9b6d0be5573f81f0e3a53d538c5**.
+  DB fresca final preservada e íntegra:7,122,944bytes,63nodos(ids1..317), SHA
+  **965c7b4a43ad8fce7e44c03108a0ea33380b77ca8d90b1bd664dfa5f35e4734f**.
+  Paths `map-immediately-before-fresh-bootstrap-ffc9566-20261117/rtabmap.db`
+  y `fresh-map-physical-ffc9566-final-20261117/rtabmap.db` bajo bootstrap.
+- Runtime principal `lekiwi-stack.service` activo y **ARMED**, stow fresco
+  **.009253rad** (no pedir más ajustes manuales). Las cinco unidades Pi activas,
+  kernel1068 y VL805 DMA40 siguen bien. Front/Astra frescos. Recursos base/arm/
+  perception_query libres en `final-bootstrap-capabilities-20261117.json`.
+- **NO decir que el estado final es collision clear ni tres cámaras sanas**:
+  `final-autonomy-bootstrap-ffc9566-20261117.json` muestra StopZone sostenida;
+  scannerreadonly final:79/79scans con puntos dentro de la huella,
+  x=.1524..2399m,y=.1674..2194m, ángulo láser294.04..302.11°,range.331..422m.
+  Es el frente izquierdo de la huella. No se amplió máscara ni se forzó el drive.
+  La cámara de muñeca JYU2C **desapareció realmente de USB**, no sólo del topic:
+  usb4-1 reconectó varias veces14:07MYT y se desconectó14:08:25; no está en lsusb
+  ni /dev/v4l/by-id. Front/Astra/lidar/motor presentes; Pi throttled=0x0. RootPi1.6G.
+  No se hizo nuevo powercycle USB ni reboot para ocultar la desconexión.
+- Se preguntó al usuario por el conector de muñeca y lo que esté pegado al frente
+  izquierdo; **respuesta pendiente**. Mantener ARMED/quieto y las protecciones.
+  No iniciar otro movimiento mientras StopZone continúe. Si se requiere cortar
+  torque/reiniciar motor/Astra/Pi, repetir gate travel_stow fresco estricto antes.
+  Para USB recovery: helper exige nueve torque-off frescos y estabilidad; no
+  reutilizar pruebas viejas ni relajar condiciones. La autorización general para
+  operar/reparar el robot persiste, sin pedir confirmaciones repetidas.
+
+No hay recorders, staging ni unidades de mapa fresco propios activos; el runtime
+principal y sensores normales siguen activos. Worktrees/release source locked,
+backups y pruebas fallidas conservados. La pregunta física pendiente no invalida
+la aceptación del arranque de explore; el rollout amplio de find/calibración y
+skills entrenadas conserva sus pendientes y reach/skills policy sigue off.
+
+---
+
 ## ffc calificada / deploy de candidata — 17 noviembre 2026, 13:40 MYT / 05:40 UTC
 
 - **ffc9566 calificada y sellada**: 110/110 compute,485.85s;16/16Pi,128.92s,

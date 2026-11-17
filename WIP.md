@@ -1,23 +1,31 @@
 # Autonomous exploration follow-up
 
-Current checkpoint: [HANDOFF-2026-11-16-autonomia.md](HANDOFF-2026-11-16-autonomia.md),
-17 November 11:07 MYT / 03:07 UTC.
+Current checkpoint: [HANDOFF-2026-11-16-autonomia.md](HANDOFF-2026-11-16-autonomia.md).
 
-PRs #190 and #191 are merged. Main 5f0b79f is clean and has the qualified e74683f
-source tree. e74683f is deployed on compute and Pi after canonical 109/109 + 16/16,
-sealed inventory checks, all five hosted checks, fresh stow gates, readiness and
-rearm. Previous is 9503b92. The native mapper enforces 0.15 s sync.
+PRs #192/#193 are merged. Main af9e42e has the deployed ffc9566 tree. Both roles
+passed canonical qualification (110/110 compute, 16/16 Pi), seals and hosted CI.
+Exploration now observes and uses measured local steps when no global target is
+reachable, including an occupied global starting footprint, without weakening
+collision, stow, freshness or region limits.
 
-VL805 kernel DMA repair survived a guarded reboot and restored Astra, lidar and
-wrist camera. Final state: ARMED/travel_stow (.012322 rad error), fresh front,
-wrist/Astra and scan/depth, clear collision monitor, all resources free. The
-supported pose needed no more manual nudging; MoveIt returned it to nominal.
+Physical acceptance: existing map 2.43 m accumulated travel, one target reached;
+separate empty database 3.68 m, two targets reached, known area 1.02 to 13.99 m².
+Both trials ended with confirmed stops and free resources. The primary map was
+restored with its raw hash preserved during the fresh-map trial and all 107 prior
+node IDs retained. This is bounded exploration proof, not full-room coverage.
 
-Generation 56 exercised fixed mapping initialization and succeeded with no
-reachable observation targets: 0 targets visited and exactly 0 m odometry travel.
-This verifies startup/termination; useful base-motion/exploration/search acceptance
-remains open for the observed map. Keep all footprint, stow, collision and freshness
-limits. Do not claim room coverage or map growth. Reach/skills policy stays off.
+Runtime is ARMED in fresh travel_stow (.009253 rad error), primary map active.
+Two physical issues remain: persistent front-left StopZone returns inside the
+footprint, and the wrist JYU2C camera electrically disappeared from USB during
+movement. Front/Astra/lidar/motor remain present. User was asked to inspect the
+wrist connection and the front-left obstruction; answer pending. Keep the robot
+still and all safety layers active. Do not ask for manual stow nudging.
 
-No own temporary process, motion task, recorder, archive or staging job remains
-active. Backups, receipts, raw trial traces and sealed releases are preserved.
+One fresh-start lifecycle RPC timeout was preserved; another empty-database cold
+start passed with the same readiness criteria and read-only polling paced at 4 Hz.
+Consider bounding repository readiness query frequency separately; no runtime
+configuration was changed for that diagnostic.
+
+Broader find/search coverage, calibration and trained arm skills remain open;
+reach/skills availability stays off. No own movement task, recorder, staging or
+fresh-map unit remains active. Preserve locked releases, backups and raw evidence.
