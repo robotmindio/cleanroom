@@ -80,6 +80,7 @@ install(PROGRAMS
   scripts/rtabmap-db-maintenance.py
   scripts/rtabmap-session-guard.py
   scripts/torque-host.py
+  scripts/recover-device-usb.py
   scripts/validate-map-bundle.py
   scripts/sim-renderer-check.py
   scripts/sim-scan-check.py
@@ -239,6 +240,8 @@ if(BUILD_TESTING)
     add_lekiwi_pytest(test_arm_jog)
     add_lekiwi_pytest(test_capture_stow)
     add_lekiwi_pytest(test_check_travel_stow)
+    add_lekiwi_pytest(test_recover_device_usb)
+    add_lekiwi_pytest(test_build_vl805_fix)
     add_lekiwi_pytest(test_collision_model)
     add_lekiwi_pytest(test_vendor_lekiwi_model)
     add_lekiwi_pytest(test_driver_link)
