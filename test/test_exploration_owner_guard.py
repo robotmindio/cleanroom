@@ -22,15 +22,17 @@ from lekiwi_rmf.explore_client import ExploreClient
 from test_exploration_ros import RobotPeers, response, wait
 
 
-@pytest.mark.parametrize('graceful,restart_guard,delayed_result', [
-    (False, False, False), (False, True, False), (True, False, False),
-    (True, True, False), (False, False, True),
+@pytest.mark.parametrize('graceful,restart_guard,delayed_result,bootstrap', [
+    (False, False, False, False), (False, True, False, False), (True, False, False, False),
+    (True, True, False, False), (False, False, True, False), (False, True, False, True),
 ])
 def test_restarted_explorer_resumes_original_bounds_and_preserves_unrelated_navigation(
-        tmp_path, monkeypatch, restart_guard, graceful, delayed_result):
+        tmp_path, monkeypatch, restart_guard, graceful, delayed_result, bootstrap):
     context = Context()
     rclpy.init(context=context)
     peers = RobotPeers(context)
+    if bootstrap:
+        peers.grid.data = [-1] * 6400
     client_node = Node('orphan_test', context=context)
     ready = []
     client_node.create_subscription(Bool, '/robot/explore/navigation_guard_ready',

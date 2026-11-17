@@ -175,13 +175,13 @@ def task_limits(duration, radius, maximum_duration, maximum_radius):
     return tuple(limits)
 
 
-def map_geometry(message, maximum_cells):
+def map_geometry(message, maximum_cells, *, frame="map"):
     info = message.info
-    if (message.header.frame_id != "map" or info.width < 1 or info.height < 1
+    if (message.header.frame_id != frame or info.width < 1 or info.height < 1
             or info.width * info.height > maximum_cells
             or len(message.data) != info.width * info.height
             or not math.isfinite(info.resolution) or not 0.01 <= info.resolution <= 0.2):
-        raise ValueError("expected a bounded metric occupancy grid in frame map (1–20 cm cells)")
+        raise ValueError(f"expected a bounded metric occupancy grid in frame {frame} (1–20 cm cells)")
     p, q = info.origin.position, info.origin.orientation
     if (not all(math.isfinite(v) for v in (p.x, p.y, p.z, q.x, q.y, q.z, q.w))
             or abs(q.x) > 1e-6 or abs(q.y) > 1e-6
@@ -210,6 +210,60 @@ def disk(radius, resolution):
     y, x = np.ogrid[-cells:cells + 1, -cells:cells + 1]
     # Keep the metric radius, allowing only floating-point roundoff.
     return ((x * x + y * y) * resolution ** 2 <= radius ** 2 + 1e-12).astype(np.uint8)
+
+
+def needs_observation(grid, resolution, origin, position, center, radius, region_margin, free_threshold):
+    """An exhausted candidate list does not prove that the connected space was observed."""
+    x, y = world_to_cell(position, resolution, origin)
+    free = ((grid >= 0) & (grid <= free_threshold)).astype(np.uint8)
+    if not (0 <= y < grid.shape[0] and 0 <= x < grid.shape[1] and free[y, x]):
+        return True
+    cv2.floodFill(free, None, (x, y), 2, flags=4)
+    yy, xx = np.indices(grid.shape)
+    wx, wy = cell_to_world(xx, yy, resolution, origin)
+    region = (wx - center[0]) ** 2 + (wy - center[1]) ** 2 < (radius - region_margin) ** 2
+    unknown = cv2.dilate((grid < 0).astype(np.uint8), np.ones((3, 3), dtype=np.uint8)) != 0
+    # The edge of a cropped first map is also unobserved, unless outside the task region.
+    unknown[[0, -1], :] = True
+    unknown[:, [0, -1]] = True
+    return bool(np.any((free == 2) & region & unknown))
+
+
+def laser_free_grid(shape, resolution, origin, sensor, ranges, angle_min, angle_increment, range_min, range_max):
+    """Only measured laser rays clear cells; missing returns leave space unknown.
+
+    Used for short bootstrap motions alongside Nav2's live obstacle costmap.
+    This does not alter the SLAM map or its 3D search evidence.
+    """
+    observed = np.full(shape, -1, dtype=np.int16)
+    start = world_to_cell(sensor[:2], resolution, origin)
+    if not (0 <= start[0] < shape[1] and 0 <= start[1] < shape[0]):
+        return observed
+    # Stop a cell diagonal short of a return; neither its cell nor cells past it are free.
+    for index, distance in enumerate(ranges):
+        if not math.isfinite(distance) or not range_min <= distance <= range_max:
+            continue
+        distance -= math.sqrt(2) * resolution
+        if distance <= 0:
+            continue
+        angle = sensor[2] + angle_min + index * angle_increment
+        end = world_to_cell((sensor[0] + distance * math.cos(angle), sensor[1] + distance * math.sin(angle)),
+                            resolution, origin)
+        cv2.line(observed, start, end, 0, 1)
+    return observed
+
+
+def sweep_is_free(grid, resolution, origin, start, end, footprint, free_threshold):
+    """Check a straight translation/rotation at subcell intervals, including both endpoints."""
+    distance = math.dist(start[:2], end[:2])
+    turn = end[2] - start[2]
+    corner = float(np.linalg.norm(footprint, axis=1).max())
+    steps = max(1, math.ceil((distance + corner * abs(turn)) / (resolution / 4)))
+    for fraction in np.linspace(0, 1, steps + 1):
+        xy = tuple(a + fraction * (b - a) for a, b in zip(start[:2], end[:2], strict=True))
+        if not footprint_is_free(grid, resolution, origin, xy, start[2] + fraction * turn, footprint, free_threshold):
+            return False
+    return True
 
 
 def known_safe_cells(grid, resolution, clearance, free_threshold):

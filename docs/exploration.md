@@ -98,6 +98,20 @@ unconfirmed navigation stop end the task. A Nav2 goal that exceeds the
 navigation deadline marks that target unreachable. Hardware operation remains within the existing attended physical
 acceptance; room-scale coverage has not been physically qualified by the tests.
 
+An empty frontier list is not completion while the connected free region still
+touches unknown cells or the cropped edge of an initial map. The explorer first
+acquires views with 45-degree Nav2 `Spin` behaviors, checking the complete swept
+body against a fresh local costmap before dispatch and throughout execution.
+After a full scan without a global target, it can advance or reverse 15 cm at
+5 cm/s. Translation additionally requires measured free laser rays over the
+entire swept body; missing, masked or invalid returns remain unknown. It never
+changes unknown SLAM cells to free to manufacture a global route. Every behavior
+runs beneath the same leased `NavigateToPose` parent, so cancellation, owner
+failure, sensor freshness, collision monitoring, arm stow and the original time
+and region bounds apply. New map observations are awaited before selecting again.
+If no safe local observation motion exists, the result remains incomplete.
+Resuming a task repeats observation at its measured pose within the saved bounds.
+
 The `ExploreKnown` Nav2 planner and the tracked `explore_nav_to_pose.xml` behavior
 tree prohibit planning through unknown space. Ordinary `GridBased` navigation
 uses the same Smac lattice planner, retaining its explicit-goal unknown-space
