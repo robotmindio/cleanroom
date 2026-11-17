@@ -1,5 +1,6 @@
 """Shared USB recovery cannot drop torque or leave USB power disabled on failure."""
 
+import ast
 from copy import deepcopy
 import importlib.util
 from pathlib import Path
@@ -251,3 +252,28 @@ def test_power_readback_failure_restores_every_hub():
     with pytest.raises(RuntimeError, match='still powered'):
         run(proof, remote)
     assert remote.calls[-4:] == [(h, 'on') for h in HUBS]
+
+
+def test_dead_pcie_usb_controller_is_reported_before_unrelated_onboard_power_cycle(tmp_path):
+    root, model = topology_files(tmp_path)
+    pci = tmp_path / 'pci'
+    device = pci / '0000:01:00.0'
+    device.mkdir(parents=True)
+    (device / 'vendor').write_text('0x1106')
+    (device / 'device').write_text('0x3483')
+    with pytest.raises(RuntimeError, match='VL805 PCIe USB controller is unbound'):
+        usb.usb_topology(root, model, pci)
+
+
+def test_remote_topology_executes_the_same_checked_discovery_function():
+    remote = usb.Remote('pi', None, '/usr/sbin/uhubctl', lambda event: None)
+
+    def run(argv):
+        assert argv[:2] == ['python3', '-c']
+        ast.parse(argv[2])
+        assert 'def usb_topology(' in argv[2]
+        assert "Path('/sys/bus/pci/devices')" in argv[2]
+        return '{"hubs": ["2", "3", "5", "4"]}'
+
+    remote.run = run
+    assert remote.topology()['hubs'] == HUBS

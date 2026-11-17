@@ -100,10 +100,17 @@ def cycle_usb(probe, remote, hubs, audit, pause=time.sleep, clock=time.monotonic
 
 # Only onboard Pi 5 xHCI root hubs. Refuse attached USB storage/network before
 # touching the shared supply; keep the motor adapter's root last in OFF order.
-def usb_topology(root, model_path):
+def usb_topology(root, model_path, pci_root=None):
     model = model_path.read_text().rstrip('\0')
     if not model.startswith('Raspberry Pi 5 '):
         raise RuntimeError('USB recovery requires Raspberry Pi 5: ' + model)
+    for device in pci_root.iterdir() if pci_root is not None else ():
+        vendor, product = device / 'vendor', device / 'device'
+        if (vendor.exists() and vendor.read_text().strip() == '0x1106'
+                and product.read_text().strip() == '0x3483'
+                and not (device / 'driver').exists()):
+            raise RuntimeError('VL805 PCIe USB controller is unbound: ' + device.name
+                               + '; inspect boot log for DMA failure before cycling onboard USB')
     hubs, motor_hubs = [], set()
     for hub in root.glob('usb*'):
         if 'xhci' not in str(hub.resolve()):
@@ -150,7 +157,7 @@ class Remote:
     def topology(self):
         source = ('import json\nfrom pathlib import Path\n' + inspect.getsource(usb_topology)
                   + "\nprint(json.dumps(usb_topology(Path('/sys/bus/usb/devices'), "
-                  + "Path('/proc/device-tree/model'))))")
+                  + "Path('/proc/device-tree/model'), Path('/sys/bus/pci/devices'))))")
         return json.loads(self.run(['python3', '-c', source]))
 
     def power(self, hub, action):

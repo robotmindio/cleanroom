@@ -1,0 +1,11 @@
+{
+  "xhci-pci.c": "818e88c8b6060931883a9e0a7f2ae2222867dc5e010803827e8619be91daea10",
+  "xhci.h": "cade335e22bac12660df11f53a2fa915cea7a262f592ae7ed0c902108a1fe40a",
+  "xhci-trace.h": "4a5b349eb8343ba9a68182fb1ddfea76672263bbca8f167c0c1e515e6f3c3c10",
+  "xhci-pci.h": "dfa2902c43dafe7e57eec34062dabfe3bc97d5c77259abd5a5e9c8a20537a7cc",
+  "xhci-ext-caps.h": "2add2b7e9b723ee06ce243bb6f300bc4d5279b00c6b85d961449aad8ee9553d6",
+  "pci-quirks.h": "bca1a78d8260b5960f3afc0c6335f9914c1e69462dcc48e19943d2675ff61c99",
+  "xhci-port.h": "a2ccd447b34c2a4111c7e2f9db4d935fe5c6741c0d1f40300667bbf63f4650f5",
+  "xhci-caps.h": "51f3325484de7be16c8c1d058ee6af0215836faff31302ea0a680e1df9a9befa",
+  "xhci-dbgcap.h": "65bee379a0ea6d206533cc33342f33c9bb772e55dc886a72620c61675213b6c6"
+}

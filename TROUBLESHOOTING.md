@@ -331,3 +331,29 @@ first use the normal guarded motion path to reach `travel_stow`; all existing
 powered-arm shutdown and deployment checks retain their 0.02 rad tolerance.
 After recovery, actual fresh perception and normal safety permissions are still
 required before arming or moving to the nominal pose.
+
+## Astra and lidar disappear together after a Pi kernel update
+
+Check `lspci -nnk` and the boot kernel log as well as `lsusb`. This robot's Astra
+and CP2102 lidar adapter share a VIA VL805 PCIe USB controller (`1106:3483`),
+separate from the RP1 controller carrying the motors and other cameras. Ubuntu
+`6.8.0-1068.72` introduced a 36-bit DMA limit which leaves the Pi 5's PCIe memory
+window unreachable: `xhci_hcd ... can't setup: -12`, no driver bound, and no USB
+roots for that controller. Cycling the onboard USB sockets cannot repair it.
+
+The [upstream correction](https://github.com/raspberrypi/linux/commit/35fc4a654ca629be18d954c402486d9221f6cdf2)
+raises VL805's limit to 40 bits. `scripts/build-vl805-fix.py --build-root <directory>`
+builds that correction against the exact running Ubuntu `6.8.0-1068-raspi`
+headers. It downloads only checksum-pinned files from the matching Ubuntu source
+commit and checks the resulting module's kernel ABI. Install the matching
+`linux-headers-6.8.0-1068-raspi` package first.
+
+Explicit root options `--activate --install` load the correction and persist it
+in that kernel's `updates/lekiwi` module directory and initramfs. Activation
+requires the failed controller to be unbound, no other controller bound to
+`xhci_pci`, and the motor adapter confirmed on the separate RP1 controller.
+It never unloads a live controller, the shared xHCI core or the RP1 driver.
+The override is restricted to this kernel version; use the distribution's
+official fixed module when available. To retire it, remove only that override,
+run `depmod -a 6.8.0-1068-raspi` and regenerate that kernel's initramfs, without
+unloading a controller while devices are live.
