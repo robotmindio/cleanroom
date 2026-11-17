@@ -355,6 +355,9 @@ if(BUILD_TESTING)
       add_lekiwi_launch_test(test_moveit_driver_e2e_launch 90)
       # Real move_group (no driver): the motion solver over MoveIt's own model and scene.
       add_lekiwi_launch_test(test_motion_solver_moveit_launch 90)
+      # Exhaustive infeasibility has an unchanged 10 s search budget. Other
+      # MoveIt startup/scene work must not consume that bounded CPU window.
+      set_tests_properties(test_test_motion_solver_moveit_launch.py PROPERTIES RUN_SERIAL TRUE)
     endif()
   endif()
 endif()
