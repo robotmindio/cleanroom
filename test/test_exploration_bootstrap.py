@@ -194,7 +194,9 @@ def test_bootstrap_cancels_its_owned_motion_when_live_guards_fail(graph, fault):
         peers.permitted = False
     else:
         peers.collision = CollisionMonitorState(action_type=CollisionMonitorState.STOP, polygon_name='StopZone')
-    wait(lambda: peers.nav_canceled == 1)
+    # The fake action acknowledges cancellation before its execute callback
+    # clears nav_active. Wait for the stop, not the intermediate acknowledgement.
+    wait(lambda: peers.nav_canceled == 1 and not peers.nav_active)
     assert not peers.nav_active
     response(handle.cancel_goal_async())
     assert response(handle.get_result_async()).status == GoalStatus.STATUS_CANCELED

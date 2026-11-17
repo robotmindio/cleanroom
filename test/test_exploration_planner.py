@@ -63,8 +63,9 @@ def test_native_routes_fit_the_body_without_extra_wall_clearance(tmp_path, scene
         goal.pose.position.x = -0.8
         yaw = 0.0
     elif scene == "backward_exit":
-        # The body fits facing forward, but cannot turn or advance in this dead end.
-        grid[[34, 45], 30:] = 100
+        # The CAD body fits, but its 0.409 m length cannot turn across this
+        # 0.40 m corridor before backing out of the dead end.
+        grid[[35, 44], 30:] = 100
         grid[:, 46] = 100
         goal.pose.position.x = -0.8
         yaw = math.pi
@@ -142,7 +143,15 @@ def test_native_routes_fit_the_body_without_extra_wall_clearance(tmp_path, scene
             footprint, _, _ = load_navigation_footprint(ROOT / "config/nav2_params.yaml")
             checked_grid = with_body_free(grid, 0.05, (-2.0, -2.0, 0.0), position, 0, footprint)
             if scene == "backward_exit":
-                assert any(p.pose.position.x < -0.1 and abs(p.pose.orientation.z) < 0.01 for p in path)
+                # A holonomic route can back out at a nonzero heading. Require
+                # actual translation against that heading, not one exact yaw.
+                assert any(
+                    b.pose.position.x < -.1 and (
+                        (b.pose.position.x - a.pose.position.x)
+                        * math.cos(2 * math.atan2(a.pose.orientation.z, a.pose.orientation.w))
+                        + (b.pose.position.y - a.pose.position.y)
+                        * math.sin(2 * math.atan2(a.pose.orientation.z, a.pose.orientation.w))) < -.01
+                    for a, b in zip(path, path[1:]))
             if scene in ("occupied_start", "unknown_start"):
                 assert checked_grid[40, 49] == 100
             assert path and all(footprint_is_free(
