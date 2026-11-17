@@ -260,6 +260,79 @@ def start(graph, duration=TEST_TASK_DURATION, revisit=False):
     return handle
 
 
+@pytest.mark.parametrize('lagging', ('map', 'slam', 'pose'))
+def test_mapping_start_anchors_region_only_after_all_post_switch_frames(graph, monkeypatch, lagging):
+    peers, explorer, client = graph
+    peers.position = (1.5, 0.0)
+    wait(lambda: abs(explorer._pose().pose.position.x - 1.5) < .01)
+    # All three old observations are still fresh enough for ordinary readiness.
+    # The mode RPC returns before RTAB-Map publishes its new mapping coordinates.
+    peers.publish_map = peers.publish_slam = peers.publish_pose = False
+    captured = []
+
+    def step(goal, check, center, radius, visited, blocked, result):
+        captured.append(center)
+        result.complete = True
+        return False
+
+    monkeypatch.setattr(explorer, '_explore_step', step)
+    handle = response(client.send_goal_async(Explore.Goal(
+        max_duration_sec=TEST_TASK_DURATION, max_radius_m=2.5)))
+    assert handle.accepted
+    finished = handle.get_result_async()
+    wait(lambda: peers.mapping_requests == [True])
+    time.sleep(.2)
+    assert captured == [] and peers.nav_count == 0
+    peers.position = (0.0, 0.0)
+    for name in ('map', 'slam', 'pose'):
+        setattr(peers, 'publish_' + name, name != lagging)
+    time.sleep(.2)
+    assert captured == [] and peers.nav_count == 0
+    setattr(peers, 'publish_' + lagging, True)
+    result = response(finished)
+    assert result.status == GoalStatus.STATUS_SUCCEEDED
+    assert captured == [(0.0, 0.0)]
+
+
+def test_mapping_start_waits_for_the_post_switch_pose_correction_to_settle(graph, monkeypatch):
+    peers, explorer, client = graph
+    peers.position = (1.5, 0.0)
+    wait(lambda: abs(explorer._pose().pose.position.x - 1.5) < .01)
+    explorer.config['settle_sec'] = .4
+    captured = []
+
+    def step(goal, check, center, radius, visited, blocked, result):
+        captured.append(center)
+        result.complete = True
+        return False
+
+    monkeypatch.setattr(explorer, '_explore_step', step)
+    handle = response(client.send_goal_async(Explore.Goal(
+        max_duration_sec=TEST_TASK_DURATION, max_radius_m=2.5)))
+    assert handle.accepted
+    finished = handle.get_result_async()
+    wait(lambda: peers.mapping_requests == [True])
+    time.sleep(.15)
+    assert captured == [] and peers.nav_count == 0
+    peers.position = (0.0, 0.0)
+    result = response(finished)
+    assert result.status == GoalStatus.STATUS_SUCCEEDED
+    assert captured == [(0.0, 0.0)] and peers.nav_count == 0
+
+
+def test_cancel_during_mapping_start_waits_for_no_motion_and_restores_localization(graph):
+    peers, explorer, client = graph
+    peers.publish_map = peers.publish_slam = peers.publish_pose = False
+    handle = response(client.send_goal_async(Explore.Goal(
+        max_duration_sec=TEST_TASK_DURATION, max_radius_m=2.5)))
+    assert handle.accepted
+    finished = handle.get_result_async()
+    wait(lambda: peers.mapping_requests == [True])
+    assert response(handle.cancel_goal_async()).goals_canceling
+    assert response(finished).status == GoalStatus.STATUS_CANCELED
+    assert peers.mapping_requests == [True, False] and peers.nav_count == 0
+
+
 @pytest.mark.parametrize('graph', ['cold_start', 'unlocalized'], indirect=True)
 @pytest.mark.parametrize('cancel_before_map', [False, True])
 def test_exploration_starts_mapping_without_a_prior_map_or_pose(graph, monkeypatch, cancel_before_map):
