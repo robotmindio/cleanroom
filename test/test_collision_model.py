@@ -429,6 +429,9 @@ def test_travel_stow_fits_navigation_footprint_with_joint_tolerance(qualificatio
     from scipy.spatial import ConvexHull
 
     robot = _real_robot()
+    envelope = json.loads((ROOT / 'docs/evidence/navigation-footprint-20261117.json').read_text())
+    normals = np.array(envelope['normals'])
+    supports = np.array(envelope['support_distances_m'])
     parents = {j.find("child").get("link"): j for j in robot.findall("joint")}
     config = yaml.safe_load((ROOT / "config/safety_production.yaml").read_text())["safety_supervisor"]["ros__parameters"]
     pose = dict(zip(config["stow_joint_names"], config["stow_joint_positions"]))
@@ -456,9 +459,7 @@ def test_travel_stow_fits_navigation_footprint_with_joint_tolerance(qualificatio
                 frame = joint.find("parent").get("link")
             world = points @ transform[:3, :3].T + transform[:3, 3]
             # 5 mm model allowance, in addition to the full joint tolerance.
-            assert world[:, 0].min() >= -0.22 + 0.005
-            assert world[:, 0].max() <= 0.24 - 0.005
-            assert np.abs(world[:, 1]).max() <= 0.22 - 0.005
+            assert np.all(world[:, :2] @ normals.T <= supports - 0.005 + 1e-9)
     nav2 = yaml.safe_load((ROOT / "config/nav2_params.yaml").read_text())
     for name in ("local_costmap", "global_costmap"):
-        assert yaml.safe_load(nav2[name][name]["ros__parameters"]["footprint"]) == [[.24,.22],[.24,-.22],[-.22,-.22],[-.22,.22]]
+        assert yaml.safe_load(nav2[name][name]["ros__parameters"]["footprint"]) == envelope['footprint']

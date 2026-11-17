@@ -4,6 +4,9 @@
 # at the driver boundary leaves 0.56 m: 0.30 * 1.15 * 1.5 + 0.04 = 0.5575 m.
 # Slower coupled return commands need less obstacle clearance for the same time reserve.
 # These bounded test fixtures remain independent of production acceptance.
+# Preserve the original attended stopping fixture when production geometry is
+# refined. Its larger rectangle and all physical trial bounds stay unchanged.
+body_footprint: [[0.24, 0.22], [0.24, -0.22], [-0.22, -0.22], [-0.22, 0.22]]
 bounds:
   maximum_stopping_distance_m: 0.65
   maximum_center_radius_m: 0.40

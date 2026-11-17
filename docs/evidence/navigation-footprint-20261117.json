@@ -1,0 +1,256 @@
+{
+  "schema": 1,
+  "frame": "base_footprint",
+  "joint_positions_rad": {
+    "arm_shoulder_pan": 0.0092,
+    "arm_shoulder_lift": -1.7967,
+    "arm_elbow_flex": 1.6249,
+    "arm_wrist_flex": 1.2306,
+    "arm_wrist_roll": -0.0077,
+    "arm_gripper": 0.2161
+  },
+  "joint_tolerance_rad": 0.02,
+  "model_allowance_m": 0.005,
+  "normals": [
+    [
+      1.0,
+      0.0
+    ],
+    [
+      0.9238795325112867,
+      0.3826834323650898
+    ],
+    [
+      0.7071067811865476,
+      0.7071067811865475
+    ],
+    [
+      0.38268343236508984,
+      0.9238795325112867
+    ],
+    [
+      6.123233995736766e-17,
+      1.0
+    ],
+    [
+      -0.3826834323650897,
+      0.9238795325112867
+    ],
+    [
+      -0.7071067811865475,
+      0.7071067811865476
+    ],
+    [
+      -0.9238795325112867,
+      0.3826834323650899
+    ],
+    [
+      -1.0,
+      1.2246467991473532e-16
+    ],
+    [
+      -0.9238795325112868,
+      -0.38268343236508967
+    ],
+    [
+      -0.7071067811865477,
+      -0.7071067811865475
+    ],
+    [
+      -0.38268343236509034,
+      -0.9238795325112865
+    ],
+    [
+      -1.8369701987210297e-16,
+      -1.0
+    ],
+    [
+      0.38268343236509,
+      -0.9238795325112866
+    ],
+    [
+      0.7071067811865474,
+      -0.7071067811865477
+    ],
+    [
+      0.9238795325112865,
+      -0.3826834323650904
+    ]
+  ],
+  "support_distances_m": [
+    0.244,
+    0.226,
+    0.178,
+    0.162,
+    0.159,
+    0.136,
+    0.149,
+    0.162,
+    0.165,
+    0.197,
+    0.224,
+    0.219,
+    0.181,
+    0.163,
+    0.183,
+    0.229
+  ],
+  "footprint": [
+    [
+      -0.165,
+      -0.11644057037
+    ],
+    [
+      -0.140008535809,
+      -0.176775302162
+    ],
+    [
+      -0.136124602732,
+      -0.18065923524
+    ],
+    [
+      -0.135301923826,
+      -0.181
+    ],
+    [
+      -0.01103312824,
+      -0.181
+    ],
+    [
+      0.140616354316,
+      -0.118184727599
+    ],
+    [
+      0.24013682589,
+      -0.018664256024
+    ],
+    [
+      0.244,
+      -0.009337728694
+    ],
+    [
+      0.244,
+      0.001498350905
+    ],
+    [
+      0.239593548695,
+      0.012136465407
+    ],
+    [
+      0.130393045569,
+      0.121336968534
+    ],
+    [
+      0.039466444203,
+      0.159
+    ],
+    [
+      0.028474829971,
+      0.159
+    ],
+    [
+      -0.108422587951,
+      0.102295232843
+    ],
+    [
+      -0.150336968534,
+      0.06038085226
+    ],
+    [
+      -0.165,
+      0.024981162828
+    ]
+  ],
+  "inscribed_radius_m": 0.136,
+  "maximum_radius_m": 0.2441786091719804,
+  "link_motion_bounds_m": {
+    "base_plate_layer1-v5": 0.0,
+    "drive_motor_mount-v11-2": 0.0,
+    "ST3215_Servo_Motor-v1-2": 0.0,
+    "4-Omni-Directional-Wheel_Single_Body-v1-2": 0.0,
+    "omni_wheel_mount-v5-2": 0.0,
+    "drive_motor_mount-v11-1": 0.0,
+    "ST3215_Servo_Motor-v1-1": 0.0,
+    "omni_wheel_mount-v5-1": 0.0,
+    "4-Omni-Directional-Wheel_Single_Body-v1-1": 0.0,
+    "drive_motor_mount-v11": 0.0,
+    "ST3215_Servo_Motor-v1": 0.0,
+    "omni_wheel_mount-v5": 0.0,
+    "4-Omni-Directional-Wheel_Single_Body-v1": 0.0,
+    "servo_controller_mount-v3": 0.0,
+    "lipo_battery_mount-v3": 0.0,
+    "Battery---Battery-5.2-Ah-DC5521-Plug-v2": 0.0,
+    "94868A713_NO-THREADS_Female-Threaded-Hex-Standoff": 0.0,
+    "base_plate_layer2-v3": 0.0,
+    "Camera-Mount-v8": 0.0,
+    "Camera-Model-v3": 0.0,
+    "94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-1": 0.0,
+    "94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-2": 0.0,
+    "94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-3": 0.0,
+    "94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-4": 0.0,
+    "94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-5": 0.0,
+    "robotskin_lidar_mount": 0.0,
+    "ld06_body": 0.0,
+    "astra_pro_compact_mount": 0.0,
+    "rpi5_through_plate": 0.0,
+    "rpi5_usb_carrier": 0.0,
+    "rpi5_table": 0.0,
+    "so101_base_link": 0.0,
+    "so101_shoulder_link": 0.0010878071460441387,
+    "so101_upper_arm_link": 0.004644707892993909,
+    "so101_lower_arm_link": 0.006960266955597224,
+    "so101_wrist_link": 0.008144724532528874,
+    "so101_gripper_link": 0.014208400783585904,
+    "so101_moving_jaw_link": 0.017281442764938485,
+    "astra_camera_link": 0.0
+  },
+  "source_sha256": {
+    "config/safety_production.yaml": "ae4122952317af7adac5e873de68a9c02d7bf00c2a0ef7b461df8b49f506ae66",
+    "urdf/lekiwi.urdf.xacro": "53d40381d335e2382287b9e0aa4daa2f63708d280e4914fe737fb206625ce76d",
+    "urdf/lekiwi_cad.urdf": "a984a36f86d57478dd0b92e6ae966ffed0fdf8e3db277d6e5b22cb4e1773dede",
+    "urdf/meshes/4-Omni-Directional-Wheel_Single_Body-v1-1.stl": "42b0ddb6c1cb8f5c33dfd80a7ff0457ed929e64284b8959a3fa16fb24e737ec6",
+    "urdf/meshes/4-Omni-Directional-Wheel_Single_Body-v1-2.stl": "b753948f880be9aa15faea5563411fc823f22ac92aa81257d6df9f609f765eea",
+    "urdf/meshes/4-Omni-Directional-Wheel_Single_Body-v1.stl": "d2f19d55a4a9dd03a0970dcbe6073611d6617b77b2ffba9641fdab33c8b2b0fa",
+    "urdf/meshes/94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-1.stl": "e62fd1bbb3fb1c9593d9948a932bdbbd0d5bd542880fb616f291271564d1dd50",
+    "urdf/meshes/94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-2.stl": "0156d029eb09642ea5243f3e363cf0d755a8fa243d3881afa4a614aa152c3a77",
+    "urdf/meshes/94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-3.stl": "3a6b8dca778c2c97bab85272ee720c108242e9384a81a600db78556b121ecad9",
+    "urdf/meshes/94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-4.stl": "f43b12734cb359810c7a52b8765396e52b13f680151a173cedc83edc6f434281",
+    "urdf/meshes/94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-5.stl": "cc81855b4b28531fee9b23a358a78fa0fc99ad58860fb786b5b8c24012d29243",
+    "urdf/meshes/94868A713_NO-THREADS_Female-Threaded-Hex-Standoff.stl": "2431b19fa561caffe476a1f48c31eb0953be20bc81f61138dfd64eb187f2671b",
+    "urdf/meshes/Battery---Battery-5.2-Ah-DC5521-Plug-v2.stl": "ed87f0621fb502e2a3d013dd38ee553541bef1a2425a08da4bebe5a4973a1c0c",
+    "urdf/meshes/Camera-Model-v3.stl": "45de967e480f775bc8ea6dfb0311ee627cccb6c257f4a0895c76aa0c5a6f9cf7",
+    "urdf/meshes/Camera-Mount-v8.stl": "f8c717b9df965adc88e43f7f7431d556a7bbb536a6c9e1d3a2532914acad79b4",
+    "urdf/meshes/ST3215_Servo_Motor-v1-1.stl": "b0943753877b273348f53fa93f9a45d58835967bea22c76cd1eec770a84b23ea",
+    "urdf/meshes/ST3215_Servo_Motor-v1-2.stl": "8b27ed502a3a090ea7e99ebd411f6dd1773af6e365570663e90be08d0431da2a",
+    "urdf/meshes/ST3215_Servo_Motor-v1.stl": "d46c776a32397b0db5fbb8f7ff6c64cf5379182151fcdcc0de2a4957642a56ae",
+    "urdf/meshes/astra_pro_compact_mount.stl": "467c3397f3058367cbcf2ee283f629ab9c262f1ce457010b874cfde0e1047c7c",
+    "urdf/meshes/base_plate_layer1-v5.stl": "bfeb86cb296605de95868cac3888dd007f798563cb6da57ac3783b01f5ddf971",
+    "urdf/meshes/base_plate_layer2-v3.stl": "ed10ba898ebbbbd9ed966cf167b92c30efd5064e6ce37e74c6332db05bc4ba01",
+    "urdf/meshes/drive_motor_mount-v11-1.stl": "8055bee14f294b8a6cf0da7a85a2c9e6bd4cd59f16984ac5004f77ce0d5bbbea",
+    "urdf/meshes/drive_motor_mount-v11-2.stl": "8055bee14f294b8a6cf0da7a85a2c9e6bd4cd59f16984ac5004f77ce0d5bbbea",
+    "urdf/meshes/drive_motor_mount-v11.stl": "8055bee14f294b8a6cf0da7a85a2c9e6bd4cd59f16984ac5004f77ce0d5bbbea",
+    "urdf/meshes/ld06_body.stl": "a179966840b61991f6b1e2dbefba8ed02380bcd534f0c00b4a84e74c8f586a99",
+    "urdf/meshes/lipo_battery_mount-v3.stl": "cd8980c613949d7b31541ed2db54070ef8ade538062196ea70ee929d1ca8d37c",
+    "urdf/meshes/omni_wheel_mount-v5-1.stl": "59581b6573f2246b82a8c812a3ac560ef5e52e55a5dfc997a9af10c746fb9a30",
+    "urdf/meshes/omni_wheel_mount-v5-2.stl": "ee253b155cac5fda238c99551f5bdede1eb457d4ed67b1bc997244fda7c59e34",
+    "urdf/meshes/omni_wheel_mount-v5.stl": "f651bf7cfb75edd9ee65c0dcb7a12ceaabe4188ef409fc68e84b0e45bfb75d3e",
+    "urdf/meshes/robotskin_lidar_mount.stl": "136e0f6a50aba6aca822f2f6b25d6b8aecb0d7add6aaf158f35bd6a9e61a6ecc",
+    "urdf/meshes/rpi5_table.stl": "461206530d60dde47a58cf0bf37d9b5845ccd58cee676218d72596d61bb64052",
+    "urdf/meshes/rpi5_through_plate.stl": "74ca1b1d633e5ec96b491c857e90559a8e8236aa4642a98a49a6b677dc58c29f",
+    "urdf/meshes/rpi5_usb_carrier.stl": "3d58fb29ef580eeca8e3a750d32bd6ecd228d6d909a1bfb8368ee91f5d333352",
+    "urdf/meshes/servo_controller_mount-v3.stl": "f82f31b6f63538cc9cb90b3247a5d1530212d13d13f5185b0fceb705443eb6f5",
+    "urdf/meshes/so101/base_motor_holder_so101_v1.stl": "8cd2f241037ea377af1191fffe0dd9d9006beea6dcc48543660ed41647072424",
+    "urdf/meshes/so101/base_so101_v2.stl": "bb12b7026575e1f70ccc7240051f9d943553bf34e5128537de6cd86fae33924d",
+    "urdf/meshes/so101/motor_holder_so101_base_v1.stl": "31242ae6fb59d8b15c66617b88ad8e9bded62d57c35d11c0c43a70d2f4caa95b",
+    "urdf/meshes/so101/motor_holder_so101_wrist_v1.stl": "887f92e6013cb64ea3a1ab8675e92da1e0beacfd5e001f972523540545e08011",
+    "urdf/meshes/so101/moving_jaw_so101_v1.stl": "785a9dded2f474bc1d869e0d3dae398a3dcd9c0c345640040472210d2861fa9d",
+    "urdf/meshes/so101/native_wrist_flex.stl": "0e2855a1d7cc2d725be45cd711e8c88e69e5b9e52607e948c52fb34ada997814",
+    "urdf/meshes/so101/rotation_pitch_so101_v1.stl": "9be900cc2a2bf718102841ef82ef8d2873842427648092c8ed2ca1e2ef4ffa34",
+    "urdf/meshes/so101/sts3215_03a_no_horn_v1.stl": "75ef3781b752e4065891aea855e34dc161a38a549549cd0970cedd07eae6f887",
+    "urdf/meshes/so101/sts3215_03a_v1.stl": "a37c871fb502483ab96c256baf457d36f2e97afc9205313d9c5ab275ef941cd0",
+    "urdf/meshes/so101/under_arm_so101_v1.stl": "d01d1f2de365651dcad9d6669e94ff87ff7652b5bb2d10752a66a456a86dbc71",
+    "urdf/meshes/so101/upper_arm_so101_v1.stl": "475056e03a17e71919b82fd88ab9a0b898ab50164f2a7943652a6b2941bb2d4f",
+    "urdf/meshes/so101/waveshare_mounting_plate_so101_v2.stl": "e197e24005a07d01bbc06a8c42311664eaeda415bf859f68fa247884d0f1a6e9",
+    "urdf/meshes/so101/wrist_roll_follower_so101_v1.stl": "4b17b410a12d64ec39554abc3e8054d8a97384b2dc4a8d95a5ecb2a93670f5f4"
+  }
+}

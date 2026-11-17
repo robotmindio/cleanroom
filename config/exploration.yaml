@@ -5,7 +5,7 @@ robot_explorer:
     max_radius_m: 10.0
     # Inscribed centre prefilter; goals, paths and live poses use the oriented
     # Nav2 footprint rather than a circumscribed obstacle-clearance circle.
-    clearance_m: 0.22
+    clearance_m: 0.136
     observation_distance_m: 0.8
     target_spacing_m: 0.5
     revisit_spacing_m: 1.0

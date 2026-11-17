@@ -48,10 +48,11 @@ and failed target counts, and known map area in the bounded region.
 in `config/exploration.yaml` (900 seconds and 10 metres). Positive goal values
 can only reduce these maxima. Duration counts active exploration time; recoverable
 pauses preserve the remaining budget, including across a server restart. Mapping
-storage and session quotas continue to apply while paused. The centre reachability prefilter is 0.22 m,
-the body's inscribed radius, without rounding up on the 5 cm grid. The former
-0.33 m circle rounded to 0.35 m and unnecessarily blocked close side clearance.
-Goals and preflight waypoints check the whole oriented 46 x 44 cm footprint
+storage and session quotas continue to apply while paused. The centre reachability prefilter is 0.136 m,
+the CAD body's inscribed radius, without rounding up on the 5 cm grid.
+The [CAD envelope](navigation-footprint-20261117.md) includes the full stow
+tolerance and 5 mm model allowance without the empty corners of a rectangle.
+Goals and preflight waypoints check the whole oriented footprint
 against occupied and unknown cell areas, including the interior and corners
 during turns. Cells under the robot's current body count as free: the robot
 occupies them, so a mapped obstacle or unknown cell there is stale or
@@ -63,7 +64,7 @@ exactly that body, with no fixed clearance beyond it. `FootprintApproach` uses
 the same body and Nav2's native holonomic collision prediction to reduce speed
 only when its projected motion would intersect scan returns. Parallel walls
 outside the body therefore permit straight travel; turning still checks the
-corners swept by the rotation. The 2.5-second horizon covers the measured
+corners swept by the rotation. The 3.3-second horizon covers the measured
 linear/angular stopping bounds and uncertainty, checked against the acceptance
 record at startup. Costmap inflation is a soft cost field, not extra footprint
 padding; local inflation still encloses the corners so

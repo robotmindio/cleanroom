@@ -55,7 +55,8 @@ def _navigation_params(source_file, bounded_test, linear_limit, angular_limit, q
         # the circumscribed footprint. Keep every production Nav2 speed.
         source = Path(get_package_share_directory('lekiwi_rmf')) / 'config/nav2_params.yaml'
         nav2 = yaml.safe_load(source.read_text())
-        footprint = polygon(nav2['local_costmap']['local_costmap']['ros__parameters']['footprint'], 'footprint')
+        fixture = yaml.safe_load(source.with_name('base_speed_qualification.yaml').read_text())
+        footprint = polygon(fixture['body_footprint'], 'qualified stopping fixture')
         xmin, xmax = min(p[0] for p in footprint), max(p[0] for p in footprint)
         ymin, ymax = min(p[1] for p in footprint), max(p[1] for p in footprint)
         monitor = nav2['collision_monitor']['ros__parameters']

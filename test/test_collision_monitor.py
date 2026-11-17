@@ -101,7 +101,7 @@ def monitor(tmp_path):
 @pytest.mark.parametrize("velocity", [(0.25, 0.0, 0.0), (-0.25, 0.0, 0.0)])
 def test_straight_travel_passes_with_one_mm_beside_the_actual_body(monitor, velocity):
     request, _, _ = monitor
-    assert request([(0.0, 0.221), (0.0, -0.221)], velocity) == pytest.approx(velocity)
+    assert request([(0.0, 0.160), (0.0, -0.182)], velocity) == pytest.approx(velocity)
 
 
 @pytest.mark.parametrize("points, velocity", [
@@ -110,8 +110,8 @@ def test_straight_travel_passes_with_one_mm_beside_the_actual_body(monitor, velo
     ([(0.0, 0.32)], (0.0, 0.25, 0.0)),
     ([(0.0, -0.32)], (0.0, -0.25, 0.0)),
     ([(0.34, 0.32)], (0.15, 0.15, 0.1)),
-    ([(0.0, 0.221)], (0.0, 0.0, 0.4)),
-    ([(0.0, -0.221)], (0.0, 0.0, -0.4)),
+    ([(0.0, 0.201)], (0.0, 0.0, 0.4)),
+    ([(0.0, -0.201)], (0.0, 0.0, -0.4)),
 ])
 def test_obstacles_in_the_swept_body_reduce_every_component(monitor, points, velocity):
     request, _, _ = monitor
@@ -126,6 +126,16 @@ def test_overlap_stops_and_clearing_the_body_restores_motion(monitor):
     velocity = (0.25, 0.0, 0.0)
     assert request([(0.10, 0.0)], velocity) == pytest.approx((0.0, 0.0, 0.0))
     assert request([], velocity) == pytest.approx(velocity)
+
+
+@pytest.mark.parametrize('velocity', [(0., 0., 0.), (.05, 0., 0.), (-.05, 0., 0.)])
+def test_real_front_left_returns_outside_the_cad_body_do_not_strand_the_base(monitor, velocity):
+    request, _, _ = monitor
+    # Live 17-Nov returns were inside the obsolete rectangle but outside every
+    # physical part, including the complete stow-tolerance/model allowance.
+    points = [(.22668, .17349), (.20901, .17108), (.20041, .17270),
+              (.18651, .17135), (.17889, .17295), (.17654, .17728), (.22850, .21936)]
+    assert request(points, velocity) == pytest.approx(velocity)
 
 
 def test_stale_scan_still_stops(monitor):

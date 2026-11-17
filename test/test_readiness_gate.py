@@ -420,3 +420,56 @@ def test_navigation_and_mapping_children_recover_after_exit():
     for name in ('cmd_vel_mux', 'slam_cloud', 'robot_explorer', 'exploration_owner_guard'):
         node = find_node(records, name=name)
         assert (node['respawn'], node['respawn_delay']) == (True, 2.0)
+
+
+@pytest.mark.parametrize('available', [False, True])
+def test_stack_readiness_bounds_rpc_traffic_even_with_immediate_callbacks(monkeypatch, available):
+    from concurrent.futures import Future
+    from types import SimpleNamespace
+    import lekiwi_rmf.stack_readiness as module
+
+    now = [0.0]
+    monkeypatch.setattr(module, 'time', SimpleNamespace(monotonic=lambda: now[0]))
+    sent, probes = [], []
+
+    def ready():
+        probes.append(now[0])
+        return available
+
+    def request(_):
+        sent.append(now[0])
+        reply = Future()
+        reply.set_result(SimpleNamespace(current_state=SimpleNamespace(id=1)))
+        return reply
+
+    node = SimpleNamespace(_lifecycle_clients={'planner_server': SimpleNamespace(
+        service_is_ready=ready, call_async=request)}, requests={}, states={}, _lifecycle_next_query={})
+    # An arbitrarily busy image/laser graph must not turn into 1,000 RPCs/sec.
+    for tick in range(1000):
+        now[0] = tick / 1000
+        assert 'not confirmed active' in module.StackReadiness.reason(node, armed=False, exploration=False)
+    assert probes == [0., .25, .5, .75]
+    assert len(sent) == (4 if available else 0)
+
+
+def test_stack_readiness_keeps_the_rpc_timeout_and_retries_a_lost_reply(monkeypatch):
+    from concurrent.futures import Future
+    from types import SimpleNamespace
+    import lekiwi_rmf.stack_readiness as module
+
+    now, replies = [0.0], []
+    monkeypatch.setattr(module, 'time', SimpleNamespace(monotonic=lambda: now[0]))
+
+    def request(_):
+        replies.append(Future())
+        return replies[-1]
+
+    node = SimpleNamespace(_lifecycle_clients={'planner_server': SimpleNamespace(
+        service_is_ready=lambda: True, call_async=request)}, requests={}, states={}, _lifecycle_next_query={})
+    for stamp in (0., .25, 1., 2.99):
+        now[0] = stamp
+        assert 'not confirmed active' in module.StackReadiness.reason(node, armed=False, exploration=False)
+    assert len(replies) == 1
+    now[0] = 3.
+    assert 'not confirmed active' in module.StackReadiness.reason(node, armed=False, exploration=False)
+    assert len(replies) == 2 and replies[0].cancelled()

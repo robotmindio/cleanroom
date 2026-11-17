@@ -14,6 +14,8 @@ import yaml
 
 # Accepted stopping bound; separate from the folded body's map clearance.
 STOPPING_MARGIN_M = 0.77
+# Preserve the accepted task-radius reserve when refining the body's shape.
+MIN_REGION_MARGIN_M = 1.10
 
 
 def task_time():
@@ -99,7 +101,8 @@ def load_navigation_footprint(path):
     inscribed = cv2.pointPolygonTest(footprint.astype(np.float32), (0, 0), True)
     if inscribed <= 0:
         raise ValueError("Nav2 footprint must enclose the robot origin")
-    boundary_margin = math.ceil(float(np.linalg.norm(footprint, axis=1).max()) * 100) / 100 + STOPPING_MARGIN_M
+    boundary_margin = max(MIN_REGION_MARGIN_M,
+                          math.ceil(float(np.linalg.norm(footprint, axis=1).max()) * 100) / 100 + STOPPING_MARGIN_M)
     return footprint, inscribed, boundary_margin
 
 

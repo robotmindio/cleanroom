@@ -92,7 +92,7 @@ def test_paused_checkpoint_cannot_renew_an_invalid_budget(checkpoint, monkeypatc
 
 def choose(grid, *, revisit=False, visited=(), blocked=(), position=(0, 0), origin=(-2, -2, 0)):
     return select_target(grid, 0.05, origin, position, (0, 0), 2.5, visited, blocked,
-                         clearance=0.22, footprint=FOOTPRINT, region_margin=REGION_MARGIN,
+                         clearance=INSCRIBED_RADIUS, footprint=FOOTPRINT, region_margin=REGION_MARGIN,
                          observation_distance=0.8, spacing=0.5,
                          revisit_spacing=1.0, free_threshold=20, revisit=revisit)
 
@@ -121,19 +121,19 @@ def test_known_map_can_be_revisited_without_frontiers():
 
 def test_close_wall_uses_actual_footprint_and_blocks_corner_turns():
     grid = np.zeros((80, 80), dtype=np.int16)
-    grid[[34, 46], :] = 100  # 55 cm corridor: ~5.5 cm beside the 44 cm body.
+    grid[[35, 45], :] = 100  # 45 cm corridor fits the body but not its sideways nose.
     position = (0.025, 0.025)
-    assert INSCRIBED_RADIUS == pytest.approx(0.22)
+    assert INSCRIBED_RADIUS == pytest.approx(0.136)
     assert REGION_MARGIN == pytest.approx(1.10)
     assert not known_safe_cells(grid, 0.05, 0.33, 20)[40, 40]
     assert known_safe_cells(grid, 0.05, 0.22, 20)[40, 40]
     assert footprint_is_free(grid, 0.05, (-2, -2, 0), position, 0, FOOTPRINT, 20)
-    assert not footprint_is_free(grid, 0.05, (-2, -2, 0), position, math.pi / 4, FOOTPRINT, 20)
+    assert not footprint_is_free(grid, 0.05, (-2, -2, 0), position, math.pi / 2, FOOTPRINT, 20)
     # Map rotation changes the world heading, not collision geometry.
     rotated_origin = (-2, -2, math.pi / 2)
     rotated_position = cell_to_world(40, 40, 0.05, rotated_origin)
     assert footprint_is_free(grid, 0.05, rotated_origin, rotated_position, math.pi / 2, FOOTPRINT, 20)
-    assert not footprint_is_free(grid, 0.05, rotated_origin, rotated_position, 3 * math.pi / 4, FOOTPRINT, 20)
+    assert not footprint_is_free(grid, 0.05, rotated_origin, rotated_position, math.pi, FOOTPRINT, 20)
     target, _, area = choose(grid, revisit=True, position=position)
     assert target is not None
     assert math.hypot(*target) < 2.5 - REGION_MARGIN
@@ -146,8 +146,8 @@ def test_close_wall_uses_actual_footprint_and_blocks_corner_turns():
     # These frontier centres pass the coarse disk, but their bodies hit unknown.
     grid[:] = 0
     grid[[33, 47], :] = 100
-    grid[40, 55] = -1
-    assert known_safe_cells(grid, 0.05, 0.22, 20)[39, 50]
+    grid[38:43, 54] = -1
+    assert known_safe_cells(grid, 0.05, INSCRIBED_RADIUS, 20)[39, 50]
     assert choose(grid, position=position)[0] is None
     target, stage, _ = choose(grid, position=position, revisit=True)
     assert target is not None and stage == "revisiting_known_space"
@@ -155,13 +155,13 @@ def test_close_wall_uses_actual_footprint_and_blocks_corner_turns():
 
 def test_cells_under_the_current_body_count_as_free_and_nothing_beyond_it():
     grid = np.zeros((80, 80), dtype=np.int16)
-    grid[44, 44] = 100  # A stale obstacle under the body's front-left corner.
+    grid[40, 43] = 100  # A stale obstacle under the actual folded arm.
     grid[45, 49] = 100  # A real obstacle beyond the front edge.
     position = (0.025, 0.025)
     assert not footprint_is_free(grid, 0.05, (-2, -2, 0), position, 0, FOOTPRINT, 20)
     cleared = with_body_free(grid, 0.05, (-2, -2, 0), position, 0, FOOTPRINT)
     assert footprint_is_free(cleared, 0.05, (-2, -2, 0), position, 0, FOOTPRINT, 20)
-    assert cleared[44, 44] == 0 and cleared[45, 49] == 100 and grid[44, 44] == 100
+    assert cleared[40, 43] == 0 and cleared[45, 49] == 100 and grid[40, 43] == 100
     assert choose(cleared, revisit=True, position=position)[0] is not None
 
 

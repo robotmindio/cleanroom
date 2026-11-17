@@ -23,6 +23,7 @@ class StackReadiness(Node):
         self.inputs = {}
         self.states = {}
         self.requests = {}
+        self._lifecycle_next_query = {}
         self._lifecycle_clients = {name: self.create_client(GetState, f'/{name}/get_state')
                         for name in ('controller_server', 'planner_server', 'bt_navigator')}
         self.tf = Buffer()
@@ -72,8 +73,12 @@ class StackReadiness(Node):
                 elif now - sent >= 3:
                     future.cancel()
                     self.requests.pop(name, None)
-            if name not in self.requests and client.service_is_ready():
-                self.requests[name] = (client.call_async(GetState.Request()), now)
+            if name not in self.requests and now >= self._lifecycle_next_query.get(name, 0.0):
+                # Sensor callbacks can make spin_once return immediately. Bound
+                # RPC/discovery traffic independently of callback frequency.
+                self._lifecycle_next_query[name] = now + 0.25
+                if client.service_is_ready():
+                    self.requests[name] = (client.call_async(GetState.Request()), now)
         for name in self._lifecycle_clients:
             state, received = self.states.get(name, (None, 0.0))
             if state != State.PRIMARY_STATE_ACTIVE or now - received > 3:

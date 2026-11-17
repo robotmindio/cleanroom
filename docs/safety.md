@@ -107,11 +107,15 @@ accepted footprint and padding to match both tracked Nav2 costmaps. The current
 collision monitor uses that exact body for `StopZone` and `FootprintApproach`,
 with no static clearance beyond it. The predictive guard uses the commanded
 translation and rotation to project the body's motion, reducing speed if it
-would intersect a scan return within 2.5 seconds. Its horizon must cover the
+would intersect a scan return within 3.3 seconds. Its horizon must cover the
 recorded stop latency and each direction's stopping distance plus uncertainty,
 with one simulation step reserved. Side walls outside the moving body do not
 stop parallel travel; a turn that sweeps a corner into them reduces speed.
 Legacy static guards must still enclose the measured stopping clearance.
+The [CAD-derived footprint](navigation-footprint-20261117.md) replaces the former
+rectangle with an envelope of every modeled physical part, the full 0.02 rad
+stow tolerance and the existing 5 mm model allowance. Nearby external returns
+remain in the scan; empty rectangular corners no longer count as body overlap.
 A newly captured arm stow invalidates the record. Tested speeds must cover the
 tracked MPPI limits; the manual driver
 uses the same limits, so slow trials cannot approve a faster command.
