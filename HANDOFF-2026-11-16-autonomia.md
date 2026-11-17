@@ -1,3 +1,52 @@
+## Corrección de huella CAD en curso — 17 noviembre 2026
+
+El usuario exige resolver los bloqueos sin convertir la cámara de muñeca en
+prerrequisito. Está autorizada la reparación, calificación, despliegue y operación.
+No esperar una respuesta a la antigua pregunta de inspección física: se ha
+sustituido por el trabajo sobre geometría y funcionamiento degradado.
+
+- PR194 draft, candidata **2d51bfb3f2a0a6eb8a3465ab159704e2c225d466**, rama
+  `fix/cad-navigation-footprint`, worktree locked
+  `/home/nex/roboto/cleanroom-worktrees/cad-navigation-footprint-20261117`.
+  El runtime todavía es ffc9566 y main af9e42e; no confundir candidata y desplegada.
+- Captura nueva confirma ARMED/travel_stow fresco, error .009253rad; frontal y
+  Astra frescas, muñeca ausente. StopZone vieja sostenida. Los siete retornos
+  front-left quedan fuera de TODO el CAD físico proyectado y no intersectan sus
+  rayos; TF del láser coincide con Xacro. NO ampliar máscara: son retornos externos.
+- Huella candidata: todas las piezas físicas CAD, Astra, tolerancia continua
+  .02rad y margen de modelo5mm. Polígono16 apoyos, radio máximo .244179m e
+  inscrito .136m. Costmaps/StopZone/Approach comparten la huella; reserva regional
+  1.10m y RMF .33m conservadas. Horizonte3.3s cubre distancias originales con
+  incertidumbre60mm. La fixture de frenado atendido conserva su rectángulo viejo.
+  Certificado y generador en el PR; no cambia CAD físico ni filtros de scan.
+- Se limita también readiness lifecycle a4Hz, con timeout y criterios originales.
+  Pruebas: geometría/CAD, monitor nativo con retornos reales y fallos,137 casos
+  navegación/launch/motion y34 readiness verdes. Checks canon completos en curso.
+- Staging compute `lekiwi-stage-cad-20261117.service` (user), log privado
+  `~/.ros/lekiwi/qualification/20261117-cad-collision/stage-compute.log`.
+  Pi `lekiwi-stage-cad-device-20261117.service`, log
+  `~/.ros/lekiwi/stage-cad-device-20261117.log`. Ambos sobre release2d51, fuentes
+  locked. CTEST_PARALLEL_LEVEL2 y OPENBLAS_NUM_THREADS1; no se omiten pruebas.
+  CI run44053916247. Todavía no hay sellos ni cambio de current.
+- Captura `before.json` conserva330 puntos filtrados, ninguno dentro de la nueva
+  huella. Fiber capabilities native explore/search disponibles, recursos libres.
+  Evidencia bajo `~/.ros/lekiwi/qualification/20261117-cad-collision/`.
+  Backup consistente primario en `map-before-footprint-trial/rtabmap.db`, SHA
+  0110e8ca266dd0a08f14cfab5f2edb6e2363c9b6d0be5573f81f0e3a53d538c5,
+ 21,250,048bytes, integrityok.
+- Preparados, NO ejecutados: `capture-after.py`, `record.py`, `run-explore.py`.
+  Trial único `qualification-explore-cad-footprint-2d51bfb-20261117-1`,240s/radio3,
+  wall300s. Antes: terminar ambos sellos, deploy canónico con SSH-agent cargando
+  id_ed25519 (SSH default pide id_rsa inexistente), verificar nuevos parámetros,
+  StopZone real despejada y sensores frescos. Recorder debe empezar antes de admitir.
+  Tras admisión incierta, reconciliar MISMO ID/generación; no repetir submit.
+
+No hay tarea física propia activa. No se cortó torque ni reinició nada al
+preparar/calificar. Mantener gates; antes de cualquier corte verificar stow
+fresco estricto. La reparación USB de muñeca va en paralelo y no bloquea Explore.
+
+---
+
 ## Corrección terminada / hardware en espera — 17 noviembre 2026, 14:42 MYT
 
 - **PRs #192 y #193 mergeados**. Main/local/originmain limpios:

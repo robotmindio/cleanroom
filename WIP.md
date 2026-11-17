@@ -1,31 +1,14 @@
-# Autonomous exploration follow-up
+# CAD navigation footprint follow-up
 
-Current checkpoint: [HANDOFF-2026-11-16-autonomia.md](HANDOFF-2026-11-16-autonomia.md).
+PR194/candidate2d51bfb is pushed; canonical compute/Pi qualification and hosted
+CI are running. Runtime remains ffc9566/main af9e42e, ARMED/stowed and held by the
+old rectangular StopZone. No physical goal is active.
 
-PRs #192/#193 are merged. Main af9e42e has the deployed ffc9566 tree. Both roles
-passed canonical qualification (110/110 compute, 16/16 Pi), seals and hosted CI.
-Exploration now observes and uses measured local steps when no global target is
-reachable, including an occupied global starting footprint, without weakening
-collision, stow, freshness or region limits.
+Measured front-left points are external to every physical CAD part. Replace
+empty rectangle corners with the certified full-stow CAD envelope, retain all
+sensor measurements, limits and reserves, and extend predictive braking to3.3s.
+The camera wrist is optional and must not block Explore/navigation/front search.
+Readiness lifecycle queries are now bounded at4Hz in the candidate.
 
-Physical acceptance: existing map 2.43 m accumulated travel, one target reached;
-separate empty database 3.68 m, two targets reached, known area 1.02 to 13.99 m².
-Both trials ended with confirmed stops and free resources. The primary map was
-restored with its raw hash preserved during the fresh-map trial and all 107 prior
-node IDs retained. This is bounded exploration proof, not full-room coverage.
-
-Runtime is ARMED in fresh travel_stow (.009253 rad error), primary map active.
-Two physical issues remain: persistent front-left StopZone returns inside the
-footprint, and the wrist JYU2C camera electrically disappeared from USB during
-movement. Front/Astra/lidar/motor remain present. User was asked to inspect the
-wrist connection and the front-left obstruction; answer pending. Keep the robot
-still and all safety layers active. Do not ask for manual stow nudging.
-
-One fresh-start lifecycle RPC timeout was preserved; another empty-database cold
-start passed with the same readiness criteria and read-only polling paced at 4 Hz.
-Consider bounding repository readiness query frequency separately; no runtime
-configuration was changed for that diagnostic.
-
-Broader find/search coverage, calibration and trained arm skills remain open;
-reach/skills availability stays off. No own movement task, recorder, staging or
-fresh-map unit remains active. Preserve locked releases, backups and raw evidence.
+See the newest handoff section for staging units, exact source, evidence,
+prepared one-shot Fiber trial and the required deploy/physical validation.
