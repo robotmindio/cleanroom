@@ -1,3 +1,34 @@
+## Sellos verificados / espera CI — 17 noviembre 2026, 13:09 MYT / 05:09 UTC
+
+- **0aa796b calificada y sellada en ambos roles**: 110/110 compute, 468.34 s;
+  16/16 Pi, 90.31 s; verificación independiente de ambos sellos exit0.
+  Compute final es `lekiwi-stage-bootstrap-0aa796b-par2.service`, inactive/result0,
+  log `~/.ros/lekiwi/stage-bootstrap-0aa796b-par2.log`. Se reanudó el build sin
+  modificar fuente y con CTEST_PARALLEL_LEVEL=2; todas las suites y deadlines
+  originales conservados. La unidad 0aa sin par2 se detuvo antes de sus tests.
+  20 bootstrap, 50 ROS, 24 recovery, 6 owner y 9 entrenamiento: cero fallos/skips.
+- **Runtime e746 restaurado y ARMED**, readiness exit0. Primer arm RPC durante
+  arranque fue rechazado por permisos aún no publicados; auto-arm normal se
+  recuperó y el RPC posterior dio success=True. Probe
+  `primary-restored-predeploy-0aa796b-20261117.json`: fresh stow .012322 rad,
+  permisos true, tres cámaras frescas, collision clear. Nada físico admitido aún.
+- PR #192 sigue draft/head0aa/main5f0b79. Hosted build/tests, device y static pasan;
+  **cobertura en curso**, cuatro checks CodeQL ya verdes. Run **44020141121**.
+  Falta terminar CI, ready/merge expected0aa, main tree equality, deploy canónico.
+- Helpers **aún NO ejecutados** de 0aa: primer ensayo120s activos, segundo con DB
+  nueva240s activos (wall300), **ambos radio2.0m**, igual al trial previo sin
+  movimiento. Recorder nuevo `--prefix ID --duration 240` para primer ensayo,
+  `--duration 360 --checkpoint <freshDB>.exploration.json` para el segundo.
+  Arranque fresco helper también guarda snapshot y SHA raw del mapa primario
+  tras parar su writer; restore comprueba ese SHA antes de arrancar el primario.
+  No copiar los helpers viejos de e624 ni reusar IDs si ya se admitieron.
+
+Sigue pendiente desplegar y demostrar movimiento/observaciones útiles, primero
+sin frontier en el mapa actual y después con DB nueva separada; reconciliar cada
+ensayo y dejar el runtime primario ARMED, tres cámaras y sensores sanos.
+
+---
+
 ## Revisión final en calificación — 17 noviembre 2026, 12:54 MYT / 04:54 UTC
 
 Este bloque sustituye el head e624 del checkpoint de abajo. **No se desplegó aún.**
