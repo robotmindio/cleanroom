@@ -1,5 +1,6 @@
 {
   "schema": 1,
+  "method": "directional_joint_taylor_with_bounded_hessian",
   "frame": "base_footprint",
   "joint_positions_rad": {
     "arm_shoulder_pan": 0.0092,
@@ -78,9 +79,9 @@
     ]
   ],
   "support_distances_m": [
-    0.244,
-    0.226,
-    0.178,
+    0.236,
+    0.218,
+    0.17,
     0.162,
     0.159,
     0.136,
@@ -92,8 +93,8 @@
     0.219,
     0.181,
     0.163,
-    0.183,
-    0.229
+    0.175,
+    0.221
   ],
   "footprint": [
     [
@@ -117,28 +118,28 @@
       -0.181
     ],
     [
-      0.140616354316,
-      -0.118184727599
+      0.121302645817,
+      -0.126184727599
     ],
     [
-      0.24013682589,
-      -0.018664256024
+      0.23335475337,
+      -0.014132620045
     ],
     [
-      0.244,
-      -0.009337728694
+      0.236,
+      -0.007746429755
     ],
     [
-      0.244,
-      0.001498350905
+      0.236,
+      -9.2948034e-05
     ],
     [
-      0.239593548695,
-      0.012136465407
+      0.232811476175,
+      0.007604829429
     ],
     [
-      0.130393045569,
-      0.121336968534
+      0.11107933707,
+      0.129336968534
     ],
     [
       0.039466444203,
@@ -162,7 +163,7 @@
     ]
   ],
   "inscribed_radius_m": 0.136,
-  "maximum_radius_m": 0.2441786091719804,
+  "maximum_radius_m": 0.23612709961787348,
   "link_motion_bounds_m": {
     "base_plate_layer1-v5": 0.0,
     "drive_motor_mount-v11-2": 0.0,
@@ -198,10 +199,51 @@
     "so101_base_link": 0.0,
     "so101_shoulder_link": 0.0010878071460441387,
     "so101_upper_arm_link": 0.004644707892993909,
-    "so101_lower_arm_link": 0.006960266955597224,
+    "so101_lower_arm_link": 0.006960266955597223,
     "so101_wrist_link": 0.008144724532528874,
     "so101_gripper_link": 0.014208400783585904,
     "so101_moving_jaw_link": 0.017281442764938485,
+    "astra_camera_link": 0.0
+  },
+  "link_taylor_remainders_m": {
+    "base_plate_layer1-v5": 0.0,
+    "drive_motor_mount-v11-2": 0.0,
+    "ST3215_Servo_Motor-v1-2": 0.0,
+    "4-Omni-Directional-Wheel_Single_Body-v1-2": 0.0,
+    "omni_wheel_mount-v5-2": 0.0,
+    "drive_motor_mount-v11-1": 0.0,
+    "ST3215_Servo_Motor-v1-1": 0.0,
+    "omni_wheel_mount-v5-1": 0.0,
+    "4-Omni-Directional-Wheel_Single_Body-v1-1": 0.0,
+    "drive_motor_mount-v11": 0.0,
+    "ST3215_Servo_Motor-v1": 0.0,
+    "omni_wheel_mount-v5": 0.0,
+    "4-Omni-Directional-Wheel_Single_Body-v1": 0.0,
+    "servo_controller_mount-v3": 0.0,
+    "lipo_battery_mount-v3": 0.0,
+    "Battery---Battery-5.2-Ah-DC5521-Plug-v2": 0.0,
+    "94868A713_NO-THREADS_Female-Threaded-Hex-Standoff": 0.0,
+    "base_plate_layer2-v3": 0.0,
+    "Camera-Mount-v8": 0.0,
+    "Camera-Model-v3": 0.0,
+    "94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-1": 0.0,
+    "94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-2": 0.0,
+    "94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-3": 0.0,
+    "94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-4": 0.0,
+    "94868A713_NO-THREADS_Female-Threaded-Hex-Standoff-5": 0.0,
+    "robotskin_lidar_mount": 0.0,
+    "ld06_body": 0.0,
+    "astra_pro_compact_mount": 0.0,
+    "rpi5_through_plate": 0.0,
+    "rpi5_usb_carrier": 0.0,
+    "rpi5_table": 0.0,
+    "so101_base_link": 0.0,
+    "so101_shoulder_link": 1.0878252763747598e-05,
+    "so101_upper_arm_link": 9.920997683782309e-05,
+    "so101_lower_arm_link": 0.0002184594728751526,
+    "so101_wrist_link": 0.00033684625260521265,
+    "so101_gripper_link": 0.0006641345041739314,
+    "so101_moving_jaw_link": 0.000897005510820488,
     "astra_camera_link": 0.0
   },
   "source_sha256": {

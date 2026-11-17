@@ -63,7 +63,7 @@ def test_native_routes_fit_the_body_without_extra_wall_clearance(tmp_path, scene
         goal.pose.position.x = -0.8
         yaw = 0.0
     elif scene == "backward_exit":
-        # The CAD body fits, but its 0.409 m length cannot turn across this
+        # The CAD body fits, but its projected length cannot turn across this
         # 0.40 m corridor before backing out of the dead end.
         grid[[35, 44], 30:] = 100
         grid[:, 46] = 100

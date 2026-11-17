@@ -64,7 +64,7 @@ exactly that body, with no fixed clearance beyond it. `FootprintApproach` uses
 the same body and Nav2's native holonomic collision prediction to reduce speed
 only when its projected motion would intersect scan returns. Parallel walls
 outside the body therefore permit straight travel; turning still checks the
-corners swept by the rotation. The 3.3-second horizon covers the measured
+corners swept by the rotation. The 5-second horizon covers the measured
 linear/angular stopping bounds and uncertainty, checked against the acceptance
 record at startup. Costmap inflation is a soft cost field, not extra footprint
 padding; local inflation still encloses the corners so

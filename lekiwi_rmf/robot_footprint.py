@@ -88,7 +88,9 @@ def physical_geometry(root, robot):
             else:
                 raise ValueError(f'unsupported physical geometry on {link.get("name")}')
             matrix = origin(visual.find('origin'))
-            geometry.append((link.get('name'), points @ matrix[:3, :3].T + matrix[:3, 3]))
+            # Binary STL repeats triangle vertices; retain the exact vertex set
+            # without paying for duplicate Jacobians in every direction.
+            geometry.append((link.get('name'), np.unique(points @ matrix[:3, :3].T + matrix[:3, 3], axis=0)))
     return geometry, sources
 
 
@@ -101,23 +103,36 @@ def cad_footprint(root, positions, tolerance):
     normals = np.column_stack((np.cos(np.arange(NORMAL_COUNT) * 2 * math.pi / NORMAL_COUNT),
                                np.sin(np.arange(NORMAL_COUNT) * 2 * math.pi / NORMAL_COUNT)))
     supports = np.full(NORMAL_COUNT, -np.inf)
-    allowances = {}
+    allowances, remainders = {}, {}
     for name, local in geometry:
         matrix = world[name]
         points = local @ matrix[:3, :3].T + matrix[:3, 3]
-        displacement = 0.0
+        joints = []
         frame = name
         while frame != 'base_footprint':
             joint = parents[frame]
             if joint.get('name') in axes:
                 center, axis = axes[joint.get('name')]
-                radius = np.linalg.norm(np.cross(points - center, axis / np.linalg.norm(axis)), axis=1).max()
-                # Telescoping the serial rotations bounds every intermediate
-                # angle, not just sampled corners of the joint-tolerance box.
-                displacement += 2 * math.sin(tolerance / 2) * radius
+                axis = axis / np.linalg.norm(axis)
+                radius = np.linalg.norm(np.cross(points - center, axis), axis=1).max()
+                joints.append((center, axis, float(radius)))
             frame = joint.find('parent').get('link')
-        allowances[name] = max(allowances.get(name, 0.0), float(displacement))
-        supports = np.maximum(supports, (points[:, :2] @ normals.T).max(axis=0) + displacement + MODEL_ALLOWANCE_M)
+        joints.reverse()  # Proximal to distal.
+        motions = [2 * math.sin(tolerance / 2) * joint[2] for joint in joints]
+        # For j <= k, H[j,k] = axis[j] x J[k], so its norm is at most
+        # the perpendicular reach of the distal joint k. Distal motion can
+        # enlarge that reach by no more than the telescoping rotation bound.
+        # Each distal index k occurs 2*k+1 times in the symmetric Hessian.
+        remainder = .5 * tolerance**2 * sum(
+            (2 * index + 1) * (joint[2] + sum(motions[index + 1:]))
+            for index, joint in enumerate(joints))
+        directional = points[:, :2] @ normals.T
+        for center, axis, _ in joints:
+            derivative = np.cross(axis, points - center)
+            directional += tolerance * np.abs(derivative[:, :2] @ normals.T)
+        allowances[name] = max(allowances.get(name, 0.0), float(sum(motions)))
+        remainders[name] = max(remainders.get(name, 0.0), float(remainder))
+        supports = np.maximum(supports, directional.max(axis=0) + remainder + MODEL_ALLOWANCE_M)
     # Round supporting lines outwards; never approximate by an inscribed hull.
     supports = np.ceil(supports * 1000) / 1000
     vertices = []
@@ -132,9 +147,11 @@ def cad_footprint(root, positions, tolerance):
     vertices = vertices[np.argsort(np.arctan2(vertices[:, 1], vertices[:, 0]))]
     for filename in ('urdf/lekiwi_cad.urdf', 'urdf/lekiwi.urdf.xacro', 'config/safety_production.yaml'):
         sources[filename] = hashlib.sha256((root / filename).read_bytes()).hexdigest()
-    return {'schema': 1, 'frame': 'base_footprint', 'joint_positions_rad': positions,
+    return {'schema': 1, 'method': 'directional_joint_taylor_with_bounded_hessian',
+            'frame': 'base_footprint', 'joint_positions_rad': positions,
             'joint_tolerance_rad': tolerance, 'model_allowance_m': MODEL_ALLOWANCE_M,
             'normals': normals.tolist(), 'support_distances_m': supports.tolist(),
             'footprint': vertices.tolist(), 'inscribed_radius_m': float(supports.min()),
             'maximum_radius_m': float(np.linalg.norm(vertices, axis=1).max()),
-            'link_motion_bounds_m': allowances, 'source_sha256': dict(sorted(sources.items()))}
+            'link_motion_bounds_m': allowances, 'link_taylor_remainders_m': remainders,
+            'source_sha256': dict(sorted(sources.items()))}

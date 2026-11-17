@@ -138,6 +138,16 @@ def test_real_front_left_returns_outside_the_cad_body_do_not_strand_the_base(mon
     assert request(points, velocity) == pytest.approx(velocity)
 
 
+def test_joint_uncertainty_does_not_turn_external_space_into_body_overlap(monitor):
+    request, _, _ = monitor
+    point = [(.1817114438, .0684261009)]
+    assert request(point, (0., 0., 0.)) == pytest.approx((0., 0., 0.))
+    assert request(point, (-.05, 0., 0.)) == pytest.approx((-.05, 0., 0.))
+    # Retain the obstacle: motion toward it must still be reduced.
+    forward = request(point, (.05, 0., 0.))
+    assert 0 <= forward[0] < .05
+
+
 def test_stale_scan_still_stops(monitor):
     request, _, _ = monitor
     velocity = (0.25, 0.0, 0.0)

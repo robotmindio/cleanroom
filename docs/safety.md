@@ -107,7 +107,7 @@ accepted footprint and padding to match both tracked Nav2 costmaps. The current
 collision monitor uses that exact body for `StopZone` and `FootprintApproach`,
 with no static clearance beyond it. The predictive guard uses the commanded
 translation and rotation to project the body's motion, reducing speed if it
-would intersect a scan return within 3.3 seconds. Its horizon must cover the
+would intersect a scan return within 5 seconds. Its horizon must cover the
 recorded stop latency and each direction's stopping distance plus uncertainty,
 with one simulation step reserved. Side walls outside the moving body do not
 stop parallel travel; a turn that sweeps a corner into them reduces speed.

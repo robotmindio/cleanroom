@@ -19,14 +19,18 @@ physical parts and are excluded. Mesh source hashes are recorded in
 [`evidence/navigation-footprint-20261117.json`](evidence/navigation-footprint-20261117.json).
 
 The generator projects every physical part into `base_footprint` and bounds all
-joint angles within the production `travel_stow` tolerance of 0.02 rad. For each
-part, the sum of `2*sin(tolerance/2)*radius` over its movable ancestors bounds its
-maximum displacement. Telescoping the serial rotations makes this conservative
-throughout the continuous angle range, rather than only at sampled endpoints.
-The existing 5 mm model allowance is added separately. Sixteen supporting lines
-are rounded outward to a millimetre and intersected to enclose the result.
+joint angles within the production `travel_stow` tolerance of 0.02 rad. It uses
+per-vertex directional joint derivatives and a conservative Taylor remainder.
+For ancestor joints j <= k, the mixed derivative is `axis_j × J_k`; its norm is
+bounded by the perpendicular reach of distal joint k. That reach can grow by at
+most the sum of distal `2*sin(tolerance/2)*radius` displacements. Summing these
+bounds over the Hessian and multiplying by `tolerance²/2` encloses every
+intermediate joint angle. The independent 5 mm model allowance is retained.
+Sixteen supporting lines are rounded outward to a millimetre and intersected.
+The certificate records both the original motion bounds and the tighter Taylor
+remainders (at most 0.898 mm).
 
-The generated body has a 0.136 m inscribed radius and a 0.244179 m maximum radius.
+The generated body has a 0.136 m inscribed radius and a 0.236128 m maximum radius.
 Both costmaps, the overlap stop and predictive braking use this same polygon.
 Explore's centre prefilter uses its inscribed radius; its full-body route checks
 remain active. The existing 1.10 m task-region stopping reserve and 0.33 m RMF/map
@@ -51,9 +55,10 @@ retained. Its expected geometry is corrected to the CAD certificate. With the
 smaller physical radius, conservatively expressing the original rotational
 stopping-distance bound as a time requires a longer predictive horizon:
 
-`max(0.447666/0.25, 0.307951/(0.244178609*0.40)) + 0.05 < 3.3 s`.
+`max(0.447666/0.25, 0.307951/(0.236127100*0.40)) + 0.05 + 1.524829 < 5 s`.
 
-`FootprintApproach` therefore uses 3.3 seconds. It still considers the commanded
+`FootprintApproach` therefore uses 5 seconds, including a separate reserve for
+the measured command-stop latency. It still considers the commanded
 translation and rotation; nearby points outside the swept body permit travel,
 and actual overlap or stale laser data still stops the base.
 
@@ -77,3 +82,9 @@ directional braking reserves and bounded test limits in
 fixture. The read-only startup checker also limits lifecycle discovery/RPCs to
 4 Hz per node, independently of incoming sensor callback frequency, while
 retaining its existing reply timeout and readiness/freshness criteria.
+
+The first physical trial with an isotropic joint-displacement expansion stopped
+on a return at (0.181711, 0.068426) m. Its x+y was 0.250138 m, while every physical
+CAD part at the measured pose stayed below 0.222941 m. The directional bound
+retains the full joint/model allowances while excluding this excessive isotropic
+margin. The measured return remains an obstacle for predicted motion toward it.
