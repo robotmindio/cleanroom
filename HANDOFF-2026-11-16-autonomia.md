@@ -1,3 +1,59 @@
+## Revisión final en calificación — 17 noviembre 2026, 12:54 MYT / 04:54 UTC
+
+Este bloque sustituye el head e624 del checkpoint de abajo. **No se desplegó aún.**
+
+- PR #192 actualizado a **0aa796bebe74d7d7cce926d6d6896042a74e1dfc**, fuente limpia/subida,
+  mismo worktree locked `exploration-active-bootstrap-20261117`.
+  Sólo cambia una expectativa en `test_exploration_recovery.py` sobre e624:
+  cuando todos los targets fallan, la nueva observación local también debe intentarse
+  y su fallo sigue incomplete. Ahora comprueba las dos tentativas y el mensaje nuevo.
+  Ambos casos focalizados pasaron (2/2, 18.47 s); no cambió código runtime ni límites.
+- e624: Pi terminó **16/16, 126.62 s**, sello verificado. Compute encontró ese único
+  fallo de expectativa en recovery (23/24), se detuvo la unidad durante owner_guard;
+  **e624 compute no está sellada/calificada**. Se preservan logs/resultados.
+  Hosted e624 pasó 109/110 suites, único fallo el mismo test; quatro checks CodeQL
+  verdes, build-test-lint falló. Log privado `bootstrap-e62411f-hosted-failure.log`.
+- **Nuevos staging canónicos 0aa activos** en compute y Pi:
+  `lekiwi-stage-bootstrap-0aa796b.service` y
+  `lekiwi-stage-device-bootstrap-0aa796b.service`; logs homónimos en
+  `~/.ros/lekiwi/stage-bootstrap-0aa796b.log` y `stage-device-bootstrap-0aa796b.log`.
+  Fuentes detach/locked, entry Pi SHA c6d8665c... byte-exacto del script tracked.
+  Se esperan 110 compute/16 Pi y ambos sellos; no editar fuentes de release.
+- Runtime compute sigue **parado de forma planificada y robot torque-off apoyado**
+  desde los dos fresh stow y disarm success descritos abajo. Selección compute/Pi
+  sigue e74683f; servicios Pi activos. Restaurar current/rearm antes del deploy.
+- Helpers finales **preparados, NO ejecutados** en bootstrap:
+  `deploy-bootstrap-0aa796b-20261117.sh`;
+  `run-bounded-explore-bootstrap-0aa796b-20261117.py`, ID
+  `qualification-explore-bootstrap-0aa796b-20261117-1`;
+  `run-bounded-explore-fresh-map-0aa796b-20261117.py`, ID
+  `qualification-explore-fresh-map-0aa796b-20261117-1`.
+  Ambos ensayos 120 s activos/radio2.5m, wall180s, admiten una vez, cancel/reconcile
+  y recursos libres requeridos. Recorder nuevo
+  `record-bootstrap-motion-and-growth-20261117.py --prefix ID --duration240`
+  mide odom y área del mapa y acepta `--checkpoint` para el mapa nuevo.
+- Para demostrar el caso nuevo físicamente, helpers preparados
+  `start-fresh-map-bootstrap-0aa796b-20261117.sh` y
+  `restore-primary-map-after-bootstrap-0aa796b-20261117.sh`: usan el launcher tracked
+  `ros-start.sh` y su argumento existente rtabmap_database, DB separada
+  `bootstrap/fresh-map-bootstrap-0aa796b-20261117/rtabmap.db`, unidad user
+  `lekiwi-qualification-fresh-map-0aa796b`. Exigen dos stow frescos/disarm success
+  antes de cada parada y restauran servicio principal + rearm/readiness.
+  No arrancar esa unidad hasta desplegar/validar la candidata canónica.
+- Backup consistente del mapa principal antes de ensayos:
+  `map-before-bootstrap-fix-20261117/rtabmap.db`, integrity ok, 17,530,880 bytes,
+  SHA **71820a0a7814cbd1ae18c474b8514e959248686656f559587c5120be40fcf116**.
+  Memoria espacial: `spatial-before-bootstrap-fix-20261117.sqlite3`, integrity ok,
+  SHA **8b98abff02270a1a36f1d848d3a89ba20b506a8f9c3a1347badb2c0a662cd546**.
+  No reemplazar el mapa de producción ni borrar historia para obtener aceptación.
+
+Próximo: terminar y verificar 0aa compute/device + CI; review/merge expected head;
+restaurar current/rearm, deploy canónico, preflight/recorder/ensayo inicial sin
+frontiers, reconciliar; ensayo con DB nueva separada, reconciliar y restaurar
+mapa/runtime/ARMED. **No terminar sin movimiento y observación útiles demostrados.**
+
+---
+
 ## Corrección activa — 17 noviembre 2026, 12:44 MYT / 04:44 UTC
 
 El usuario rechazó expresamente dar por terminada la autonomía con cero targets
