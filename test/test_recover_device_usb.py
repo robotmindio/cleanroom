@@ -40,6 +40,9 @@ class Remote:
         if (hub, action) == self.fail:
             raise RuntimeError('connection failed')
 
+    def require_all_off(self, hubs):
+        pass
+
 
 HUBS = ['2', '3', '5', '4']
 
@@ -212,3 +215,39 @@ def test_topology_rejects_a_supply_cycle_that_would_drop_storage_or_network(tmp_
         (root / 'usb3').unlink()
     with pytest.raises(RuntimeError):
         usb.usb_topology(root, model)
+
+
+def test_live_baseline_uses_recent_adequate_history_instead_of_stale_oldest_sample():
+    samples = [{'received': 9.51, 'stamp': 9.49},
+               {'received': 9.79, 'stamp': 9.78},
+               {'received': 9.90, 'stamp': 9.89},
+               {'received': 10., 'stamp': 9.99}]
+    assert usb.joint_baseline(samples, 10., 10.01) is samples[1]
+
+
+def test_live_baseline_waits_for_real_history_and_rejects_stale_source_samples():
+    assert usb.joint_baseline([{'received': 9.9, 'stamp': 9.9}], 10., 10.) is None
+    assert usb.joint_baseline([{'received': 9.7, 'stamp': 9.4}], 10., 10.) is None
+
+
+@pytest.mark.parametrize('output,expected', [
+    ('  Port 1: 0000 off\n  Port 2: 0000 off\n', True),
+    ('  Port 1: 0080 off\n', True),
+    ('  Port 1: 0000 off\n  Port 2: 0100 power\n', False),
+    ('  Port 1: 02a0 power 5gbps Rx.Detect\n', False),
+    ('no hub found', False),
+])
+def test_power_readback_requires_every_port_off(output, expected):
+    assert usb.ports_off(output) == expected
+
+
+def test_power_readback_failure_restores_every_hub():
+    remote = Remote()
+
+    def powered(hubs):
+        raise RuntimeError('hub still powered')
+
+    remote.require_all_off = powered
+    with pytest.raises(RuntimeError, match='still powered'):
+        run(proof, remote)
+    assert remote.calls[-4:] == [(h, 'on') for h in HUBS]

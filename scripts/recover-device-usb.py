@@ -14,6 +14,7 @@ import json
 import math
 import os
 from pathlib import PurePosixPath
+import re
 import shlex
 import subprocess
 import time
@@ -68,18 +69,19 @@ def require_off(proof):
 def cycle_usb(probe, remote, hubs, audit, pause=time.sleep, clock=time.monotonic):
     """Recheck before every OFF; independently schedule restoration before any OFF."""
     proof = probe()
-    require_off(proof)
     audit({'event': 'initial_gate', 'proof': proof})
+    require_off(proof)
     remote.schedule_restore(hubs)
     deadline = clock() + 10
     try:
         for hub in hubs:
             proof = probe()
+            audit({'event': 'before_off', 'hub': hub, 'proof': proof})
             require_off(proof)
             if clock() >= deadline:
                 raise RuntimeError('USB OFF window expired; restoring power')
-            audit({'event': 'before_off', 'hub': hub, 'proof': proof})
             remote.power(hub, 'off')
+        remote.require_all_off(hubs)
         pause(3)
     finally:
         # Attempt every hub even if restoring an earlier hub fails. The Pi-local
@@ -154,8 +156,21 @@ class Remote:
     def power(self, hub, action):
         output = self.run(['sudo', '-n', self.tool, '-e', '-l', hub, '-a', action])
         self.audit({'event': 'power', 'hub': hub, 'action': action, 'output': output})
+        if action == 'off' and not ports_off(output.split('New status for hub')[-1]):
+            raise RuntimeError(f'hub {hub} did not confirm USB power off')
+
+    def require_all_off(self, hubs):
+        for hub in hubs:
+            output = self.run(['sudo', '-n', self.tool, '-e', '-l', hub])
+            self.audit({'event': 'off_readback', 'hub': hub, 'output': output})
+            if not ports_off(output):
+                raise RuntimeError(f'hub {hub} is powered; shared USB supply never turned off')
 
     def schedule_restore(self, hubs):
+        active = self.run(['systemctl', '--user', 'list-units', '--plain', '--no-legend',
+                           '--state=active,activating', 'lekiwi-usb-restore-*'])
+        if active.strip():
+            raise RuntimeError('previous USB restoration still active; wait for it to finish')
         # No &&: restoration of subsequent hubs must survive individual failures.
         restore = '\n'.join(shlex.join(['timeout', '3s', 'sudo', '-n', self.tool, '-e', '-l', h, '-a', 'on'])
                             for h in hubs)
@@ -169,6 +184,11 @@ class Remote:
         self.run(['systemctl', '--user', 'is-active', unit + '.timer'])
         self.run(['test', '-x', self.tool])
         self.audit({'event': 'restore_timer', 'unit': unit})
+
+
+def ports_off(output):
+    ports = re.findall(r'^\s*Port \d+:.*$', output, flags=re.MULTILINE)
+    return bool(ports) and all(re.search(r'\boff\b', line) for line in ports)
 
 
 class LiveProbe:
@@ -243,8 +263,9 @@ class LiveProbe:
                 proof = {k: {'value': v['value'], 'age': now - v['received'],
                              **({'stamp_age': ros_now - v['stamp']} if v['stamp'] is not None else {})}
                          for k, v in self.values.items()}
-                baseline = next((v for v in self.joints
-                                 if 0.2 <= self.values['joints']['received'] - v['received'] <= MAX_AGE), None)
+                baseline = joint_baseline(self.joints, self.values['joints']['received'], ros_now)
+                if baseline is None:
+                    continue
                 window = [v['value'] for v in self.joints if baseline and v['received'] >= baseline['received']]
                 proof['joints'].update(baseline=baseline['value'] if baseline else {},
                                        baseline_stamp_age=ros_now - baseline['stamp'] if baseline else float('inf'),
@@ -260,6 +281,13 @@ class LiveProbe:
     def close(self):
         self.node.destroy_node()
         self.ros.try_shutdown()
+
+
+def joint_baseline(samples, latest_receipt, ros_now):
+    """Use the most recent adequate baseline, never an older stale source sample."""
+    return next((v for v in reversed(samples)
+                 if 0.2 <= latest_receipt - v['received'] <= MAX_AGE
+                 and -FUTURE_GRACE <= ros_now - v['stamp'] <= MAX_AGE), None)
 
 
 def main():
