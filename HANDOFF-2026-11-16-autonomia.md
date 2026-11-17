@@ -1,3 +1,57 @@
+## 2dc calificada; Pi desconectada ANTES del despliegue
+
+Head final limpio y publicado: `2dc7fcaf087189094583319906b4d3442a814bd5`,
+PR #194 todavía draft. Compute pasó 111/111 en 1558.45 s mediante staging canónico
+completo, un worker CTest, prioridad normal y TODOS los plazos originales. Unidad
+`lekiwi-stage-cad-single-worker-20261117.service` terminó inactiva/success/exit0.
+Sello compute verificado independientemente después de terminar. Pi pasó 16/16 en
+102.43 s y su sello device se verificó independientemente antes de perder conexión.
+Los cinco checks hospedados están verdes en ese SHA. Revisión de código publicada
+como COMMENT (self-review) id5937609924. No se ha mergeado ni desplegado 2dc.
+
+El primer intento compute 107/111 y las cuatro causas están íntegros en
+`2dc-first-qualification/`; no se mezclaron reportes para sellar. La repetición
+completa pasó training185.37 s, Nav2 48.45 s, simulación física y MoveIt9.90 s.
+Log final: `stage-compute-single-worker.log` en el directorio privado habitual.
+
+BLOQUEO NUEVO: la Pi robot-1 (100.107.20.66) aparece offline desde
+2026-11-17 11:30:00 UTC / 19:30 MYT. Tailscale ping y dos accesos SSH agotaron
+plazo; LAN conocidas .229/.202 y robot-1.local tampoco respondieron. Preflight
+`device-unreachable-2dc7fca`: 0 joints, 0 cámaras, permisos base/arm false,
+160 estados invalid-source, SIN stow fresco. No reiniciar/cortar torque ni mandar
+movimiento con estas lecturas. Se preguntó al usuario si sigue encendido/Wi-Fi;
+respuesta pendiente. La última observación REAL anterior era ARMED y stow.010712.
+No afirmar armado o postura actuales con la Pi fuera de red.
+
+Current compute sigue216; última selección Pi verificada también216, previousffc.
+El wrapper `deploy-final.sh` NO se ejecutó para2dc y `deploy-2dc7fca.log` no existe.
+Fiber `fiber-final-deploy-ready.json` confirmó base/arm/query libres antes del
+intento de acceso; ninguna nueva tarea admitida, gen60 ya cancelada/stopconfirmed.
+Las unidades de calificación terminaron; no hay recorder ni movimiento propios.
+
+Al regresar la Pi: releer recursos Fiber y estado real, verificar otra vez ambos
+sellos, ejecutar deploy-final.sh (canónico con stow fresco antes de cada corte),
+luego verify-runtime.py (espera2dc/horizonte5, outputruntime-directional.json).
+Captura estacionaria preparada `capture-directional.py`, salidas NUEVAS
+`directional-after.json` y `directional-after-model.urdf`. No sobrescribir previas.
+Comparación gráfica privada: `cad-envelope-comparison.svg`, postura medida/CAD/
+contorno certificado/retorno real; no cambia fuente ni aporta aceptación física.
+
+Después del deploy: withdrawal15cm por Nav2 con withdraw-target.py2dc; recorder
+300 s antes del helper run-bounded-task.py ID2dc navigate withdraw-target.json.
+Explore: recorder600 s, tarea240 s/radio3/wall300. Search: recorder360 s,
+tarea90 s/1m/wall150. Detener cada recorder propio con SIGUSR1 SOLO después de
+terminal/stopconfirmed/recursos libres. Helper ahora valida identidad/PID del
+recorder también justo antes de admitir, y exige las tres claves de recursos.
+JWT se renueva en401 sin cambiar key/ID/generación. No usar runners viejos.
+
+Falta aceptación física del contorno final; NO mergear solo por pruebas verdes.
+Mantener backups del mapa y archivos de releases retiradas. Tras prueba efectiva,
+actualizar PR/review, merge con SHA exacto y mainFF/árbol idéntico a desplegado.
+Calibración y habilidades entrenadas siguen pendientes; no inventar aprobación.
+
+---
+
 ## Recalificación 2dc en serie — sin despliegue nuevo
 
 El primer staging compute 2dc terminó 107/111 en 1034.77 s. Hubo timeouts de

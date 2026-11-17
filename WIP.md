@@ -1,12 +1,15 @@
-# CAD footprint final acceptance
+# Qualified CAD footprint awaiting robot connectivity
 
-PR #194 / head 2dc7fca is clean/pushed. Pi 16/16 passed; device seal verified.
-First compute run failed 4/111 under load; full evidence preserved in
-2dc-first-qualification. No seal or deploy. Full canonical retry with one CTest
-worker and normal priority is active in lekiwi-stage-cad-single-worker-20261117.
-Log: stage-compute-single-worker.log. All scenario/suite deadlines unchanged.
+PR #194 head 2dc7fca is clean/pushed. Full canonical compute111/111 passed1558.45s;
+Pi16/16 passed102.43s; both seals independently verified. Five hosted checks green.
+Original loaded failures preserved in2dc-first-qualification; no deadlines changed.
 
-Runtime remains 216 ARMED/stowed, maximum fresh error .010712 rad.
-Fiber resources free; no owned motion or recorder active; wrist remains absent.
-Next: all111 pass, seals, canonical deployment, physical withdrawal/Explore/Search.
-Do not merge before acceptance. Calibration and trained skills remain open.
+Pi robot-1 went offline11:30UTC/19:30MYT before deployment. SSH/tailnet/knownLAN
+unreachable; preflight has0joints/0images, permissionsfalse, invalid-source160.
+User asked whether still powered/onWi-Fi; awaiting answer. No fresh stow: no cuts,
+restarts or motion. Last observed runtime216; compute current remains216.
+No new task admitted, no own recorder or staging process active.
+
+Next: connectivity, fresh readings/resources/seals, canonicaldeploy2dc, parameters,
+guarded withdrawal, Explore/nativeSearch, physical acceptance then merge/mainFF.
+Do not merge before physical proof. See handoff for exact paths and prepared tools.
