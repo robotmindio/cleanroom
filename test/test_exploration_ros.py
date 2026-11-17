@@ -869,7 +869,9 @@ def test_route_uses_measured_start_but_preserves_other_footprint_checks(fault):
     from lekiwi_rmf.exploration import load_navigation_footprint
     footprint, _, margin = load_navigation_footprint(FilePath(__file__).parents[1] / "config/nav2_params.yaml")
     grid = np.zeros((80, 80), dtype=np.int16)
-    grid[45, 42] = -1
+    # The CAD nose clears this cell at the measured heading, but the native
+    # lattice's rounded heading sweeps it into unknown space.
+    grid[42, 44] = -1
     geometry = (grid, 0.05, (-2.0, -2.0, 0.0))
     explorer = SimpleNamespace(_footprint=footprint, _region_margin=margin, config={"free_threshold": 20})
     explorer._footprint_clear = lambda pose, grid: RobotExplorer._footprint_clear(explorer, pose, grid)

@@ -70,7 +70,7 @@
     "parameters": {
      "allow_exploration": false,
      "allow_search": false,
-     "clearance_m": 0.22,
+     "clearance_m": 0.136,
      "data_timeout_sec": 1.0,
      "database_path": "$(env HOME)/.ros/lekiwi_rtabmap_sim.db",
      "free_threshold": 20,

@@ -27,7 +27,18 @@ def test_production_envelope_is_reproducible_from_unchanged_cad_and_stow(envelop
     assert config['stow_tolerance'] == .02
     assert envelope['model_allowance_m'] == .005
     pose = dict(zip(config['stow_joint_names'], config['stow_joint_positions']))
-    assert cad_footprint(ROOT, pose, config['stow_tolerance']) == envelope
+    actual = cad_footprint(ROOT, pose, config['stow_tolerance'])
+    numeric = {'normals', 'support_distances_m', 'footprint', 'inscribed_radius_m', 'maximum_radius_m'}
+    for key in numeric:
+        np.testing.assert_allclose(actual[key], envelope[key], atol=1e-11, rtol=0)
+    assert actual['link_motion_bounds_m'].keys() == envelope['link_motion_bounds_m'].keys()
+    for name, bound in actual['link_motion_bounds_m'].items():
+        assert bound == pytest.approx(envelope['link_motion_bounds_m'][name], abs=1e-12, rel=0)
+    # Hashes, references, tolerances and model allowance must match exactly;
+    # harmless platform floating-point differences are confined to geometry.
+    strict = actual.keys() - numeric - {'link_motion_bounds_m'}
+    assert actual.keys() == envelope.keys()
+    assert {k: actual[k] for k in strict} == {k: envelope[k] for k in strict}
     valid, reason = validate_tracked_acceptance(ROOT / 'config')
     assert valid, reason
     params = yaml.safe_load((ROOT / 'config/nav2_params.yaml').read_text())

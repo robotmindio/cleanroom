@@ -82,7 +82,7 @@
     "parameters": {
      "allow_exploration": true,
      "allow_search": true,
-     "clearance_m": 0.22,
+     "clearance_m": 0.136,
      "data_timeout_sec": 1.0,
      "database_path": "$(env HOME)/.ros/lekiwi_rtabmap_floor_v2.db",
      "free_threshold": 20,
