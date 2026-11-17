@@ -1,3 +1,34 @@
+## Candidata final CAD 51ef796 — calificación en curso
+
+- PR194 head **51ef79643d03b67ecbdcbb4467d9ad084660b1ac**, limpio/subido.
+  Runtime sigue ffc9566; main af9e42e. Ningún deploy ni movimiento nuevo todavía.
+- La primera compute2d51 se detuvo tras81/111 suites completadas: detectó
+  snapshots del prefiltro/huella viejos y6 fixtures de rumbo redondeado dependientes
+  del rectángulo. Se preservó el log; no quedó sellada ni se desplegó.
+  La Pi2d51 falló dos deadlines de5s en service_installation al correr en paralelo;
+  se guardó XML/log y la repetición canónica serial pasó16/16,87.47s, sin cambiar
+  deadlines ni runtime. Su sello previo se conserva, sin seleccionar esa release.
+- 51ef solo añade snapshots correctos, el obstáculo CAD para conservar los6
+  casos de ruta y tolerancia numérica de1e-11m en reproducción del certificado
+  (hashes/config/modelo siguen exactos). Runtime de navegación idéntico a2d51.
+  Verificación local final50 casos CAD/snapshots/readiness,6 rutas y Ruff verdes.
+- Calificación final: compute user `lekiwi-stage-cad-final-20261117.service`, log
+  `~/.ros/lekiwi/qualification/20261117-cad-collision/stage-compute-final.log`;
+  Pi user `lekiwi-stage-cad-device-final-20261117.service`, log
+  `~/.ros/lekiwi/stage-cad-device-final-20261117.log`. Compute paralelo2, Pi serial1.
+  Fuentes51ef locked. CI run **44056267191**. Terminar/verificar sellos antes de deploy.
+- QueryObservations real ahora confirma **stream_ready=true** con frontal y muñeca
+  ausente. Fiber explore/search disponibles y recursos libres. Nada depende de
+  reparar la muñeca para continuar. Snapshot del mapa y geometría previa íntegros.
+- Helpers preparados actualizados a51ef: `verify-runtime.py`, `capture-after.py`,
+  `record.py`, `run-explore.py`. Prueba física única pendiente:
+  **qualification-explore-cad-footprint-51ef796-20261117-1**,240s/radio3/wall300.
+  Iniciar recorder primero, verificar nuevos parámetros y collision-clear reales;
+  admitir una vez y reconciliar ID/generación hasta parada confirmada/recursos libres.
+  No usar los helpers2d51. No afirmar movimiento ni protección despejada todavía.
+
+---
+
 ## Corrección de huella CAD en curso — 17 noviembre 2026
 
 El usuario exige resolver los bloqueos sin convertir la cámara de muñeca en
