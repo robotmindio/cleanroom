@@ -1,3 +1,67 @@
+## Actualización activa — 17 noviembre 2026, 10:16 MYT / 02:16 UTC
+
+- **PR #190 mergeado** con head guard tras cinco checks verdes (build-test-lint
+  21m49s, compute/device, static, coverage y CodeQL). Merge/main/origin-main:
+  **2ab33a01d59d5b6c8d845347b0771a410ccfc44b**. Main limpio. El backport del VL805
+  sigue aplicado y persistente; el robot sigue seleccionado/rearmado en 9503b92.
+- **PR #191 draft** https://github.com/robotmindio/cleanroom/pull/191,
+  head **e74683fce67a464377fd5e28411f1412af3b7672**, rama limpia/subida
+  `fix/exploration-mapping-startup`, worktree bloqueado
+  `/home/nex/roboto/cleanroom-worktrees/exploration-mapping-startup-20261117`.
+  Contiene sólo dos archivos sobre main: exploration_node.py y test_exploration_ros.py.
+  Espera observaciones map/SLAM/TF posteriores al cambio de modo y pose estable
+  antes de fijar el centro. Usa settle_sec y tolerancias SLAM existentes; feedback
+  starting para inicialización, paused para fallos reales. No cambia radio/margen,
+  freshness, cuotas, cancelación, default armed ni allow_reach.
+- Tres casos ROS reprodujeron el defecto en la fuente anterior (3 failed) y pasan
+  con el cambio. Se añadieron pose correction tardía y cancelación al iniciar.
+  Una ejecución combinada dio dos expectativas de feedback y un test unitario
+  cuyo deadline de módulo envejeció tras >100 s de ROS; los 38 unitarios pasan
+  ejecutados por archivo como CTest. Se corrigió el feedback con MappingStarting.
+  Otra ejecución encontró el logger rclpy de severidad dinámica; arreglado con
+  call sites separados. Los **seis casos de pause/recovery que fallaban pasan**
+  en 34.21 s. Ruff pasa. No presentar todavía todo el head final como calificado:
+  la matriz completa final se está ejecutando en staging canónico.
+- **Staging compute activo**: `lekiwi-stage-mapping-start-e74683f.service`, Nice10,
+  log `~/.ros/lekiwi/stage-mapping-start-e74683f.log`; release source bloqueado.
+  Build del paquete aún avanzaba (66% a 10:14), sin fallo. Reutiliza overlay nativo
+  9503b92; no se reconstruye la seleccionada.
+- **Staging device activo**: `lekiwi-stage-device-mapping-start-e74683f.service`,
+  log Pi `~/.ros/lekiwi/stage-device-mapping-start-e74683f.log`, entry canónico
+  `~/.ros/lekiwi/stage-device-mapping-start-e74683f-entry.sh` (hash c6d8665c... igual
+  al script tracked). Bundle e746 transferido, fuente detach/locked. No repetir
+  staging mientras esté activo. Hosted #191: cuatro checks CodeQL verdes; build/test
+  y coverage en curso. Verificar ambos sellos y todos los checks antes de merge/deploy.
+- Wrapper de deploy nuevo **preparado, no ejecutado**:
+  `bootstrap/deploy-mapping-start-e74683f-20261117.sh`. Exige árbol igual a main,
+  fuente limpia/head correcto/sello y usa deploy-split canónico más ssh-agent propio.
+  Tras merge #191 comparar el árbol; no ejecutar antes de la calificación completa.
+- Journals **ya archivados y vacuum completado**. El primer export textual terminó
+  SIGTERM/143 a los 15 minutos; se conserva como `.export.partial.gz`, no es backup
+  completo. Se rotaron journals y archivaron 92 archivos binarios: archivo privado
+  `pi-journal-archived-20261117.tar.zst`, validación zstd + tar completa,
+  **3,607,244,800 bytes** descomprimidos, SHA256
+  **c8387a86682d4ea7250c2f533480a0d8f5358232c26dde124183d2c321e5f4f3**.
+  `journalctl --vacuum-size=1G` liberó **2.1G**, dejando root Pi ~2.5G libres antes
+  del nuevo build, ~1GB journals. Recibo `pi-journal-vacuum-20261117.log` y `.files`.
+  Los procesos de export/archive/timers USB ya terminaron; sólo staging/CI propios
+  quedan activos, no goal físico ni recorder.
+- Snapshot consistente de la base después del fallo de transición:
+  `bootstrap/map-after-mapping-transition-20261117/rtabmap.db`, integrity=ok,
+  SHA256 **7c954eafd80ac7fbeae0c94c37a07eb3ac91817c9bfa13c88652bde32bf998b3**.
+  65 nodos, **los 56 IDs del backup anterior retenidos**, ninguno perdido. El
+  primer Node.time_enter fue actualizado por RTAB, explicando el aviso de cambio
+  de identidad; no afirmar que se borró la base. Ese tag merece seguimiento para
+  spatial memory, separado de la coherencia inicial que #191 está corrigiendo.
+
+Próximo: terminar calificación/CI, verificar seals, revisión propia explícita y
+merge #191 con expected head. Después deploy canónico con fresh travel_stow,
+readiness y rearm; repetir sensor/pose/mapping checks y un único Explore con nuevo
+ID y recorder. Gen55 ya está terminal, stop confirmado y recursos libres; no
+reusar su ID/UUID. Wrist JYU2C sigue ausente (-71), front GENERAL/Astra/lidar sanos.
+
+---
+
 ## Checkpoint actual — 17 noviembre 2026, 09:51 MYT / 01:51 UTC
 
 Este bloque sustituye el estado offline y los pendientes de device/deploy de abajo.
