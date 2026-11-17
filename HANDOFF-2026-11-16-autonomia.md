@@ -1,3 +1,34 @@
+## Verificación de arranque — 17 noviembre 2026, 10:35 MYT / 02:35 UTC
+
+- El Pi se reinició de forma controlada para verificar persistencia del fix. Gate
+  travel_stow fresco antes de disarm, RPC success, **nueve servos torque-off**
+  frescos y recursos libres, otro gate fresco antes de reboot. Ambos pasaron.
+- Boot ID cambió a `e2411503-fec9-47cc-8c75-2d6d2ebd4102`, kernel sigue
+  6.8.0-1068-raspi y el VL805 arrancó automáticamente con **DMA=40**, driver bound,
+  módulo de `updates/lekiwi`. Astra, CP2102 y **wrist JYU2C volvieron**. No hay error
+  de setup ni -71 en ese arranque. Las cinco unidades de dispositivo están activas.
+- Se ejecutó el rearm normal del repo tras verificar sensores; RPC success.
+  Probe `continue-20261117-kernel-reboot-rearmed.json`: ARMED, arm/base permissions
+  true, arm_stowed true, max error .012322 rad, front/wrist/Astra frescos, collision
+  clear. Por tanto el pendiente de wrist ausente de los bloques viejos está resuelto.
+  Evidencia: `pi-kernel-reboot-{before,after}.txt`, `before-kernel-reboot.json`,
+  `pi-kernel-reboot-rearm.log` y prefijos `continue-20261117-*kernel-reboot*` en bootstrap.
+- **e74683f device pasó 16/16** en 91.36 s, se selló y verificó independientemente.
+  La unidad transient de staging terminó antes del reboot; su registro systemd
+  puede desaparecer por ese reboot, pero log/XML/sello/fuente locked permanecen.
+- **Los cinco checks hosted de #191 ya están verdes**: compute/device build/test,
+  static, coverage y CodeQL. El PR sigue draft hasta terminar la calificación local
+  compute. Compute completó build y está ejecutando **109 suites**; recovery pasó
+  104.95 s, owner guard 163.33 s, y está entrando en exploration_ros. Sin fallos
+  reportados hasta ese punto. Unidad `lekiwi-stage-mapping-start-e74683f.service`
+  sigue activa; no repetir staging ni modificar la candidata.
+- El runtime ROS seleccionado sigue **9503b92 en ambos hosts**, rearmado. No se ha
+  ejecutado todavía el wrapper e746 ni una segunda prueba física. Gen55 terminal
+  y recursos libres. Siguiente paso: terminar/verificar sello compute, revisar y
+  mergear #191 con head e746, comparar árbol de main, deploy canónico y nuevo trial.
+
+---
+
 ## Actualización activa — 17 noviembre 2026, 10:16 MYT / 02:16 UTC
 
 - **PR #190 mergeado** con head guard tras cinco checks verdes (build-test-lint
