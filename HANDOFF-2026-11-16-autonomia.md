@@ -1,3 +1,66 @@
+## Ensayo físico y segundo bloqueo — 17 noviembre 2026, 13:30 MYT / 05:30 UTC
+
+**Seguir hasta demostrar navegación útil y arranque con mapa nuevo. No darlo por cerrado.**
+
+- PR **#192 mergeado**, expected head0aa; main/originmain/localmain limpio:
+  **21dd4444c996aa74f5fe31bfcc397901ff617823**, árbol igual a 0aa.
+  Cinco checks verdes, build-test-lint24m25s. Deploy canónico 0aa exit0, tres stow
+  frescos, readiness dos veces, ambos marcadores/current0aa, previous e746,
+  rearmado y tres cámaras frescas. Log `deploy-bootstrap-0aa796b-20261117.log`.
+- **Ensayo generación57**, ID `qualification-explore-bootstrap-0aa796b-20261117-1`,
+  radio2m/120s. Arrancó `observing_without_frontier`, giró y generó frontiers,
+  pero después repitió `START_OCCUPIED` del planner: el viejo pause/resume no
+  podía corregir la huella global inicial. Se canceló explícitamente:
+  **canceled, complete=false, stop confirmed, recursos libres**, visited0/unreachable0.
+  No reusar ese ID/gen; runner y recorder ya terminaron. Evidencia completa prefijo
+  del ID, cancel-start-footprint-gen57*, y `*-assessment.json`.
+  Entre admisión/terminal: 3134 muestras odom, giro **1.59950rad (~91.6°)**;
+  recorrido integrado .05987m (deriva durante giro; no llamarlo avance útil),
+  área conocida raw **3.3125→máximo5.8050m²**, último5.7900. Resultado regional .970m².
+  El bootstrap ya observa físicamente, **falta desbloquear navegación**.
+- **PR #193 draft**, head **ffc9566d6834ec8100475de1b81332183d13376d**, rama limpia/subida
+  `fix/exploration-start-footprint-bootstrap`, worktree locked
+  `/home/nex/roboto/cleanroom-worktrees/exploration-start-footprint-bootstrap-20261117`.
+  `StartingFootprintBlocked(Paused)` separa START_OCCUPIED y `_explore_step` lo
+  recupera con `_observe_step`. El contador sólo se reinicia cuando un route
+  global pasa; antes se borraba cada vez que aparecía un candidato y nunca
+  alcanzaba el paso local. No cambia Nav2/collision/stow/freshness/unknown policy.
+  Test nuevo reprodujo rojo el bucle (timeout20s); ambos casos relevantes verdes
+  **2/2 en16.15s**, Ruff pasa. 4archivos, 43add/8del.
+- Staging canónico ffc **activo, aún no calificado/sellado**:
+  `lekiwi-stage-start-footprint-ffc9566.service` (CTEST_PARALLEL_LEVEL2),
+  log `~/.ros/lekiwi/stage-start-footprint-ffc9566.log`;
+  Pi `lekiwi-stage-device-start-footprint-ffc9566.service`, log stage-device-*.
+  Fuentes detach/locked; entry Pi hashc6d8665c... exacto. CI run **44024126766**.
+  Esperados110suites compute (bootstrap21 casos ahora)/16Pi.
+- **Runtime compute parado de forma planificada otra vez**, robot apoyado torque-off:
+  dos check-travel-stow max-age.5 pasaron alrededor de05:27UTC; disarm success=True
+  confirmó los nueve sin torque. Selección compute/Pi sigue0aa; cinco servicios Pi
+  activos. Restaurar current/rearm después de calificar, antes de deploy canónico.
+- Nuevo backup tras el ensayo y cerrar writer:
+  `map-after-bootstrap-gen57-20261117/rtabmap.db`, integrityok,18,067,456bytes,
+  SHA **fe4e939dd3be3529c7236415daa22a889fde05bec776272c9238017d525cb157**.
+- Helpers ffc preparados, **NO ejecutados** en bootstrap:
+  `deploy-start-footprint-ffc9566-20261117.sh`;
+  `run-bounded-explore-start-footprint-ffc9566-20261117.py`, ID
+  `qualification-explore-start-footprint-ffc9566-20261117-1`,180s/radio2/wall240;
+  `run-bounded-explore-fresh-map-ffc9566-20261117.py`, ID
+  `qualification-explore-fresh-map-ffc9566-20261117-1`,240s/radio2/wall300.
+  Recorder **ya corregido** `record-bootstrap-motion-and-growth-20261117.py`
+  incluye QoSProfile/DurabilityPolicy, --duration300/360 respectivamente.
+  Su primer arranque 0aa falló por import antes de admitir; streams vacíos
+  preservados como `.init-failed`. Se corrigió y ensayo57 sí grabó completo.
+  Fresh helpers `start-fresh-map-bootstrap-ffc9566-20261117.sh` y
+  `restore-primary-map-after-bootstrap-ffc9566-20261117.sh` usan DB separada
+  `bootstrap/fresh-map-bootstrap-ffc9566-20261117/rtabmap.db` y unidad
+  `lekiwi-qualification-fresh-map-ffc9566`, con stow/disarm gates y SHA primario.
+
+Próximo: terminar sellos/CI ffc; restaurar0aa ARMED; review/merge expectedffc;
+deploy canónico con stow fresco. Repetir ensayo actual y comprobar avance real,
+no sólo giro; luego DB fresca separada, reconciliar y restaurar primario ARMED.
+
+---
+
 ## Sellos verificados / espera CI — 17 noviembre 2026, 13:09 MYT / 05:09 UTC
 
 - **0aa796b calificada y sellada en ambos roles**: 110/110 compute, 468.34 s;
