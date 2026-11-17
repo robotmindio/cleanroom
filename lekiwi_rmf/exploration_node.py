@@ -55,6 +55,10 @@ class ResponseTimeout(Paused):
     """A ROS peer did not answer before its deadline."""
 
 
+class MappingStarting(Paused):
+    """Expected mapping initialization, before any navigation is dispatched."""
+
+
 class Replan(Exception):
     """New evidence or a map revision invalidated the viewpoint being driven to."""
 
@@ -114,6 +118,7 @@ class RobotExplorer(Node):
         self._stage = "idle"
         self._rejection = ""
         self._map = None
+        self._map_stamp_ns = 0
         self._inputs = {}
         self._slam_seen = 0.0
         self._slam_reference = None
@@ -224,8 +229,10 @@ class RobotExplorer(Node):
     def _on_map(self, message):
         try:
             self._map = map_geometry(message, self.config["max_map_cells"])
+            self._map_stamp_ns = rclpy.time.Time.from_msg(message.header.stamp).nanoseconds
         except ValueError as error:
             self._map = None
+            self._map_stamp_ns = 0
             self.get_logger().error(str(error), throttle_duration_sec=5)
 
     def _mode_response(self, future, requested_at):
@@ -622,18 +629,23 @@ class RobotExplorer(Node):
         shutdown) or an unconfirmed navigation stop end it while paused.
         """
         self._stop_navigation()
-        self.get_logger().warning(f"exploration paused: {reason}")
-        self._stage = f"paused: {reason}"
+        def stage(reason):
+            return f"{'starting' if isinstance(reason, MappingStarting) else 'paused'}: {reason}"
+        if isinstance(reason, MappingStarting):
+            self.get_logger().info(f"exploration {stage(reason)}")
+        else:
+            self.get_logger().warning(f"exploration {stage(reason)}")
+        self._stage = stage(reason)
         goal.publish_feedback(feedback(stage=self._stage, **progress()))
         while True:
             try:
                 check()
                 break
             except Paused as current:
-                stage = f"paused: {current}"
-                if stage != self._stage:
-                    self._stage = stage
-                    goal.publish_feedback(feedback(stage=stage, **progress()))
+                current_stage = stage(current)
+                if current_stage != self._stage:
+                    self._stage = current_stage
+                    goal.publish_feedback(feedback(stage=current_stage, **progress()))
                 time.sleep(0.2)
         self.get_logger().info("exploration resumed")
 
@@ -651,15 +663,7 @@ class RobotExplorer(Node):
             # Start native mapping without inventing free space or a transform.
             mapping_requested = True
             self._set_mapping(True)
-
-            def starting_check():
-                return self._checkpoint(goal, deadline, None, radius)
-
-            try:
-                pose = starting_check()
-            except Paused as reason:
-                self._pause(goal, starting_check, reason, lambda: {})
-                pose = starting_check()
+            pose = self._mapping_start_pose(goal, deadline, radius)
             center = (pose.pose.position.x, pose.pose.position.y)
             if goal.request.resume_task_id:
                 state = self._resume_task(goal.request.resume_task_id)
@@ -754,6 +758,51 @@ class RobotExplorer(Node):
                 self._busy = False
                 self._stage = "idle"
         return result
+
+    def _mapping_start_pose(self, goal, deadline, radius):
+        """Anchor the bounded region in observations from the confirmed mapping mode.
+
+        The mode RPC can return while a localization map/TF is still fresh. Its
+        first mapping update can rebase coordinates without any physical motion.
+        Keep navigation stopped until map, SLAM and TF are from after the switch
+        and the pose has settled; all ordinary freshness/cancel/quota gates apply.
+        """
+        switched_ns = self.get_clock().now().nanoseconds
+        reference, stable_since = None, 0.0
+
+        def check():
+            nonlocal reference, stable_since
+            try:
+                pose = self._checkpoint(goal, deadline, None, radius)
+                slam, _ = self._inputs.get("slam", (None, 0.0))
+                if (self._map_stamp_ns <= switched_ns or slam is None
+                        or rclpy.time.Time.from_msg(slam.stamp).nanoseconds <= switched_ns
+                        or rclpy.time.Time.from_msg(pose.header.stamp).nanoseconds <= switched_ns):
+                    raise MappingStarting("waiting for post-switch mapping observations")
+            except Paused:
+                reference, stable_since = None, 0.0
+                raise
+            here, now = pose.pose, time.monotonic()
+            if reference is not None:
+                then = reference.pose
+                moved = (math.hypot(here.position.x - then.position.x, here.position.y - then.position.y)
+                         > self.config["slam_motion_tolerance_m"]
+                         or abs(math.remainder(2 * math.atan2(here.orientation.z, here.orientation.w)
+                                               - 2 * math.atan2(then.orientation.z, then.orientation.w),
+                                               2 * math.pi)) > self.config["slam_motion_tolerance_rad"])
+            else:
+                moved = True
+            if moved:
+                reference, stable_since = pose, now
+            if now - stable_since < self.config["settle_sec"]:
+                raise MappingStarting("waiting for mapping pose to settle")
+            return pose
+
+        try:
+            return check()
+        except Paused as reason:
+            self._pause(goal, check, reason, lambda: {})
+            return check()
 
     def _search_profile(self):
         c = self.config
