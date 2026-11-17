@@ -37,12 +37,16 @@ def test_failed_targets_get_one_second_pass_without_an_endless_retry(graph, reco
     assert handle.accepted
     result = response(handle.get_result_async(), timeout=TEST_TASK_DURATION)
     assert stages.count('retrying_failed_targets') == 1
+    # Exhausting the global candidates now attempts observation before each
+    # bounded retry, rather than treating their absence as completed coverage.
+    assert stages.count('observing_without_frontier') == (1 if recovers else 2)
     if recovers:
         assert result.status == GoalStatus.STATUS_SUCCEEDED
         assert result.result.visited_targets > 0 and result.result.unreachable_targets == 0
     else:
         assert result.status == GoalStatus.STATUS_ABORTED
-        assert result.result.message == 'remaining targets failed navigation'
+        assert not result.result.complete
+        assert result.result.message == 'unobserved space remains; Nav2 could not complete local observation'
         assert result.result.unreachable_targets > 0
     assert not explorer._task_file.exists()
 
