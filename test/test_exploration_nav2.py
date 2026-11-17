@@ -1,6 +1,7 @@
 """Load and execute the tracked exploration tree in the real Jazzy BT navigator."""
 
 from pathlib import Path
+import math
 import subprocess
 import threading
 from concurrent.futures import Future
@@ -10,7 +11,7 @@ from action_msgs.msg import GoalStatus
 from ament_index_python.packages import get_package_prefix
 from lifecycle_msgs.msg import Transition
 from lifecycle_msgs.srv import ChangeState
-from nav2_msgs.action import BackUp, ComputePathToPose, FollowPath, Spin, Wait
+from nav2_msgs.action import BackUp, ComputePathToPose, DriveOnHeading, FollowPath, Spin, Wait
 from nav2_msgs.srv import ClearEntireCostmap
 import pytest
 import rclpy
@@ -30,10 +31,7 @@ from test_exploration_ros import RobotPeers, response, wait
 ROOT = Path(__file__).parents[1]
 
 
-@pytest.mark.parametrize("failure", [
-    "none", "acknowledgement", "cancel", "planner", "controller", "backup", "cancel_recovery", "exhausted", "fatal",
-])
-def test_real_nav2_tree_recovers_with_the_same_target_and_cancels_its_actions(tmp_path, failure):
+def run_nav2_case(tmp_path, failure):
     context = Context()
     rclpy.init(context=context)
 
@@ -47,6 +45,9 @@ def test_real_nav2_tree_recovers_with_the_same_target_and_cancels_its_actions(tm
             return super().plan(goal)
 
     peers = Peers(context, native_navigation=True)
+    bootstrap = 'bootstrap' in failure
+    if bootstrap:
+        peers.grid.data = [-1] * 6400
     guard = ExplorationOwnerGuard(context=context)
     peers.nav_mode = "hold" if failure == "cancel" else "success"
     failed_controls = {"controller": 1, "backup": 8, "cancel_recovery": 6,
@@ -66,12 +67,21 @@ def test_real_nav2_tree_recovers_with_the_same_target_and_cancels_its_actions(tm
     def recover(goal, kind, action):
         recoveries.append(kind)
         recovery["active"] = kind
-        while failure == "cancel_recovery" and kind == "wait" and not goal.is_cancel_requested:
+        while ((failure == "cancel_recovery" and kind == "wait")
+               or failure == "cancel_bootstrap") and not goal.is_cancel_requested:
             time.sleep(0.03)
         if goal.is_cancel_requested:
             recovery["canceled"] += 1
             goal.canceled()
         else:
+            if bootstrap:
+                if kind == 'spin':
+                    peers.yaw += goal.request.target_yaw
+                elif kind == 'drive_on_heading':
+                    peers.position = (peers.position[0] + .15 * math.cos(peers.yaw),
+                                      peers.position[1] + .15 * math.sin(peers.yaw))
+                if failure == 'bootstrap' or kind == 'drive_on_heading':
+                    peers.grid.data = [0] * 6400
             goal.succeed()
         recovery["active"] = None
         return action.Result()
@@ -80,7 +90,8 @@ def test_real_nav2_tree_recovers_with_the_same_target_and_cancels_its_actions(tm
                               lambda goal, kind=kind, action=action: recover(goal, kind, action),
                               cancel_callback=lambda _goal: CancelResponse.ACCEPT,
                               callback_group=peers.group)
-                 for kind, action in (("spin", Spin), ("wait", Wait), ("backup", BackUp))]
+                 for kind, action in (("spin", Spin), ("wait", Wait), ("backup", BackUp),
+                                      ("drive_on_heading", DriveOnHeading))]
 
     def follow(goal):
         peers.nav_active = True
@@ -116,6 +127,9 @@ def test_real_nav2_tree_recovers_with_the_same_target_and_cancels_its_actions(tm
     explorer = RobotExplorer(context=context, parameter_overrides=[
         Parameter("database_path", value=str(tmp_path / "map.db")),
         Parameter("navigation_tree", value=str(ROOT / "config/explore_nav_to_pose.xml")),
+        *[Parameter(name, value=str(ROOT / 'config' / filename)) for name, filename in (
+            ('observation_tree', 'explore_observe.xml'), ('observation_reverse_tree', 'explore_observe_reverse.xml'),
+            ('bootstrap_tree', 'explore_bootstrap.xml'), ('bootstrap_reverse_tree', 'explore_bootstrap_reverse.xml'))],
         Parameter("max_duration_sec", value=30.0),
         # This test covers the native tree against instrumented Python peers.
         # Production one-second input leases are exercised by the ROS fault tests.
@@ -159,12 +173,22 @@ def test_real_nav2_tree_recovers_with_the_same_target_and_cancels_its_actions(tm
             elif failure == "cancel_recovery":
                 wait(lambda: recovery["active"] == "wait", timeout=15)
                 response(handle.cancel_goal_async())
+            elif failure == "cancel_bootstrap":
+                wait(lambda: recovery['active'] == 'spin')
+                response(handle.cancel_goal_async())
             result = response(handle.get_result_async(), timeout=20)
-            cancel = failure in ("cancel", "cancel_recovery")
+            cancel = failure in ("cancel", "cancel_recovery", "cancel_bootstrap")
             failed = failure == "fatal"
             expected = (GoalStatus.STATUS_CANCELED if cancel else
                         GoalStatus.STATUS_ABORTED if failed else GoalStatus.STATUS_SUCCEEDED)
             assert result.status == expected, (result.result.message, log_path.read_text())
+            if bootstrap:
+                assert not follow_goals and not peers.planner_ids
+                assert result.result.visited_targets == 0
+                assert recoveries == (['spin'] * 8 + ['drive_on_heading'] if failure == 'bootstrap_advance' else ['spin'])
+                assert recovery['active'] is None
+                assert recovery['canceled'] == int(cancel)
+                return
             assert len(peers.planner_ids) >= 2 and set(peers.planner_ids) == {"ExploreKnown"}
             wait(lambda: not peers.nav_active)
             assert peers.nav_canceled == int(failure == "cancel")
@@ -197,3 +221,10 @@ def test_real_nav2_tree_recovers_with_the_same_target_and_cancels_its_actions(tm
                 release_graph(executor=executor, thread=thread, finished=finished, processes=(process,),
                               waitables=(controller, *behaviors, client),
                               nodes=(client_node, explorer, guard, peers), context=context)
+
+
+@pytest.mark.parametrize("failure", [
+    "none", "acknowledgement", "cancel", "planner", "controller", "backup", "cancel_recovery", "exhausted", "fatal",
+])
+def test_real_nav2_tree_recovers_with_the_same_target_and_cancels_its_actions(tmp_path, failure):
+    run_nav2_case(tmp_path, failure)

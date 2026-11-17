@@ -1,0 +1,5 @@
+<root BTCPP_format="4" main_tree_to_execute="BootstrapReverse">
+  <BehaviorTree ID="BootstrapReverse">
+    <BackUp backup_dist="0.15" backup_speed="0.05" time_allowance="8.0"/>
+  </BehaviorTree>
+</root>

@@ -27,9 +27,10 @@ from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 from rclpy.parameter_client import AsyncParameterClient
-from rclpy.qos import DurabilityPolicy, QoSProfile
+from rclpy.qos import DurabilityPolicy, QoSProfile, qos_profile_sensor_data
 from rclpy.signals import SignalHandlerOptions
 from rtabmap_msgs.msg import Info
+from sensor_msgs.msg import LaserScan
 from std_msgs.msg import Bool, String
 from std_srvs.srv import Empty
 from tf2_ros import Buffer, TransformException, TransformListener
@@ -42,6 +43,7 @@ from lekiwi_rmf.latency_budget import LatencyBudget
 from lekiwi_rmf.exploration import (
     database_size, footprint_is_free, load_navigation_footprint, map_geometry, select_target, task_limits,
     with_body_free, load_task_checkpoint, save_task_checkpoint, task_time,
+    laser_free_grid, needs_observation, sweep_is_free,
 )
 from lekiwi_rmf.navigation_distance import NavigationDistance
 from lekiwi_rmf.search_evidence import SearchEvidence
@@ -85,6 +87,10 @@ class RobotExplorer(Node):
             "allow_exploration": True, "database_path": str(Path.home() / ".ros/lekiwi_rtabmap_floor_v2.db"),
             **yaml.safe_load((config / "exploration.yaml").read_text())["robot_explorer"]["ros__parameters"],
             "navigation_tree": str(config / "explore_nav_to_pose.xml"),
+            "observation_tree": str(config / "explore_observe.xml"),
+            "observation_reverse_tree": str(config / "explore_observe_reverse.xml"),
+            "bootstrap_tree": str(config / "explore_bootstrap.xml"),
+            "bootstrap_reverse_tree": str(config / "explore_bootstrap_reverse.xml"),
             "navigation_params_file": str(config / "nav2_params.yaml"),
         }
         for name, value in defaults.items():
@@ -119,6 +125,8 @@ class RobotExplorer(Node):
         self._rejection = ""
         self._map = None
         self._map_stamp_ns = 0
+        self._scan = None
+        self._observation_turns = 0
         self._inputs = {}
         self._slam_seen = 0.0
         self._slam_reference = None
@@ -140,6 +148,7 @@ class RobotExplorer(Node):
         self._listener = TransformListener(self._tf, self)
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.create_subscription(OccupancyGrid, "/map", self._on_map, latched)
+        self.create_subscription(LaserScan, "/scan", self._on_scan, qos_profile_sensor_data)
         for topic in ("base_motion_permitted", "arm_stowed"):
             self.create_subscription(Bool, f"/safety/{topic}",
                                      lambda msg, name=topic: self._record(name, msg.data), latched)
@@ -162,6 +171,7 @@ class RobotExplorer(Node):
         self._navigation = ActionClient(self, NavigateToPose, "/navigate_to_pose", callback_group=self._group)
         self._planner = ActionClient(self, ComputePathToPose, "/compute_path_to_pose", callback_group=self._group)
         self._costmap = self.create_client(GetCostmap, "/global_costmap/get_costmap", callback_group=self._group)
+        self._local_costmap = self.create_client(GetCostmap, "/local_costmap/get_costmap", callback_group=self._group)
         self._action = ActionServer(
             self, Explore, "/robot/explore", self._execute, goal_callback=self._accept,
             cancel_callback=lambda _goal: CancelResponse.ACCEPT, callback_group=self._group,
@@ -234,6 +244,9 @@ class RobotExplorer(Node):
             self._map = None
             self._map_stamp_ns = 0
             self.get_logger().error(str(error), throttle_duration_sec=5)
+
+    def _on_scan(self, message):
+        self._scan = (message, time.monotonic())
 
     def _mode_response(self, future, requested_at):
         if future.cancelled():
@@ -655,6 +668,8 @@ class RobotExplorer(Node):
         visited, blocked = [], []
         mapping_requested = False
         state = None
+        # Resume observes again at its measured pose, retaining saved time/region bounds.
+        self._observation_turns = 0
         try:
             duration, radius = task_limits(goal.request.max_duration_sec, goal.request.max_radius_m,
                                            self.config["max_duration_sec"], self.config["max_radius_m"])
@@ -1134,7 +1149,7 @@ class RobotExplorer(Node):
             return False
         return self._route_clear(route.result.path.poses, pose, grid, center, radius)
 
-    def _drive(self, check, destination, stage, feedback):
+    def _drive(self, check, destination, stage, feedback, *, behavior_tree=None):
         """Drive one guarded Nav2 goal: whether Nav2 reached it, or None if it never ran to a result."""
         self._owned_id = owned_goal_id()
         until = time.monotonic() + self.config["service_timeout_sec"]
@@ -1147,7 +1162,7 @@ class RobotExplorer(Node):
             time.sleep(0.05)
         self._stage = stage
         self._nav_request = self._navigation.send_goal_async(NavigateToPose.Goal(
-            pose=destination, behavior_tree=self.config["navigation_tree"]),
+            pose=destination, behavior_tree=behavior_tree or self.config["navigation_tree"]),
             goal_uuid=self._owned_id, feedback_callback=lambda message: feedback(message.feedback.current_pose))
         self._nav_handle = self._wait(self._nav_request, self.config["service_timeout_sec"], check)
         if not self._nav_handle.accepted:
@@ -1176,17 +1191,25 @@ class RobotExplorer(Node):
         """Plan and drive to one target; return False when no target remains."""
         pose = check()
         grid = self._navigation_grid(check, pose)
-        target, stage, result.mapped_area_m2 = select_target(
-            *grid, (pose.pose.position.x, pose.pose.position.y), center, radius, visited, blocked,
-            clearance=self.config["clearance_m"], footprint=self._footprint, region_margin=self._region_margin,
-            observation_distance=self.config["observation_distance_m"],
-            spacing=self.config["target_spacing_m"], revisit_spacing=self.config["revisit_spacing_m"],
-            free_threshold=self.config["free_threshold"], revisit=goal.request.revisit_known,
-        )
+        position = (pose.pose.position.x, pose.pose.position.y)
+        try:
+            target, stage, result.mapped_area_m2 = select_target(
+                *grid, position, center, radius, visited, blocked,
+                clearance=self.config["clearance_m"], footprint=self._footprint, region_margin=self._region_margin,
+                observation_distance=self.config["observation_distance_m"],
+                spacing=self.config["target_spacing_m"], revisit_spacing=self.config["revisit_spacing_m"],
+                free_threshold=self.config["free_threshold"], revisit=goal.request.revisit_known,
+            )
+        except ValueError:
+            # A first RGB-D grid may not cover the robot's centre yet.
+            target = None
         if target is None:
+            if needs_observation(*grid, position, center, radius, self._region_margin, self.config["free_threshold"]):
+                return self._observe_step(goal, check, center, radius, visited, blocked, result)
             result.complete = not blocked
-            result.message = "no further reachable observation targets" if not blocked else "remaining targets failed navigation"
+            result.message = "reachable region observed" if not blocked else "remaining targets failed navigation"
             return False
+        self._observation_turns = 0
         yaw = math.atan2(target[1] - pose.pose.position.y, target[0] - pose.pose.position.x)
         destination = self._destination(*target, yaw)
         feedback = Explore.Feedback(stage=stage, current_pose=pose, visited_targets=len(visited),
@@ -1205,6 +1228,141 @@ class RobotExplorer(Node):
         while time.monotonic() < until:
             check()
             time.sleep(0.05)
+        return True
+
+
+    def _bootstrap_scan(self):
+        if self._scan is None:
+            raise Paused("bootstrap requires a fresh laser scan")
+        scan, received = self._scan
+        age = (self.get_clock().now() - rclpy.time.Time.from_msg(scan.header.stamp)).nanoseconds / 1e9
+        if (time.monotonic() - received > self.config["data_timeout_sec"]
+                or not -0.3 <= age <= self.config["data_timeout_sec"]):
+            raise Paused("bootstrap laser scan is stale")
+        if (not scan.header.frame_id or not 2 <= len(scan.ranges) <= self.config["max_map_cells"]
+                or not all(math.isfinite(v) for v in (scan.angle_min, scan.angle_increment, scan.range_min, scan.range_max))
+                or not 0 < abs(scan.angle_increment) <= 0.1
+                or abs(scan.angle_increment) * (len(scan.ranges) - 1) > 2 * math.pi + 0.1
+                or not 0 <= scan.range_min < scan.range_max <= 100):
+            raise Paused("bootstrap laser geometry is invalid")
+        return scan, received
+
+    def _local_observation_grid(self, check, *, measured=False):
+        """Fresh local obstacles; translation additionally requires measured laser free space."""
+        check()
+        self._bootstrap_scan()
+        request = self._local_costmap.call_async(GetCostmap.Request())
+        try:
+            costmap = self._wait(request, self.config["service_timeout_sec"], check).map
+        finally:
+            self._local_costmap.remove_pending_request(request)
+        metadata = costmap.metadata
+        if len(costmap.data) > self.config["max_map_cells"]:
+            raise Paused("local costmap exceeds the cell limit")
+        costs = np.asarray(costmap.data, dtype=np.int16)
+        observed = OccupancyGrid(header=costmap.header, info=MapMetaData(
+            resolution=metadata.resolution, width=metadata.size_x, height=metadata.size_y, origin=metadata.origin),
+            data=np.where(costs == 255, -1, np.where(costs >= 254, 100, 0)).tolist())
+        # A service reply may take several scan periods. Validate and use the
+        # newest scan, rather than discarding fresh data because an older copy aged.
+        scan, received = self._bootstrap_scan()
+        try:
+            grid, resolution, origin = map_geometry(observed, self.config["max_map_cells"], frame="odom")
+            sensor = self._tf.lookup_transform("odom", scan.header.frame_id, rclpy.time.Time.from_msg(scan.header.stamp))
+            body = self._tf.lookup_transform("odom", "base_footprint", rclpy.time.Time())
+        except (ValueError, TransformException) as error:
+            raise Paused(f"bootstrap local geometry unavailable: {error}") from error
+        for stamp in (costmap.header.stamp, body.header.stamp):
+            age = (self.get_clock().now() - rclpy.time.Time.from_msg(stamp)).nanoseconds / 1e9
+            if not -0.3 <= age <= self.config["data_timeout_sec"]:
+                raise Paused("bootstrap local costmap or pose is stale")
+
+        def planar(transform):
+            p, q = transform.transform.translation, transform.transform.rotation
+            if (not all(math.isfinite(v) for v in (p.x, p.y, p.z, q.x, q.y, q.z, q.w))
+                    or abs(q.x) > 1e-3 or abs(q.y) > 1e-3 or abs(q.z * q.z + q.w * q.w - 1) > 1e-3):
+                raise Paused("bootstrap transform is not finite and planar")
+            return p.x, p.y, 2 * math.atan2(q.z, q.w)
+
+        start = planar(body)
+        age = (self.get_clock().now() - rclpy.time.Time.from_msg(scan.header.stamp)).nanoseconds / 1e9
+        if (not -0.3 <= age <= self.config["data_timeout_sec"]
+                or time.monotonic() - received > self.config["data_timeout_sec"]):
+            raise Paused("bootstrap laser scan is stale")
+        if not measured:
+            return (grid, resolution, origin), start
+        rays = laser_free_grid(grid.shape, resolution, origin, planar(sensor), scan.ranges,
+                               scan.angle_min, scan.angle_increment, scan.range_min, scan.range_max)
+        # The current physical body may occlude its own scan; clear only that body.
+        rays = with_body_free(rays, resolution, origin, start[:2], start[2], self._footprint)
+        return (np.where((grid < 0) | (grid > self.config["free_threshold"]), grid, rays), resolution, origin), start
+
+    def _observe_step(self, goal, check, center, radius, visited, blocked, result):
+        """Acquire new views before retrying frontiers, with a locally observed short advance.
+
+        Behaviors remain children of a leased NavigateToPose goal. No global
+        unknown cells are cleared. Check the whole local sweep before dispatch
+        and while the child runs, alongside Nav2 and collision monitor.
+        """
+        grid, start = self._local_observation_grid(check)
+        advance = False
+        map_pose = check()
+        q, p = map_pose.pose.orientation, map_pose.pose.position
+        yaw = 2 * math.atan2(q.z, q.w)
+        if self._observation_turns >= 8:
+            measured_grid, start = self._local_observation_grid(check, measured=True)
+            for distance, name in ((.15, "bootstrap_tree"), (-.15, "bootstrap_reverse_tree")):
+                end = (start[0] + distance * math.cos(start[2]), start[1] + distance * math.sin(start[2]), start[2])
+                if (math.hypot(p.x + distance * math.cos(yaw) - center[0],
+                               p.y + distance * math.sin(yaw) - center[1]) < radius - self._region_margin
+                        and sweep_is_free(*measured_grid, start, end, self._footprint, self.config["free_threshold"])):
+                    advance = True
+                    tree, stage = self.config[name], "bootstrapping_known_space"
+                    break
+        if not advance:
+            for turn, name in ((math.pi / 4, "observation_tree"), (-math.pi / 4, "observation_reverse_tree")):
+                end = (start[0], start[1], start[2] + turn)
+                if sweep_is_free(*grid, start, end, self._footprint, self.config["free_threshold"]):
+                    tree, stage = self.config[name], "observing_without_frontier"
+                    break
+            else:
+                result.message = "unobserved space remains; no collision-free local observation motion"
+                return False
+            if self._observation_turns >= 16:
+                result.message = "unobserved space remains; no observed local advance after scanning"
+                return False
+        checked_at = time.monotonic()
+
+        def motion_check():
+            nonlocal checked_at
+            current_map = check()
+            if time.monotonic() - checked_at >= .1:
+                latest_grid, current = self._local_observation_grid(check, measured=advance)
+                checked_at = time.monotonic()
+                current = (*current[:2], end[2] - math.remainder(end[2] - current[2], 2 * math.pi))
+                if not sweep_is_free(*latest_grid, current, end, self._footprint, self.config["free_threshold"]):
+                    raise Paused("local observation sweep is no longer clear")
+            return current_map
+
+        def feedback(current):
+            goal.publish_feedback(Explore.Feedback(stage=stage, current_pose=current, visited_targets=len(visited),
+                                                   unreachable_targets=len(blocked), mapped_area_m2=result.mapped_area_m2))
+
+        feedback(map_pose)
+        destination = self._destination(p.x, p.y, yaw)
+        reached = self._drive(motion_check, destination, stage, feedback, behavior_tree=tree)
+        if not reached:
+            result.message = "unobserved space remains; Nav2 could not complete local observation"
+            return False
+        self._observation_turns = 0 if advance else self._observation_turns + 1
+        finished = self.get_clock().now().nanoseconds
+        until = time.monotonic() + self.config["slam_timeout_sec"]
+        settled = time.monotonic() + self.config["settle_sec"]
+        while time.monotonic() < settled or self._map_stamp_ns < finished:
+            check()
+            if time.monotonic() >= until:
+                raise Paused("waiting for a map observation after bootstrap motion")
+            time.sleep(.05)
         return True
 
 

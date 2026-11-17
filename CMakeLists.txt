@@ -172,7 +172,8 @@ if(BUILD_TESTING)
     set(timeout_args)
     # Complete restart matrices exceed two minutes beside other builds; scenario deadlines stay unchanged.
     if(name STREQUAL "test_exploration_owner_guard" OR name STREQUAL "test_exploration_recovery"
-        OR name STREQUAL "test_exploration_ros" OR name STREQUAL "test_task_gateway"
+        OR name STREQUAL "test_exploration_ros" OR name STREQUAL "test_exploration_bootstrap"
+        OR name STREQUAL "test_task_gateway"
         OR name STREQUAL "test_task_execution"
         OR name STREQUAL "test_search_ros")
       set(timeout_args TIMEOUT 300)
@@ -269,6 +270,7 @@ if(BUILD_TESTING)
     add_lekiwi_pytest(test_exploration_recovery)
     add_lekiwi_pytest(test_exploration_owner_guard)
     add_lekiwi_pytest(test_exploration_ros)
+    add_lekiwi_pytest(test_exploration_bootstrap)
     add_lekiwi_pytest(test_task_gateway)
     add_lekiwi_pytest(test_task_execution)
     add_lekiwi_pytest(test_object_observations)

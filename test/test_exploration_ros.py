@@ -15,6 +15,7 @@ from nav2_msgs.action import ComputePathToPose, NavigateToPose
 from nav2_msgs.msg import CollisionMonitorState, CostmapMetaData
 from nav2_msgs.srv import GetCostmap
 from nav_msgs.msg import OccupancyGrid, Path
+from sensor_msgs.msg import LaserScan
 import pytest
 import rclpy
 from rcl_interfaces.msg import SetParametersResult
@@ -77,6 +78,11 @@ class RobotPeers(Node):
         self.planner_ids = []
         self.acceptance_delay = 0.0
         self.position = (0.0, 0.0)
+        self.yaw = 0.0
+        self.publish_scan = True
+        self.observation_goals = []
+        self.observation_reveal_after = None
+        self.observation_reveal_on = None
         self.group = ReentrantCallbackGroup()
         self.create_service(Empty, "/rtabmap/set_mode_mapping", lambda req, res: self.set_mode(True, res),
                             callback_group=self.group)
@@ -96,10 +102,13 @@ class RobotPeers(Node):
         self.costmap_unknown_cost = 255
         self.costmap_service = self.create_service(GetCostmap, "/global_costmap/get_costmap",
                                                    self.get_costmap, callback_group=self.group)
+        self.local_costmap_service = self.create_service(GetCostmap, "/local_costmap/get_costmap",
+                                                         self.get_local_costmap, callback_group=self.group)
         self.base_pub = self.create_publisher(Bool, "/safety/base_motion_permitted", latched)
         self.stow_pub = self.create_publisher(Bool, "/safety/arm_stowed", latched)
         self.info_pub = self.create_publisher(Info, "/info", 1)
         self.collision_pub = self.create_publisher(CollisionMonitorState, "/collision_monitor_state", 1)
+        self.scan_pub = self.create_publisher(LaserScan, "/scan", 1)
         self.tf_pub = TransformBroadcaster(self)
         self.grid = OccupancyGrid()
         self.grid.header.frame_id = "map"
@@ -108,10 +117,17 @@ class RobotPeers(Node):
         self.grid.info.origin.position.x = self.grid.info.origin.position.y = -2.0
         self.grid.info.origin.orientation.w = 1.0
         self.grid.data = [0 if index % 80 < 60 else -1 for index in range(6400)]
+        from copy import deepcopy
+        self.local_grid = deepcopy(self.grid)
+        self.local_grid.header.frame_id = "odom"
+        self.local_grid.data = [0] * 6400
         self.create_timer(0.05, self.publish)
 
     def get_costmap(self, _request, result):
         source = self.costmap if self.costmap is not None else self.grid
+        return self.costmap_reply(source, result)
+
+    def costmap_reply(self, source, result):
         result.map.header = source.header
         result.map.header.stamp = self.get_clock().now().to_msg()
         result.map.metadata = CostmapMetaData(
@@ -125,6 +141,9 @@ class RobotPeers(Node):
         self.mapping_requests.append(mapping)
         self.set_parameters([Parameter("Mem/IncrementalMemory", value=str(mapping).lower())])
         return result
+
+    def get_local_costmap(self, request, result):
+        return self.costmap_reply(self.local_grid, result)
 
     def session_policy_set(self, parameters):
         for parameter in parameters:
@@ -145,13 +164,22 @@ class RobotPeers(Node):
             message = Info()
             message.header.stamp = (self.get_clock().now() - Duration(seconds=self.slam_delay)).to_msg()
             self.info_pub.publish(message)
+        if self.publish_scan:
+            scan = LaserScan(angle_min=-math.pi, angle_increment=2 * math.pi / 720,
+                             range_min=.05, range_max=4.0, ranges=[3.0] * 720)
+            scan.header.frame_id, scan.header.stamp = "base_footprint", stamp
+            self.scan_pub.publish(scan)
         transform = TransformStamped()
-        transform.header.frame_id, transform.child_frame_id = "map", "base_footprint"
+        transform.header.frame_id, transform.child_frame_id = "odom", "base_footprint"
         transform.header.stamp = stamp
         transform.transform.translation.x, transform.transform.translation.y = self.position
-        transform.transform.rotation.w = 1.0
+        transform.transform.rotation.z, transform.transform.rotation.w = math.sin(self.yaw / 2), math.cos(self.yaw / 2)
         if self.publish_pose:
-            self.tf_pub.sendTransform(transform)
+            parent = TransformStamped()
+            parent.header.frame_id, parent.child_frame_id = "map", "odom"
+            parent.header.stamp = stamp
+            parent.transform.rotation.w = 1.0
+            self.tf_pub.sendTransform([parent, transform])
 
     def plan(self, goal):
         self.planner_ids.append(goal.request.planner_id)
@@ -169,7 +197,12 @@ class RobotPeers(Node):
         return ComputePathToPose.Result(path=route)
 
     def navigate(self, goal):
-        assert goal.request.behavior_tree.endswith("explore_nav_to_pose.xml")
+        tree = goal.request.behavior_tree.rsplit("/", 1)[-1]
+        observation = tree != "explore_nav_to_pose.xml"
+        if observation:
+            assert tree in ("explore_observe.xml", "explore_observe_reverse.xml", "explore_bootstrap.xml",
+                            "explore_bootstrap_reverse.xml")
+            self.observation_goals.append(tree)
         self.navigation_goals.append(goal.request.pose)
         self.nav_count += 1
         self.nav_active = True
@@ -183,9 +216,19 @@ class RobotPeers(Node):
             self.nav_canceled += 1
             goal.canceled()
         elif self.nav_mode == "success":
-            p = goal.request.pose.pose.position
-            self.position = (p.x, p.y)
-            self.grid.data = [0] * 6400  # The new observation completes this map.
+            if observation:
+                if tree in ("explore_bootstrap.xml", "explore_bootstrap_reverse.xml"):
+                    distance = -.15 if tree == "explore_bootstrap_reverse.xml" else .15
+                    self.position = (self.position[0] + distance * math.cos(self.yaw),
+                                     self.position[1] + distance * math.sin(self.yaw))
+                else:
+                    self.yaw += (-1 if tree == "explore_observe_reverse.xml" else 1) * math.pi / 4
+                if self.observation_reveal_after == len(self.observation_goals) or self.observation_reveal_on == tree:
+                    self.grid.data = [0 if index % 80 < 60 else -1 for index in range(6400)]
+            else:
+                p = goal.request.pose.pose.position
+                self.position = (p.x, p.y)
+                self.grid.data = [0] * 6400  # The new observation completes this map.
             goal.succeed()
         else:
             goal.abort()

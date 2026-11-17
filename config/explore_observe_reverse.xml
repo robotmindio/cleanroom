@@ -1,0 +1,5 @@
+<root BTCPP_format="4" main_tree_to_execute="ObserveReverse">
+  <BehaviorTree ID="ObserveReverse">
+    <Spin spin_dist="-0.7853981633974483" time_allowance="12.0"/>
+  </BehaviorTree>
+</root>
