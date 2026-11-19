@@ -19,7 +19,7 @@ shared saved calibration, including negative pitch.
 | --- | --- | --- | --- |
 | `profile` | `sim`, `wired`, `split` | `sim` | Select simulation, local hardware, or device-service streams |
 | `headless` | `true`, `false` | `true` | Run Gazebo server-only with offscreen rendering; set false to open its GUI |
-| `localization` | `visual_slam`, `amcl` | `visual_slam` | Select the sole `map -> odom` provider; `visual_slam` is RTAB-Map running lidar-only |
+| `localization` | `visual_slam`, `amcl` | `visual_slam` | Select the sole `map -> odom` provider; `visual_slam` is RTAB-Map, registering RGB-D visually and refining with ICP on the range cloud when both camera and lidar are on |
 | `slam_mode` | `mapping`, `localization` | real: `localization`; sim: `mapping` | Reuse the saved map on hardware; explicit mapping or exploration extends it |
 | `remote_ip` | IPv4/hostname | `127.0.0.1` | Address of the LeKiwi ZMQ host and of the device zenoh bridge (`scripts/ros-start.sh` takes it from `LEKIWI_ROBOT_HOST`) |
 | `curve_client_secret_key_file`, `curve_server_public_key_file` | file paths | empty | Optional CURVE identity for the ZMQ link; set both or neither |
@@ -42,7 +42,7 @@ shared saved calibration, including negative pitch.
 | `camera_height` | metres | `0.093` | Measured front-camera height used by the camera scan |
 | `camera_pitch` | radians | `0.031` | Measured front-camera pitch used by the camera scan |
 | `xy_velocity_scale` | float | `1.0` | Correction for reported and commanded translation |
-| `yaw_velocity_scale` | float | `0.90` | Correction for reported and commanded rotation |
+| `yaw_velocity_scale` | float | `0.976` | Correction for reported and commanded rotation |
 | `start_rmf` | `true`, `false` | `false` | Start Zenoh, RMF schedule, dispatcher, and fleet adapter; requires `localization:=amcl`, `slam_mode:=localization` and an approved `map_bundle` |
 | `start_foxglove` | `true`, `false` | `true` | Start the read-only Foxglove WebSocket bridge |
 | `foxglove_address` | bind address | `127.0.0.1` | Interface exposed by Foxglove; loopback by default |
@@ -170,9 +170,9 @@ the driver arms and holds the measured position. After an explicit disarm, call
 `/safety/arm`; otherwise the default startup policy arms automatically. Confirm
 `/safety/driver_state` is `ARMED` before releasing support. Then plan and
 execute the reviewed forward stow in MoveIt from that valid start, checking the
-displayed path and surroundings before execution. Base permission remains
-denied until the physical stopping trials and other required checks in
-`config/safety_acceptance.yaml` are recorded and validated.
+displayed path and surroundings before execution. Base permission is granted
+only within the scope recorded in `config/safety_acceptance.yaml`, which is
+validated.
 
 ## Production safety prerequisites
 
@@ -199,9 +199,7 @@ until hardware publishes them:
 | Arm collision gate | `/safety/arm_workspace_clear` | Live MoveIt scene/state validity |
 
 `config/safety_acceptance.yaml` records the validated physical acceptance
-scope: attended operation, dry concrete, the installed 200 g load, folded
-`travel_stow`, 0.03 m/s and 0.06 rad/s, within a 50 mm stopping budget that
-includes 20 mm measurement uncertainty. See
+scope; its conditions, speeds and stopping budget are listed under
 [Physical acceptance](safety.md#physical-acceptance). A change to the accepted
 conditions requires new physical evidence; software tests alone do not
 establish physical stopping or obstacle coverage.
@@ -214,8 +212,8 @@ OpenNI/UVC driver publishes synchronized, depth-registered RGB-D under
 `/camera/astra/...`; its filtered cloud is published at `/camera/depth/points`
 for MoveIt's octomap updater and for the SLAM cloud (`/slam/cloud`), which merges
 each LD06 scan with the Astra points between 3 cm and 1 m above the floor.
-RTAB-Map consumes only that cloud plus wheel odometry, never the RGB or depth
-images. Set the physical serial in the tracked
+RTAB-Map consumes that cloud, the RGB-D views and wheel odometry: visual
+registration supplies the pose hypothesis and ICP on the cloud refines it. Set the physical serial in the tracked
 `config/hardware.yaml` before enabling Astra: an empty serial is rejected
 instead of allowing the driver to claim an arbitrary compatible USB camera.
 The full hardware installer also installs the camera's udev rule, so this
@@ -254,7 +252,7 @@ The known JYU2C wrist camera is auto-detected unless `LEKIWI_WRIST=none`. It pub
 
 ## Odometry scale
 
-LeRobot's kinematics assume a wheel 12.5 cm from the centre of rotation. Measure your robot — wheel centre to wheel centre, divided by √3 — and set `yaw_velocity_scale` to `0.125 / that`. Wheels 24 cm apart give 0.90, the default here. The factor corrects both what the base reports and what it executes, so a rotation Nav2 asks for is the rotation it gets.
+LeRobot's kinematics assume a wheel 12.5 cm from the centre of rotation. Measure your robot — wheel centre to wheel centre, divided by √3 — and set `yaw_velocity_scale` to `0.125 / that`. Wheels 24 cm apart give 0.90; the default here, 0.976, is this robot's value measured against lidar. The factor corrects both what the base reports and what it executes, so a rotation Nav2 asks for is the rotation it gets.
 
 The motor host integrates measured base velocities on the Pi before publishing
 telemetry. Compute aligns this accumulated pose to its local odometry frame and

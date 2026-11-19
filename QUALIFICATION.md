@@ -32,7 +32,7 @@ scripts/sim-qualification.py \
 The runner is strict. It requires a clean exact revision; a CMake build and
 installed package bound to this checkout; the guarded simulation profile;
 ShellCheck; pyzmq in CMake's selected interpreter; the complete expected CTest
-set, including the three pyzmq-dependent tests, with every test passing;
+set, including the four pyzmq-dependent tests, with every test passing;
 static source and simulation safety-profile checks; and an EGL/OpenGL renderer
 of at least 3.3. It writes every command result, the exact revision/dirty
 state and `summary.json` to the output directory, including when a check

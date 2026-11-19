@@ -280,8 +280,7 @@ Software now requires capture-time known-free OctoMap volumes for negative
 evidence, supports optical roll and vertical views, and retains bounded
 geometry proofs through anchor reprojection. Native-writer fixtures and ROS
 tests cover overhangs, missing/stale/replayed geometry and corrected anchors.
-This does not replace measured detector recall or the live trials above;
-`allow_search` remains false.
+This does not replace measured detector recall or the live trials above.
 
 ## Spatial memory qualification
 

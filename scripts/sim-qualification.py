@@ -376,7 +376,8 @@ def main() -> int:
     results.append(Result(
         name="required-ctest-names", command=[], returncode=0 if not missing else 1,
         required=True, passed=not missing, log=str(expected_log.relative_to(evidence)),
-        note="The three pyzmq-dependent tests are required: test_fake_host, test_test_driver_fake_host_launch.py, test_test_moveit_driver_e2e_launch.py.",
+        note="The four pyzmq-dependent tests are required: test_fake_host, test_test_driver_fake_host_launch.py, "
+             "test_test_moveit_driver_e2e_launch.py, test_test_motion_solver_moveit_launch.py.",
     ))
     # The full installed suite takes ~800 s on the target; retain each test's own tighter deadline.
     results.append(run_command(evidence, "ctest", ["ctest", "--test-dir", str(args.build_dir), "--output-on-failure"], timeout=1800.0))

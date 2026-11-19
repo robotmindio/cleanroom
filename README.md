@@ -23,8 +23,8 @@ The package includes:
 - a LeRobot-to-ROS driver for velocity, odometry, arm joints, and the front camera;
 - MoveIt planning and execution for the five-joint arm on real hardware and
   the physics-actuated Gazebo arm;
-- RTAB-Map lidar SLAM (ICP and proximity loop closure) on the merged LD06 scan and
-  Astra obstacle-band cloud, using metric wheel odometry;
+- RTAB-Map SLAM on RGB-D and the merged LD06/Astra cloud (visual registration
+  refined by ICP, with proximity loop closure), using metric wheel odometry;
 - a Free Fleet adapter connecting Nav2 to Open-RMF;
 - a read-only Foxglove dashboard for robot, navigation, sensor, and safety telemetry;
 - optional rosbridge WebSocket access for browsers and external applications;

@@ -13,8 +13,8 @@ so there is no layout to detect and nothing to configure.
 
 Publishes Twist on /cmd_vel_manual, which must pass through the repository's command
 mux and collision monitor before reaching the driver. Releasing a key does not stop the
-robot -- the base runs until the next command, and LeRobot's host stops it by itself
-after half a second of silence -- so this repeats the current command at 10 Hz and
+robot -- the base runs until the next command, and the command mux drops a manual
+command after 0.25 s of silence -- so this repeats the current command at 10 Hz and
 zeroes it on exit.
 
 There is nothing here that ros-jazzy-teleop-twist-keyboard would not do; it is only that

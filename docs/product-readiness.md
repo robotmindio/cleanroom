@@ -361,8 +361,9 @@ policy; do not add a competing goal scheduler to ROS.
 **Outcome:** achieve a resolved goal using available actions, with explicit
 preconditions, failure reasons and bounded recovery.
 
-**Current gap:** Nav2 and MoveIt solve geometric motion problems. The managed
-catalog currently exposes only navigate/explore. There is no inspected robot
+**Current gap:** Nav2 and MoveIt solve geometric motion problems. The task
+gateway advertises navigate, explore, search, reach and skill; reach and skill
+are off by default (`allow_reach`, `allow_skills`) pending arm trials. There is no inspected robot
 task planner that chooses observe, search, approach, inspect and verify steps
 against a semantic goal.
 
