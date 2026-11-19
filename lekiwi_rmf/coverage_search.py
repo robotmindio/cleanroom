@@ -17,7 +17,15 @@ from lekiwi_rmf.exploration import cell_to_world, disk, footprint_is_free, known
 
 # An occupancy above this blocks a camera ray; the blocking cell's visible surface is observed.
 OCCUPIED = 50
-OUTCOMES = ('found', 'coverage_reached', 'inaccessible', 'budget_exhausted', 'incapable', 'canceled', 'failed')
+OUTCOMES = ('found', 'coverage_reached', 'inaccessible', 'budget_exhausted', 'incapable', 'unmapped', 'canceled',
+            'failed')
+# Causes of a dwell without evidence that no other viewpoint can cure: no instrument is in force.
+NO_INSTRUMENT = {
+    'unable_model': 'only a recognizer that cannot report the label served frames',
+    'other_profile': 'frames ran under another proposal profile than the one admitted',
+    'other_query': 'the open-vocabulary query in force did not ask for the label',
+    'missing_3d_geometry': 'no capture had eligible capture-time 3D geometry',
+}
 # Bounded report lists; counts stay exact.
 REPORT_ITEMS = 20
 
@@ -349,6 +357,20 @@ class QueryCoverage:
         return weights
 
 
+def unproductive_cause(counts):
+    """Why the captures counted in ``counts`` (a QueryCoverage.counts delta) resolved no cell."""
+    ignored = {name: counts[key] for name, key in (
+        ('unable_model', 'other_model'), ('other_profile', 'other_profile'), ('other_query', 'other_query'))}
+    admitted = counts['captures'] - sum(ignored.values())
+    if not counts['captures'] or (admitted and admitted == counts['moving']):
+        return 'no_stationary_capture'
+    if not admitted:
+        return max(ignored, key=ignored.get)
+    if counts['no_geometry'] == admitted:
+        return 'missing_3d_geometry'
+    return 'no_new_cells'  # Occluded, or unknown in the capture-time 3D geometry.
+
+
 @dataclass(frozen=True)
 class Mount:
     """A base-fixed camera: optical height, pitch and axis yaw relative to the base."""
@@ -481,7 +503,7 @@ def statement(outcome, label, fraction, found_ids):
         return f'found "{label}" in {len(found_ids)} observation(s); see evidence_ids'
     covered = f'{fraction:.0%} of the searchable mapped cells in the region have fresh evidence of absence'
     if outcome == 'incapable':
-        return f'cannot search for "{label}": no observation instrument in force can detect it; nothing is claimed'
+        return f'cannot search for "{label}": the observation instrument in force gives no evidence about it; nothing is claimed'
     return (f'"{label}" was not found in the inspected zones: {covered}. '
             'Unobserved, unmapped and stale space was not searched; this is not evidence of absence there')
 

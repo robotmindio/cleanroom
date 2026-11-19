@@ -37,7 +37,9 @@ from tf2_ros import Buffer, TransformException, TransformListener
 from unique_identifier_msgs.msg import UUID
 
 from lekiwi_rmf.action import Explore, Search
-from lekiwi_rmf.coverage_search import Profile, SearchSession, normalize_label, select_viewpoint, viewpoint_gain
+from lekiwi_rmf.coverage_search import (
+    NO_INSTRUMENT, Profile, SearchSession, normalize_label, select_viewpoint, unproductive_cause, viewpoint_gain,
+)
 from lekiwi_rmf.exploration_owner_guard import owned_goal_id
 from lekiwi_rmf.latency_budget import LatencyBudget
 from lekiwi_rmf.exploration import (
@@ -883,7 +885,9 @@ class RobotExplorer(Node):
             self._search_limits(request)
             with self._lock:
                 reason = self._readiness_reason(mapping_quota=False)
-                if reason:
+                # An unmapped place is answered by the goal's own result (outcome "unmapped", no
+                # motion): a bare rejection would not tell the caller to explore first.
+                if reason and not self._unmapped():
                     raise RuntimeError(reason)
                 if self._busy or self._nav_uncertain:
                     raise RuntimeError("another goal is active or its navigation stop is unconfirmed")
@@ -900,8 +904,8 @@ class RobotExplorer(Node):
         """Choose viewpoints by information gain and observe until found, covered or out of budget."""
         result = Search.Result(outcome="failed")
         config, profile = self.config, self._search_profile()
-        session, visited, blocked, unproductive = None, [], [], []
-        state = {"serial": 0, "plan": None, "dwell": None, "revision": self._map_revision,
+        session, visited, blocked, unproductive, causes = None, [], [], [], {}
+        state = {"serial": 0, "plan": None, "revision": self._map_revision,
                  "generation": self._evidence.generation,
                  "reason": "initial plan", "evidence": []}
         odometry = {"epoch": None, "base": 0.0, "last": 0.0, "before": 0.0}
@@ -950,11 +954,27 @@ class RobotExplorer(Node):
                 state["serial"] = serial
                 if session.integrate(capture, self._map[0], self._evidence.geometry_for(capture)):
                     raise SearchEnded("found", f'found "{session.label}"; see evidence_ids')
-                dwell = state["dwell"]
-                if (dwell and capture.camera_id == dwell[0] and capture.stamp >= dwell[1]
-                        and capture.stationary and capture.pose is not None):
-                    state["dwell"] = None
             return fresh
+
+        def observe(viewpoint, mount):
+            """Dwell until a capture resolves part of the view; otherwise return why none did."""
+            def gain():
+                return viewpoint_gain(viewpoint, weights(), *self._map, mount, profile)
+
+            coverage, arrived = session.coverage, gain()
+            before = dict(coverage.counts)
+            seen = before["captures"]
+            until = time.monotonic() + config["search_dwell_sec"]
+            while time.monotonic() < until:
+                check()
+                if session.coverage is not coverage:
+                    return None  # Reprojected into a new map revision; plan again from the rebuilt coverage.
+                if coverage.counts["captures"] != seen:
+                    seen = coverage.counts["captures"]
+                    if gain() < arrived:
+                        return None
+                time.sleep(0.05)
+            return unproductive_cause({name: value - before[name] for name, value in coverage.counts.items()})
 
         def check():
             current = self._checkpoint(goal, deadline, center, radius, mapping_quota=False)
@@ -980,6 +1000,8 @@ class RobotExplorer(Node):
         try:
             label, duration, radius, travel_limit, target = self._search_limits(goal.request)
             result.target_coverage = target
+            if self._unmapped():
+                raise SearchEnded("unmapped", "this place has no map or map pose yet; explore it first, then search")
             pose = self._pose()
             center = (pose.pose.position.x, pose.pose.position.y)
             deadline = started_task + duration
@@ -1034,23 +1056,22 @@ class RobotExplorer(Node):
                         blocked.append(point)
                         continue
                     visited.append(point)
-                    # Coverage needs a stationary capture taken at the viewpoint, not the arrival itself.
-                    state["dwell"] = (viewpoint.camera_id, now())
+                    # Coverage needs evidence captured at the viewpoint, not the arrival itself.
                     self._stage = "searching: observing"
-                    until = time.monotonic() + config["search_dwell_sec"]
-                    while state["dwell"] is not None and time.monotonic() < until:
-                        check()
-                        time.sleep(0.05)
-                    if state["dwell"] is not None:
-                        # Never retry a view that produced no usable capture; it would spin until the budget.
+                    cause = observe(viewpoint, mounts[viewpoint.camera_id])
+                    if cause in NO_INSTRUMENT:
+                        # No other viewpoint can do better; say so instead of spending the budget.
+                        raise SearchEnded("incapable", f"{NO_INSTRUMENT[cause]} for a whole observation dwell")
+                    if cause:
+                        # Never retry a view that resolved nothing; it would be chosen again until the budget.
                         unproductive.append(point)
-                        state["reason"] = "previous viewpoint yielded no stationary capture"
-                    state["dwell"] = None
+                        causes[cause] = causes.get(cause, 0) + 1
+                        state["reason"] = f"previous viewpoint resolved no cell: {cause}"
                 except Replan as change:
                     self._stop_navigation()
                     state["plan"], state["reason"], state["evidence"] = None, str(change), change.evidence
                 except Paused as reason:
-                    state["plan"] = state["dwell"] = None
+                    state["plan"] = None
                     state["reason"] = f"resumed after pause: {reason}"
                     paused_at = task_time()
 
@@ -1081,7 +1102,8 @@ class RobotExplorer(Node):
                     session.rebase(self._map)
                     report = session.report(result.outcome, self._map[0], now(), {
                         "viewpoints_visited": len(visited), "viewpoints_unreachable": len(blocked),
-                        "viewpoints_without_stationary_capture": len(unproductive),
+                        "viewpoints_without_stationary_capture": causes.get("no_stationary_capture", 0),
+                        "viewpoints_unproductive": dict(causes),
                         "travel_m": round(result.travel_m, 3), "elapsed_sec": round(task_time() - started_task, 3)})
                     coverage = report["coverage"]
                     result.coverage_fraction = coverage["fraction"]

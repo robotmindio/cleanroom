@@ -89,6 +89,10 @@ scene. The one-second capture-to-geometry bound and revision checks remain enfor
 With range/RGB-D synchronization, the mapper keeps 15 synchronization candidates
 and pairs stamps at most 150 ms apart; the five-message transport queue stays short.
 
+Search never drives without a map. A goal sent where no `/map` exists, or where
+localization has no `map` pose yet, is accepted and ends at once with outcome
+`unmapped` and no motion, so a caller can run `explore` and then search again.
+
 Exploration does not require search coverage or a previously saved map. An explicit
 Explore goal with no `/map` enables native RTAB-Map mapping immediately, even when
 bringup selected localization and Nav2 is still waiting for that first map. It then
@@ -108,8 +112,15 @@ for each base-fixed camera at `search_headings` headings. Utility is expected
 newly resolved cells per metre of straight-line travel plus
 `search_viewpoint_overhead_m`. This is an uncalibrated heuristic, not a
 probability, and the report says so. At a viewpoint the search waits up to
-`search_dwell_sec` for a stationary capture from the chosen camera; a view that
-yields none is not retried. Safety faults, stale perception and missing odometry
+`search_dwell_sec` for a capture that resolves part of the planned view. A view
+whose dwell resolves no cell is not retried, and the report counts it by cause in
+`progress.viewpoints_unproductive`: `no_stationary_capture`, or `no_new_cells`
+when the captures were eligible but the view was occluded or unknown in 3D.
+When a whole dwell brings captures but none can count anywhere (only a recognizer
+that cannot report the label served, another profile or open-vocabulary query was
+in force, or no capture had eligible 3D geometry), no other viewpoint can do
+better: the search ends `incapable` with that cause instead of spending its
+budget. Safety faults, stale perception and missing odometry
 pause the search with the robot held still, preserving the active-time budget,
 as exploration does.
 
@@ -126,7 +137,8 @@ Each plan revision records its reason and the observation IDs that caused it.
 | `coverage_reached` | `target_coverage` of searchable mapped cells in the region has fresh evidence of absence. | succeeded |
 | `inaccessible` | No reachable viewpoint can observe the remaining unobserved cells. | failed |
 | `budget_exhausted` | Active duration or odometry travel budget reached. | failed |
-| `incapable` | The label is outside the catalogue, or no fresh posed perception exists. No motion. | failed |
+| `incapable` | The label is outside the catalogue or no fresh posed perception exists (no motion), or a whole dwell at a viewpoint had no admitted recognizer frame or no eligible 3D geometry. | failed |
+| `unmapped` | No map or map pose exists here yet. No motion; explore first. | failed |
 
 `report_json` holds the coverage fraction and areas (covered, unobserved, stale,
 unmapped), the largest unobserved regions, the negative-evidence summary (model,

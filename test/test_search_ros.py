@@ -323,13 +323,43 @@ def test_fallback_frames_never_cover_a_primary_only_label(search_graph):
     peers, perception, _, client = search_graph
     perception.model = FALLBACK
     peers.nav_mode = 'success'
-    _, outcome = run(client, Search.Goal(query='cup', region_radius_m=1.2, target_coverage=0.6, max_duration_sec=8.0))
+    _, outcome = run(client, Search.Goal(query='cup', region_radius_m=1.2, target_coverage=0.6))
     result = outcome.result
     assert outcome.status == GoalStatus.STATUS_ABORTED, result.message
-    assert result.outcome in ('budget_exhausted', 'inaccessible') and result.coverage_fraction < 0.6
+    # One dwell without a frame that can speak for the label answers; the 900 s budget is not spent revisiting it.
+    assert result.outcome == 'incapable' and result.coverage_fraction < 0.6
+    assert 'only a recognizer that cannot report the label served frames' in result.message
     report = json.loads(result.report_json)
+    assert report['progress']['elapsed_sec'] < 60
     # Only primary frames retained from before the switch count; every fallback frame was ignored.
     assert set(report['negative_evidence']['observations_by_model']) <= {MODEL}
     assert report['negative_evidence']['ignored_unable_model'] >= 10
     assert [(r['role'], r['label_supported']) for r in report['perception']['recognizers']] == [
         ('primary', True), ('fallback', False)]
+
+
+def test_captures_without_3d_geometry_end_the_search_instead_of_revisiting_the_view(search_graph):
+    """Without capture-time geometry no view can prove absence; say so rather than spend the budget."""
+    peers, perception, _, client = search_graph
+    peers.nav_mode = 'success'
+    perception.geometry.publish = lambda message: None
+    time.sleep(1.2)  # Later captures have no octomap within the capture-to-geometry bound.
+    _, outcome = run(client, Search.Goal(query='cup', region_radius_m=1.2, target_coverage=0.6))
+    result = outcome.result
+    assert outcome.status == GoalStatus.STATUS_ABORTED, result.message
+    assert result.outcome == 'incapable' and not result.found
+    assert 'no capture had eligible capture-time 3D geometry' in result.message
+    report = json.loads(result.report_json)
+    assert report['progress']['elapsed_sec'] < 60 and report['negative_evidence']['missing_3d_geometry'] > 0
+    assert not peers.nav_active
+
+
+def test_search_without_a_map_asks_for_exploration_first_and_never_moves(search_graph):
+    peers, _, explorer, client = search_graph
+    peers.map_pub.publish = lambda message: None
+    time.sleep(0.3)
+    explorer._map = None
+    _, outcome = run(client, Search.Goal(query='cup'))
+    assert outcome.status == GoalStatus.STATUS_ABORTED
+    assert outcome.result.outcome == 'unmapped' and not outcome.result.complete
+    assert 'explore it first' in outcome.result.message and peers.nav_count == 0

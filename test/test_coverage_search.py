@@ -258,6 +258,24 @@ def test_termination_found_coverage_and_incapable_with_honest_report():
     assert search.evidence_ids() == ['f' * 64]
 
 
+@pytest.mark.parametrize('counts, cause', [
+    ({}, 'no_stationary_capture'),
+    ({'captures': 3, 'moving': 3}, 'no_stationary_capture'),
+    ({'captures': 4, 'other_model': 4}, 'unable_model'),
+    ({'captures': 4, 'other_profile': 3, 'other_model': 1}, 'other_profile'),
+    ({'captures': 2, 'other_query': 2}, 'other_query'),
+    ({'captures': 5, 'other_model': 2, 'no_geometry': 3}, 'missing_3d_geometry'),
+    ({'captures': 5, 'no_geometry': 2}, 'no_new_cells'),
+    ({'captures': 2}, 'no_new_cells'),
+])
+def test_a_dwell_without_new_coverage_names_its_cause(counts, cause):
+    from lekiwi_rmf.coverage_search import NO_INSTRUMENT, unproductive_cause
+    empty = dict.fromkeys(QueryCoverage('cup', {}, PROFILE, (2, 2), 0.05, (0., 0., 0.)).counts, 0)
+    assert unproductive_cause({**empty, **counts}) == cause
+    # Only a missing instrument ends a search; an occluded view or a moving frame is one viewpoint's problem.
+    assert (cause in NO_INSTRUMENT) == (cause not in ('no_stationary_capture', 'no_new_cells'))
+
+
 def test_new_coverage_en_route_refutes_the_planned_viewpoint():
     grid = free_grid()
     coverage = QueryCoverage('cup', {'m' * 64: PROFILE_REVISION}, PROFILE, grid.shape, RESOLUTION, ORIGIN)
