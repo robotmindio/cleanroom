@@ -219,6 +219,17 @@ The service installers enable `lekiwi-ros-logrotate.timer`. Every five minutes
 twelve compressed archives. The same run deletes log files untouched for four days (unless a process still
 holds them open) and launch directories left empty, so finished launches do not accumulate under `~/.ros/log`.
 
+## Staging stops with too little free space
+
+`stage-release.sh` removes superseded releases, leftovers of failed runs and unused dependency
+overlays before it builds, then requires 1 GiB free on the device or 4 GiB on compute. If it
+still stops with `MiB free, ... MiB needed`, releases are no longer what fills that filesystem:
+its message says how little retention found to remove. `prune-release-builds.py WORKSPACE
+--retain` lists each kept release with its reason (`current`, `previous`, `process PID`,
+`locked worktree`, `recent`); stop a leftover process that pins an old release, then look at
+`retired-release-manifests/*/source` (records of on-robot tests), the RTAB-Map database and
+ROS logs. See the release retention policy in [docs/real-robot.md](docs/real-robot.md).
+
 ## Installer reports a ParaView/VTK conflict
 
 Ubuntu's `python3-paraview` conflicts with the `python3-vtk9` package required by RTAB-Map through PCL. If you do not need the existing ParaView installation, remove it and rerun the installer:

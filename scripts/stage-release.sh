@@ -27,23 +27,47 @@ if [[ -f $release/release.json ]]; then
   exit
 fi
 [[ $(readlink -f "$workspace/current" 2>/dev/null || true) != "$release" ]] || die "cannot rebuild an active release"
+# Bound what the workspace keeps before building, while the space still helps.
+# The staged revision's own policy keeps the active, rollback, in-use and newest
+# sealed releases; it removes older ones, unsealed leftovers of failed runs
+# (this revision's included) and dependency overlays nothing kept is built on.
+# Staging then needs room for a checkout, a build and, when the pinned
+# dependencies changed, a new overlay: 95 + 130 + 316 MB measured on the device
+# and 0.9 + 1.8 GB on compute, roughly doubled for test output.
+need_free=$((4 << 30))
+[[ $role == compute ]] || need_free=$((1 << 30))
+git -C "$project_root" show "$revision:scripts/prune-release-builds.py" |
+  /usr/bin/python3 - "$workspace" --retain --need-free "$need_free" --apply
+# A release directory deleted by hand leaves a record that blocks its checkout.
+git -C "$project_root" worktree prune
+[[ ! -e $release ]] || die "an unsealed $release is still in use; stop what uses it and retry"
+# A failed or interrupted run frees its partial release and overlay at once: a
+# full disk endangers the running robot. A sealed release is complete and stays.
+# shellcheck disable=SC2317 # Reached through the EXIT trap.
+discard_unsealed_release() {
+  [[ ! -e $release/release.json ]] || return 0
+  cd /
+  git -C "$project_root" worktree remove --force --force "$release/source" 2>/dev/null || true
+  rm -rf -- "$release"
+  git -C "$project_root" worktree prune || true
+  [[ -z ${overlay:-} || -e $overlay/.complete ]] || rm -rf -- "$overlay"
+}
+trap discard_unsealed_release EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM HUP
 mkdir -p "$release/install" "$release/src"
-if [[ ! -e $release/source ]]; then
-  git -C "$project_root" worktree add --detach "$release/source" "$revision"
-fi
-[[ $(git -C "$release/source" rev-parse HEAD) == "$revision" ]] || die "staged source has the wrong revision"
-[[ -z $(git -C "$release/source" status --porcelain) ]] || die "staged source is dirty"
+git -C "$project_root" worktree add --detach "$release/source" "$revision"
 
 # Preserve the installed service's local settings without exposing their contents.
 unit=lekiwi-stack.service
 [[ $role != device ]] || unit=lekiwi-host.service
 settings_root=$(systemctl show -P WorkingDirectory "$unit" 2>/dev/null || true)
 [[ -f $settings_root/.env ]] || settings_root=$project_root
-if [[ -f $settings_root/.env && ! -e $release/source/.env ]]; then
+if [[ -f $settings_root/.env ]]; then
   install -m 0600 "$settings_root/.env" "$release/source/.env"
 fi
 for venv in .venv .venv-lerobot; do
-  if [[ -d $workspace/$venv && ! -e $release/$venv ]]; then
+  if [[ -d $workspace/$venv ]]; then
     ln -s "$workspace/$venv" "$release/$venv"
   fi
 done
@@ -76,13 +100,6 @@ if [[ $(cat "$overlay/.complete" 2>/dev/null || true) != "$key" ]]; then
   fi
   LEKIWI_WS=$overlay "$release/source/scripts/build-lekiwi.sh" --dependencies "${build_args[@]}"
   printf '%s\n' "$key" > "$overlay/.complete"
-fi
-# A retried, unsealed release may have been configured against another overlay
-# (an earlier key, or an interrupted pre-overlay build). CMake caches and the
-# generated setup chain keep those absolute paths, so rebuild it from scratch.
-if [[ $(cat "$release/install/.lekiwi-overlay" 2>/dev/null || true) != "$overlay" ]]; then
-  rm -rf -- "$release/build" "$release/install"
-  mkdir -p "$release/install"
 fi
 printf 'source %q\n' "$overlay/install/setup.bash" > "$release/install/setup.bash"
 printf '%s\n' "$overlay" > "$release/install/.lekiwi-overlay"

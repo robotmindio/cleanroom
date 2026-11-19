@@ -268,8 +268,31 @@ pinned dependency scripts and patches, the bootstrap dependency sources and the
 installed `ros-jazzy-*` packages; changing any of them builds a new overlay. An
 overlay is reused only after its build completed, and each release manifest
 records the hashes of its overlay's installed files. A cold overlay build can
-take substantial time and disk space. Do not delete retained releases or the
-overlays they name while a service uses them.
+take substantial time and disk space.
+
+Each host keeps a bounded set of releases. Before it builds, `stage-release.sh`
+applies the retention policy of `prune-release-builds.py --retain` under the
+staging and deployment locks. It keeps `current`, `previous`, every release or
+overlay a running process names, release checkouts held with `git worktree
+lock`, and the three most recently sealed other releases. It removes every
+older release whole (build, install and source checkout, with the checkout's
+record in the anchor repository), every unsealed release directory left by a
+failed or interrupted staging run, and every dependency overlay that no kept
+release was built on, except the newest complete one. Staging then stops before
+building unless the workspace filesystem has 1 GiB free on the device or 4 GiB
+on compute, naming the workspace and what retention removed. A staging run that
+fails or is interrupted removes its own partial release and overlay; copy any
+build or test output you need from the terminal.
+
+A removed sealed release leaves a receipt in the workspace's
+`retired-release-manifests/REVISION-TIMESTAMP/`: its `release.json`, the
+qualification results (`qualification.tar.gz`) and, under `source/`, the
+untracked files found in its checkout, such as `.benchmarks` records of on-robot
+tests. The private `.env` snapshot and Python caches are not kept. To use a
+removed revision again, deploy it or run `stage-release.sh` for it: staging
+rebuilds and requalifies it from Git. `prune-release-builds.py WORKSPACE
+--retain` prints what the policy would remove without changing anything. Do not
+delete releases or overlays by hand.
 
 After qualification, the deployer confirms torque-off, stops both stacks, and
 atomically selects each host's `current` symlink. Services use `current/source`

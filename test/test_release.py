@@ -139,6 +139,136 @@ def test_pruning_archive_failure_keeps_the_seal_and_build(tmp_path, pruner, monk
     assert (release / 'release.json').is_file() and (release / 'build').is_dir()
 
 
+def git(repository, *arguments):
+    return subprocess.run(['git', '-C', str(repository), *arguments], check=True, capture_output=True, text=True).stdout
+
+
+def retention_workspace(tmp_path):
+    """Eight sealed releases (oldest first), an interrupted one and four overlays around their anchor repository."""
+    anchor, workspace = tmp_path / 'anchor', tmp_path / 'workspace'
+    anchor.mkdir()
+    (anchor / '.gitignore').write_text('.benchmarks/\n.env\n__pycache__/\n')
+    git(anchor, 'init', '-q')
+    git(anchor, 'add', '.')
+    git(anchor, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-q', '-m', 'fixture')
+    overlays = {name: workspace / 'overlays' / f'device-{name * 32}' for name in 'abcd'}
+    for age, (name, overlay) in enumerate(overlays.items()):
+        overlay.mkdir(parents=True)
+        if name != 'd':  # an interrupted overlay build has no marker
+            (overlay / '.complete').write_text(overlay.name)
+            os.utime(overlay / '.complete', (1000 + age, 1000 + age))
+    releases = [cached_release(workspace, str(index) * 40) for index in range(8)]
+    releases.append(workspace / 'releases' / ('d' * 40))
+    for age, release in enumerate(releases):
+        git(anchor, 'worktree', 'add', '-q', '--detach', str(release / 'source'), 'HEAD')
+        (release / 'build/lekiwi_rmf').mkdir(parents=True)
+        (release / 'build/lekiwi_rmf/release-ctest.xml').write_text('<testsuite/>')
+        (release / 'install').mkdir()
+        # Only the retired release 3 names overlay b; every other release names a.
+        (release / 'install/.lekiwi-overlay').write_text(str(overlays['b' if age == 3 else 'a']) + '\n')
+        if age < 8:
+            os.utime(release / 'release.json', (1000 + age, 1000 + age))
+    (workspace / 'current').symlink_to(releases[0])
+    (workspace / 'previous').symlink_to(releases[1])
+    process = tmp_path / 'proc/123'
+    process.mkdir(parents=True)
+    for name in ('maps', 'environ'):
+        (process / name).write_bytes(b'')
+    (process / 'cmdline').write_bytes(f'python3\0{releases[2]}/source/tool.py\0'.encode())
+    (process / 'cwd').symlink_to(tmp_path)
+    git(anchor, 'worktree', 'lock', str(releases[4] / 'source'))
+    # A staging run killed while Git created its checkout leaves Git's own lock behind.
+    git(anchor, 'worktree', 'lock', '--reason', 'initializing', str(releases[8] / 'source'))
+    record = releases[3] / 'source/.benchmarks/onboard-braking/result.json'
+    record.parent.mkdir(parents=True)
+    record.write_text('measured on the robot')
+    (releases[3] / 'source/.env').write_text('private configuration')
+    (releases[3] / 'source/__pycache__').mkdir()
+    (releases[3] / 'source/__pycache__/tool.pyc').write_bytes(b'cache')
+    return anchor, workspace, releases, overlays
+
+
+def run_retention(pruner, tmp_path, workspace, monkeypatch, capsys, *options):
+    plan = pruner.plan_retention
+    monkeypatch.setenv('LEKIWI_LOGS', str(tmp_path / 'logs'))
+    monkeypatch.setattr(pruner, 'plan_retention', lambda root: plan(root, tmp_path / 'proc'))
+    monkeypatch.setattr(sys, 'argv', ['prune-release-builds.py', str(workspace), '--retain', *options])
+    pruner.main()
+    return json.loads(capsys.readouterr().out)
+
+
+def test_retention_keeps_releases_in_use_and_the_newest_and_removes_the_rest(tmp_path, pruner, monkeypatch, capsys):
+    anchor, workspace, releases, overlays = retention_workspace(tmp_path)
+    report = run_retention(pruner, tmp_path, workspace, monkeypatch, capsys, '--apply')
+    assert report['kept'] == {
+        releases[0].name: 'current', releases[1].name: 'previous', releases[2].name: 'process 123',
+        releases[4].name: 'locked worktree', **{releases[index].name: 'recent' for index in (5, 6, 7)}}
+    assert pruner.RETAINED == 3 and report['retired'] == [releases[3].name]
+    assert report['unsealed'] == [releases[8].name]
+    for index in (0, 1, 2, 4, 5, 6, 7):
+        assert (releases[index] / 'release.json').is_file() and (releases[index] / 'build').is_dir()
+        assert (releases[index] / 'source/.git').is_file()
+    assert not releases[3].exists() and not releases[8].exists()
+    # The anchor repository forgets the removed checkouts, so the revisions can be staged again.
+    registered = git(anchor, 'worktree', 'list', '--porcelain')
+    assert str(releases[3]) not in registered and str(releases[8]) not in registered
+    assert str(releases[5] / 'source') in registered
+    receipt, = (workspace / 'retired-release-manifests').iterdir()
+    assert report['receipts'] == [str(receipt)] and receipt.name.startswith(releases[3].name)
+    assert json.loads((receipt / 'release.json').read_text())['revision'] == releases[3].name
+    import tarfile
+    with tarfile.open(receipt / 'qualification.tar.gz') as archive:
+        assert archive.extractfile('release-ctest.xml').read() == b'<testsuite/>'
+    assert sorted(str(path.relative_to(receipt)) for path in receipt.rglob('*') if path.is_file()) == [
+        'qualification.tar.gz', 'release.json', 'source/.benchmarks/onboard-braking/result.json']
+    # a: named by kept releases; c: the newest complete one; b: named only by the retired release.
+    assert {name for name, overlay in overlays.items() if overlay.exists()} == {'a', 'c'}
+
+
+def test_retention_keeps_an_overlay_a_process_still_maps(tmp_path, pruner, monkeypatch, capsys):
+    _, workspace, _, overlays = retention_workspace(tmp_path)
+    (tmp_path / 'proc/123/maps').write_bytes(f'7f00-7f01 r-xp {overlays["b"]}/install/lib/libdriver.so\n'.encode())
+    assert overlays['b'].name not in run_retention(pruner, tmp_path, workspace, monkeypatch, capsys, '--apply')['overlays']
+    assert overlays['b'].is_dir()
+
+
+def test_retention_dry_run_removes_nothing(tmp_path, pruner, monkeypatch, capsys):
+    anchor, workspace, releases, overlays = retention_workspace(tmp_path)
+    before = sorted(str(path) for path in workspace.rglob('*'))
+    report = run_retention(pruner, tmp_path, workspace, monkeypatch, capsys)
+    assert report['applied'] is False and report['receipts'] == []
+    assert report['retired'] == [releases[3].name] and report['unsealed'] == [releases[8].name]
+    assert report['overlays'] == [overlays['b'].name, overlays['d'].name]
+    assert sorted(str(path) for path in workspace.rglob('*')) == before + [str(workspace / 'releases/stage.lock')]
+    assert str(releases[3] / 'source') in git(anchor, 'worktree', 'list', '--porcelain')
+
+
+def test_retention_fails_early_when_the_workspace_still_lacks_space(tmp_path, pruner, monkeypatch, capsys):
+    _, workspace, releases, _ = retention_workspace(tmp_path)
+    with pytest.raises(SystemExit) as failure:
+        run_retention(pruner, tmp_path, workspace, monkeypatch, capsys, '--apply', '--need-free', str(1 << 60))
+    message = str(failure.value)
+    assert str(workspace) in message and f'{1 << 40} MiB needed' in message
+    assert 'removed 1 releases, 1 unsealed directories and 2 overlays' in message
+    assert not releases[3].exists() and (releases[0] / 'release.json').is_file()
+
+
+def test_pruning_runs_under_locks_its_caller_holds_and_refuses_anyone_elses(tmp_path):
+    import fcntl
+    (tmp_path / 'releases').mkdir()
+    (tmp_path / 'logs').mkdir()
+    command = [sys.executable, str(ROOT / 'scripts/prune-release-builds.py'), str(tmp_path), '--retain']
+    environment = {**os.environ, 'LEKIWI_LOGS': str(tmp_path / 'logs')}
+    for held in ('releases/stage.lock', 'logs/deploy.lock'):
+        with (tmp_path / held).open('w') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            # stage-release.sh and deploy-split.sh hand their held descriptor down to the tool.
+            inherited = subprocess.run(command, env=environment, pass_fds=[lock.fileno()], capture_output=True, text=True)
+            assert inherited.returncode == 0, inherited.stderr
+            foreign = subprocess.run(command, env=environment, capture_output=True, text=True)
+            assert foreign.returncode != 0 and 'is held by another' in foreign.stderr
+
+
 @pytest.mark.parametrize("builder", ["build-lekiwi.sh", "build-native.sh"])
 def test_builders_refuse_a_sealed_release_before_building(tmp_path, builder):
     (tmp_path / "install").mkdir()
@@ -179,7 +309,7 @@ def release_fixture(tmp_path):
     (repo / ".gitignore").write_text(".env\n__pycache__/\n")
     (repo / "test/test_example.py").write_text("def test_example(): pass\n")
     (repo / ".env").write_text("LEKIWI_WRIST=none\n")
-    for name in ("stage-release.sh", "check-release.py", "dependency-overlay-key.sh"):
+    for name in ("stage-release.sh", "check-release.py", "dependency-overlay-key.sh", "prune-release-builds.py"):
         path = repo / "scripts" / name
         path.write_text((ROOT / "scripts" / name).read_text())
         path.chmod(0o755)
@@ -224,7 +354,8 @@ printf '<testsuite><testcase name="test_example"/></testsuite>' > "${report%/*}/
     (workspace / "install/setup.bash").write_text("true\n")
     (workspace / "install/live-artifact").write_text("unchanged")
     (workspace / "current").symlink_to(workspace / "install", target_is_directory=True)
-    environment = {**os.environ, "PATH": f"{binaries}:{os.environ['PATH']}"}
+    # Staging applies the retention policy under the deployment lock; never contend for the real one.
+    environment = {**os.environ, "PATH": f"{binaries}:{os.environ['PATH']}", "LEKIWI_LOGS": str(tmp_path / "logs")}
     return repo, workspace, revision, environment
 
 
@@ -241,7 +372,10 @@ def test_staging_keeps_live_source_artifacts_and_pointer_unchanged(tmp_path, fai
     assert subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip() == revision
     release = workspace / "releases" / revision
     assert (release / "release.json").exists() is not fail
-    if not fail:
+    if fail:
+        # A failed run frees its partial release and its checkout record at once.
+        assert not release.exists() and str(release) not in git(repo, "worktree", "list", "--porcelain")
+    else:
         overlay = Path((release / "install/.lekiwi-overlay").read_text().strip())
         assert overlay.parent == workspace / "overlays" and (overlay / ".complete").is_file()
         assert (overlay / "install/.lekiwi-native-revision").is_file() is (role == "compute")
@@ -331,7 +465,7 @@ def test_releases_reuse_a_dependency_overlay_until_its_inputs_change(tmp_path, d
         checker.check_release(second_release, second, "compute")
 
 
-def test_a_retried_release_rebuilds_against_a_changed_dependency_overlay(tmp_path):
+def test_a_retried_release_is_built_from_scratch_against_a_changed_dependency_overlay(tmp_path):
     repo, workspace, revision, environment = release_fixture(tmp_path)
     log = tmp_path / "builds"
     environment = {**environment, "LEKIWI_TEST_BUILD_LOG": str(log)}
@@ -342,19 +476,70 @@ def test_a_retried_release_rebuilds_against_a_changed_dependency_overlay(tmp_pat
                             capture_output=True, text=True, timeout=30)
     assert failed.returncode == 43, failed.stdout + failed.stderr
     release = workspace / "releases" / revision
-    first = Path((release / "install/.lekiwi-overlay").read_text().strip())
+    first, = (workspace / "overlays").iterdir()
+    assert not release.exists() and (first / ".complete").is_file()
+    # A run killed outright cannot clean up: its build still names the overlay of its time.
     stale = release / "build/lekiwi_rmf/CMakeCache.txt"
-    stale.parent.mkdir(parents=True, exist_ok=True)
+    stale.parent.mkdir(parents=True)
     stale.write_text(f"rclcpp_DIR:PATH={first}/install/rclcpp\n")
     # An installed-package upgrade or dependency source change between attempts changes the key.
-    for args in (("-c", "user.name=Test", "-c", "user.email=test@example.invalid",
-                  "commit", "-q", "--allow-empty", "-m", "upgrade"),):
-        subprocess.run(["git", "-C", str(dependency), *args], check=True)
+    git(dependency, "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+        "commit", "-q", "--allow-empty", "-m", "upgrade")
     result = subprocess.run(command, env=environment, capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stdout + result.stderr
     second = Path((release / "install/.lekiwi-overlay").read_text().strip())
     assert second != first and not stale.exists()
     assert log.read_text().splitlines()[-1] == f"package on source {second}/install/setup.bash"
+
+
+def test_staging_first_removes_superseded_releases_leftovers_and_unused_overlays(tmp_path):
+    repo, workspace, first, environment = release_fixture(tmp_path)
+
+    def stage(revision):
+        # As the deployer stages on the device: the script arrives on standard input.
+        with (ROOT / "scripts/stage-release.sh").open() as script:
+            result = subprocess.run(["bash", "-s", "--", "device", str(workspace), revision, str(repo)],
+                                    stdin=script, env=environment, capture_output=True, text=True, timeout=30)
+        assert result.returncode == 0, result.stdout + result.stderr
+        return workspace / "releases" / revision
+
+    def commit(name):
+        (repo / name).parent.mkdir(parents=True, exist_ok=True)
+        (repo / name).write_text("# change\n")
+        git(repo, "add", name)
+        git(repo, "commit", "-q", "-m", name)
+        return git(repo, "rev-parse", "HEAD").strip()
+
+    active = stage(first)
+    (workspace / "current").unlink()
+    (workspace / "current").symlink_to(active)
+    old_overlay = Path((active / "install/.lekiwi-overlay").read_text().strip())
+    releases = [stage(commit(f"lekiwi_rmf/change{index}.py")) for index in range(3)]
+    leftover = workspace / "releases" / ("d" * 40) / "build"
+    leftover.mkdir(parents=True)
+    # Three other releases are sealed already: staging two more retires the two oldest of them.
+    releases.append(stage(commit("thirdparty/ldlidar_stl_ros2/fix.patch")))
+    releases.append(stage(commit("lekiwi_rmf/latest.py")))
+    assert not leftover.parent.exists()
+    assert [release.exists() for release in releases] == [False, True, True, True, True]
+    assert (active / "release.json").is_file() and old_overlay.is_dir()
+    registered = git(repo, "worktree", "list", "--porcelain")
+    assert str(releases[0]) not in registered and str(releases[1] / "source") in registered
+    assert len(list((workspace / "retired-release-manifests").iterdir())) == 1
+    # Activating the newest release leaves the first overlay to `previous` alone...
+    new_overlay = Path((releases[-1] / "install/.lekiwi-overlay").read_text().strip())
+    assert new_overlay != old_overlay
+    for name, target in (("previous", active), ("current", releases[-1])):
+        (workspace / name).unlink(missing_ok=True)
+        (workspace / name).symlink_to(target)
+    stage(commit("lekiwi_rmf/after.py"))
+    assert old_overlay.is_dir() and active.is_dir()
+    # ...and once no kept release is built on it, the next staging removes it.
+    (workspace / "previous").unlink()
+    (workspace / "previous").symlink_to(releases[-2])
+    for index in range(4):
+        stage(commit(f"lekiwi_rmf/later{index}.py"))
+    assert not active.exists() and not old_overlay.exists() and new_overlay.is_dir()
 
 
 def test_staging_clones_only_the_materialized_vendor_revision(tmp_path):
@@ -377,6 +562,29 @@ def test_staging_clones_only_the_materialized_vendor_revision(tmp_path):
                             env=environment, text=True, capture_output=True, timeout=30)
     assert result.returncode == 0, result.stdout + result.stderr
     assert (workspace / "releases" / revision / "release.json").is_file()
+
+
+def test_interrupted_staging_removes_its_partial_release_and_overlay(tmp_path):
+    repo, workspace, _, environment = release_fixture(tmp_path)
+    builder = repo / "scripts/build-native.sh"
+    builder.write_text(builder.read_text() + 'touch "$LEKIWI_TEST_ENTERED"\nsleep 30\n')
+    git(repo, "commit", "-q", "-am", "blocking build")
+    revision = git(repo, "rev-parse", "HEAD").strip()
+    entered = tmp_path / "entered"
+    process = subprocess.Popen(["bash", str(repo / "scripts/stage-release.sh"), "compute", str(workspace), revision],
+                               env={**environment, "LEKIWI_TEST_ENTERED": str(entered)}, start_new_session=True,
+                               text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        deadline = time.monotonic() + 10
+        while not entered.exists() and process.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert entered.exists() and (workspace / "releases" / revision / "source").is_dir()
+    finally:
+        os.killpg(process.pid, 15)  # a dropped SSH session ends the whole staging session
+        stdout, stderr = process.communicate(timeout=30)
+    assert process.returncode == 143, stdout + stderr
+    assert not (workspace / "releases" / revision).exists() and list((workspace / "overlays").iterdir()) == []
+    assert str(workspace) not in git(repo, "worktree", "list", "--porcelain")
 
 
 def test_staging_finishes_its_original_commands_when_the_caller_file_changes(tmp_path):

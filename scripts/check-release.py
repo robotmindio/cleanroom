@@ -122,8 +122,11 @@ def check_release(release, revision, role, seal=False):
     if seal:
         if manifest.exists():
             raise ValueError("refusing to overwrite a sealed release")
-        manifest.write_text(json.dumps(actual, indent=2) + "\n", encoding="utf-8")
-        manifest.chmod(0o600)
+        # The seal appears complete or not at all: staging and retention remove unsealed releases.
+        partial = manifest.with_name("release.json.partial")
+        partial.write_text(json.dumps(actual, indent=2) + "\n", encoding="utf-8")
+        partial.chmod(0o600)
+        partial.replace(manifest)
     elif json.loads(manifest.read_text(encoding="utf-8")) != actual:
         raise ValueError("release files or test evidence changed after qualification")
 
