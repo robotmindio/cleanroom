@@ -89,7 +89,8 @@ robot-local classes; retention references the parameter that enforces it.
 Backups snapshot the task journal, observation store (records and evidence),
 spatial memory and arm calibration with SQLite's online backup, and list model
 and skill files by size and digest; weights are reinstalled from their pinned
-sources. RTAB-Map keeps its own archives.
+sources. The RTAB-Map database is not included; snapshot it with
+`scripts/rtabmap-db-maintenance.py --backup SOURCE DESTINATION`.
 
 Restore and verify:
 

@@ -42,8 +42,8 @@ classes:
     mode: '0775'
 # What a backup snapshots. SQLite stores are copied with SQLite's online backup, so a running node does
 # not tear the copy. Weights are excluded and listed by digest instead: they are reinstalled from their
-# pinned source (scripts/install-object-model.py, the skill registry). RTAB-Map's database keeps its own
-# archives (scripts/rtabmap-db-maintenance.py) and approved maps live in map bundles.
+# pinned source (scripts/install-object-model.py, the skill registry). RTAB-Map's database is not part
+# of this backup (snapshot it with scripts/rtabmap-db-maintenance.py --backup); approved maps live in map bundles.
 stores:
   task_journal: {path: '.ros/lekiwi_tasks{suffix}.sqlite3', kind: sqlite, lock: true}
   observations: {path: '.ros/lekiwi/observations{suffix}.sqlite3', kind: sqlite, lock: true}

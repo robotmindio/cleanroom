@@ -78,7 +78,6 @@ install(PROGRAMS
   scripts/host-health-check.py
   scripts/reload-moveit.py
   scripts/rtabmap-db-maintenance.py
-  scripts/rtabmap-session-guard.py
   scripts/torque-host.py
   scripts/recover-device-usb.py
   scripts/validate-map-bundle.py
@@ -265,7 +264,6 @@ if(BUILD_TESTING)
     add_lekiwi_pytest(test_launch_validation)
     add_lekiwi_pytest(test_bringup_snapshot)
     add_lekiwi_pytest(test_safety_profiles)
-    add_lekiwi_pytest(test_rtabmap_session_guard)
     add_lekiwi_pytest(test_exploration)
     add_lekiwi_pytest(test_explore_launcher)
     add_lekiwi_pytest(test_exploration_recovery)

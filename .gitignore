@@ -18,3 +18,6 @@ __pycache__/
 .rmf_schedule_node.yaml
 *.db
 .claude/
+
+# output of scripts/checkerboard.py
+checkerboard-*.pdf

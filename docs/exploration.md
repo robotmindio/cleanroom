@@ -238,8 +238,6 @@ and torque policy stays unchanged.
 
 The mapper and this quota monitor must remain running. This task runner does
 not replace the existing independent motion guards or physical supervision.
-The standalone `rtabmap-session-guard.py` remains a finite quota-report utility,
-not the bringup monitor.
 
 ## MCP / Fiber
 

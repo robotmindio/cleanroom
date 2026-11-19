@@ -103,7 +103,6 @@ def test_ros_start_inhibits_sleep_and_records_the_signalable_launcher(tmp_path, 
         shutil.copy2(ROOT / 'scripts' / name, scripts / name)
     (scripts / 'setup.bash').write_text('')
     (scripts / 'lib/self-heal.sh').write_text('self_heal() { :; }\n')
-    _executable(scripts / 'rtabmap-db-maintenance.py', 'exit 0\n')
     fakes = tmp_path / 'bin'
     _executable(fakes / 'python3', 'exit 0\n')
     (fakes / 'dbus.py').write_text("""import os,json
