@@ -61,3 +61,25 @@ def test_named_travel_pose_matches_safety_and_preserves_home():
     for fault in (float("nan"), float("inf"), -2.0):
         with pytest.raises(ValueError):
             capture.stow_from_samples([dict(stow, arm_shoulder_lift=fault)])
+
+
+def test_attended_stage_stow_reference_follows_the_captured_pose():
+    original = (ROOT / "config/base_speed_qualification.yaml").read_text(encoding="utf-8")
+    production = yaml.safe_load((ROOT / "config/safety_production.yaml").read_text())["safety_supervisor"]["ros__parameters"]
+    tracked = dict(zip(production["stow_joint_names"], production["stow_joint_positions"]))
+
+    def stages(text, reference):
+        return {name: stage.get("stow_joint_positions") if reference else
+                {key: value for key, value in stage.items() if key != "stow_joint_positions"}
+                for name, stage in yaml.safe_load(text)["stages"].items()}
+
+    # The tracked copies agree, and rewriting the same pose changes nothing.
+    references = [reference for reference in stages(original, True).values() if reference]
+    assert references and all(reference == tracked for reference in references)
+    assert capture.write_qualification_stow(original, tracked) == original
+    stow = dict(zip(capture.STOW_JOINTS, (0.1, -1.5708, 1.4, 0.95, -0.02, 0.3)))
+    changed = capture.write_qualification_stow(original, stow)
+    assert [reference for reference in stages(changed, True).values() if reference] == [stow] * len(references)
+    assert stages(changed, False) == stages(original, False)
+    with pytest.raises(ValueError, match="arm_gripper"):
+        capture.write_qualification_stow(original.replace("      arm_gripper:", "      gripper:"), stow)

@@ -7,7 +7,9 @@ averages the six arm joints, refuses if they move, and writes the same values to
 config/safety_production.yaml (stow_joint_positions) and
 config/safety_acceptance.yaml (accepted_stow_joint_positions), which the
 supervisor requires to match, plus config/lekiwi.srdf (travel_stow for arm and
-gripper). It never commands motion. Review and commit the diff.
+gripper) and the attended stages' stow reference in
+config/base_speed_qualification.yaml. It never commands motion. Review and commit
+the diff.
 """
 
 import argparse
@@ -24,6 +26,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PRODUCTION = ROOT / "config" / "safety_production.yaml"
 ACCEPTANCE = ROOT / "config" / "safety_acceptance.yaml"
 SEMANTIC = ROOT / "config" / "lekiwi.srdf"
+QUALIFICATION = ROOT / "config" / "base_speed_qualification.yaml"
 STOW_JOINTS = (
     "arm_shoulder_pan", "arm_shoulder_lift", "arm_elbow_flex",
     "arm_wrist_flex", "arm_wrist_roll", "arm_gripper",
@@ -108,6 +111,18 @@ def write_named_stow(semantic_text, stow):
     return semantic_text
 
 
+def write_qualification_stow(qualification_text, stow):
+    """Keep every attended stage's stow reference equal to the production pose."""
+    blocks = len(re.findall(r"^\s*stow_joint_positions:\s*$", qualification_text, flags=re.MULTILINE))
+    for joint in STOW_JOINTS:
+        qualification_text, count = re.subn(
+            rf"^(\s+{joint}:\s*)\S+$", rf"\g<1>{stow[joint]!r}", qualification_text, flags=re.MULTILINE,
+        )
+        if count != blocks:
+            raise ValueError(f"base_speed_qualification.yaml needs one {joint} entry per stow reference")
+    return qualification_text
+
+
 def record(samples_wanted, timeout):
     import rclpy
     from sensor_msgs.msg import JointState
@@ -140,14 +155,17 @@ def main():
             PRODUCTION.read_text(encoding="utf-8"), ACCEPTANCE.read_text(encoding="utf-8"), stow
         )
         semantic = write_named_stow(SEMANTIC.read_text(encoding="utf-8"), stow)
+        qualification = write_qualification_stow(QUALIFICATION.read_text(encoding="utf-8"), stow)
     except ValueError as error:
         sys.exit(str(error))
     PRODUCTION.write_text(production, encoding="utf-8")
     ACCEPTANCE.write_text(acceptance, encoding="utf-8")
     SEMANTIC.write_text(semantic, encoding="utf-8")
+    QUALIFICATION.write_text(qualification, encoding="utf-8")
     for joint in STOW_JOINTS:
         print(f"{joint}: {stow[joint]}")
-    print("Wrote both safety entries and MoveIt travel_stow; review clearance and commit together.")
+    print("Wrote both safety entries, MoveIt travel_stow and the qualification stow reference; "
+          "review clearance and commit together.")
 
 
 if __name__ == "__main__":
