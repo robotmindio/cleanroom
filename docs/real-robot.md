@@ -15,8 +15,11 @@ depth/metadata and image previews. Loss or backlog in a preview stream therefore
 does not hold up scan/depth on the same TCP stream. Three independent compute clients use disjoint import lists, without listeners
 or scouting; their reconnect backoff is 100 ms to 1 s.
 Freshness and motion gates still stop on a complete outage and recover only
-when current inputs return. The native encrypted-delay probe and remaining
-acceptance are in [the project status](project-status-20261105.md).
+when current inputs return. `test/test_zenoh_tls.py` runs a two-domain ROS/mTLS
+probe when the pinned bridge is installed: startup without the device, delayed
+camera and depth links that do not block scan, and reconnection of all three
+clients. It is software fault injection, not a physical Wi-Fi outage trial;
+remaining acceptance is in [DEFERRED.md](../DEFERRED.md).
 
 Before anything here, bring the robot up under plain LeRobot: motor IDs,
 calibration, cameras, and keyboard teleoperation. See

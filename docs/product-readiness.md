@@ -1,10 +1,12 @@
 # Product readiness and delivery epics
 
-For current implementation, acceptance gaps and the complete open-issue inventory,
-see [project status — 2026-11-07](project-status-20261107.md). The October assessment
-below predates the delivered perception, semantic-memory and Fiber objective software.
+The capability inventory states what is implemented and what acceptance is
+still required; open acceptance work with completion conditions and tracking
+issues is in [DEFERRED.md](../DEFERRED.md). The delivery epics were assessed on
+2026-10-13: where an epic's "current gap" differs from the inventory, the
+inventory is current.
 
-Assessment date: 2026-10-13. Scope: this ROS repository and its tracked
+Scope: this ROS repository and its tracked
 integration contracts, assuming one physical robot, one managed task at a time,
 and an operator at the independent motor-power stop. A bounded read-only review
 of the adjacent Fiber goal/connector code and camera deployment defaults informs
@@ -23,9 +25,9 @@ recognition, world state, user goals, planning and verification before grasping
 adds contact and payload risks. A repeatable attended navigation/exploration pilot
 supplies the physical foundation for that moving search.
 
-The repository has substantial execution, recovery and safety software. It does
-not yet connect user intent to recognized objects, semantic locations or verified
-physical outcomes. It also does not establish an unattended household robot,
+The repository has substantial execution, recovery, perception and safety
+software. It does not yet establish accepted recognition accuracy, metric object
+locations or verified physical outcomes. It also does not establish an unattended household robot,
 a qualified manipulation product, automatic charging or production fleet operation.
 Those outcomes require separate implementations, acceptance and integrations.
 
@@ -41,11 +43,14 @@ within its recorded conditions; it does not qualify this changed behavior.
 | Drive autonomously under supervision | Reviewed base stopping record: dry concrete, reported 200 g installed load, folded stow, 0.25 m/s and 0.40 rad/s | Current predictive obstacle-response check and binding reviewed evidence to safety-relevant release inputs |
 | Ask the robot to explore and observe progress | Bounded Explore action; managed task journal; pause, cancel and restart reconciliation | Physical room-scale acceptance and deployed Fiber/UI completion, failure and reconnect trials |
 | Understand task parameters before submitting | Live Explorer defaults and additive capability descriptions on this review branch | External clients must consume the contract; `available` means profile enabled and action server discovered, not physical permission |
-| Recognize and locate a requested object | RGB streams, camera information and depth transport | Detector/recognizer, object identity, calibrated 3D grounding and a tested observation contract |
-| Know objects, rooms and named destinations | Geometric occupancy map and fixed RMF graph vertices | Semantic world state, object/place identifiers, last-seen evidence and map-version handling |
-| Set a durable user objective | Adjacent Fiber core has persisted goals/subgoals and an optional goal-layer plugin contract | Robot-specific success predicates, constraints, target resolution and linkage to physical task outcomes |
-| Decide and verify how to achieve an objective | Nav2 plans paths; MoveIt plans arm trajectories; managed gateway exposes navigate/explore | Multi-step robot skill planning, target-driven search and independent outcome verification |
-| Execute arm motion reliably | MoveIt and guarded trajectories; one loaded HOME cycle at 0.10 scaling | Measured workspace coverage, intrusion stopping, payload retention/endurance and wrist-camera reliability |
+| Recognize a requested object | Pinned remote GPU recognizer with local fallback, latest-frame scheduling, source-age rejection, hashed evidence storage and explicit ambiguity/quality outcomes | Independent site corpus with accuracy, input-quality and latency acceptance; scene-specific canaries do not qualify a category detector |
+| Locate it metrically | RGB-D/TF grounding with map and uncertainty gates; invalid calibration leaves observations image-only | Measured Astra intrinsics, depth scale, registration and extrinsics; independent position error; approved site map |
+| Know objects, rooms and named destinations | Timestamped sightings with provenance, map revisions and capture anchors; geometric occupancy map and fixed RMF graph vertices | Loop-closure, relocalization, map-merge/relink and capture/graph-race acceptance; a class label is not a stable instance identity |
+| Set a durable user objective | Stationary find-object objective through Fiber: observe, resolve, verify with evidence-backed completion | Repeatable acceptance across positive, negative, ambiguous, stale, reconnect, cancellation and policy cases for the deployed tenant, profile and UI |
+| Decide and verify how to achieve an objective | Nav2 plans paths; MoveIt plans arm trajectories; the task gateway advertises navigate, explore, search, reach and skill (reach and skill off by default) | Multi-step robot skill planning and independent outcome verification |
+| Search for an object while moving | Search action with view selection, bounded travel/time, cancellation and coverage bookkeeping; `allow_search: true` permits explicitly requested attended trials | Live moving-search qualification, measured detectability and 3D occlusion/coverage |
+| Execute arm motion reliably | MoveIt and guarded trajectories; stow and torque-hold recovery; skill registry, training and execution infrastructure; one loaded HOME cycle at 0.10 scaling | Measured workspace coverage, intrusion stopping, payload retention/endurance and wrist-camera reliability; `config/robot_skills.yaml` registers no skills, so grasp/carry/place is not delivered |
+| Keep sensors and control connected | Immutable split releases, service hardening, mTLS sensor bridge on three isolated sessions, CURVE motor transport, sleep inhibitor | Sustained transport/endurance, saturation and outage acceptance; service readiness is not uninterrupted sensor freshness |
 | Localize and navigate precisely | Wheel odometry, lidar/RGB-D SLAM, calibration tooling and map validation | Measured Astra calibration, site accuracy and an approved surveyed bundle |
 | Operate unattended | Software checks and independent physical motor-power stop | Near-field/surround coverage, required physical sensing and a separately reviewed unattended scope |
 | Run a fleet or recharge automatically | Free Fleet integration and bundle admission checks | Approved map, ownership architecture, physical battery source and charging interface/workflow |

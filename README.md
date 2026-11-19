@@ -1,19 +1,18 @@
-# LeKiwi ROS 2 + lidar SLAM + Open-RMF
+# LeKiwi ROS 2 + RTAB-Map SLAM + Open-RMF
 
 A shared ROS 2 Jazzy stack for running a LeKiwi mobile manipulator in Gazebo or on real hardware. Nav2 and Open-RMF see the same robot interface in both modes.
 
 The usual operator commands are indexed in [`scripts/README.md`](scripts/README.md).
-Current implementation, completion criteria and all documented outstanding work are in
-[`docs/project-status-20261105.md`](docs/project-status-20261105.md).
-The original delivery epics remain in [`docs/product-readiness.md`](docs/product-readiness.md).
+Capability status and delivery epics are in [`docs/product-readiness.md`](docs/product-readiness.md);
+open acceptance work with completion conditions is in [`DEFERRED.md`](DEFERRED.md).
 
 ```text
 Open-RMF -> Free Fleet -> Nav2 -> cmd_vel_smoothed --+
                          ^                            |-> mux -> collision monitor -> /cmd_vel_safe
                          |                            |                              |-- Gazebo Harmonic
                          |                            `-> manual teleop              `-- LeRobot ZMQ host -> LeKiwi
-                RTAB-Map lidar SLAM
-                LD06 + Astra cloud + wheel odometry
+                RTAB-Map SLAM      
+                RGB-D + LD06/Astra cloud + wheel odometry
 ```
 
 The package includes:
@@ -125,7 +124,7 @@ Source the environment in every new terminal:
 source scripts/setup.bash
 ```
 
-Launch Gazebo, lidar SLAM, and Nav2 through the managed renderer preflight:
+Launch Gazebo, RTAB-Map SLAM, and Nav2 through the managed renderer preflight:
 
 ```bash
 scripts/sim-up.sh
