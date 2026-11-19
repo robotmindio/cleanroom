@@ -41,3 +41,7 @@ record_service_fingerprint() {
   printf '%s\n' "$fingerprint" | as_root tee "$marker" >/dev/null
   as_root chown "$LEKIWI_SERVICE_USER:$group" "$marker"
 }
+
+clear_service_fingerprint() { # the installed configuration is not what is running
+  as_root rm -f "$LEKIWI_SERVICE_HOME/.ros/lekiwi/service-fingerprint-$1"
+}

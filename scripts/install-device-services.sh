@@ -17,7 +17,10 @@
 # one (hostname -I).
 #
 # Re-run any time; both installers are idempotent. A service whose installed
-# unit changed (new --bind-address or --curve-dir) is restarted to pick it up.
+# unit changed (new --bind-address or --curve-dir) is restarted to pick it up,
+# except lekiwi-host and lekiwi-astra while the motor host runs: restarting
+# either can drop the arm, so scripts/deploy-split.sh restarts them after
+# measuring travel_stow.
 # Usage: scripts/install-device-services.sh [--service-user USER]
 #        [--workspace PATH] [--lerobot-venv PATH] [--bind-address IPV4]
 #        [--curve-dir PATH] [--no-start]
@@ -112,6 +115,24 @@ ros_package_available() { # ros_package_available <package>
     fi
     ros2 pkg prefix "$1" >/dev/null 2>&1
   )
+}
+
+DEFERRED_UNITS=()
+defer_live_motor_units() {
+  # A host restart cuts arm torque in whatever pose the arm holds, and an Astra restart
+  # resets the USB hub the motor bus shares. Nothing here measures travel_stow, so while
+  # the motor host is anything but stopped both units keep running as they are.
+  local unit kept=()
+  case $(systemctl show -P ActiveState lekiwi-host.service 2>/dev/null) in
+    inactive|failed) return 0 ;;
+  esac
+  for unit in "${CHANGED_UNITS[@]}"; do
+    case $unit in
+      lekiwi-host.service|lekiwi-astra.service) DEFERRED_UNITS+=("$unit") ;;
+      *) kept+=("$unit") ;;
+    esac
+  done
+  CHANGED_UNITS=("${kept[@]}")
 }
 
 if ! ros_package_available ldlidar_stl_ros2; then
@@ -210,6 +231,7 @@ as_root systemctl daemon-reload
 # --no-block: lekiwi-host only starts once every servo answers, and systemd keeps
 # retrying it. Unpowered servos must not abort the installation before the sudoers
 # grant, the Wi-Fi country and the configuration fingerprint below.
+defer_live_motor_units
 restart_changed_units --no-block
 if [[ $START_SERVICES == true ]]; then
   as_root systemctl enable --now --no-block "${units[@]}" lekiwi-ros-logrotate.timer
@@ -222,7 +244,15 @@ as_root "$PROJECT_ROOT/scripts/install-deploy-sudoers.sh" device --user "$LEKIWI
 log "Setting the Wi-Fi country, disabling power saving and granting network control"
 as_root "$PROJECT_ROOT/scripts/install-device-network.sh" --user "$LEKIWI_SERVICE_USER" \
   --country "${LEKIWI_WIFI_COUNTRY:-ID}"
-record_service_fingerprint device
+if (( ${#DEFERRED_UNITS[@]} )); then
+  # Without a recorded fingerprint the next deployment refreshes the device services:
+  # it stops and starts them itself, after its fresh travel_stow check.
+  clear_service_fingerprint device
+  log "Not restarted while the motor host is running (it would cut arm torque): ${DEFERRED_UNITS[*]}"
+  log "They keep their previous configuration until scripts/deploy-split.sh runs on the compute machine."
+else
+  record_service_fingerprint device
+fi
 for unit in "${units[@]}"; do
   log "$unit: $(systemctl is-active "$unit" 2>/dev/null || true)"
 done

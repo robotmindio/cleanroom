@@ -938,6 +938,36 @@ restart_changed_units --no-block
     calls = (tmp_path / "calls").read_text(encoding="utf-8")
     assert calls == "systemctl try-restart --no-block lekiwi-host.service\n"
 
+
+@pytest.mark.parametrize("host_state,restarted,deferred", [
+    ("active", "lekiwi-lidar.service", "lekiwi-host.service lekiwi-astra.service"),
+    ("activating", "lekiwi-lidar.service", "lekiwi-host.service lekiwi-astra.service"),
+    ("inactive", "lekiwi-host.service lekiwi-astra.service lekiwi-lidar.service", ""),
+    ("failed", "lekiwi-host.service lekiwi-astra.service lekiwi-lidar.service", ""),
+])
+def test_device_installer_never_restarts_torque_holding_units_under_a_live_host(
+        host_state, restarted, deferred):
+    # A host restart cuts arm torque and an Astra restart resets the motor bus's USB
+    # hub; the installer cannot measure travel_stow, so only the deployment does both.
+    device = (ROOT / "scripts" / "install-device-services.sh").read_text(encoding="utf-8")
+    start = device.index("DEFERRED_UNITS=()\ndefer_live_motor_units() {")
+    function = device[start:device.index("\n}\n", start) + 3]
+    result = _bash('state=$1; systemctl() { [[ $* == "show -P ActiveState lekiwi-host.service" ]] && echo "$state"; }\n'
+                   'CHANGED_UNITS=(lekiwi-host.service lekiwi-astra.service lekiwi-lidar.service)\n'
+                   + function + 'defer_live_motor_units\n'
+                   'echo "${CHANGED_UNITS[*]}"; echo "${DEFERRED_UNITS[*]}"\n', host_state)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == [restarted, deferred]
+    assert device.index("\ndefer_live_motor_units\n") < device.index("restart_changed_units --no-block\n")
+    # A deferred restart leaves no fingerprint, so the next deployment refreshes the
+    # services itself, behind its fresh stow check.
+    assert re.search(r'if \(\( \$\{#DEFERRED_UNITS\[@\]\} \)\); then\n(  #.*\n)*  clear_service_fingerprint device\n',
+                     device)
+    marker = _bash('as_root() { "$@"; }; PROJECT_ROOT=/unused; LEKIWI_SERVICE_HOME=$1\n'
+                   'source "$LIB/service-install-revision.sh"; clear_service_fingerprint device',
+                   "/srv/robot")
+    assert marker.returncode == 0, marker.stderr
+
 def test_compute_stack_restarts_only_when_its_configuration_changes(tmp_path):
     """Replays the compute installer's configuration and start sequence against a fake systemctl."""
     compute = (ROOT / "scripts" / "install-compute-services.sh").read_text(encoding="utf-8")
