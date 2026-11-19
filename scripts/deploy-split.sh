@@ -322,13 +322,61 @@ verify_release() {
     /usr/bin/python3 "$compute_release/source/scripts/check-release.py" verify "$compute_release" "$target" compute &&
     "${ssh_command[@]}" /usr/bin/python3 "$device_release/source/scripts/check-release.py" verify "$device_release" "$target" device
 }
-if [[ $refresh_compute == false && $refresh_device == false &&
-      -L $compute_current && $(readlink -f "$compute_current") == "$compute_release" &&
-      $("${ssh_command[@]}" readlink -f "$device_current") == "$device_release" &&
+record_deployment() {
+  log "Recording the verified deployment revision"
+  printf '%s\n' "$target" > "$marker"
+  "${ssh_command[@]}" "mkdir -p '$remote_home/.ros/lekiwi' && printf '%s\\n' '$target' > '$remote_marker'"
+}
+driver_state() {
+  timeout 10 ros2 topic echo --once /safety/driver_state --field data | tr -d "'[:space:]-"
+}
+validate_robot() { # device sensors reach compute, the release is intact, the robot is ready and armed
+  wait_for 30 sh -c "ros2 topic info /hardware/diagnostics | grep -Eq 'Publisher count: [1-9]'" || \
+    die "updated driver is not publishing motor health"
+  if ! has_device_unit lekiwi-cameras.service; then
+    log "lekiwi-cameras.service is not installed on the device; skipping the camera check"
+  elif remote_front_camera_present; then
+    timeout 30 ros2 topic echo --once /pi/camera/front/image_raw/compressed >/dev/null || \
+      die "attached front camera did not reach compute"
+  else
+    log "No front camera is attached; its independent service remains waiting"
+  fi
+  if has_device_unit lekiwi-astra.service; then
+    timeout 30 ros2 topic echo --once /camera/depth/points >/dev/null || \
+      die "device Astra point cloud did not reach compute; check lekiwi-astra.service for invalid depth"
+  else
+    log "lekiwi-astra.service is not installed on the device; skipping the point-cloud check"
+  fi
+  local lidar_frame state
+  lidar_frame=$(timeout 30 ros2 topic echo --once --field header.frame_id /scan | \
+    awk 'NF && $1 != "---" { print $1; exit }') || \
+    die "device LD06 scan did not reach compute"
+  [[ $lidar_frame == laser ]] || die "canonical /scan is not the LD06 frame: $lidar_frame"
+
+  verify_release || die "qualified release changed during deployment"
+  operational_ready 120 false || die "navigation did not become operationally ready"
+  # A domestic robot stays armed, so arm one this deployment (or a failed earlier run)
+  # left disarmed; only LEKIWI_DISARM_ON_FAILURE=true keeps it disarmed for an operator.
+  # Arming holds the measured pose and zeroes the command, so an armed robot is left alone.
+  [[ ${LEKIWI_DISARM_ON_FAILURE:-false} != true ]] || return 0
+  state=$(driver_state) || state=""
+  if [[ $state != ARMED ]]; then
+    wait_for 60 "$PROJECT_ROOT/scripts/rearm-robot.sh" || die "required re-arm failed; deployment remains unverified"
+  fi
+  operational_ready 30 true || die "armed robot did not grant fresh base permission"
+}
+# Both machines already run the verified target release with current service
+# configuration: nothing has to stop for it to be validated.
+release_selected=false
+if [[ $refresh_compute == false && $refresh_device == false && -L $compute_current ]] &&
+    verify_release; then
+  release_selected=true
+fi
+if [[ $release_selected == true &&
       $(cat "$marker" 2>/dev/null || true) == "$target" &&
       $("${ssh_command[@]}" "cat '$remote_marker' 2>/dev/null || true") == "$target" ]] &&
     /usr/bin/systemctl is-active --quiet lekiwi-stack.service &&
-    remote_unit_active_all "${device_units[@]}" && verify_release; then
+    remote_unit_active_all "${device_units[@]}"; then
   ros_setup
   if operational_ready 30 "$([[ ${LEKIWI_DISARM_ON_FAILURE:-false} == true ]] && echo false || echo true)"; then
     echo "already deployed ${target:0:12}; sealed releases and robot readiness verified"
@@ -336,9 +384,6 @@ if [[ $refresh_compute == false && $refresh_device == false &&
   fi
   log "Current revision is installed but not operationally ready; continuing deployment recovery"
 fi
-
-/usr/bin/systemctl is-active --quiet lekiwi-stack.service || die "lekiwi-stack.service must be running before deployment"
-remote_unit_active lekiwi-host.service || die "lekiwi-host.service must be running before deployment"
 
 # Build and qualify persistent detached worktrees before touching live services.
 # A staging failure leaves both the active source and install prefixes unchanged.
@@ -364,10 +409,53 @@ activate_release() { # activate_release <workspace> <release>, only after servic
   mv -Tf "$temporary" "$root/current"
 }
 
-trap 'echo "$0: deployment failed; previous releases and bootstrap installation are retained; no automatic rollback or resume" >&2' EXIT
+trap 'echo "$0: deployment failed; previous releases and bootstrap installation are retained; no automatic rollback. Rerun to resume" >&2' EXIT
+
+# A failed deployment can leave services stopped, and the stow check below needs the
+# driver. Starting a service cuts no torque, with one exception: lekiwi-astra resets the
+# USB hub the motor bus shares, so it is started only by the restart sequence below.
+stack_started=false
+for unit in lekiwi-host.service lekiwi-cameras.service lekiwi-lidar.service lekiwi-zenoh.service; do
+  if has_device_unit "$unit" && ! remote_unit_active "$unit"; then
+    log "Starting stopped $unit"
+    "${ssh_command[@]}" sudo -n /usr/bin/systemctl reset-failed "$unit"
+    "${ssh_command[@]}" sudo -n /usr/bin/systemctl start "$unit"
+    remote_unit_active "$unit" || die "$unit did not become active"
+  fi
+done
+if ! /usr/bin/systemctl is-active --quiet lekiwi-stack.service; then
+  log "Starting stopped lekiwi-stack.service"
+  sudo -n /usr/bin/systemctl reset-failed lekiwi-stack.service
+  sudo -n /usr/bin/systemctl start lekiwi-stack.service
+  wait_for 120 /usr/bin/systemctl is-active --quiet lekiwi-stack.service || \
+    die "lekiwi-stack.service did not become active"
+  stack_started=true
+fi
+
+ros_setup
+[[ $stack_started == false ]] || wait_for 120 ros2 service type /safety/disarm || \
+  die "driver did not appear after starting lekiwi-stack.service"
+
+# An earlier run that failed after selecting this release (a sensor, readiness or the
+# final re-arm) left it running. Validate it in place: no stop, no restart, no torque cut.
+if [[ $release_selected == true && $pi_reboot_needed == false ]] &&
+    remote_unit_active_all "${device_units[@]}"; then
+  log "Revision ${target:0:12} is already selected and running; validating it without a restart"
+  set +e
+  ( set -e; validate_robot )
+  validated=$?
+  set -e
+  if (( validated == 0 )); then
+    record_deployment
+    trap - EXIT
+    echo "deployed ${target:0:12} to compute and $device without a restart; $(
+      [[ ${LEKIWI_DISARM_ON_FAILURE:-false} == true ]] && echo "arming state unchanged" || echo "robot armed")"
+    exit 0
+  fi
+  log "Validation without a restart failed; continuing with a full restart"
+fi
 
 log "Confirming torque-off and stopping the compute stack"
-ros_setup
 # Disarming cuts arm torque; anywhere but travel_stow the unpowered arm falls.
 python3 "$PROJECT_ROOT/scripts/check-travel-stow.py" || die "move the arm to travel_stow before deploying"
 disarm
@@ -456,45 +544,13 @@ wait_for 120 /usr/bin/systemctl is-active --quiet lekiwi-stack.service || \
 ros_setup
 wait_for 120 ros2 service type /safety/disarm || die "updated driver did not appear"
 disarm
-driver_state=$(timeout 10 ros2 topic echo --once /safety/driver_state --field data | tr -d "'[:space:]-")
-[[ $driver_state == DISARMED ]] || die "updated driver is not disarmed: $driver_state"
-wait_for 30 sh -c "ros2 topic info /hardware/diagnostics | grep -Eq 'Publisher count: [1-9]'" || \
-  die "updated driver is not publishing motor health"
-if ! has_device_unit lekiwi-cameras.service; then
-  log "lekiwi-cameras.service is not installed on the device; skipping the camera check"
-elif remote_front_camera_present; then
-  timeout 30 ros2 topic echo --once /pi/camera/front/image_raw/compressed >/dev/null || \
-    die "attached front camera did not reach compute"
-else
-  log "No front camera is attached; its independent service remains waiting"
-fi
-if has_device_unit lekiwi-astra.service; then
-  timeout 30 ros2 topic echo --once /camera/depth/points >/dev/null || \
-    die "device Astra point cloud did not reach compute; check lekiwi-astra.service for invalid depth"
-else
-  log "lekiwi-astra.service is not installed on the device; skipping the point-cloud check"
-fi
-lidar_frame=$(timeout 30 ros2 topic echo --once --field header.frame_id /scan | \
-  awk 'NF && $1 != "---" { print $1; exit }') || \
-  die "device LD06 scan did not reach compute"
-[[ $lidar_frame == laser ]] || die "canonical /scan is not the LD06 frame: $lidar_frame"
-
-verify_release || die "qualified release changed during deployment"
-operational_ready 120 false || die "navigation did not become operationally ready"
-# The verification above left the driver deliberately disarmed. A domestic robot stays
-# armed, so arm it again; only LEKIWI_DISARM_ON_FAILURE=true keeps it disarmed for an operator.
-outcome="robot remains disarmed"
-if [[ ${LEKIWI_DISARM_ON_FAILURE:-false} != true ]]; then
-  if wait_for 60 "$PROJECT_ROOT/scripts/rearm-robot.sh"; then
-    outcome="robot armed"
-  else
-    die "required re-arm failed; deployment remains unverified"
-  fi
-  operational_ready 30 true || die "armed robot did not grant fresh base permission"
-fi
-log "Recording the verified deployment revision"
-printf '%s\n' "$target" > "$marker"
-"${ssh_command[@]}" "mkdir -p '$remote_home/.ros/lekiwi' && printf '%s\\n' '$target' > '$remote_marker'"
+state=$(driver_state)
+[[ $state == DISARMED ]] || die "updated driver is not disarmed: $state"
+# The verification above left the driver deliberately disarmed; validate_robot arms it again.
+validate_robot
+outcome="robot armed"
+[[ ${LEKIWI_DISARM_ON_FAILURE:-false} != true ]] || outcome="robot remains disarmed"
+record_deployment
 trap - EXIT
 echo "deployed ${target:0:12} to compute and $device; $outcome"
 exit 0

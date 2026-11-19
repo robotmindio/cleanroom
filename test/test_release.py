@@ -467,7 +467,15 @@ def test_deployment_records_success_only_after_required_readiness_and_rearm(
     tmp_path, arm_ok, readiness_ok, strict, expected,
 ):
     deploy = (ROOT / 'scripts/deploy-split.sh').read_text()
-    final = deploy.rsplit('verify_release || die "qualified release changed during deployment"', 1)[1]
+
+    def function(name):
+        start = deploy.index(name + '() {')
+        return deploy[start:deploy.index('\n}\n', start) + 3]
+
+    # The closing sequence of a restart; a resumed run records through the same two functions.
+    final = deploy.split('# The verification above left the driver deliberately disarmed', 1)[1].split('\n', 1)[1]
+    assert final.startswith('validate_robot\n') and 'record_deployment\n' in final
+    assert deploy.count('( set -e; validate_robot )') == 1
     marker = tmp_path / 'deployed-revision'
     remote = tmp_path / 'remote-recorded'
     script = '''
@@ -476,7 +484,11 @@ log() { :; }
 die() { echo "$*" >&2; exit 1; }
 verify_release() { return 0; }
 operational_ready() { [[ $LEKIWI_TEST_READY == true ]]; }
-wait_for() { [[ $LEKIWI_TEST_ARM == true ]]; }
+has_device_unit() { return 1; }
+timeout() { echo laser; }
+driver_state() { echo DISARMED; }
+wait_for() { [[ $1 == 30 ]] || [[ $LEKIWI_TEST_ARM == true ]]; }
+PROJECT_ROOT=/unused
 record_remote() { touch "$LEKIWI_TEST_REMOTE"; }
 ssh_command=(record_remote)
 marker=$LEKIWI_TEST_MARKER
@@ -484,8 +496,7 @@ remote_home=/unused
 remote_marker=/unused/marker
 target=abcdef0123456789
 device=test-peer
-{
-''' + final
+''' + function('validate_robot') + function('record_deployment') + '{\n' + final
     result = subprocess.run(['bash', '-c', script], capture_output=True, text=True,
         env={**os.environ, 'LEKIWI_TEST_READY': str(readiness_ok).lower(),
              'LEKIWI_TEST_ARM': str(arm_ok).lower(), 'LEKIWI_TEST_MARKER': str(marker),
@@ -498,7 +509,7 @@ device=test-peer
 
 def test_same_revision_shortcut_checks_operational_readiness_before_success(tmp_path):
     deploy = (ROOT / 'scripts/deploy-split.sh').read_text()
-    block = deploy.split('    remote_unit_active_all "${device_units[@]}" && verify_release; then\n', 1)[1]
+    block = deploy.split('    remote_unit_active_all "${device_units[@]}"; then\n', 1)[1]
     block = block.split('\nfi\n', 1)[0]
     for ready in ('true', 'false'):
         script = '''

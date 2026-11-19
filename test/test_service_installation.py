@@ -1103,6 +1103,102 @@ def test_deploy_order_fails_closed_around_the_device_restart():
     assert "reset --hard" not in deploy
 
 
+@pytest.mark.parametrize("selected,reboot,inactive,validation,started,outcome", [
+    # A run that failed after selecting the release is validated in place.
+    ("true", "false", "", 0, [], "recorded"),
+    ("true", "false", "", 1, [], "full restart"),
+    # Astra resets the motor bus's USB hub: only the restart behind the stow gate starts it.
+    ("true", "false", "lekiwi-astra.service", 0, [], "full restart"),
+    ("true", "true", "", 0, [], "full restart"),
+    # Services a failed run left stopped are started instead of refusing the deployment.
+    ("true", "false", "lekiwi-host.service lekiwi-zenoh.service lekiwi-stack.service", 0,
+     ["lekiwi-host.service", "lekiwi-zenoh.service", "lekiwi-stack.service"], "recorded"),
+    ("false", "false", "lekiwi-host.service lekiwi-astra.service lekiwi-stack.service", 0,
+     ["lekiwi-host.service", "lekiwi-stack.service"], "full restart"),
+])
+def test_deploy_rerun_resumes_a_selected_release_without_stopping_anything(
+        tmp_path, selected, reboot, inactive, validation, started, outcome):
+    deploy = (ROOT / "scripts/deploy-split.sh").read_text()
+    start = deploy.index("# A failed deployment can leave services stopped")
+    end = deploy.index('log "Confirming torque-off and stopping the compute stack"')
+    # Everything that cuts torque or stops a service comes after the resume block.
+    assert end < deploy.index("\ndisarm\n") < deploy.index("systemctl stop")
+    block = deploy[start:end].replace("/usr/bin/systemctl", "systemctl")
+    assert not re.search(r"systemctl (stop|restart|try-restart|reboot)|^\s*disarm\b", block, re.M)
+    calls = tmp_path / "calls"
+    harness = r'''
+set -Eeuo pipefail
+inactive=" $LEKIWI_TEST_INACTIVE "
+note() { printf '%s\n' "$*" >> "$LEKIWI_TEST_CALLS"; }
+systemctl() {
+  case $1 in
+    is-active) [[ $inactive != *" ${*: -1} "* ]] ;;
+    start) note "start $2"; inactive=${inactive/ $2 / } ;;
+  esac
+}
+sudo() { shift; "$@"; }
+device() { shift 3; systemctl "$@"; }
+ssh_command=(device)
+device_units=(lekiwi-host.service lekiwi-lidar.service lekiwi-zenoh.service lekiwi-astra.service)
+has_device_unit() { [[ " ${device_units[*]} " == *" $1 "* ]]; }
+remote_unit_active() { systemctl is-active --quiet "$1"; }
+remote_unit_active_all() { local unit; for unit in "$@"; do remote_unit_active "$unit" || return 1; done; }
+log() { :; }
+die() { echo "$*" >&2; exit 1; }
+ros_setup() { :; }
+wait_for() { shift; [[ $1 != ros2 ]] || note "waited for the driver"; [[ $1 == ros2 ]] || "$@"; }
+validate_robot() { note validated; return "$LEKIWI_TEST_VALIDATION"; }
+record_deployment() { note recorded; }
+target=0123456789abcdef device=robot-1 PROJECT_ROOT=/unused
+release_selected=$LEKIWI_TEST_SELECTED pi_reboot_needed=$LEKIWI_TEST_REBOOT
+'''
+    env = {**os.environ, "LEKIWI_TEST_CALLS": str(calls), "LEKIWI_TEST_INACTIVE": inactive,
+           "LEKIWI_TEST_VALIDATION": str(validation), "LEKIWI_TEST_SELECTED": selected,
+           "LEKIWI_TEST_REBOOT": reboot}
+    env.pop("LEKIWI_DISARM_ON_FAILURE", None)
+    result = subprocess.run(["bash", "-c", harness + block + "note 'full restart'\ntrap - EXIT\n"],
+                            env=env, text=True, capture_output=True, timeout=10)
+    assert result.returncode == 0, result.stderr
+    log = calls.read_text().splitlines()
+    starts = [line.removeprefix("start ") for line in log if line.startswith("start ")]
+    assert starts == started
+    assert ("waited for the driver" in log) is ("lekiwi-stack.service" in started)
+    assert log[-1] == outcome
+    assert ("without a restart; robot armed" in result.stdout) is (outcome == "recorded")
+
+
+@pytest.mark.parametrize("strict,state,rearmed", [
+    ("false", "DISARMED", True), ("false", "ARMED", False), ("false", "", True), ("true", "DISARMED", False),
+])
+def test_deploy_validation_arms_only_a_robot_that_is_not_armed(tmp_path, strict, state, rearmed):
+    deploy = (ROOT / "scripts/deploy-split.sh").read_text()
+    start = deploy.index("validate_robot() {")
+    function = deploy[start:deploy.index("\n}\n", start) + 3]
+    calls = tmp_path / "calls"
+    harness = r'''
+set -Eeuo pipefail
+PROJECT_ROOT=/release
+note() { printf '%s\n' "$*" >> "$LEKIWI_TEST_CALLS"; }
+die() { echo "$*" >&2; exit 1; }
+log() { :; }
+has_device_unit() { return 1; }
+timeout() { echo laser; }
+verify_release() { note verified; }
+operational_ready() { note "ready $*"; }
+driver_state() { [[ -n $LEKIWI_TEST_STATE ]] && echo "$LEKIWI_TEST_STATE"; }
+wait_for() { shift; [[ $1 != /release/scripts/rearm-robot.sh ]] || note rearm; }
+'''
+    env = {**os.environ, "LEKIWI_TEST_CALLS": str(calls), "LEKIWI_TEST_STATE": state,
+           "LEKIWI_DISARM_ON_FAILURE": strict}
+    result = subprocess.run(["bash", "-c", harness + function + "validate_robot\n"],
+                            env=env, text=True, capture_output=True, timeout=10)
+    assert result.returncode == 0, result.stderr
+    expected = ["verified", "ready 120 false"]
+    if strict == "false":
+        expected += (["rearm"] if rearmed else []) + ["ready 30 true"]
+    assert calls.read_text().splitlines() == expected
+
+
 @pytest.mark.parametrize("needs_reload", ["yes", "no"])
 def test_deploy_refreshes_a_service_that_systemd_has_not_reloaded(needs_reload):
     deploy = (ROOT / "scripts/deploy-split.sh").read_text()
