@@ -44,11 +44,7 @@
   "start": [
    {
     "arguments": [],
-    "env": {
-     "LD_LIBRARY_PATH": "/home/nex/.local/lib/python3.12/site-packages/cv2/../../lib64:/home/nex/lekiwi_ws/current/install/lekiwi_rmf/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rviz_ogre_vendor/opt/rviz_ogre_vendor/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rtabmap_sync/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_smac_planner/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_lifecycle_manager/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_collision_monitor/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_util/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/astra_camera/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rclcpp/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/class_loader/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/astra_camera_msgs/lib:/home/nex/lekiwi_ws/install/rviz_ogre_vendor/opt/rviz_ogre_vendor/lib:/home/nex/lekiwi_ws/install/lekiwi_rmf/lib:/home/nex/lekiwi_ws/install/nav2_lifecycle_manager/lib:/home/nex/lekiwi_ws/install/nav2_util/lib:/home/nex/lekiwi_ws/install/astra_camera/lib:/home/nex/lekiwi_ws/install/rclcpp/lib:/home/nex/lekiwi_ws/install/class_loader/lib:/home/nex/lekiwi_ws/install/astra_camera_msgs/lib:/opt/ros/jazzy/opt/gz_sim_vendor/lib:/opt/ros/jazzy/opt/gz_sensors_vendor/lib:/opt/ros/jazzy/opt/gz_physics_vendor/lib:/opt/ros/jazzy/opt/sdformat_vendor/lib:/opt/ros/jazzy/opt/rviz_ogre_vendor/lib:/opt/ros/jazzy/lib/x86_64-linux-gnu:/opt/ros/jazzy/opt/gz_gui_vendor/lib:/opt/ros/jazzy/opt/gz_transport_vendor/lib:/opt/ros/jazzy/opt/gz_rendering_vendor/lib:/opt/ros/jazzy/opt/gz_plugin_vendor/lib:/opt/ros/jazzy/opt/gz_fuel_tools_vendor/lib:/opt/ros/jazzy/opt/gz_msgs_vendor/lib:/opt/ros/jazzy/opt/gz_common_vendor/lib:/opt/ros/jazzy/opt/gz_math_vendor/lib:/opt/ros/jazzy/opt/gz_utils_vendor/lib:/opt/ros/jazzy/opt/gz_tools_vendor/lib:/opt/ros/jazzy/opt/gz_ogre_next_vendor/lib:/opt/ros/jazzy/opt/gz_dartsim_vendor/lib:/opt/ros/jazzy/opt/gz_cmake_vendor/lib:/opt/ros/jazzy/lib",
-     "QT_QPA_FONTDIR": "/home/nex/.local/lib/python3.12/site-packages/cv2/qt/fonts",
-     "QT_QPA_PLATFORM_PLUGIN_PATH": "/home/nex/.local/lib/python3.12/site-packages/cv2/qt/plugins"
-    },
+    "env": {},
     "name": "wait_for_map",
     "namespace": "",
     "node": "lekiwi_rmf/readiness_gate",
@@ -76,11 +72,8 @@
    {
     "arguments": [],
     "env": {
-     "LD_LIBRARY_PATH": "/home/nex/.local/lib/python3.12/site-packages/cv2/../../lib64:/home/nex/lekiwi_ws/current/install/lekiwi_rmf/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rviz_ogre_vendor/opt/rviz_ogre_vendor/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rtabmap_sync/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_smac_planner/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_lifecycle_manager/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_collision_monitor/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_util/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/astra_camera/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rclcpp/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/class_loader/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/astra_camera_msgs/lib:/home/nex/lekiwi_ws/install/rviz_ogre_vendor/opt/rviz_ogre_vendor/lib:/home/nex/lekiwi_ws/install/lekiwi_rmf/lib:/home/nex/lekiwi_ws/install/nav2_lifecycle_manager/lib:/home/nex/lekiwi_ws/install/nav2_util/lib:/home/nex/lekiwi_ws/install/astra_camera/lib:/home/nex/lekiwi_ws/install/rclcpp/lib:/home/nex/lekiwi_ws/install/class_loader/lib:/home/nex/lekiwi_ws/install/astra_camera_msgs/lib:/opt/ros/jazzy/opt/gz_sim_vendor/lib:/opt/ros/jazzy/opt/gz_sensors_vendor/lib:/opt/ros/jazzy/opt/gz_physics_vendor/lib:/opt/ros/jazzy/opt/sdformat_vendor/lib:/opt/ros/jazzy/opt/rviz_ogre_vendor/lib:/opt/ros/jazzy/lib/x86_64-linux-gnu:/opt/ros/jazzy/opt/gz_gui_vendor/lib:/opt/ros/jazzy/opt/gz_transport_vendor/lib:/opt/ros/jazzy/opt/gz_rendering_vendor/lib:/opt/ros/jazzy/opt/gz_plugin_vendor/lib:/opt/ros/jazzy/opt/gz_fuel_tools_vendor/lib:/opt/ros/jazzy/opt/gz_msgs_vendor/lib:/opt/ros/jazzy/opt/gz_common_vendor/lib:/opt/ros/jazzy/opt/gz_math_vendor/lib:/opt/ros/jazzy/opt/gz_utils_vendor/lib:/opt/ros/jazzy/opt/gz_tools_vendor/lib:/opt/ros/jazzy/opt/gz_ogre_next_vendor/lib:/opt/ros/jazzy/opt/gz_dartsim_vendor/lib:/opt/ros/jazzy/opt/gz_cmake_vendor/lib:/opt/ros/jazzy/lib",
      "OMP_NUM_THREADS": "1",
-     "OPENBLAS_NUM_THREADS": "1",
-     "QT_QPA_FONTDIR": "/home/nex/.local/lib/python3.12/site-packages/cv2/qt/fonts",
-     "QT_QPA_PLATFORM_PLUGIN_PATH": "/home/nex/.local/lib/python3.12/site-packages/cv2/qt/plugins"
+     "OPENBLAS_NUM_THREADS": "1"
     },
     "name": "robot_explorer",
     "namespace": "",
@@ -140,10 +133,7 @@
    {
     "arguments": [],
     "env": {
-     "LD_LIBRARY_PATH": "/home/nex/.local/lib/python3.12/site-packages/cv2/../../lib64:/home/nex/lekiwi_ws/current/install/lekiwi_rmf/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rviz_ogre_vendor/opt/rviz_ogre_vendor/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rtabmap_sync/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_smac_planner/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_lifecycle_manager/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_collision_monitor/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_util/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/astra_camera/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rclcpp/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/class_loader/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/astra_camera_msgs/lib:/home/nex/lekiwi_ws/install/rviz_ogre_vendor/opt/rviz_ogre_vendor/lib:/home/nex/lekiwi_ws/install/lekiwi_rmf/lib:/home/nex/lekiwi_ws/install/nav2_lifecycle_manager/lib:/home/nex/lekiwi_ws/install/nav2_util/lib:/home/nex/lekiwi_ws/install/astra_camera/lib:/home/nex/lekiwi_ws/install/rclcpp/lib:/home/nex/lekiwi_ws/install/class_loader/lib:/home/nex/lekiwi_ws/install/astra_camera_msgs/lib:/opt/ros/jazzy/opt/gz_sim_vendor/lib:/opt/ros/jazzy/opt/gz_sensors_vendor/lib:/opt/ros/jazzy/opt/gz_physics_vendor/lib:/opt/ros/jazzy/opt/sdformat_vendor/lib:/opt/ros/jazzy/opt/rviz_ogre_vendor/lib:/opt/ros/jazzy/lib/x86_64-linux-gnu:/opt/ros/jazzy/opt/gz_gui_vendor/lib:/opt/ros/jazzy/opt/gz_transport_vendor/lib:/opt/ros/jazzy/opt/gz_rendering_vendor/lib:/opt/ros/jazzy/opt/gz_plugin_vendor/lib:/opt/ros/jazzy/opt/gz_fuel_tools_vendor/lib:/opt/ros/jazzy/opt/gz_msgs_vendor/lib:/opt/ros/jazzy/opt/gz_common_vendor/lib:/opt/ros/jazzy/opt/gz_math_vendor/lib:/opt/ros/jazzy/opt/gz_utils_vendor/lib:/opt/ros/jazzy/opt/gz_tools_vendor/lib:/opt/ros/jazzy/opt/gz_ogre_next_vendor/lib:/opt/ros/jazzy/opt/gz_dartsim_vendor/lib:/opt/ros/jazzy/opt/gz_cmake_vendor/lib:/opt/ros/jazzy/lib",
-     "OPENBLAS_NUM_THREADS": "1",
-     "QT_QPA_FONTDIR": "/home/nex/.local/lib/python3.12/site-packages/cv2/qt/fonts",
-     "QT_QPA_PLATFORM_PLUGIN_PATH": "/home/nex/.local/lib/python3.12/site-packages/cv2/qt/plugins"
+     "OPENBLAS_NUM_THREADS": "1"
     },
     "name": "spatial_memory",
     "namespace": "",
@@ -164,11 +154,7 @@
    },
    {
     "arguments": [],
-    "env": {
-     "LD_LIBRARY_PATH": "/home/nex/.local/lib/python3.12/site-packages/cv2/../../lib64:/home/nex/lekiwi_ws/current/install/lekiwi_rmf/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rviz_ogre_vendor/opt/rviz_ogre_vendor/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rtabmap_sync/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_smac_planner/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_lifecycle_manager/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_collision_monitor/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_util/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/astra_camera/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rclcpp/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/class_loader/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/astra_camera_msgs/lib:/home/nex/lekiwi_ws/install/rviz_ogre_vendor/opt/rviz_ogre_vendor/lib:/home/nex/lekiwi_ws/install/lekiwi_rmf/lib:/home/nex/lekiwi_ws/install/nav2_lifecycle_manager/lib:/home/nex/lekiwi_ws/install/nav2_util/lib:/home/nex/lekiwi_ws/install/astra_camera/lib:/home/nex/lekiwi_ws/install/rclcpp/lib:/home/nex/lekiwi_ws/install/class_loader/lib:/home/nex/lekiwi_ws/install/astra_camera_msgs/lib:/opt/ros/jazzy/opt/gz_sim_vendor/lib:/opt/ros/jazzy/opt/gz_sensors_vendor/lib:/opt/ros/jazzy/opt/gz_physics_vendor/lib:/opt/ros/jazzy/opt/sdformat_vendor/lib:/opt/ros/jazzy/opt/rviz_ogre_vendor/lib:/opt/ros/jazzy/lib/x86_64-linux-gnu:/opt/ros/jazzy/opt/gz_gui_vendor/lib:/opt/ros/jazzy/opt/gz_transport_vendor/lib:/opt/ros/jazzy/opt/gz_rendering_vendor/lib:/opt/ros/jazzy/opt/gz_plugin_vendor/lib:/opt/ros/jazzy/opt/gz_fuel_tools_vendor/lib:/opt/ros/jazzy/opt/gz_msgs_vendor/lib:/opt/ros/jazzy/opt/gz_common_vendor/lib:/opt/ros/jazzy/opt/gz_math_vendor/lib:/opt/ros/jazzy/opt/gz_utils_vendor/lib:/opt/ros/jazzy/opt/gz_tools_vendor/lib:/opt/ros/jazzy/opt/gz_ogre_next_vendor/lib:/opt/ros/jazzy/opt/gz_dartsim_vendor/lib:/opt/ros/jazzy/opt/gz_cmake_vendor/lib:/opt/ros/jazzy/lib",
-     "QT_QPA_FONTDIR": "/home/nex/.local/lib/python3.12/site-packages/cv2/qt/fonts",
-     "QT_QPA_PLATFORM_PLUGIN_PATH": "/home/nex/.local/lib/python3.12/site-packages/cv2/qt/plugins"
-    },
+    "env": {},
     "name": "rtabmap",
     "namespace": "",
     "node": "rtabmap_slam/rtabmap",
@@ -280,11 +266,7 @@
   "start": [
    {
     "arguments": [],
-    "env": {
-     "LD_LIBRARY_PATH": "/home/nex/.local/lib/python3.12/site-packages/cv2/../../lib64:/home/nex/lekiwi_ws/current/install/lekiwi_rmf/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rviz_ogre_vendor/opt/rviz_ogre_vendor/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rtabmap_sync/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_smac_planner/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_lifecycle_manager/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_collision_monitor/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_util/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/astra_camera/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rclcpp/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/class_loader/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/astra_camera_msgs/lib:/home/nex/lekiwi_ws/install/rviz_ogre_vendor/opt/rviz_ogre_vendor/lib:/home/nex/lekiwi_ws/install/lekiwi_rmf/lib:/home/nex/lekiwi_ws/install/nav2_lifecycle_manager/lib:/home/nex/lekiwi_ws/install/nav2_util/lib:/home/nex/lekiwi_ws/install/astra_camera/lib:/home/nex/lekiwi_ws/install/rclcpp/lib:/home/nex/lekiwi_ws/install/class_loader/lib:/home/nex/lekiwi_ws/install/astra_camera_msgs/lib:/opt/ros/jazzy/opt/gz_sim_vendor/lib:/opt/ros/jazzy/opt/gz_sensors_vendor/lib:/opt/ros/jazzy/opt/gz_physics_vendor/lib:/opt/ros/jazzy/opt/sdformat_vendor/lib:/opt/ros/jazzy/opt/rviz_ogre_vendor/lib:/opt/ros/jazzy/lib/x86_64-linux-gnu:/opt/ros/jazzy/opt/gz_gui_vendor/lib:/opt/ros/jazzy/opt/gz_transport_vendor/lib:/opt/ros/jazzy/opt/gz_rendering_vendor/lib:/opt/ros/jazzy/opt/gz_plugin_vendor/lib:/opt/ros/jazzy/opt/gz_fuel_tools_vendor/lib:/opt/ros/jazzy/opt/gz_msgs_vendor/lib:/opt/ros/jazzy/opt/gz_common_vendor/lib:/opt/ros/jazzy/opt/gz_math_vendor/lib:/opt/ros/jazzy/opt/gz_utils_vendor/lib:/opt/ros/jazzy/opt/gz_tools_vendor/lib:/opt/ros/jazzy/opt/gz_ogre_next_vendor/lib:/opt/ros/jazzy/opt/gz_dartsim_vendor/lib:/opt/ros/jazzy/opt/gz_cmake_vendor/lib:/opt/ros/jazzy/lib",
-     "QT_QPA_FONTDIR": "/home/nex/.local/lib/python3.12/site-packages/cv2/qt/fonts",
-     "QT_QPA_PLATFORM_PLUGIN_PATH": "/home/nex/.local/lib/python3.12/site-packages/cv2/qt/plugins"
-    },
+    "env": {},
     "name": "safety_supervisor",
     "namespace": "",
     "node": "lekiwi_rmf/safety_supervisor",
@@ -352,10 +334,7 @@
  {
   "arguments": [],
   "env": {
-   "LD_LIBRARY_PATH": "/home/nex/.local/lib/python3.12/site-packages/cv2/../../lib64:/home/nex/lekiwi_ws/current/install/lekiwi_rmf/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rviz_ogre_vendor/opt/rviz_ogre_vendor/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rtabmap_sync/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_smac_planner/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_lifecycle_manager/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_collision_monitor/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_util/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/astra_camera/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rclcpp/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/class_loader/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/astra_camera_msgs/lib:/home/nex/lekiwi_ws/install/rviz_ogre_vendor/opt/rviz_ogre_vendor/lib:/home/nex/lekiwi_ws/install/lekiwi_rmf/lib:/home/nex/lekiwi_ws/install/nav2_lifecycle_manager/lib:/home/nex/lekiwi_ws/install/nav2_util/lib:/home/nex/lekiwi_ws/install/astra_camera/lib:/home/nex/lekiwi_ws/install/rclcpp/lib:/home/nex/lekiwi_ws/install/class_loader/lib:/home/nex/lekiwi_ws/install/astra_camera_msgs/lib:/opt/ros/jazzy/opt/gz_sim_vendor/lib:/opt/ros/jazzy/opt/gz_sensors_vendor/lib:/opt/ros/jazzy/opt/gz_physics_vendor/lib:/opt/ros/jazzy/opt/sdformat_vendor/lib:/opt/ros/jazzy/opt/rviz_ogre_vendor/lib:/opt/ros/jazzy/lib/x86_64-linux-gnu:/opt/ros/jazzy/opt/gz_gui_vendor/lib:/opt/ros/jazzy/opt/gz_transport_vendor/lib:/opt/ros/jazzy/opt/gz_rendering_vendor/lib:/opt/ros/jazzy/opt/gz_plugin_vendor/lib:/opt/ros/jazzy/opt/gz_fuel_tools_vendor/lib:/opt/ros/jazzy/opt/gz_msgs_vendor/lib:/opt/ros/jazzy/opt/gz_common_vendor/lib:/opt/ros/jazzy/opt/gz_math_vendor/lib:/opt/ros/jazzy/opt/gz_utils_vendor/lib:/opt/ros/jazzy/opt/gz_tools_vendor/lib:/opt/ros/jazzy/opt/gz_ogre_next_vendor/lib:/opt/ros/jazzy/opt/gz_dartsim_vendor/lib:/opt/ros/jazzy/opt/gz_cmake_vendor/lib:/opt/ros/jazzy/lib",
-   "OPENBLAS_NUM_THREADS": "1",
-   "QT_QPA_FONTDIR": "/home/nex/.local/lib/python3.12/site-packages/cv2/qt/fonts",
-   "QT_QPA_PLATFORM_PLUGIN_PATH": "/home/nex/.local/lib/python3.12/site-packages/cv2/qt/plugins"
+   "OPENBLAS_NUM_THREADS": "1"
   },
   "name": "slam_cloud",
   "namespace": "",
@@ -373,10 +352,7 @@
  {
   "arguments": [],
   "env": {
-   "LD_LIBRARY_PATH": "/home/nex/.local/lib/python3.12/site-packages/cv2/../../lib64:/home/nex/lekiwi_ws/current/install/lekiwi_rmf/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rviz_ogre_vendor/opt/rviz_ogre_vendor/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rtabmap_sync/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_smac_planner/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_lifecycle_manager/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_collision_monitor/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_util/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/astra_camera/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rclcpp/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/class_loader/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/astra_camera_msgs/lib:/home/nex/lekiwi_ws/install/rviz_ogre_vendor/opt/rviz_ogre_vendor/lib:/home/nex/lekiwi_ws/install/lekiwi_rmf/lib:/home/nex/lekiwi_ws/install/nav2_lifecycle_manager/lib:/home/nex/lekiwi_ws/install/nav2_util/lib:/home/nex/lekiwi_ws/install/astra_camera/lib:/home/nex/lekiwi_ws/install/rclcpp/lib:/home/nex/lekiwi_ws/install/class_loader/lib:/home/nex/lekiwi_ws/install/astra_camera_msgs/lib:/opt/ros/jazzy/opt/gz_sim_vendor/lib:/opt/ros/jazzy/opt/gz_sensors_vendor/lib:/opt/ros/jazzy/opt/gz_physics_vendor/lib:/opt/ros/jazzy/opt/sdformat_vendor/lib:/opt/ros/jazzy/opt/rviz_ogre_vendor/lib:/opt/ros/jazzy/lib/x86_64-linux-gnu:/opt/ros/jazzy/opt/gz_gui_vendor/lib:/opt/ros/jazzy/opt/gz_transport_vendor/lib:/opt/ros/jazzy/opt/gz_rendering_vendor/lib:/opt/ros/jazzy/opt/gz_plugin_vendor/lib:/opt/ros/jazzy/opt/gz_fuel_tools_vendor/lib:/opt/ros/jazzy/opt/gz_msgs_vendor/lib:/opt/ros/jazzy/opt/gz_common_vendor/lib:/opt/ros/jazzy/opt/gz_math_vendor/lib:/opt/ros/jazzy/opt/gz_utils_vendor/lib:/opt/ros/jazzy/opt/gz_tools_vendor/lib:/opt/ros/jazzy/opt/gz_ogre_next_vendor/lib:/opt/ros/jazzy/opt/gz_dartsim_vendor/lib:/opt/ros/jazzy/opt/gz_cmake_vendor/lib:/opt/ros/jazzy/lib",
-   "PYTHONNOUSERSITE": "1",
-   "QT_QPA_FONTDIR": "/home/nex/.local/lib/python3.12/site-packages/cv2/qt/fonts",
-   "QT_QPA_PLATFORM_PLUGIN_PATH": "/home/nex/.local/lib/python3.12/site-packages/cv2/qt/plugins"
+   "PYTHONNOUSERSITE": "1"
   },
   "name": "object_detector",
   "namespace": "",
@@ -400,10 +376,7 @@
  {
   "arguments": [],
   "env": {
-   "LD_LIBRARY_PATH": "/home/nex/.local/lib/python3.12/site-packages/cv2/../../lib64:/home/nex/lekiwi_ws/current/install/lekiwi_rmf/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rviz_ogre_vendor/opt/rviz_ogre_vendor/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rtabmap_sync/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_smac_planner/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_lifecycle_manager/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_collision_monitor/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_util/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/astra_camera/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rclcpp/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/class_loader/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/astra_camera_msgs/lib:/home/nex/lekiwi_ws/install/rviz_ogre_vendor/opt/rviz_ogre_vendor/lib:/home/nex/lekiwi_ws/install/lekiwi_rmf/lib:/home/nex/lekiwi_ws/install/nav2_lifecycle_manager/lib:/home/nex/lekiwi_ws/install/nav2_util/lib:/home/nex/lekiwi_ws/install/astra_camera/lib:/home/nex/lekiwi_ws/install/rclcpp/lib:/home/nex/lekiwi_ws/install/class_loader/lib:/home/nex/lekiwi_ws/install/astra_camera_msgs/lib:/opt/ros/jazzy/opt/gz_sim_vendor/lib:/opt/ros/jazzy/opt/gz_sensors_vendor/lib:/opt/ros/jazzy/opt/gz_physics_vendor/lib:/opt/ros/jazzy/opt/sdformat_vendor/lib:/opt/ros/jazzy/opt/rviz_ogre_vendor/lib:/opt/ros/jazzy/lib/x86_64-linux-gnu:/opt/ros/jazzy/opt/gz_gui_vendor/lib:/opt/ros/jazzy/opt/gz_transport_vendor/lib:/opt/ros/jazzy/opt/gz_rendering_vendor/lib:/opt/ros/jazzy/opt/gz_plugin_vendor/lib:/opt/ros/jazzy/opt/gz_fuel_tools_vendor/lib:/opt/ros/jazzy/opt/gz_msgs_vendor/lib:/opt/ros/jazzy/opt/gz_common_vendor/lib:/opt/ros/jazzy/opt/gz_math_vendor/lib:/opt/ros/jazzy/opt/gz_utils_vendor/lib:/opt/ros/jazzy/opt/gz_tools_vendor/lib:/opt/ros/jazzy/opt/gz_ogre_next_vendor/lib:/opt/ros/jazzy/opt/gz_dartsim_vendor/lib:/opt/ros/jazzy/opt/gz_cmake_vendor/lib:/opt/ros/jazzy/lib",
-   "PYTHONNOUSERSITE": "1",
-   "QT_QPA_FONTDIR": "/home/nex/.local/lib/python3.12/site-packages/cv2/qt/fonts",
-   "QT_QPA_PLATFORM_PLUGIN_PATH": "/home/nex/.local/lib/python3.12/site-packages/cv2/qt/plugins"
+   "PYTHONNOUSERSITE": "1"
   },
   "name": "object_observations",
   "namespace": "",
@@ -420,265 +393,6 @@
    "model_name": "grounding_dino_tiny_gpu",
    "retention_sec": 604800.0,
    "use_sim_time": false
-  },
-  "remappings": [],
-  "respawn": false,
-  "respawn_delay": null,
-  "ros_arguments": []
- },
- {
-  "arguments": [],
-  "env": {
-   "LD_LIBRARY_PATH": "/home/nex/.local/lib/python3.12/site-packages/cv2/../../lib64:/home/nex/lekiwi_ws/current/install/lekiwi_rmf/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rviz_ogre_vendor/opt/rviz_ogre_vendor/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rtabmap_sync/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_smac_planner/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_lifecycle_manager/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_collision_monitor/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_util/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/astra_camera/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rclcpp/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/class_loader/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/astra_camera_msgs/lib:/home/nex/lekiwi_ws/install/rviz_ogre_vendor/opt/rviz_ogre_vendor/lib:/home/nex/lekiwi_ws/install/lekiwi_rmf/lib:/home/nex/lekiwi_ws/install/nav2_lifecycle_manager/lib:/home/nex/lekiwi_ws/install/nav2_util/lib:/home/nex/lekiwi_ws/install/astra_camera/lib:/home/nex/lekiwi_ws/install/rclcpp/lib:/home/nex/lekiwi_ws/install/class_loader/lib:/home/nex/lekiwi_ws/install/astra_camera_msgs/lib:/opt/ros/jazzy/opt/gz_sim_vendor/lib:/opt/ros/jazzy/opt/gz_sensors_vendor/lib:/opt/ros/jazzy/opt/gz_physics_vendor/lib:/opt/ros/jazzy/opt/sdformat_vendor/lib:/opt/ros/jazzy/opt/rviz_ogre_vendor/lib:/opt/ros/jazzy/lib/x86_64-linux-gnu:/opt/ros/jazzy/opt/gz_gui_vendor/lib:/opt/ros/jazzy/opt/gz_transport_vendor/lib:/opt/ros/jazzy/opt/gz_rendering_vendor/lib:/opt/ros/jazzy/opt/gz_plugin_vendor/lib:/opt/ros/jazzy/opt/gz_fuel_tools_vendor/lib:/opt/ros/jazzy/opt/gz_msgs_vendor/lib:/opt/ros/jazzy/opt/gz_common_vendor/lib:/opt/ros/jazzy/opt/gz_math_vendor/lib:/opt/ros/jazzy/opt/gz_utils_vendor/lib:/opt/ros/jazzy/opt/gz_tools_vendor/lib:/opt/ros/jazzy/opt/gz_ogre_next_vendor/lib:/opt/ros/jazzy/opt/gz_dartsim_vendor/lib:/opt/ros/jazzy/opt/gz_cmake_vendor/lib:/opt/ros/jazzy/lib",
-   "QT_QPA_FONTDIR": "/home/nex/.local/lib/python3.12/site-packages/cv2/qt/fonts",
-   "QT_QPA_PLATFORM_PLUGIN_PATH": "/home/nex/.local/lib/python3.12/site-packages/cv2/qt/plugins"
-  },
-  "name": "foxglove_bridge",
-  "namespace": "",
-  "node": "foxglove_bridge/foxglove_bridge",
-  "output": "screen",
-  "parameters": {
-   "address": "127.0.0.1",
-   "capabilities": [
-    "connectionGraph",
-    "assets"
-   ],
-   "port": 8765,
-   "publish_client_count": true,
-   "use_sim_time": false
-  },
-  "remappings": [],
-  "respawn": false,
-  "respawn_delay": null,
-  "ros_arguments": []
- },
- {
-  "arguments": [],
-  "env": {
-   "LD_LIBRARY_PATH": "/home/nex/.local/lib/python3.12/site-packages/cv2/../../lib64:/home/nex/lekiwi_ws/current/install/lekiwi_rmf/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rviz_ogre_vendor/opt/rviz_ogre_vendor/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rtabmap_sync/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_smac_planner/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_lifecycle_manager/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_collision_monitor/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_util/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/astra_camera/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rclcpp/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/class_loader/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/astra_camera_msgs/lib:/home/nex/lekiwi_ws/install/rviz_ogre_vendor/opt/rviz_ogre_vendor/lib:/home/nex/lekiwi_ws/install/lekiwi_rmf/lib:/home/nex/lekiwi_ws/install/nav2_lifecycle_manager/lib:/home/nex/lekiwi_ws/install/nav2_util/lib:/home/nex/lekiwi_ws/install/astra_camera/lib:/home/nex/lekiwi_ws/install/rclcpp/lib:/home/nex/lekiwi_ws/install/class_loader/lib:/home/nex/lekiwi_ws/install/astra_camera_msgs/lib:/opt/ros/jazzy/opt/gz_sim_vendor/lib:/opt/ros/jazzy/opt/gz_sensors_vendor/lib:/opt/ros/jazzy/opt/gz_physics_vendor/lib:/opt/ros/jazzy/opt/sdformat_vendor/lib:/opt/ros/jazzy/opt/rviz_ogre_vendor/lib:/opt/ros/jazzy/lib/x86_64-linux-gnu:/opt/ros/jazzy/opt/gz_gui_vendor/lib:/opt/ros/jazzy/opt/gz_transport_vendor/lib:/opt/ros/jazzy/opt/gz_rendering_vendor/lib:/opt/ros/jazzy/opt/gz_plugin_vendor/lib:/opt/ros/jazzy/opt/gz_fuel_tools_vendor/lib:/opt/ros/jazzy/opt/gz_msgs_vendor/lib:/opt/ros/jazzy/opt/gz_common_vendor/lib:/opt/ros/jazzy/opt/gz_math_vendor/lib:/opt/ros/jazzy/opt/gz_utils_vendor/lib:/opt/ros/jazzy/opt/gz_tools_vendor/lib:/opt/ros/jazzy/opt/gz_ogre_next_vendor/lib:/opt/ros/jazzy/opt/gz_dartsim_vendor/lib:/opt/ros/jazzy/opt/gz_cmake_vendor/lib:/opt/ros/jazzy/lib",
-   "QT_QPA_FONTDIR": "/home/nex/.local/lib/python3.12/site-packages/cv2/qt/fonts",
-   "QT_QPA_PLATFORM_PLUGIN_PATH": "/home/nex/.local/lib/python3.12/site-packages/cv2/qt/plugins"
-  },
-  "name": "slam_astra_rgbd",
-  "namespace": "",
-  "node": "rtabmap_sync/rgbd_sync",
-  "output": "screen",
-  "parameters": {
-   "approx_sync": true,
-   "approx_sync_max_interval": 0.35,
-   "decimation": 2,
-   "qos": 1,
-   "qos_camera_info": 2,
-   "sync_queue_size": 30,
-   "topic_queue_size": 5,
-   "use_sim_time": false
-  },
-  "remappings": [
-   [
-    "rgb/image",
-    "/camera/astra/color/image_raw"
-   ],
-   [
-    "rgb/camera_info",
-    "/camera/astra/color/camera_info"
-   ],
-   [
-    "depth/image",
-    "/camera/astra/depth/image_raw"
-   ],
-   [
-    "rgbd_image",
-    "/slam/astra/rgbd_image"
-   ]
-  ],
-  "respawn": false,
-  "respawn_delay": null,
-  "ros_arguments": []
- },
- {
-  "arguments": [],
-  "env": {
-   "LD_LIBRARY_PATH": "/home/nex/.local/lib/python3.12/site-packages/cv2/../../lib64:/home/nex/lekiwi_ws/current/install/lekiwi_rmf/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rviz_ogre_vendor/opt/rviz_ogre_vendor/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rtabmap_sync/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_smac_planner/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_lifecycle_manager/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_collision_monitor/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_util/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/astra_camera/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rclcpp/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/class_loader/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/astra_camera_msgs/lib:/home/nex/lekiwi_ws/install/rviz_ogre_vendor/opt/rviz_ogre_vendor/lib:/home/nex/lekiwi_ws/install/lekiwi_rmf/lib:/home/nex/lekiwi_ws/install/nav2_lifecycle_manager/lib:/home/nex/lekiwi_ws/install/nav2_util/lib:/home/nex/lekiwi_ws/install/astra_camera/lib:/home/nex/lekiwi_ws/install/rclcpp/lib:/home/nex/lekiwi_ws/install/class_loader/lib:/home/nex/lekiwi_ws/install/astra_camera_msgs/lib:/opt/ros/jazzy/opt/gz_sim_vendor/lib:/opt/ros/jazzy/opt/gz_sensors_vendor/lib:/opt/ros/jazzy/opt/gz_physics_vendor/lib:/opt/ros/jazzy/opt/sdformat_vendor/lib:/opt/ros/jazzy/opt/rviz_ogre_vendor/lib:/opt/ros/jazzy/lib/x86_64-linux-gnu:/opt/ros/jazzy/opt/gz_gui_vendor/lib:/opt/ros/jazzy/opt/gz_transport_vendor/lib:/opt/ros/jazzy/opt/gz_rendering_vendor/lib:/opt/ros/jazzy/opt/gz_plugin_vendor/lib:/opt/ros/jazzy/opt/gz_fuel_tools_vendor/lib:/opt/ros/jazzy/opt/gz_msgs_vendor/lib:/opt/ros/jazzy/opt/gz_common_vendor/lib:/opt/ros/jazzy/opt/gz_math_vendor/lib:/opt/ros/jazzy/opt/gz_utils_vendor/lib:/opt/ros/jazzy/opt/gz_tools_vendor/lib:/opt/ros/jazzy/opt/gz_ogre_next_vendor/lib:/opt/ros/jazzy/opt/gz_dartsim_vendor/lib:/opt/ros/jazzy/opt/gz_cmake_vendor/lib:/opt/ros/jazzy/lib",
-   "QT_QPA_FONTDIR": "/home/nex/.local/lib/python3.12/site-packages/cv2/qt/fonts",
-   "QT_QPA_PLATFORM_PLUGIN_PATH": "/home/nex/.local/lib/python3.12/site-packages/cv2/qt/plugins"
-  },
-  "name": "slam_front_depth",
-  "namespace": "",
-  "node": "rtabmap_util/pointcloud_to_depthimage",
-  "output": "screen",
-  "parameters": {
-   "approx": true,
-   "decimation": 2,
-   "fill_holes_error": 0.05,
-   "fill_holes_size": 0,
-   "fill_iterations": 0,
-   "fixed_frame_id": "odom",
-   "qos": 1,
-   "qos_camera_info": 1,
-   "sync_queue_size": 30,
-   "topic_queue_size": 5,
-   "use_sim_time": false,
-   "wait_for_transform": 0.1
-  },
-  "remappings": [
-   [
-    "cloud",
-    "/slam/cloud"
-   ],
-   [
-    "camera_info",
-    "/camera/front/camera_info"
-   ],
-   [
-    "image_raw",
-    "/slam/front_depth/image_raw"
-   ]
-  ],
-  "respawn": false,
-  "respawn_delay": null,
-  "ros_arguments": []
- },
- {
-  "arguments": [],
-  "env": {
-   "LD_LIBRARY_PATH": "/home/nex/.local/lib/python3.12/site-packages/cv2/../../lib64:/home/nex/lekiwi_ws/current/install/lekiwi_rmf/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rviz_ogre_vendor/opt/rviz_ogre_vendor/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rtabmap_sync/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_smac_planner/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_lifecycle_manager/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_collision_monitor/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_util/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/astra_camera/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rclcpp/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/class_loader/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/astra_camera_msgs/lib:/home/nex/lekiwi_ws/install/rviz_ogre_vendor/opt/rviz_ogre_vendor/lib:/home/nex/lekiwi_ws/install/lekiwi_rmf/lib:/home/nex/lekiwi_ws/install/nav2_lifecycle_manager/lib:/home/nex/lekiwi_ws/install/nav2_util/lib:/home/nex/lekiwi_ws/install/astra_camera/lib:/home/nex/lekiwi_ws/install/rclcpp/lib:/home/nex/lekiwi_ws/install/class_loader/lib:/home/nex/lekiwi_ws/install/astra_camera_msgs/lib:/opt/ros/jazzy/opt/gz_sim_vendor/lib:/opt/ros/jazzy/opt/gz_sensors_vendor/lib:/opt/ros/jazzy/opt/gz_physics_vendor/lib:/opt/ros/jazzy/opt/sdformat_vendor/lib:/opt/ros/jazzy/opt/rviz_ogre_vendor/lib:/opt/ros/jazzy/lib/x86_64-linux-gnu:/opt/ros/jazzy/opt/gz_gui_vendor/lib:/opt/ros/jazzy/opt/gz_transport_vendor/lib:/opt/ros/jazzy/opt/gz_rendering_vendor/lib:/opt/ros/jazzy/opt/gz_plugin_vendor/lib:/opt/ros/jazzy/opt/gz_fuel_tools_vendor/lib:/opt/ros/jazzy/opt/gz_msgs_vendor/lib:/opt/ros/jazzy/opt/gz_common_vendor/lib:/opt/ros/jazzy/opt/gz_math_vendor/lib:/opt/ros/jazzy/opt/gz_utils_vendor/lib:/opt/ros/jazzy/opt/gz_tools_vendor/lib:/opt/ros/jazzy/opt/gz_ogre_next_vendor/lib:/opt/ros/jazzy/opt/gz_dartsim_vendor/lib:/opt/ros/jazzy/opt/gz_cmake_vendor/lib:/opt/ros/jazzy/lib",
-   "QT_QPA_FONTDIR": "/home/nex/.local/lib/python3.12/site-packages/cv2/qt/fonts",
-   "QT_QPA_PLATFORM_PLUGIN_PATH": "/home/nex/.local/lib/python3.12/site-packages/cv2/qt/plugins"
-  },
-  "name": "slam_front_rgbd",
-  "namespace": "",
-  "node": "rtabmap_sync/rgbd_sync",
-  "output": "screen",
-  "parameters": {
-   "approx_sync": true,
-   "approx_sync_max_interval": 0.35,
-   "decimation": 1,
-   "qos": 1,
-   "qos_camera_info": 1,
-   "sync_queue_size": 30,
-   "topic_queue_size": 5,
-   "use_sim_time": false
-  },
-  "remappings": [
-   [
-    "rgb/image",
-    "/camera/front/image_raw"
-   ],
-   [
-    "rgb/camera_info",
-    "/camera/front/camera_info"
-   ],
-   [
-    "depth/image",
-    "/slam/front_depth/image_raw"
-   ],
-   [
-    "rgbd_image",
-    "/slam/front/rgbd_image"
-   ]
-  ],
-  "respawn": false,
-  "respawn_delay": null,
-  "ros_arguments": []
- },
- {
-  "arguments": [],
-  "env": {
-   "LD_LIBRARY_PATH": "/home/nex/.local/lib/python3.12/site-packages/cv2/../../lib64:/home/nex/lekiwi_ws/current/install/lekiwi_rmf/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rviz_ogre_vendor/opt/rviz_ogre_vendor/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rtabmap_sync/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_smac_planner/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_lifecycle_manager/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_collision_monitor/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_util/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/astra_camera/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rclcpp/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/class_loader/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/astra_camera_msgs/lib:/home/nex/lekiwi_ws/install/rviz_ogre_vendor/opt/rviz_ogre_vendor/lib:/home/nex/lekiwi_ws/install/lekiwi_rmf/lib:/home/nex/lekiwi_ws/install/nav2_lifecycle_manager/lib:/home/nex/lekiwi_ws/install/nav2_util/lib:/home/nex/lekiwi_ws/install/astra_camera/lib:/home/nex/lekiwi_ws/install/rclcpp/lib:/home/nex/lekiwi_ws/install/class_loader/lib:/home/nex/lekiwi_ws/install/astra_camera_msgs/lib:/opt/ros/jazzy/opt/gz_sim_vendor/lib:/opt/ros/jazzy/opt/gz_sensors_vendor/lib:/opt/ros/jazzy/opt/gz_physics_vendor/lib:/opt/ros/jazzy/opt/sdformat_vendor/lib:/opt/ros/jazzy/opt/rviz_ogre_vendor/lib:/opt/ros/jazzy/lib/x86_64-linux-gnu:/opt/ros/jazzy/opt/gz_gui_vendor/lib:/opt/ros/jazzy/opt/gz_transport_vendor/lib:/opt/ros/jazzy/opt/gz_rendering_vendor/lib:/opt/ros/jazzy/opt/gz_plugin_vendor/lib:/opt/ros/jazzy/opt/gz_fuel_tools_vendor/lib:/opt/ros/jazzy/opt/gz_msgs_vendor/lib:/opt/ros/jazzy/opt/gz_common_vendor/lib:/opt/ros/jazzy/opt/gz_math_vendor/lib:/opt/ros/jazzy/opt/gz_utils_vendor/lib:/opt/ros/jazzy/opt/gz_tools_vendor/lib:/opt/ros/jazzy/opt/gz_ogre_next_vendor/lib:/opt/ros/jazzy/opt/gz_dartsim_vendor/lib:/opt/ros/jazzy/opt/gz_cmake_vendor/lib:/opt/ros/jazzy/lib",
-   "QT_QPA_FONTDIR": "/home/nex/.local/lib/python3.12/site-packages/cv2/qt/fonts",
-   "QT_QPA_PLATFORM_PLUGIN_PATH": "/home/nex/.local/lib/python3.12/site-packages/cv2/qt/plugins"
-  },
-  "name": "slam_rgbd_views",
-  "namespace": "",
-  "node": "lekiwi_rmf/slam_views",
-  "output": "screen",
-  "parameters": {
-   "approx_sync_max_interval": 0.35,
-   "use_sim_time": false
-  },
-  "remappings": [
-   [
-    "rgbd_image0",
-    "/slam/astra/rgbd_image"
-   ],
-   [
-    "rgbd_image1",
-    "/slam/front/rgbd_image"
-   ],
-   [
-    "rgbd_images",
-    "/slam/rgbd_images"
-   ]
-  ],
-  "respawn": false,
-  "respawn_delay": null,
-  "ros_arguments": []
- },
- {
-  "arguments": [],
-  "env": {
-   "LD_LIBRARY_PATH": "/home/nex/.local/lib/python3.12/site-packages/cv2/../../lib64:/home/nex/lekiwi_ws/current/install/lekiwi_rmf/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rviz_ogre_vendor/opt/rviz_ogre_vendor/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rtabmap_sync/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_smac_planner/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_lifecycle_manager/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_collision_monitor/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_util/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/astra_camera/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rclcpp/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/class_loader/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/astra_camera_msgs/lib:/home/nex/lekiwi_ws/install/rviz_ogre_vendor/opt/rviz_ogre_vendor/lib:/home/nex/lekiwi_ws/install/lekiwi_rmf/lib:/home/nex/lekiwi_ws/install/nav2_lifecycle_manager/lib:/home/nex/lekiwi_ws/install/nav2_util/lib:/home/nex/lekiwi_ws/install/astra_camera/lib:/home/nex/lekiwi_ws/install/rclcpp/lib:/home/nex/lekiwi_ws/install/class_loader/lib:/home/nex/lekiwi_ws/install/astra_camera_msgs/lib:/opt/ros/jazzy/opt/gz_sim_vendor/lib:/opt/ros/jazzy/opt/gz_sensors_vendor/lib:/opt/ros/jazzy/opt/gz_physics_vendor/lib:/opt/ros/jazzy/opt/sdformat_vendor/lib:/opt/ros/jazzy/opt/rviz_ogre_vendor/lib:/opt/ros/jazzy/lib/x86_64-linux-gnu:/opt/ros/jazzy/opt/gz_gui_vendor/lib:/opt/ros/jazzy/opt/gz_transport_vendor/lib:/opt/ros/jazzy/opt/gz_rendering_vendor/lib:/opt/ros/jazzy/opt/gz_plugin_vendor/lib:/opt/ros/jazzy/opt/gz_fuel_tools_vendor/lib:/opt/ros/jazzy/opt/gz_msgs_vendor/lib:/opt/ros/jazzy/opt/gz_common_vendor/lib:/opt/ros/jazzy/opt/gz_math_vendor/lib:/opt/ros/jazzy/opt/gz_utils_vendor/lib:/opt/ros/jazzy/opt/gz_tools_vendor/lib:/opt/ros/jazzy/opt/gz_ogre_next_vendor/lib:/opt/ros/jazzy/opt/gz_dartsim_vendor/lib:/opt/ros/jazzy/opt/gz_cmake_vendor/lib:/opt/ros/jazzy/lib",
-   "QT_QPA_FONTDIR": "/home/nex/.local/lib/python3.12/site-packages/cv2/qt/fonts",
-   "QT_QPA_PLATFORM_PLUGIN_PATH": "/home/nex/.local/lib/python3.12/site-packages/cv2/qt/plugins"
-  },
-  "name": "wait_for_odom",
-  "namespace": "",
-  "node": "lekiwi_rmf/readiness_gate",
-  "output": "screen",
-  "parameters": {
-   "kind": "topic",
-   "topic": "/odom",
-   "topic_type": "odom"
-  },
-  "remappings": [],
-  "respawn": false,
-  "respawn_delay": null,
-  "ros_arguments": []
- },
- {
-  "arguments": [],
-  "env": {
-   "LD_LIBRARY_PATH": "/home/nex/.local/lib/python3.12/site-packages/cv2/../../lib64:/home/nex/lekiwi_ws/current/install/lekiwi_rmf/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rviz_ogre_vendor/opt/rviz_ogre_vendor/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rtabmap_sync/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_smac_planner/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_lifecycle_manager/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_collision_monitor/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_util/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/astra_camera/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rclcpp/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/class_loader/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/astra_camera_msgs/lib:/home/nex/lekiwi_ws/install/rviz_ogre_vendor/opt/rviz_ogre_vendor/lib:/home/nex/lekiwi_ws/install/lekiwi_rmf/lib:/home/nex/lekiwi_ws/install/nav2_lifecycle_manager/lib:/home/nex/lekiwi_ws/install/nav2_util/lib:/home/nex/lekiwi_ws/install/astra_camera/lib:/home/nex/lekiwi_ws/install/rclcpp/lib:/home/nex/lekiwi_ws/install/class_loader/lib:/home/nex/lekiwi_ws/install/astra_camera_msgs/lib:/opt/ros/jazzy/opt/gz_sim_vendor/lib:/opt/ros/jazzy/opt/gz_sensors_vendor/lib:/opt/ros/jazzy/opt/gz_physics_vendor/lib:/opt/ros/jazzy/opt/sdformat_vendor/lib:/opt/ros/jazzy/opt/rviz_ogre_vendor/lib:/opt/ros/jazzy/lib/x86_64-linux-gnu:/opt/ros/jazzy/opt/gz_gui_vendor/lib:/opt/ros/jazzy/opt/gz_transport_vendor/lib:/opt/ros/jazzy/opt/gz_rendering_vendor/lib:/opt/ros/jazzy/opt/gz_plugin_vendor/lib:/opt/ros/jazzy/opt/gz_fuel_tools_vendor/lib:/opt/ros/jazzy/opt/gz_msgs_vendor/lib:/opt/ros/jazzy/opt/gz_common_vendor/lib:/opt/ros/jazzy/opt/gz_math_vendor/lib:/opt/ros/jazzy/opt/gz_utils_vendor/lib:/opt/ros/jazzy/opt/gz_tools_vendor/lib:/opt/ros/jazzy/opt/gz_ogre_next_vendor/lib:/opt/ros/jazzy/opt/gz_dartsim_vendor/lib:/opt/ros/jazzy/opt/gz_cmake_vendor/lib:/opt/ros/jazzy/lib",
-   "QT_QPA_FONTDIR": "/home/nex/.local/lib/python3.12/site-packages/cv2/qt/fonts",
-   "QT_QPA_PLATFORM_PLUGIN_PATH": "/home/nex/.local/lib/python3.12/site-packages/cv2/qt/plugins"
-  },
-  "name": "wait_for_slam_sensor",
-  "namespace": "",
-  "node": "lekiwi_rmf/readiness_gate",
-  "output": "screen",
-  "parameters": {
-   "kind": "topic",
-   "topic": "/slam/cloud",
-   "topic_type": "cloud"
-  },
-  "remappings": [],
-  "respawn": false,
-  "respawn_delay": null,
-  "ros_arguments": []
- },
- {
-  "arguments": [],
-  "env": {
-   "LD_LIBRARY_PATH": "/home/nex/.local/lib/python3.12/site-packages/cv2/../../lib64:/home/nex/lekiwi_ws/current/install/lekiwi_rmf/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rviz_ogre_vendor/opt/rviz_ogre_vendor/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rtabmap_sync/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_smac_planner/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_lifecycle_manager/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_collision_monitor/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/nav2_util/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/astra_camera/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/rclcpp/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/class_loader/lib:/home/nex/lekiwi_ws/overlays/compute-f1a97b18aab5517c92f3726350697741/install/astra_camera_msgs/lib:/home/nex/lekiwi_ws/install/rviz_ogre_vendor/opt/rviz_ogre_vendor/lib:/home/nex/lekiwi_ws/install/lekiwi_rmf/lib:/home/nex/lekiwi_ws/install/nav2_lifecycle_manager/lib:/home/nex/lekiwi_ws/install/nav2_util/lib:/home/nex/lekiwi_ws/install/astra_camera/lib:/home/nex/lekiwi_ws/install/rclcpp/lib:/home/nex/lekiwi_ws/install/class_loader/lib:/home/nex/lekiwi_ws/install/astra_camera_msgs/lib:/opt/ros/jazzy/opt/gz_sim_vendor/lib:/opt/ros/jazzy/opt/gz_sensors_vendor/lib:/opt/ros/jazzy/opt/gz_physics_vendor/lib:/opt/ros/jazzy/opt/sdformat_vendor/lib:/opt/ros/jazzy/opt/rviz_ogre_vendor/lib:/opt/ros/jazzy/lib/x86_64-linux-gnu:/opt/ros/jazzy/opt/gz_gui_vendor/lib:/opt/ros/jazzy/opt/gz_transport_vendor/lib:/opt/ros/jazzy/opt/gz_rendering_vendor/lib:/opt/ros/jazzy/opt/gz_plugin_vendor/lib:/opt/ros/jazzy/opt/gz_fuel_tools_vendor/lib:/opt/ros/jazzy/opt/gz_msgs_vendor/lib:/opt/ros/jazzy/opt/gz_common_vendor/lib:/opt/ros/jazzy/opt/gz_math_vendor/lib:/opt/ros/jazzy/opt/gz_utils_vendor/lib:/opt/ros/jazzy/opt/gz_tools_vendor/lib:/opt/ros/jazzy/opt/gz_ogre_next_vendor/lib:/opt/ros/jazzy/opt/gz_dartsim_vendor/lib:/opt/ros/jazzy/opt/gz_cmake_vendor/lib:/opt/ros/jazzy/lib",
-   "QT_QPA_FONTDIR": "/home/nex/.local/lib/python3.12/site-packages/cv2/qt/fonts",
-   "QT_QPA_PLATFORM_PLUGIN_PATH": "/home/nex/.local/lib/python3.12/site-packages/cv2/qt/plugins"
-  },
-  "name": "wait_for_stable_joint_states",
-  "namespace": "",
-  "node": "lekiwi_rmf/readiness_gate",
-  "output": "screen",
-  "parameters": {
-   "joint_names": [
-    "arm_shoulder_pan",
-    "arm_shoulder_lift",
-    "arm_elbow_flex",
-    "arm_wrist_flex",
-    "arm_wrist_roll",
-    "arm_gripper"
-   ],
-   "kind": "joint_states",
-   "minimum_joint_samples": 20,
-   "topic": "/joint_states"
   },
   "remappings": [],
   "respawn": false,
@@ -811,6 +525,28 @@
  {
   "arguments": [],
   "env": {},
+  "name": "foxglove_bridge",
+  "namespace": "",
+  "node": "foxglove_bridge/foxglove_bridge",
+  "output": "screen",
+  "parameters": {
+   "address": "127.0.0.1",
+   "capabilities": [
+    "connectionGraph",
+    "assets"
+   ],
+   "port": 8765,
+   "publish_client_count": true,
+   "use_sim_time": false
+  },
+  "remappings": [],
+  "respawn": false,
+  "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {},
   "name": "motion_solver",
   "namespace": "",
   "node": "lekiwi_rmf/motion_solver",
@@ -912,6 +648,152 @@
  {
   "arguments": [],
   "env": {},
+  "name": "slam_astra_rgbd",
+  "namespace": "",
+  "node": "rtabmap_sync/rgbd_sync",
+  "output": "screen",
+  "parameters": {
+   "approx_sync": true,
+   "approx_sync_max_interval": 0.35,
+   "decimation": 2,
+   "qos": 1,
+   "qos_camera_info": 2,
+   "sync_queue_size": 30,
+   "topic_queue_size": 5,
+   "use_sim_time": false
+  },
+  "remappings": [
+   [
+    "rgb/image",
+    "/camera/astra/color/image_raw"
+   ],
+   [
+    "rgb/camera_info",
+    "/camera/astra/color/camera_info"
+   ],
+   [
+    "depth/image",
+    "/camera/astra/depth/image_raw"
+   ],
+   [
+    "rgbd_image",
+    "/slam/astra/rgbd_image"
+   ]
+  ],
+  "respawn": false,
+  "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {},
+  "name": "slam_front_depth",
+  "namespace": "",
+  "node": "rtabmap_util/pointcloud_to_depthimage",
+  "output": "screen",
+  "parameters": {
+   "approx": true,
+   "decimation": 2,
+   "fill_holes_error": 0.05,
+   "fill_holes_size": 0,
+   "fill_iterations": 0,
+   "fixed_frame_id": "odom",
+   "qos": 1,
+   "qos_camera_info": 1,
+   "sync_queue_size": 30,
+   "topic_queue_size": 5,
+   "use_sim_time": false,
+   "wait_for_transform": 0.1
+  },
+  "remappings": [
+   [
+    "cloud",
+    "/slam/cloud"
+   ],
+   [
+    "camera_info",
+    "/camera/front/camera_info"
+   ],
+   [
+    "image_raw",
+    "/slam/front_depth/image_raw"
+   ]
+  ],
+  "respawn": false,
+  "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {},
+  "name": "slam_front_rgbd",
+  "namespace": "",
+  "node": "rtabmap_sync/rgbd_sync",
+  "output": "screen",
+  "parameters": {
+   "approx_sync": true,
+   "approx_sync_max_interval": 0.35,
+   "decimation": 1,
+   "qos": 1,
+   "qos_camera_info": 1,
+   "sync_queue_size": 30,
+   "topic_queue_size": 5,
+   "use_sim_time": false
+  },
+  "remappings": [
+   [
+    "rgb/image",
+    "/camera/front/image_raw"
+   ],
+   [
+    "rgb/camera_info",
+    "/camera/front/camera_info"
+   ],
+   [
+    "depth/image",
+    "/slam/front_depth/image_raw"
+   ],
+   [
+    "rgbd_image",
+    "/slam/front/rgbd_image"
+   ]
+  ],
+  "respawn": false,
+  "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {},
+  "name": "slam_rgbd_views",
+  "namespace": "",
+  "node": "lekiwi_rmf/slam_views",
+  "output": "screen",
+  "parameters": {
+   "approx_sync_max_interval": 0.35,
+   "use_sim_time": false
+  },
+  "remappings": [
+   [
+    "rgbd_image0",
+    "/slam/astra/rgbd_image"
+   ],
+   [
+    "rgbd_image1",
+    "/slam/front/rgbd_image"
+   ],
+   [
+    "rgbd_images",
+    "/slam/rgbd_images"
+   ]
+  ],
+  "respawn": false,
+  "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {},
   "name": "wait_for_arm_controller",
   "namespace": "",
   "node": "lekiwi_rmf/readiness_gate",
@@ -919,6 +801,65 @@
   "parameters": {
    "action": "/arm_controller/follow_joint_trajectory",
    "kind": "follow_joint_trajectory_action"
+  },
+  "remappings": [],
+  "respawn": false,
+  "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {},
+  "name": "wait_for_odom",
+  "namespace": "",
+  "node": "lekiwi_rmf/readiness_gate",
+  "output": "screen",
+  "parameters": {
+   "kind": "topic",
+   "topic": "/odom",
+   "topic_type": "odom"
+  },
+  "remappings": [],
+  "respawn": false,
+  "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {},
+  "name": "wait_for_slam_sensor",
+  "namespace": "",
+  "node": "lekiwi_rmf/readiness_gate",
+  "output": "screen",
+  "parameters": {
+   "kind": "topic",
+   "topic": "/slam/cloud",
+   "topic_type": "cloud"
+  },
+  "remappings": [],
+  "respawn": false,
+  "respawn_delay": null,
+  "ros_arguments": []
+ },
+ {
+  "arguments": [],
+  "env": {},
+  "name": "wait_for_stable_joint_states",
+  "namespace": "",
+  "node": "lekiwi_rmf/readiness_gate",
+  "output": "screen",
+  "parameters": {
+   "joint_names": [
+    "arm_shoulder_pan",
+    "arm_shoulder_lift",
+    "arm_elbow_flex",
+    "arm_wrist_flex",
+    "arm_wrist_roll",
+    "arm_gripper"
+   ],
+   "kind": "joint_states",
+   "minimum_joint_samples": 20,
+   "topic": "/joint_states"
   },
   "remappings": [],
   "respawn": false,
