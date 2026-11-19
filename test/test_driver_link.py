@@ -159,7 +159,7 @@ def test_arm_permission_lease_expiry_disarms_and_base_expiry_zeros_command():
     assert disarms == ["DISARMED"]
 
 
-def test_explicit_arm_rejects_base_permission_without_arm_workspace_clear():
+def test_explicit_arm_rejects_base_permission_with_a_confirmed_arm_collision():
     class Now:
         def __sub__(self, _other):
             return types.SimpleNamespace(nanoseconds=0)
@@ -172,6 +172,7 @@ def test_explicit_arm_rejects_base_permission_without_arm_workspace_clear():
     node.link_lost = False
     node.last_observation = {"complete": True}
     grant_fresh_base_permission(node)
+    node.arm_workspace_collision = True
     node.state_lock = threading.Lock()
     node.action_lock = threading.Lock()
     node.torque_fault = False
@@ -184,7 +185,7 @@ def test_explicit_arm_rejects_base_permission_without_arm_workspace_clear():
     node.arm(None, response)
 
     assert response.success is False
-    assert "arm permission" in response.message
+    assert "permission" in response.message
     assert node.armed is False
     assert torque_requests == []
     assert states == []
@@ -957,6 +958,47 @@ def test_automatic_rearm_waits_for_telemetry_and_supervisor_permission():
     assert node.arm_after_startup_telemetry() is True
 
 
+@pytest.mark.parametrize('torque', [False, None], ids=['torque_off', 'torque_unknown'])
+def test_torque_is_enabled_with_base_permission_alone_where_depth_is_blind(torque):
+    node = rearm_node()
+    node.auto_arm_pending = True
+    node.robot = fake_client(observation_torque_enabled=torque)
+    grant_fresh_arm_permission(node, permitted=False)
+    assert node.arm_after_startup_telemetry() is False
+
+    grant_fresh_base_permission(node)
+    assert node.arm_after_startup_telemetry() is True
+    assert node.armed is True and node.torque_requests == [True]
+
+
+def test_strict_mode_automatic_arm_still_requires_arm_permission():
+    node = rearm_node(strict=True)
+    node.auto_arm_pending = True
+    grant_fresh_arm_permission(node, permitted=False)
+    grant_fresh_base_permission(node)
+
+    assert node.arm_after_startup_telemetry() is False
+    assert node.torque_requests == []
+
+
+def test_an_explicit_arm_needs_base_or_arm_permission():
+    from rclpy.time import Time
+
+    node = rearm_node()
+    node.get_clock = lambda: types.SimpleNamespace(now=lambda: Time(nanoseconds=1))
+    node.last_fresh = Time(nanoseconds=1)
+    node.last_observation = {"joint": 0.0}
+    node.link_timeout = 1.0
+    grant_fresh_arm_permission(node, permitted=False)
+
+    refused = node.arm(None, types.SimpleNamespace())
+    assert refused.success is False and node.torque_requests == []
+
+    grant_fresh_base_permission(node)
+    assert node.arm(None, types.SimpleNamespace()).success is True
+    assert node.armed is True
+
+
 def held_torque_recovery_node():
     from rclpy.time import Time
     from lekiwi_rmf.motor_health import healthy_snapshot, parse_motor_health
@@ -985,12 +1027,18 @@ def test_automatic_recovery_of_held_torque_never_sends_an_enable_request():
     assert not node._arm_permission_is_current()
 
 
-def test_explicit_arm_still_requires_arm_permission_with_verified_held_torque():
+def test_explicit_arm_with_verified_held_torque_needs_only_the_base_lease():
     node = held_torque_recovery_node()
     node.last_fresh = node._healthy_telemetry_at
+    node.last_observation = {"joint": 0.0}
+    grant_fresh_base_permission(node, permitted=False)
     response = node.arm(None, types.SimpleNamespace())
-    assert not response.success
+    assert not response.success and "permission" in response.message
     assert not node.armed and node.torque_requests == []
+
+    grant_fresh_base_permission(node)
+    assert node.arm(None, types.SimpleNamespace()).success
+    assert node.armed
 
 
 def test_held_torque_recovers_guarded_base_control_on_the_loopback_host(connected_driver):
@@ -1018,6 +1066,8 @@ def test_held_torque_recovers_guarded_base_control_on_the_loopback_host(connecte
     assert requests == [True]
     positions = {key: value for key, value in node.last_observation.items() if key.endswith('.pos')}
     grant_fresh_arm_permission(node, permitted=False)
+    # Reported-off torque is now enabled under the base lease; held recovery needs the readback.
+    until(lambda: node.robot.observation_torque_enabled is True)
     node.set_disarmed('LINK_LOST')
     until(lambda: node.armed)
     assert requests == [True]
@@ -1034,7 +1084,7 @@ def test_held_torque_recovers_guarded_base_control_on_the_loopback_host(connecte
 
 
 @pytest.mark.parametrize('fault', [
-    'base_denied', 'base_expired', 'torque_off', 'torque_unknown', 'health_missing',
+    'base_denied', 'base_expired', 'health_missing',
     'health_error', 'health_torque_off', 'telemetry_missing', 'telemetry_stale',
     'telemetry_future', 'strict', 'operator_disarmed', 'link_lost', 'torque_fault',
 ])
@@ -1047,8 +1097,6 @@ def test_held_torque_recovery_rejects_missing_evidence_and_manual_or_strict_disa
         grant_fresh_base_permission(node, permitted=False)
     elif fault == 'base_expired':
         node.base_permission.received_at_ns = 0
-    elif fault in ('torque_off', 'torque_unknown'):
-        node.robot.observation_torque_enabled = False if fault == 'torque_off' else None
     elif fault == 'health_missing':
         node.robot.observation_motor_health = ()
     elif fault == 'health_error':

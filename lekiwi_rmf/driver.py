@@ -984,6 +984,17 @@ class LeKiwiDriver(Node):
     def _arm_permission_is_current(self):
         return self.arm_permission.current()
 
+    def _arming_permission_is_current(self):
+        """Torque may be enabled while the supervisor permits any motion capability.
+
+        A domestic robot can start where the depth camera sees nothing valid, which
+        withholds arm permission. The base lease already requires the arm stowed, so
+        torque is enabled there too; arm motion still needs its own lease. A
+        confirmed arm collision is not a blind sensor and keeps torque off.
+        """
+        return self.arm_permission.current() or (
+            self.base_permission.current() and not self.arm_workspace_collision)
+
     def _enable_torque_and_arm(self, permission_is_current, operator, disarm_epoch):
         """Enable servo torque, then commit ARMED only if it is still safe.
 
@@ -1052,12 +1063,13 @@ class LeKiwiDriver(Node):
                     or self.torque_fault
                 ):
                     return False
-                held_torque = not self._arm_permission_is_current()
+                arm_permitted = self._arm_permission_is_current()
+                if not arm_permitted and (self.disarm_on_failure or not self.base_permission.current()):
+                    return False
+                held_torque = not arm_permitted and self.robot.observation_torque_enabled is True
                 if held_torque:
                     # Resuming already-powered servos needs no enable transaction.
-                    if (self.disarm_on_failure or not self.base_permission.current()
-                            or self._healthy_telemetry_at is None
-                            or self.robot.observation_torque_enabled is not True):
+                    if self._healthy_telemetry_at is None:
                         return False
                     health = self.robot.observation_motor_health
                     age = (self.get_clock().now() - self._healthy_telemetry_at).nanoseconds / 1e9
@@ -1075,7 +1087,7 @@ class LeKiwiDriver(Node):
                 self.get_logger().info("Recovered control with verified torque left on")
                 return True
             outcome, _torque_cut = self._enable_torque_and_arm(
-                self._arm_permission_is_current, operator=False, disarm_epoch=disarm_epoch
+                self._arming_permission_is_current, operator=False, disarm_epoch=disarm_epoch
             )
             if outcome == "armed":
                 self.get_logger().info("Armed after initial healthy LeKiwi telemetry")
@@ -1110,9 +1122,9 @@ class LeKiwiDriver(Node):
                         "and confirm torque-off before rearming"
                     )
                     return response
-                if not self._arm_permission_is_current():
+                if not self._arming_permission_is_current():
                     response.success = False
-                    response.message = "continuous safety supervisor has not granted arm permission"
+                    response.message = "continuous safety supervisor has not granted base or arm permission"
                     return response
                 if (
                     self.link_lost
@@ -1125,7 +1137,7 @@ class LeKiwiDriver(Node):
                     return response
                 disarm_epoch = self._disarm_epoch
             outcome, torque_cut = self._enable_torque_and_arm(
-                self._arm_permission_is_current, operator=True, disarm_epoch=disarm_epoch
+                self._arming_permission_is_current, operator=True, disarm_epoch=disarm_epoch
             )
             response.success = outcome == "armed"
             if outcome == "armed":

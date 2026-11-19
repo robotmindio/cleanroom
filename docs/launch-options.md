@@ -125,8 +125,10 @@ When fresh healthy servo readbacks confirm that torque remained on, automatic
 recovery can restore logical control with a current base permission lease. The
 supervisor grants that lease only with the arm stowed, and arm motion continues
 to require arm permission. Recovery resets the base command to zero and sends
-no torque-enable request. Off or unknown torque still requires arm permission
-before it can be enabled.
+no torque-enable request. Off or unknown torque is enabled with either lease
+current, so the robot can arm where its depth camera sees nothing valid (against
+a curtain, facing a sunlit window); strict mode's automatic arm still waits for
+arm permission.
 
 For larger robots, set `LEKIWI_DISARM_ON_FAILURE=true` in `.env` on both the
 workstation and the robot computer (launch argument `safety_policy:=strict`, host

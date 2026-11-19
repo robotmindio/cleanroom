@@ -135,7 +135,7 @@ and establish software behavior, not real stopping performance. Reuse qualified
 evidence only for unchanged conditions, and repeat the fault cases affected by
 the change. Host and ROS
 restart tests must show an immediate command stop, then re-arm only once
-telemetry and arm permission are healthy.
+telemetry and a base or arm permission are healthy.
 
 Each runner below is finite, preserves production services and the SLAM
 database, and records observations without granting acceptance. Run them only
@@ -240,7 +240,9 @@ on allow logical recovery with a current base permission lease. That lease
 requires the arm stowed. This recovery sends no torque-enable request and resets
 the base command to zero; arm movement still requires its own permission lease.
 Enabling torque from off or unknown state, and explicit `/safety/arm` requests,
-continue to require arm permission.
+need either lease. A blind depth camera withholds only arm permission, so the
+stowed robot still arms and drives away; the arm holds its measured pose until
+its own lease returns.
 
 The diagnostics use these units:
 
