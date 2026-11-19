@@ -105,12 +105,29 @@ acquires views with 45-degree Nav2 `Spin` behaviors, checking the complete swept
 body against a fresh local costmap before dispatch and throughout execution.
 After a full scan without a global target, it can advance or reverse 15 cm at
 5 cm/s. Translation additionally requires measured free laser rays over the
-entire swept body; missing, masked or invalid returns remain unknown. It never
+entire swept body; missing, masked or invalid returns remain unknown. Turning
+sweeps the body's corners and needs the most room, so when neither turn is clear
+(a robot parked against a wall or curtain) the same measured advance or reverse
+is tried at once instead of ending the task. The turn angle and step length are
+read from the tracked `config/explore_observe*.xml` and
+`config/explore_bootstrap*.xml` trees, so the checked sweep is the commanded
+motion. It never
 changes unknown SLAM cells to free to manufacture a global route. Every behavior
 runs beneath the same leased `NavigateToPose` parent, so cancellation, owner
 failure, sensor freshness, collision monitoring, arm stow and the original time
 and region bounds apply. New map observations are awaited before selecting again.
 If no safe local observation motion exists, the result remains incomplete.
+
+Local observation has a progress criterion. One round is a full scan plus one
+more motion (normally the advance). When a round leaves as many connected free
+cells bordering unknown space as before, further rounds would only repeat it:
+glass, gaps narrower than the body and space under furniture never close. The
+task then ends `complete` with the residual count in its message (`reachable
+region observed; N free cells bordering unknown space stayed unobservable ...`),
+or incomplete when deferred targets remain. While the map offers no usable
+starting space (the robot's own cell is unknown, or the planner keeps reporting
+an occupied start), a round without progress ends the task incomplete instead of
+repeating until the deadline.
 The same recovery runs when the global planner reports an occupied starting
 footprint. Observation progress is retained while candidates exist, so repeated
 global rejections can still lead to a measured local step; untried targets stay eligible.
@@ -210,8 +227,11 @@ A paused checkpoint also records when the pause began, allowing recovery to
 retain the same remaining active time without renewing the task's budget.
 Restart recovery cannot replenish the active-time budget or recenter the travel region.
 The deadline includes system suspend time. A missing, invalid, expired or
-superseded checkpoint, changed host boot, or reduced configuration limits refuse
-continuation. Cancellation and ordinary terminal results remove the checkpoint;
+superseded checkpoint, changed host boot, another map, or reduced configuration
+limits refuse continuation. The checkpoint records the `map_ref` that
+[spatial memory](spatial-memory.md) publishes on `/robot/spatial/revision`; its
+centre and progress points are coordinates of that map, so a resume is refused
+when RTAB-Map has since started another map or the identity is not published. Cancellation and ordinary terminal results remove the checkpoint;
 server shutdown preserves it for a running client's continuation. The optional
 resume request uses zero duration/radius and the original `revisit_known` setting.
 

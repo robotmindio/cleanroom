@@ -41,12 +41,13 @@ from lekiwi_rmf.coverage_search import Profile, SearchSession, normalize_label, 
 from lekiwi_rmf.exploration_owner_guard import owned_goal_id
 from lekiwi_rmf.latency_budget import LatencyBudget
 from lekiwi_rmf.exploration import (
-    database_size, footprint_is_free, load_navigation_footprint, map_geometry, select_target, task_limits,
-    with_body_free, load_task_checkpoint, save_task_checkpoint, task_time,
-    laser_free_grid, needs_observation, sweep_is_free,
+    behavior_distance, database_size, footprint_is_free, load_navigation_footprint, map_geometry, select_target,
+    task_limits, with_body_free, load_task_checkpoint, save_task_checkpoint, task_time,
+    laser_free_grid, sweep_is_free, unobserved_boundary,
 )
 from lekiwi_rmf.navigation_distance import NavigationDistance
 from lekiwi_rmf.search_evidence import SearchEvidence
+from lekiwi_rmf.spatial_anchors import SCHEMA as SPATIAL_SCHEMA, valid_ref
 
 
 class Paused(RuntimeError):
@@ -101,9 +102,17 @@ class RobotExplorer(Node):
             self.declare_parameter(name, value)
         self.config = {name: self.get_parameter(name).value for name in defaults}
         self._footprint, inscribed, self._region_margin = None, 0.0, 0.0
+        # The tracked single-behavior trees are the source of the local motions whose sweeps are checked.
+        self._observation_motions, self._full_scan = {}, 0
         if self.config["allow_exploration"]:
             self._footprint, inscribed, self._region_margin = load_navigation_footprint(
                 Path(self.config["navigation_params_file"]).expanduser())
+            self._observation_motions = {name: behavior_distance(self.config[name], tag, port) for name, tag, port in (
+                ("observation_tree", "Spin", "spin_dist"), ("observation_reverse_tree", "Spin", "spin_dist"),
+                ("bootstrap_tree", "DriveOnHeading", "dist_to_travel"),
+                ("bootstrap_reverse_tree", "BackUp", "backup_dist"))}
+            self._full_scan = math.ceil(2 * math.pi / min(
+                abs(self._observation_motions[name]) for name in ("observation_tree", "observation_reverse_tree")) - 1e-9)
         for name, value in self.config.items():
             if type(value) in (float, int) and (not math.isfinite(value) or value <= 0):
                 raise ValueError(f"{name} must be finite and positive")
@@ -131,6 +140,8 @@ class RobotExplorer(Node):
         self._map_stamp_ns = 0
         self._scan = None
         self._observation_turns = 0
+        self._observation_round = None
+        self._map_ref = None
         self._inputs = {}
         self._slam_seen = 0.0
         self._slam_reference = None
@@ -157,6 +168,7 @@ class RobotExplorer(Node):
             self.create_subscription(Bool, f"/safety/{topic}",
                                      lambda msg, name=topic: self._record(name, msg.data), latched)
         self.create_subscription(DiagnosticArray, "/diagnostics", self._on_safety_status, 10)
+        self.create_subscription(String, "/robot/spatial/revision", self._on_spatial_revision, latched)
         self._map_revision = 0
         self.create_subscription(Info, "/info", self._on_slam, 1)
         self.create_subscription(Bool, "/robot/explore/navigation_guard_ready",
@@ -239,6 +251,18 @@ class RobotExplorer(Node):
                 values = {item.key: item.value for item in status.values}
                 reason = values.get("latched_faults") or values.get("faults") or status.message
                 self._record("safety_reason", reason)
+
+    def _on_spatial_revision(self, message):
+        """The cartography whose coordinates a saved task's centre and progress points are in."""
+        try:
+            value = json.loads(message.data)
+            if (not isinstance(value, dict) or value.get("schema") != SPATIAL_SCHEMA
+                    or not valid_ref(value.get("map_ref"))):
+                raise ValueError("invalid spatial revision")
+            self._map_ref = value["map_ref"]
+        except (ValueError, RecursionError) as error:
+            self._map_ref = None
+            self.get_logger().error(f"map identity unavailable: {error}", throttle_duration_sec=5)
 
     def _on_map(self, message):
         try:
@@ -501,7 +525,12 @@ class RobotExplorer(Node):
         return load_task_checkpoint(
             self._task_file, identifier, maximum_duration=self.config["max_duration_sec"],
             maximum_radius=self.config["max_radius_m"], region_margin=self._region_margin,
-            maximum_points=self.config["max_map_cells"])
+            maximum_points=self.config["max_map_cells"], map_ref=self._map_ref)
+
+    def _unmapped(self):
+        """No map, or no pose in it while localizing: only an Explore goal can create them."""
+        return self._map is None or (self._mapping is False and not self._tf.can_transform(
+            "map", "base_footprint", rclpy.time.Time()))
 
     def _readiness_reason(self, require_permission=True, mapping_quota=True):
         try:
@@ -511,9 +540,7 @@ class RobotExplorer(Node):
                 return "exploration disabled for fixed-map/RMF operation"
             # Nav2 starts after the first map. Admit mapping initialization before
             # that map exists; every drive still requires the full checkpoint.
-            initializing = mapping_quota and (self._map is None or (
-                self._mapping is False and not self._tf.can_transform(
-                    "map", "base_footprint", rclpy.time.Time())))
+            initializing = mapping_quota and self._unmapped()
             if initializing:
                 if self._mapping is None or time.monotonic() - self._mode_at > self.config["service_timeout_sec"]:
                     return "mapping mode is unknown or stale"
@@ -673,7 +700,7 @@ class RobotExplorer(Node):
         mapping_requested = False
         state = None
         # Resume observes again at its measured pose, retaining saved time/region bounds.
-        self._observation_turns = 0
+        self._observation_turns, self._observation_round = 0, None
         try:
             duration, radius = task_limits(goal.request.max_duration_sec, goal.request.max_radius_m,
                                            self.config["max_duration_sec"], self.config["max_radius_m"])
@@ -695,7 +722,7 @@ class RobotExplorer(Node):
                          "boot_id": Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
                          "center": center, "radius": radius, "deadline": deadline,
                          "revisit_known": goal.request.revisit_known, "retrying": False,
-                         "previous_mapping": previous_mapping}
+                         "previous_mapping": previous_mapping, "map_ref": self._map_ref}
             def check():
                 current = self._checkpoint(goal, deadline, center, radius)
                 if self._mapping is not True:
@@ -707,7 +734,8 @@ class RobotExplorer(Node):
                         "mapped_area_m2": result.mapped_area_m2}
 
             def save():
-                state.update(visited=visited, blocked=blocked, mapped_area_m2=result.mapped_area_m2)
+                state.update(visited=visited, blocked=blocked, mapped_area_m2=result.mapped_area_m2,
+                             map_ref=self._map_ref)
                 save_task_checkpoint(self._task_file, state)
 
             save()
@@ -976,7 +1004,7 @@ class RobotExplorer(Node):
                     mounts = {mount.camera_id: mount for mount in self._evidence.mounts()}
                     if not mounts:
                         raise SearchEnded("incapable", "no base camera has intrinsics and a mount transform")
-                    grid = self._navigation_grid(check, pose)
+                    grid, _ = self._navigation_grid(check, pose)
                     position = (pose.pose.position.x, pose.pose.position.y)
                     viewpoint = select_viewpoint(
                         weights(), *grid, position, center, radius, list(mounts.values()), profile,
@@ -1082,7 +1110,10 @@ class RobotExplorer(Node):
         return result
 
     def _navigation_grid(self, check, pose):
-        """The SLAM map with live costmap obstacles and the robot's own body cleared."""
+        """The SLAM map with live costmap obstacles and the robot's own body cleared.
+
+        Also returns the same grid before the body was cleared.
+        """
         q = pose.pose.orientation
         grid, resolution, origin = self._map
         request = self._costmap.call_async(GetCostmap.Request())
@@ -1117,7 +1148,7 @@ class RobotExplorer(Node):
         grid = np.where((live == 100) & (grid >= 0), 100, grid)
         # Cells under the robot's own body are free: it is standing there.
         return (with_body_free(grid, resolution, origin, (pose.pose.position.x, pose.pose.position.y),
-                               2 * math.atan2(q.z, q.w), self._footprint), resolution, origin)
+                               2 * math.atan2(q.z, q.w), self._footprint), resolution, origin), grid
 
     def _destination(self, x, y, yaw):
         destination = PoseStamped()
@@ -1194,7 +1225,7 @@ class RobotExplorer(Node):
     def _explore_step(self, goal, check, center, radius, visited, blocked, result):
         """Plan and drive to one target; return False when no target remains."""
         pose = check()
-        grid = self._navigation_grid(check, pose)
+        grid, observed = self._navigation_grid(check, pose)
         position = (pose.pose.position.x, pose.pose.position.y)
         try:
             target, stage, result.mapped_area_m2 = select_target(
@@ -1208,8 +1239,10 @@ class RobotExplorer(Node):
             # A first RGB-D grid may not cover the robot's centre yet.
             target = None
         if target is None:
-            if needs_observation(*grid, position, center, radius, self._region_margin, self.config["free_threshold"]):
-                return self._observe_step(goal, check, center, radius, visited, blocked, result)
+            boundary = unobserved_boundary(grid[0], observed, *grid[1:], position, center, radius,
+                                           self._region_margin, self.config["free_threshold"])
+            if boundary:
+                return self._observe_step(goal, check, center, radius, visited, blocked, result, boundary)
             result.complete = not blocked
             result.message = "reachable region observed" if not blocked else "remaining targets failed navigation"
             return False
@@ -1224,11 +1257,11 @@ class RobotExplorer(Node):
             # Repeating the same global route cannot clear an unobserved start.
             # Keep the observation progress even when a candidate now exists,
             # so a locally checked step can establish a usable starting body.
-            return self._observe_step(goal, check, center, radius, visited, blocked, result)
+            return self._observe_step(goal, check, center, radius, visited, blocked, result, math.inf)
         if not route_clear:
             blocked.append(target)
             return True
-        self._observation_turns = 0
+        self._observation_turns, self._observation_round = 0, None
         reached = self._drive(check, destination, stage, lambda current: goal.publish_feedback(Explore.Feedback(
             stage=stage, current_pose=current, visited_targets=len(visited),
             unreachable_targets=len(blocked), mapped_area_m2=result.mapped_area_m2)))
@@ -1308,47 +1341,79 @@ class RobotExplorer(Node):
         rays = with_body_free(rays, resolution, origin, start[:2], start[2], self._footprint)
         return (np.where((grid < 0) | (grid > self.config["free_threshold"]), grid, rays), resolution, origin), start
 
-    def _observe_step(self, goal, check, center, radius, visited, blocked, result):
+    def _observe_step(self, goal, check, center, radius, visited, blocked, result, boundary):
         """Acquire new views before retrying frontiers, with a locally observed short advance.
 
         Behaviors remain children of a leased NavigateToPose goal. No global
         unknown cells are cleared. Check the whole local sweep before dispatch
         and while the child runs, alongside Nav2 and collision monitor.
+
+        ``boundary`` is the unobserved boundary these motions are meant to
+        close (infinite while the map offers no usable starting space). A round
+        of a full scan plus one more motion that closes none of it ends the task.
         """
+        if self._observation_round is None:
+            self._observation_round = [boundary, 0]
+        closed_from, motions = self._observation_round
+        if motions > self._full_scan:
+            if boundary >= closed_from:
+                if not math.isfinite(boundary):
+                    result.message = ("unobserved space remains; a full round of local observation motions "
+                                      "gave no usable starting space")
+                elif blocked:
+                    result.message = "remaining targets failed navigation"
+                else:
+                    # Glass, gaps narrower than the body and space under furniture never close.
+                    result.complete = True
+                    result.message = (f"reachable region observed; {boundary} free cells bordering unknown space "
+                                      "stayed unobservable through a full round of local observation motions")
+                return False
+            self._observation_round = [boundary, 0]
         grid, start = self._local_observation_grid(check)
-        advance = False
         map_pose = check()
         q, p = map_pose.pose.orientation, map_pose.pose.position
         yaw = 2 * math.atan2(q.z, q.w)
-        if self._observation_turns >= 8:
-            measured_grid, start = self._local_observation_grid(check, measured=True)
-            for distance, name in ((.15, "bootstrap_tree"), (-.15, "bootstrap_reverse_tree")):
-                end = (start[0] + distance * math.cos(start[2]), start[1] + distance * math.sin(start[2]), start[2])
+        distances = self._observation_motions
+
+        def advance():
+            measured_grid, measured_start = self._local_observation_grid(check, measured=True)
+            for distance, name in ((abs(distances["bootstrap_tree"]), "bootstrap_tree"),
+                                   (-abs(distances["bootstrap_reverse_tree"]), "bootstrap_reverse_tree")):
+                end = (measured_start[0] + distance * math.cos(measured_start[2]),
+                       measured_start[1] + distance * math.sin(measured_start[2]), measured_start[2])
                 if (math.hypot(p.x + distance * math.cos(yaw) - center[0],
                                p.y + distance * math.sin(yaw) - center[1]) < radius - self._region_margin
-                        and sweep_is_free(*measured_grid, start, end, self._footprint, self.config["free_threshold"])):
-                    advance = True
-                    tree, stage = self.config[name], "bootstrapping_known_space"
-                    break
-        if not advance:
-            for turn, name in ((math.pi / 4, "observation_tree"), (-math.pi / 4, "observation_reverse_tree")):
-                end = (start[0], start[1], start[2] + turn)
+                        and sweep_is_free(*measured_grid, measured_start, end, self._footprint,
+                                          self.config["free_threshold"])):
+                    return end, name
+            return None
+
+        scanned = self._observation_turns >= self._full_scan
+        motion = advance() if scanned else None
+        advancing = motion is not None
+        if motion is None:
+            for name in ("observation_tree", "observation_reverse_tree"):
+                end = (start[0], start[1], start[2] + distances[name])
                 if sweep_is_free(*grid, start, end, self._footprint, self.config["free_threshold"]):
-                    tree, stage = self.config[name], "observing_without_frontier"
+                    motion = end, name
                     break
             else:
-                result.message = "unobserved space remains; no collision-free local observation motion"
-                return False
-            if self._observation_turns >= 16:
-                result.message = "unobserved space remains; no observed local advance after scanning"
-                return False
+                # Turning sweeps the body's corners and needs the most room; a straight step can still be clear.
+                motion = None if scanned else advance()
+                advancing = motion is not None
+        if motion is None:
+            result.message = "unobserved space remains; no collision-free local observation motion"
+            return False
+        end, name = motion
+        tree = self.config[name]
+        stage = "bootstrapping_known_space" if advancing else "observing_without_frontier"
         checked_at = time.monotonic()
 
         def motion_check():
             nonlocal checked_at
             current_map = check()
             if time.monotonic() - checked_at >= .1:
-                latest_grid, current = self._local_observation_grid(check, measured=advance)
+                latest_grid, current = self._local_observation_grid(check, measured=advancing)
                 checked_at = time.monotonic()
                 current = (*current[:2], end[2] - math.remainder(end[2] - current[2], 2 * math.pi))
                 if not sweep_is_free(*latest_grid, current, end, self._footprint, self.config["free_threshold"]):
@@ -1365,7 +1430,8 @@ class RobotExplorer(Node):
         if not reached:
             result.message = "unobserved space remains; Nav2 could not complete local observation"
             return False
-        self._observation_turns = 0 if advance else self._observation_turns + 1
+        self._observation_turns = 0 if advancing else self._observation_turns + 1
+        self._observation_round[1] += 1
         finished = self.get_clock().now().nanoseconds
         until = time.monotonic() + self.config["slam_timeout_sec"]
         settled = time.monotonic() + self.config["settle_sec"]

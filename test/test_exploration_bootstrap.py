@@ -2,6 +2,7 @@
 
 import math
 from pathlib import Path
+import re
 import time
 import xml.etree.ElementTree as ET
 
@@ -10,7 +11,9 @@ import numpy as np
 import pytest
 
 from lekiwi_rmf.action import Explore
-from lekiwi_rmf.exploration import laser_free_grid, needs_observation, sweep_is_free
+from lekiwi_rmf.exploration import (
+    laser_free_grid, load_navigation_footprint, sweep_is_free, unobserved_boundary, with_body_free,
+)
 from lekiwi_rmf.exploration_node import Paused
 from test_exploration_ros import graph as graph, response, wait
 from test_exploration_nav2 import run_nav2_case
@@ -23,13 +26,27 @@ BODY = np.array([[.24, .22], [.24, -.22], [-.22, -.22], [-.22, .22]])
 def test_empty_candidates_require_observation_at_unknown_boundaries_and_cropped_map_edges():
     grid = np.zeros((40, 40), dtype=np.int16)
     args = (.05, (-1., -1., 0.), (0., 0.), (0., 0.), 1.8, 1.1, 20)
-    assert not needs_observation(grid, *args)
+    assert unobserved_boundary(grid, grid, *args) == 0
     grid[:, 24:] = -1
-    assert needs_observation(grid, *args)
-    assert needs_observation(np.zeros((4, 4), dtype=np.int16), .05, (-.1, -.1, 0.), *args[2:])
+    # One column of connected free cells borders the unknown side, inside the motion region.
+    assert unobserved_boundary(grid, grid, *args) == 28
+    small = np.zeros((4, 4), dtype=np.int16)
+    assert unobserved_boundary(small, small, .05, (-.1, -.1, 0.), *args[2:]) == 12
     # A fully observed enclosing wall really can finish without entering space behind it.
     grid[:, 23] = 100
-    assert not needs_observation(grid, *args)
+    assert unobserved_boundary(grid, grid, *args) == 0
+
+
+def test_no_observed_region_exists_while_only_the_robots_own_body_is_free():
+    observed = np.full((40, 40), -1, dtype=np.int16)
+    args = (.05, (-1., -1., 0.), (0., 0.), (0., 0.), 1.8, 1.1, 20)
+    assert unobserved_boundary(observed, observed, *args) == math.inf
+    # Clearing the body the robot stands on is not an observation of the room.
+    standing = with_body_free(observed, .05, (-1., -1., 0.), (0., 0.), 0., BODY)
+    assert unobserved_boundary(standing, observed, *args) == math.inf
+    observed[18:22, 18:30] = 0
+    seen = with_body_free(observed, .05, (-1., -1., 0.), (0., 0.), 0., BODY)
+    assert 0 < unobserved_boundary(seen, observed, *args) < math.inf
 
 
 def test_laser_rays_do_not_clear_missing_returns_or_cells_at_and_behind_obstacles():
@@ -60,6 +77,14 @@ def test_tracked_behavior_distances_match_checked_sweeps_and_keep_collision_chec
         behavior = ET.parse(ROOT / 'config' / filename).find(f'.//{tag}')
         assert float(behavior.get(port)) == value
         assert behavior.get('disable_collision_checks', 'false') == 'false'
+
+
+def test_checked_sweeps_use_the_motions_of_the_tracked_trees(graph):
+    _, explorer, _ = graph
+    assert explorer._observation_motions == {
+        'observation_tree': math.pi / 4, 'observation_reverse_tree': -math.pi / 4,
+        'bootstrap_tree': .15, 'bootstrap_reverse_tree': .15}
+    assert explorer._full_scan == 8
 
 
 def first_map(peers, explorer, *, cropped=False):
@@ -146,15 +171,66 @@ def test_blocked_local_sweep_finishes_incomplete_instead_of_claiming_region_comp
     assert peers.nav_count == 0 and peers.planner_ids == []
 
 
-def test_continuing_observation_retains_the_original_duration_bound(graph):
+def test_turns_blocked_beside_the_body_fall_through_to_the_measured_straight_step(graph):
+    """Parked against a wall or curtain: turning needs the most room, a straight step may still be clear."""
     peers, explorer, client = graph
     first_map(peers, explorer)
-    peers.nav_mode = 'success'
-    handle = response(client.send_goal_async(Explore.Goal(max_radius_m=2.5, max_duration_sec=2.0)))
+    footprint = load_navigation_footprint(ROOT / 'config' / 'nav2_params.yaml')[0]
+    local = np.zeros((80, 80), dtype=np.int16)
+    local[42, 44] = local[37, 44] = 100  # Beside the front of the body, inside the corners' turning circle.
+    start, sweep = (0., 0., 0.), (local, .05, (-2., -2., 0.))
+    assert not sweep_is_free(*sweep, start, (0., 0., math.pi / 4), footprint, 20)
+    assert not sweep_is_free(*sweep, start, (0., 0., -math.pi / 4), footprint, 20)
+    assert not sweep_is_free(*sweep, start, (.15, 0., 0.), footprint, 20)
+    assert sweep_is_free(*sweep, start, (-.15, 0., 0.), footprint, 20)
+    peers.local_grid.data = local.reshape(-1).tolist()
+    handle = response(client.send_goal_async(Explore.Goal(max_radius_m=2.5)))
+    wait(lambda: peers.nav_active)
+    assert peers.observation_goals == ['explore_bootstrap_reverse.xml'] and peers.planner_ids == []
+    response(handle.cancel_goal_async())
+    assert response(handle.get_result_async()).status == GoalStatus.STATUS_CANCELED
+
+
+def test_observation_keeps_the_original_duration_bound(graph):
+    peers, explorer, client = graph
+    first_map(peers, explorer)
+    handle = response(client.send_goal_async(Explore.Goal(max_radius_m=2.5, max_duration_sec=3.0)))
     result = response(handle.get_result_async())
     assert result.status == GoalStatus.STATUS_ABORTED and not result.result.complete
     assert result.result.message == 'exploration duration reached'
     assert peers.observation_goals and not peers.planner_ids and not peers.nav_active
+
+
+def test_a_round_that_closes_no_boundary_finishes_with_the_residual_reported(graph):
+    """Glass, narrow gaps and space under furniture never close; repeating the round only spends the budget."""
+    peers, explorer, client = graph
+    # A mapped patch too small to hold another target, bordered by space no sensor resolves.
+    patch = np.full((80, 80), -1, dtype=np.int16)
+    patch[32:48, 32:48] = 0
+    peers.grid.data = patch.reshape(-1).tolist()
+    wait(lambda: explorer._map[0][0, 0] == -1 and explorer._map[0][40, 40] == 0)
+    peers.nav_mode = 'success'
+    handle = response(client.send_goal_async(Explore.Goal(max_radius_m=2.5)))
+    assert handle.accepted, explorer._rejection
+    result = response(handle.get_result_async(), timeout=55)
+    assert result.status == GoalStatus.STATUS_SUCCEEDED and result.result.complete
+    assert re.fullmatch(r'reachable region observed; \d+ free cells bordering unknown space stayed unobservable '
+                        'through a full round of local observation motions', result.result.message)
+    assert peers.observation_goals[:9] == ['explore_observe.xml'] * 8 + ['explore_bootstrap.xml']
+    assert result.result.visited_targets == 0 and peers.planner_ids == []
+
+
+def test_a_round_that_maps_nothing_ends_incomplete_instead_of_repeating_until_the_deadline(graph):
+    peers, explorer, client = graph
+    first_map(peers, explorer)
+    peers.nav_mode = 'success'
+    handle = response(client.send_goal_async(Explore.Goal(max_radius_m=2.5)))
+    # The task's own bound is 60 s; an unchanged all-unknown map is answered after one round.
+    result = response(handle.get_result_async(), timeout=20)
+    assert result.status == GoalStatus.STATUS_ABORTED and not result.result.complete
+    assert 'no usable starting space' in result.result.message
+    assert peers.observation_goals == ['explore_observe.xml'] * 8 + ['explore_bootstrap.xml']
+    assert not peers.planner_ids and not peers.nav_active
 
 
 def test_persistent_occupied_global_start_observes_and_translates_before_retrying_the_target(graph):

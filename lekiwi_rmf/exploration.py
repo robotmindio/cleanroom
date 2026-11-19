@@ -6,6 +6,7 @@ import math
 import os
 import tempfile
 import time
+import xml.etree.ElementTree as ET
 
 import cv2
 import numpy as np
@@ -38,7 +39,17 @@ def save_task_checkpoint(path, state):
             temporary.unlink(missing_ok=True)
 
 
-def load_task_checkpoint(path, identifier, *, maximum_duration, maximum_radius, region_margin, maximum_points):
+def behavior_distance(path, tag, port):
+    """The motion a tracked single-behavior tree commands; the sweep checked before it uses the same value."""
+    behavior = ET.parse(path).find(f".//{tag}")
+    value = float(behavior.get(port)) if behavior is not None and behavior.get(port) else math.nan
+    if not math.isfinite(value) or value == 0:
+        raise ValueError(f"{path} needs a {tag} behavior with a finite non-zero {port}")
+    return value
+
+
+def load_task_checkpoint(path, identifier, *, maximum_duration, maximum_radius, region_margin, maximum_points,
+                         map_ref):
     """Reject lost, expired or altered bounds instead of starting a fresh task."""
     if len(identifier) != 32 or any(c not in "0123456789abcdef" for c in identifier):
         raise ValueError("invalid exploration resume task ID")
@@ -49,6 +60,9 @@ def load_task_checkpoint(path, identifier, *, maximum_duration, maximum_radius, 
             or state.get("id") != identifier
             or state.get("boot_id") != Path("/proc/sys/kernel/random/boot_id").read_text().strip()):
         raise ValueError("exploration checkpoint does not match this task and host boot")
+    if state.get("map_ref") != map_ref:
+        # Its centre and progress points are coordinates of the map they were recorded in.
+        raise ValueError("exploration checkpoint belongs to another map")
     for name in ("deadline", "radius", "mapped_area_m2"):
         value = state.get(name)
         if type(value) not in (float, int) or not math.isfinite(value) or value < 0:
@@ -215,13 +229,22 @@ def disk(radius, resolution):
     return ((x * x + y * y) * resolution ** 2 <= radius ** 2 + 1e-12).astype(np.uint8)
 
 
-def needs_observation(grid, resolution, origin, position, center, radius, region_margin, free_threshold):
-    """An exhausted candidate list does not prove that the connected space was observed."""
+def unobserved_boundary(grid, observed, resolution, origin, position, center, radius, region_margin,
+                        free_threshold):
+    """Count the connected free cells in the region that border unknown space.
+
+    An exhausted candidate list does not prove that the connected space was
+    observed. ``observed`` is ``grid`` before the robot's own body was marked
+    free. Infinite while the robot's cell is not free or its connected free
+    space is only that body: no observed region exists yet.
+    """
     x, y = world_to_cell(position, resolution, origin)
     free = ((grid >= 0) & (grid <= free_threshold)).astype(np.uint8)
     if not (0 <= y < grid.shape[0] and 0 <= x < grid.shape[1] and free[y, x]):
-        return True
+        return math.inf
     cv2.floodFill(free, None, (x, y), 2, flags=4)
+    if not np.any((free == 2) & (observed >= 0) & (observed <= free_threshold)):
+        return math.inf
     yy, xx = np.indices(grid.shape)
     wx, wy = cell_to_world(xx, yy, resolution, origin)
     region = (wx - center[0]) ** 2 + (wy - center[1]) ** 2 < (radius - region_margin) ** 2
@@ -229,7 +252,7 @@ def needs_observation(grid, resolution, origin, position, center, radius, region
     # The edge of a cropped first map is also unobserved, unless outside the task region.
     unknown[[0, -1], :] = True
     unknown[:, [0, -1]] = True
-    return bool(np.any((free == 2) & region & unknown))
+    return int(np.count_nonzero((free == 2) & region & unknown))
 
 
 def laser_free_grid(shape, resolution, origin, sensor, ranges, angle_min, angle_increment, range_min, range_max):

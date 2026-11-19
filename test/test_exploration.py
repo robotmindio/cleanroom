@@ -28,9 +28,9 @@ def checkpoint(tmp_path):
     return path, state
 
 
-def restore(path):
+def restore(path, map_ref=None):
     return load_task_checkpoint(path, "a" * 32, maximum_duration=900, maximum_radius=10,
-                                region_margin=REGION_MARGIN, maximum_points=100)
+                                region_margin=REGION_MARGIN, maximum_points=100, map_ref=map_ref)
 
 
 def test_checkpoint_retains_original_bounds_progress_and_mapping(checkpoint):
@@ -53,6 +53,16 @@ def test_checkpoint_cannot_expand_or_reset_an_interrupted_task(checkpoint, chang
     path.write_text(json.dumps(state))
     with pytest.raises(ValueError):
         restore(path)
+
+
+@pytest.mark.parametrize("saved, current", [("map-a", "map-b"), ("map-a", None), (None, "map-a")])
+def test_checkpoint_progress_is_refused_in_another_or_unidentified_map(checkpoint, saved, current):
+    """Its centre and visited points are coordinates of the map they were recorded in."""
+    path, state = checkpoint
+    save_task_checkpoint(path, {**state, "map_ref": saved})
+    with pytest.raises(ValueError, match="another map"):
+        restore(path, current)
+    assert restore(path, saved)["center"] == state["center"]
 
 
 def test_checkpoint_write_failure_preserves_last_complete_record(checkpoint, monkeypatch):
