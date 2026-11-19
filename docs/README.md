@@ -14,6 +14,8 @@
   independent verifier and regression suites.
 - [Perception training](perception-training.md): datasets of taught and corrected
   views, recognizer fine-tuning, registration, and promotion without regression.
+- [Object map](object-map.md): where the robot estimates the things it has seen
+  to be, by which method, and what is not yet qualified.
 - [Spatial memory](spatial-memory.md): map, revision, anchor and session
   identities, capture-time map poses and reprojection after SLAM optimization.
 - [Robot task contract](robot-tasks.md): managed admission, status, cancellation,

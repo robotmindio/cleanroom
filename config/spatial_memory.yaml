@@ -11,3 +11,51 @@ spatial_memory:
     # so their capture revisions are not needed for reprojection.
     retention_sec: 604800.0
     max_revisions: 2000
+    # /robot/spatial/query `pose` refuses a map transform of this frame older than this.
+    base_frame: base_footprint
+    pose_max_age_sec: 1.0
+    # Object map (docs/object-map.md): one anchored entry per thing the robot keeps
+    # seeing, read from the observation store behind a persisted cursor.
+    objects_enabled: true
+    # One page of observations per tick, for at most the budget; the rest waits.
+    objects_tick_sec: 0.5
+    objects_tick_budget_sec: 0.05
+    # Evidence-of-absence criteria and the 3D map topic: empty means the active
+    # search's own, config/exploration.yaml, so both agree on what an empty view proves.
+    objects_absence_config: ''
+    # Association: a sighting joins the one same-label entry within
+    # gate_sigmas * sqrt(sigma_entry^2 + sigma_sighting^2); fused sigma never
+    # drops below min_sigma_m, because repeated views of one scene are not independent.
+    # DEBT: engineering defaults, not fitted to this robot; every estimate they
+    # shape is reported `qualified: false`. Fit them with measured object positions
+    # when the cameras are calibrated: https://github.com/robotmindio/cleanroom/issues/91
+    # (done when the gate and the sigma floor come from a recorded qualification).
+    objects_gate_sigmas: 3.0
+    objects_min_sigma_m: 0.05
+    # Estimators: longest ray or triangulation range, the camera roll/pitch beyond
+    # which an image box gives no horizontal bearing, and the least baseline and
+    # parallax between viewpoints for a triangulated point.
+    objects_max_range_m: 6.0
+    objects_max_tilt_rad: 0.6
+    objects_min_baseline_m: 0.3
+    objects_min_parallax_rad: 0.1
+    # Bounds. An entry is never dropped for not being seen: only one proven
+    # absent leaves, after absent_retention_sec or to make room at max_objects.
+    objects_max_objects: 2000
+    objects_max_history: 20000
+    objects_max_support: 8
+    objects_max_wedges: 8
+    objects_history_interval_sec: 60.0
+    objects_absent_retention_sec: 2592000.0
+    # Forgetting: views at least miss_interval_sec apart that prove an entry's
+    # place empty step it to unconfirmed and then absent_at_last_place. A place
+    # wider than absence_max_radius_m is too uncertain to be proven empty.
+    objects_misses_unconfirmed: 2
+    objects_misses_absent: 4
+    objects_miss_interval_sec: 5.0
+    # The proof checks every absence_cell_m column of the place against the 3D
+    # map (on the order of 0.1 s per place in the unit tests; unmeasured on the robot), so one
+    # capture puts at most absence_max_checks places to it, nearest first.
+    objects_absence_cell_m: 0.1
+    objects_absence_max_radius_m: 0.5
+    objects_absence_max_checks: 1

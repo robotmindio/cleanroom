@@ -54,6 +54,7 @@ without historical TF, the observation records `map_pose: null` and
 | `op` | Result |
 | --- | --- |
 | `current` | Readiness, session, and the newest revision of the session's map. |
+| `pose` | Where the robot is now: `pose` (`T_map_base_footprint`), `site_ref`, `map_ref`, `revision`, the nearest `anchor_ref`, `localization_session` and `stamp_unix_sec`. Refused with `localization unavailable: …` until the session has localized in a map, and when the map transform is missing or older than `pose_max_age_sec`. |
 | `maps` | Maps with merges, recent sessions and alignments. |
 | `revision` | One revision with a page of its anchor table (`after_anchor`, `limit` up to 5000). |
 | `anchor` | For captures (`map_pose`, capture-frame `points`, `uncertainties_m`): the nearest node of the capture revision, `T_anchor_camera`, and each point's `anchor_xyz` and `cov_xyz`. These are the Knowledge `estimate` fields. |
@@ -68,6 +69,14 @@ displacement in that common revision. Captures from another site fail with
 
 The latched `/robot/spatial/revision` topic announces each revision with its
 session.
+
+## Object map
+
+The same node and database hold the [object map](object-map.md): entries for
+the things the robot has seen, each stored relative to an anchor so that it is
+placed in the newest revision whenever it is asked for, without the capture
+revision. `/robot/objects/query` answers it. The database is schema version 2;
+opening a version 1 store adds the object tables and keeps everything else.
 
 ## Limits
 

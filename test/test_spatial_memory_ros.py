@@ -14,13 +14,14 @@ from rclpy.parameter import Parameter
 from rclpy.qos import DurabilityPolicy, QoSProfile
 import rclpy
 from rtabmap_msgs.msg import Info, MapGraph
-from sensor_msgs.msg import Image
-from std_msgs.msg import String
-from tf2_ros import StaticTransformBroadcaster
+from sensor_msgs.msg import CameraInfo, Image
+from std_msgs.msg import Header, String
+from tf2_ros import StaticTransformBroadcaster, TransformBroadcaster
 import pytest
 from vision_msgs.msg import Detection2DArray
 import yaml
 
+from lekiwi_rmf.object_cameras import camera_bindings
 from lekiwi_rmf.object_observation_node import ObjectObservations
 from lekiwi_rmf.object_recognition import recognition_identity
 from lekiwi_rmf.spatial_memory_node import SpatialMemory, parse_request
@@ -64,7 +65,8 @@ def rtabmap_database(path):
 
 def test_request_validation():
     assert parse_request('{"op": "current"}') == {'op': 'current'}
-    for text in ('[]', '{"op": "drop"}', '{"op": "current", "x": 1}', '{"op": "revision", "limit": 0}',
+    assert parse_request('{"op": "pose"}') == {'op': 'pose'}
+    for text in ('[]', '{"op": "drop"}', '{"op": "current", "x": 1}', '{"op": "pose", "frame": "odom"}', '{"op": "revision", "limit": 0}',
                  '{"op": "project", "items": []}', '{"op": "project", "items": [{"map_pose": {}}], "target": {}}'):
         try:
             parse_request(text)
@@ -188,6 +190,120 @@ def test_graphs_become_revisions_and_observations_reproject(tmp_path):
         maps = spatial_call({'op': 'maps'})
         assert [entry['map_ref'] for entry in maps['maps']] == [first['map_ref']]
     finally:
+        stop(executor, thread, (peer, spatial, collector), context)
+
+
+def test_stored_observations_become_object_entries_and_the_robot_pose_is_answered(tmp_path):
+    context = Context()
+    rclpy.init(context=context)
+    database = tmp_path / 'rtabmap.db'
+    rtabmap_database(database)
+    spatial = SpatialMemory(context=context, parameter_overrides=[
+        Parameter('database_path', value=str(tmp_path / 'spatial.db')),
+        Parameter('rtabmap_database', value=str(database)), Parameter('site_ref', value='home'),
+        Parameter('graph_topic', value='/test/mapGraph'), Parameter('info_topic', value='/test/info'),
+        Parameter('objects_tick_sec', value=0.1)])
+    binding = camera_bindings(['front'])['front']
+    collector = ObjectObservations(context=context, parameter_overrides=[
+        Parameter('database_path', value=str(tmp_path / 'observations.db')),
+        Parameter('camera_ids', value=['front']), Parameter('max_source_age_sec', value=1.0)])
+    peer = Node('spatial_peer', context=context)
+    graphs = peer.create_publisher(MapGraph, '/test/mapGraph', 1)
+    revisions = []
+    latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+    peer.create_subscription(String, '/robot/spatial/revision', lambda msg: revisions.append(json.loads(msg.data)), latched)
+    images = peer.create_publisher(Image, '/robot/perception/front/source_image', 1)
+    detections = peer.create_publisher(Detection2DArray, '/robot/perception/front/detections', 1)
+    points = peer.create_publisher(PerceptionOperatingPoint, '/robot/perception/front/operating_point', 1)
+    infos = peer.create_publisher(CameraInfo, binding['camera_info_topic'], 10)
+    profiles = peer.create_publisher(String, '/robot/perception/profile', latched)
+    spatial_query = peer.create_client(QuerySpatial, '/robot/spatial/query')
+    object_query = peer.create_client(QuerySpatial, '/robot/objects/query')
+    camera = TransformStamped()
+    camera.header.frame_id, camera.child_frame_id = 'map', binding['optical_frame']
+    camera.transform.translation.x, camera.transform.translation.z = 2.1, 0.3
+    camera.transform.rotation.x, camera.transform.rotation.y = -0.5, 0.5
+    camera.transform.rotation.z, camera.transform.rotation.w = -0.5, 0.5
+    StaticTransformBroadcaster(peer).sendTransform(camera)
+    base = TransformStamped()
+    base.header.frame_id, base.child_frame_id = 'map', 'base_footprint'
+    base.transform.translation.x, base.transform.rotation.w = 2.1, 1.0
+    broadcaster, localized = TransformBroadcaster(peer), threading.Event()
+
+    def publish():
+        infos.publish(CameraInfo(header=Header(frame_id=binding['optical_frame']), width=60, height=40,
+                                 k=[50., 0., 30., 0., 50., 20., 0., 0., 1.]))
+        if localized.is_set():
+            base.header.stamp = peer.get_clock().now().to_msg()
+            broadcaster.sendTransform(base)
+    ticker = peer.create_timer(0.05, publish)
+    executor = SingleThreadedExecutor(context=context)
+    for node in (peer, spatial, collector):
+        executor.add_node(node)
+    thread = threading.Thread(target=executor.spin, daemon=True)
+    thread.start()
+
+    def call(client, value):
+        future = client.call_async(QuerySpatial.Request(request_json=json.dumps(value)))
+        wait(future.done)
+        response = future.result()
+        return response.success, json.loads(response.response_json) if response.success else response.detail
+
+    try:
+        wait(lambda: spatial_query.service_is_ready() and object_query.service_is_ready()
+             and graphs.get_subscription_count() == 1 and images.get_subscription_count() == 1)
+        # Before any graph the robot is nowhere it can name; with a graph but no map transform, still nowhere.
+        assert call(spatial_query, {'op': 'pose'}) == (
+            False, 'localization unavailable: waiting for an optimized RTAB-Map graph')
+        assert call(object_query, {'region': {'x': 0, 'y': 0, 'radius_m': 1}})[1].startswith('localization unavailable')
+        assert call(object_query, {'bogus': 1})[0] is False
+        now = peer.get_clock().now().to_msg().sec
+        graphs.publish(graph(now - 5))
+        wait(lambda: revisions and len(collector._spatial) == 1)
+        ok, detail = call(spatial_query, {'op': 'pose'})
+        assert not ok and 'no transform from map to base_footprint' in detail
+        localized.set()
+        wait(lambda: call(spatial_query, {'op': 'pose'})[0])
+        pose = call(spatial_query, {'op': 'pose'})[1]
+        assert pose['site_ref'] == 'home' and pose['map_ref'] == revisions[-1]['map_ref']
+        assert pose['revision'] == revisions[-1]['revision'] and pose['anchor_ref'].endswith(':2')
+        assert pose['pose']['t'] == [2.1, 0.0, 0.0] and pose['child_frame_id'] == 'base_footprint'
+        assert 0 <= peer.get_clock().now().nanoseconds / 1e9 - pose['stamp_unix_sec'] <= 1.0
+        assert pose['localization_session'] == revisions[-1]['session']['session']
+
+        # The detector's operating point names the cameras; a stored capture then becomes an entry.
+        profiles.publish(String(data=json.dumps({'schema': 1, 'cameras': {'front': binding['sha256']}, 'recognizers': [
+            {'role': 'primary', 'model_sha256': MODEL_SHA256, 'model_name': 'yolox', 'open_vocabulary': False,
+             'labels': ['cup'], 'profile': {'revision': 'b' * 64}}]})))
+        assert call(object_query, {})[1]['objects'] == []
+        image, found = capture(count=1)
+        image.header.frame_id = binding['optical_frame']
+        image.header.stamp = peer.get_clock().now().to_msg()
+        found.header = image.header
+        for item in found.detections:
+            item.header = image.header
+        detections.publish(found)
+        points.publish(operating_point(image, count=1))
+        images.publish(image)
+        wait(lambda: call(object_query, {'label': 'cup'})[1]['objects'])
+        result = call(object_query, {'label': 'cup'})[1]
+        entry = result['objects'][0]
+        # No depth and no 3D map: the honest estimate is a bearing, and the observation keeps no position.
+        assert entry['method'] == 'bearing_only' and entry['position'] is None and entry['qualified'] is False
+        assert entry['bearings'][0]['origin'] == [2.1, 0.0] and entry['state'] == 'present'
+        assert entry['map_ref'] == pose['map_ref'] and entry['revision'] == pose['revision']
+        assert result['localized'] and result['ingestion']['enabled'] and result['ingestion']['observation_sequence'] == 1
+        assert result['ingestion']['counts']['created'] == 1 and not entry['observations'][0]['evidence_expired']
+        stored = collector._store.query('{}')['observations'][0]
+        assert stored['id'] == entry['observations'][0]['id'] and stored['position'] is None
+        assert 'position' not in stored['detections'][0]
+        # The cursor is persisted with the entry: reading on creates nothing more.
+        time.sleep(0.5)
+        later = call(object_query, {})[1]['objects']
+        assert len(later) == 1 and later[0]['sightings'] == 1
+        assert spatial._objects.cursor()[:2] == (collector._store.epoch, 1)
+    finally:
+        ticker.cancel()  # Nothing may still be publishing while the graph is torn down.
         stop(executor, thread, (peer, spatial, collector), context)
 
 
