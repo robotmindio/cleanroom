@@ -39,6 +39,42 @@ ROTATION_TOLERANCE_RAD = 1e-3
 # Relinks of compacted anchors form chains; a longer one is reported, never followed.
 MAX_RELINKS = 8
 
+# Version 2 added the object map's tables (lekiwi_rmf/object_map.py) to the version 1 cartography.
+SCHEMA_VERSION = 2
+TABLES = '''
+    CREATE TABLE IF NOT EXISTS site (site_ref TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS maps (map_ref TEXT PRIMARY KEY, created_at REAL NOT NULL,
+        merged_into TEXT);
+    CREATE TABLE IF NOT EXISTS revisions (sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+        revision TEXT NOT NULL UNIQUE, map_ref TEXT NOT NULL, parent TEXT, created_at REAL NOT NULL,
+        cause TEXT NOT NULL, session TEXT NOT NULL, observer_ref TEXT NOT NULL, anchors INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS poses (anchor_ref TEXT NOT NULL, sequence INTEGER NOT NULL,
+        map_ref TEXT NOT NULL, pose TEXT, PRIMARY KEY (anchor_ref, map_ref, sequence));
+    CREATE TABLE IF NOT EXISTS relinks (anchor_ref TEXT NOT NULL, map_ref TEXT NOT NULL,
+        sequence INTEGER NOT NULL, via_anchor TEXT NOT NULL, pose TEXT NOT NULL,
+        PRIMARY KEY (anchor_ref, map_ref, sequence));
+    CREATE TABLE IF NOT EXISTS sessions (session TEXT PRIMARY KEY, observer_ref TEXT NOT NULL,
+        started_at REAL NOT NULL, map_ref TEXT, relocalized_at REAL);
+    CREATE TABLE IF NOT EXISTS alignments (from_map TEXT NOT NULL, from_revision TEXT NOT NULL,
+        to_map TEXT NOT NULL, to_revision TEXT NOT NULL, pose TEXT NOT NULL, method TEXT NOT NULL,
+        created_at REAL NOT NULL, PRIMARY KEY (from_map, to_map, to_revision));
+    CREATE TABLE IF NOT EXISTS objects (object_id TEXT PRIMARY KEY, label TEXT NOT NULL, map_ref TEXT NOT NULL,
+        anchor_ref TEXT NOT NULL, anchor_xyz TEXT, height_known INTEGER NOT NULL, sigma_m REAL,
+        wedges TEXT NOT NULL, method TEXT NOT NULL, qualified INTEGER NOT NULL, calibration_sha256 TEXT,
+        assumptions TEXT NOT NULL, state TEXT NOT NULL, score REAL NOT NULL, first_seen REAL NOT NULL,
+        last_seen REAL NOT NULL, last_verified REAL NOT NULL, miss_count INTEGER NOT NULL, last_miss REAL,
+        sightings INTEGER NOT NULL, first_xyz TEXT);
+    CREATE INDEX IF NOT EXISTS objects_label ON objects(label);
+    CREATE TABLE IF NOT EXISTS object_support (object_id TEXT NOT NULL, observation_id TEXT NOT NULL,
+        epoch TEXT NOT NULL, sequence INTEGER NOT NULL, stamp REAL NOT NULL,
+        PRIMARY KEY (object_id, observation_id));
+    CREATE TABLE IF NOT EXISTS object_history (id INTEGER PRIMARY KEY AUTOINCREMENT, object_id TEXT NOT NULL,
+        label TEXT NOT NULL, stamp REAL NOT NULL, event TEXT NOT NULL, observation_id TEXT, detail TEXT NOT NULL);
+    CREATE INDEX IF NOT EXISTS object_history_object ON object_history(object_id, id);
+    CREATE TABLE IF NOT EXISTS object_cursor (epoch TEXT NOT NULL, sequence INTEGER NOT NULL,
+        evicted INTEGER NOT NULL);
+'''
+
 
 class SpatialError(ValueError):
     """A projection that cannot be made; ``code`` is the shared error vocabulary."""
@@ -222,25 +258,13 @@ class SpatialStore:
         path.touch(mode=0o600, exist_ok=True)
         self._db = sqlite3.connect(path, check_same_thread=False)
         self._db.row_factory = sqlite3.Row
+        version = self._db.execute('PRAGMA user_version').fetchone()[0]
+        if version > SCHEMA_VERSION:
+            self._db.close()
+            raise ValueError(f'spatial database version {version} is newer than this software ({SCHEMA_VERSION})')
         with self._db:
-            self._db.executescript('''
-                CREATE TABLE IF NOT EXISTS site (site_ref TEXT NOT NULL);
-                CREATE TABLE IF NOT EXISTS maps (map_ref TEXT PRIMARY KEY, created_at REAL NOT NULL,
-                    merged_into TEXT);
-                CREATE TABLE IF NOT EXISTS revisions (sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-                    revision TEXT NOT NULL UNIQUE, map_ref TEXT NOT NULL, parent TEXT, created_at REAL NOT NULL,
-                    cause TEXT NOT NULL, session TEXT NOT NULL, observer_ref TEXT NOT NULL, anchors INTEGER NOT NULL);
-                CREATE TABLE IF NOT EXISTS poses (anchor_ref TEXT NOT NULL, sequence INTEGER NOT NULL,
-                    map_ref TEXT NOT NULL, pose TEXT, PRIMARY KEY (anchor_ref, map_ref, sequence));
-                CREATE TABLE IF NOT EXISTS relinks (anchor_ref TEXT NOT NULL, map_ref TEXT NOT NULL,
-                    sequence INTEGER NOT NULL, via_anchor TEXT NOT NULL, pose TEXT NOT NULL,
-                    PRIMARY KEY (anchor_ref, map_ref, sequence));
-                CREATE TABLE IF NOT EXISTS sessions (session TEXT PRIMARY KEY, observer_ref TEXT NOT NULL,
-                    started_at REAL NOT NULL, map_ref TEXT, relocalized_at REAL);
-                CREATE TABLE IF NOT EXISTS alignments (from_map TEXT NOT NULL, from_revision TEXT NOT NULL,
-                    to_map TEXT NOT NULL, to_revision TEXT NOT NULL, pose TEXT NOT NULL, method TEXT NOT NULL,
-                    created_at REAL NOT NULL, PRIMARY KEY (from_map, to_map, to_revision));
-                PRAGMA user_version=1;''')
+            # Every statement is idempotent, so creating a store and migrating an older one are the same step.
+            self._db.executescript(TABLES + f'PRAGMA user_version={SCHEMA_VERSION};')
             stored = self._db.execute('SELECT site_ref FROM site').fetchone()
             if stored is None:
                 self._db.execute('INSERT INTO site VALUES (?)', (site_ref,))
@@ -255,6 +279,11 @@ class SpatialStore:
                 self._current[row['anchor_ref']] = (row['map_ref'], Transform.from_dict(json.loads(row['pose'])))
         self.session = None
         self._tables = {}
+
+    @property
+    def connection(self):
+        """The store's database, shared with the object map so both live in one file."""
+        return self._db
 
     def close(self):
         self._db.close()
@@ -424,6 +453,26 @@ class SpatialStore:
             relinks.append(Transform.from_dict(json.loads(link[1])))
             anchor_ref = link[0]
         raise SpatialError('anchor_missing', 'anchor relink chain is too long')
+
+    def current_anchor(self, map_ref, anchor_ref):
+        """``T_map_anchor`` in the newest revision of the map ``map_ref`` lives on in, with that revision.
+
+        It needs no capture revision, so what is stored relative to an anchor stays
+        placeable after the revision it was made in has been pruned.
+        """
+        surviving = self.surviving_map(map_ref)
+        target = self.latest(surviving)
+        if target is None:
+            raise SpatialError('revision_unknown', f'map {map_ref} has no revision')
+        try:
+            pose, relinks = self.anchor_pose(target, anchor_ref)
+            return target, pose, 'anchor' if relinks == 0 else 'relinked_anchor'
+        except SpatialError:
+            alignment = self.alignment(map_ref, surviving) if map_ref != surviving else None
+            if alignment is None:
+                raise
+            # The anchor never joined the survivor's graph; the merge transform still places it.
+            return target, alignment[0].compose(self.anchor_pose(self.latest(map_ref), anchor_ref)[0]), 'merge_alignment'
 
     def anchors(self, revision, *, after='', limit=5000):
         """One page of a revision's anchor table, ordered by reference."""

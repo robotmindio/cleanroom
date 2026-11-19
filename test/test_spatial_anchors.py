@@ -242,3 +242,34 @@ def test_database_tag_changes_when_the_database_is_recreated(tmp_path):
     assert first == rtabmap_database_tag(path)
     create('2026-10-19 09:00:00')
     assert rtabmap_database_tag(path) != first
+
+
+def test_current_anchor_needs_no_capture_revision_and_follows_relinks_and_merges(tmp_path):
+    store = SpatialStore(tmp_path / 'spatial.db', site_ref='home', observer_ref='robot-a')
+    store.start_session(now=0.0)
+    old = store.ingest(corridor(range(1, 8)), created_at=1.0)
+    second = store.ingest(corridor([1, 2, 3, 4, 6, 7], lambda i: (0.0, 0.2, 0.0)), created_at=2.0)
+    target, pose, method = store.current_anchor(old.map_ref, 'rtabmap:test:3')
+    assert target == second and method == 'anchor' and np.allclose(pose.t, (3.0, 0.2, 0.0))
+    target, pose, method = store.current_anchor(old.map_ref, 'rtabmap:test:5')
+    assert method == 'relinked_anchor' and np.allclose(pose.t, (5.0, 0.2, 0.0))
+    with pytest.raises(SpatialError) as error:
+        store.current_anchor(old.map_ref, 'rtabmap:test:99')
+    assert error.value.code == 'anchor_missing'
+    with pytest.raises(SpatialError) as error:
+        store.current_anchor('unknown-map', 'rtabmap:test:3')
+    assert error.value.code == 'revision_unknown'
+
+    # A second map is absorbed by a loop closure that does not carry all of its nodes over.
+    store.close()
+    store = SpatialStore(tmp_path / 'spatial.db', site_ref='home', observer_ref='robot-a')
+    store.start_session(now=20.0)
+    fresh = store.ingest(corridor(range(100, 106), lambda i: (-95.0, 3.0, 0.0)), created_at=21.0)
+    merged = store.ingest({**corridor([1, 2, 3, 4, 6, 7], lambda i: (0.0, 0.2, 0.0)),
+                           **corridor(range(100, 105), lambda i: (-95.0, 0.0, 0.0))}, created_at=22.0)
+    assert merged.cause == 'merge' and merged.map_ref == old.map_ref
+    target, pose, method = store.current_anchor(fresh.map_ref, 'rtabmap:test:102')
+    assert target == merged and method == 'anchor' and np.allclose(pose.t, (7.0, 0.0, 0.0))
+    target, pose, method = store.current_anchor(fresh.map_ref, 'rtabmap:test:105')
+    assert target == merged and method == 'merge_alignment' and np.allclose(pose.t, (10.0, 0.0, 0.0), atol=1e-6)
+    store.close()
