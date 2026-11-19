@@ -42,7 +42,7 @@ def test_synchronized_capture_query_evidence_and_stale_stream(tmp_path):
         'camera_info_topic': '/camera/test/info', 'depth_topic': '', 'calibration_file': ''}}))
     collector = ObjectObservations(context=context, parameter_overrides=[
         Parameter('database_path', value=str(tmp_path / 'observations.db')),
-        Parameter('model_sha256', value=MODEL_SHA256), Parameter('camera_ids', value=['astra_color']),
+        Parameter('camera_ids', value=['astra_color']),
         Parameter('camera_profiles_file', value=str(bindings)), Parameter('max_source_age_sec', value=1.0)])
     peer = Node('observation_peer', context=context)
     images = peer.create_publisher(Image, '/robot/perception/astra_color/source_image', 1)
@@ -142,7 +142,7 @@ def test_multiple_camera_readiness_cannot_mask_wrong_or_missing_source(tmp_path)
     rclpy.init(context=context)
     collector = ObjectObservations(context=context, parameter_overrides=[
         Parameter('database_path', value=str(tmp_path / 'multiple.db')),
-        Parameter('model_sha256', value=MODEL_SHA256), Parameter('camera_ids', value=['front', 'wrist']),
+        Parameter('camera_ids', value=['front', 'wrist']),
         Parameter('camera_profiles_file', value=str(bindings))])
     def ingest(camera, frame):
         image, found = capture()
@@ -181,7 +181,7 @@ def test_depth_cache_retains_capture_until_inference_freshness_deadline(tmp_path
     rclpy.init(context=context)
     collector = ObjectObservations(context=context, parameter_overrides=[
         Parameter('database_path', value=str(tmp_path / 'depth-cache.db')),
-        Parameter('model_sha256', value=MODEL_SHA256), Parameter('camera_ids', value=['astra_color']),
+        Parameter('camera_ids', value=['astra_color']),
         Parameter('max_source_age_sec', value=3.)])
     try:
         cache = collector._streams['astra_color']['depth']

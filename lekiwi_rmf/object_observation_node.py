@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Collect any standard ROS 2 detector's exactly synchronized image observations."""
+"""Collect the object detector's exactly synchronized image, detections and operating point."""
 
 import base64
 from collections import deque
@@ -54,21 +54,21 @@ class ObjectObservations(Node):
         if self.get_parameter('use_sim_time').value:
             suffix += '_sim'
         self.declare_parameter('database_path', str(Path.home() / f'.ros/lekiwi/observations{suffix}.sqlite3'))
-        for name, value in {'camera_ids': ['front'], 'camera_profiles_file': '', 'model_sha256': '', 'max_source_age_sec': 2.0,
+        for name, value in {'camera_ids': ['front'], 'camera_profiles_file': '', 'max_source_age_sec': 2.0,
                             'max_records': 100000, 'max_bytes': 2 * 1024**3, 'retention_sec': 7 * 86400.0}.items():
             self.declare_parameter(name, value)
         self._bindings = camera_bindings(self.get_parameter('camera_ids').value,
                                         self.get_parameter('camera_profiles_file').value or None)
         self.declare_parameter('model_name', 'yolox')
         self.declare_parameter('fallback_model_name', '')
-        reject_parameter_changes(self, ['database_path', 'camera_ids', 'camera_profiles_file', 'model_sha256',
+        reject_parameter_changes(self, ['database_path', 'camera_ids', 'camera_profiles_file',
                                         'max_source_age_sec', 'max_records', 'max_bytes', 'retention_sec',
                                         'model_name', 'fallback_model_name'])
         name = self.get_parameter('model_name').value
-        self._model = self.get_parameter('model_sha256').value or recognition_identity(name)[0]
-        # Each detector output topic is bound to exactly one recognizer identity; every frame carries the
-        # profile (and an open recognizer's query) it ran under on a third, exactly synchronized topic.
-        self._roles = {'': (self._model, open_vocabulary(name), model_spec(name)['backend'])}
+        # Each detector output topic is bound to exactly one recognizer identity, computed here from the
+        # same tracked model and runtime as the detector; every frame carries the profile (and an open
+        # recognizer's query) it ran under on a third, exactly synchronized topic.
+        self._roles = {'': (recognition_identity(name)[0], open_vocabulary(name), model_spec(name)['backend'])}
         fallback = self.get_parameter('fallback_model_name').value
         if fallback:
             self._roles['/fallback'] = (recognition_identity(fallback)[0], open_vocabulary(fallback),
@@ -107,8 +107,8 @@ class ObjectObservations(Node):
                     stream[key] = message_filters.Cache(subscriber, size)
             self._streams[name] = stream
         models = [model for model, _, _ in self._roles.values()]
-        if not all(valid_id(model) for model in models) or len(set(models)) != len(models):
-            raise ValueError('configured model SHA-256 and camera identity are required')
+        if len(set(models)) != len(models):
+            raise ValueError('the primary and fallback recognizers need distinct identities')
         self._store = ObservationStore(self.get_parameter('database_path').value,
             max_records=self.get_parameter('max_records').value, max_bytes=self.get_parameter('max_bytes').value,
             retention_sec=self.get_parameter('retention_sec').value)

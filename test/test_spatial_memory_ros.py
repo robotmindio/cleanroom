@@ -88,7 +88,7 @@ def test_graphs_become_revisions_and_observations_reproject(tmp_path):
         'camera_info_topic': '/camera/test/info', 'depth_topic': '', 'calibration_file': ''}}))
     collector = ObjectObservations(context=context, parameter_overrides=[
         Parameter('database_path', value=str(tmp_path / 'observations.db')),
-        Parameter('model_sha256', value=MODEL_SHA256), Parameter('camera_ids', value=['astra_color']),
+        Parameter('camera_ids', value=['astra_color']),
         Parameter('camera_profiles_file', value=str(bindings)), Parameter('max_source_age_sec', value=1.0)])
     peer = Node('spatial_peer', context=context)
     graphs = peer.create_publisher(MapGraph, '/test/mapGraph', 1)

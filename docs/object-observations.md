@@ -336,17 +336,21 @@ do not make systematic recognition errors independent.
 | --- | --- |
 | `/robot/perception/<camera>/detections` | `vision_msgs/Detection2DArray`, original capture header, source-pixel boxes, native label as `class_id`, at most 20 by score. Persistent track IDs stay empty. |
 | `/robot/perception/<camera>/source_image` | Canonical BGR image, exact same capture header and no overlays. |
-| `/robot/perception/<camera>/fallback/{detections,source_image}` | The same contracts for frames the configured fallback recognizer served; recorded under its own `model_sha256`. |
+| `/robot/perception/<camera>/operating_point` | `lekiwi_rmf/msg/PerceptionOperatingPoint`, exact same capture header: model SHA-256, profile, query, input artifact digest and per-detection evidence of that frame. |
+| `/robot/perception/<camera>/fallback/{detections,source_image,operating_point}` | The same contracts for frames the configured fallback recognizer served; recorded under its own `model_sha256`. |
 | `/robot/observations/events` | Schema, immutable observation ID and sequence; a wake-up hint, not authority. |
 | `/robot/observations/query` | Bounded cursor/ID metadata query, `streams`, aggregate `stream_ready`, epoch and cursor-gap state. |
 | `/robot/observations/evidence` | ID-only JPEG lookup with SHA-256; no filesystem path accepted. |
 | `/robot/observations/pin` | Idempotent goal-owned evidence reservation within existing quotas. |
 | `/robot/observations/status` | Requires all configured camera streams to be fresh and healthy. |
 
-The collector uses ROS `message_filters.TimeSynchronizer` for exact image and
-detection stamps. A standard ROS detector can replace the recognizer without
-replacing storage, services or Fiber. Its source binding and model identity must
-be configured truthfully.
+The collector uses ROS `message_filters.TimeSynchronizer` to pair, by exact
+stamp, each `source_image` and `detections` with the
+`lekiwi_rmf/msg/PerceptionOperatingPoint` on `/robot/perception/<camera>[/fallback]/operating_point`,
+and stores a frame only when that operating point names the recognizer identity
+the collector computed from the same tracked `model_name`. It therefore collects
+this repository's `object_detector`; a detector that publishes only the standard
+`vision_msgs` topics produces no observations.
 
 Queries accept `{"after_sequence":0,"limit":20}`. Subsequent cursors include the
 returned `epoch`; a new database requires restarting from its head. ID queries
