@@ -795,3 +795,52 @@ def test_preparation_handles_legacy_null_proposal_profiles(tmp_path):
             store.put(record, jpeg, now=100)
         result = store.prepare(preparation_request(recognizers=[[MODEL_SHA256, '']]), now=100)
         assert len(result['observations']) == 2 and len(result['pins']) == 2
+
+
+def test_recall_filters_select_by_label_time_camera_and_capture_place(tmp_path):
+    store = ObservationStore(tmp_path / 'store.db')
+    try:
+        for stamp, label, camera, place in ((1, 'cup', 'astra_color', (1.0, 0.0, 'r1')), (2, 'Water  Bottle', 'front', None),
+                                            (3, 'cup', 'front', (4.0, 0.0, 'r1')), (4, 'cup', 'astra_color', (1.0, 0.2, 'r2'))):
+            record, jpeg = document(stamp=stamp)
+            record['detections'][0]['label'], record['camera_id'] = label, camera
+            record['map_pose'] = place and {'revision': place[2], 'pose': {'t': [place[0], place[1], 0.3], 'q': [0, 0, 0, 1]}}
+            store.put(record, jpeg, now=100)
+
+        def stamps(**filters):
+            return [item['stamp']['sec'] for item in store.query(json.dumps(filters), now=100)['observations']]
+        assert stamps() == [1, 2, 3, 4]
+        assert stamps(labels=['CUP']) == [1, 3, 4] and stamps(labels=['water bottle', 'spoon']) == [2]
+        assert stamps(since_unix_sec=2, until_unix_sec=3) == [2, 3] and stamps(camera_id='front') == [2, 3]
+        # A place is only comparable within one map revision; a capture without a map pose is nowhere.
+        assert stamps(near={'x': 1.0, 'y': 0.1, 'radius_m': 0.5, 'revision': 'r1'}) == [1]
+        assert stamps(near={'x': 1.0, 'y': 0.1, 'radius_m': 5.0, 'revision': 'r1'}, labels=['cup']) == [1, 3]
+        assert stamps(near={'x': 1.0, 'y': 0.1, 'radius_m': 0.5, 'revision': 'r2'}) == [4]
+        # The cursor resumes after everything examined, matching or not, and after the last match of a full page.
+        page = store.query(json.dumps({'labels': ['cup'], 'limit': 2}), now=100)
+        assert [item['sequence'] for item in page['observations']] == [1, 3] and page['next_sequence'] == 3
+        rest = store.query(json.dumps({'labels': ['cup'], 'after_sequence': 3, 'epoch': store.epoch}), now=100)
+        assert [item['sequence'] for item in rest['observations']] == [4] and rest['next_sequence'] == 4
+        empty = store.query(json.dumps({'labels': ['spoon']}), now=100)
+        assert empty['observations'] == [] and empty['next_sequence'] == empty['latest_sequence'] == 4
+        # An unfiltered request answers as before, now also naming how far eviction has reached.
+        plain = store.query('{"after_sequence":0,"limit":20}', now=100)
+        assert plain['next_sequence'] == 4 and plain['evicted_sequence'] == 0 and not plain['cursor_gap']
+        for text in ('{"labels": []}', '{"labels": ["a"], "observation_ids": ["' + 'a' * 64 + '"]}', '{"camera_id": 3}',
+                     '{"since_unix_sec": 5, "until_unix_sec": 4}', '{"since_unix_sec": "1"}',
+                     '{"near": {"x": 0, "y": 0, "radius_m": 1}}', '{"near": {"x": 0, "y": 0, "radius_m": 0, "revision": "r"}}'):
+            with pytest.raises(ValueError):
+                query_parameters(text)
+    finally:
+        store.close()
+
+
+def test_eviction_is_reported_so_that_consumers_know_which_evidence_is_gone(tmp_path):
+    store = ObservationStore(tmp_path / 'store.db', max_records=2)
+    try:
+        for stamp in (1, 2, 3, 4):
+            store.put(*document(stamp=stamp), now=100)
+        result = store.query('{}', now=100)
+        assert [item['sequence'] for item in result['observations']] == [3, 4] and result['evicted_sequence'] == 2
+    finally:
+        store.close()

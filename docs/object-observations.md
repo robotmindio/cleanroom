@@ -355,7 +355,7 @@ do not make systematic recognition errors independent.
 | `/robot/perception/<camera>/operating_point` | `lekiwi_rmf/msg/PerceptionOperatingPoint`, exact same capture header: model SHA-256, profile, query, input artifact digest and per-detection evidence of that frame. |
 | `/robot/perception/<camera>/fallback/{detections,source_image,operating_point}` | The same contracts for frames the configured fallback recognizer served; recorded under its own `model_sha256`. |
 | `/robot/observations/events` | Schema, immutable observation ID and sequence; a wake-up hint, not authority. |
-| `/robot/observations/query` | Bounded cursor/ID metadata query, `streams`, aggregate `stream_ready`, epoch and cursor-gap state. |
+| `/robot/observations/query` | Bounded cursor/ID metadata query with optional label, time, camera and place filters; `streams`, aggregate `stream_ready`, epoch, eviction and cursor-gap state. |
 | `/robot/observations/evidence` | ID-only JPEG lookup with SHA-256; no filesystem path accepted. |
 | `/robot/observations/pin` | Idempotent goal-owned evidence reservation within existing quotas. |
 | `/robot/observations/status` | Requires all configured camera streams to be fresh and healthy. |
@@ -378,7 +378,20 @@ quality 80 whatever the frame shows (436,906 pixels: 640×480 and 768×544 fit,
 before inference. A higher-resolution camera needs a larger evidence cap, which
 the store, the evidence service and Fiber's verifier share.
 `latest_sequence` is a live-consumer admission head; `next_sequence` paginates
-history and does not prove freshness.
+history and does not prove freshness. `evicted_sequence` is the highest
+sequence ever evicted: every unpinned record up to it is gone.
+
+A cursor query may add recall filters, all optional and combined: `labels`
+(1–20, matched case- and spacing-insensitively against any detection),
+`since_unix_sec` and `until_unix_sec` (capture stamp), `camera_id`, and `near`
+`{"x", "y", "radius_m", "revision"}`, which matches captures whose capture-time
+`map_pose` was solved in that revision with the camera within `radius_m` of the
+point. Coordinates of different revisions are not comparable, so a capture of
+another revision or without a map pose never matches `near`; the
+[object map](object-map.md) answers "what is here" across revisions. A filtered
+query examines at most 2,000 stored records and `next_sequence` resumes after
+the last one examined, so a page can be empty while `next_sequence` is still
+below `latest_sequence`. Filters cannot be combined with `observation_ids`.
 
 `capture_id` hashes camera/frame/stamp. The observation `id` is
 `sha256(capture_id:model_sha256:profile_revision[:query_revision])`, the query

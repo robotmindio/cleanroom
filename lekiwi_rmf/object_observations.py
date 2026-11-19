@@ -14,6 +14,65 @@ import uuid
 import cv2
 import numpy as np
 
+from lekiwi_rmf.coverage_search import normalize_label
+
+FILTERS = ('labels', 'since_unix_sec', 'until_unix_sec', 'camera_id', 'near')
+# Stored records one filtered query examines; `next_sequence` resumes where it stopped.
+FILTER_SCAN = 2000
+
+
+def query_filters(values):
+    """Optional recall filters of a cursor query, validated; an empty result means none was given."""
+    def number(value, low, high):
+        return type(value) in (int, float) and math.isfinite(value) and low <= value <= high
+
+    result = {}
+    if 'labels' in values:
+        labels = values['labels']
+        if (not isinstance(labels, list) or not 1 <= len(labels) <= 20
+                or any(not isinstance(label, str) or not 1 <= len(label) <= 128 for label in labels)):
+            raise ValueError('labels requires 1..20 labels of 1..128 characters')
+        result['labels'] = {normalize_label(label) for label in labels}
+    for name in ('since_unix_sec', 'until_unix_sec'):
+        if name in values:
+            if not number(values[name], 0, 1e12):
+                raise ValueError(f'{name} must be a Unix time in seconds')
+            result[name] = float(values[name])
+    if result.get('since_unix_sec', 0) > result.get('until_unix_sec', math.inf):
+        raise ValueError('since_unix_sec is after until_unix_sec')
+    if 'camera_id' in values:
+        if not isinstance(values['camera_id'], str) or not 1 <= len(values['camera_id']) <= 128:
+            raise ValueError('camera_id must be 1..128 characters')
+        result['camera_id'] = values['camera_id']
+    if 'near' in values:
+        near = values['near']
+        if (not isinstance(near, dict) or set(near) != {'x', 'y', 'radius_m', 'revision'}
+                or not number(near['x'], -1e6, 1e6) or not number(near['y'], -1e6, 1e6)
+                or not number(near['radius_m'], 1e-3, 100)
+                or not isinstance(near['revision'], str) or not 1 <= len(near['revision']) <= 128):
+            raise ValueError('near is {x, y, radius_m, revision} with a radius in (0, 100] metres')
+        result['near'] = near
+    return result
+
+
+def matches(record, filters):
+    """Whether a stored record passes the recall filters, by its capture stamp and capture-time map pose."""
+    stamp = record['stamp']['sec'] + record['stamp']['nanosec'] / 1e9
+    if not filters.get('since_unix_sec', 0) <= stamp <= filters.get('until_unix_sec', math.inf):
+        return False
+    if 'camera_id' in filters and record['camera_id'] != filters['camera_id']:
+        return False
+    if 'labels' in filters and not any(normalize_label(item['label']) in filters['labels']
+                                       for item in record['detections']):
+        return False
+    near = filters.get('near')
+    if near is not None:
+        # Coordinates of two revisions are not comparable, so only captures solved in the named one can match.
+        pose = record.get('map_pose') or {}
+        if pose.get('revision') != near['revision'] or math.dist(pose['pose']['t'][:2], (near['x'], near['y'])) > near['radius_m']:
+            return False
+    return True
+
 
 def query_parameters(text):
     if len(text.encode()) > 4096:
@@ -22,7 +81,8 @@ def query_parameters(text):
         values = json.loads(text)
     except RecursionError as error:
         raise ValueError('query is nested too deeply') from error
-    if not isinstance(values, dict) or set(values) - {'after_sequence', 'observation_ids', 'limit', 'epoch', 'pin_request_id'}:
+    if (not isinstance(values, dict)
+            or set(values) - {'after_sequence', 'observation_ids', 'limit', 'epoch', 'pin_request_id', *FILTERS}):
         raise ValueError('unknown observation query fields')
     limit = values.get('limit', 20)
     if type(limit) is not int or not 1 <= limit <= 100:
@@ -44,7 +104,10 @@ def query_parameters(text):
         raise ValueError('invalid observation store epoch')
     if cursor and epoch is None:
         raise ValueError('a nonzero cursor requires its store epoch')
-    return cursor, ids, limit, epoch
+    filters = query_filters(values)
+    if filters and ids is not None:
+        raise ValueError('recall filters apply to cursor queries, not to observation_ids')
+    return cursor, ids, limit, epoch, filters
 
 
 def valid_id(value):
@@ -481,12 +544,22 @@ class ObservationStore:
 
     @_serialized
     def query(self, text, now=None):
-        cursor, ids, limit, epoch = query_parameters(text)
+        cursor, ids, limit, epoch, filters = query_parameters(text)
         if epoch is not None and epoch != self.epoch:
             raise ValueError('observation store epoch changed; restart from cursor zero')
         with self._db:
             self._prune(time.time() if now is None else now)
-        if ids is None:
+        scanned = None
+        if filters:
+            rows, scanned = [], cursor
+            for row in self._db.execute('SELECT sequence,stored_at,document FROM observations WHERE sequence>? '
+                                        'ORDER BY sequence LIMIT ?', (cursor, FILTER_SCAN)):
+                scanned = row['sequence']
+                if matches(json.loads(row['document']), filters):
+                    rows.append(row)
+                    if len(rows) == limit:
+                        break
+        elif ids is None:
             rows = self._db.execute('SELECT sequence,stored_at,document FROM observations WHERE sequence>? ORDER BY sequence LIMIT ?',
                                     (cursor, limit)).fetchall()
         else:
@@ -505,9 +578,13 @@ class ObservationStore:
         request = json.loads(text).get('pin_request_id')
         pins = {} if request is None else {row[0]: row[1] for row in self._db.execute(
             'SELECT observation_id,expires_at FROM pins WHERE request_id=?', (request,))}
+        # A filtered page resumes after everything it examined, unless the metadata cap cut it short.
+        examined = scanned if scanned is not None and len(records) == len(rows) else None
         return {'schema': 1, 'epoch': self.epoch, 'observations': records, 'pins': pins,
-                'next_sequence': records[-1]['sequence'] if records else cursor,
+                'next_sequence': examined if examined is not None else records[-1]['sequence'] if records else cursor,
                 'latest_sequence': last[0] if last is not None else 0,
+                # Every unpinned record up to here has been evicted; its evidence no longer exists.
+                'evicted_sequence': evicted,
                 'cursor_gap': bool(ids is None and cursor and (cursor < evicted or
                     (first is not None and cursor < first - 1) or (first is None and last is not None and cursor < last[0])))}
 
