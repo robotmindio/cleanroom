@@ -84,6 +84,19 @@ def open_vocabulary(name):
     return model_spec(name)['backend'] in OPEN_BACKENDS
 
 
+def deployment():
+    return yaml.safe_load((config_directory() / 'object_perception_deployment.yaml').read_text())
+
+
+def default_query():
+    """The vocabulary every open recognizer starts on and returns to when a client clears its query.
+
+    It is deployment configuration shared by all open-vocabulary models, not a property of one of them,
+    and no identity: each frame records the query it actually ran under.
+    """
+    return make_query(deployment()['default_query'])
+
+
 class Rows(list):
     """Detections as [x, y, w, h, score, label, extras] rows; `run` holds the provider's run reference."""
     run = None
@@ -246,19 +259,21 @@ def verify_model(directory, spec):
     return directory
 
 
-def recognition_identity(name):
+def recognition_identity(name, runtime=None):
     """The recognizer's model identity: artifacts, runtime and input normalization, but no thresholds.
 
     Thresholds, suppression, resolution and budget are the proposal profile, whose revision every
-    frame records beside this identity (lekiwi_rmf/perception_profiles.py).
+    frame records beside this identity (lekiwi_rmf/perception_profiles.py). `runtime` gives another
+    interpreter's package versions, to compute the identity that interpreter reports; by default they
+    are this interpreter's.
     """
     spec = model_spec(name)
-    runtime = {'opencv': cv2.__version__, 'numpy': np.__version__}
-    if spec['backend'] in TORCH_BACKENDS:
-        runtime.update({package: importlib.metadata.version(package) for package in ['torch', 'torchvision', 'transformers', 'Pillow', 'safetensors', 'tokenizers']})
-    # An open recognizer's labels are the per-frame query, recorded beside this identity in each observation;
-    # the startup default is not an operating point of the model.
-    artifacts = {key: value for key, value in spec.items() if key != 'default_query' and key not in GOVERNANCE_KEYS}
+    if runtime is None:
+        runtime = {'opencv': cv2.__version__, 'numpy': np.__version__}
+        if spec['backend'] in TORCH_BACKENDS:
+            runtime.update({package: importlib.metadata.version(package) for package in ['torch', 'torchvision', 'transformers', 'Pillow', 'safetensors', 'tokenizers']})
+    # An open recognizer's labels are the per-frame query, recorded beside this identity in each observation.
+    artifacts = {key: value for key, value in spec.items() if key not in GOVERNANCE_KEYS}
     # Every recognizer consumes the frame's stored evidence artifact (a deterministic JPEG), so a stored
     # observation replays byte-exact; see object_observations.capture_artifact.
     document = {'model': name, 'artifacts': artifacts, 'postprocessing': 'profile', 'preprocessing_revision': 2,
@@ -310,7 +325,7 @@ class Recognizer:
         # Open recognizers report only the phrases of the query they ran; closed ones their native catalogue.
         self.open_vocabulary = self.backend in OPEN_BACKENDS
         self.supports_concepts = self.backend in CONCEPT_BACKENDS
-        self.default_query = make_query(self.spec['default_query']) if self.open_vocabulary else None
+        self.default_query = default_query() if self.open_vocabulary else None
         self.labels = None
         # Remote only: (round trip, provider timings) of the last answer, for the latency budget.
         self.last_remote = None
@@ -512,18 +527,17 @@ def main(argv=None):
     settings = yaml.safe_load(perception_config(args.mode).read_text())['/**']['ros__parameters']
     use_model_runtime(*selected_models(settings))
     identity, operating = recognition_identity(settings['model_name'])
-    deployment = yaml.safe_load((config_directory() / 'object_perception_deployment.yaml').read_text())
     described = {'model_sha256': identity, 'operating_point': operating,
                  'profile': default_profile(model_spec(settings['model_name'])['backend']).document(),
                  'vocabulary': 'open' if open_vocabulary(settings['model_name']) else 'closed'}
     if open_vocabulary(settings['model_name']):
-        described['default_query'] = make_query(model_spec(settings['model_name'])['default_query']).document()
+        described['default_query'] = default_query().document()
     if settings.get('fallback_model_name'):
         # Frames served by the fallback carry its own identity; an admitting profile lists both.
         fallback, fallback_operating = recognition_identity(settings['fallback_model_name'])
         described.update(fallback_model_sha256=fallback, fallback_operating_point=fallback_operating,
                          fallback_profile=default_profile(model_spec(settings['fallback_model_name'])['backend']).document())
-    described['cameras'] = {name: value['sha256'] for name, value in camera_bindings(deployment['cameras']).items()}
+    described['cameras'] = {name: value['sha256'] for name, value in camera_bindings(deployment()['cameras']).items()}
     print(json.dumps(described, indent=2))
 
 

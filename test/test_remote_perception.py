@@ -512,9 +512,10 @@ def test_remote_identity_pins_the_provider_hash_but_not_its_endpoint(monkeypatch
     assert 'tailb78697' not in json.dumps(document) and ':30610' not in json.dumps(document)
     # Thresholds belong to the profile; the identity pins what the model consumes and how.
     assert 'confidence_threshold' not in document and document['input'] == 'evidence_jpeg_q80'
-    # The query is per frame, not part of the model identity: the default only seeds it.
-    assert document['labels'] == 'query' and 'default_query' not in document['artifacts']
-    monkeypatch.setattr(object_recognition, 'model_spec', lambda name: {**SPEC, 'default_query': ['a spoon']})
+    # The query is per frame, not part of the model identity: the deployment's default only seeds it.
+    assert document['labels'] == 'query' and 'default_query' not in SPEC
+    monkeypatch.setattr(object_recognition, 'deployment', lambda: {'default_query': ['a spoon', 'bowl']})
+    assert Recognizer(REMOTE, None).default_query.labels == ('a spoon', 'bowl')
     assert recognition_identity(REMOTE)[0] == identity
     changed = {**SPEC, 'provider_model_sha256': '0' * 64}
     monkeypatch.setattr(object_recognition, 'model_spec', lambda name: changed)

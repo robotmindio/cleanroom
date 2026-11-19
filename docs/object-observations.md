@@ -136,13 +136,13 @@ state owned by the detector, not a parameter. Clients set it with
   hyphens and apostrophes; `.` is Grounding DINO's phrase separator.
 - At most 16 labels of at most 48 characters, and a prompt (`a. b.`) of at most
   254 characters, so Grounding DINO's 256-token text limit never truncates it.
-- Empty labels restore the tracked `default_query` from
-  `config/recognition_models.yaml`. The default is not part of `model_sha256`.
-  The startup query is the single canonical phrase `cup`; clients can still request
-  multiple distinct labels. Duplicating cup/mug synonyms lowered confidence and
-  produced fused labels in the native robot-camera trial, so startup no longer
-  uses that combined prompt. This changes the recorded query revision, not the
-  model identity or score threshold, and does not qualify general recognition.
+- Empty labels restore the tracked `default_query` list in
+  `config/object_perception_deployment.yaml`, which is also the startup query of
+  every open-vocabulary recognizer. It is deployment configuration: extend the
+  list to extend the vocabulary. It is not part of `model_sha256`; changing it
+  changes the recorded query revision only, and does not qualify recognition of
+  the added labels. Name each kind of object once: cup/mug synonyms lowered
+  confidence and produced fused labels in the native robot-camera trial.
 
 - `expected_revision` applies the change only while that revision is in force,
   so a client restoring its predecessor never clobbers a newer query.

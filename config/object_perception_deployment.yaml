@@ -3,3 +3,8 @@
 start: true
 # Start with one qualified image-only camera; all selected streams must be fresh.
 cameras: [front]
+# The labels every open-vocabulary recognizer localizes at startup and whenever a client clears its
+# own query; extend the list to extend that vocabulary (at most 16 labels). Synonyms of one object
+# (cup, mug) compete for the same proposal and lower its score, so name each kind of object once.
+# Every frame records the query it ran under; this list is part of no model identity.
+default_query: [cup]
