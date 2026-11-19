@@ -20,11 +20,14 @@ import yaml
 
 from lekiwi_rmf.action import RunSkill
 from lekiwi_rmf.arm_trajectory import ARM_JOINTS, JOINT_LIMITS
-from lekiwi_rmf.skills import arm_targets, artifact_digest, catalog, load_registry, skill_parameters, verify_artifact
+from lekiwi_rmf.skills import (
+    CAMERAS, arm_targets, artifact_digest, camera_sources, catalog, conditioning, load_registry, skill_parameters,
+    verify_artifact)
 from lekiwi_rmf.task_gateway import task_goal
 from ros_test_utils import release_graph
 
-ACTIONS = [*ARM_JOINTS, 'base_x_vel', 'base_y_vel', 'base_yaw_rate']
+ACTIONS = list(ARM_JOINTS)
+WITH_BASE = [*ARM_JOINTS, 'base_x_vel', 'base_y_vel', 'base_yaw_rate']
 
 
 def entry(**changes):
@@ -50,7 +53,8 @@ def test_tracked_registry_is_valid_and_empty_until_a_skill_is_acquired():
     {'status': 'trusted'}, {'kind': 'script'}, {'checkpoint': '/etc/x'}, {'checkpoint': '../x'},
     {'artifact_sha256': 'A' * 64}, {'weights_sha256': 'a' * 64}, {'action_names': ['base_x_vel']}, {'action_names': ['elbow']},
     {'cameras': ['front', 'front']}, {'fps': 0}, {'max_duration_sec': 1000}, {'max_joint_step_rad': 1.0},
-    {'parameters': {'Bad': {'type': 'number'}}}, {'parameters': {'x': {'type': 'object'}}}, {'extra': 1}])
+    {'parameters': {'Bad': {'type': 'number'}}}, {'parameters': {'x': {'type': 'object'}}}, {'extra': 1},
+    {'cameras': ['astra']}, {'task': 7}, {'task': 'x' * 1001}])
 def test_malformed_entries_reject_the_whole_registry(tmp_path, change):
     with pytest.raises(ValueError):
         registry(tmp_path, {'good': entry(), 'push': entry(**change)})
@@ -63,8 +67,8 @@ def test_experimental_skills_are_offered_only_to_an_acquisition_protocol(tmp_pat
 
 
 def test_catalog_advertises_kind_and_the_resources_each_skill_uses(tmp_path):
-    skills = registry(tmp_path, {'drive': entry(cameras=['front', 'wrist']),
-                                 'grip': entry(action_names=list(ARM_JOINTS), cameras=[])})
+    skills = registry(tmp_path, {'drive': entry(action_names=WITH_BASE, cameras=['front', 'wrist']),
+                                 'grip': entry(cameras=[])})
     drive, grip = catalog(skills)
     assert drive['kind'] == grip['kind'] == 'lerobot_policy'
     # Base commands in the action space and any camera input are declared, never assumed.
@@ -81,12 +85,11 @@ def test_parameters_follow_the_declared_contract(tmp_path):
             skill_parameters(skill, bad)
 
 
-def test_arm_targets_are_rate_limited_kept_in_limits_and_ignore_base(tmp_path):
+def test_arm_targets_are_rate_limited_and_kept_in_limits(tmp_path):
     skill = registry(tmp_path, {'push': entry()})['push']
     measured = dict.fromkeys(ARM_JOINTS, 0.0)
     chunk = np.zeros((3, len(ACTIONS)))
     chunk[:, 0] = 1.0  # far target for the pan joint
-    chunk[:, ACTIONS.index('base_x_vel')] = 5.0
     rows = arm_targets(skill, measured, chunk)
     assert [row['arm_shoulder_pan'] for row in rows] == pytest.approx([.1, .2, .3])
     assert all(set(row) == set(ARM_JOINTS) for row in rows)
@@ -99,6 +102,24 @@ def test_arm_targets_are_rate_limited_kept_in_limits_and_ignore_base(tmp_path):
         arm_targets(skill, measured, np.full((1, len(ACTIONS)), math.nan))
     with pytest.raises(ValueError, match='malformed'):
         arm_targets(skill, measured, np.zeros((1, 3)))
+
+
+def test_base_actions_are_refused_never_dropped(tmp_path):
+    skill = registry(tmp_path, {'drive': entry(action_names=WITH_BASE)})['drive']
+    with pytest.raises(ValueError, match='commands the base'):
+        arm_targets(skill, dict.fromkeys(ARM_JOINTS, 0.0), np.zeros((1, len(WITH_BASE))))
+
+
+def test_cameras_are_the_tracked_perception_identities():
+    assert CAMERAS == ('front', 'wrist', 'astra_color')
+    assert camera_sources()['astra_color']['image_topic'] == '/camera/astra/color/image_raw'
+
+
+def test_training_and_inference_build_the_same_task_text():
+    assert conditioning('push the block', {}) == 'push the block'
+    assert conditioning('push the block', {'force': 1, 'side': 'left'}) == 'push the block {"force":1.0,"side":"left"}'
+    assert conditioning('push the block', {'side': 'left', 'force': 1.0}) == conditioning(
+        'push the block', {'force': 1, 'side': 'left'})
 
 
 def lerobot_checkpoint(tmp_path):
@@ -206,18 +227,19 @@ def test_gateway_bounds_the_skill_request_shape_only():
 
 
 class FakePolicy:
-    delay = 0.
+    delay, steps, task_conditioned = 0., 2, True
 
     def __init__(self, path):
-        self.path, self.calls = path, 0
+        self.path, self.calls, self.tasks = path, 0, []
 
     def reset(self):
         self.calls = 0
 
     def chunk(self, state, images, task):
         self.calls += 1
+        self.tasks.append(task)
         time.sleep(self.delay)
-        actions = np.zeros((2, len(ACTIONS)))
+        actions = np.zeros((self.steps, len(ACTIONS)))
         actions[:, 0] = state[0] + .05
         return actions
 
@@ -226,6 +248,8 @@ class FakeArm(Node):
     def __init__(self, context, accept=True):
         super().__init__('fake_arm_controller', context=context)
         self.goals, self.accept, self.hold = [], accept, threading.Event()
+        # stop_delay: how long a canceled goal keeps moving; obey_cancel False: it never reports terminal.
+        self.stop_delay, self.obey_cancel, self.stopped_at, self.cancels = 0., True, None, 0
         self.hold.set()
         ActionServer(self, FollowJointTrajectory, '/arm_controller/follow_joint_trajectory', self.execute,
                      goal_callback=lambda _goal: GoalResponse.ACCEPT if self.accept else GoalResponse.REJECT,
@@ -234,7 +258,10 @@ class FakeArm(Node):
     def execute(self, handle):
         self.goals.append(handle.request)
         while not self.hold.wait(.02):
-            if handle.is_cancel_requested:
+            if handle.is_cancel_requested and self.obey_cancel:
+                self.cancels += 1
+                time.sleep(self.stop_delay)
+                self.stopped_at = time.monotonic()
                 handle.canceled()
                 return FollowJointTrajectory.Result()
         handle.succeed()
@@ -248,8 +275,9 @@ def ros_runner(tmp_path):
     (tmp_path / 'push/1').mkdir(parents=True)
     (tmp_path / 'push/1/model.safetensors').write_bytes(b'weights')
     artifact = artifact_digest(tmp_path / 'push/1')
-    skills = {'push': entry(artifact_sha256=artifact, cameras=[], max_duration_sec=.6),
-              'trial': entry(status='experimental', artifact_sha256=artifact, cameras=[])}
+    skills = {'push': entry(artifact_sha256=artifact, cameras=[], max_duration_sec=.6, task='push the block'),
+              'trial': entry(status='experimental', artifact_sha256=artifact, cameras=[]),
+              'drive': entry(artifact_sha256=artifact, cameras=[], action_names=WITH_BASE)}
     (tmp_path / 'skills.yaml').write_text(yaml.safe_dump({'skills': skills}))
     context = Context()
     rclpy.init(context=context)
@@ -315,6 +343,7 @@ def test_runner_executes_rate_limited_chunks_through_the_arm_controller(ros_runn
     assert run(client, 'missing') is None
     assert run(client, 'trial') is None  # experimental needs an acquisition protocol
     assert run(client, 'push', '{"force": 9}') is None
+    assert run(client, 'drive') is None  # no guarded base path: never run as an arm-only skill
 
 
 def test_runner_fails_on_stale_state_and_reports_controller_rejection(ros_runner):
@@ -330,12 +359,56 @@ def test_runner_fails_on_stale_state_and_reports_controller_rejection(ros_runner
     assert not runner._busy
 
 
-def test_cancel_stops_the_running_chunk_and_releases_the_arm(ros_runner):
+def test_cancel_reports_canceled_only_after_the_arm_goal_is_terminal(ros_runner):
     runner, arm, client, _ = ros_runner
     arm.hold.clear()
+    arm.stop_delay = .5  # the arm keeps moving this long after the cancel is acknowledged
     result = run(client, 'push', cancel_after=.3)
-    assert result.outcome == 'canceled'
+    assert result.outcome == 'canceled' and json.loads(result.result_json)['arm_stopped'] is True
+    assert arm.stopped_at is not None and time.monotonic() >= arm.stopped_at
     assert not runner._busy and len(arm.goals) == 1
+
+
+def test_a_cancel_the_arm_never_confirms_is_reported_as_an_unconfirmed_stop(ros_runner, monkeypatch):
+    from lekiwi_rmf import skill_runner
+    runner, arm, client, _ = ros_runner
+    monkeypatch.setattr(skill_runner, 'ARM_ANSWER_SEC', .3)
+    arm.hold.clear()
+    arm.obey_cancel = False
+    result = run(client, 'push', cancel_after=.2)
+    assert result.outcome == 'failed' and 'did not confirm that the chunk stopped' in result.detail
+    assert json.loads(result.result_json)['arm_stopped'] is False
+
+
+def test_a_chunk_that_overruns_is_canceled_and_its_stop_confirmed_before_failing(ros_runner, monkeypatch):
+    from lekiwi_rmf import skill_runner
+    runner, arm, client, _ = ros_runner
+    monkeypatch.setattr(skill_runner, 'ARM_ANSWER_SEC', .3)
+    arm.hold.clear()
+    result = run(client, 'push')
+    assert result.outcome == 'failed' and 'canceled and the arm stopped' in result.detail
+    assert arm.cancels == 1 and json.loads(result.result_json)['arm_stopped'] is True
+    arm.obey_cancel = False
+    result = run(client, 'push')
+    assert result.outcome == 'failed' and json.loads(result.result_json)['arm_stopped'] is False
+
+
+def test_a_chunk_is_cut_to_the_remaining_duration_limit(ros_runner, monkeypatch):
+    runner, arm, client, _ = ros_runner
+    monkeypatch.setattr(FakePolicy, 'steps', 20)  # 2 s of motion against a 0.6 s limit at 10 Hz
+    result = run(client, 'push')
+    assert result.outcome == 'finished', result.detail
+    assert arm.goals and all(1 <= len(goal.trajectory.points) <= 6 for goal in arm.goals)
+
+
+def test_parameters_reach_a_conditioned_policy_and_are_refused_by_any_other(ros_runner, monkeypatch):
+    runner, arm, client, _ = ros_runner
+    assert run(client, 'push', '{"force": 0.5}').outcome == 'finished'
+    assert set(runner._policies['push'].tasks) == {conditioning('push the block', {'force': .5})}
+    sent = len(arm.goals)
+    monkeypatch.setattr(FakePolicy, 'task_conditioned', False)
+    result = run(client, 'push')
+    assert result.outcome == 'failed' and 'not task-conditioned' in result.detail and len(arm.goals) == sent
 
 
 def test_camera_frames_decode_to_rgb_without_cv_bridge():

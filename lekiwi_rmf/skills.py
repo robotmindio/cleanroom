@@ -21,7 +21,9 @@ SKILL_ID = re.compile(r'^[a-z][a-z0-9_]{0,63}$')
 KINDS = ('lerobot_policy',)
 STATUSES = ('experimental', 'qualified')
 BASE_COMMANDS = ('base_x_vel', 'base_y_vel', 'base_yaw_rate')
-CAMERAS = ('front', 'wrist', 'astra')
+# LeRobot 0.4.1 policy types whose model reads the `task` text. config/trainers.yaml admits none of them
+# yet, so a skill that declares parameters cannot be registered: its policy could not tell them apart.
+TASK_CONDITIONED_POLICIES = frozenset({'smolvla', 'pi0', 'pi05', 'groot'})
 PARAMETER_TYPES = {'number': (int, float), 'boolean': (bool,), 'string': (str,)}
 # reversible: an inverse action restores the prior state. compensable: the state can be
 # repaired, but not exactly undone. irreversible: a material change; it can only be
@@ -30,12 +32,43 @@ REVERSIBILITY = ('reversible', 'compensable', 'irreversible')
 UNDECLARED_EFFECTS = {'reversibility': 'irreversible',
                       'compensation': 'Stop the arm, isolate the object and record its partial state; no automatic undo.'}
 ARTIFACT_SUFFIXES = ('.safetensors', '.json')
+MAX_TASK_CHARACTERS = 1000
 MAX_JSON_BYTES = 1024**2
 # Keys through which Hugging Face, LeRobot and Hydra-style configurations name code to import.
 IMPORT_KEYS = frozenset({'class', 'auto_map', '_target_', 'trust_remote_code', 'custom_pipeline'})
 # Provenance records registration adds beside the checkpoint. LeRobot never opens them, and the
 # evaluation report is written after the digest it names, so they are outside the artifact digest.
 PROVENANCE_RECORDS = frozenset({'training-manifest.json', 'evaluation-report.json'})
+
+
+def camera_sources(path=None):
+    """Camera identities and their topics: the tracked bindings perception uses (config/object_cameras.yaml).
+
+    The recorder, the export, the registry and the runner all name a camera by these identities, so
+    `observation.images.<identity>` means the same stream when recording, training and running.
+    """
+    document = yaml.safe_load((Path(path) if path else config_directory() / 'object_cameras.yaml').read_text())
+    if not isinstance(document, dict) or not all(
+            isinstance(value, dict) and isinstance(value.get('image_topic'), str) and value['image_topic']
+            for value in document.values()):
+        raise ValueError('camera bindings must map each identity to an image_topic')
+    return document
+
+
+CAMERAS = tuple(camera_sources())
+
+
+def conditioning(task, parameters):
+    """The `task` text a policy is given: the demonstrated task, then the parameter values in canonical JSON.
+
+    scripts/export-lerobot.py writes it on every training frame and the runner passes it at
+    inference, so a task-conditioned policy sees at run time exactly the text it was trained on.
+    """
+    if not parameters:
+        return task
+    # 1 and 1.0 are the same parameter value; JSON would spell them differently.
+    values = {name: float(value) if type(value) is int else value for name, value in parameters.items()}
+    return f'{task} {json.dumps(values, sort_keys=True, separators=(",", ":"))}'.strip()
 
 
 @dataclass(frozen=True)
@@ -54,6 +87,7 @@ class Skill:
     max_joint_step_rad: float
     parameters: dict
     effects: dict
+    task: str = ''
 
     def resources(self):
         """What the implementation commands or reads: arm joints, base commands and cameras."""
@@ -76,8 +110,11 @@ def _skill(skill_id, value, artifacts):
     if 'weights_sha256' in value:
         # The old field pinned model.safetensors alone; such an entry never vouches for a whole checkpoint.
         raise ValueError(f'{skill_id}: weights_sha256 pins only the weights; re-register for artifact_sha256')
-    if set(value) - {'effects'} != known:
-        raise ValueError(f'{skill_id}: fields must be exactly {sorted(known)}, optionally with effects')
+    if set(value) - {'effects', 'task'} != known:
+        raise ValueError(f'{skill_id}: fields must be exactly {sorted(known)}, optionally with effects and task')
+    task = value.get('task', '')
+    if not isinstance(task, str) or len(task) > MAX_TASK_CHARACTERS:
+        raise ValueError(f'{skill_id}: task is the demonstrated task text, at most {MAX_TASK_CHARACTERS} characters')
     effects = value.get('effects', UNDECLARED_EFFECTS)
     if (not isinstance(effects, dict) or set(effects) != {'reversibility', 'compensation'}
             or effects['reversibility'] not in REVERSIBILITY or not isinstance(effects['compensation'], str)
@@ -116,7 +153,7 @@ def _skill(skill_id, value, artifacts):
         raise ValueError(f'{skill_id}: parameters map names to {{type, min, max, max_length}}')
     return Skill(skill_id, value['version'], value['description'], value['status'], value['kind'],
                  artifacts / checkpoint, digest, tuple(names), tuple(cameras), value['fps'],
-                 float(value['max_duration_sec']), float(value['max_joint_step_rad']), parameters, dict(effects))
+                 float(value['max_duration_sec']), float(value['max_joint_step_rad']), parameters, dict(effects), task)
 
 
 def load_registry(path=None, artifacts=None):
@@ -228,9 +265,12 @@ def skill_parameters(skill, text):
 def arm_targets(skill, measured, chunk):
     """Joint targets for one action chunk, rate-limited per step and kept inside joint limits.
 
-    Base commands in the chunk are ignored: learned skills drive only the arm until base
-    actuation has its own guarded path. The rows returned are what the trajectory carries.
+    A skill whose action space includes base commands is refused: the runner has no guarded
+    base path, and executing only the arm half of a learned action is not the learned skill.
+    The rows returned are what the trajectory carries.
     """
+    if set(skill.action_names) & set(BASE_COMMANDS):
+        raise ValueError(f'{skill.skill_id} commands the base; learned skills may drive only the arm')
     previous = {name: measured[name] for name in ARM_JOINTS}
     rows = []
     for action in chunk:
@@ -238,10 +278,9 @@ def arm_targets(skill, measured, chunk):
             raise ValueError('policy produced a malformed or non-finite action')
         target = dict(previous)
         for name, value in zip(skill.action_names, action):
-            if name in ARM_JOINTS:
-                lower, upper = JOINT_LIMITS[name]
-                step = max(-skill.max_joint_step_rad, min(skill.max_joint_step_rad, float(value) - previous[name]))
-                target[name] = max(lower, min(upper, previous[name] + step))
+            lower, upper = JOINT_LIMITS[name]
+            step = max(-skill.max_joint_step_rad, min(skill.max_joint_step_rad, float(value) - previous[name]))
+            target[name] = max(lower, min(upper, previous[name] + step))
         rows.append(target)
         previous = target
     return rows

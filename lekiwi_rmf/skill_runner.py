@@ -5,6 +5,8 @@ Receding horizon: observe, ask the implementation for one action chunk, send it 
 one FollowJointTrajectory goal that the driver validates and the host executes,
 wait for its result, then observe again. Nothing here bypasses arming, permissions,
 calibration or joint limits, and a finished run never claims the goal succeeded.
+A run reports a terminal outcome only after the arm controller reported the last
+chunk terminal; when it does not, the result says the arm stop is unconfirmed.
 """
 
 import json
@@ -14,6 +16,7 @@ import sys
 import threading
 import time
 
+from action_msgs.msg import GoalStatus
 from control_msgs.action import FollowJointTrajectory
 from diagnostic_msgs.msg import DiagnosticArray
 import numpy as np
@@ -30,7 +33,9 @@ from lekiwi_rmf.action import RunSkill
 from lekiwi_rmf.arm_trajectory import ARM_JOINTS
 from lekiwi_rmf.latency_budget import LatencyBudget
 from lekiwi_rmf.object_recognition import reject_parameter_changes
-from lekiwi_rmf.skills import arm_targets, catalog, load_registry, skill_parameters, verify_artifact
+from lekiwi_rmf.skills import (
+    BASE_COMMANDS, TASK_CONDITIONED_POLICIES, arm_targets, camera_sources, catalog, conditioning, load_registry,
+    skill_parameters, verify_artifact)
 
 # The LeRobot environment (scripts/install-lerobot-export.sh); ROS stays importable through PYTHONPATH.
 POLICY_RUNTIME = Path.home() / '.ros/lekiwi/lerobot-venv/bin/python'
@@ -40,8 +45,12 @@ CPU_PROCESSORS = {'device_processor': {'device': 'cpu'}}
 # Chunks in a row that may miss the control age limit before the run fails.
 MAX_CONSECUTIVE_LATE = 3
 
-CAMERA_TOPICS = {'front': '/camera/front/image_raw', 'wrist': '/camera/wrist/image_raw',
-                 'astra': '/camera/astra/color/image_raw'}
+# How long the arm controller has to answer a chunk, and to report a canceled chunk terminal.
+ARM_ANSWER_SEC = 5.0
+
+
+class ArmStopUnconfirmed(RuntimeError):
+    """The arm controller never reported the chunk terminal, so the arm may still be moving."""
 
 
 def rgb_pixels(message):
@@ -74,6 +83,7 @@ class LeRobotPolicy:
             # unpinned weights from the network before they are overwritten.
             config.pretrained_backbone_weights = None
         self.torch = torch
+        self.task_conditioned = config.type in TASK_CONDITIONED_POLICIES
         self.policy = get_policy_class(config.type).from_pretrained(path, config=config).eval()
         self.pre, self.post = make_pre_post_processors(
             self.policy.config, pretrained_path=str(path), preprocessor_overrides=CPU_PROCESSORS,
@@ -119,8 +129,10 @@ class SkillRunner(Node):
         self._joints, self._images = None, {}
         group = ReentrantCallbackGroup()
         self.create_subscription(JointState, '/joint_states', self._joint_state, 10, callback_group=group)
+        sources = camera_sources()
         for camera in sorted({camera for skill in self._registry.values() for camera in skill.cameras}):
-            self.create_subscription(Image, CAMERA_TOPICS[camera], lambda message, name=camera: self._image(name, message),
+            self.create_subscription(Image, sources[camera]['image_topic'],
+                                     lambda message, name=camera: self._image(name, message),
                                      qos_profile_sensor_data, callback_group=group)
         self._arm = ActionClient(self, FollowJointTrajectory, '/arm_controller/follow_joint_trajectory',
                                  callback_group=group)
@@ -157,6 +169,9 @@ class SkillRunner(Node):
             raise ValueError('unknown skill')
         if skill.status != 'qualified' and not self._experimental:
             raise ValueError('skill is experimental; only an acquisition protocol may run it')
+        if set(skill.action_names) & set(BASE_COMMANDS):
+            # Running only the arm half of a learned arm-and-base action would not be the learned skill.
+            raise ValueError('skill commands the base and the runner has no guarded base path')
         return skill, skill_parameters(skill, request.parameters_json)
 
     def _accept(self, request):
@@ -206,11 +221,28 @@ class SkillRunner(Node):
             if goal_handle is not None and goal_handle.is_cancel_requested:
                 return None
             if time.monotonic() >= deadline or not rclpy.ok(context=self.context):
-                raise RuntimeError('arm controller did not answer in time')
+                raise TimeoutError('arm controller did not answer in time')
             time.sleep(.02)
         return future.result()
 
+    def _stop_chunk(self, handle, outcome):
+        """Cancel one arm goal and wait for its terminal status: only that proves the arm stopped."""
+        try:
+            self._wait(handle.cancel_goal_async(), ARM_ANSWER_SEC)
+            result = self._wait(outcome, ARM_ANSWER_SEC)
+        except TimeoutError as error:
+            raise ArmStopUnconfirmed('the arm controller did not confirm that the chunk stopped') from error
+        if result.status not in (GoalStatus.STATUS_SUCCEEDED, GoalStatus.STATUS_CANCELED, GoalStatus.STATUS_ABORTED):
+            raise ArmStopUnconfirmed('the arm controller no longer knows the chunk it was executing')
+
+    @staticmethod
+    def _cancel_late(sending):
+        # A chunk answered after the run gave up on it must not start moving the arm.
+        if sending.exception() is None and sending.result().accepted:
+            sending.result().cancel_goal_async()
+
     def _send_chunk(self, skill, rows, goal_handle):
+        """Execute one chunk to its terminal status; False when the run was canceled and the arm stopped."""
         goal = FollowJointTrajectory.Goal()
         goal.trajectory.joint_names = list(ARM_JOINTS)
         for index, row in enumerate(rows, 1):
@@ -219,12 +251,22 @@ class SkillRunner(Node):
             point.time_from_start.sec, point.time_from_start.nanosec = int(seconds), int(seconds % 1 * 1e9)
             goal.trajectory.points.append(point)
         sent = time.monotonic()
-        handle = self._wait(self._arm.send_goal_async(goal), 5.0)
-        if handle is None or not handle.accepted:
+        sending = self._arm.send_goal_async(goal)
+        try:
+            handle = self._wait(sending, ARM_ANSWER_SEC)
+        except TimeoutError as error:
+            sending.add_done_callback(self._cancel_late)
+            raise ArmStopUnconfirmed('the arm controller did not answer the chunk; it may still execute it') from error
+        if not handle.accepted:
             raise RuntimeError('arm controller rejected the chunk (disarmed, no permission or invalid targets)')
-        result = self._wait(handle.get_result_async(), len(rows) / skill.fps + 5.0, goal_handle)
+        outcome = handle.get_result_async()
+        try:
+            result = self._wait(outcome, len(rows) / skill.fps + ARM_ANSWER_SEC, goal_handle)
+        except TimeoutError:
+            self._stop_chunk(handle, outcome)
+            raise RuntimeError('arm chunk did not finish in time; it was canceled and the arm stopped') from None
         if result is None:
-            self._wait(handle.cancel_goal_async(), 5.0)
+            self._stop_chunk(handle, outcome)
             return False
         self._budget.record('execution', time.monotonic() - sent)
         if result.result.error_code != FollowJointTrajectory.Result.SUCCESSFUL:
@@ -233,16 +275,18 @@ class SkillRunner(Node):
 
     def _execute(self, goal_handle):
         request, started, chunks, late, consecutive = goal_handle.request, time.monotonic(), 0, 0, 0
-        result, detail, last = RunSkill.Result(), '', None
+        result, detail, last, stopped = RunSkill.Result(), '', None, True
         try:
             skill, parameters = self._admitted(request)
             policy = self._policies.get(skill.skill_id)
             if policy is None:
                 policy = self._policies[skill.skill_id] = self._policy_factory(verify_artifact(skill))
+            if skill.parameters and not policy.task_conditioned:
+                raise ValueError('skill declares parameters but its policy type is not task-conditioned')
             policy.reset()
             # The duration limit bounds motion; loading the policy on first use must not consume it.
             motion_started = time.monotonic()
-            task = json.dumps({'skill': skill.skill_id, **parameters}, sort_keys=True)
+            task = conditioning(skill.task, parameters)
             while time.monotonic() - motion_started < skill.max_duration_sec:
                 if goal_handle.is_cancel_requested:
                     raise InterruptedError
@@ -258,7 +302,11 @@ class SkillRunner(Node):
                         raise RuntimeError('policy chunks repeatedly arrived after max_observation_age_sec')
                     continue
                 consecutive = 0
-                rows = arm_targets(skill, measured, chunk)
+                # A chunk never outlasts the duration limit: only the steps that still fit are sent.
+                remaining = skill.max_duration_sec - (time.monotonic() - motion_started)
+                rows = arm_targets(skill, measured, chunk)[:max(0, int(remaining * skill.fps))]
+                if not rows:
+                    break
                 if not self._send_chunk(skill, rows, goal_handle):
                     raise InterruptedError
                 chunks, last = chunks + 1, rows[-1]
@@ -272,7 +320,9 @@ class SkillRunner(Node):
             result.outcome, detail = 'canceled', 'canceled before the run finished'
             goal_handle.canceled()
         except (RuntimeError, ValueError, OSError) as error:
-            result.outcome, detail = 'failed', str(error)
+            result.outcome, detail, stopped = 'failed', str(error), not isinstance(error, ArmStopUnconfirmed)
+            if not stopped:
+                self.get_logger().error(f'Skill {request.skill_id!r} ended without a confirmed arm stop: {error}')
             goal_handle.abort()
         finally:
             with self._lock:
@@ -283,6 +333,8 @@ class SkillRunner(Node):
             'skill_id': request.skill_id, 'version': skill.version if skill else None,
             'artifact_sha256': skill.artifact_sha256 if skill else None, 'chunks_executed': chunks,
             'elapsed_sec': time.monotonic() - started, 'last_targets': last, 'late_chunks': late,
+            # False: the arm controller never reported the last chunk terminal; the arm may still be moving.
+            'arm_stopped': stopped,
             'verification': 'not performed by the runner'}, sort_keys=True)
         return result
 
