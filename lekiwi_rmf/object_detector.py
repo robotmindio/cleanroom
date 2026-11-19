@@ -26,7 +26,7 @@ from vision_msgs.msg import Detection2D, Detection2DArray, ObjectHypothesisWithP
 from lekiwi_rmf.latency_budget import LatencyBudget
 from lekiwi_rmf.object_recognition import REMOTE_BACKENDS, ProviderUnavailable, Recognizer, reject_parameter_changes
 from lekiwi_rmf.object_cameras import camera_bindings
-from lekiwi_rmf.object_observations import artifact_pixels, capture_artifact
+from lekiwi_rmf.object_observations import artifact_pixels, capture_artifact, evidence_size
 from lekiwi_rmf.perception_concepts import load_concept, reference
 from lekiwi_rmf.perception_profiles import make_profile, tracked_profiles
 from lekiwi_rmf.perception_query import make_query
@@ -341,10 +341,14 @@ class ObjectDetector(Node):
                 not 0 < stamp or not 0 <= age <= self._age):
             self._reject(camera, 'camera binding or capture freshness mismatch')
             return
-        if (not 1 <= image.width <= 1920 or not 1 <= image.height <= 1080 or
-                    image.encoding not in ('rgb8', 'bgr8') or image.is_bigendian or
-                    not image.width * 3 <= image.step <= image.width * 3 + 4096 or
-                    len(image.data) != image.step * image.height or len(image.data) > 8 * 1024**2):
+        try:
+            evidence_size(image.width, image.height)
+        except ValueError as error:
+            self._reject(camera, str(error))
+            return
+        if (image.encoding not in ('rgb8', 'bgr8') or image.is_bigendian or
+                not image.width * 3 <= image.step <= image.width * 3 + 4096 or
+                len(image.data) != image.step * image.height or len(image.data) > 8 * 1024**2):
             self._reject(camera, 'recognition image exceeds encoding/payload bounds')
             return
         with self._frame_lock:

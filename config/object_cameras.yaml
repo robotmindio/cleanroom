@@ -1,4 +1,10 @@
 # Physical source bindings. Metric calibration is opt-in and must be measured.
+# input_quality holds each camera's limits: mean luma (0..255) below dark_luma or above bright_luma, or
+# Laplacian variance below blur_variance, flags a frame. camera_sha256 does not cover them.
+# DEBT: limits without a `calibration` record are engineering defaults, not measured on that camera, so
+# its dark/overexposed/blurred abstention reasons are unqualified. Fit them with the hard-condition corpus
+# and `scripts/calibrate-thresholds.py input-quality --write` before an abstention reason gates a
+# decision: https://github.com/robotmindio/cleanroom/issues/98 (done when every camera names a record).
 front:
   mount: base
   image_topic: /camera/front/image_raw
@@ -6,6 +12,7 @@ front:
   camera_info_topic: /camera/front/camera_info
   depth_topic: ''
   calibration_file: ''
+  input_quality: {dark_luma: 40.0, bright_luma: 225.0, blur_variance: 30.0}
 wrist:
   mount: arm
   image_topic: /camera/wrist/image_raw
@@ -13,6 +20,7 @@ wrist:
   camera_info_topic: /camera/wrist/camera_info
   depth_topic: ''
   calibration_file: ''
+  input_quality: {dark_luma: 40.0, bright_luma: 225.0, blur_variance: 30.0}
 astra_color:
   mount: base
   image_topic: /camera/astra/color/image_raw
@@ -20,3 +28,4 @@ astra_color:
   camera_info_topic: /camera/astra/color/camera_info
   depth_topic: /camera/astra/depth/image_raw
   calibration_file: ''
+  input_quality: {dark_luma: 40.0, bright_luma: 225.0, blur_variance: 30.0}

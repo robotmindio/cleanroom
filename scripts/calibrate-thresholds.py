@@ -2,9 +2,11 @@
 """Fit perception thresholds from labelled evaluator reports (docs/threshold-calibration.md).
 
   search          search_min_object_px (config/exploration.yaml), cleanroom#88
-  input-quality   dark, overexposed and blurred limits (object_observations.py), cleanroom#98
+  input-quality   each camera's dark, overexposed and blurred limits (config/object_cameras.yaml),
+                  cleanroom#98
 
-Each --report is a scripts/evaluate-object-recognition.py report, optionally prefixed CAMERA=.
+Each --report is a scripts/evaluate-object-recognition.py report. Its camera is the CAMERA= prefix,
+else the --camera it was evaluated with; reports of no camera are pooled.
 Pass development and held-out reports: cuts are chosen on development and confirmed on held-out.
 --write records a `calibrated` result in tracked files for a reviewed PR; any other status writes
 nothing. Never commands the robot. Exit 0 only when calibrated.
@@ -20,7 +22,8 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from lekiwi_rmf.threshold_calibration import (  # noqa: E402
-    DEFAULT_TARGET_RECALL, calibrate_input_quality, calibrate_search, load_report, write_calibration)
+    DEFAULT_TARGET_RECALL, calibrate_input_quality, calibrate_search, input_quality_limits, load_report,
+    write_calibration)
 
 
 def reports(values):
@@ -47,7 +50,7 @@ def main():
         config = yaml.safe_load((Path(args.root) / 'config/exploration.yaml').read_text())
         result = calibrate_search(loaded, config['robot_explorer']['ros__parameters'], args.target_recall)
     else:
-        result = calibrate_input_quality(loaded, args.target_recall)
+        result = calibrate_input_quality(loaded, input_quality_limits(args.root), args.target_recall)
     output = Path(args.output).expanduser()
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(result, indent=2, allow_nan=False) + '\n')

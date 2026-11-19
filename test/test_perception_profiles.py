@@ -13,7 +13,13 @@ from lekiwi_rmf.object_recognition import ProviderUnavailable, suppress
 from lekiwi_rmf.perception_profiles import (
     PARAMETERS, default_profile, make_profile, recorded_profile, specification, tracked_profiles)
 from lekiwi_rmf.perception_study import admitted_candidate, paired_bootstrap, run_study, save
+from test_object_observations import QUALITY
 from test_perception_query import DEFAULT, Harness, closed_recognizer, open_recognizer, wait
+
+
+# The robot's interpreter, which the identities in the Fiber profiles were computed under: Ubuntu 24.04's
+# python3-opencv and the numpy pin of config/requirements-perception.txt.
+DEPLOYED_RUNTIME = {'opencv': '4.6.0', 'numpy': '1.26.4'}
 
 
 @pytest.mark.parametrize('filename,camera,proposal', [
@@ -32,17 +38,22 @@ def test_fiber_canary_profile_matches_the_tracked_camera_and_proposal(filename, 
 
 
 def test_fiber_stationary_profile_is_the_enabled_open_vocabulary_observation_point():
+    import yaml
     from lekiwi_rmf.object_cameras import camera_bindings
+    from lekiwi_rmf.object_recognition import perception_config, recognition_identity
 
     root = Path(__file__).resolve().parents[1]
     profile = json.loads((root / 'config/fiber_perception_profile.json').read_text())
     assert profile['camera_sha256'] == camera_bindings(['front'])['front']['sha256']
     # The runtime's default proposal profile, not a canary's stricter one.
     assert profile['profile_revision'] == default_profile('remote_grounding_dino').revision
-    # Fingerprints of the deployed runtime (`scripts/object-perception.sh --describe`), where
-    # the private interpreter fixes the library versions the identity hashes include.
-    assert profile['model_sha256'] == '6ec9eb1f5a01c271a5b0b6ce6d95432148f94d33c16b1ad6a4ccca6ee2f5636f'
-    # The CPU fallback still answers only for the qualified native labels.
+    # The identity the deployed primary reports, recomputed from its tracked model entry, so a change to
+    # that entry which is not carried into the Fiber profile fails here.
+    primary = yaml.safe_load(perception_config('remote').read_text())['/**']['ros__parameters']['model_name']
+    assert profile['model_sha256'] == recognition_identity(primary, DEPLOYED_RUNTIME)[0]
+    # The CPU fallback still answers only for the qualified native labels. Its identity also hashes the
+    # private interpreter's Torch stack, whose versions are not all tracked (tokenizers is unpinned), so it
+    # is the fingerprint `scripts/object-perception.sh --describe` printed on the robot.
     assert profile['additional_recognizers'] == [{
         'model_sha256': '81778a0ac0300bfd3c885954d983f02a86ee3ce4469ef2a76b1a00100ddb3869',
         'profile_revision': default_profile('rtdetr_v2').revision}]
@@ -60,7 +71,7 @@ def test_local_yolox_canary_keeps_the_wrist_binding_and_existing_safety_bounds()
     value = json.loads((root / 'config/fiber_perception_wrist_yolox_canary.json').read_text())
     assert value['camera_id'] == 'wrist'
     assert value['camera_sha256'] == camera_bindings(['wrist'])['wrist']['sha256']
-    assert value['model_sha256'] == recognition_identity('yolox')[0]
+    assert value['model_sha256'] == recognition_identity('yolox', DEPLOYED_RUNTIME)[0]
     assert value['profile_revision'] == default_profile('yolox').revision
     assert value['minimum_score'] == .5
     assert value['max_evidence_age_sec'] == value['confirmation_window_sec'] == 2
@@ -155,7 +166,7 @@ def test_negative_query_stays_negative_instead_of_forcing_a_detection(monkeypatc
     found, extras, _ = detect(recognizer, pixels, header, DEFAULT, OPEN)
     image = CvBridge().cv2_to_imgmsg(pixels, 'bgr8')
     image.header = header
-    record, _ = observation(image, found, 'a' * 64, 'astra_color', DEFAULT, profile=OPEN, extras=extras)
+    record, _ = observation(image, found, 'a' * 64, 'astra_color', DEFAULT, profile=OPEN, quality_limits=QUALITY, extras=extras)
     assert record['detections'] == [] and record['input_quality']['flags'] == []
     assert [(item['label'], item['reason']) for item in record['abstentions']] == [
         ('a cup', 'no_candidate'), ('a mug', 'no_candidate')]

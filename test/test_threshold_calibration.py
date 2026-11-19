@@ -49,10 +49,10 @@ def scene(identifier, group, objects, predictions, quality=None, conditions=()):
     return item
 
 
-def report(tmp_path, name, split, scenes, model='m' * 64):
+def report(tmp_path, name, split, scenes, model='m' * 64, **fields):
     path = tmp_path / f'{name}.json'
     path.write_text(json.dumps({'schema': 3, 'split': split, 'model_sha256': model, 'manifest_sha256': name * 8,
-                                'scenes': scenes}))
+                                'scenes': scenes, **fields}))
     return path
 
 
@@ -107,9 +107,18 @@ def test_reports_must_share_one_model(tmp_path):
         calibration.load_report(failed)
 
 
+CURRENT = calibration.input_quality_limits(ROOT)
+
+
+def test_tracked_cameras_keep_the_uncalibrated_engineering_limits():
+    # cleanroom#98: until a calibration record replaces them, and never with a lower dark limit.
+    assert set(CURRENT) == {'front', 'wrist', 'astra_color'}
+    assert all(limits == {'dark_luma': 40., 'bright_luma': 225., 'blur_variance': 30.} for limits in CURRENT.values())
+
+
 def test_input_quality_without_runtime_features_is_insufficient(tmp_path):
     loaded = [calibration.load_report(report(tmp_path, 'dev', 'development', size_scenes('d', 30)))]
-    result = calibration.calibrate_input_quality(loaded)
+    result = calibration.calibrate_input_quality(loaded, CURRENT)
     assert (result['status'], result['reason']) == ('insufficient_corpus', 'report_lacks_input_quality')
     assert result['proposed_value'] is None
 
@@ -129,15 +138,46 @@ def quality_scenes(prefix, groups):
 def test_input_quality_limits_and_condition_gate(tmp_path):
     loaded = [calibration.load_report(report(tmp_path, 'dev', 'development', quality_scenes('d', 30))),
               calibration.load_report(report(tmp_path, 'held', 'heldout', quality_scenes('h', 30)))]
-    result = calibration.calibrate_input_quality(loaded)
+    result = calibration.calibrate_input_quality(loaded, CURRENT)
     assert result['status'] == 'calibrated', result['reason']
-    assert result['proposed_value'] == {'dark_luma': 120., 'bright_luma': 120., 'blur_variance': 500.}
-    assert result['conditions']['dark']['group_recall'] == 0
+    # Reports that name no camera are one pooled fit, proposed for every tracked camera.
+    fitted = {'dark_luma': 120., 'bright_luma': 120., 'blur_variance': 500.}
+    assert result['proposed_value'] == {camera: fitted for camera in CURRENT}
+    assert result['cameras']['pooled']['conditions']['dark']['group_recall'] == 0
     few = [calibration.load_report(report(tmp_path, 'dev2', 'development', quality_scenes('d', 5))),
            calibration.load_report(report(tmp_path, 'held2', 'heldout', quality_scenes('h', 4)))]
-    thin = calibration.calibrate_input_quality(few)
-    assert thin['status'] == 'insufficient_corpus' and thin['reason'] == 'hard_conditions_below_minimum'
-    assert thin['condition_groups_missing']['dark'] == 11
+    thin = calibration.calibrate_input_quality(few, CURRENT)
+    assert thin['status'] == 'insufficient_corpus' and thin['reason'] == 'pooled:hard_conditions_below_minimum'
+    assert thin['cameras']['pooled']['condition_groups_missing']['dark'] == 11
+
+
+def test_input_quality_is_fitted_per_camera_against_its_own_current_limits(tmp_path):
+    def loaded(camera, development, heldout, **fields):
+        return [calibration.load_report(report(tmp_path, f'{camera}-dev', 'development', development, **fields), camera),
+                calibration.load_report(report(tmp_path, f'{camera}-held', 'heldout', heldout, **fields), camera)]
+    front = loaded('front', quality_scenes('d', 30), quality_scenes('h', 30))
+    wrist = loaded('wrist', quality_scenes('d', 30), quality_scenes('h', 4))
+    result = calibration.calibrate_input_quality(front, CURRENT)
+    # Only the camera the reports name is proposed; the others keep their limits.
+    assert result['status'] == 'calibrated' and set(result['proposed_value']) == {'front'}
+    both = calibration.calibrate_input_quality(front + wrist, CURRENT)
+    assert both['status'] == 'insufficient_corpus' and both['proposed_value'] is None
+    assert both['cameras']['front']['status'] == 'calibrated'
+    assert both['cameras']['wrist']['status'] == 'insufficient_corpus'
+    # A camera's fit uses its own current limits: one that already trusts only very sharp frames keeps none.
+    strict = {**CURRENT, 'front': {**CURRENT['front'], 'blur_variance': 900.}}
+    assert calibration.calibrate_input_quality(front, strict)['cameras']['front']['limits']['dark_luma']['status'] \
+        == 'insufficient_corpus'
+    # The evaluator's own --camera labels a report when no prefix overrides it.
+    labelled = calibration.load_report(report(tmp_path, 'own', 'development', quality_scenes('d', 1), camera='wrist'))
+    assert {trial['camera'] for trial in calibration.trials(labelled)} == {'wrist'}
+    pooled = [calibration.load_report(report(tmp_path, 'pool', 'development', quality_scenes('p', 1)))]
+    with pytest.raises(ValueError, match='every report'):
+        calibration.calibrate_input_quality(front + pooled, CURRENT)
+    with pytest.raises(ValueError, match='different limits'):
+        calibration.calibrate_input_quality(pooled, strict)
+    with pytest.raises(ValueError, match='untracked cameras'):
+        calibration.calibrate_input_quality(loaded('ceiling', quality_scenes('d', 1), quality_scenes('h', 1)), CURRENT)
 
 
 def test_write_refuses_anything_but_calibrated(tmp_path):
@@ -163,18 +203,29 @@ def test_write_updates_one_tracked_line_and_records_the_evidence(tmp_path):
     assert json.loads((tmp_path / record).read_text()) == result
 
 
-def test_input_quality_write_needs_the_runtime_limits(tmp_path):
-    (tmp_path / 'lekiwi_rmf').mkdir()
-    (tmp_path / 'lekiwi_rmf/object_observations.py').write_text('"""no limits yet."""\n')
+def test_input_quality_write_updates_only_the_fitted_camera_and_keeps_its_binding(tmp_path):
+    from lekiwi_rmf.object_cameras import camera_bindings
+    (tmp_path / 'config').mkdir()
+    original = (ROOT / 'config/object_cameras.yaml').read_text()
+    (tmp_path / 'config/object_cameras.yaml').write_text(original)
     result = {'status': 'calibrated', 'procedure': calibration.INPUT_QUALITY_PROCEDURE,
-              'proposed_value': {'dark_luma': 30., 'bright_luma': 240., 'blur_variance': 20.},
+              'proposed_value': {'wrist': {'dark_luma': 45., 'bright_luma': 240., 'blur_variance': 20.}},
               'inputs': [{'split': 'heldout', 'manifest_sha256': None, 'sha256': 'c' * 64}]}
-    with pytest.raises(ValueError, match='cleanroom#100'):
-        calibration.write_calibration(tmp_path, result)
-    (tmp_path / 'lekiwi_rmf/object_observations.py').write_text('X = 1\nDARK_LUMA, BRIGHT_LUMA, BLUR_VARIANCE = 40., 225., 30.\n')
-    calibration.write_calibration(tmp_path, result)
-    assert (tmp_path / 'lekiwi_rmf/object_observations.py').read_text().splitlines()[1].startswith(
-        'DARK_LUMA, BRIGHT_LUMA, BLUR_VARIANCE = 30.0, 240.0, 20.0  # calibrated: config/calibration/')
+    written = calibration.write_calibration(tmp_path, result)
+    assert written[1] == 'config/object_cameras.yaml' and json.loads((tmp_path / written[0]).read_text()) == result
+    updated = (tmp_path / 'config/object_cameras.yaml').read_text()
+    # The file's leading documentation, including the DEBT link, survives the rewrite.
+    comments = [line for line in original.splitlines() if line.startswith('#')]
+    assert comments and updated.splitlines()[:len(comments)] == comments
+    assert calibration.input_quality_limits(tmp_path) == {**CURRENT, 'wrist': result['proposed_value']['wrist']}
+    names = ['front', 'wrist', 'astra_color']
+    before, after = camera_bindings(names), camera_bindings(names, tmp_path / 'config/object_cameras.yaml')
+    # The limits are no part of the camera identity an admitted Fiber profile pins.
+    assert {name: after[name]['sha256'] for name in names} == {name: before[name]['sha256'] for name in names}
+    assert after['wrist']['input_quality'] == result['proposed_value']['wrist']
+    assert after['front']['input_quality'] == before['front']['input_quality']
+    with pytest.raises(ValueError, match='not a camera'):
+        calibration.write_calibration(tmp_path, {**result, 'proposed_value': {'ceiling': result['proposed_value']['wrist']}})
 
 
 def test_cli_writes_nothing_on_an_insufficient_corpus(tmp_path):

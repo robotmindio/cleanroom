@@ -57,6 +57,18 @@ def blue_mask(pixels):
 
 EVIDENCE_QUALITY = 80
 MAX_EVIDENCE_BYTES = 384 * 1024
+# The densest quality-80 JPEG found, saturated binary noise in every channel, takes 0.85 bytes per pixel.
+# A frame within this budget therefore fits MAX_EVIDENCE_BYTES whatever it shows, so no admitted frame is
+# refused for its content. A larger source needs a larger evidence cap, which the observation store, the
+# evidence service and Fiber's verifier share.
+MAX_EVIDENCE_PIXELS = int(MAX_EVIDENCE_BYTES / .9)
+
+
+def evidence_size(width, height):
+    """Refuse, before any work on it, a frame too large for its evidence to be guaranteed to fit."""
+    if width < 1 or height < 1 or width * height > MAX_EVIDENCE_PIXELS:
+        raise ValueError(f'{width}x{height} image exceeds the {MAX_EVIDENCE_PIXELS}-pixel evidence budget '
+                         f'({MAX_EVIDENCE_BYTES // 1024} KiB at JPEG quality {EVIDENCE_QUALITY})')
 
 
 def capture_artifact(pixels):
@@ -66,6 +78,7 @@ def capture_artifact(pixels):
     encode the same bytes; every recognizer consumes the decoded artifact, which makes each stored
     observation replayable byte-exact (lekiwi_rmf/perception_replay.py).
     """
+    evidence_size(pixels.shape[1], pixels.shape[0])
     ok, encoded = cv2.imencode('.jpg', pixels, [cv2.IMWRITE_JPEG_QUALITY, EVIDENCE_QUALITY])
     if not ok:
         raise RuntimeError('capture JPEG encoding failed')
@@ -82,9 +95,6 @@ def artifact_pixels(data):
     return pixels
 
 
-# DEBT: input-quality limits are engineering defaults, not measured on the robot's cameras; calibrate them
-# with the hard-condition corpus (cleanroom#98) before an abstention reason gates a decision.
-DARK_LUMA, BRIGHT_LUMA, BLUR_VARIANCE = 40., 225., 30.
 NEXT_REQUIREMENT = {
     'no_candidate': 'another_viewpoint_or_memory_query',
     'dark': 'more_light_or_another_camera',
@@ -95,11 +105,15 @@ NEXT_REQUIREMENT = {
 }
 
 
-def input_quality(pixels):
+def input_quality(pixels, limits):
+    """Mean luma and Laplacian sharpness, flagged against the capturing camera's `limits`
+    (input_quality in config/object_cameras.yaml). An image of no tracked camera has no limits (None):
+    it is measured but never flagged."""
     gray = cv2.cvtColor(pixels, cv2.COLOR_BGR2GRAY)
     luma, sharpness = float(gray.mean()), float(cv2.Laplacian(gray, cv2.CV_64F).var())
-    flags = [flag for flag, bad in [('dark', luma < DARK_LUMA), ('overexposed', luma > BRIGHT_LUMA),
-                                    ('blurred', sharpness < BLUR_VARIANCE)] if bad]
+    flags = [] if limits is None else [flag for flag, bad in [
+        ('dark', luma < limits['dark_luma']), ('overexposed', luma > limits['bright_luma']),
+        ('blurred', sharpness < limits['blur_variance'])] if bad]
     return {'mean_luma': round(luma, 2), 'sharpness': round(sharpness, 2), 'flags': flags}
 
 
@@ -183,12 +197,13 @@ def inference_id(capture_id, model_sha256, profile, query=None):
     return hashlib.sha256(f'{capture_id}:{inference}'.encode()).hexdigest()
 
 
-def observation(image, detections, model_sha256, camera_id, query=None, *, profile, extras=None, run=None,
-                degraded=None, input_sha256=None):
+def observation(image, detections, model_sha256, camera_id, query=None, *, profile, quality_limits, extras=None,
+                run=None, degraded=None, input_sha256=None):
     """Use an exact synchronized ROS image/detection pair; preserve all candidates.
 
     `query` is the open-vocabulary Query the frame ran under, or None for a closed native catalogue;
-    `profile` is the proposal profile that turned the model output into these detections.
+    `profile` is the proposal profile that turned the model output into these detections;
+    `quality_limits` are the capturing camera's input-quality limits (see input_quality).
     """
     if (image.header != detections.header or not image.header.frame_id
             or image.header.stamp.sec < 0 or not 0 <= image.header.stamp.nanosec < 10**9
@@ -198,8 +213,7 @@ def observation(image, detections, model_sha256, camera_id, query=None, *, profi
         raise ValueError('camera identity and model SHA-256 are required')
     if image.encoding not in ('bgr8', 'rgb8') or image.is_bigendian:
         raise ValueError('expected little-endian bgr8/rgb8 image')
-    if not 1 <= image.width <= 1920 or not 1 <= image.height <= 1080:
-        raise ValueError('image dimensions exceed 1920x1080')
+    evidence_size(image.width, image.height)
     if not image.width * 3 <= image.step <= image.width * 3 + 4096 or len(image.data) != image.step * image.height:
         raise ValueError('image stride or payload does not match its dimensions')
     if len(detections.detections) > 20:
@@ -242,7 +256,7 @@ def observation(image, detections, model_sha256, camera_id, query=None, *, profi
                 # model_input: the recognizer consumed exactly these bytes, so replaying them reproduces it.
                 'evidence': {'sha256': digest, 'size': len(evidence), 'format': 'image/jpeg',
                              'model_input': input_sha256 == digest},
-                'profile': profile.document(), 'input_quality': input_quality(pixels)}
+                'profile': profile.document(), 'input_quality': input_quality(pixels, quality_limits)}
     if run is not None:
         document['provider_run'] = run
     if degraded is not None:

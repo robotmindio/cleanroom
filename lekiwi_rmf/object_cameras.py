@@ -4,8 +4,11 @@ from pathlib import Path
 import re
 import json
 import hashlib
+import math
 
 import yaml
+
+QUALITY_LIMITS = ('dark_luma', 'bright_luma', 'blur_variance')
 
 
 def config_directory():
@@ -14,6 +17,17 @@ def config_directory():
         return source
     from ament_index_python.packages import get_package_share_directory
     return Path(get_package_share_directory('lekiwi_rmf')) / 'config'
+
+
+def quality_limits(value):
+    """A camera's input-quality limits: mean luma below `dark_luma` or above `bright_luma` (0..255) and
+    Laplacian variance below `blur_variance` flag a frame. `calibration` names the record that fitted them."""
+    if (not isinstance(value, dict) or set(value) - {'calibration'} != set(QUALITY_LIMITS)
+            or any(type(value[name]) not in (int, float) or not math.isfinite(value[name]) for name in QUALITY_LIMITS)
+            or not 0 <= value['dark_luma'] < value['bright_luma'] <= 255 or value['blur_variance'] < 0
+            or not isinstance(value.get('calibration', ''), str)):
+        raise ValueError('camera input_quality needs 0 <= dark_luma < bright_luma <= 255 and blur_variance >= 0')
+    return {name: float(value[name]) for name in QUALITY_LIMITS}
 
 
 def camera_bindings(names, path=None):
@@ -29,8 +43,11 @@ def camera_bindings(names, path=None):
     result = {}
     for name in names:
         value = configured.get(name) if isinstance(configured, dict) else None
-        if not isinstance(value, dict) or set(value) != required:
+        if not isinstance(value, dict) or set(value) != required | {'input_quality'}:
             raise ValueError(f'invalid tracked camera binding: {name}')
+        # The limits tune abstention reasons, not the physical source, so camera_sha256 does not cover them.
+        limits = quality_limits(value['input_quality'])
+        value = {key: value[key] for key in required}
         if any(not isinstance(item, str) for item in value.values()):
             raise ValueError('camera binding values must be strings')
         if not re.fullmatch(r'[A-Za-z][A-Za-z0-9_]{0,127}', value['optical_frame']):
@@ -52,7 +69,7 @@ def camera_bindings(names, path=None):
         identity = {**value, 'camera_id': name, 'calibration_file': calibration_hash}
         result[name] = {**value, 'calibration_file': calibration, 'calibration_sha256': calibration_hash,
                         'sha256': hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest(),
-                        'prefix': '/robot/perception/' + name}
+                        'prefix': '/robot/perception/' + name, 'input_quality': limits}
     if len({v['image_topic'] for v in result.values()}) != len(result):
         raise ValueError('camera identities cannot alias the same image source')
     if len({v['optical_frame'] for v in result.values()}) != len(result):

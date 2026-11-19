@@ -16,9 +16,10 @@ from builtin_interfaces.msg import Time
 from std_msgs.msg import Header
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from lekiwi_rmf.object_cameras import camera_bindings
 from lekiwi_rmf.object_detector import detect
 from lekiwi_rmf.object_recognition import Recognizer, use_model_runtime
-from lekiwi_rmf.object_observations import artifact_pixels, capture_artifact, observation
+from lekiwi_rmf.object_observations import artifact_pixels, capture_artifact, evidence_size, observation
 from lekiwi_rmf.perception_profiles import make_profile, tracked_profiles
 from lekiwi_rmf.perception_query import make_query
 from lekiwi_rmf.threshold_calibration import matches, overlap
@@ -117,8 +118,9 @@ def load_scenes(manifest, split='heldout'):
         content = image_path.read_bytes()
         digest = hashlib.sha256(content).hexdigest()
         pixels = cv2.imdecode(np.frombuffer(content, np.uint8), cv2.IMREAD_COLOR)
-        if pixels is None or pixels.shape[0] > 1080 or pixels.shape[1] > 1920:
-            raise ValueError('evaluation image unreadable or exceeds 1920x1080')
+        if pixels is None:
+            raise ValueError('evaluation image unreadable')
+        evidence_size(pixels.shape[1], pixels.shape[0])
         pixel_digest = hashlib.sha256(str(pixels.shape).encode() + pixels.tobytes()).hexdigest()
         prior = image_hashes.get(digest) or pixel_hashes.get(pixel_digest)
         if prior:
@@ -179,11 +181,13 @@ def scene_metrics(detections, objects, blue_threshold, labels, blue_labels):
 
 
 def evaluate(manifest, model_path=None, *, name='yolox', split='heldout', profile=None, blue_threshold=.35,
-             recognizer=None, query=None):
+             recognizer=None, query=None, camera=None):
     """Score one recognizer under one proposal profile; defaults to the tracked default profile.
 
     An open recognizer is asked for the manifest's label vocabulary unless a study fixes another `query`
-    that reports every manifest label; the report records the query used.
+    that reports every manifest label; the report records the query used. `camera` names the tracked
+    camera that captured the corpus: its input-quality limits flag the frames and the report carries it,
+    so threshold calibration fits that camera. Without it frames are measured but not flagged.
     """
     if split not in ('development', 'heldout') or not 0 <= blue_threshold <= 1:
         raise ValueError('invalid frozen evaluation operating point')
@@ -193,6 +197,7 @@ def evaluate(manifest, model_path=None, *, name='yolox', split='heldout', profil
     model, bridge = recognizer or Recognizer(name, model_path, allow_experimental=True), CvBridge()
     profile = profile or model.default_profile
     query = corpus_query(model, labels, query)
+    limits = camera_bindings([camera])[camera]['input_quality'] if camera else None
     totals, attribute = {key: [0, 0, 0] for key in keys}, [0, 0, 0, 0]
     durations, hashes, results = [], [], []
     groups = {key: {'positive': set(), 'negative': set(), 'ambiguous': set()} for key in keys}
@@ -210,7 +215,7 @@ def evaluate(manifest, model_path=None, *, name='yolox', split='heldout', profil
         image = bridge.cv2_to_imgmsg(pixels, 'bgr8')
         image.header = header
         record, _ = observation(image, found, model.sha256, 'offline', query, profile=profile, extras=extras,
-                                input_sha256=hashlib.sha256(artifact).hexdigest())
+                                quality_limits=limits, input_sha256=hashlib.sha256(artifact).hexdigest())
         durations.append(time.monotonic() - start)
         result = scene_metrics(record['detections'], scene['objects'], blue_threshold, labels, blue_labels)
         for key in keys:
@@ -261,7 +266,7 @@ def evaluate(manifest, model_path=None, *, name='yolox', split='heldout', profil
                               for key in keys},
             'unscored_predictions': sum(len(item['unscored_predictions']) for item in results),
             'model_sha256': model.sha256, 'operating_point': model.identity, 'profile': profile.document(),
-            'query': query.document() if query is not None else None,
+            'query': query.document() if query is not None else None, 'camera': camera,
             'conditions': {tag: sum(tag in item['conditions'] for item in results)
                            for tag in sorted({tag for item in results for tag in item['conditions']} | set(HARD_CONDITIONS))},
             'missing_hard_conditions': [tag for tag in HARD_CONDITIONS
@@ -285,6 +290,8 @@ def main():
     parser.add_argument('--profile', default='', help='tracked profile name (config/perception_profiles.yaml)')
     parser.add_argument('--profile-json', default='', help='complete candidate parameters as JSON')
     parser.add_argument('--blue-fraction', type=float, default=.35)
+    parser.add_argument('--camera', help='tracked camera (config/object_cameras.yaml) that captured the corpus; '
+                        'applies its input-quality limits and labels the report for per-camera calibration')
     args = parser.parse_args()
     try:
         use_model_runtime(args.model_name)
@@ -300,7 +307,7 @@ def main():
         elif args.profile_json:
             profile = make_profile(model.backend, json.loads(args.profile_json))
         report = evaluate(args.manifest, name=args.model_name, split=args.split, profile=profile,
-                          blue_threshold=args.blue_fraction, recognizer=model)
+                          blue_threshold=args.blue_fraction, recognizer=model, camera=args.camera)
     except (ValueError, OSError, RuntimeError, RecursionError, cv2.error) as error:
         report = {'schema': 3, 'passed': False, 'error': str(error)}
     output = Path(args.output).expanduser()

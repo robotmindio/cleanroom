@@ -21,7 +21,7 @@ from lekiwi_rmf.object_recognition import ProviderUnavailable, recognition_ident
 from lekiwi_rmf.perception_profiles import default_profile
 from lekiwi_rmf.perception_query import MAX_LABELS, ConceptRef, make_query, normalize_label, recorded_query
 from lekiwi_rmf.srv import ApplyPerceptionProfile, QueryObservations, SetPerceptionQuery
-from test_object_observations import capture, fake_recognizer, operating_point
+from test_object_observations import QUALITY, capture, fake_recognizer, operating_point
 
 REMOTE = 'grounding_dino_tiny_gpu'
 # A closed fallback whose identity needs no torch metadata, so these tests run without the model runtime.
@@ -67,9 +67,9 @@ def test_a_recorded_query_must_already_be_canonical():
 
 def test_the_same_capture_under_another_query_is_another_inference():
     model = recognition_identity(REMOTE)[0]
-    cups, _ = observation(*capture(), model, 'astra_color', DEFAULT, profile=OPEN_PROFILE)
-    spoons, _ = observation(*capture(), model, 'astra_color', make_query(['spoon']), profile=OPEN_PROFILE)
-    closed, _ = observation(*capture(), model, 'astra_color', profile=OPEN_PROFILE)
+    cups, _ = observation(*capture(), model, 'astra_color', DEFAULT, profile=OPEN_PROFILE, quality_limits=QUALITY)
+    spoons, _ = observation(*capture(), model, 'astra_color', make_query(['spoon']), profile=OPEN_PROFILE, quality_limits=QUALITY)
+    closed, _ = observation(*capture(), model, 'astra_color', profile=OPEN_PROFILE, quality_limits=QUALITY)
     assert cups['capture_id'] == spoons['capture_id'] == closed['capture_id']
     assert len({cups['id'], spoons['id'], closed['id']}) == 3
     assert cups['query'] == DEFAULT.document() and cups['vocabulary'] == 'open'
@@ -98,7 +98,8 @@ class Harness:
         bindings = tmp_path / 'cameras.yaml'
         bindings.write_text(yaml.safe_dump({'astra_color': {
             'mount': 'base', 'image_topic': '/camera/test/image', 'optical_frame': 'camera_optical',
-            'camera_info_topic': '/camera/test/info', 'depth_topic': '', 'calibration_file': ''}}))
+            'camera_info_topic': '/camera/test/info', 'depth_topic': '', 'calibration_file': '',
+        'input_quality': {'dark_luma': 40., 'bright_luma': 225., 'blur_variance': 30.}}}))
         recognizers = {REMOTE: primary, FALLBACK: fallback}
         monkeypatch.setattr(object_detector, 'Recognizer', lambda name, *args: recognizers[name])
         self.context = Context()
@@ -301,7 +302,8 @@ def test_collector_rejects_a_frame_operating_point_it_cannot_prove(monkeypatch, 
     yaml_path = tmp_path / 'cameras.yaml'
     yaml_path.write_text(yaml.safe_dump({'astra_color': {
         'mount': 'base', 'image_topic': '/camera/test/image', 'optical_frame': 'camera_optical',
-        'camera_info_topic': '/camera/test/info', 'depth_topic': '', 'calibration_file': ''}}))
+        'camera_info_topic': '/camera/test/info', 'depth_topic': '', 'calibration_file': '',
+        'input_quality': {'dark_luma': 40., 'bright_luma': 225., 'blur_variance': 30.}}}))
     context = Context()
     rclpy.init(context=context)
     node = ObjectObservations(context=context, parameter_overrides=[

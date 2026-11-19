@@ -24,7 +24,7 @@ from lekiwi_rmf.perception_concepts import calibrate, learn_concept, load_concep
 from lekiwi_rmf.perception_profiles import default_profile, make_profile
 from lekiwi_rmf.perception_query import make_query, recorded_query
 from lekiwi_rmf.perception_replay import replay
-from test_object_observations import bare_recognizer, fake_recognizer
+from test_object_observations import QUALITY, bare_recognizer, fake_recognizer
 from test_perception_query import DEFAULT, Harness, open_recognizer
 from test_remote_perception import PROFILE as REMOTE_PROFILE, REMOTE, FakeProvider
 
@@ -79,6 +79,8 @@ def test_a_new_category_is_learned_from_byte_exact_views_without_retraining(tmp_
     assert len(concept['exemplars']) == 3 and len(concept['negatives']) == 1
     # The match threshold admits both held-out positives and the held-out negative stays out.
     assert record['evaluation']['admitted_positives'] == 2 and record['evaluation']['false_admissions'] == 0
+    # A similarity threshold alone separates these views, so no margin is fitted.
+    assert concept['match']['min_margin'] == 0.
     assert record['views'][0]['source'] == 'knowledge:region/0' and 'detector weights unchanged' in record['method']
     assert encoder.calls == [('siglip2-base-patch16-224', 7)]
     assert load_concept(concept['revision'], tmp_path) == concept
@@ -106,6 +108,51 @@ def test_inseparable_views_call_for_a_dataset_and_training_instead_of_a_threshol
     assert match is None and evidence['admitted_positives'] == 0
     match, _ = calibrate([unit(1, .1, 0, 0)], [unit(0, 1, 0, 0)], exemplars, [])
     assert match['min_margin'] == 0. and -1 < match['min_similarity'] <= 1
+
+
+def hard_negative_views():
+    """A held-out negative more similar to the exemplar than one held-out positive, but next to a taught negative."""
+    exemplars, references = [unit(1, 0, 0, 0)], [unit(1, 1, 0, 0)]
+    positives, negatives = [unit(1, .1, 0, 0), unit(1, -.6, 0, 0)], [unit(1, .35, 0, 0)]
+    return positives, negatives, exemplars, references
+
+
+def test_a_margin_is_fitted_where_it_recovers_a_positive_a_threshold_alone_would_lose():
+    positives, negatives, exemplars, references = hard_negative_views()
+    match, evidence = calibrate(positives, negatives, exemplars, references)
+    # The far positive (similarity .857) lies below the negative (.944); only its distance from the taught
+    # negative tells them apart, so the margin is what admits it.
+    assert evidence['positive_similarities'][1] < evidence['negative_similarities'][0]
+    assert evidence['negative_margins'][0] < match['min_margin'] <= min(evidence['positive_margins'])
+    assert match['min_similarity'] == pytest.approx(evidence['positive_similarities'][1], abs=1e-6)
+    assert evidence['admitted_positives'] == 2 and evidence['recall'] == 1 and evidence['false_admissions'] == 0
+    assert type(match['min_margin']) is float and 0 < match['min_margin'] <= 2
+    # Without taught negatives a margin only restates the similarity: it stays 0 and the positive is lost.
+    match, evidence = calibrate(positives, negatives, exemplars, [])
+    assert match['min_margin'] == 0. and evidence['admitted_positives'] == 1
+
+
+def test_a_match_the_provider_admitted_below_the_fitted_margin_is_refused(concept, monkeypatch, tmp_path):
+    from lekiwi_rmf.perception_concepts import concept_revision
+    fitted = {**concept, 'match': {'min_similarity': .5, 'min_margin': .2}}
+    fitted['revision'] = concept_revision(fitted)
+    (perception_concepts.STORE / f"{fitted['revision']}.json").write_text(json.dumps({'concept': fitted}))
+    fake = FakeProvider()
+    monkeypatch.setattr(object_recognition, 'provider_endpoint', lambda name: (fake.url, 1.0))
+    try:
+        query = make_query([], concepts=[reference(fitted)])
+        artifact = capture_artifact(np.full((48, 64, 3), 90, np.uint8))
+
+        def answer(similarity, negative):
+            match = {'name': 'lata', 'revision': fitted['revision'], 'similarity': similarity, 'negative_similarity': negative}
+            fake.respond = lambda body: fake.admitted(body, detections=[
+                {'box': [1.0, 2.0, 21.0, 32.0], 'score': .7, 'label': 'lata', 'concept': match}])
+            return Recognizer(REMOTE, None).predict(artifact_pixels(artifact), query, REMOTE_PROFILE, artifact)
+        assert len(answer(.9, .7)) == 1
+        with pytest.raises(ProviderUnavailable, match='below its calibrated margin'):
+            answer(.9, .8)
+    finally:
+        fake.close()
 
 
 @pytest.fixture
@@ -174,7 +221,7 @@ def test_parts_are_tied_only_to_a_containing_whole_of_the_declared_label():
     found, extras, _ = detect(recognizer, pixels, header, query, REMOTE_PROFILE)
     image = CvBridge().cv2_to_imgmsg(pixels, 'bgr8')
     image.header = header
-    record, _ = observation(image, found, 'a' * 64, 'astra_color', query, profile=REMOTE_PROFILE, extras=extras)
+    record, _ = observation(image, found, 'a' * 64, 'astra_color', query, profile=REMOTE_PROFILE, quality_limits=QUALITY, extras=extras)
     handle, stray = [item for item in record['detections'] if item['label'] == 'mug handle']
     assert handle['part_of']['label'] == 'mug' and handle['part_of']['containment'] >= .8
     assert record['detections'][handle['part_of']['index']]['label'] == 'mug'
@@ -194,7 +241,7 @@ def stored_observation(tmp_path, rows, profile=None, query=DEFAULT):
     found, extras, _ = detect(recognizer, artifact_pixels(artifact), header, query, profile, artifact)
     image = CvBridge().cv2_to_imgmsg(pixels, 'bgr8')
     image.header = header
-    record, evidence = observation(image, found, recognizer.sha256, 'astra_color', query, profile=profile,
+    record, evidence = observation(image, found, recognizer.sha256, 'astra_color', query, profile=profile, quality_limits=QUALITY,
                                    extras=extras, input_sha256=hashlib.sha256(artifact).hexdigest())
     store = ObservationStore(tmp_path / 'store.db')
     store.put(record, evidence)
@@ -254,7 +301,7 @@ def ingest(store, recognizer, query, profile, stamp):
     found, extras, _ = detect(recognizer, pixels, header, query, profile)
     image = CvBridge().cv2_to_imgmsg(pixels, 'bgr8')
     image.header = header
-    record, evidence = observation(image, found, recognizer.sha256, 'astra_color', query, profile=profile, extras=extras)
+    record, evidence = observation(image, found, recognizer.sha256, 'astra_color', query, profile=profile, quality_limits=QUALITY, extras=extras)
     store.put(record, evidence)
     result = store.query(json.dumps({'observation_ids': [record['id']]}))['observations'][0]
     return {item['label'] for item in result['detections']}
@@ -306,7 +353,7 @@ def test_hard_conditions_are_diagnosed_per_frame_and_counted_in_the_corpus(tmp_p
     found, extras, _ = detect(open_recognizer(lambda *_: []), dark, header, DEFAULT, REMOTE_PROFILE)
     image = CvBridge().cv2_to_imgmsg(dark, 'bgr8')
     image.header = header
-    record, _ = observation(image, found, 'a' * 64, 'astra_color', DEFAULT, profile=REMOTE_PROFILE, extras=extras)
+    record, _ = observation(image, found, 'a' * 64, 'astra_color', DEFAULT, profile=REMOTE_PROFILE, quality_limits=QUALITY, extras=extras)
     assert record['input_quality']['flags'] == ['dark', 'blurred']
     assert {item['reason'] for item in record['abstentions']} == {'low_quality_input'}
 

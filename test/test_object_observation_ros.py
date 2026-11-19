@@ -39,7 +39,8 @@ def test_synchronized_capture_query_evidence_and_stale_stream(tmp_path):
     bindings = tmp_path / 'cameras.yaml'
     bindings.write_text(yaml.safe_dump({'astra_color': {
         'mount': 'base', 'image_topic': '/camera/test/image', 'optical_frame': 'camera_optical',
-        'camera_info_topic': '/camera/test/info', 'depth_topic': '', 'calibration_file': ''}}))
+        'camera_info_topic': '/camera/test/info', 'depth_topic': '', 'calibration_file': '',
+        'input_quality': {'dark_luma': 40., 'bright_luma': 225., 'blur_variance': 30.}}}))
     collector = ObjectObservations(context=context, parameter_overrides=[
         Parameter('database_path', value=str(tmp_path / 'observations.db')),
         Parameter('camera_ids', value=['astra_color']),
@@ -136,7 +137,8 @@ def test_multiple_camera_readiness_cannot_mask_wrong_or_missing_source(tmp_path)
     bindings = tmp_path / 'cameras.yaml'
     bindings.write_text(yaml.safe_dump({name: {
         'mount': 'arm' if name == 'wrist' else 'base', 'image_topic': f'/camera/{name}/image', 'optical_frame': name + '_optical',
-        'camera_info_topic': f'/camera/{name}/info', 'depth_topic': '', 'calibration_file': ''}
+        'camera_info_topic': f'/camera/{name}/info', 'depth_topic': '', 'calibration_file': '',
+        'input_quality': {'dark_luma': 40., 'bright_luma': 225., 'blur_variance': 30.}}
         for name in ['front', 'wrist']}))
     context = Context()
     rclpy.init(context=context)
@@ -184,14 +186,35 @@ def test_depth_cache_retains_capture_until_inference_freshness_deadline(tmp_path
         Parameter('camera_ids', value=['astra_color']),
         Parameter('max_source_age_sec', value=3.)])
     try:
-        cache = collector._streams['astra_color']['depth']
-        for index in range(91):
-            image = Image()
-            image.header.stamp = Stamp(sec=100 + index // 30, nanosec=(index % 30) * 1000000000 // 30)
-            cache.add(image)
-        captured = Time.from_msg(Stamp(sec=100))
-        assert cache.getInterval(captured, captured)
-        assert len(cache.cache_msgs) <= 94
+        from lekiwi_rmf.object_observation_node import RecentMessages
+        captured = Time.from_msg(Stamp(sec=100)).nanoseconds
+
+        def stream(recent, rate, seconds):
+            for index in range(round(rate * seconds) + 1):
+                image = Image()
+                image.header.stamp = Time(nanoseconds=captured + round(index * 1e9 / rate)).to_msg()
+                recent.add(image)
+        # The capture's own depth frame is still held when the capture reaches the freshness deadline,
+        # at the tracked 30 Hz and at a rate three times as high.
+        for rate in (30, 90):
+            recent = RecentMessages(collector._age + .1)
+            stream(recent, rate, 3.)
+            found = recent.nearest(captured, 5e7)
+            assert found is not None and Time.from_msg(found.header.stamp).nanoseconds == captured
+            assert recent.nearest(captured - 10**9, 5e7) is None
+            # Only the window is kept, not the whole stream.
+            stream(recent, rate, 9.)
+            assert len(recent._messages) <= rate * 3.1 + 2
+        assert isinstance(collector._streams['astra_color']['depth'], RecentMessages)
+        # A stream too fast for the bound drops its oldest frames instead of growing without limit.
+        fast = RecentMessages(10.)
+        stream(fast, 200, 10.)
+        assert len(fast._messages) == RecentMessages.LIMIT and fast.nearest(captured, 5e7) is None
+        # After a clock reset the old window is discarded rather than paired with new captures.
+        early = Image()
+        early.header.stamp = Stamp(sec=5)
+        recent.add(early)
+        assert len(recent._messages) == 1
     finally:
         collector.destroy_node()
         context.try_shutdown()

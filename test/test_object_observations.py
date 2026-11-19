@@ -18,6 +18,7 @@ from vision_msgs.msg import Detection2D, Detection2DArray, ObjectHypothesisWithP
 
 from lekiwi_rmf.object_recognition import recognition_identity, model_spec
 
+from lekiwi_rmf.object_cameras import camera_bindings
 from lekiwi_rmf.object_observations import ObservationStore, observation, query_parameters
 from lekiwi_rmf.perception_profiles import default_profile
 from lekiwi_rmf.perception_query import make_query
@@ -25,6 +26,8 @@ from lekiwi_rmf.perception_query import make_query
 
 MODEL_SHA256 = recognition_identity('yolox')[0]
 PROFILE = default_profile('yolox')
+# The tracked limits of the camera these fixtures are captured with.
+QUALITY = camera_bindings(['astra_color'])['astra_color']['input_quality']
 
 
 def bare_recognizer(backend):
@@ -78,7 +81,7 @@ def operating_point(image, model=MODEL_SHA256, profile=PROFILE, query=None, extr
 
 
 def document(count=1, stamp=1):
-    return observation(*capture(count, stamp), MODEL_SHA256, 'astra_color', profile=PROFILE)
+    return observation(*capture(count, stamp), MODEL_SHA256, 'astra_color', profile=PROFILE, quality_limits=QUALITY)
 
 
 @pytest.mark.parametrize('count', [0, 1, 2])
@@ -93,11 +96,11 @@ def test_contract_preserves_no_match_single_and_ambiguous_candidates(count):
 
 
 def test_each_operating_point_on_one_capture_is_a_distinct_observation(tmp_path):
-    first, jpeg = observation(*capture(), MODEL_SHA256, 'astra_color', profile=PROFILE)
-    second, _ = observation(*capture(), 'b' * 64, 'astra_color', profile=PROFILE)
+    first, jpeg = observation(*capture(), MODEL_SHA256, 'astra_color', profile=PROFILE, quality_limits=QUALITY)
+    second, _ = observation(*capture(), 'b' * 64, 'astra_color', profile=PROFILE, quality_limits=QUALITY)
     stricter = default_profile('yolox').parameters | {'score_threshold': .6}
     from lekiwi_rmf.perception_profiles import make_profile
-    third, _ = observation(*capture(), MODEL_SHA256, 'astra_color', profile=make_profile('yolox', stricter))
+    third, _ = observation(*capture(), MODEL_SHA256, 'astra_color', profile=make_profile('yolox', stricter), quality_limits=QUALITY)
     # Another profile on the same capture and model is another inference, recorded with its revision.
     assert third['capture_id'] == first['capture_id'] and third['id'] not in (first['id'], second['id'])
     assert third['profile']['parameters']['score_threshold'] == .6 and first['profile']['revision'] == PROFILE.revision
@@ -146,7 +149,7 @@ def test_operating_point_identity_records_native_label_output():
 
 
 def test_color_measurement_does_not_label_red_as_blue():
-    record, _ = observation(*capture(blue=False), MODEL_SHA256, 'astra_color', profile=PROFILE)
+    record, _ = observation(*capture(blue=False), MODEL_SHA256, 'astra_color', profile=PROFILE, quality_limits=QUALITY)
     assert record['detections'][0]['blue_fraction'] == 0
 
 
@@ -171,7 +174,7 @@ def test_invalid_boundary_data_is_rejected(fault):
     else:
         image.width = 2000
     with pytest.raises(ValueError):
-        observation(image, detections, MODEL_SHA256, 'astra_color', profile=PROFILE)
+        observation(image, detections, MODEL_SHA256, 'astra_color', profile=PROFILE, quality_limits=QUALITY)
 
 
 @pytest.mark.parametrize('text', ['[]', '{"limit":true}', '{"limit":101}', '{"after_sequence":-1}',
@@ -605,6 +608,59 @@ def test_multiclass_manifest_defines_the_vocabulary(tmp_path, evaluator):
         manifest.write_text(json.dumps([{'scene_id': 'one', 'split': 'heldout', 'image': 'one.png', **bad}]))
         with pytest.raises(ValueError):
             evaluator.load_scenes(manifest)
+
+
+def test_input_quality_is_judged_against_the_capturing_cameras_limits(tmp_path, evaluator):
+    dark = capture()
+    dark[0].data = bytes(len(dark[0].data))
+    limits = {'dark_luma': 40., 'bright_luma': 225., 'blur_variance': 30.}
+
+    def flags(quality_limits):
+        record, _ = observation(*dark, MODEL_SHA256, 'astra_color', profile=PROFILE, quality_limits=quality_limits)
+        return record['input_quality']['flags']
+    assert flags(limits) == ['dark', 'blurred']
+    # Another camera's limits judge the same frame differently; an image of no tracked camera is not judged.
+    assert flags({**limits, 'dark_luma': 0., 'blur_variance': 0.}) == [] and flags(None) == []
+    cv2.imwrite(str(tmp_path / 'dark.png'), np.zeros((40, 60, 3), np.uint8))
+    manifest = tmp_path / 'scenes.json'
+    manifest.write_text(json.dumps([{'scene_id': 'dark', 'split': 'heldout', 'image': 'dark.png',
+                                     'objects': [{'label': 'cup', 'bbox': [5, 5, 10, 10]}]}]))
+    recognizer = fake_recognizer(lambda *_: [], identity={})
+    report = evaluator.evaluate(manifest, recognizer=recognizer, camera='front')
+    assert report['camera'] == 'front' and report['scenes'][0]['input_quality']['flags'] == ['dark', 'blurred']
+    report = evaluator.evaluate(manifest, recognizer=recognizer)
+    assert report['camera'] is None and report['scenes'][0]['input_quality']['flags'] == []
+    assert report['scenes'][0]['input_quality']['mean_luma'] == 0
+    with pytest.raises(ValueError, match='invalid tracked camera binding'):
+        evaluator.evaluate(manifest, recognizer=recognizer, camera='ceiling')
+
+
+def test_every_admitted_frame_fits_the_evidence_cap_and_larger_ones_are_refused_up_front():
+    from lekiwi_rmf.object_observations import (
+        MAX_EVIDENCE_BYTES, MAX_EVIDENCE_PIXELS, artifact_pixels, capture_artifact, evidence_size)
+    random = np.random.default_rng(0)
+
+    def densest(width, height):
+        # Saturated binary noise in every channel: the least compressible content found for baseline JPEG.
+        return random.integers(0, 2, (height, width, 3), dtype=np.uint8) * 255
+    # A noisy 1080p frame encodes to several times the cap: it was admitted and then lost at encoding.
+    noisy_1080p = random.integers(0, 256, (1080, 1920, 3), dtype=np.uint8)
+    assert len(cv2.imencode('.jpg', noisy_1080p, [cv2.IMWRITE_JPEG_QUALITY, 80])[1]) > 3 * MAX_EVIDENCE_BYTES
+    with pytest.raises(ValueError, match='1920x1080 image exceeds the 436906-pixel evidence budget'):
+        capture_artifact(noisy_1080p)
+    # The widest admitted 480-line frame fits even with the densest content, so content never rejects a frame.
+    width = MAX_EVIDENCE_PIXELS // 480
+    artifact = capture_artifact(densest(width, 480))
+    assert .8 * MAX_EVIDENCE_BYTES < len(artifact) <= MAX_EVIDENCE_BYTES
+    assert artifact_pixels(artifact).shape == (480, width, 3)
+    evidence_size(640, 480)
+    for size in [(width + 1, 480), (800, 600), (0, 480)]:
+        with pytest.raises(ValueError, match='evidence budget'):
+            evidence_size(*size)
+    image, detections = capture()
+    image.width, image.height = 1280, 720
+    with pytest.raises(ValueError, match='1280x720 image exceeds'):
+        observation(image, detections, MODEL_SHA256, 'astra_color', profile=PROFILE, quality_limits=QUALITY)
 
 
 def test_open_recognizer_is_evaluated_under_the_manifest_vocabulary(tmp_path, evaluator):

@@ -681,7 +681,8 @@ def test_observations_carry_the_identity_of_the_recognizer_that_served_the_frame
     bindings = tmp_path / 'cameras.yaml'
     bindings.write_text(yaml.safe_dump({'astra_color': {
         'mount': 'base', 'image_topic': '/camera/test/image', 'optical_frame': 'camera_optical',
-        'camera_info_topic': '/camera/test/info', 'depth_topic': '', 'calibration_file': ''}}))
+        'camera_info_topic': '/camera/test/info', 'depth_topic': '', 'calibration_file': '',
+        'input_quality': {'dark_luma': 40., 'bright_luma': 225., 'blur_variance': 30.}}}))
     primary = recognition_identity(REMOTE)[0]
     fallback = recognition_identity('yolox')[0]
     context = Context()

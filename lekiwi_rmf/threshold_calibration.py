@@ -13,10 +13,13 @@ ROS-free, so it runs anywhere the evaluator's JSON reports are available.
 
 from collections import defaultdict
 import hashlib
+from itertools import takewhile
 import json
 import math
 from pathlib import Path
 import re
+
+import yaml
 
 SEARCH_PROCEDURE = 'search-min-object-px/1'
 INPUT_QUALITY_PROCEDURE = 'input-quality-limits/1'
@@ -25,9 +28,8 @@ DEFAULT_TARGET_RECALL = .90
 # cleanroom#98: every hard condition needs this many scene groups before limits are chosen.
 HARD_CONDITIONS = ('dark', 'overhead', 'occlusion', 'transparent', 'reflective', 'blur', 'similar_instances')
 MIN_CONDITION_GROUPS = 20
-# Engineering defaults in force until a calibration replaces them (cleanroom#98).
-INPUT_QUALITY_DEFAULTS = {'dark_luma': 40., 'bright_luma': 225., 'blur_variance': 30.}
-INPUT_QUALITY_LINE = re.compile(r'^DARK_LUMA, BRIGHT_LUMA, BLUR_VARIANCE = .*$', re.MULTILINE)
+INPUT_QUALITY_LIMITS = ('dark_luma', 'bright_luma', 'blur_variance')
+CAMERAS_FILE = 'config/object_cameras.yaml'
 SEARCH_PX_LINE = re.compile(r'^(?P<indent>[ \t]*)search_min_object_px:[^\n]*$', re.MULTILINE)
 
 
@@ -150,7 +152,7 @@ def trials(loaded):
     report = loaded['report']
     result = []
     for scene in report['scenes']:
-        camera = loaded['camera'] or scene.get('camera') or 'pooled'
+        camera = loaded['camera'] or report.get('camera') or 'pooled'
         expected, predicted = scene.get('expected', []), scene.get('predictions', [])
         quality = scene.get('input_quality')
         for label in sorted({item['label'] for item in expected}):
@@ -273,16 +275,15 @@ def calibrate_search(loaded, current, target=DEFAULT_TARGET_RECALL):
                 for key in ('search_min_object_m', 'search_min_height_m', 'search_max_height_m')}}
 
 
-def calibrate_input_quality(loaded, target=DEFAULT_TARGET_RECALL, current=None):
-    """Fit the dark, overexposed and blurred limits; each on trials passing the other two current limits."""
-    current = dict(current or INPUT_QUALITY_DEFAULTS)
-    model, inputs = _provenance(loaded)
-    every = [trial for item in loaded for trial in trials(item)]
-    base = {'schema': 1, 'procedure': INPUT_QUALITY_PROCEDURE, 'confidence': CONFIDENCE,
-            'uncertainty_unit': 'scene_group', 'model_sha256': model, 'inputs': inputs,
-            'current_value': current, 'proposed_value': None}
-    if not every or any(trial['mean_luma'] is None for trial in every):
-        return {**base, 'status': 'insufficient_corpus', 'reason': 'report_lacks_input_quality'}
+def input_quality_limits(root):
+    """Each tracked camera's limits in force (config/object_cameras.yaml)."""
+    cameras = yaml.safe_load((Path(root) / CAMERAS_FILE).read_text())
+    return {camera: {name: float(binding['input_quality'][name]) for name in INPUT_QUALITY_LIMITS}
+            for camera, binding in cameras.items()}
+
+
+def _fit_input_quality(every, current, target):
+    """One camera's limits; each fitted on trials passing that camera's other two current limits."""
     conditions = {}
     for tag in sorted(set(HARD_CONDITIONS) | {tag for trial in every for tag in trial['conditions']}):
         tagged = [trial for trial in every if tag in trial['conditions']]
@@ -297,7 +298,8 @@ def calibrate_input_quality(loaded, target=DEFAULT_TARGET_RECALL, current=None):
         kept = [trial for trial in every if all(_trusted(trial, other, current[key], way)
                                                 for key, other, way in others)]
         limits[name] = fit_cut(_split(kept, 'development'), _split(kept, 'heldout'), feature, direction, target)
-    result = {**base, 'conditions': conditions, 'condition_groups_missing': missing, 'limits': limits}
+    result = {'current_value': current, 'proposed_value': None, 'conditions': conditions,
+              'condition_groups_missing': missing, 'limits': limits}
     if missing:
         return {**result, 'status': 'insufficient_corpus', 'reason': 'hard_conditions_below_minimum'}
     statuses = {fit['status'] for fit in limits.values()}
@@ -306,6 +308,46 @@ def calibrate_input_quality(loaded, target=DEFAULT_TARGET_RECALL, current=None):
         return {**result, 'status': status, 'reason': 'a_limit_is_not_calibrated'}
     return {**result, 'status': 'calibrated', 'reason': 'heldout_confirms_every_limit',
             'proposed_value': {name: fit['cut'] for name, fit in limits.items()}}
+
+
+def calibrate_input_quality(loaded, current, target=DEFAULT_TARGET_RECALL):
+    """Fit the dark, overexposed and blurred limits of each camera the reports name.
+
+    `current` maps every tracked camera to its limits in force (input_quality_limits). Reports that name
+    no camera are pooled into one fit proposed for every tracked camera, which is sound only while those
+    cameras share their current limits; named and unnamed reports cannot be mixed.
+    """
+    model, inputs = _provenance(loaded)
+    every = [trial for item in loaded for trial in trials(item)]
+    base = {'schema': 1, 'procedure': INPUT_QUALITY_PROCEDURE, 'confidence': CONFIDENCE,
+            'uncertainty_unit': 'scene_group', 'model_sha256': model, 'inputs': inputs,
+            'current_value': current, 'proposed_value': None}
+    if not every or any(trial['mean_luma'] is None for trial in every):
+        return {**base, 'status': 'insufficient_corpus', 'reason': 'report_lacks_input_quality'}
+    by_camera = defaultdict(list)
+    for trial in every:
+        by_camera[trial['camera']].append(trial)
+    if 'pooled' in by_camera:
+        if len(by_camera) > 1:
+            raise ValueError('name the camera of every report (CAMERA=report) or of none')
+        if len({tuple(limits.items()) for limits in current.values()}) != 1:
+            raise ValueError('tracked cameras have different limits; name the camera of every report')
+    elif set(by_camera) - set(current):
+        raise ValueError(f'reports name untracked cameras: {sorted(set(by_camera) - set(current))}')
+    shared = next(iter(current.values()))
+    cameras = {camera: _fit_input_quality(items, shared if camera == 'pooled' else current[camera], target)
+               for camera, items in sorted(by_camera.items())}
+    statuses = {fit['status'] for fit in cameras.values()}
+    status = ('calibrated' if statuses == {'calibrated'} else
+              'no_feasible_cut' if 'no_feasible_cut' in statuses else 'insufficient_corpus')
+    result = {**base, 'status': status, 'cameras': cameras,
+              'reason': ','.join(f"{camera}:{fit['reason']}" for camera, fit in cameras.items())}
+    if status == 'calibrated':
+        # A pooled fit is every tracked camera's; a named fit is that camera's alone.
+        pooled = cameras.get('pooled')
+        result['proposed_value'] = {camera: (pooled or cameras.get(camera))['proposed_value']
+                                    for camera in (current if pooled else cameras)}
+    return result
 
 
 # ── reviewed write ─────────────────────────────────────────────────────────────────────────
@@ -336,15 +378,17 @@ def write_calibration(root, calibration):
             lambda found: f"{found['indent']}search_min_object_px: {calibration['proposed_value']:g}"
                           f'  # calibrated: {relative}', text)
     elif calibration['procedure'] == INPUT_QUALITY_PROCEDURE:
-        target = root / 'lekiwi_rmf/object_observations.py'
+        target = root / CAMERAS_FILE
         text = target.read_text()
-        if len(INPUT_QUALITY_LINE.findall(text)) != 1:
-            raise ValueError('lekiwi_rmf/object_observations.py has no input-quality limits line; '
-                             'the runtime limits land with cleanroom#100')
-        value = calibration['proposed_value']
-        updated = INPUT_QUALITY_LINE.sub(
-            f"DARK_LUMA, BRIGHT_LUMA, BLUR_VARIANCE = {value['dark_luma']!r}, {value['bright_luma']!r}, "
-            f"{value['blur_variance']!r}  # calibrated: {relative}", text)
+        cameras = yaml.safe_load(text)
+        for camera, value in calibration['proposed_value'].items():
+            if camera not in cameras:
+                raise ValueError(f'{camera} is not a camera of {CAMERAS_FILE}')
+            cameras[camera]['input_quality'] = {**{name: float(value[name]) for name in INPUT_QUALITY_LIMITS},
+                                                'calibration': str(relative)}
+        # The leading comment block documents the file; YAML itself carries the values and their record.
+        header = ''.join(takewhile(lambda line: line.startswith('#'), text.splitlines(keepends=True)))
+        updated = header + yaml.safe_dump(cameras, sort_keys=False)
     else:
         raise ValueError(f"unknown procedure {calibration['procedure']!r}")
     record.parent.mkdir(parents=True, exist_ok=True)

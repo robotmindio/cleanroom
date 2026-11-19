@@ -85,7 +85,8 @@ def test_graphs_become_revisions_and_observations_reproject(tmp_path):
     bindings = tmp_path / 'cameras.yaml'
     bindings.write_text(yaml.safe_dump({'astra_color': {
         'mount': 'base', 'image_topic': '/camera/test/image', 'optical_frame': 'camera_optical',
-        'camera_info_topic': '/camera/test/info', 'depth_topic': '', 'calibration_file': ''}}))
+        'camera_info_topic': '/camera/test/info', 'depth_topic': '', 'calibration_file': '',
+        'input_quality': {'dark_luma': 40., 'bright_luma': 225., 'blur_variance': 30.}}}))
     collector = ObjectObservations(context=context, parameter_overrides=[
         Parameter('database_path', value=str(tmp_path / 'observations.db')),
         Parameter('camera_ids', value=['astra_color']),

@@ -31,6 +31,28 @@ def test_camera_bindings_fail_closed(names):
         camera_bindings(names)
 
 
+def test_each_camera_carries_its_input_quality_limits_outside_its_identity(tmp_path):
+    import yaml
+    from lekiwi_rmf.object_cameras import config_directory
+    tracked = yaml.safe_load((config_directory() / 'object_cameras.yaml').read_text())
+    path = tmp_path / 'cameras.yaml'
+    stricter = {'dark_luma': 60, 'bright_luma': 200., 'blur_variance': 80., 'calibration': 'config/calibration/x.json'}
+    path.write_text(yaml.safe_dump({**tracked, 'wrist': {**tracked['wrist'], 'input_quality': stricter}}))
+    before, after = camera_bindings(['front', 'wrist']), camera_bindings(['front', 'wrist'], path)
+    assert after['wrist']['input_quality'] == {'dark_luma': 60., 'bright_luma': 200., 'blur_variance': 80.}
+    assert after['front']['input_quality'] == before['front']['input_quality']
+    # Limits tune abstention reasons; the identity an admitted profile pins covers the physical source only.
+    assert after['wrist']['sha256'] == before['wrist']['sha256']
+    for bad in [None, {}, {**stricter, 'dark_luma': 200.}, {**stricter, 'bright_luma': 256.},
+                {**stricter, 'blur_variance': -1.}, {**stricter, 'dark_luma': float('nan')}, {**stricter, 'gain': 1.}]:
+        path.write_text(yaml.safe_dump({'front': {**tracked['front'], 'input_quality': bad}}))
+        with pytest.raises(ValueError, match='input_quality'):
+            camera_bindings(['front'], path)
+    path.write_text(yaml.safe_dump({'front': {key: value for key, value in tracked['front'].items() if key != 'input_quality'}}))
+    with pytest.raises(ValueError, match='invalid tracked camera binding'):
+        camera_bindings(['front'], path)
+
+
 def test_camera_bindings_keep_depth_and_optical_frame_with_their_camera():
     cameras = camera_bindings(['front', 'wrist', 'astra_color'])
     assert not cameras['front']['depth_topic'] and not cameras['wrist']['depth_topic']

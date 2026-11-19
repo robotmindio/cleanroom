@@ -13,7 +13,6 @@ import message_filters
 from cv_bridge import CvBridgeError
 import cv2
 import rclpy
-from rclpy.duration import Duration
 from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
@@ -38,6 +37,10 @@ from lekiwi_rmf.msg import PerceptionOperatingPoint
 from lekiwi_rmf.srv import GetObservationEvidence, QueryObservations, PinObservationEvidence, PrepareObservationEvidence
 
 
+# Depth and CameraInfo pair with a capture stamped within this long of them.
+DEPTH_PAIRING_SEC = .05
+
+
 def bounded_json(text, name, limit=65536):
     if len(text.encode()) > limit:
         raise ValueError(f'frame {name} exceeds {limit} bytes')
@@ -45,6 +48,30 @@ def bounded_json(text, name, limit=65536):
         return json.loads(text)
     except (ValueError, RecursionError) as error:
         raise ValueError(f'frame {name} is not JSON') from error
+
+
+class RecentMessages:
+    """A stream's messages stamped within `seconds` of its newest one, whatever the stream's rate."""
+
+    # Bounds memory on a fast stream; a capture older than what is held abstains as out of sync.
+    LIMIT = 1024
+
+    def __init__(self, seconds):
+        self._span, self._messages = round(seconds * 1e9), deque(maxlen=self.LIMIT)
+
+    def add(self, message):
+        stamp = Time.from_msg(message.header.stamp).nanoseconds
+        if self._messages and stamp < self._messages[-1][0] - self._span:
+            self._messages.clear()  # The clock went back; the old window can never pair again.
+        self._messages.append((stamp, message))
+        while self._messages[0][0] < stamp - self._span:
+            self._messages.popleft()
+
+    def nearest(self, stamp, tolerance):
+        """The message stamped closest to `stamp` (nanoseconds) within `tolerance`, or None."""
+        distance, message = min(((abs(held - stamp), message) for held, message in self._messages),
+                                key=lambda item: item[0], default=(None, None))
+        return message if message is not None and distance <= tolerance else None
 
 
 class ObjectObservations(Node):
@@ -88,8 +115,6 @@ class ObjectObservations(Node):
         self._age = self.get_parameter('max_source_age_sec').value
         if not 0 < self._age <= 10:
             raise ValueError('max_source_age_sec must be within (0,10]')
-        # Retain the tracked 30-Hz depth stream throughout the inference freshness window.
-        cache_size = math.ceil(self._age * 30) + 4
         self._streams = {}
         for name, binding in self._bindings.items():
             geometry = ObjectGeometry(binding['calibration_file'])
@@ -101,10 +126,12 @@ class ObjectObservations(Node):
             stream = {'last': 0., 'stamp': 0, 'reason': 'waiting for synchronized image/detections',
                       'geometry': geometry, 'depth': None, 'info': None}
             if binding['depth_topic']:
-                for key, kind, topic, size in [('depth', Image, binding['depth_topic'], cache_size),
-                                               ('info', CameraInfo, binding['camera_info_topic'], cache_size)]:
-                    subscriber = message_filters.Subscriber(self, kind, topic, qos_profile=qos_profile_sensor_data)
-                    stream[key] = message_filters.Cache(subscriber, size)
+                for key, kind, topic in [('depth', Image, binding['depth_topic']),
+                                         ('info', CameraInfo, binding['camera_info_topic'])]:
+                    # A capture is paired within DEPTH_PAIRING_SEC of its stamp until it leaves the
+                    # freshness window, so that span of the stream is retained at whatever rate it runs.
+                    stream[key] = RecentMessages(self._age + 2 * DEPTH_PAIRING_SEC)
+                    self.create_subscription(kind, topic, stream[key].add, qos_profile_sensor_data)
             self._streams[name] = stream
         models = [model for model, _, _ in self._roles.values()]
         if len(set(models)) != len(models):
@@ -167,18 +194,14 @@ class ObjectObservations(Node):
                 raise ValueError('capture frame differs from tracked camera binding')
             query, profile, extras, run, degraded, input_sha256 = self._operating_point(image, point, role)
             record, jpeg = observation(image, detections, role[0], camera, query, profile=profile, extras=extras,
+                                       quality_limits=self._bindings[camera]['input_quality'],
                                        run=run, degraded=degraded, input_sha256=input_sha256)
             record['camera_sha256'] = self._bindings[camera]['sha256']
             record['stationary'] = self._motion.stationary(stamp / 1e9, self._bindings[camera]['mount'] == 'arm')
             record['clock_domain'] = 'ros_sim_time' if self.get_parameter('use_sim_time').value else 'ros_system_time'
             record['ros_domain_id'] = self.context.get_domain_id()
-            capture_time = Time.from_msg(image.header.stamp)
-            interval = Duration(seconds=.05)
-            def nearest(cache):
-                if cache is None:
-                    return None
-                messages = cache.getInterval(capture_time-interval, capture_time+interval)
-                return min(messages, key=lambda msg: abs((Time.from_msg(msg.header.stamp)-capture_time).nanoseconds)) if messages else None
+            def nearest(recent):
+                return None if recent is None else recent.nearest(stamp, DEPTH_PAIRING_SEC * 1e9)
             stream['geometry'].ground(record, image, nearest(stream['depth']), nearest(stream['info']),
                                   self._transforms, self._map_context)
             record['map_pose'], reason = self._map_pose(image.header)
