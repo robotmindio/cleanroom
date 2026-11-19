@@ -74,7 +74,6 @@ OBJECTS_SERVICE = '/robot/objects/query'
 # The object map's answer schema (lekiwi_rmf/object_map.py); an answer under another is refused.
 OBJECT_MAP_SCHEMA = 'lekiwi.object_map/1'
 # The most entries one object query returns, newest sighting first.
-OBJECT_QUERY_LIMIT = 100
 SEARCH_LIMITS = ('max_duration_sec', 'max_travel_m')
 # Schema 1 is SubmitTask/GetTask/CancelTask; schema 2 is the TaskApi services below.
 API_SCHEMAS = (1, 2)
@@ -363,13 +362,13 @@ CAPABILITIES = {
         'effects': {'reversibility': 'reversible',
                     'compensation': 'Observations are data; navigate back to the starting pose.'},
         'effect': _search_effect,
-        'reasons': ('found', 'coverage_reached', 'inaccessible', 'budget_exhausted', 'incapable'),
+        'reasons': ('found', 'coverage_reached', 'inaccessible', 'budget_exhausted', 'incapable', 'unmapped'),
         'advertise': lambda gateway: {
             'effective_defaults': (dict(gateway._search_defaults, region=None)
                                    if gateway._search_defaults is not None else None),
             'labels': '/robot/perception/profile',
-            'outcomes': ['found', 'coverage_reached', 'inaccessible', 'budget_exhausted', 'incapable', 'canceled',
-                         'failed']},
+            'outcomes': ['found', 'coverage_reached', 'inaccessible', 'budget_exhausted', 'incapable', 'unmapped',
+                         'canceled', 'failed']},
         'description': ('Moves the base between viewpoints chosen by expected information gain until the query '
                         'label is detected, target_coverage of the searchable mapped region has fresh evidence '
                         'of absence, or a budget ends. query is a native label of the perception profile; '
@@ -1670,20 +1669,13 @@ class TaskGateway(Node):
         def refused(code, detail, condition, retryable=False, field='target.object', **data):
             return Refused(code, detail, retryable=retryable, next_condition=condition, field=field, **data)
 
-        # DEBT: the object map has no lookup by id, so an entry is found only among the newest
-        # OBJECT_QUERY_LIMIT sightings and an older one is refused until it is seen again. Revisit
-        # when /robot/objects/query accepts an object_id.
-        answer = self._query(self._objects, {'limit': OBJECT_QUERY_LIMIT}, 'the object map', 'wait_object_map',
-                             'target.object')
+        answer = self._query(self._objects, {'object_id': identifier, 'limit': 1}, 'the object map',
+                             'wait_object_map', 'target.object')
         try:
             if answer['schema'] != OBJECT_MAP_SCHEMA:
                 raise refused('precondition_failed', f'the object map answers {answer["schema"]}, not '
                               f'{OBJECT_MAP_SCHEMA}', 'fix_deployment')
             entry = next((item for item in answer['objects'] if item['object_id'] == identifier), None)
-            if entry is None and answer['truncated']:
-                raise refused('precondition_failed', f'the object is not among the {OBJECT_QUERY_LIMIT} most recently '
-                              'seen entries, the most the object map returns', 'run_search',
-                              field='target.object.object_id')
             if entry is None:
                 raise refused('not_found', 'the object map has no entry with this object_id', 'query_objects',
                               field='target.object.object_id')

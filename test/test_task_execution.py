@@ -37,7 +37,7 @@ from lekiwi_rmf.object_detector import ObjectDetector
 from lekiwi_rmf.perception_query import make_query
 from lekiwi_rmf.spatial_memory_node import SpatialMemory
 from lekiwi_rmf.srv import GetTask, QuerySpatial, SetPerceptionQuery, SubmitTask, TaskApi
-from lekiwi_rmf.task_gateway import BODY_PROFILE, OBJECT_MAP_SCHEMA, OBJECT_QUERY_LIMIT, TASK_API, TaskGateway
+from lekiwi_rmf.task_gateway import BODY_PROFILE, OBJECT_MAP_SCHEMA, TASK_API, TaskGateway
 from lekiwi_rmf.task_journal import Refused
 from ros_test_utils import release_graph
 from test_spatial_memory_ros import graph, rtabmap_database
@@ -891,9 +891,6 @@ def test_an_object_target_approaches_its_last_observed_estimate_and_says_what_it
     for case, code, data in (
             (object_answer(cup(object_id='d' * 32)), 'not_found',
              {'retryable': False, 'next_condition': 'query_objects', 'field': 'target.object.object_id'}),
-            # More entries than one query returns: the id may exist, so it is not called unknown.
-            (object_answer(truncated=True), 'precondition_failed',
-             {'retryable': False, 'next_condition': 'run_search', 'field': 'target.object.object_id'}),
             (object_answer(cup(state='absent_at_last_place')), 'precondition_failed',
              {**again, 'object_state': 'absent_at_last_place'}),
             (object_answer(cup(position=None, method='bearing_only', sigma_m=None)), 'precondition_failed',
@@ -920,7 +917,7 @@ def test_an_object_target_approaches_its_last_observed_estimate_and_says_what_it
     answer[0] = object_answer(cup(object_id='d' * 32), cup(state='unconfirmed'))
     reply = robot.submit('cup', 'navigate', target)
     assert reply.ok, reply.detail
-    assert asked[-1] == {'limit': OBJECT_QUERY_LIMIT}
+    assert asked[-1] == {'object_id': CUP, 'limit': 1}
     effective = reply.data['task']['effective_parameters']
     # The same standoff pose as the point target at the entry's x, y.
     assert (effective['x'], effective['y'], effective['yaw']) == pytest.approx((0.4, 0.0, 0.0), abs=1e-9)

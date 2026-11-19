@@ -138,6 +138,7 @@ optional; the request is capped at 4 KiB.
 
 | Field | Meaning |
 | --- | --- |
+| `object_id` | Exactly that entry, however long ago it was seen. |
 | `label` | Normalized like stored labels. |
 | `region` | A disk in the newest revision of the map the robot is localized in. Refused with `localization unavailable` when the session has not localized. |
 | `near_object_id`, `radius_m` | Entries within `radius_m` of that entry's position, itself excluded. Alternative to `region`. |

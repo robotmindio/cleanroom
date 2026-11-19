@@ -319,6 +319,8 @@ def test_queries_filter_by_label_place_time_and_state_and_report_expired_evidenc
     cup = everything['objects'][2]
     assert [item['last_seen_unix_sec'] for item in ask(objects, label='cup')['objects']] == [30, 10]
     assert [item['label'] for item in ask(objects, label='WATER bottle')['objects']] == ['water bottle']
+    assert [item['object_id'] for item in ask(objects, object_id=cup['object_id'])['objects']] == [cup['object_id']]
+    assert ask(objects, object_id='0' * 32)['objects'] == []
     assert [item['label'] for item in ask(objects, since=15)['objects']] == ['cup', 'water bottle']
     assert ask(objects, state='unconfirmed')['objects'] == []
     limited = ask(objects, limit=2)

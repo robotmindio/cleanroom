@@ -12,7 +12,7 @@ float64 target_coverage
 ---
 # Complete means found, or the target coverage was reached without finding it.
 bool complete
-# found, coverage_reached, inaccessible, budget_exhausted, incapable, canceled or failed.
+# found, coverage_reached, inaccessible, budget_exhausted, incapable, unmapped, canceled or failed.
 string outcome
 string message
 bool found

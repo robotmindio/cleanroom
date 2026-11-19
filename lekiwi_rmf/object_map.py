@@ -25,7 +25,7 @@ from lekiwi_rmf.spatial_anchors import SpatialError, Transform
 SCHEMA = 'lekiwi.object_map/1'
 # `moved` asserts that two entries are one object, an identity decision of Knowledge; nothing here assigns it.
 STATES = ('present', 'unconfirmed', 'moved', 'absent_at_last_place')
-QUERY_FIELDS = {'label', 'region', 'near_object_id', 'radius_m', 'since', 'state', 'limit'}
+QUERY_FIELDS = {'object_id', 'label', 'region', 'near_object_id', 'radius_m', 'since', 'state', 'limit'}
 
 
 @dataclass(frozen=True)
@@ -98,6 +98,11 @@ def parse_query(text):
     result = {'limit': value.get('limit', 20)}
     if type(result['limit']) is not int or not 1 <= result['limit'] <= 100:
         raise ValueError('limit must be an integer in 1..100')
+    if 'object_id' in value:
+        identifier = value['object_id']
+        if not isinstance(identifier, str) or len(identifier) != 32 or set(identifier) - set('0123456789abcdef'):
+            raise ValueError('object_id is 32 lowercase hexadecimal characters')
+        result['object_id'] = identifier
     if 'label' in value:
         if not isinstance(value['label'], str) or not 1 <= len(value['label']) <= 128:
             raise ValueError('label must be 1..128 characters')
@@ -523,6 +528,9 @@ class ObjectMap:
             centre = (origin['target'].map_ref, origin['point'][:2], request['near'][1])
         cursor = self.cursor()
         where, parameters = ['1'], []
+        if 'object_id' in request:
+            where.append('object_id=?')
+            parameters.append(request['object_id'])
         if 'label' in request:
             where.append('label=?')
             parameters.append(request['label'])

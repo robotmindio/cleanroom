@@ -97,7 +97,6 @@ stated:
 | --- | --- | --- |
 | `precondition_failed` | `wait_object_map` (retryable) | the object map is not answering |
 | `not_found` | `query_objects` | no entry has this `object_id` (`target.object.object_id`) |
-| `precondition_failed` | `run_search` | the entry is not among the 100 most recently seen, the most one query returns (`target.object.object_id`) |
 | `precondition_failed` | `run_search` (retryable) | the entry is `absent_at_last_place` (`object_state`), or is only a direction without a point (`method`) |
 | `site_mismatch`, `revision_unknown`, `map_unaligned` or `precondition_failed` | `refresh_reference` | the entry cannot be placed in the current map (`spatial_code` is the map's `position_unavailable_reason`), or lives in a map without alignment to the one the robot is in |
 | `precondition_failed` | `needs_localization` (retryable) | the robot is not localized in a known map |
@@ -238,7 +237,7 @@ events. A state without one clears it. The manifest lists them under
 
 | Kind | Codes |
 | --- | --- |
-| `terminal` | `succeeded`, `canceled`, `canceled_before_dispatch`, `goal_rejected`, `capability_disabled`, `executor_error` (a nonzero native error code), `executor_aborted`, `incomplete`, `outcome_unknown` (termination proven, outcome not), `budget_exhausted` (navigation deadline, active time or travel bound), and a search's own `found`, `coverage_reached`, `inaccessible`, `budget_exhausted`, `incapable` |
+| `terminal` | `succeeded`, `canceled`, `canceled_before_dispatch`, `goal_rejected`, `capability_disabled`, `executor_error` (a nonzero native error code), `executor_aborted`, `incomplete`, `outcome_unknown` (termination proven, outcome not), `budget_exhausted` (navigation deadline, active time or travel bound), and a search's own `found`, `coverage_reached`, `inaccessible`, `budget_exhausted`, `incapable`, `unmapped` |
 | `paused` | `collision_stop`, `collision_settling`, `base_motion_denied`, `safety_input_stale`, `safety_inputs_unavailable`, `awaiting_navigation_stop`, `navigation_stopped`, `executor_paused` (an exploration or search pausing itself) |
 | `unknown` | `result_unconfirmed`, `acceptance_unconfirmed`, `arm_stop_unconfirmed`, `pause_stop_unconfirmed` |
 
