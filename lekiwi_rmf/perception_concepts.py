@@ -108,29 +108,41 @@ def crop(image_bytes, region):
 
 
 def calibrate(positives, negatives, exemplars, references):
-    """Smallest similarity that admits no held-out negative, keeping as many held-out positives as possible.
+    """The match profile that admits the most held-out positives and no held-out negative.
 
-    A positive is admitted when it is at least `min_similarity` from the exemplars and closer to them than to
-    any taught negative. Returns (match, evidence); match is None when no threshold admits any positive
-    without also admitting a negative, which means the views cannot teach this concept by exemplar.
+    A view is admitted when its similarity to the exemplars is at least `min_similarity` and exceeds its
+    similarity to every taught negative by at least `min_margin`. For each candidate margin the threshold
+    is the smallest similarity that still admits no held-out negative. Equal recall keeps the smaller
+    margin, so a margin above 0 is fitted only where it recovers positives that a similarity threshold
+    alone would lose to a negative lying close to a taught one. Returns (match, evidence); match is None
+    when no profile admits a positive without also admitting a negative, which means the views cannot
+    teach this concept by exemplar.
     """
     def scores(vectors):
         return [(similarity(v, exemplars), similarity(v, references)) for v in vectors]
     held_positive, held_negative = scores(positives), scores(negatives)
-    margin = 0.0
-    candidates = sorted({s for s, n in held_positive if s - n >= margin}, reverse=True)
+    # Without taught negatives the margin only restates the similarity, so it stays 0.
+    margins = {0.0} | ({s - n for s, n in held_positive if s - n > 0} if references else set())
     best = None
-    for threshold in candidates:
-        if any(s >= threshold and s - n >= margin for s, n in held_negative):
-            break
-        best = threshold
+    for margin in sorted(margins):
+        threshold = None
+        for candidate in sorted({s for s, n in held_positive if s - n >= margin}, reverse=True):
+            if any(s >= candidate and s - n >= margin for s, n in held_negative):
+                break
+            threshold = candidate
+        if threshold is not None:
+            admitted = sum(s >= threshold and s - n >= margin for s, n in held_positive)
+            if best is None or admitted > best[0]:
+                best = admitted, threshold, margin
     evidence = {'heldout_positives': len(positives), 'heldout_negatives': len(negatives),
                 'positive_similarities': [round(s, 6) for s, _ in held_positive],
-                'negative_similarities': [round(s, 6) for s, _ in held_negative]}
+                'negative_similarities': [round(s, 6) for s, _ in held_negative],
+                'positive_margins': [round(s - n, 6) for s, n in held_positive],
+                'negative_margins': [round(s - n, 6) for s, n in held_negative]}
     if best is None:
         return None, {**evidence, 'admitted_positives': 0, 'false_admissions': 0}
-    admitted = sum(s >= best and s - n >= margin for s, n in held_positive)
-    return {'min_similarity': float(best), 'min_margin': margin}, {
+    admitted, threshold, margin = best
+    return {'min_similarity': float(threshold), 'min_margin': float(margin)}, {
         **evidence, 'admitted_positives': admitted, 'false_admissions': 0, 'recall': admitted / len(positives)}
 
 

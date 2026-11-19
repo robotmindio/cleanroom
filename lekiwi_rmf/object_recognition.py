@@ -450,7 +450,8 @@ class Recognizer:
         detections = response.get('detections')
         if not isinstance(detections, list) or len(detections) > parameters['max_detections']:
             raise ProviderUnavailable('perception provider returned malformed detections')
-        reportable, revisions = set(query.reportable), {concept['revision'] for concept in concepts}
+        reportable = set(query.reportable)
+        revisions = {concept['revision']: concept['match']['min_margin'] for concept in concepts}
         rows = Rows()
         for item in detections:
             box = item.get('box') if isinstance(item, dict) else None
@@ -475,6 +476,11 @@ class Recognizer:
                         or concept.get('name') != item['label'] or item['label'] not in reportable
                         or any(type(concept.get(key)) not in (int, float) for key in ('similarity', 'negative_similarity'))):
                     raise ProviderUnavailable('perception provider returned a concept match outside the query')
+                # A fitted margin lowers the similarity a match needs, so a match the provider admitted
+                # without that margin is one the taught views were calibrated to exclude.
+                margin = revisions[concept['revision']]
+                if margin > 0 and concept['similarity'] - concept['negative_similarity'] < margin - 1e-6:
+                    raise ProviderUnavailable('perception provider admitted a concept match below its calibrated margin')
                 extras['concept'] = {key: concept[key] for key in ('name', 'revision', 'similarity', 'negative_similarity')}
             x0, y0, x1, y1 = box
             rows.append([x0, y0, x1 - x0, y1 - y0, float(item['score']), item['label'], extras])
