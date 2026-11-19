@@ -25,7 +25,7 @@ from lekiwi_rmf.srv import PinObservationEvidence, QueryObservations
 from ros_test_utils import release_graph
 
 SCRIPTS = Path(__file__).parents[1] / 'scripts'
-ACTIONS = [*ARM_JOINTS, 'base_x_vel', 'base_y_vel', 'base_yaw_rate']
+ACTIONS = list(ARM_JOINTS)
 HEADER = '# tracked registry header\n# second line\n'
 
 
@@ -174,18 +174,19 @@ def test_a_job_waiting_for_a_gpu_slot_reports_why_and_gives_up_in_bounded_time(m
         FakeCluster(args, [failed]).wait(10**6)
 
 
-def training_dir(tmp_path, weights=b'weights', action_names=ACTIONS, name='run'):
+def training_dir(tmp_path, weights=b'weights', action_names=ACTIONS, name='run', policy='act', episodes=()):
     output = tmp_path / name
     (output / 'checkpoint').mkdir(parents=True)
     (output / 'checkpoint/model.safetensors').write_bytes(weights)
-    (output / 'checkpoint/config.json').write_text('{"type": "act"}')
+    (output / 'checkpoint/config.json').write_text(json.dumps({'type': policy}))
     (output / 'checkpoint/policy_preprocessor.json').write_text(
         '{"steps": [{"registry_name": "normalizer_processor", "state_file": "normalizer.safetensors"}]}')
     (output / 'checkpoint/normalizer.safetensors').write_bytes(b'stats')
     (output / 'manifest.json').write_text(json.dumps({
         'kind': 'lekiwi_skill_training', 'checkpoint': {'weights_sha256': hashlib.sha256(weights).hexdigest(),
                                                         'artifact_sha256': artifact_digest(output / 'checkpoint')},
-        'dataset': {'action_names': action_names, 'cameras': ['front'], 'fps': 10}}))
+        'dataset': {'action_names': action_names, 'cameras': ['front'], 'fps': 10,
+                    'export': {'schema': 2, 'episodes': list(episodes)}}}))
     return output
 
 
@@ -242,6 +243,54 @@ def test_a_training_manifest_without_the_artifact_digest_or_a_changed_checkpoint
     assert run_register(monkeypatch, registry_file, artifacts, 'learned', '--training', changed, '--version', 1,
                         '--description', 'x') == 1
     assert not artifacts.exists() and registry_file.read_text() == HEADER + 'skills: {}\n'
+
+
+def test_parameters_need_a_task_conditioned_policy_trained_on_them(tmp_path, registry_file, monkeypatch, capsys):
+    artifacts = tmp_path / 'skills'
+    declared = json.dumps({'side': {'type': 'string', 'max_length': 8}})
+    demonstrations = [{'task': 'push the block', 'parameters': {'side': 'left'}},
+                      {'task': 'push the block', 'parameters': {'side': 'right'}}]
+
+    def attempt(name, **training):
+        return run_register(monkeypatch, registry_file, artifacts, 'learned', '--training',
+                            training_dir(tmp_path, name=name, **training), '--version', 1, '--description', 'x',
+                            '--parameters', declared)
+    # ACT never reads the task text: its parameters would be accepted and silently ignored.
+    assert attempt('act', episodes=demonstrations) == 1
+    assert 'ignores the task text' in capsys.readouterr().err
+    assert attempt('undemonstrated', policy='smolvla', episodes=[{'task': 'push the block', 'parameters': {}}]) == 1
+    assert "no demonstration was recorded with the parameters ['side']" in capsys.readouterr().err
+    assert attempt('two-tasks', policy='smolvla', episodes=[*demonstrations, {'task': 'lift', 'parameters': {}}]) == 1
+    assert not artifacts.exists() and registry_file.read_text() == HEADER + 'skills: {}\n'
+    assert attempt('conditioned', policy='smolvla', episodes=demonstrations) == 0
+    skill = load_registry(registry_file, artifacts)['learned']
+    # The runner conditions on the demonstrated task text, the same one the export wrote on every frame.
+    assert skill.task == 'push the block' and set(skill.parameters) == {'side'}
+
+
+def test_effects_are_declared_at_registration_and_a_replacement_keeps_what_it_does_not_replace(
+        tmp_path, registry_file, monkeypatch):
+    artifacts = tmp_path / 'skills'
+    effects = {'reversibility': 'reversible', 'compensation': 'return the arm to its start pose'}
+    assert run_register(monkeypatch, registry_file, artifacts, 'learned', '--training', training_dir(tmp_path),
+                        '--version', 1, '--description', 'wave', '--max-duration-sec', 12, '--effects',
+                        json.dumps(effects)) == 0
+    assert load_registry(registry_file, artifacts)['learned'].effects == effects
+    assert run_register(monkeypatch, registry_file, artifacts, 'learned', '--training',
+                        training_dir(tmp_path, b'other', name='other'), '--version', 2, '--replace') == 0
+    skill = load_registry(registry_file, artifacts)['learned']
+    assert (skill.version, skill.description, skill.max_duration_sec, skill.effects) == (2, 'wave', 12.0, effects)
+    assert skill.status == 'experimental'
+    changed = {'reversibility': 'irreversible', 'compensation': 'isolate the object'}
+    assert run_register(monkeypatch, registry_file, artifacts, 'learned', '--training',
+                        training_dir(tmp_path, b'third', name='third'), '--version', 3, '--replace', '--effects',
+                        json.dumps(changed)) == 0
+    assert load_registry(registry_file, artifacts)['learned'].effects == changed
+    assert run_register(monkeypatch, registry_file, artifacts, 'learned', '--training',
+                        training_dir(tmp_path, b'fourth', name='fourth'), '--version', 4, '--replace', '--effects',
+                        '{"reversibility": "undoable", "compensation": "x"}') == 1
+    assert run_register(monkeypatch, registry_file, artifacts, 'unnamed', '--training', training_dir(tmp_path, name='new'),
+                        '--version', 1) == 1  # a new skill has no description to keep
 
 
 def test_host_unit_actions_are_refused_before_anything_is_installed(tmp_path, registry_file, monkeypatch):

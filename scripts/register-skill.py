@@ -5,7 +5,12 @@ Registering copies the checkpoint of a scripts/train-skill.py directory to
 ~/.ros/lekiwi/skills/<id>/<version> and writes its config/robot_skills.yaml entry
 with the checkpoint's artifact digest (every file the runner loads, lekiwi_rmf.skills.artifact_digest)
 and `status: experimental`. The observation, camera and
-action contract comes from the training manifest, not from the operator.
+action contract and the demonstrated task text come from the training manifest, not from
+the operator. `--parameters` is refused unless the checkpoint's policy type reads the task
+text and the demonstrations carried those parameters: otherwise they could never change
+what the skill does. `--effects` declares reversibility and compensation; an entry without
+it is treated as irreversible. Registering over an existing entry keeps every declaration
+(description, limits, parameters, effects) that is not passed again.
 
 `--promote REPORT [REPORT ...]` sets `status: qualified` only when every
 scripts/evaluate-skill.py report is a passing physical evaluation of this skill, version
@@ -29,7 +34,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lekiwi_rmf.qualification import load_suites, save_suites, store_report  # noqa: E402
-from lekiwi_rmf.skills import SKILL_ID, artifact_digest, load_registry  # noqa: E402
+from lekiwi_rmf.skills import SKILL_ID, TASK_CONDITIONED_POLICIES, artifact_digest, load_registry  # noqa: E402
 
 REGISTRY = Path(__file__).resolve().parents[1] / 'config/robot_skills.yaml'
 ARTIFACTS = Path.home() / '.ros/lekiwi/skills'
@@ -73,7 +78,34 @@ def contract(manifest):
         raise RegistrationError('the training manifest does not name the action features')
     if type(dataset.get('fps')) is not int:
         raise RegistrationError('the training manifest does not record the dataset rate')
-    return {'action_names': names, 'cameras': dataset['cameras'], 'fps': dataset['fps']}
+    declared = {'action_names': names, 'cameras': dataset['cameras'], 'fps': dataset['fps']}
+    tasks = {episode['task'] for episode in episodes(manifest)}
+    if len(tasks) == 1:
+        # The text the policy was trained on; the runner conditions on it (lekiwi_rmf.skills.conditioning).
+        declared['task'] = tasks.pop()
+    return declared
+
+
+def episodes(manifest):
+    return (manifest['dataset'].get('export') or {}).get('episodes', [])
+
+
+def check_conditioning(training, manifest, parameters):
+    """Declared parameters must be able to change what the policy does."""
+    if not parameters:
+        return
+    policy = json.loads((training / 'checkpoint/config.json').read_text()).get('type')
+    if policy not in TASK_CONDITIONED_POLICIES:
+        raise RegistrationError(
+            f'the checkpoint is a {policy!r} policy, which ignores the task text, so the parameters '
+            f'{sorted(parameters)} could never change its behaviour; register without parameters or train a '
+            f'task-conditioned policy ({sorted(TASK_CONDITIONED_POLICIES)})')
+    if len({episode['task'] for episode in episodes(manifest)}) != 1:
+        raise RegistrationError('a parameterised skill needs demonstrations of exactly one task')
+    demonstrated = {name for episode in episodes(manifest) for name in episode.get('parameters', {})}
+    if set(parameters) - demonstrated:
+        raise RegistrationError(f'no demonstration was recorded with the parameters {sorted(set(parameters) - demonstrated)} '
+                                '(scripts/record-episode.py --parameters)')
 
 
 def install(training, artifacts, skill_id, version, artifact):
@@ -118,10 +150,20 @@ def register(args):
                                 'pass --replace to supersede it')
     if current is not None and current['version'] == args.version and current.get('artifact_sha256') != artifact:
         raise RegistrationError(f'{args.skill_id} version {args.version} is registered with a different checkpoint')
-    entry = {'version': args.version, 'description': args.description, 'status': 'experimental',
-             'kind': 'lerobot_policy', 'checkpoint': f'{args.skill_id}/{args.version}', 'artifact_sha256': artifact,
-             **contract(manifest), 'max_duration_sec': args.max_duration_sec,
-             'max_joint_step_rad': args.max_joint_step_rad, 'parameters': args.parameters}
+    # What the operator declares; an option that is not passed keeps the registered declaration.
+    declared = {'description': None, 'max_duration_sec': 30.0, 'max_joint_step_rad': .05, 'parameters': {},
+                'effects': None}
+    for name, default in declared.items():
+        passed = getattr(args, name)
+        declared[name] = passed if passed is not None else (current or {}).get(name, default)
+    if not declared['description']:
+        raise RegistrationError('a new skill requires --description')
+    if declared['effects'] is None:
+        del declared['effects']
+    check_conditioning(args.training, manifest, declared['parameters'])
+    entry = {'version': args.version, 'status': 'experimental', 'kind': 'lerobot_policy',
+             'checkpoint': f'{args.skill_id}/{args.version}', 'artifact_sha256': artifact, **contract(manifest),
+             **declared}
     document['skills'][args.skill_id] = entry
     staged = staged_registry(args.registry, header, document, args.artifacts)
     try:
@@ -199,10 +241,13 @@ def main():
     parser.add_argument('--promote', type=Path, nargs='+', metavar='REPORT',
                         help='passing physical scripts/evaluate-skill.py reports, one per stored suite')
     parser.add_argument('--version', type=int)
-    parser.add_argument('--description', default='')
-    parser.add_argument('--max-duration-sec', type=float, default=30.0)
-    parser.add_argument('--max-joint-step-rad', type=float, default=.05)
-    parser.add_argument('--parameters', default='{}', help='JSON parameter declarations (see config/robot_skills.yaml)')
+    parser.add_argument('--description')
+    parser.add_argument('--max-duration-sec', type=float, help='default 30')
+    parser.add_argument('--max-joint-step-rad', type=float, help='default 0.05')
+    parser.add_argument('--parameters', type=json.loads, help='JSON parameter declarations, '
+                        '{NAME: {"type": "number"|"boolean"|"string", "min", "max", "max_length"}}; default none')
+    parser.add_argument('--effects', type=json.loads, help='JSON {"reversibility": "reversible"|"compensable"|'
+                        '"irreversible", "compensation": TEXT}; undeclared is irreversible')
     parser.add_argument('--replace', action='store_true', help='supersede a registered entry with a new version')
     parser.add_argument('--registry', type=Path, default=REGISTRY)
     parser.add_argument('--artifacts', type=Path, default=ARTIFACTS)
@@ -213,11 +258,10 @@ def main():
         parser.error('skill_id must match [a-z][a-z0-9_]{0,63}')
     if (args.training is None) == (args.promote is None):
         parser.error('pass exactly one of --training or --promote')
-    if args.training is not None and (args.version is None or not args.description):
-        parser.error('registering requires --version and --description')
+    if args.training is not None and args.version is None:
+        parser.error('registering requires --version')
     args.artifacts = args.artifacts.expanduser()
     try:
-        args.parameters = json.loads(args.parameters)
         result = register(args) if args.training is not None else promote(args)
     except (RegistrationError, OSError, ValueError, KeyError) as error:
         print(f'{parser.prog}: {error}', file=sys.stderr)
