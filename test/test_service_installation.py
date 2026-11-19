@@ -1475,11 +1475,46 @@ def test_torque_on_failure_key_is_validated_and_reaches_both_machines(tmp_path):
     assert load("false").stdout.strip() == "false"
     assert load("yes").returncode != 0
 
+    # The loader replaced a three-key parser; its messages are part of the contract.
+    assert "LEKIWI_DISARM_ON_FAILURE must be true or false" in load("yes").stderr
+
     # Both sides must pass the same opt-in on, and default to holding torque.
     stack = (ROOT / "scripts" / "ros-start.sh").read_text(encoding="utf-8")
     host = (ROOT / "scripts" / "robot-host.sh").read_text(encoding="utf-8")
     assert "safety_policy:=strict" in stack
     assert '--safety.disarm_on_failure="${LEKIWI_DISARM_ON_FAILURE:-false}"' in host
+
+
+def test_per_machine_hardware_overrides_reach_the_services_through_the_env_file(tmp_path):
+    # systemd units pass no hardware variables, so .env is how a service learns them.
+    env_file = tmp_path / ".env"
+    names = ("LEKIWI_PORT", "LEKIWI_ID", "LEKIWI_LIDAR_PORT", "LEKIWI_FRONT", "LEKIWI_WRIST", "LEKIWI_WS")
+
+    def load(content, **environment):
+        env_file.write_text(content)
+        return subprocess.run(
+            ["bash", "-c", 'set -u; source "$1/scripts/lib/runtime-common.sh"; load_lekiwi_env "$2" || exit 1\n'
+             'shift 2; for name; do echo "${!name:-unset}"; done', "test", str(ROOT), str(env_file), *names],
+            env={**{k: v for k, v in os.environ.items() if not k.startswith("LEKIWI_")}, **environment},
+            capture_output=True, text=True,
+        )
+
+    port = "/dev/serial/by-id/usb-1a86_USB_Single_Serial_5A46083062-if00"
+    loaded = load(f"# LEKIWI_ID=commented\nLEKIWI_PORT={port}\r\nLEKIWI_ID=kitchen-2\nLEKIWI_LIDAR_PORT=/dev/ttyUSB1\n"
+                  "LEKIWI_FRONT=/dev/video4\nLEKIWI_WRIST=none\nLEKIWI_WS=/ignored\nLEKIWI_PORT\n")
+    assert loaded.returncode == 0, loaded.stderr
+    # Only allow-listed keys are read: LEKIWI_WS stays an environment-only override.
+    assert loaded.stdout.split() == [port, "kitchen-2", "/dev/ttyUSB1", "/dev/video4", "none", "unset"]
+    assert load("LEKIWI_PORT=/dev/ttyACM1\n", LEKIWI_PORT="/dev/ttyACM0").stdout.split()[0] == "/dev/ttyACM0"
+    for line, reason in (("LEKIWI_PORT=ttyACM0", "LEKIWI_PORT must be a /dev path"),
+                         ("LEKIWI_LIDAR_PORT=/dev/tty USB0", "LEKIWI_LIDAR_PORT must be a /dev path"),
+                         ("LEKIWI_ID=$(reboot)", "LEKIWI_ID must be letters, digits"),
+                         ("LEKIWI_WRIST=off", "LEKIWI_WRIST must be none or a /dev path")):
+        rejected = load(line + "\n")
+        assert rejected.returncode != 0 and reason in rejected.stderr, line
+    for script in ("robot-host.sh", "ros-lidar.sh", "ros-cameras.sh", "calibrate.sh"):
+        text = (ROOT / "scripts" / script).read_text(encoding="utf-8")
+        assert re.search(r"^load_lekiwi_env$", text, re.M), script
 
 
 def _bash(body: str, *args: str, **env: str) -> subprocess.CompletedProcess:

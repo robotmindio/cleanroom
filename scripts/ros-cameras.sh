@@ -16,6 +16,7 @@ source scripts/lib/runtime-common.sh
 # shellcheck source=/dev/null
 source scripts/lib/self-heal.sh
 
+load_lekiwi_env
 source_device_ros_env
 
 calibration="${LEKIWI_CAMERA_INFO:-$HOME/.ros/camera_info/lekiwi_front.yaml}"

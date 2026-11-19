@@ -30,6 +30,8 @@ set -Eeuo pipefail
 cd "$(dirname "$0")/.."
 # shellcheck source=/dev/null
 source scripts/lib/runtime-common.sh
+# The same per-machine hardware settings the services read.
+load_lekiwi_env
 # shellcheck source=/dev/null
 source scripts/lib/service-install-common.sh
 

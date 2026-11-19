@@ -2,7 +2,7 @@
 # Motor calibration and ZMQ motor host for a LeKiwi. The host serves no cameras:
 # ROS camera nodes own the USB cameras (scripts/ros-cameras.sh).
 # Usage: scripts/robot-host.sh [calibrate|--telemetry-fault-test]
-# Override per machine: LEKIWI_PORT, LEKIWI_ID
+# Override per machine, in the environment or .env: LEKIWI_PORT, LEKIWI_ID
 set -Eeuo pipefail
 
 cd "$(dirname "$0")/.."

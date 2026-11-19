@@ -6,39 +6,31 @@
 log() { printf '\n==> %s\n' "$*"; }
 die() { echo "$0: $*" >&2; exit 1; }
 
-load_lekiwi_env() {
-  local file=${1:-.env} line value
+load_lekiwi_env() { # export the known keys of a .env file; a value already in the environment wins
+  local file=${1:-.env} line key value pattern description
   [ -r "$file" ] || return 0
   while IFS= read -r line || [ -n "$line" ]; do
-    case $line in
-      LEKIWI_ROBOT_HOST=*)
-        value=${line#*=}
-        value=${value%$'\r'}
-        [[ $value =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || {
-          echo "$file: LEKIWI_ROBOT_HOST must be a hostname or IPv4 address" >&2
-          return 1
-        }
-        [[ -n ${LEKIWI_ROBOT_HOST:-} ]] || export LEKIWI_ROBOT_HOST=$value
-        ;;
-      LEKIWI_DISARM_ON_FAILURE=*)
-        value=${line#*=}
-        value=${value%$'\r'}
-        [[ $value == true || $value == false ]] || {
-          echo "$file: LEKIWI_DISARM_ON_FAILURE must be true or false" >&2
-          return 1
-        }
-        [[ -n ${LEKIWI_DISARM_ON_FAILURE:-} ]] || export LEKIWI_DISARM_ON_FAILURE=$value
-        ;;
-      LEKIWI_WIFI_COUNTRY=*)
-        value=${line#*=}
-        value=${value%$'\r'}
-        [[ $value =~ ^[A-Z]{2}$ ]] || {
-          echo "$file: LEKIWI_WIFI_COUNTRY must be two uppercase letters (ISO 3166)" >&2
-          return 1
-        }
-        [[ -n ${LEKIWI_WIFI_COUNTRY:-} ]] || export LEKIWI_WIFI_COUNTRY=$value
-        ;;
+    key=${line%%=*}
+    case $key in
+      LEKIWI_ROBOT_HOST) pattern='^[A-Za-z0-9][A-Za-z0-9._-]*$'; description="a hostname or IPv4 address" ;;
+      LEKIWI_DISARM_ON_FAILURE) pattern='^(true|false)$'; description="true or false" ;;
+      LEKIWI_WIFI_COUNTRY) pattern='^[A-Z]{2}$'; description="two uppercase letters (ISO 3166)" ;;
+      # Per-machine hardware: systemd units pass no such variables, so this file is
+      # how a service learns them.
+      LEKIWI_PORT|LEKIWI_LIDAR_PORT|LEKIWI_FRONT)
+        pattern='^/dev/[A-Za-z0-9._:/+-]+$'; description="a /dev path without whitespace" ;;
+      LEKIWI_WRIST) pattern='^(none|/dev/[A-Za-z0-9._:/+-]+)$'; description="none or a /dev path without whitespace" ;;
+      LEKIWI_ID) pattern='^[A-Za-z0-9_-]+$'; description="letters, digits, _ and - only" ;;
+      *) continue ;;
     esac
+    [[ $line == "$key="* ]] || continue
+    value=${line#*=}
+    value=${value%$'\r'}
+    [[ $value =~ $pattern ]] || {
+      echo "$file: $key must be $description" >&2
+      return 1
+    }
+    [[ -n ${!key:-} ]] || export "$key=$value"
   done < "$file"
 }
 

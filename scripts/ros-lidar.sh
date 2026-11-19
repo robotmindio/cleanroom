@@ -7,6 +7,7 @@ cd "$(dirname "$0")/.."
 source scripts/lib/runtime-common.sh
 # shellcheck source=/dev/null
 source scripts/lib/self-heal.sh
+load_lekiwi_env
 source_device_ros_env
 
 default_port=/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0
