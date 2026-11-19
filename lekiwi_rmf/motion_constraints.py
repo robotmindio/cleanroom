@@ -21,6 +21,8 @@ OPERATIONS = ('solve', 'verify')
 MAX_CONSTRAINTS = 4
 MAX_REGION_M = 0.5
 MAX_TIME_SEC = 10.0
+# MoveIt's model frame, the arm's tool link and its planning group (config/lekiwi.srdf).
+PLANNING_FRAME, TOOL_LINK, GROUP = 'base_footprint', 'tool0', 'arm'
 OBSERVATION_ID = re.compile(r'^[0-9a-f]{64}$')
 FRAME = re.compile(r'^[A-Za-z0-9_/.-]{1,128}$')
 # The solver keeps this much inside each constraint, so the executed motion (MoveIt's goal

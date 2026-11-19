@@ -35,7 +35,7 @@ from tf2_ros import Buffer, TransformException, TransformListener
 
 from lekiwi_rmf.arm_trajectory import ARM_JOINTS, JOINT_LIMITS
 from lekiwi_rmf.motion_constraints import (
-    SCHEMA, KinematicSearch, judge, parse_request, resolve, solvable,
+    GROUP, PLANNING_FRAME, SCHEMA, TOOL_LINK, KinematicSearch, judge, parse_request, resolve, solvable,
 )
 from lekiwi_rmf.srv import QueryObservations, TaskApi
 
@@ -59,9 +59,9 @@ class MotionSolver(Node):
     def __init__(self, **kwargs):
         super().__init__('motion_solver', **kwargs)
         # MoveIt's model frame, so forward kinematics needs no TF.
-        self.declare_parameter('planning_frame', 'base_footprint')
-        self.declare_parameter('tool_link', 'tool0')
-        self.declare_parameter('group', 'arm')
+        self.declare_parameter('planning_frame', PLANNING_FRAME)
+        self.declare_parameter('tool_link', TOOL_LINK)
+        self.declare_parameter('group', GROUP)
         # Object positions are measured at capture time; TF carries them to now through odometry.
         self.declare_parameter('fixed_frame', 'odom')
         self.declare_parameter('joint_state_max_age_sec', 0.5)
