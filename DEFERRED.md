@@ -89,7 +89,7 @@ intrusion stop are in the acceptance record. Tracked in
 [#7](https://github.com/robotmindio/cleanroom/issues/7).
 
 - The real joint-zero calibration and folded `travel_stow` are tracked. Confirm
-  the assembled arm rests on its contacts within the unchanged 0.02 rad tolerance
+  the assembled arm rests on its contacts within the production 0.08 rad `stow_tolerance`
   using fresh joint states before any torque cut. Qualify the physical arm/cable
   envelope against the base footprint; CAD clearance alone is insufficient.
 - Find and record a physically collision-free calibration pose, then review

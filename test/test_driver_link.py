@@ -296,7 +296,8 @@ def test_unsafe_or_undefined_settings_are_rejected(field, value, parameter):
 
 def test_gripper_trajectory_uses_its_tighter_completion_tolerance():
     node = make_node()
-    assert node.trajectory_tolerance == yaml.safe_load(
+    # An arrival inside the goal tolerance must also satisfy the supervisor's stow check.
+    assert node.trajectory_tolerance <= yaml.safe_load(
         (pathlib.Path(__file__).parents[1] / "config" / "safety_production.yaml").read_text()
     )["safety_supervisor"]["ros__parameters"]["stow_tolerance"]
     goal = types.SimpleNamespace(

@@ -259,7 +259,7 @@
       -0.0077,
       0.2161
      ],
-     "stow_tolerance": 0.02,
+     "stow_tolerance": 0.08,
      "strict": false,
      "use_sim_time": false
     },

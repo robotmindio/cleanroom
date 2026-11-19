@@ -10,7 +10,7 @@
     "arm_wrist_roll": -0.0077,
     "arm_gripper": 0.2161
   },
-  "joint_tolerance_rad": 0.02,
+  "joint_tolerance_rad": 0.08,
   "model_allowance_m": 0.005,
   "normals": [
     [
@@ -79,9 +79,9 @@
     ]
   ],
   "support_distances_m": [
-    0.236,
-    0.218,
-    0.17,
+    0.274,
+    0.259,
+    0.208,
     0.162,
     0.159,
     0.136,
@@ -93,8 +93,8 @@
     0.219,
     0.181,
     0.163,
-    0.175,
-    0.221
+    0.213,
+    0.261
   ],
   "footprint": [
     [
@@ -118,28 +118,28 @@
       -0.181
     ],
     [
-      0.121302645817,
-      -0.126184727599
+      0.213042761187,
+      -0.088184727599
     ],
     [
-      0.23335475337,
-      -0.014132620045
+      0.269265115971,
+      -0.031962372815
     ],
     [
-      0.236,
-      -0.007746429755
+      0.274,
+      -0.020531351575
     ],
     [
-      0.236,
-      -9.2948034e-05
+      0.274,
+      0.015305099716
     ],
     [
-      0.232811476175,
-      0.007604829429
+      0.270569597841,
+      0.023586823133
     ],
     [
-      0.11107933707,
-      0.129336968534
+      0.20281945244,
+      0.091336968534
     ],
     [
       0.039466444203,
@@ -163,7 +163,7 @@
     ]
   ],
   "inscribed_radius_m": 0.136,
-  "maximum_radius_m": 0.23612709961787348,
+  "maximum_radius_m": 0.2747681502603536,
   "link_motion_bounds_m": {
     "base_plate_layer1-v5": 0.0,
     "drive_motor_mount-v11-2": 0.0,
@@ -197,12 +197,12 @@
     "rpi5_usb_carrier": 0.0,
     "rpi5_table": 0.0,
     "so101_base_link": 0.0,
-    "so101_shoulder_link": 0.0010878071460441387,
-    "so101_upper_arm_link": 0.004644707892993909,
-    "so101_lower_arm_link": 0.006960266955597223,
-    "so101_wrist_link": 0.008144724532528874,
-    "so101_gripper_link": 0.014208400783585904,
-    "so101_moving_jaw_link": 0.017281442764938485,
+    "so101_shoulder_link": 0.004350140851361793,
+    "so101_upper_arm_link": 0.018574187181461598,
+    "so101_lower_arm_link": 0.027834108031037426,
+    "so101_wrist_link": 0.03257075396212263,
+    "so101_gripper_link": 0.056819395704438606,
+    "so101_moving_jaw_link": 0.06910849079785256,
     "astra_camera_link": 0.0
   },
   "link_taylor_remainders_m": {
@@ -238,16 +238,16 @@
     "rpi5_usb_carrier": 0.0,
     "rpi5_table": 0.0,
     "so101_base_link": 0.0,
-    "so101_shoulder_link": 1.0878252763747598e-05,
-    "so101_upper_arm_link": 9.920997683782309e-05,
-    "so101_lower_arm_link": 0.0002184594728751526,
-    "so101_wrist_link": 0.00033684625260521265,
-    "so101_gripper_link": 0.0006641345041739314,
-    "so101_moving_jaw_link": 0.000897005510820488,
+    "so101_shoulder_link": 0.00017405204421996157,
+    "so101_upper_arm_link": 0.001612425926707512,
+    "so101_lower_arm_link": 0.0036113165292393726,
+    "so101_wrist_link": 0.005655810239766929,
+    "so101_gripper_link": 0.011239755687446161,
+    "so101_moving_jaw_link": 0.015391261093146381,
     "astra_camera_link": 0.0
   },
   "source_sha256": {
-    "config/safety_production.yaml": "ae4122952317af7adac5e873de68a9c02d7bf00c2a0ef7b461df8b49f506ae66",
+    "config/safety_production.yaml": "31a88ff9d3a6e1caf6edc0456198c29771c26b164dc60dd93b4b810066ff0895",
     "urdf/lekiwi.urdf.xacro": "53d40381d335e2382287b9e0aa4daa2f63708d280e4914fe737fb206625ce76d",
     "urdf/lekiwi_cad.urdf": "a984a36f86d57478dd0b92e6ae966ffed0fdf8e3db277d6e5b22cb4e1773dede",
     "urdf/meshes/4-Omni-Directional-Wheel_Single_Body-v1-1.stl": "42b0ddb6c1cb8f5c33dfd80a7ff0457ed929e64284b8959a3fa16fb24e737ec6",

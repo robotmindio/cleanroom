@@ -19,7 +19,7 @@ physical parts and are excluded. Mesh source hashes are recorded in
 [`evidence/navigation-footprint-20261117.json`](evidence/navigation-footprint-20261117.json).
 
 The generator projects every physical part into `base_footprint` and bounds all
-joint angles within the production `travel_stow` tolerance of 0.02 rad. It uses
+joint angles within the production `travel_stow` tolerance of 0.08 rad. It uses
 per-vertex directional joint derivatives and a conservative Taylor remainder.
 For ancestor joints j <= k, the mixed derivative is `axis_j × J_k`; its norm is
 bounded by the perpendicular reach of distal joint k. That reach can grow by at
@@ -28,9 +28,9 @@ bounds over the Hessian and multiplying by `tolerance²/2` encloses every
 intermediate joint angle. The independent 5 mm model allowance is retained.
 Sixteen supporting lines are rounded outward to a millimetre and intersected.
 The certificate records both the original motion bounds and the tighter Taylor
-remainders (at most 0.898 mm).
+remainders (at most 15.4 mm).
 
-The generated body has a 0.136 m inscribed radius and a 0.236128 m maximum radius.
+The generated body has a 0.136 m inscribed radius and a 0.274768 m maximum radius.
 Both costmaps, the overlap stop and predictive braking use this same polygon.
 Explore's centre prefilter uses its inscribed radius; its full-body route checks
 remain active. The existing 1.10 m task-region stopping reserve and 0.33 m RMF/map
@@ -55,7 +55,7 @@ retained. Its expected geometry is corrected to the CAD certificate. With the
 smaller physical radius, conservatively expressing the original rotational
 stopping-distance bound as a time requires a longer predictive horizon:
 
-`max(0.447666/0.25, 0.307951/(0.236127100*0.40)) + 0.05 + 1.524829 < 5 s`.
+`max(0.447666/0.25, 0.307951/(0.274768150*0.40)) + 0.05 + 1.524829 < 5 s`.
 
 `FootprintApproach` therefore uses 5 seconds, including a separate reserve for
 the measured command-stop latency. It still considers the commanded
@@ -88,3 +88,10 @@ on a return at (0.181711, 0.068426) m. Its x+y was 0.250138 m, while every physi
 CAD part at the measured pose stayed below 0.222941 m. The directional bound
 retains the full joint/model allowances while excluding this excessive isotropic
 margin. The measured return remains an obstacle for predicted motion toward it.
+
+The stow tolerance is 0.08 rad, the value simulation already used. An unpowered
+arm settles on its contacts up to about 0.05 rad from `travel_stow` (measured
+after the 17 November power loss), and at 0.02 rad the robot could neither
+regain base permission nor redeploy without someone repositioning the arm. The
+envelope covers that whole tolerance, so its front grows from 0.236 m to
+0.274 m, and the 17 November return above now lies inside the body polygon.

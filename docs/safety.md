@@ -113,7 +113,7 @@ with one simulation step reserved. Side walls outside the moving body do not
 stop parallel travel; a turn that sweeps a corner into them reduces speed.
 Legacy static guards must still enclose the measured stopping clearance.
 The [CAD-derived footprint](navigation-footprint-20261117.md) replaces the former
-rectangle with an envelope of every modeled physical part, the full 0.02 rad
+rectangle with an envelope of every modeled physical part, the full 0.08 rad
 stow tolerance and the existing 5 mm model allowance. Nearby external returns
 remain in the scan; empty rectangular corners no longer count as body overlap.
 A newly captured arm stow invalidates the record. Tested speeds must cover the
@@ -198,7 +198,7 @@ The supported reference records the stable posture the assembled arm settled
 into, with the operator reporting physical support; capture and CAD measurements
 are in [the evidence record](evidence/supported-rest-20261116.json).
 It permits that resting contact to be considered by the planner. Base motion and
-torque-off still require the accepted `travel_stow` posture within 0.02 rad;
+torque-off still require the accepted `travel_stow` posture within the production `stow_tolerance` (0.08 rad);
 this record grants no new transport or physical trajectory acceptance.
 
 The motor host validates every streamed or locally sampled action before writing

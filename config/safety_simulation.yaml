@@ -23,7 +23,6 @@ safety_supervisor:
     # Simulation has no battery monitor (require_battery is false); keep the
     # threshold it has always run with.
     minimum_battery_percentage: 0.10
-    stow_tolerance: 0.08
     stow_joint_positions: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
 arm_workspace_monitor:

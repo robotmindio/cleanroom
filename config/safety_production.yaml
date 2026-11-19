@@ -53,7 +53,7 @@ safety_supervisor:
     minimum_battery_percentage: 0.15
     # Physically accepted compact fold. Base permission also requires healthy
     # inputs and the matching recorded footprint/stopping acceptance.
-    stow_tolerance: 0.02
+    stow_tolerance: 0.08
     stow_joint_names:
       - arm_shoulder_pan
       - arm_shoulder_lift

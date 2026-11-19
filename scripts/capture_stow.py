@@ -28,7 +28,7 @@ STOW_JOINTS = (
     "arm_shoulder_pan", "arm_shoulder_lift", "arm_elbow_flex",
     "arm_wrist_flex", "arm_wrist_roll", "arm_gripper",
 )
-# Radians. Under the supervisor's 0.02 stow tolerance.
+# Radians. Well under the supervisor's stow tolerance.
 MAX_SPREAD = 0.01
 DECIMALS = 4
 

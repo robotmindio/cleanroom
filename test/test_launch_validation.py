@@ -236,7 +236,7 @@ def test_qualified_held_stow_reference_is_used_by_production_and_attended_stages
         supervisor=find_node(resolve_bringup(profile='split',**arguments),
             node='lekiwi_rmf/safety_supervisor')['parameters']
         assert supervisor['stow_joint_positions']==expected
-        assert supervisor['stow_tolerance']==.02
+        assert supervisor['stow_tolerance']==.08
 
 
 def test_nav2_bounded_profile_matches_the_driver_and_preserves_production():

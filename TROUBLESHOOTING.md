@@ -328,7 +328,7 @@ source stamps and every servo before each OFF command, refuses USB storage or
 network interfaces, and schedules Pi-local power restoration before switching.
 It never disarms, arms, moves the robot, or changes safety gates. If powered,
 first use the normal guarded motion path to reach `travel_stow`; all existing
-powered-arm shutdown and deployment checks retain their 0.02 rad tolerance.
+powered-arm shutdown and deployment checks use the production `stow_tolerance` (0.08 rad).
 After recovery, actual fresh perception and normal safety permissions are still
 required before arming or moving to the nominal pose.
 

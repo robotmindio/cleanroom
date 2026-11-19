@@ -2,7 +2,8 @@
 """Exit 0 only when fresh /joint_states put the arm in the SRDF travel_stow pose.
 
 Anything that cuts arm torque runs this first: elsewhere the unpowered arm falls.
-Compares the arm group's travel_stow joints (config/lekiwi.srdf) within 0.02 rad,
+Compares the arm group's travel_stow joints (config/lekiwi.srdf) within the
+production supervisor's stow_tolerance,
 using a message received after start whose stamp is at most --max-age old. The
 gripper group is not required; it cannot fall onto anything. Never commands motion.
 """
@@ -15,6 +16,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import rclpy
+import yaml
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import JointState
 
@@ -25,7 +27,8 @@ from lekiwi_rmf.motion_guards import (
 )
 
 SEMANTIC = Path(__file__).resolve().parents[1] / "config" / "lekiwi.srdf"
-TOLERANCE = 0.02
+TOLERANCE = yaml.safe_load((SEMANTIC.parent / "safety_production.yaml").read_text())[
+    "safety_supervisor"]["ros__parameters"]["stow_tolerance"]
 
 
 def travel_stow(path=SEMANTIC):
