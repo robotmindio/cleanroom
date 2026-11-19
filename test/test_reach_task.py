@@ -17,6 +17,7 @@ from rclpy.parameter import Parameter
 from std_srvs.srv import Trigger
 from trajectory_msgs.msg import JointTrajectoryPoint
 
+from lekiwi_rmf.motion_constraints import PLANNING_FRAME, TOOL_LINK
 from lekiwi_rmf.srv import TaskApi
 from lekiwi_rmf.task_gateway import REACH_JOINTS, TaskGateway, reach_result, task_goal
 from ros_test_utils import release_graph
@@ -38,7 +39,7 @@ def wait(predicate, timeout=10):
     {}, {'joints': {}}, {'joints': {**TARGET, 'arm_gripper': 0.0}},
     {'joints': {k: v for k, v in TARGET.items() if k != 'arm_wrist_roll'}},
     {'joints': {**TARGET, 'arm_shoulder_pan': 3.5}}, {'joints': {**TARGET, 'arm_elbow_flex': True}},
-    {'joints': TARGET, 'solution_id': 'bad id with spaces'}, {'joints': TARGET, 'speed': 1.0},
+    {'joints': TARGET, 'solution_id': 'motion-1'}, {'joints': TARGET, 'speed': 1.0},
 ])
 def test_invalid_reach_targets_are_refused(parameters):
     with pytest.raises(ValueError):
@@ -46,7 +47,7 @@ def test_invalid_reach_targets_are_refused(parameters):
 
 
 def test_reach_goal_asks_moveit_to_plan_and_execute_to_the_joint_target():
-    goal, canonical = task_goal('reach', json.dumps({'joints': TARGET, 'solution_id': 'motion-1'}))
+    goal, canonical = task_goal('reach', json.dumps({'joints': TARGET}))
     assert json.loads(canonical)['joints'] == TARGET
     request = goal.request
     assert request.group_name == 'arm' and request.start_state.is_diff and not goal.planning_options.plan_only
@@ -69,6 +70,7 @@ class FakeMoveGroup(Node):
     def __init__(self, context):
         super().__init__('fake_move_group', context=context)
         self.code = MoveItErrorCodes.SUCCESS
+        self.hold = False
         self.goals = []
         self.server = ActionServer(self, MoveGroup, '/move_action', self.execute,
                                    goal_callback=lambda _: GoalResponse.ACCEPT,
@@ -87,6 +89,9 @@ class FakeMoveGroup(Node):
         point = JointTrajectoryPoint(positions=[item.position for item in
                                                 goal.request.request.goal_constraints[0].joint_constraints])
         result.executed_trajectory.joint_trajectory.points = [point]
+        while self.hold:
+            goal.publish_feedback(MoveGroup.Feedback(state='MONITOR'))
+            time.sleep(0.05)
         goal.succeed()
         return result
 
@@ -139,7 +144,9 @@ def test_reach_and_the_motion_solver_are_advertised(reach):
     wait(lambda: catalog()['motion']['available'])
     motion = catalog()['motion']
     assert motion['operations'] == ['solve', 'verify'] and motion['execute'] == 'reach'
-    assert motion['schema'] == 1 and motion['planning_frame'] == 'base_footprint'
+    assert motion['schema'] == 1
+    assert (motion['planning_frame'], motion['tool_link']) == (PLANNING_FRAME, TOOL_LINK)
+    assert entry['parameters'] == entry['required_parameters'] == ['joints']
 
 
 @pytest.mark.parametrize('code,state', [(MoveItErrorCodes.SUCCESS, 'succeeded'),
@@ -148,7 +155,7 @@ def test_reach_terminal_state_is_moveits_error_code(reach, code, state):
     fake, api, _ = reach
     fake.code = code
     ok, error, view = api('submit', {'task_id': f'reach-{code}', 'capability': 'reach', 'owner': 'planner',
-                                     'parameters': {'joints': TARGET, 'solution_id': 'motion-1'}})
+                                     'parameters': {'joints': TARGET}})
     assert ok, (error, view)
     assert view['admitted'] and view['task']['resources'] == ['arm', 'base']
 
@@ -158,6 +165,19 @@ def test_reach_terminal_state_is_moveits_error_code(reach, code, state):
     view = api('status', {'task_id': f'reach-{code}'})[2]['task']
     assert view['state'] == state
     assert len(fake.goals) == 1
+
+
+def test_a_running_reach_reports_moveits_own_state(reach):
+    fake, api, _ = reach
+    fake.hold = True
+    try:
+        assert api('submit', {'task_id': 'reach-held', 'capability': 'reach', 'owner': 'planner',
+                              'parameters': {'joints': TARGET}})[0]
+        wait(lambda: api('status', {'task_id': 'reach-held'})[2]['task']['detail'] == 'MONITOR')
+        assert api('status', {'task_id': 'reach-held'})[2]['task']['state'] == 'running'
+    finally:
+        fake.hold = False
+    wait(lambda: api('status', {'task_id': 'reach-held'})[2]['task']['state'] == 'succeeded')
 
 
 def test_reach_is_off_unless_the_deployment_enables_it(tmp_path):

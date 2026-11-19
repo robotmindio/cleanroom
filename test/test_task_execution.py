@@ -13,7 +13,7 @@ from types import SimpleNamespace
 from action_msgs.msg import GoalStatus
 import pytest
 import rclpy
-from rclpy.action import ActionServer, CancelResponse
+from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.context import Context
 from rclpy.executors import MultiThreadedExecutor, SingleThreadedExecutor
@@ -23,6 +23,7 @@ from rclpy.qos import DurabilityPolicy, QoSProfile
 from rclpy.task import Future
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
+import yaml
 
 from lekiwi_rmf.action import Explore, RunSkill
 from lekiwi_rmf.exploration_owner_guard import ExplorationOwnerGuard
@@ -40,6 +41,13 @@ def wait(predicate, timeout=20):
 
 
 SKILL = {'skill_id': 'insert_peg', 'parameters': {}}
+ARTIFACT = 'a' * 64
+REGISTRY = {name: {
+    'version': 2, 'description': 'test double', 'status': status, 'kind': 'lerobot_policy',
+    'checkpoint': f'{name}/2', 'artifact_sha256': ARTIFACT, 'action_names': ['arm_shoulder_pan'], 'cameras': [],
+    'fps': 10, 'max_duration_sec': 5.0, 'max_joint_step_rad': 0.1,
+    'parameters': {'depth_m': {'type': 'number', 'min': 0.0, 'max': 0.05}}}
+    for name, status in (('insert_peg', 'qualified'), ('trial', 'experimental'))}
 
 
 class ExecutionPeers(Peers):
@@ -47,12 +55,17 @@ class ExecutionPeers(Peers):
 
     def __init__(self, context):
         super().__init__(context)
+        self.reject_skill = False
+        self.skill_report = '{}'
         self.skilling = ActionServer(self, RunSkill, '/robot/skills/run', self.skill,
-                                     goal_callback=self.accept, cancel_callback=lambda _: CancelResponse.ACCEPT,
+                                     goal_callback=lambda _: GoalResponse.REJECT if self.reject_skill
+                                     else GoalResponse.ACCEPT,
+                                     cancel_callback=lambda _: CancelResponse.ACCEPT,
                                      callback_group=ReentrantCallbackGroup())
 
     def skill(self, goal):
-        return self.execute(goal, RunSkill.Result(outcome='finished', detail='ran to its end', result_json='{}'),
+        return self.execute(goal, RunSkill.Result(outcome='finished', detail='ran to its end',
+                                                  result_json=self.skill_report),
                             lambda: RunSkill.Feedback(stage='chunk'))
 
     def destroy_node(self):
@@ -65,6 +78,8 @@ class Robot:
         self.context = Context()
         rclpy.init(context=self.context)
         self.path = str(tmp_path / 'tasks.sqlite3')
+        self.registry = tmp_path / 'skills.yaml'
+        self.registry.write_text(yaml.safe_dump({'skills': REGISTRY}))
         self.peers = ExecutionPeers(self.context)
         self.guard = ExplorationOwnerGuard(context=self.context)
         self.client = Node('execution_client', context=self.context)
@@ -87,7 +102,8 @@ class Robot:
 
     def start_gateway(self):
         self.gateway = TaskGateway(context=self.context, parameter_overrides=[
-            Parameter('database_path', value=self.path), Parameter('allow_skills', value=True)])
+            Parameter('database_path', value=self.path), Parameter('allow_skills', value=True),
+            Parameter('registry_file', value=str(self.registry))])
         self.gateway_executor = SingleThreadedExecutor(context=self.context)
         self.gateway_executor.add_node(self.gateway)
         self.gateway_thread = threading.Thread(target=self.gateway_executor.spin, daemon=True)
@@ -161,6 +177,9 @@ def test_capabilities_declare_resources_effects_and_the_negotiated_schema(robot)
     assert entries['search']['resources'] == ['base', 'perception_query']
     assert entries['skill']['resources'] == ['arm', 'base']
     assert entries['skill']['implementation_kinds'] == ['lerobot_policy']
+    # Only what admission accepts is advertised: the qualified entry, with the version a plan can pin.
+    assert [(skill['skill_id'], skill['version']) for skill in entries['skill']['skills']] == [('insert_peg', 2)]
+    assert catalog['observations']['services']['prepare'] == '/robot/observations/prepare'
     assert entries['navigate']['effects']['reversibility'] == 'reversible'
     assert entries['skill']['effects']['undeclared']['reversibility'] == 'irreversible'
     assert entries['navigate']['units']['yaw'] == 'rad' and entries['navigate']['frame'] == 'map'
@@ -182,6 +201,72 @@ def test_t40_incompatible_requests_are_refused_before_dispatch(robot, capability
                           owner='agent-a', **extra)
         assert not reply.ok and reply.error == code, reply.detail
     assert robot.journal_rows() == [] and robot.peers.received == []
+
+
+@pytest.mark.parametrize('parameters,code', [
+    ({'skill_id': 'unknown_skill'}, 'competence_insufficient'),
+    ({'skill_id': 'trial'}, 'competence_insufficient'),
+    ({'skill_id': 'insert_peg', 'version': 1}, 'competence_insufficient'),
+    ({'skill_id': 'insert_peg', 'artifact_sha256': 'b' * 64}, 'competence_insufficient'),
+    ({'skill_id': 'insert_peg', 'parameters': {'depth_m': 0.5}}, 'invalid_request'),
+    ({'skill_id': 'insert_peg', 'parameters': {'speed': 1}}, 'invalid_request'),
+    ({'skill_id': 'insert_peg', 'version': '2'}, 'invalid_request'),
+])
+def test_a_skill_the_runner_would_reject_is_refused_before_anything_is_held(robot, parameters, code):
+    for operation in ('validate', 'submit'):
+        reply = robot.api(operation, task_id='bad', capability='skill', parameters=parameters, owner='agent-a')
+        assert not reply.ok and reply.error == code, reply.detail
+    assert robot.journal_rows() == [] and robot.peers.received == []
+    assert robot.capability_catalog()['task_api']['resources']['arm'] is None
+
+
+def test_a_qualified_skill_is_admitted_with_the_pins_its_plan_was_made_for(robot):
+    pinned = {'skill_id': 'insert_peg', 'parameters': {'depth_m': 0.01}, 'version': 2, 'artifact_sha256': ARTIFACT}
+    reply = robot.api('validate', task_id='peg', capability='skill', parameters=pinned, owner='agent-a')
+    assert reply.ok and reply.data['valid'], reply.detail
+    assert robot.submit('peg', 'skill', pinned).ok
+    running(robot, 'peg')
+    assert json.loads(robot.peers.requests[0].parameters_json) == {'depth_m': 0.01}
+    assert robot.status('peg')['detail'] == 'chunk'
+
+
+def test_a_goal_the_runner_rejects_leaves_nothing_to_compensate(robot):
+    robot.peers.reject_skill = True
+    assert robot.submit('weld', 'skill', SKILL).ok
+    wait(lambda: robot.status('weld')['state'] == 'failed')
+    view = robot.status('weld')
+    assert view['result'] == {'goal_rejected': True} and not view['compensation_required']
+    assert not view['holding_resources'] and robot.peers.received == []
+
+
+@pytest.mark.parametrize('report,abort', [('{"arm_stopped": false}', False), ('{"arm_stopped": false}', True),
+                                          ('not json', False)])
+def test_a_skill_that_ends_without_a_confirmed_arm_stop_keeps_its_resources(robot, report, abort):
+    robot.peers.skill_report, robot.peers.abort, robot.peers.finish = report, abort, True
+    assert robot.submit('weld', 'skill', SKILL).ok
+    wait(lambda: robot.status('weld')['state'] == 'unknown')
+    view = robot.status('weld')
+    assert 'did not confirm the arm stopped' in view['detail'] and view['result']['arm_stopped'] is False
+    assert view['stop'] == 'uncertain' and view['execution']['phase'] == 'uncertain' and view['holding_resources']
+    assert robot.capability_catalog()['task_api']['resources']['arm']['task_id'] == 'weld'
+    for capability, parameters in (('skill', SKILL), ('navigate', {'x': 0, 'y': 0})):
+        assert robot.submit('next', capability, parameters).error == 'execution_uncertain'
+    # Neither a cancel, the server's repeated answer nor a gateway restart turns it into a stop.
+    assert robot.api('cancel', task_id='weld').data['stop'] in ('stopping', 'uncertain')
+    robot.restart()
+    time.sleep(4.5)
+    view = robot.status('weld')
+    assert view['state'] in ('unknown', 'canceling') and view['stop'] != 'confirmed' and view['holding_resources']
+    assert robot.submit('next', 'navigate', {'x': 0, 'y': 0}).error in ('execution_uncertain', 'resource_busy')
+
+
+def test_a_skill_whose_runner_confirms_or_omits_the_arm_stop_releases_on_its_terminal_result(robot):
+    for task_id, report in (('old-runner', '{}'), ('confirmed', '{"arm_stopped": true}')):
+        robot.peers.skill_report, robot.peers.finish = report, True
+        assert robot.submit(task_id, 'skill', SKILL).ok
+        wait(lambda: robot.status(task_id)['state'] == 'succeeded')
+        view = robot.status(task_id)
+        assert view['stop'] == 'confirmed' and not view['holding_resources']
 
 
 def test_t40_validate_does_not_admit_and_schema_is_negotiated(robot):
@@ -257,13 +342,14 @@ def test_t47_lost_reply_after_admission_reconciles_without_a_second_command(robo
     assert len(robot.peers.received) == 1
 
 
-def test_t48_restart_between_journal_and_dispatch_never_invents_termination(robot):
+@pytest.mark.parametrize('capability,parameters', [('explore', {}), ('skill', SKILL)])
+def test_t48_restart_between_journal_and_dispatch_never_invents_an_outcome(robot, capability, parameters):
     for timer in robot.gateway.timers:
         timer.cancel()
-    assert robot.submit().ok
+    assert robot.submit(capability=capability, parameters=parameters).ok
     assert robot.status()['execution']['phase'] == 'admitted'
     # Crash after the dispatch marker committed but before the goal left the process.
-    robot.gateway._journal.mark_dispatched('task-1', robot.gateway._server_id('explore'))
+    robot.gateway._journal.mark_dispatched('task-1', robot.gateway._server_id(capability))
     robot.restart()
     wait(lambda: robot.status()['state'] == 'unknown')
     view = robot.status()
@@ -271,8 +357,15 @@ def test_t48_restart_between_journal_and_dispatch_never_invents_termination(robo
     assert view['stop'] == 'uncertain' and view['holding_resources']
     blocked = robot.submit('task-2', 'navigate', {'x': 0, 'y': 0})
     assert blocked.error == 'execution_uncertain'
-    time.sleep(1.5)
-    assert robot.status()['state'] == 'unknown' and robot.peers.received == []
+    # The server that would have run it denies the goal to its result and cancel services, and the
+    # process that might have sent it is gone: termination is proven, the outcome is not, nothing is replayed.
+    wait(lambda: robot.status()['state'] == 'failed')
+    view = robot.status()
+    assert view['result'] == {'outcome_known': False, 'termination_confirmed': True}
+    assert view['execution']['outcome'] == 'unknown' and not view['holding_resources']
+    assert view['times']['finished_at'] - view['times']['dispatched_at'] >= 3.0
+    assert robot.peers.received == []
+    assert robot.submit('task-2', 'navigate', {'x': 0, 'y': 0}).ok
 
 
 def test_t50_stale_generation_and_late_callback_cannot_overwrite_the_new_execution(robot):
@@ -351,16 +444,35 @@ def test_t42_t52_handoff_reconciles_then_compensation_does_not_hide_failure(robo
                      plan=plan).error == 'stale_generation'
     recorded = robot.api('compensate', task_id='weld', generation=generation, owner='agent-b', plan=plan)
     assert recorded.ok and recorded.data['task']['compensation']['material_rollback'] is False
+    # A lost reply is retried with the same plan; another plan never replaces the recorded one.
+    assert robot.api('compensate', task_id='weld', generation=generation, owner='agent-b', plan=plan).ok
+    assert robot.api('compensate', task_id='weld', generation=generation, owner='agent-b',
+                     plan={**plan, 'steps': []}).error == 'identity_conflict'
+    compensates = {'task_id': 'weld', 'generation': generation}
+    # A step is the plan's next step with exactly its parameters, not any task of that capability.
+    for capability, parameters in (('navigate', {'x': 5, 'y': 0}), ('explore', {})):
+        for operation in ('validate', 'submit'):
+            other = robot.api(operation, task_id='elsewhere', capability=capability, parameters=parameters,
+                              owner='agent-b', compensates=compensates)
+            assert other.error == 'precondition_failed' and other.data == {'step': 0}, other.detail
+    # A failed step leaves the plan open: a new task runs the same step again.
+    assert robot.submit('away-1', 'navigate', {'x': 0, 'y': 0}, owner='agent-b', compensates=compensates).ok
+    wait(lambda: robot.status('weld')['compensation']['status'] == 'failed')
     robot.peers.abort = robot.peers.finish = False
-    away = robot.submit('away', 'navigate', {'x': 0, 'y': 0}, owner='agent-b',
-                        compensates={'task_id': 'weld', 'generation': generation})
+    away = robot.submit('away', 'navigate', {'x': 0, 'y': 0}, owner='agent-b', compensates=compensates)
     assert away.ok, away.detail
+    assert robot.status('weld')['compensation']['status'] == 'in_progress'
     assert robot.submit('again', 'navigate', {'x': 0, 'y': 0}, owner='agent-b',
-                        compensates={'task_id': 'weld', 'generation': generation}).error in (
-        'resource_busy', 'precondition_failed')
+                        compensates=compensates).error == 'precondition_failed'
     running(robot, 'away')
     robot.peers.finish = True
     wait(lambda: robot.status('weld')['compensation']['status'] == 'succeeded')
+    assert robot.status('weld')['compensation']['tasks'] == {'away-1': 'failed', 'away': 'succeeded'}
+    assert robot.submit('more', 'navigate', {'x': 0, 'y': 0}, owner='agent-b',
+                        compensates=compensates).error == 'precondition_failed'
+    started = [event['data'] for event in robot.api('events', task_id='weld').data['events']
+               if event['kind'] == 'compensation_started']
+    assert started == [{'task_id': 'away-1', 'step': 0}, {'task_id': 'away', 'step': 0}]
     view = robot.status('weld')
     assert view['state'] == 'failed' and view['execution']['outcome'] == 'failed'
     assert view['goal'] == {'id': 'join-parts', 'revision': 1, 'verified': None, 'verifier': 'recuriant'}

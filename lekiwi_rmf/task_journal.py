@@ -157,11 +157,32 @@ class TaskJournal:
                           f'resources held: {held}; another managed task is active or its result is unconfirmed',
                           holders=holders)
 
+    def compensation_step(self, identifier, capability, values):
+        """The index of the plan step this task would run: the next one, with exactly its parameters.
+
+        Steps run in order, one at a time, and each succeeds once, so the number of succeeded
+        tasks is the next step. A failed or canceled step is run again by a new task.
+        """
+        plan = json.loads(self.row(identifier)['compensation'] or 'null')
+        if plan is None or plan['status'] not in ('planned', 'in_progress', 'failed'):
+            raise Refused('precondition_failed', 'that task has no open compensation plan')
+        tasks, steps = plan.get('tasks', {}), plan['plan']['steps']
+        running = sorted(task for task, state in tasks.items() if state not in TERMINAL)
+        if running:
+            raise Refused('precondition_failed', f'compensation step task {running[0]} has not finished')
+        # An open plan always has a step left: the last success closes it.
+        index = sum(state == 'succeeded' for state in tasks.values())
+        if (capability, values) != (steps[index]['capability'], steps[index]['parameters']):
+            raise Refused('precondition_failed', f'step {index} of the compensation plan is '
+                          f'{steps[index]["capability"]} {_json(steps[index]["parameters"])}', step=index)
+        return index
+
     def admit(self, identifier, capability, parameters, goal_id, result=None, *, resources=(),
               owner='', api_schema=1, digest='', compensates=''):
         with self._db:
             self._db.execute('BEGIN IMMEDIATE')
             self.require_free(resources)
+            step = self.compensation_step(compensates, capability, json.loads(parameters)) if compensates else None
             generation = self._db.execute('SELECT COALESCE(MAX(generation), 0) + 1 FROM tasks').fetchone()[0]
             self._db.execute('''INSERT INTO tasks
                 (id,capability,parameters,goal_id,state,detail,result,dispatched,owner,generation,
@@ -178,7 +199,7 @@ class TaskJournal:
                 plan['tasks'] = {**plan.get('tasks', {}), identifier: 'starting'}
                 plan['status'] = 'in_progress'
                 self._db.execute('UPDATE tasks SET compensation=? WHERE id=?', (_json(plan), compensates))
-                self._event(original, 'compensation_started', {'task_id': identifier})
+                self._event(original, 'compensation_started', {'task_id': identifier, 'step': step})
         return row
 
     def update(self, identifier, state, detail, result=None):
@@ -200,6 +221,7 @@ class TaskJournal:
         plan = json.loads(original['compensation'])
         plan['tasks'] = {**plan.get('tasks', {}), row['id']: state}
         done = sum(value == 'succeeded' for value in plan['tasks'].values())
+        # `failed` stays open: a new task may run the same step again.
         plan['status'] = ('failed' if state != 'succeeded' else
                           'succeeded' if done >= len(plan['plan']['steps']) else 'in_progress')
         self._db.execute('UPDATE tasks SET compensation=? WHERE id=?', (_json(plan), original['id']))
@@ -291,7 +313,10 @@ class TaskJournal:
             self._db.execute('BEGIN IMMEDIATE')
             row = self.fence(identifier, generation, owner, reconciled=True)
             if row['compensation']:
-                raise Refused('identity_conflict', 'a compensation plan is already recorded for this task')
+                # A retry after a lost reply returns the recorded plan; a different plan never replaces it.
+                if json.loads(row['compensation'])['plan'] == compensation['plan']:
+                    return row
+                raise Refused('identity_conflict', 'a different compensation plan is already recorded for this task')
             self._db.execute('UPDATE tasks SET compensation=? WHERE id=?', (_json(compensation), identifier))
             self._event(row, 'compensation_planned', {'intent': compensation['plan']['intent'],
                                                       'steps': len(compensation['plan']['steps'])})

@@ -700,24 +700,37 @@ def test_replacement_server_reconciles_forgotten_task_without_replay(system, cap
     assert start(identifier='task-2').accepted
 
 
-@pytest.mark.parametrize('original,current,guard,foreign,expected', [
-    ('old', 'new', True, False, True), ('same', 'same', True, False, False),
-    ('', 'new', True, False, False), ('old', 'new', False, False, False),
-    ('old', 'new', True, True, False),
+@pytest.mark.parametrize('original,current,guard,foreign,capability,sent,expected', [
+    ('old', 'new', True, False, 'explore', True, True), ('old', 'new', True, False, 'navigate', True, True),
+    ('', 'new', True, False, 'explore', False, False), ('old', 'new', False, False, 'explore', True, False),
+    ('old', 'new', True, True, 'explore', True, False),
+    # The same server denying the goal proves termination only once the sending process is gone,
+    # and never for navigation, whose lease the owner guard releases.
+    ('same', 'same', True, False, 'explore', False, True), ('same', 'same', True, False, 'skill', False, True),
+    ('same', 'same', True, False, 'explore', True, False), ('same', 'same', True, False, 'navigate', False, False),
+    ('same', 'same', False, False, 'explore', False, False), ('same', 'same', True, True, 'explore', False, False),
 ])
 @pytest.mark.parametrize('deadline', [False, True])
-def test_reconciliation_requires_replacement_server_and_clear_owner_guard(original, current, guard, foreign, expected, deadline):
+def test_reconciliation_requires_a_server_that_denies_the_goal_and_clear_owner_guard(
+        original, current, guard, foreign, capability, sent, expected, deadline):
     from types import SimpleNamespace
     from unittest.mock import Mock
-    row = {'id': 'task', 'capability': 'explore', 'server_id': original, 'goal_id': bytes(16), 'cancel_requested': 2 if deadline else 0}
+    row = {'id': 'task', 'capability': capability, 'server_id': original, 'goal_id': bytes(16),
+           'cancel_requested': 2 if deadline else 0, 'result': '{}'}
     gateway = SimpleNamespace(
         _unknown_results={'task': current}, _unknown_cancels={'task': current}, _unknown_since={'task': 5.0},
-        _server_id=lambda _: current, _observed={'explore': {bytes(range(16))} if foreign else set()},
+        _sent={'task'} if sent else set(),
+        _server_id=lambda _: current, _observed={capability: {bytes(range(16))} if foreign else set()},
         _guard=(guard, 10.0), _children=Mock(busy=lambda: False), _update=Mock())
     assert TaskGateway._reconcile(gateway, row, 10.1) == expected
     assert gateway._update.called == expected
     if expected and deadline:
         assert gateway._update.call_args.args[2].startswith('navigation deadline reached;')
+    if expected and original == current:
+        # A skill that ended without a confirmed arm stop is not released by its server forgetting it.
+        gateway._update.reset_mock()
+        assert not TaskGateway._reconcile(gateway, {**row, 'result': '{"arm_stopped": false}'}, 10.1)
+        assert not gateway._update.called
 
 
 def test_navigation_pause_with_unconfirmed_stop_expires_owner_lease(system):

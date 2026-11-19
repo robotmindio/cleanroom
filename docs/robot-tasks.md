@@ -35,6 +35,10 @@ RGB-D; unsupported sensor and fleet topologies keep it unavailable. Physical
 qualification remains open. A search `succeeded` only when it found the label
 or reached its target coverage; budget, inaccessible space and missing
 instruments are `failed` with the outcome and an honest coverage report.
+`skill` and `reach` command the arm and are off unless `allow_skills` or
+`allow_reach` is true in `config/robot_tasks.yaml`, the only switch for them.
+Both are false; turning one on for the physical robot is an operator decision
+that follows the arm trials in `DEFERRED.md`.
 
 States are `starting`, `running`, `paused`, `canceling`, `succeeded`, `canceled`,
 `failed` and `unknown`. Only `succeeded`, `canceled` and `failed` are terminal.
@@ -72,9 +76,15 @@ observed: a forgotten parent cannot release admission while a child executes.
 The owner guard reconciles its forgotten parent only after the same replacement
 server evidence and child termination. It then records `failed` with `outcome_known=false`
 and `termination_confirmed=true`; it never replays that task or claims success.
-Same-instance uncertainty and legacy rows without a recorded server instance
-remain blocked until native terminal evidence becomes available. A canceled
-request alone is never proof that motion stopped.
+The original server instance gives the same proof for an exploration, search,
+skill or reach task once the gateway that dispatched it has restarted: that
+server returns UNKNOWN for both result and cancellation, the sender is gone, so
+the goal ended or never arrived. The same grace period, no observed active ROS
+goals and a ready owner guard are required, and the record is the same `failed`
+with `outcome_known=false`. A goal the running gateway sent itself, any
+navigation task on its original server and legacy rows without a recorded
+server instance remain blocked until native terminal evidence becomes
+available. A canceled request alone is never proof that motion stopped.
 
 ## Negotiated task API (schema 2)
 
@@ -93,6 +103,17 @@ the runner executes (`lerobot_policy`), and each advertised skill carries its
 arm joints give `arm`, base commands `base` and cameras `camera`. These are
 additive schema 1 fields. Admission still holds the capability's `resources`
 (the arm, and the base kept still) for every skill.
+
+`skill` takes `skill_id`, an optional `parameters` object and optional `version`
+and `artifact_sha256` pins. `validate` and `submit` resolve the registry entry
+before anything is held: an unregistered or experimental skill, or a pin that
+differs from the registered entry, is refused with `competence_insufficient`
+(the reply carries the registered `version` and `artifact_sha256` for a pin
+mismatch); parameters outside the entry's declared names, types and ranges are
+`invalid_request`. The gateway and the skill runner read the same registry:
+`config/robot_skills.yaml`, or the `registry_file` parameter when both nodes set
+it. Experimental skills run only through the acquisition protocol, which calls
+the runner directly.
 
 | Service | Request | Result |
 | --- | --- | --- |
@@ -127,7 +148,7 @@ returns the existing task to any client.
 A repeated `task_id` with the same request digest (capability, parameters, goal
 and compensation target) returns the existing task without a second command; a
 different digest is `identity_conflict`. Refusal codes include
-`invalid_request`, `capability_unavailable`, `resource_busy`,
+`invalid_request`, `capability_unavailable`, `competence_insufficient`, `resource_busy`,
 `execution_uncertain`, `resource_mismatch`, `body_profile_mismatch`,
 `map_unaligned`, `unit_mismatch`, `precondition_failed`, `stale_generation`,
 `authority_denied`, `identity_conflict`, `irreversible_effect`, `not_found` and
@@ -143,6 +164,15 @@ none); and `goal`, which the robot never verifies (`verified: null`,
 checkpoint, compensation, effective parameters, admission/dispatch/finish times
 and the task's latest event cursor. After a gateway restart a dispatched task is
 `uncertain` until this process observes it live or a native result arrives.
+While a task runs, `detail` is the executor's own feedback: the `stage` of an
+exploration, search or skill, MoveIt's `state` for a reach, and `navigating` for
+Nav2. A goal the action server rejected is `failed` with `goal_rejected: true`
+in its result; it never executed, so `compensation_required` stays false.
+A skill's `result_json` carries `arm_stopped`. When it is `false` (or the report
+is unreadable) the arm controller never confirmed the last chunk terminal, so
+the task is `unknown` with `stop: uncertain` and keeps the arm and base, whatever
+terminal status the runner returned; a missing key means stopped. Only the
+replacement-server proof above releases it.
 
 Events are journaled in the same transaction as the change they describe:
 admission, dispatch, state changes (with released resources), cancel requests,
@@ -154,10 +184,17 @@ journal (`journal_id`), and the client then reconciles from `status`.
 Compensation is a recorded plan, never an automatic undo. It may be recorded only
 after the task is terminal. `restore` is allowed only for reversible effects,
 `repair` also for compensable ones; an irreversible effect can only be `isolate`d
-or `record`ed (`irreversible_effect` otherwise). Compensating steps are ordinary
-tasks submitted with `compensates`; their results update the plan's status, while
-the original task keeps its own state and outcome, and the plan always reports
-`counts_as_goal_success: false`.
+or `record`ed (`irreversible_effect` otherwise). Recording the same plan again
+returns it; a different plan for the same task is `identity_conflict`.
+Compensating steps are ordinary tasks submitted with `compensates`. They run in
+plan order, one at a time: a submission must name the plan's next step, with that
+step's capability and exactly its parameters, or it is `precondition_failed` with
+the expected `step` index. A step that fails or is canceled sets the plan to
+`failed` and stays the next step, so a new task (a new `task_id`) runs it again;
+the plan is `succeeded` once every step has. Each attempt is journaled as a
+`compensation_started` event with its `task_id` and `step`, and `tasks` maps
+every attempt to its state. The original task keeps its own state and outcome,
+and the plan always reports `counts_as_goal_success: false`.
 
 `/robot/tasks/events` publishes state changes as `std_msgs/msg/String` JSON.
 Events accelerate observation; the journal/status service is authoritative
@@ -204,16 +241,16 @@ inputs are `unknown`, never `infeasible`: `joint_state_stale`,
 it describes that scene only, so a planner checks again right before it moves.
 
 `reach` takes `joints` for exactly `arm_shoulder_pan`, `arm_shoulder_lift`,
-`arm_elbow_flex`, `arm_wrist_flex` and `arm_wrist_roll` within the joint limits, and an
-optional `solution_id`. The gateway sends MoveIt's `MoveGroup` action (`/move_action`)
+`arm_elbow_flex`, `arm_wrist_flex` and `arm_wrist_roll` within the joint limits, and
+nothing else. The gateway sends MoveIt's `MoveGroup` action (`/move_action`)
 a joint goal (0.01 rad tolerance) with `plan_only: false`: MoveIt plans again from
 the current state, checks the current scene and executes through the same controller
 and safety path as RViz. It holds the arm and keeps the base still, its effect is
 reversible, and `succeeded` requires MoveIt's `SUCCESS` error code. The result keeps
 MoveIt's code, planning time and final joints, not the trajectories. Success means
 the motion finished, not that a constraint holds; check that with `verify`.
-`allow_reach` is false by default, like `allow_skills`, until arm planning is
-qualified on this body.
+`allow_reach` in `config/robot_tasks.yaml` is false, like `allow_skills`, until arm
+planning is qualified on this body.
 
 ## Fiber and permissions
 

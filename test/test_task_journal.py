@@ -300,13 +300,70 @@ def test_compensation_never_changes_the_original_outcome(tmp_path):
         plan = {'plan': {'intent': 'isolate', 'steps': [{'capability': 'navigate', 'parameters': {'x': 0, 'y': 0}}],
                          'note': 'move away from the part'}, 'status': 'planned', 'tasks': {}}
         journal.record_compensation('weld', row['generation'], 'agent-a', plan)
-        with pytest.raises(Refused):
-            journal.record_compensation('weld', row['generation'], 'agent-a', plan)
+        # The same plan again is the lost reply's retry; a different one never replaces it.
+        assert journal.record_compensation('weld', row['generation'], 'agent-a', plan)['compensation']
+        with pytest.raises(Refused) as conflict:
+            journal.record_compensation('weld', row['generation'], 'agent-a',
+                                        {**plan, 'plan': {**plan['plan'], 'steps': []}})
+        assert conflict.value.code == 'identity_conflict'
         journal.admit('away', 'navigate', '{"x":0,"y":0}', bytes(range(16)), resources=('base',),
                       owner='agent-a', compensates='weld')
         journal.update('away', 'succeeded', 'reached')
         original = journal.row('weld')
         assert original['state'] == 'failed'
         assert json.loads(original['compensation'])['status'] == 'succeeded'
+    finally:
+        journal.close()
+
+
+def test_compensation_steps_run_in_order_with_their_own_parameters_and_a_failed_one_is_retried(tmp_path):
+    journal = TaskJournal(tmp_path / 'tasks.db')
+    steps = [{'capability': 'navigate', 'parameters': {'x': 1, 'y': 0}}, {'capability': 'explore', 'parameters': {}},
+             {'capability': 'navigate', 'parameters': {'x': 0, 'y': 0}}]
+
+    def status():
+        return json.loads(journal.row('weld')['compensation'])['status']
+
+    def step(identifier, capability, parameters):
+        return journal.admit(identifier, capability, json.dumps(parameters), identifier.encode().ljust(16),
+                             resources=('base',), owner='agent-a', compensates='weld')
+    try:
+        journal.admit('weld', 'skill', '{}', bytes(16), resources=('arm', 'base'), owner='agent-a')
+        with pytest.raises(Refused, match='no open compensation plan'):
+            journal.compensation_step('weld', 'navigate', {'x': 1, 'y': 0})
+        journal.update('weld', 'failed', 'implementation aborted')
+        journal.record_compensation('weld', 1, 'agent-a', {
+            'plan': {'intent': 'isolate', 'steps': steps, 'note': ''}, 'status': 'planned', 'tasks': {}})
+        # Another capability of the plan, a later step and other parameters are all refused, journaling nothing.
+        for capability, parameters in (('explore', {}), ('navigate', {'x': 0, 'y': 0}), ('navigate', {'x': 1, 'y': 1})):
+            with pytest.raises(Refused) as refused:
+                step('wrong', capability, parameters)
+            assert refused.value.code == 'precondition_failed' and refused.value.data == {'step': 0}
+        assert journal.row('wrong') is None and status() == 'planned'
+        step('first', 'navigate', {'x': 1.0, 'y': 0})
+        assert status() == 'in_progress'
+        with pytest.raises(Refused, match='first has not finished'):
+            journal.compensation_step('weld', 'explore', {})
+        journal.update('first', 'canceled', 'stopped')
+        assert status() == 'failed'
+        # The failed step stays the next step; the one after it is still refused.
+        with pytest.raises(Refused):
+            step('early', 'explore', {})
+        step('first-again', 'navigate', {'x': 1, 'y': 0})
+        assert status() == 'in_progress'
+        journal.update('first-again', 'succeeded', 'reached')
+        step('second', 'explore', {})
+        journal.update('second', 'succeeded', 'explored')
+        assert status() == 'in_progress'
+        step('third', 'navigate', {'x': 0, 'y': 0})
+        journal.update('third', 'succeeded', 'reached')
+        assert status() == 'succeeded'
+        with pytest.raises(Refused, match='no open compensation plan'):
+            step('fourth', 'navigate', {'x': 0, 'y': 0})
+        started = [event['data'] for event in journal.events_since(0, 'weld')['events']
+                   if event['kind'] == 'compensation_started']
+        assert [(item['task_id'], item['step']) for item in started] == [
+            ('first', 0), ('first-again', 0), ('second', 1), ('third', 2)]
+        assert journal.row('weld')['state'] == 'failed'
     finally:
         journal.close()

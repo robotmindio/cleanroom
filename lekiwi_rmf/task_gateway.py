@@ -41,11 +41,13 @@ from lekiwi_rmf.navigation_observer import NavigationObserver, server_instance
 from lekiwi_rmf.navigation_distance import NavigationDistance
 from lekiwi_rmf.map_bundle import validate_map_bundle
 from lekiwi_rmf.motion_constraints import (
-    MAX_CONSTRAINTS, MAX_REGION_M, MAX_TIME_SEC as MOTION_MAX_TIME_SEC, OPERATIONS as MOTION_OPERATIONS,
-    SCHEMA as MOTION_SCHEMA,
+    GROUP, MAX_CONSTRAINTS, MAX_REGION_M, MAX_TIME_SEC as MOTION_MAX_TIME_SEC, OPERATIONS as MOTION_OPERATIONS,
+    PLANNING_FRAME, SCHEMA as MOTION_SCHEMA, TOOL_LINK,
 )
 from lekiwi_rmf.arm_trajectory import ARM_JOINTS, JOINT_LIMITS
-from lekiwi_rmf.skills import BASE_COMMANDS, KINDS, SKILL_ID, UNDECLARED_EFFECTS, catalog, load_registry
+from lekiwi_rmf.skills import (
+    BASE_COMMANDS, KINDS, SKILL_ID, UNDECLARED_EFFECTS, catalog, load_registry, skill_parameters,
+)
 
 
 ACTIONS = {'navigate': ('/navigate_to_pose', NavigateToPose), 'explore': ('/robot/explore', Explore),
@@ -54,6 +56,8 @@ ACTIONS = {'navigate': ('/navigate_to_pose', NavigateToPose), 'explore': ('/robo
 # The arm planning group: a reach moves these joints and holds the gripper where it is.
 REACH_JOINTS = tuple(name for name in ARM_JOINTS if name != 'arm_gripper')
 MOTION_SERVICE = '/robot/motion/solve'
+# The feedback field that names what a running goal is doing; Nav2 reports poses, not a stage.
+FEEDBACK_FIELD = {'explore': 'stage', 'search': 'stage', 'skill': 'stage', 'reach': 'state'}
 SEARCH_PARAMETERS = ('query', 'region', 'max_duration_sec', 'max_travel_m', 'target_coverage')
 SEARCH_LIMITS = ('max_duration_sec', 'max_travel_m')
 # Schema 1 is SubmitTask/GetTask/CancelTask; schema 2 is the TaskApi services below.
@@ -148,26 +152,26 @@ def task_goal(capability, text):
                            max_travel_m=float(values.get('max_travel_m', 0.0)),
                            target_coverage=float(values.get('target_coverage', 0.0)))
     elif capability == 'skill':
-        # The skill runner validates parameters against the registered skill; this only bounds the shape.
-        if set(values) - {'skill_id', 'parameters'} or not isinstance(values.get('skill_id'), str) \
-                or not SKILL_ID.match(values['skill_id']) or not isinstance(values.get('parameters', {}), dict):
-            raise ValueError('skill requires a registered skill_id and an optional parameters object')
+        # Only the shape; admission resolves the registry entry, its pins and its declared parameters.
+        if set(values) - {'skill_id', 'parameters', 'version', 'artifact_sha256'} \
+                or not isinstance(values.get('skill_id'), str) or not SKILL_ID.match(values['skill_id']) \
+                or not isinstance(values.get('parameters', {}), dict) \
+                or type(values.get('version', 1)) is not int or not isinstance(values.get('artifact_sha256', ''), str):
+            raise ValueError('skill requires a registered skill_id and accepts only a parameters object, '
+                             'an integer version and an artifact_sha256')
         goal = RunSkill.Goal(skill_id=values['skill_id'],
                              parameters_json=json.dumps(values.get('parameters', {}), sort_keys=True, allow_nan=False))
     elif capability == 'reach':
         # A joint target, normally a /robot/motion/solve solution; MoveIt plans and checks collisions again.
-        if set(values) - {'joints', 'solution_id'} or not isinstance(values.get('joints'), dict) \
+        if set(values) != {'joints'} or not isinstance(values['joints'], dict) \
                 or set(values['joints']) != set(REACH_JOINTS):
-            raise ValueError(f'reach requires joints for exactly {list(REACH_JOINTS)} and an optional solution_id')
+            raise ValueError(f'reach requires only joints, for exactly {list(REACH_JOINTS)}')
         for name, value in values['joints'].items():
             lower, upper = JOINT_LIMITS[name]
             if type(value) not in (float, int) or not math.isfinite(value) or not lower <= value <= upper:
                 raise ValueError(f'{name} must be a finite angle within [{lower}, {upper}] rad')
-        if 'solution_id' in values and (not isinstance(values['solution_id'], str)
-                                        or not REFERENCE.match(values['solution_id'])):
-            raise ValueError('solution_id must be a short reference')
         goal = MoveGroup.Goal()
-        goal.request.group_name = 'arm'
+        goal.request.group_name = GROUP
         goal.request.num_planning_attempts, goal.request.allowed_planning_time = 3, 5.0
         goal.request.start_state.is_diff = True
         goal.request.goal_constraints = [Constraints(joint_constraints=[
@@ -189,6 +193,15 @@ def reach_result(result):
             'planning_time_sec': result.get('planning_time'), 'final_joints': final}
 
 
+def arm_stopped(result):
+    """Whether a finished skill's arm controller confirmed its last chunk terminal; older runners omit it."""
+    try:
+        report = json.loads(result.get('result_json') or '{}')
+    except (ValueError, RecursionError):
+        return False
+    return not isinstance(report, dict) or report.get('arm_stopped', True) is not False
+
+
 class TaskGateway(Node):
     def __init__(self, **kwargs):
         super().__init__('robot_tasks', **kwargs)
@@ -200,9 +213,11 @@ class TaskGateway(Node):
         self.declare_parameter('navigation_timeout_sec', 180.0)
         self.declare_parameter('allow_navigation', True)
         self.declare_parameter('allow_exploration', True)
+        # The arm capabilities; config/robot_tasks.yaml is their tracked switch.
         self.declare_parameter('allow_skills', False)
-        # Arm motion to a solved joint target; off until arm planning is qualified on this body.
         self.declare_parameter('allow_reach', False)
+        # Empty selects config/robot_skills.yaml, as in the skill runner; set both or neither.
+        self.declare_parameter('registry_file', '')
         # The explorer's tracked allow_search owns availability of the action server.
         self.declare_parameter('allow_search', True)
         self.declare_parameter('map_bundle', '')
@@ -213,10 +228,11 @@ class TaskGateway(Node):
                          'reach': self.get_parameter('allow_reach').value}
         try:
             # Experimental skills run only through an acquisition protocol, never a user task.
-            self._skills = catalog(load_registry())
+            self._registry = load_registry(self.get_parameter('registry_file').value or None)
         except (OSError, ValueError) as error:
             self.get_logger().error(f'skill registry unavailable: {error}')
-            self._enabled['skill'], self._skills = False, []
+            self._enabled['skill'], self._registry = False, {}
+        self._skills = catalog(self._registry)
         self._timeout = self.get_parameter('navigation_timeout_sec').value
         if type(self._timeout) not in (float, int) or not math.isfinite(self._timeout) or self._timeout <= 0:
             raise ValueError('navigation_timeout_sec must be positive and finite')
@@ -389,9 +405,11 @@ class TaskGateway(Node):
             return row, None
         if not self._enabled[capability]:
             raise Refused('capability_unavailable', 'capability disabled by this deployment profile')
+        if capability == 'skill':
+            self._check_skill(values)
         resources = CAPABILITY_RESOURCES[capability]
         if request is not None:
-            self._check_request(capability, request, resources)
+            self._check_request(capability, request, resources, values)
         self._journal.require_free(resources)
         if any(self._observed.values()) or self._children.busy():
             raise Refused('resource_busy', 'another ROS client has an active navigation, exploration, search, skill or arm goal',
@@ -441,7 +459,24 @@ class TaskGateway(Node):
         self._publish_resources()
         return row, summary
 
-    def _check_request(self, capability, request, resources):
+    def _check_skill(self, values):
+        """Refuse what the runner would reject, before any resource is held."""
+        skill = self._registry.get(values['skill_id'])
+        if skill is None or skill.status != 'qualified':
+            raise Refused('competence_insufficient', f'{values["skill_id"]} is not a registered skill of this robot'
+                          if skill is None else f'{skill.skill_id} is {skill.status}, not qualified',
+                          skill_id=values['skill_id'], status=skill.status if skill else None)
+        for pin in ('version', 'artifact_sha256'):
+            if pin in values and values[pin] != getattr(skill, pin):
+                raise Refused('competence_insufficient', f'{skill.skill_id} is registered with {pin} '
+                              f'{getattr(skill, pin)}, not {values[pin]}', skill_id=skill.skill_id,
+                              version=skill.version, artifact_sha256=skill.artifact_sha256)
+        try:
+            skill_parameters(skill, json.dumps(values.get('parameters', {}), allow_nan=False))
+        except ValueError as error:
+            raise Refused('invalid_request', str(error)) from error
+
+    def _check_request(self, capability, request, resources, values):
         """Refuse a plan made for another body, frame, unit system or resource set."""
         body = request.get('body_profile')
         if body is not None and body != BODY_PROFILE:
@@ -457,14 +492,8 @@ class TaskGateway(Node):
             raise Refused('resource_mismatch', f'{capability} uses exactly {sorted(resources)}')
         compensates = request.get('compensates')
         if compensates is not None:
-            original = self._journal.fence(compensates['task_id'], compensates['generation'], request['owner'],
-                                           reconciled=True)
-            plan = json.loads(original['compensation'] or 'null')
-            if plan is None or plan['status'] not in ('planned', 'in_progress'):
-                raise Refused('precondition_failed', 'that task has no open compensation plan')
-            steps = [step['capability'] for step in plan['plan']['steps']]
-            if capability not in steps or len(plan.get('tasks', {})) >= len(steps):
-                raise Refused('precondition_failed', 'the compensation plan has no remaining step for this capability')
+            self._journal.fence(compensates['task_id'], compensates['generation'], request['owner'], reconciled=True)
+            self._journal.compensation_step(compensates['task_id'], capability, values)
 
     def _submit(self, request, response):
         try:
@@ -698,6 +727,7 @@ class TaskGateway(Node):
             'goal': {**request.get('goal', {}), 'verified': None, 'verifier': 'recuriant'},
             'effects': effects, 'compensation': compensation,
             'compensation_required': (terminal and bool(row['dispatched']) and state != 'succeeded'
+                                      and not result.get('goal_rejected')
                                       and effects['reversibility'] != 'reversible' and compensation is None),
             'compensates': row['compensates'] or None,
             'checkpoint': json.loads(row['checkpoint'] or 'null'),
@@ -782,7 +812,7 @@ class TaskGateway(Node):
                                     'Duration is active seconds, radius is metres around the starting pose. '
                                     'resume_task_id is a saved native exploration UUID and preserves its original bounds.')}
         if name == 'reach':
-            return {**entry, 'parameters': ['joints', 'solution_id'], 'required_parameters': ['joints'],
+            return {**entry, 'parameters': ['joints'], 'required_parameters': ['joints'],
                     'defaults': {}, 'effective_defaults': {}, 'joints': list(REACH_JOINTS),
                     'limits': {name: list(JOINT_LIMITS[name]) for name in REACH_JOINTS},
                     'solver': MOTION_SERVICE,
@@ -791,11 +821,13 @@ class TaskGateway(Node):
                                    'scene again; success means the motion finished, not that a constraint holds. '
                                    'Verify it with the solver.'}
         if name == 'skill':
-            return {**entry, 'parameters': ['skill_id', 'parameters'], 'required_parameters': ['skill_id'],
+            return {**entry, 'parameters': ['skill_id', 'parameters', 'version', 'artifact_sha256'],
+                    'required_parameters': ['skill_id'],
                     'defaults': {'parameters': {}}, 'effective_defaults': {'parameters': {}}, 'skills': self._skills,
                     # The implementation kinds the runner executes, so a client acquires only runnable skills.
                     'implementation_kinds': list(KINDS),
-                    'description': 'Run a registered skill implementation on the arm. Success means the implementation '
+                    'description': 'Run a qualified registered skill implementation on the arm; version and '
+                                   'artifact_sha256 pin the entry a plan was made for. Success means the implementation '
                                    'finished, not that the world reached the goal; verify the effect independently. '
                                    'Each skill lists the resources it commands or reads (arm, base, camera); '
                                    'admission holds the capability resources whatever the skill uses.'}
@@ -847,6 +879,7 @@ class TaskGateway(Node):
                              'schema': 1, 'grounding': 'image_only',
                              'services': {'query': '/robot/observations/query',
                                           'evidence': '/robot/observations/evidence',
+                                          'prepare': '/robot/observations/prepare',
                                           'pin': '/robot/observations/pin',
                                           'status': '/robot/observations/status'},
                              'events': '/robot/observations/events',
@@ -874,7 +907,7 @@ class TaskGateway(Node):
                                                 'profile in force.'}},
             'motion': {'available': self._motion.service_is_ready(), 'schema': MOTION_SCHEMA,
                        'service': MOTION_SERVICE, 'type': 'lekiwi_rmf/srv/TaskApi',
-                       'operations': list(MOTION_OPERATIONS), 'planning_frame': 'base_footprint', 'tool_link': 'tool0',
+                       'operations': list(MOTION_OPERATIONS), 'planning_frame': PLANNING_FRAME, 'tool_link': TOOL_LINK,
                        'execute': 'reach', 'limits': {'max_constraints': MAX_CONSTRAINTS, 'max_region_m': MAX_REGION_M,
                                                       'max_time_sec': MOTION_MAX_TIME_SEC},
                        'description': ('Geometric feasibility over MoveIt: solve finds arm joints whose tool pose '
@@ -910,7 +943,8 @@ class TaskGateway(Node):
             return
         if row['id'] in self._pausing:
             return
-        stage = getattr(message.feedback, 'stage', 'navigating')
+        field = FEEDBACK_FIELD.get(row['capability'])
+        stage = getattr(message.feedback, field) if field else 'navigating'
         self._update(row['id'], 'paused' if stage.startswith('paused:') else 'running', stage)
 
     def _status(self, message, capability):
@@ -970,6 +1004,12 @@ class TaskGateway(Node):
             self._update(identifier, 'unknown', 'nonterminal ROS result')
             return
         state = states[response.status]
+        if self._row(identifier)['capability'] == 'skill' and not arm_stopped(result):
+            # The runner ended but the arm may still be moving: not a stop, so nothing is released.
+            detail = f'skill {state}, but the arm controller did not confirm the arm stopped'
+            if self._row(identifier)['detail'] != detail:
+                self._update(identifier, 'unknown', detail, {**result, 'arm_stopped': False})
+            return
         if state == 'succeeded' and (result.get('complete') is False or result.get('error_code', 0)):
             state = 'failed'
         detail = result.get('message') or result.get('error_msg') or result.get('detail') or state
@@ -1001,7 +1041,8 @@ class TaskGateway(Node):
             self._delivery_failed(identifier, error)
             return
         if not accepted:
-            self._update(identifier, 'failed', 'ROS action server rejected the goal')
+            # A rejected goal never executed, so it left nothing to compensate.
+            self._update(identifier, 'failed', 'ROS action server rejected the goal', {'goal_rejected': True})
             return
         row = self._row(identifier)
         if not row['cancel_requested'] and identifier not in self._pausing:
@@ -1159,7 +1200,15 @@ class TaskGateway(Node):
         identifier, capability = row['id'], row['capability']
         original = row['server_id']
         current = self._unknown_results.get(identifier, '')
-        if not original or not current or original == current or self._unknown_cancels.get(identifier) != current:
+        if not original or not current or self._unknown_cancels.get(identifier) != current:
+            return False
+        replaced = original != current
+        # The server that was sent the goal denies it. Once the sending process is gone nothing of its
+        # is in transit, so the goal ended or never arrived; a goal this process sent may still arrive.
+        # Navigation is released only by its owner guard's lease, which needs the replacement, and a
+        # skill whose arm stop was never confirmed did not end by leaving that server's memory.
+        if not replaced and (capability == 'navigate' or identifier in self._sent
+                             or json.loads(row['result']).get('arm_stopped') is False):
             return False
         # Let the independent guard expire an orphan's lease before clearing uncertainty.
         if now - self._unknown_since.get(identifier, now) < 3.0:
@@ -1172,7 +1221,8 @@ class TaskGateway(Node):
             return False
         if not self._guard[0] or now - self._guard[1] >= 1.0:
             return False
-        detail = 'action server restarted; goal absent and owned navigation stopped; outcome unavailable'
+        detail = ('action server restarted; goal absent and owned navigation stopped; outcome unavailable' if replaced
+                  else 'action server has no such goal after a gateway restart; outcome unavailable')
         if row['cancel_requested'] == 2:
             detail = f'navigation deadline reached; {detail}'
         self._update(identifier, 'failed', detail, {'outcome_known': False, 'termination_confirmed': True})
