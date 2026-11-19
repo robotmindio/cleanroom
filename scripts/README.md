@@ -50,9 +50,14 @@ before using them; the robot runtime does not require it.
 - `switch-device-wifi.sh SSID` creates or reuses the matching 5 GHz profile with priority above the active fallback and a native timed rollback; it retains the original profile and does not expose credentials.
 - `install-wifi-powersave.sh` disables Wi-Fi power saving on the active interface and on future NetworkManager connections; both service installers run it.
 - `install-wifi-regdom.sh [CC]` sets the Wi-Fi regulatory country (default `LEKIWI_WIFI_COUNTRY`, else `ID`) now and at every boot.
+- `install-time-sync.sh compute|device` installs the split robot's chrony configuration for that role; the service installers run it.
+- `install-motor-network-guard.sh` installs the opt-in nftables unit that restricts the motor ports (TCP 5555-5557) to loopback and `tailscale0`; CURVE authentication is still required.
+- `enable-pi5-usb-current.sh` persists `usb_max_current_enable=1` in the Pi 5 boot configuration (run as root by `install-pi.sh` and the device deployment; no effect on other boards).
+- `build-vl805-fix.py --build-root DIR [--activate|--install]` builds the upstream VL805 DMA fix for the pinned Pi kernel; it builds only by default and never unloads `xhci_hcd`, restarts services or reboots.
 - `install-deploy-sudoers.sh` grants the deploy user passwordless start/stop of the LeKiwi units only.
 - `setup-zenoh-tls.sh DEVICE` creates the private CA and mutual-TLS identities of the zenoh bridge on both machines.
 - `deploy-split.sh [DEVICE]` deploys one pushed revision to the compute machine and its device host.
+- `check-travel-stow.py` exits 0 only when fresh `/joint_states` put the arm in SRDF `travel_stow` within the production `stow_tolerance`; anything that cuts arm torque runs it first. It never commands motion.
 - `stage-release.sh compute|device WORKSPACE REVISION` builds and tests a detached release before cutover, retaining the active workspace.
 - `check-release.py seal|verify RELEASE REVISION compute|device` checks source, installed artifacts, local settings, and complete passing CTest evidence.
 - `prune-release-builds.py WORKSPACE REVISION [REVISION ...] [--apply]` retires explicitly selected inactive builds (dry-run by default). It locks staging/deployment, protects `current`, `previous` and process references, archives qualification evidence and removes the seal before deleting generated build/install/log/test files. Sources, local settings, dependency overlays and virtual environments remain. Restage a retired revision before activation. Run with access to the managed user's process details; if elevated, retain the deployment's `LEKIWI_LOGS` so it locks the same `deploy.lock`.
@@ -71,10 +76,11 @@ before using them; the robot runtime does not require it.
 - `workstation-up.sh [DEVICE] [launch args]` starts the ROS stack (remote sensors, MoveIt) and RViz, refusing while a recorded stack or `lekiwi-stack.service` runs.
 - `sim-up.sh [launch args]` checks the renderer and starts a managed headless simulation.
 - `ros-start.sh [launch args]` runs `bringup.launch.py` against the real robot; `up.sh`, `workstation-up.sh` and `lekiwi-stack.service` execute it.
+- `inhibit-robot-sleep.py COMMAND...` takes logind's sleep inhibitor and execs the command, so `ros-start.sh` keeps the machine awake while the stack runs.
 - `ros-stop.sh` stops the process groups the launchers recorded and leaves systemd units alone.
 - `robot-host.sh [calibrate]` runs the camera-less LeRobot motor host or its motor calibration; `lekiwi-host.service` executes it.
 - `torque-host.py` is the LeRobot motor host with the torque-safety endpoint that `robot-host.sh` runs.
-- `robot-host.sh --telemetry-fault-test` runs the same host with a qualification-only observation wrapper: SIGUSR1 injects motor diagnostic ERROR and SIGUSR2 repeats the last valid frame; each expires after eight seconds to cover the stop observation. Stop the normal host first, use a finite systemd test unit, and restore the normal service afterward. It never writes diagnostic faults to servos.
+- `robot-host.sh --telemetry-fault-test` runs the same host with a qualification-only observation wrapper (`test-host-telemetry.py`): SIGUSR1 injects motor diagnostic ERROR and SIGUSR2 repeats the last valid frame; each expires after eight seconds to cover the stop observation. Stop the normal host first, use a finite systemd test unit, and restore the normal service afterward. It never writes diagnostic faults to servos.
 - `test-acceptance-gates.py obstacle|workspace` checks a real lidar obstacle or a temporary MoveIt collision object and rejects arm movement during the collision; it restores production and does not approve acceptance.
 - `ros-astra.sh`, `ros-cameras.sh`, `ros-lidar.sh`, `ros-zenoh.sh` publish the Astra, the V4L2 cameras, the LD06 and the zenoh bridge on the device.
 - `camera-supervisor.sh` keeps one `v4l2_camera` node alive across USB resets.
@@ -99,6 +105,9 @@ before using them; the robot runtime does not require it.
 - `rearm-robot.sh` explicitly re-arms a running real-robot stack; it exits nonzero on rejection, transport failure, or timeout.
 - `generate-zmq-keys.py` generates the CURVE server identity and authorized client keys.
 - `host-health-check.py` checks that the motor host serves both protocols (the host unit's start gate).
+- `recover-device-usb.py --ssh-host HOST --uhubctl PATH [--cycle]` checks the Pi 5's USB devices from the compute host; `--cycle` switches the shared USB VBUS group, which also disconnects the motor adapter, so the motors must already be torque-off in `travel_stow`.
+- `generate-navigation-footprint.py --output FILE` computes the CAD navigation envelope for the production stow pose and tolerance as reviewable JSON; it grants no physical acceptance.
+- `generate-arm-collisions.py` regenerates the per-link convex collision meshes in `urdf/collision/` from the vendored CAD; `generate-chassis-guard.py` regenerates `urdf/chassis_guard.stl`.
 
 ## Maps, simulation and qualification
 
@@ -110,10 +119,11 @@ before using them; the robot runtime does not require it.
 - Qualification collision zones use native holonomic velocity polygons. Pure translation retains the full stopping-time and measurement reserve along travel and the accepted lateral padding; rotation encloses the footprint at every heading. Return motion includes simultaneous linear/angular braking, and unsupported command directions keep the full conservative zone. Production collision zones and speed limits remain unchanged.
 - Qualification commands carry an explicit stage to the Pi motor host (protocol 3). The host independently applies that stage's speed and center caps, holds the arm, requires fresh local feedback and stops on a 250 ms command gap. Untagged production commands retain their accepted caps. Deploy the matching compute and Pi protocol together before testing.
 - `test-physical-acceptance.py` runs finite live lidar, depth and telemetry-loss checks within the attended 30 cm envelope; `--restart-tests` tests compute-driver suspension and the Pi motor-host restart. It restores services and records fault evidence without approving physical braking distances.
+- `test-navigation.py` runs a finite attended base/SLAM test and restores the production service. Source `scripts/setup.bash` first; the arm must be in `travel_stow` and a 30 cm radius clear. It never changes physical acceptance.
+- `test-perception-latency.py --output FILE` measures live perception latency and failover under an injected provider loss, relaying real images into an isolated test domain; the running stack and observation store are unchanged.
 - `free_space.py` turns the front camera into a floor-edge `LaserScan`.
 - `validate-map-bundle.py` validates an immutable map/RMF bundle.
-- `rtabmap-db-maintenance.py` prunes old RTAB-Map archives without replacing the active map.
-- `rtabmap-session-guard.py` reports a finite mapping quota; normal bringup uses the persistent `robot_explorer` monitor. See [ROS/MCP exploration](../docs/exploration.md).
+- `rtabmap-db-maintenance.py --backup SOURCE DESTINATION` snapshots an RTAB-Map database, including committed WAL data, into a new directory with an integrity-checked manifest.
 - `sim-qualification.py` collects the fail-closed simulation qualification evidence.
 - `sim-renderer-check.py` fails fast without headless OpenGL 3.3.
 - `sim-scan-check.py` waits for a usable simulated scan.
