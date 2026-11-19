@@ -212,12 +212,22 @@ class SystemBus:
         process.wait(timeout=5)
 
 
-@pytest.mark.parametrize('role', ['compute', 'device'])
-@pytest.mark.parametrize('package_installed', [False, True])
-def test_clock_setup_is_repeatable_and_only_restarts_chrony(tmp_path, role, package_installed):
+CLOCK_ADDRESSES = {
+    'device': ('LEKIWI_TIME_SERVERS', ['compute.example', '192.0.2.10']),
+    'compute': ('LEKIWI_TIME_CLIENTS', ['192.0.2.0/24', '198.51.100.7/32']),
+}
+
+
+def _clock_install(tmp_path, role, *args, env_file='', package_installed=True):
+    """Run the time-sync installer from a copy (no developer .env) against a fake /etc."""
+    checkout = tmp_path / 'checkout'
+    for name in ('scripts/install-time-sync.sh', 'scripts/lib/runtime-common.sh',
+                 'scripts/lib/service-install-common.sh', f'config/chrony-{role}.conf'):
+        (checkout / name).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / name, checkout / name)
+    (checkout / '.env').write_text(env_file)
     environment = tmp_path / 'environment.sh'
-    log = tmp_path / 'calls'
-    environment.write_text(r'''
+    environment.write_text(r"""
 command() {
   if [[ $* == '-v chronyd' ]]; then
     [[ -f $LEKIWI_TEST_ROOT/chrony-installed ]]
@@ -242,22 +252,50 @@ as_root() {
     "$command" "${args[@]}"
   fi
 }
-''')
+""")
     if package_installed:
         (tmp_path / 'chrony-installed').touch()
     fakes = tmp_path / 'bin'
     _executable(fakes / 'systemctl', 'exit 0\n')
-    env = {**os.environ, 'PATH': f"{fakes}:{os.environ['PATH']}",
-           'BASH_ENV': str(environment), 'LEKIWI_TEST_ROOT': str(tmp_path),
-           'LEKIWI_TEST_LOG': str(log)}
-    for _ in range(2):
-        subprocess.run(['bash', str(ROOT / 'scripts/install-time-sync.sh'), role], env=env, check=True)
+    env = {k: v for k, v in os.environ.items() if not k.startswith('LEKIWI_')}
+    env.update(PATH=f"{fakes}:{os.environ['PATH']}", BASH_ENV=str(environment),
+               LEKIWI_TEST_ROOT=str(tmp_path), LEKIWI_TEST_LOG=str(tmp_path / 'calls'))
+    return subprocess.run(['bash', str(checkout / 'scripts/install-time-sync.sh'), role, *args],
+                          env=env, text=True, capture_output=True)
+
+
+def _rendered_clock(role, addresses):
+    lines = []
+    for line in (ROOT / f'config/chrony-{role}.conf').read_text().splitlines():
+        if '@FIRST_ADDRESS@' in line:
+            lines += [line.replace('@FIRST_ADDRESS@', address) for address in addresses[:1]]
+        elif '@OTHER_ADDRESS@' in line:
+            lines += [line.replace('@OTHER_ADDRESS@', address) for address in addresses[1:]]
+        else:
+            lines.append(line)
+    return '\n'.join(lines)
+
+
+@pytest.mark.parametrize('role', ['compute', 'device'])
+@pytest.mark.parametrize('package_installed', [False, True])
+def test_clock_setup_is_repeatable_and_only_restarts_chrony(tmp_path, role, package_installed):
+    key, addresses = CLOCK_ADDRESSES[role]
+    first = _clock_install(tmp_path, role, env_file=f"{key}={','.join(addresses)}\n",
+                           package_installed=package_installed)
+    assert first.returncode == 0, first.stderr
     installed = tmp_path / 'etc/chrony/chrony.conf'
-    assert installed.read_text() == (ROOT / f'config/chrony-{role}.conf').read_text().rstrip('\n')
+    rendered = installed.read_text()
+    assert rendered == _rendered_clock(role, addresses) and '@' not in rendered
+    # A rerun without the key keeps the installed addresses: the deployed robot's
+    # clock configuration, and with it chrony, is left exactly as it is.
+    second = _clock_install(tmp_path, role)
+    assert second.returncode == 0, second.stderr
+    assert f'{key} is not set in .env; keeping the installed' in second.stdout
+    assert installed.read_text() == rendered
     package_calls = [] if package_installed else [
         'mask --runtime chrony.service',
         'package-install NEEDRESTART_MODE=l DEBIAN_FRONTEND=noninteractive apt-get install -y chrony']
-    assert log.read_text().splitlines() == package_calls + [
+    assert (tmp_path / 'calls').read_text().splitlines() == package_calls + [
         '-p -f ' + str(installed), 'disable --now systemd-timesyncd.service',
         'unmask --runtime chrony.service', 'try-restart chrony.service',
         'enable --now chrony.service', '-p -f ' + str(installed),
@@ -265,16 +303,46 @@ as_root() {
         'enable --now chrony.service']
 
 
+def test_clock_addresses_are_this_sites_and_a_device_without_any_fails_clearly(tmp_path):
+    # The RTC-less device never synchronizes against another site's reference, and the
+    # driver then rejects its telemetry indefinitely: no address may be a tracked default.
+    for role in ('compute', 'device'):
+        template = (ROOT / f'config/chrony-{role}.conf').read_text()
+        directive = {'compute': 'allow', 'device': 'server'}[role]
+        hosts = [line.split()[1] for line in template.splitlines() if line.startswith(directive + ' ')]
+        assert hosts == ['@FIRST_ADDRESS@', '@OTHER_ADDRESS@']
+
+    missing = _clock_install(tmp_path / 'device', 'device')
+    assert missing.returncode != 0 and 'set LEKIWI_TIME_SERVERS=' in missing.stderr
+    assert not (tmp_path / 'device/etc/chrony/chrony.conf').exists()
+    assert _clock_install(tmp_path / 'bad', 'device', env_file='LEKIWI_TIME_SERVERS=a b\n').returncode != 0
+
+    def allowed(name, *args):
+        result = _clock_install(tmp_path / name, 'compute', *args)
+        if result.returncode:
+            return result.stderr
+        text = (tmp_path / name / 'etc/chrony/chrony.conf').read_text()
+        return [line for line in text.splitlines() if line.startswith('allow ')]
+
+    # The compute installer's --remote address serves a new site without another key;
+    # a host name would be resolved once at chrony start, so that needs the explicit key.
+    assert allowed('address', '192.0.2.44') == ['allow 192.0.2.44']
+    assert 'set LEKIWI_TIME_CLIENTS=' in allowed('name', 'robot-1')
+    assert allowed('all-in-one') == []
+    compute = (ROOT / 'scripts/install-compute-services.sh').read_text()
+    assert 'install-time-sync.sh" compute ${REMOTE:+"$REMOTE"}' in compute
+
+
 def test_clock_profiles_share_reference_across_lan_changes_without_clock_steps():
-    compute = (ROOT / 'config/chrony-compute.conf').read_text()
-    device = (ROOT / 'config/chrony-device.conf').read_text()
+    compute = _rendered_clock('compute', CLOCK_ADDRESSES['compute'][1])
+    device = _rendered_clock('device', CLOCK_ADDRESSES['device'][1])
     assert 'pool ntp.ubuntu.com iburst maxpoll 6' in compute
-    assert 'allow 192.168.110.0/24' in compute
-    assert 'allow 100.107.20.66/32' in compute
+    assert [line for line in compute.splitlines() if line.startswith('allow ')] == [
+        'allow 192.0.2.0/24', 'allow 198.51.100.7/32']
     servers = [line for line in device.splitlines() if line.startswith('server ')]
     assert servers == [
-        'server andres-Lenovo.local iburst minpoll 2 maxpoll 3 xleave prefer',
-        'server 100.87.252.60 iburst minpoll 2 maxpoll 3',
+        'server compute.example iburst minpoll 2 maxpoll 3 xleave prefer',
+        'server 192.0.2.10 iburst minpoll 2 maxpoll 3',
     ]
     # The RTC-less device steps its first three updates after boot (it restarts
     # weeks behind); the compute host has no RTC drift to recover from and never

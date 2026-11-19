@@ -20,6 +20,13 @@ load_lekiwi_env() { # export the known keys of a .env file; a value already in t
       LEKIWI_PORT|LEKIWI_LIDAR_PORT|LEKIWI_FRONT)
         pattern='^/dev/[A-Za-z0-9._:/+-]+$'; description="a /dev path without whitespace" ;;
       LEKIWI_WRIST) pattern='^(none|/dev/[A-Za-z0-9._:/+-]+)$'; description="none or a /dev path without whitespace" ;;
+      # Site addresses for scripts/install-time-sync.sh.
+      LEKIWI_TIME_SERVERS)
+        pattern='^[A-Za-z0-9][A-Za-z0-9._-]*(,[A-Za-z0-9][A-Za-z0-9._-]*)*$'
+        description="comma-separated hostnames or IPv4 addresses" ;;
+      LEKIWI_TIME_CLIENTS)
+        pattern='^[0-9]+([.][0-9]+){3}(/[0-9]{1,2})?(,[0-9]+([.][0-9]+){3}(/[0-9]{1,2})?)*$'
+        description="comma-separated IPv4 addresses or subnets" ;;
       LEKIWI_ID) pattern='^[A-Za-z0-9_-]+$'; description="letters, digits, _ and - only" ;;
       *) continue ;;
     esac

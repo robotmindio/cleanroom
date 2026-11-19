@@ -167,7 +167,7 @@ install_unit lekiwi-awake.service
 install_unit lekiwi-stack.service
 log "Installing ROS log rotation"
 install_log_rotation
-as_root "$PROJECT_ROOT/scripts/install-time-sync.sh" compute
+as_root "$PROJECT_ROOT/scripts/install-time-sync.sh" compute ${REMOTE:+"$REMOTE"}
 log "Validating rendered systemd unit"
 verify_systemd_units lekiwi.slice lekiwi-awake.service lekiwi-stack.service
 verify_systemd_units lekiwi-ros-logrotate.service lekiwi-ros-logrotate.timer
