@@ -7,9 +7,10 @@ commands the robot. Two versioned procedures exist:
 | Procedure | Threshold | Tracked value | Issue |
 |---|---|---|---|
 | `search-min-object-px/1` | `search_min_object_px` | `config/exploration.yaml` | [#88](https://github.com/robotmindio/cleanroom/issues/88) |
-| `input-quality-limits/1` | dark luma, overexposed luma, blur variance | `DARK_LUMA, BRIGHT_LUMA, BLUR_VARIANCE` in `lekiwi_rmf/object_observations.py` (arrives with #100) | [#98](https://github.com/robotmindio/cleanroom/issues/98) |
+| `input-quality-limits/1` | dark luma, overexposed luma, blur variance, per camera | each camera's `input_quality` in `config/object_cameras.yaml` | [#98](https://github.com/robotmindio/cleanroom/issues/98) |
 
-Both values are uncalibrated engineering defaults today. No real corpus large
+Both values are uncalibrated engineering defaults today; every camera carries
+the same input-quality limits (40, 225, 30). No real corpus large
 enough to fit them exists yet; see [Recording protocol](#recording-protocol).
 
 ## Rule
@@ -25,7 +26,7 @@ evidence (search negative evidence, a `no_candidate` abstention), and a
 - Input quality: trusted when mean luma ≥ dark limit, mean luma ≤ overexposed
   limit and Laplacian variance ≥ blur limit, using the `input_quality` the
   runtime records for each frame. Each limit is fitted on trials that pass the
-  other two current limits.
+  other two current limits of the same camera.
 
 The fitted cut is the most permissive one whose **one-sided 95% exact
 (Clopper-Pearson) lower bound of scene-group recall** on the trusted side is at
@@ -44,9 +45,15 @@ Status is:
 - `no_feasible_cut`: enough groups, but no cut reaches the target or held-out
   data does not confirm it.
 
-Search fits each camera separately (prefix a report with `CAMERA=`) and proposes
-the largest cut. Every report must evaluate the same `model_sha256`; a new
-model or operating point needs a new calibration.
+Both procedures fit each camera separately. A report's camera is its `CAMERA=`
+prefix, else the `--camera` it was evaluated with. Search proposes the largest
+cut across cameras. Input quality proposes limits for exactly the cameras the
+reports name, each fitted against its own current limits; the status is
+`calibrated` only when every named camera is. Reports that name no camera are
+pooled into one fit proposed for every tracked camera, which is accepted only
+while those cameras share their current limits, and cannot be mixed with named
+reports. Every report must evaluate the same `model_sha256`; a new model or
+operating point needs a new calibration.
 
 `search_min_object_m` and the height band are domain declarations: an image
 manifest records no physical size or height, so they are reported with
@@ -56,18 +63,21 @@ manifest records no physical size or height, so they are reported with
 
 `--write` acts only on `calibrated`. It stores the full result under
 `config/calibration/<procedure>-<held-out manifest digest>.json` and rewrites the
-single tracked value with a comment naming that file. Any other status writes
+tracked value: the `search_min_object_px` line with a comment naming that file,
+or the fitted cameras' `input_quality` in `config/object_cameras.yaml` with a
+`calibration` key naming it. The limits are not part of `camera_sha256`, so the
+write does not invalidate an admitted Fiber profile. Any other status writes
 nothing and exits 1. Commit the two files on a branch and merge them through a
 reviewed PR; the result file is the evidence the reviewer checks.
 
 ```bash
 source scripts/setup.bash
 scripts/evaluate-object-recognition.py front-dev.json --split development \
-  --model-name rtdetr_v2_r18 --output front-dev-report.json
+  --camera front --model-name rtdetr_v2_r18 --output front-dev-report.json
 scripts/evaluate-object-recognition.py front-heldout.json \
-  --model-name rtdetr_v2_r18 --output front-heldout-report.json
+  --camera front --model-name rtdetr_v2_r18 --output front-heldout-report.json
 scripts/calibrate-thresholds.py search \
-  --report front=front-dev-report.json --report front=front-heldout-report.json \
+  --report front-dev-report.json --report front-heldout-report.json \
   --output search-calibration.json --write
 ```
 
@@ -111,16 +121,18 @@ moving the robot to a new viewpoint of the same placement is the same group.
 - Include at least 20 groups per split with no vocabulary object present, so
   false positives are counted, and at least 10 with two similar instances.
 
-### Input quality (cleanroom#98), across the three cameras
+### Input quality (cleanroom#98), per camera
 
 - At least 20 groups per split for each hard condition tag: `dark` (lamps off,
   dusk), `overhead` (top-down view), `occlusion` (object partly hidden),
   `transparent`, `reflective`, `blur` (capture while the wrist or a person
   moves) and `similar_instances`, plus at least 30 groups per split of normal
-  conditions. Tag each scene in the manifest's `conditions` list (#100).
+  conditions, for each camera whose limits are fitted. Tag each scene in the
+  manifest's `conditions` list.
 - Cover the luma range at the frame level: under 20, 20–40, 40–80, 80–200,
   over 200 mean luma, at least 10 groups per band per split, with objects present.
-- Evaluate with the evaluator that records `input_quality` per frame (#100).
+- Evaluate each camera's corpus with `--camera`, so the report carries the
+  camera and the per-frame `input_quality` measurements.
 
 ## Current evidence
 

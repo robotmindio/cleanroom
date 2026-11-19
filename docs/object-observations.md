@@ -101,18 +101,24 @@ and grasp acceptance remain separate.
 Grounding DINO weights as `grounding_dino_tiny`, served by
 RobotMind's `perception-provider` on the cluster GTX 1070. The endpoint lives in
 `config/perception_providers.yaml` (Tailscale address, 1.5 s timeout) and is not
-part of any identity. The recognizer sends lossless PNG pixels plus the frame's
-query phrases and thresholds, and accepts a response only when it echoes the pinned
+part of any identity. The recognizer sends the frame's evidence artifact (the
+quality-80 JPEG that is also stored, byte for byte) plus the frame's query
+phrases and proposal profile, and accepts a response only when it echoes the pinned
 `provider_model_sha256` (the provider's hash of its weight files, Torch/CUDA and
-transformers build, and GPU), the exact effective prompt and thresholds, and the
-SHA-256 and size of the image it was sent. Boxes then go through the same
-suppression as the local Grounding DINO. Measured on the cluster, GPU and CPU
-results for one image agreed to 1e-4 in score and 0.01 px.
+transformers build, and GPU), the exact effective prompt and thresholds, the
+profile parameters, and the SHA-256 and size of the image it was sent.
+Suppression is the provider's: it applies the profile it echoed and reports the
+suppressed phrases as `alternatives`. The robot validates the returned boxes,
+scores, alternatives and detection count and does not suppress again. Measured
+on the cluster, GPU and CPU results for one image agreed to 1e-4 in score and
+0.01 px.
 
 `fallback_model_name` (`rtdetr_v2_r18`) serves frames while the provider is
 unreachable, busy, not ready, too slow, or answering outside its pinned identity.
-After a failure, frames skip the primary for 10 s, so an outage costs one timeout
-per window. Fallback frames go to `/robot/perception/<camera>/fallback/...`, and
+After a failure, frames skip the primary for 1 s; each further failure doubles
+that wait up to 10 s and a served frame resets it, so a transient fault is
+retried promptly and a long outage costs one timeout per 10 s. Up to two
+requests may already be in flight when a failure arrives. Fallback frames go to `/robot/perception/<camera>/fallback/...`, and
 the collector records them under the fallback's own `model_sha256`, so every
 observation names the recognizer that produced it. `--describe` prints both
 identities. A Fiber profile that admits both accepts either source; one that
@@ -225,7 +231,8 @@ its own `replay` and `evaluate` operations by `provider_run.run_id`.
 ## Abstention
 
 Each observation records `input_quality` (mean luma, Laplacian sharpness and
-`dark`, `overexposed` or `blurred` flags) and typed `abstentions`, each with the
+`dark`, `overexposed` or `blurred` flags against the capturing camera's
+`input_quality` limits in `config/object_cameras.yaml`) and typed `abstentions`, each with the
 next information that would answer it: `no_candidate` (another viewpoint or a
 memory query), `low_quality_input` (light, glare or a steadier view),
 `geometry_unavailable` with the depth reason (`no_depth_calibration`,
@@ -255,8 +262,12 @@ per-condition results for every candidate, goes to
 byte-exact views, such as Knowledge appearance-gallery region observations and
 their source artifacts, without retraining the detector. Taught positives and
 negatives become exemplar embeddings from the provider's encoder. Held-out
-positives and negatives calibrate the match threshold so that no held-out
-negative is admitted. Views that cannot be separated are refused, because that
+positives and negatives calibrate the match profile, a minimum similarity to
+the exemplars and a minimum margin over the nearest taught negative, so that
+the most held-out positives and no held-out negative are admitted. The margin
+stays 0 unless it recovers positives that a similarity threshold alone would
+lose, and the robot refuses a provider match that falls below a fitted margin.
+Views that cannot be separated are refused, because that
 concept needs a reviewed dataset and a trained detector instead. The concept
 (name, prompts, encoder identity, exemplars, match) is stored by revision under
 `~/.ros/lekiwi/perception/concepts/`. Name it in `set_query` as
@@ -277,6 +288,10 @@ startup; runtime captures with the wrong frame are rejected.
 
 `camera_sha256` fingerprints the binding and calibration content. Changing a
 binding requires a new matching Fiber profile even if its camera ID is unchanged.
+Each camera's `input_quality` limits live beside its binding but outside that
+fingerprint: they decide abstention reasons, not which physical source a frame
+came from. They are engineering defaults until
+[threshold calibration](threshold-calibration.md) records a fit for that camera.
 
 One recognizer fairly schedules the newest pending capture of each selected
 camera. One collector owns the database and global services. All selected
@@ -284,7 +299,8 @@ streams are required: a healthy camera cannot mask a missing required camera.
 Select additional cameras only after their coverage and aggregate processing
 budget are qualified; the two-Hz setting is a total inference start limit, not two Hz
 per camera. Do not increase front resolution without measuring optical quality,
-transport, processing latency and the camera's corresponding calibration.
+transport, processing latency and the camera's corresponding calibration, and
+not beyond the evidence pixel budget (see ROS contracts).
 
 ## Freshness and stationary evidence
 
@@ -356,12 +372,18 @@ Queries accept `{"after_sequence":0,"limit":20}`. Subsequent cursors include the
 returned `epoch`; a new database requires restarting from its head. ID queries
 use `{"observation_ids":["<64 lowercase hex characters>"],"limit":20}`. Inputs
 are capped at 4 KiB, metadata at 64 KiB, and evidence at 384 KiB before base64.
+A frame is admitted only within the pixel budget that cap guarantees at JPEG
+quality 80 whatever the frame shows (436,906 pixels: 640×480 and 768×544 fit,
+800×600 does not); a larger frame is rejected on receipt with that reason,
+before inference. A higher-resolution camera needs a larger evidence cap, which
+the store, the evidence service and Fiber's verifier share.
 `latest_sequence` is a live-consumer admission head; `next_sequence` paginates
 history and does not prove freshness.
 
-`capture_id` hashes camera/frame/stamp. The observation `id` hashes the capture
-ID with `model_sha256`, so one capture recognized under two operating points
-yields two coexisting observations. Same-content replay is idempotent; different
+`capture_id` hashes camera/frame/stamp. The observation `id` is
+`sha256(capture_id:model_sha256:profile_revision[:query_revision])`, the query
+revision being present for open-vocabulary frames, so one capture recognized
+under two operating points yields two coexisting observations. Same-content replay is idempotent; different
 content for the same observation ID fails explicitly. Metadata and JPEG are
 one private SQLite transaction. A process lock prevents competing writers.
 Journals are separated by ROS domain and simulated-time mode. Retention is
@@ -410,8 +432,10 @@ scripts/evaluate-object-recognition.py /path/to/scenes.json \
 ```
 
 `--split development`, `--profile NAME`, `--profile-json` and `--blue-fraction`
-support operating-point selection before held-out evaluation; the calibration
-study script automates that protocol. Freeze the selected values before opening
+support operating-point selection before held-out evaluation. `--camera NAME`
+names the tracked camera that captured the corpus: its input-quality limits
+flag the frames and the report carries the camera for per-camera threshold
+calibration; without it frames are measured but not flagged. The calibration study script automates the selection protocol. Freeze the selected values before opening
 the held-out results. Reusing a held-out set to tune a model invalidates it.
 Non-OpenCV models automatically run in the installed perception environment.
 Scenes may carry `conditions` tags; the report counts them and lists the hard
@@ -454,8 +478,9 @@ Metric mode requires a reviewed schema-1 calibration marked `validated` and
 `depth_registered`, matching camera/frame, measured intrinsics, distortion,
 raster correspondence and dimensions. Uncertainty limits remain 0.10 m camera,
 0.20 m map and 0.02 s clock; depth/CameraInfo must match capture within 50 ms.
-The ROS depth/CameraInfo caches cover the configured inference-age window at
-the tracked 30-Hz depth rate. Depth must be actual registered 16-bit surface
+The collector retains each depth/CameraInfo stream by stamp over the configured
+inference-age window, whatever the stream's rate, up to 1,024 messages; a
+capture older than what is held abstains as out of sync. Depth must be actual registered 16-bit surface
 depth within the calibration's measured `depth_range_m: [min, max]` (Astra:
 0.55–3.0 m). A floor projection cannot substitute for the object's surface.
 
