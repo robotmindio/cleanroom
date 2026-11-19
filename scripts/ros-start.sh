@@ -12,8 +12,6 @@ set -Eeuo pipefail
 cd "$(dirname "$0")/.."
 # shellcheck source=/dev/null
 source scripts/lib/runtime-common.sh
-# shellcheck source=/dev/null
-source scripts/lib/self-heal.sh
 load_lekiwi_env
 # By default the robot stays armed after a failure; only the strict opt-in is passed on.
 [[ ${LEKIWI_DISARM_ON_FAILURE:-false} != true ]] || set -- safety_policy:=strict "$@"
@@ -74,7 +72,6 @@ fi
 front_camera_info="file://${LEKIWI_CAMERA_INFO:-$HOME/.ros/camera_info/lekiwi_front.yaml}"
 wrist_camera_info="file://${LEKIWI_WRIST_CAMERA_INFO:-$HOME/.ros/camera_info/lekiwi_wrist.yaml}"
 
-self_heal
 # The managed service waits for its companion lease; manual launches acquire their own.
 sleep_inhibitor=()
 if [[ ${LEKIWI_SLEEP_INHIBITED:-false} != true ]]; then

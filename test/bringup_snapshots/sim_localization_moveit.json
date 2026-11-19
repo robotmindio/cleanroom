@@ -534,8 +534,8 @@
    "validity_timeout": 0.15
   },
   "remappings": [],
-  "respawn": false,
-  "respawn_delay": null,
+  "respawn": true,
+  "respawn_delay": 2.0,
   "ros_arguments": []
  },
  {
@@ -629,8 +629,8 @@
    "use_sim_time": true
   },
   "remappings": [],
-  "respawn": false,
-  "respawn_delay": null,
+  "respawn": true,
+  "respawn_delay": 2.0,
   "ros_arguments": []
  },
  {

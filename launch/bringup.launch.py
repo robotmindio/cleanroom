@@ -308,6 +308,8 @@ def _stack(context):
                 name="arm_workspace_monitor",
                 parameters=[*safety_params_files, {"use_sim_time": sim}],
                 output="screen",
+                # Arm permission depends on it; a crash must not deny the arm until the stack restarts.
+                respawn=True, respawn_delay=2.0,
             ),
             Node(
                 package="lekiwi_rmf",
@@ -315,6 +317,8 @@ def _stack(context):
                 name="moveit_cloud_gate",
                 parameters=[{"use_sim_time": sim}],
                 output="screen",
+                # Arm permission depends on it; a crash must not deny the arm until the stack restarts.
+                respawn=True, respawn_delay=2.0,
             ),
             # Geometric feasibility over move_group's model and scene; it never moves the arm.
             Node(
@@ -442,7 +446,7 @@ def generate_launch_description():
     package = FindPackageShare("lekiwi_rmf")
     config = Path(get_package_share_directory("lekiwi_rmf")) / "config"
     perception = yaml.safe_load((config / 'object_perception_deployment.yaml').read_text())
-    if (not isinstance(perception, dict) or set(perception) != {'start', 'cameras'}
+    if (not isinstance(perception, dict) or set(perception) != {'start', 'cameras', 'default_query'}
             or type(perception['start']) is not bool or not isinstance(perception['cameras'], list)):
         raise ValueError('invalid tracked object perception deployment settings')
     from lekiwi_rmf.object_cameras import camera_bindings
