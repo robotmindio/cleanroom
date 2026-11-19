@@ -344,9 +344,12 @@ the action layers apart: `/cmd_vel_safe` (requested base twist),
 boundary gating, in host units; while the host runs an arm trajectory its arm
 keys are the superseded hold), `/hardware/applied_command` (the applied command
 in ROS units: arm URDF radians, using the trajectory sample while one runs, and
-base m/s and rad/s) and `/joint_states` (measured joints). A
-supervisor marks an intervention by publishing on `/episode/intervention`
-(`std_msgs/String`).
+base m/s and rad/s) and `/joint_states` (measured joints). In the
+recorder's terminal, `i` + Enter marks where a supervisor intervention starts and
+again where it ends (`start` and `end` on `/episode/intervention`,
+`std_msgs/String`), and the recorder asks for the outcome (`success` or
+`failure`) when it stops; only episodes labelled `success` are exported by
+default. See [skill acquisition](docs/skill-acquisition.md#demonstrations).
 
 Export to a local LeRobot dataset from an isolated CPU environment:
 

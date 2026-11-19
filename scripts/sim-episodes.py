@@ -8,6 +8,8 @@ confirm the whole initial state from ground truth), record with scripts/record-e
 `--domain sim`, and execute the joint-waypoint program as one trajectory through
 /arm_controller/follow_joint_trajectory, the guarded path every arm motion uses. A reset that
 is not confirmed skips that trial; it never becomes a demonstration from an unknown start.
+`--success PREDICATE` labels each episode success or failure from ground truth after the
+program ran; unlabeled episodes are not exported for training by default.
 
 The program is data, not a skill: {"waypoints": [{"positions": {"arm_shoulder_pan": 0.1, ...},
 "time_from_start_sec": 2.0}, ...]}. Each episode manifest stores the scene, the trial's reset
@@ -30,7 +32,7 @@ import time
 REPOSITORY = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPOSITORY))
 from lekiwi_rmf.arm_trajectory import ARM_JOINTS, JOINT_LIMITS  # noqa: E402
-from lekiwi_rmf.sim_scene import load_scene  # noqa: E402
+from lekiwi_rmf.sim_scene import judge, load_scene, sim_predicate  # noqa: E402
 
 
 def load_program(path):
@@ -92,6 +94,8 @@ def main():
     parser.add_argument('--first-trial', type=int, default=1, help='trial index of the first episode (its reset seed)')
     parser.add_argument('--output', type=Path, required=True, help='new directory for the episodes')
     parser.add_argument('--cameras', default='front')
+    parser.add_argument('--success', help='sim predicate (scripts/evaluate-skill.py --sim-scene) that labels each '
+                        'episode success or failure from ground truth; without it episodes stay unlabeled')
     parser.add_argument('--margin-sec', type=float, default=2.0, help='recording before and after the program')
     args = parser.parse_args()
     if not 1 <= args.episodes <= 1000 or args.first_trial < 1 or not 0 <= args.margin_sec <= 30:
@@ -99,6 +103,7 @@ def main():
     try:
         scene, scene_sha256 = load_scene(args.scene)
         program, program_sha256 = load_program(args.program)
+        predicate = sim_predicate(args.success, scene) if args.success else None
     except (OSError, ValueError) as error:
         parser.error(str(error))
     args.output.mkdir(parents=True, exist_ok=False)
@@ -134,17 +139,24 @@ def main():
                        'intervened': False}
             with tempfile.NamedTemporaryFile('w', suffix='.json', delete=False) as stream:
                 json.dump(context, stream)
-            recorder = subprocess.Popen([sys.executable, str(REPOSITORY / 'scripts/record-episode.py'), str(directory),
-                                         '--task', args.task, '--cameras', args.cameras, '--domain', 'sim',
-                                         '--context', stream.name, '--operator', 'scripted:sim-episodes',
-                                         '--duration', str(duration + 2 * args.margin_sec)])
+            before = controller.ground_truth()[0]
+            record = [sys.executable, str(REPOSITORY / 'scripts/record-episode.py'), str(directory),
+                      '--operator', 'scripted:sim-episodes']
+            recorder = subprocess.Popen([*record, '--task', args.task, '--cameras', args.cameras, '--domain', 'sim',
+                                         '--context', stream.name, '--duration', str(duration + 2 * args.margin_sec)],
+                                        stdin=subprocess.DEVNULL)
             time.sleep(args.margin_sec)
             executed = execute(node, arm, program, duration + 30)
             code = recorder.wait(timeout=duration + 2 * args.margin_sec + 60)
             os.unlink(stream.name)
             after, robot, joints, _ = controller.ground_truth()
+            outcome = None
+            if predicate is not None and code == 0:
+                name = predicate['object']
+                outcome = 'success' if judge(predicate, after.get(name), before.get(name))[0] else 'failure'
+                subprocess.run([*record, '--label', outcome], check=True)
             summary['episodes'].append({'trial': trial, 'recorded': code == 0, 'episode': str(directory),
-                                        'execution': executed, 'ground_truth_after': after})
+                                        'execution': executed, 'ground_truth_after': after, 'outcome': outcome})
             print(json.dumps({'trial': trial, 'recorded': code == 0, 'execution': executed}), file=sys.stderr)
     except (RuntimeError, OSError, subprocess.SubprocessError) as error:
         print(f'{parser.prog}: {error}', file=sys.stderr)
