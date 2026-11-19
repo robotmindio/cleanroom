@@ -21,8 +21,10 @@ Documentation=file://@PROJECT_ROOT@/HARDWARE.md
 # The /dev/serial/by-id glob only resolves after udev has settled; without
 # this a slow boot can race the first enumeration.
 After=systemd-udevd.service
-StartLimitIntervalSec=600
-StartLimitBurst=8
+# robot-host.sh waits for a missing serial adapter and reconnects a dropped bus; a
+# failure it cannot wait out (the start gate timing out) must keep retrying rather than
+# exhaust systemd's restart budget and stay failed until someone runs reset-failed.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple

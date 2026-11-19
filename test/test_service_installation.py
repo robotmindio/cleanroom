@@ -490,6 +490,41 @@ def test_headless_host_refuses_to_answer_the_calibration_prompt_without_a_calibr
     assert _unit("lekiwi-host.service")["Service"]["RestartPreventExitStatus"] == ["78"]
 
 
+def test_host_waits_for_a_serial_adapter_that_enumerates_late(tmp_path):
+    venv = tmp_path / "venv"
+    calibration = tmp_path / "home/.cache/huggingface/lerobot/calibration/robots/lekiwi/lekiwi_1.json"
+    calibration.parent.mkdir(parents=True)
+    calibration.write_text("{}", encoding="utf-8")
+    started = tmp_path / "host-arguments"
+    # The fake host records its port, then ends the supervisor loop through exit 78.
+    _executable(venv / "bin" / "python", f'echo "$*" > "{started}"\nrm -f "{calibration}"\nexit 1\n')
+    _executable(venv / "bin" / "lerobot-calibrate", "exit 1\n")
+    fakes = tmp_path / "bin"
+    _executable(fakes / "fuser", "exit 1\n")
+    port = tmp_path / "ttyACM0"
+    environment = {k: v for k, v in os.environ.items() if not k.startswith(("HF_", "LEKIWI_"))}
+    environment.update(
+        HOME=str(tmp_path / "home"), LEKIWI_LEROBOT_VENV=str(venv), LEKIWI_PORT=str(port),
+        LEKIWI_HOST_RESTART_DELAY="0", PATH=f"{fakes}:{os.environ['PATH']}",
+    )
+    process = subprocess.Popen(
+        ["bash", str(ROOT / "scripts" / "robot-host.sh")],
+        cwd=ROOT, env=environment, text=True, stderr=subprocess.PIPE,
+    )
+    try:
+        time.sleep(1)
+        assert process.poll() is None and not started.exists()
+        port.write_text("", encoding="utf-8")
+        _, stderr = process.communicate(timeout=15)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+    assert process.returncode == 78
+    assert "waiting for the motor-bus serial port" in stderr
+    assert f"--robot.port={port}" in started.read_text(encoding="utf-8")
+
+
 @pytest.mark.skipif(os.geteuid() == 0, reason="an explicit account is resolved as a non-root caller")
 def test_service_user_must_be_an_existing_non_root_account():
     def resolve(name):
@@ -1467,7 +1502,10 @@ def test_stack_retries_startup_and_host_gets_time_to_pass_its_gate():
     stack = _unit("lekiwi-stack.service")["Unit"]
     host = _unit("lekiwi-host.service")["Service"]
 
-    assert stack["StartLimitIntervalSec"] == ["0"] and "StartLimitBurst" not in stack
+    # No unit may exhaust a restart budget: a failed unit waits for a person.
+    for unit in (stack, _unit("lekiwi-host.service")["Unit"]):
+        assert unit["StartLimitIntervalSec"] == ["0"] and "StartLimitBurst" not in unit
+    assert host["Restart"] == ["on-failure"]
     # The ExecStartPost gate probes up to 120 times, one second each plus a one second sleep.
     timeout, = host["TimeoutStartSec"]
     assert re.fullmatch(r"\d+s", timeout) and int(timeout[:-1]) > 2 * 120

@@ -67,6 +67,17 @@ require() {
   done
 }
 
+wait_for_port() {
+  # The adapter can enumerate after this service starts (a hub reset, a slow boot). Wait
+  # for it, as ros-lidar.sh does for the LD06, instead of exiting into a restart loop.
+  [ -n "$PORT" ] && [ -e "$PORT" ] && return 0
+  echo "$0: waiting for the motor-bus serial port (set LEKIWI_PORT for other hardware)" >&2
+  until [ -n "$PORT" ] && [ -e "$PORT" ]; do
+    sleep 2
+    PORT="${LEKIWI_PORT:-$(first_match '/dev/serial/by-id/*USB_Single_Serial*')}"
+  done
+}
+
 require_port_access() {
   local resolved
   resolved="$(readlink -f "$PORT")"
@@ -135,7 +146,7 @@ case "${1:-}" in
     ;;
   ''|--telemetry-fault-test)
     [[ ${1:-} != --telemetry-fault-test ]] || HOST_PROGRAM=scripts/test-host-telemetry.py
-    require PORT
+    wait_for_port
     require_port_access
     run_host
     ;;
