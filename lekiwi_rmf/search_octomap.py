@@ -79,6 +79,62 @@ class SearchOctomap:
 
         return self._free(intersects)
 
+    def first_hit(self, start, direction, max_range):
+        """Distance along a unit ray to the first occupied voxel.
+
+        None when unknown space, the range limit or the traversal budget comes
+        first: an unknown voxel may hide a nearer surface, so nothing behind it
+        is known to be the first one.
+        """
+        if (len(start) != 3 or len(direction) != 3
+                or not all(math.isfinite(value) for value in (*start, *direction, max_range)) or max_range <= 0
+                or abs(math.sqrt(sum(value * value for value in direction)) - 1) > 1e-6):
+            return None
+        extent = KEY_OFFSET * self.resolution
+        if any(value < -extent or value >= extent for value in start):
+            return None
+
+        def entry(lower, size):
+            near, far = 0., max_range
+            for axis, step in enumerate(direction):
+                low, high = lower[axis], lower[axis] + size
+                if step == 0:
+                    if start[axis] < low - 1e-10 or start[axis] > high + 1e-10:
+                        return None
+                else:
+                    first, last = (low - start[axis]) / step, (high - start[axis]) / step
+                    near, far = max(near, min(first, last)), min(far, max(first, last))
+                    if near > far + 1e-10:
+                        return None
+            return near
+
+        best, occupied, visited = math.inf, False, 0
+        pending = [(0., self.root, (-extent, -extent, -extent), 2 * extent)]
+        while pending:
+            near, node, lower, size = pending.pop()
+            if near > best:
+                continue
+            visited += 1
+            if visited > MAX_RAY_NODES:
+                return None
+            half = size / 2
+            crossed = []
+            for index, child in enumerate(node):
+                if child == 1:
+                    continue
+                corner = tuple(lower[axis] + half * ((index >> axis) & 1) for axis in range(3))
+                distance = entry(corner, half)
+                if distance is None or distance > best:
+                    continue
+                if not isinstance(child, int):
+                    crossed.append((distance, child, corner, half))
+                elif distance < best or child != 2:
+                    # At equal distance unknown wins: a grazed unknown voxel is not a proven surface.
+                    best, occupied = distance, child == 2
+            # The nearest box is expanded first, so its hit prunes the boxes behind it.
+            pending.extend(sorted(crossed, key=lambda item: item[0], reverse=True))
+        return best if occupied else None
+
     def volume_free(self, start, low, high):
         """Conservatively test the whole camera-to-box volume, including its interior."""
         extent = KEY_OFFSET * self.resolution
