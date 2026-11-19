@@ -571,6 +571,7 @@
    "arm_calibration_file": "$(env HOME)/.ros/lekiwi_arm_calibration.json",
    "map_bundle": "",
    "navigation_params_file": "$(share lekiwi_rmf)/config/nav2_params.yaml",
+   "object_target_max_sigma_ratio": 0.5,
    "use_sim_time": false
   },
   "remappings": [],

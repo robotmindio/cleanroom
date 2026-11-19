@@ -44,20 +44,22 @@ operator decision that follows the arm trials in `DEFERRED.md`.
 ## Navigation targets
 
 `navigate` takes either `x`, `y` and optional `yaw`, or a `target` object holding
-exactly one of the shapes below. Language, named places and object references
-belong to the orchestrator; the robot only turns a geometric reference into a pose.
+exactly one of the shapes below. Language, named places and which object is meant
+belong to the orchestrator; the robot only turns a geometric reference, or an
+entry of its own [object map](object-map.md), into a pose.
 
 | `target` | Meaning | Resolved by |
 | --- | --- | --- |
 | `{pose: {x, y, yaw}}` | a map-frame pose, the same as `x`, `y`, `yaw` | nothing |
 | `{anchored: {map_pose: {x, y, yaw}, site_ref, map_ref, revision}}` | a pose remembered under an earlier map revision | `/robot/spatial/query`: `current`, then `project` into the current revision |
 | `{point: {x, y}, standoff_m}` | stand `standoff_m` (0.3 to 3 m, default 0.6) from a map point and face it | the latched `/map` occupancy grid and the robot's pose in `map` |
+| `{object: {object_id, standoff_m}}` | stand `standoff_m` (the same range and default) from an object-map entry's estimate and face it | `/robot/objects/query` for the entry, then the point resolution at its current-revision `x`, `y` |
 
 The target is resolved once, at `validate` and at `submit`, after the base is known
 to be free. The task's `effective_parameters` hold the resolved `x`, `y`, `yaw`
 and `resolved` (the target kind and how it was found: the revision, method and
 `shift_m` of a projection, or the point, standoff and robot position of an
-approach); `parameters` keep the request. That pose is what is sent to Nav2 and
+approach, with the entry it came from for an object); `parameters` keep the request. That pose is what is sent to Nav2 and
 resent after a pause, through the same owner guard, limits and budgets as a raw
 pose. The request digest covers the request, so a retry with the same `task_id`
 returns the admitted task and its pose.
@@ -81,7 +83,35 @@ the request is `precondition_failed`: `needs_map` when part of the circle is
 unmapped, `change_standoff` when all of it is mapped and blocked,
 `needs_localization` without a `map` to `base_footprint` transform younger than
 the explorer's `data_timeout_sec`. Nav2 still plans and validates the route.
-The `navigate` manifest entry lists which kinds can resolve now under `targets`.
+
+An object target is the point target of an entry's position in the current map
+revision. The entry is what the robot last observed, not a verified place:
+`resolved` repeats its `object_id`, `label`, `state`, `method`, `sigma_m`,
+`qualified`, `last_seen_unix_sec`, `map_ref`, `revision` and the map's
+`verification` (`last_observed`), so the caller knows it is navigating to an
+estimate, unqualified for every deployed method. A `present` or `unconfirmed`
+entry is accepted. The request is refused, with `field` `target.object` unless
+stated:
+
+| Refusal | `next_condition` | When |
+| --- | --- | --- |
+| `precondition_failed` | `wait_object_map` (retryable) | the object map is not answering |
+| `not_found` | `query_objects` | no entry has this `object_id` (`target.object.object_id`) |
+| `precondition_failed` | `run_search` | the entry is not among the 100 most recently seen, the most one query returns (`target.object.object_id`) |
+| `precondition_failed` | `run_search` (retryable) | the entry is `absent_at_last_place` (`object_state`), or is only a direction without a point (`method`) |
+| `site_mismatch`, `revision_unknown`, `map_unaligned` or `precondition_failed` | `refresh_reference` | the entry cannot be placed in the current map (`spatial_code` is the map's `position_unavailable_reason`), or lives in a map without alignment to the one the robot is in |
+| `precondition_failed` | `needs_localization` (retryable) | the robot is not localized in a known map |
+| `precondition_failed` | `change_standoff` (`target.object.standoff_m`), or `run_search` (retryable) when no permitted standoff is wide enough | `sigma_m` exceeds `object_target_max_sigma_ratio` × `standoff_m`; `sigma_m` and `max_sigma_m` are stated |
+| `precondition_failed` | `fix_deployment` | the answer is not `lekiwi.object_map/1` or is malformed |
+
+`object_target_max_sigma_ratio` in `config/robot_tasks.yaml` is 0.5: an object one
+`sigma_m` from its estimate is then still at least half the standoff from the
+base and within 30° of its heading. The refusals of a point target apply
+afterwards with the fields `target.object` and `target.object.standoff_m`.
+`run_search` means a `search` for the label must see the object again first.
+
+The `navigate` manifest entry lists which kinds can resolve now under `targets`;
+`object` needs the object map's service as well as what a point needs.
 
 States are `starting`, `running`, `paused`, `canceling`, `succeeded`, `canceled`,
 `failed` and `unknown`. Only `succeeded`, `canceled` and `failed` are terminal.
@@ -148,6 +178,20 @@ arm joints give `arm`, base commands `base` and cameras `camera`. These are
 additive schema 1 fields. Admission still holds the capability's `resources`
 (the arm, and the base kept still) for every skill.
 
+Beside the capabilities the manifest states what the gateway can observe of the
+robot's memory, each with `available` (its service is discovered), `service`,
+`type` and `schema`:
+
+- `observations.grounding` is `per_observation`: each observation record states
+  its own `grounding` (`image_only` or `camera_position`) and `position`.
+- `objects` is the [object map](object-map.md) on `/robot/objects/query`
+  (`lekiwi.object_map/1`): `estimates: local_landmark`, `verification:
+  last_observed` (never currently verified), `qualified: per_object` (false
+  unless a position was measured under a validated calibration) and
+  `navigate_target: object`.
+- `spatial` is `/robot/spatial/query` (`robotmind.spacetime/1`); `pose` holds
+  the request that answers where the robot is in the current revision.
+
 ## Self-describing capabilities
 
 `task_gateway.py` holds one descriptor per capability (`CAPABILITIES`). Request
@@ -182,7 +226,8 @@ The manifest's `refusals` table gives each code's default pair; a refusal may
 state a more specific one. Conditions in use: `fix_request`,
 `use_supported_schema`, `use_new_task_id`, `enable_capability`,
 `wait_capability_ready`, `acquire_skill`, `wait_resource_free`, `reconcile_task`,
-`wait_task_terminal`, `wait_odometry`, `wait_spatial_memory`, `needs_map`,
+`wait_task_terminal`, `wait_odometry`, `wait_spatial_memory`, `wait_object_map`,
+`query_objects`, `run_search`, `needs_map`,
 `needs_localization`, `change_standoff`, `refresh_reference`, `replan_for_body`,
 `read_status`, `use_owner`, `isolate_or_record` and `fix_deployment`.
 

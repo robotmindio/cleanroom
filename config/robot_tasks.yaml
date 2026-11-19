@@ -1,6 +1,6 @@
-# lekiwi_rmf/task_gateway.py: the arm capabilities of the task API. All stay false on the
-# physical robot until the arm trials in DEFERRED.md pass; enabling one is an operator decision
-# made here, never a parameter set after startup.
+# lekiwi_rmf/task_gateway.py: the tracked settings of the task API. The arm capabilities all
+# stay false on the physical robot until the arm trials in DEFERRED.md pass; enabling one is an
+# operator decision made here, never a parameter set after startup.
 robot_tasks:
   ros__parameters:
     # `skill`: qualified entries of config/robot_skills.yaml, run by the skill runner.
@@ -9,3 +9,10 @@ robot_tasks:
     allow_reach: false
     # `gripper`: an SRDF gripper state or a claw position, through the same MoveGroup path as `reach`.
     allow_gripper: false
+    # `navigate` to `target.object`: the entry's sigma_m may be at most this share of standoff_m.
+    # The base stops standoff_m from the estimate, facing it. At 0.5 an object one sigma from its
+    # estimate is still at least half the standoff away and within 30 degrees of the heading; a
+    # larger share lets the robot stop on the object or beside it. sigma_m is the object map's own
+    # model, unqualified for every deployed method (docs/object-map.md), so this bounds what the
+    # map claims, not a measured error.
+    object_target_max_sigma_ratio: 0.5

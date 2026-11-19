@@ -181,6 +181,16 @@ region and near nothing.
 - `ingestion` says how far the map has read the observation store, so a stale
   map is distinguishable from an empty one.
 
+An entry with a point position is a navigation target: `navigate` with
+`target: {object: {object_id, standoff_m}}` stands that far from the entry's
+position in the newest revision and faces it, and reports the entry's `state`,
+`method`, `sigma_m`, `qualified` and `last_seen_unix_sec` with the pose. An
+`absent_at_last_place` entry, a bearing, an entry that cannot be placed and one
+whose `sigma_m` is too large for the standoff are refused: see
+[navigation targets](robot-tasks.md#navigation-targets). The query has no
+lookup by `object_id`, so the task API finds an entry only among the 100 most
+recently seen.
+
 `/robot/spatial/query` with `{"op": "pose"}` returns where the robot is, for
 remembering a spot: see [spatial memory](spatial-memory.md).
 

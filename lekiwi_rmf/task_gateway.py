@@ -53,6 +53,7 @@ from lekiwi_rmf.motion_constraints import (
     OPERATIONS as MOTION_OPERATIONS, PLANNING_FRAME, SCHEMA as MOTION_SCHEMA, TOOL_LINK, group_states,
 )
 from lekiwi_rmf.object_cameras import config_directory
+from lekiwi_rmf.spatial_anchors import SCHEMA as SPATIAL_SCHEMA
 from lekiwi_rmf.arm_trajectory import ARM_JOINTS, JOINT_LIMITS
 from lekiwi_rmf.skills import (
     BASE_COMMANDS, KINDS, SKILL_ID, UNDECLARED_EFFECTS, catalog, load_registry, skill_parameters,
@@ -69,6 +70,11 @@ GRIPPER_STATES = {name: joints[GRIPPER_JOINT]
                   for name, joints in group_states(SRDF.read_text()).get(GRIPPER_GROUP, {}).items()}
 MOTION_SERVICE = '/robot/motion/solve'
 SPATIAL_SERVICE = '/robot/spatial/query'
+OBJECTS_SERVICE = '/robot/objects/query'
+# The object map's answer schema (lekiwi_rmf/object_map.py); an answer under another is refused.
+OBJECT_MAP_SCHEMA = 'lekiwi.object_map/1'
+# The most entries one object query returns, newest sighting first.
+OBJECT_QUERY_LIMIT = 100
 SEARCH_LIMITS = ('max_duration_sec', 'max_travel_m')
 # Schema 1 is SubmitTask/GetTask/CancelTask; schema 2 is the TaskApi services below.
 API_SCHEMAS = (1, 2)
@@ -156,7 +162,7 @@ def check_object(spec, values, prefix='', now=None):
 def _navigate_goal(values):
     target = values.get('target', {}).get('pose', values)
     if 'x' not in target:
-        raise ValueError('an anchored or point target becomes a pose at admission')
+        raise ValueError('an anchored, point or object target becomes a pose at admission')
     pose = PoseStamped()
     pose.header.frame_id = 'map'
     pose.pose.position.x, pose.pose.position.y = float(target['x']), float(target['y'])
@@ -273,6 +279,7 @@ _POSE = {'x': {**_METRES, 'required': True}, 'y': {**_METRES, 'required': True},
          'yaw': {'type': 'number', 'unit': 'rad', 'default': 0.0}}
 _REFERENCE = {'type': 'string', 'min_length': 1, 'max_length': 128, 'required': True}
 _BUDGET = {'type': 'number', 'min': 0, 'default': 0.0}
+_STANDOFF = {**_METRES, 'min': MIN_STANDOFF_M, 'max': MAX_STANDOFF_M, 'default': DEFAULT_STANDOFF_M}
 # One descriptor per capability. Request validation, the capability manifest and execution all
 # read it, so what is advertised is what is enforced:
 #   action       the ROS action that executes it; `feedback` names the field telling what a goal is doing
@@ -303,10 +310,13 @@ CAPABILITIES = {
                         'map_pose': {'type': 'object', 'required': True, 'properties': _POSE},
                         'site_ref': _REFERENCE, 'map_ref': _REFERENCE, 'revision': _REFERENCE}},
                     'point': {'type': 'object', 'properties': {'x': _POSE['x'], 'y': _POSE['y']}},
-                    'standoff_m': {**_METRES, 'min': MIN_STANDOFF_M, 'max': MAX_STANDOFF_M,
-                                   'default': DEFAULT_STANDOFF_M}},
+                    'standoff_m': _STANDOFF,
+                    'object': {'type': 'object', 'properties': {
+                        'object_id': {'type': 'string', 'pattern': '[0-9a-f]{32}', 'required': True},
+                        'standoff_m': _STANDOFF}}},
                     'alternatives': [{'required': ['pose']}, {'required': ['anchored']},
-                                     {'required': ['point'], 'optional': ['standoff_m']}]}},
+                                     {'required': ['point'], 'optional': ['standoff_m']},
+                                     {'required': ['object']}]}},
             'alternatives': [{'required': ['x', 'y'], 'optional': ['yaw']}, {'required': ['target']}]},
         'goal': _navigate_goal, 'effective': _navigate_effective,
         'effects': {'reversibility': 'reversible', 'compensation': 'Navigate back to the starting pose.'},
@@ -315,8 +325,10 @@ CAPABILITIES = {
         'advertise': lambda gateway: {'effective_defaults': {'yaw': 0.0, 'max_duration_sec': gateway._timeout},
                                       'targets': gateway.target_kinds()},
         'description': 'Map-frame x, y; yaw in radians. Or one target: {pose}, {anchored} (a pose remembered under '
-                       'an earlier map revision, reprojected into the current one) or {point, standoff_m} (stand '
-                       'that far from a map point, facing it). effective_parameters report the pose that runs. '
+                       'an earlier map revision, reprojected into the current one), {point, standoff_m} (stand '
+                       'that far from a map point, facing it) or {object: {object_id, standoff_m}} (the same '
+                       f'around an entry of {OBJECTS_SERVICE}: its last observed estimate, not a verified '
+                       'place). effective_parameters report the pose that runs and what it was resolved from. '
                        'Pauses preserve the active-time budget.'},
     'explore': {
         'action': ('/robot/explore', Explore), 'switch': ('allow_exploration', True), 'feedback': 'stage',
@@ -473,6 +485,10 @@ class TaskGateway(Node):
         self.declare_parameter('map_bundle', '')
         # The Nav2 profile whose footprint admits a standoff pose; the launch passes the one Nav2 runs.
         self.declare_parameter('navigation_params_file', str(config_directory() / 'nav2_params.yaml'))
+        # An object target is refused when its sigma_m exceeds this share of the standoff distance.
+        self._sigma_ratio = self.declare_parameter('object_target_max_sigma_ratio', 0.5).value
+        if type(self._sigma_ratio) not in (float, int) or not 0 < self._sigma_ratio <= 1:
+            raise ValueError('object_target_max_sigma_ratio must be within (0, 1]')
         # The calibration MoveIt applies to the claw's limits and endpoints; empty in simulation.
         self.declare_parameter('arm_calibration_file', '')
         try:
@@ -1094,8 +1110,9 @@ class TaskGateway(Node):
                                          'resources overlap; returns cancel receipts; and replays journal events '
                                          'from a cursor. Capabilities with requires_schema 2 are refused through '
                                          'SubmitTask.')},
+            # Each observation record states its own `grounding` and `position`; the gateway sees neither.
             'observations': {'available': self._observation_status.service_is_ready(),
-                             'schema': 1, 'grounding': 'image_only',
+                             'schema': 1, 'grounding': 'per_observation',
                              'services': {'query': '/robot/observations/query',
                                           'evidence': '/robot/observations/evidence',
                                           'prepare': '/robot/observations/prepare',
@@ -1124,6 +1141,21 @@ class TaskGateway(Node):
                                                 'or a candidate selected by a recorded calibration study. '
                                                 'expected_revision is required; the response reads back the '
                                                 'profile in force.'}},
+            # Only availability is observed here; clients query the object map and spatial memory directly.
+            'objects': {'available': self._objects.service_is_ready(), 'schema': OBJECT_MAP_SCHEMA,
+                        'service': OBJECTS_SERVICE, 'type': 'lekiwi_rmf/srv/QuerySpatial',
+                        'estimates': 'local_landmark', 'verification': 'last_observed', 'qualified': 'per_object',
+                        'navigate_target': 'object',
+                        'description': ('Where labelled things were last estimated, in the current map revision. '
+                                        'Entries are local landmark estimates, not identities: last_observed, never '
+                                        'currently_verified, and qualified is false unless the position was measured '
+                                        'under a validated calibration. Each entry states its method, sigma_m and '
+                                        'state; look again before acting on one.')},
+            'spatial': {'available': self._spatial.service_is_ready(), 'schema': SPATIAL_SCHEMA,
+                        'service': SPATIAL_SERVICE, 'type': 'lekiwi_rmf/srv/QuerySpatial',
+                        'pose': {'request': {'op': 'pose'}},
+                        'description': 'Map revisions, anchors and projections; pose answers where the robot is '
+                                       'in the current revision, for remembering a spot as an anchored target.'},
             'motion': {'available': self._motion.service_is_ready(), 'schema': MOTION_SCHEMA,
                        'service': MOTION_SERVICE, 'type': 'lekiwi_rmf/srv/TaskApi',
                        'operations': list(MOTION_OPERATIONS), 'planning_frame': PLANNING_FRAME, 'tool_link': TOOL_LINK,
@@ -1529,6 +1561,7 @@ class TaskGateway(Node):
         self._resolver_executor = SingleThreadedExecutor(context=self.context)
         self._resolver_executor.add_node(self._resolver)
         self._spatial = self._resolver.create_client(QuerySpatial, SPATIAL_SERVICE)
+        self._objects = self._resolver.create_client(QuerySpatial, OBJECTS_SERVICE)
         self._tf = Buffer()
         self._tf_listener = TransformListener(self._tf, self._resolver)
         self._map = None
@@ -1555,14 +1588,16 @@ class TaskGateway(Node):
             self._resolver_executor.spin_once(timeout_sec=0.05)
 
     def target_kinds(self):
+        point = self._footprint is not None and self._resolver.count_publishers('/map') > 0
         return {'pose': {'available': True},
                 'anchored': {'available': self._spatial.service_is_ready(), 'service': SPATIAL_SERVICE},
-                'point': {'available': self._footprint is not None and self._resolver.count_publishers('/map') > 0,
-                          'map': '/map'}}
+                'point': {'available': point, 'map': '/map'},
+                'object': {'available': point and self._objects.service_is_ready(), 'service': OBJECTS_SERVICE,
+                           'map': '/map', 'max_sigma_ratio': self._sigma_ratio}}
 
     def resolve_target(self, target):
         """The map pose a navigation target stands for now, and how it was found; one method per kind."""
-        kind = next(name for name in ('pose', 'anchored', 'point') if name in target)
+        kind = next(name for name in ('pose', 'anchored', 'point', 'object') if name in target)
         x, y, yaw, resolved = getattr(self, f'_target_{kind}')(target)
         return {'x': x, 'y': y, 'yaw': yaw, 'resolved': {'target': kind, **resolved}}
 
@@ -1571,20 +1606,23 @@ class TaskGateway(Node):
         pose = target['pose']
         return pose['x'], pose['y'], pose.get('yaw', 0.0), {}
 
-    def _spatial_query(self, request):
-        unavailable = Refused('precondition_failed', 'spatial memory is not answering', retryable=True,
-                              next_condition='wait_spatial_memory', field='target.anchored')
-        if not self._spatial.service_is_ready():
+    def _query(self, client, request, name, condition, field):
+        """One bounded JSON query of a spatial-memory service; refused when it does not answer in time."""
+        unavailable = Refused('precondition_failed', f'{name} is not answering', retryable=True,
+                              next_condition=condition, field=field)
+        if not client.service_is_ready():
             raise unavailable
-        future = self._spatial.call_async(QuerySpatial.Request(request_json=json.dumps(request, allow_nan=False)))
+        future = client.call_async(QuerySpatial.Request(request_json=json.dumps(request, allow_nan=False)))
         reply = self._resolve(lambda: future.result() if future.done() else None)
         if reply is None:
-            self._spatial.remove_pending_request(future)
+            client.remove_pending_request(future)
             raise unavailable
         if not reply.success:
-            raise Refused('precondition_failed', f'spatial memory refused the query: {reply.detail}',
-                          field='target.anchored')
+            raise Refused('precondition_failed', f'{name} refused the query: {reply.detail}', field=field)
         return json.loads(reply.response_json)
+
+    def _spatial_query(self, request):
+        return self._query(self._spatial, request, 'spatial memory', 'wait_spatial_memory', 'target.anchored')
 
     def _target_anchored(self, target):
         """A pose remembered under an earlier map revision, carried by its anchor into the current one."""
@@ -1621,30 +1659,98 @@ class TaskGateway(Node):
         return t.x, t.y
 
     def _target_point(self, target):
+        return self._approach((target['point']['x'], target['point']['y']),
+                              target.get('standoff_m', DEFAULT_STANDOFF_M), 'target.point', 'target.standoff_m')
+
+    def _target_object(self, target):
+        """Near an object-map entry and facing it: the point target of its last observed estimate."""
+        identifier = target['object']['object_id']
+        standoff = target['object'].get('standoff_m', DEFAULT_STANDOFF_M)
+
+        def refused(code, detail, condition, retryable=False, field='target.object', **data):
+            return Refused(code, detail, retryable=retryable, next_condition=condition, field=field, **data)
+
+        # DEBT: the object map has no lookup by id, so an entry is found only among the newest
+        # OBJECT_QUERY_LIMIT sightings and an older one is refused until it is seen again. Revisit
+        # when /robot/objects/query accepts an object_id.
+        answer = self._query(self._objects, {'limit': OBJECT_QUERY_LIMIT}, 'the object map', 'wait_object_map',
+                             'target.object')
+        try:
+            if answer['schema'] != OBJECT_MAP_SCHEMA:
+                raise refused('precondition_failed', f'the object map answers {answer["schema"]}, not '
+                              f'{OBJECT_MAP_SCHEMA}', 'fix_deployment')
+            entry = next((item for item in answer['objects'] if item['object_id'] == identifier), None)
+            if entry is None and answer['truncated']:
+                raise refused('precondition_failed', f'the object is not among the {OBJECT_QUERY_LIMIT} most recently '
+                              'seen entries, the most the object map returns', 'run_search',
+                              field='target.object.object_id')
+            if entry is None:
+                raise refused('not_found', 'the object map has no entry with this object_id', 'query_objects',
+                              field='target.object.object_id')
+            state, position, sigma = entry['state'], entry['position'], entry['sigma_m']
+            if state == 'absent_at_last_place':
+                raise refused('precondition_failed', 'the object was not detected in views that should have shown '
+                              'it at its last place', 'run_search', retryable=True, object_state=state)
+            if position is None and 'position_unavailable_reason' in entry:
+                code = entry['position_unavailable_reason']
+                raise refused(code if code in ('site_mismatch', 'map_unaligned', 'revision_unknown')
+                              else 'precondition_failed', f'the object has no place in the current map: {code}',
+                              'refresh_reference', spatial_code=code)
+            if position is None:
+                raise refused('precondition_failed', f'the object is known only as a direction ({entry["method"]}), '
+                              'not as a point', 'run_search', retryable=True, method=entry['method'])
+            if not answer['localized']:
+                raise refused('precondition_failed', 'the robot is not localized in a known map', 'needs_localization',
+                              retryable=True)
+            if entry['map_ref'] != answer['map']['map_ref']:
+                raise refused('map_unaligned', 'the object is in a map that has no alignment with the one the '
+                              'robot is in', 'refresh_reference')
+            point = (position['x'], position['y'])
+            if any(type(value) not in (float, int) or not math.isfinite(value) for value in (*point, sigma)):
+                raise TypeError('position and sigma_m must be finite numbers')
+            # The pose stands standoff_m from the estimate and faces it. With the object one sigma_m away
+            # from the estimate, the tracked 0.5 keeps it at least half the standoff from the base and
+            # within 30 degrees of its heading; beyond that the robot may stop on the object or beside it.
+            limit = self._sigma_ratio * standoff
+            if sigma > limit:
+                wider = sigma <= self._sigma_ratio * MAX_STANDOFF_M
+                raise refused('precondition_failed', f'the object estimate is uncertain by {sigma} m, more than '
+                              f'{limit:.3f} m ({self._sigma_ratio} of the standoff)',
+                              'change_standoff' if wider else 'run_search', retryable=not wider,
+                              field='target.object.standoff_m' if wider else 'target.object',
+                              sigma_m=sigma, max_sigma_m=limit)
+            resolved = {name: entry[name] for name in ('object_id', 'label', 'state', 'method', 'sigma_m', 'qualified',
+                                                       'last_seen_unix_sec', 'map_ref', 'revision')}
+            resolved['verification'] = answer['verification']
+        except (KeyError, TypeError) as error:
+            raise refused('precondition_failed', f'the object map answer is malformed: {error!r}',
+                          'fix_deployment') from error
+        x, y, yaw, approach = self._approach(point, standoff, 'target.object', 'target.object.standoff_m')
+        return x, y, yaw, {**approach, **resolved}
+
+    def _approach(self, point, standoff, field, standoff_field):
         """Near a map point and facing it: a clear, known standoff pose, the one nearest the robot."""
-        point = (target['point']['x'], target['point']['y'])
-        standoff = target.get('standoff_m', DEFAULT_STANDOFF_M)
         if self._footprint is None:
             raise Refused('capability_unavailable', 'point targets need the Nav2 footprint of this deployment',
-                          next_condition='fix_deployment', field='target.point')
+                          next_condition='fix_deployment', field=field)
         # Take what queued up since the last request first: the newest map and transforms.
         self._resolve(lambda: None, wait_sec=0.1)
         robot = self._resolve(self._robot_position)
         if robot is None:
             raise Refused('precondition_failed', 'the robot has no fresh pose in the map', retryable=True,
-                          next_condition='needs_localization', field='target.point')
+                          next_condition='needs_localization', field=field)
         try:
             grid = map_geometry(self._resolve(lambda: self._map), self._standoff['max_map_cells'])
         except (AttributeError, ValueError) as error:
             raise Refused('precondition_failed', f'no usable occupancy map: {error}', retryable=True,
-                          next_condition='needs_map', field='target.point') from error
+                          next_condition='needs_map', field=field) from error
         try:
             x, y, yaw = approach_pose(*grid, point, standoff, robot, clearance=self._standoff['clearance_m'],
                                       footprint=self._footprint, free_threshold=self._standoff['free_threshold'])
         except NoStandoff as error:
             raise Refused('precondition_failed', f'no standoff pose {standoff} m from the point: {error}',
                           retryable=error.unmapped, next_condition='needs_map' if error.unmapped else 'change_standoff',
-                          field='target.point' if error.unmapped else 'target.standoff_m') from error
+                          field=field if error.unmapped else standoff_field) from error
         return x, y, yaw, {'point': list(point), 'standoff_m': standoff, 'robot': list(robot)}
 
     def destroy_node(self):

@@ -20,6 +20,7 @@
     "/robot/motion/solve",
     "/robot/navigation/odometry",
     "/robot/spatial/query",
+    "/robot/objects/query",
     "/robot/observations/query",
     "/robot/observations/evidence",
     "/robot/observations/pin",

@@ -32,11 +32,12 @@ import yaml
 
 from lekiwi_rmf.action import Explore, RunSkill
 from lekiwi_rmf.exploration_owner_guard import ExplorationOwnerGuard
+from lekiwi_rmf import object_map
 from lekiwi_rmf.object_detector import ObjectDetector
 from lekiwi_rmf.perception_query import make_query
 from lekiwi_rmf.spatial_memory_node import SpatialMemory
-from lekiwi_rmf.srv import GetTask, SetPerceptionQuery, SubmitTask, TaskApi
-from lekiwi_rmf.task_gateway import BODY_PROFILE, TASK_API, TaskGateway
+from lekiwi_rmf.srv import GetTask, QuerySpatial, SetPerceptionQuery, SubmitTask, TaskApi
+from lekiwi_rmf.task_gateway import BODY_PROFILE, OBJECT_MAP_SCHEMA, OBJECT_QUERY_LIMIT, TASK_API, TaskGateway
 from lekiwi_rmf.task_journal import Refused
 from ros_test_utils import release_graph
 from test_spatial_memory_ros import graph, rtabmap_database
@@ -190,6 +191,18 @@ def test_capabilities_declare_resources_effects_and_the_negotiated_schema(robot)
     # Only what admission accepts is advertised: the qualified entry, with the version a plan can pin.
     assert [(skill['skill_id'], skill['version']) for skill in entries['skill']['skills']] == [('insert_peg', 2)]
     assert catalog['observations']['services']['prepare'] == '/robot/observations/prepare'
+    # The gateway states what it can observe: each observation carries its own grounding, and the
+    # object map and the robot's pose are advertised with the availability of their services.
+    assert catalog['observations']['grounding'] == 'per_observation'
+    assert OBJECT_MAP_SCHEMA == object_map.SCHEMA
+    assert {name: catalog['objects'][name] for name in catalog['objects'] if name != 'description'} == {
+        'available': False, 'schema': 'lekiwi.object_map/1', 'service': '/robot/objects/query',
+        'type': 'lekiwi_rmf/srv/QuerySpatial', 'estimates': 'local_landmark', 'verification': 'last_observed',
+        'qualified': 'per_object', 'navigate_target': 'object'}
+    assert catalog['spatial']['service'] == '/robot/spatial/query' and not catalog['spatial']['available']
+    assert catalog['spatial']['pose'] == {'request': {'op': 'pose'}}
+    assert entries['navigate']['targets']['object'] == {
+        'available': False, 'service': '/robot/objects/query', 'map': '/map', 'max_sigma_ratio': 0.5}
     assert entries['navigate']['effects']['reversibility'] == 'reversible'
     assert entries['skill']['effects']['undeclared']['reversibility'] == 'irreversible'
     assert entries['navigate']['units']['yaw'] == 'rad' and entries['navigate']['frame'] == 'map'
@@ -520,7 +533,8 @@ EXAMPLES = {
                  {'target': {'pose': {'x': 1, 'y': 2, 'yaw': 0.1}}},
                  {'target': {'anchored': {'map_pose': {'x': 1, 'y': 2, 'yaw': 0.1}, 'site_ref': 'home',
                                           'map_ref': 'map-1', 'revision': 'revision-1'}}},
-                 {'target': {'point': {'x': 1, 'y': 2}, 'standoff_m': 0.6}}],
+                 {'target': {'point': {'x': 1, 'y': 2}, 'standoff_m': 0.6}},
+                 {'target': {'object': {'object_id': 'c' * 32, 'standoff_m': 0.6}}}],
     'explore': [{'revisit_known': True, 'max_duration_sec': 5, 'max_radius_m': 2}, {'resume_task_id': 'a' * 32}],
     'search': [{'query': 'cup', 'region': {'x': 0, 'y': 0, 'radius_m': 1}, 'max_duration_sec': 5,
                 'max_travel_m': 2, 'target_coverage': 0.5}],
@@ -698,7 +712,21 @@ def arrived(robot, task_id):
     wait(lambda: robot.status(task_id)['state'] == 'succeeded')
     view = robot.status(task_id)
     assert view['reason_code'] == 'succeeded' and view['effect']['kind'] == 'pose_reached'
-    assert view['effective_parameters']['resolved']['target'] in ('pose', 'point', 'anchored')
+    assert view['effective_parameters']['resolved']['target'] in ('pose', 'point', 'anchored', 'object')
+
+
+def localize(robot, x=-1.0):
+    """Keep a fresh map to base_footprint transform on the graph."""
+    broadcaster = TransformBroadcaster(robot.peers)
+
+    def send():
+        transform = TransformStamped()
+        transform.header.stamp = robot.peers.get_clock().now().to_msg()
+        transform.header.frame_id, transform.child_frame_id = 'map', 'base_footprint'
+        transform.transform.translation.x, transform.transform.rotation.w = x, 1.0
+        broadcaster.sendTransform(transform)
+
+    robot.peers.create_timer(0.05, send)
 
 
 def test_a_pose_target_runs_as_the_pose_it_names(robot):
@@ -727,16 +755,7 @@ def test_a_point_target_becomes_a_clear_standoff_pose_facing_it(robot):
     lost = validate()
     assert (lost.error, lost.data) == ('precondition_failed', {
         'retryable': True, 'next_condition': 'needs_localization', 'field': 'target.point'})
-    broadcaster = TransformBroadcaster(robot.peers)
-
-    def localize():
-        transform = TransformStamped()
-        transform.header.stamp = robot.peers.get_clock().now().to_msg()
-        transform.header.frame_id, transform.child_frame_id = 'map', 'base_footprint'
-        transform.transform.translation.x, transform.transform.rotation.w = -1.0, 1.0
-        broadcaster.sendTransform(transform)
-
-    robot.peers.create_timer(0.05, localize)
+    localize(robot)
     wait(lambda: validate().data['next_condition'] == 'needs_map')
     maps = robot.peers.create_publisher(OccupancyGrid, '/map',
                                         QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
@@ -823,3 +842,95 @@ def test_an_anchored_target_follows_its_anchor_into_the_current_map_revision(rob
     wait(lambda: len(robot.peers.requests) == 1)
     assert robot.peers.requests[0].pose.pose.position.y == pytest.approx(0.2, abs=1e-6)
     arrived(robot, 'back')
+
+
+CUP = 'c' * 32
+
+
+def cup(**changes):
+    """An object-map entry as /robot/objects/query documents it."""
+    return {'object_id': CUP, 'label': 'cup', 'state': 'present', 'site_ref': 'home', 'map_ref': 'm',
+            'revision': 'r2', 'position': {'x': 1.0, 'y': 0.0, 'z': 0.1}, 'bearings': [],
+            'method': 'ray_octomap_hit', 'sigma_m': 0.09, 'qualified': False,
+            'last_seen_unix_sec': 1700000000.0, **changes}
+
+
+def object_answer(*entries, **changes):
+    return {'schema': OBJECT_MAP_SCHEMA, 'site_ref': 'home', 'localized': True,
+            'map': {'map_ref': 'm', 'revision': 'r2'}, 'verification': 'last_observed', 'truncated': False,
+            'objects': list(entries), **changes}
+
+
+def test_an_object_target_approaches_its_last_observed_estimate_and_says_what_it_is(robot):
+    wait(lambda: robot.gateway._action_clients['navigate'].server_is_ready())
+    target = {'target': {'object': {'object_id': CUP, 'standoff_m': 0.6}}}
+
+    def validate():
+        return robot.api('validate', task_id='cup', capability='navigate', parameters=target, owner='agent-a')
+
+    silent = validate()
+    assert (silent.error, silent.data) == ('precondition_failed', {
+        'retryable': True, 'next_condition': 'wait_object_map', 'field': 'target.object'})
+    answer, asked = [object_answer()], []
+
+    def serve(request, response):
+        asked.append(json.loads(request.request_json))
+        response.success, response.response_json = True, json.dumps(answer[0])
+        return response
+
+    robot.peers.create_service(QuerySpatial, '/robot/objects/query', serve)
+    localize(robot)
+    maps = robot.peers.create_publisher(OccupancyGrid, '/map',
+                                        QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
+    maps.publish(occupancy(0))
+    wait(lambda: robot.capability_catalog()['capabilities'][0]['targets']['object']['available'])
+    assert robot.capability_catalog()['objects']['available']
+    again = {'retryable': True, 'next_condition': 'run_search', 'field': 'target.object'}
+    stale = {'retryable': False, 'next_condition': 'refresh_reference', 'field': 'target.object'}
+    broken = {'retryable': False, 'next_condition': 'fix_deployment', 'field': 'target.object'}
+    for case, code, data in (
+            (object_answer(cup(object_id='d' * 32)), 'not_found',
+             {'retryable': False, 'next_condition': 'query_objects', 'field': 'target.object.object_id'}),
+            # More entries than one query returns: the id may exist, so it is not called unknown.
+            (object_answer(truncated=True), 'precondition_failed',
+             {'retryable': False, 'next_condition': 'run_search', 'field': 'target.object.object_id'}),
+            (object_answer(cup(state='absent_at_last_place')), 'precondition_failed',
+             {**again, 'object_state': 'absent_at_last_place'}),
+            (object_answer(cup(position=None, method='bearing_only', sigma_m=None)), 'precondition_failed',
+             {**again, 'method': 'bearing_only'}),
+            (object_answer(cup(position=None, revision=None, position_unavailable_reason='revision_unknown')),
+             'revision_unknown', {**stale, 'spatial_code': 'revision_unknown'}),
+            (object_answer(cup(position=None, revision=None, position_unavailable_reason='anchor_unknown')),
+             'precondition_failed', {**stale, 'spatial_code': 'anchor_unknown'}),
+            (object_answer(cup(map_ref='another-map')), 'map_unaligned', stale),
+            (object_answer(cup(), localized=False, map=None), 'precondition_failed',
+             {'retryable': True, 'next_condition': 'needs_localization', 'field': 'target.object'}),
+            # Uncertain by more than half the standoff: a wider standoff admits 0.4 m, nothing admits 2 m.
+            (object_answer(cup(sigma_m=0.4)), 'precondition_failed',
+             {'retryable': False, 'next_condition': 'change_standoff', 'field': 'target.object.standoff_m',
+              'sigma_m': 0.4, 'max_sigma_m': 0.3}),
+            (object_answer(cup(sigma_m=2.0)), 'precondition_failed', {**again, 'sigma_m': 2.0, 'max_sigma_m': 0.3}),
+            (object_answer(cup(), schema='lekiwi.object_map/2'), 'precondition_failed', broken),
+            (object_answer(cup(sigma_m='narrow')), 'precondition_failed', broken)):
+        answer[0] = case
+        refused = validate()
+        assert (refused.error, refused.data) == (code, data), refused.detail
+    assert robot.journal_rows() == [] and robot.peers.requests == []
+    # An unconfirmed entry is still the best estimate; the caller is told its state.
+    answer[0] = object_answer(cup(object_id='d' * 32), cup(state='unconfirmed'))
+    reply = robot.submit('cup', 'navigate', target)
+    assert reply.ok, reply.detail
+    assert asked[-1] == {'limit': OBJECT_QUERY_LIMIT}
+    effective = reply.data['task']['effective_parameters']
+    # The same standoff pose as the point target at the entry's x, y.
+    assert (effective['x'], effective['y'], effective['yaw']) == pytest.approx((0.4, 0.0, 0.0), abs=1e-9)
+    assert effective['resolved'] == {
+        'target': 'object', 'point': [1.0, 0.0], 'standoff_m': 0.6, 'robot': [-1.0, 0.0],
+        'object_id': CUP, 'label': 'cup', 'state': 'unconfirmed', 'method': 'ray_octomap_hit', 'sigma_m': 0.09,
+        'qualified': False, 'last_seen_unix_sec': 1700000000.0, 'map_ref': 'm', 'revision': 'r2',
+        'verification': 'last_observed'}
+    assert effective['max_duration_sec'] == 180.0 and 'target' not in effective
+    wait(lambda: len(robot.peers.requests) == 1)
+    sent = robot.peers.requests[0].pose.pose
+    assert (sent.position.x, sent.position.y) == pytest.approx((0.4, 0.0), abs=1e-9)
+    arrived(robot, 'cup')

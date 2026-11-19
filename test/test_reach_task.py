@@ -298,7 +298,8 @@ def test_a_failed_gripper_motion_is_moveits_error_and_asks_for_compensation(reac
 
 def test_the_arm_capabilities_are_off_unless_the_deployment_enables_them(tmp_path):
     tracked = yaml.safe_load((CONFIG / 'robot_tasks.yaml').read_text())['robot_tasks']['ros__parameters']
-    assert tracked == {'allow_skills': False, 'allow_reach': False, 'allow_gripper': False}
+    assert {name: value for name, value in tracked.items() if name.startswith('allow_')} == {
+        'allow_skills': False, 'allow_reach': False, 'allow_gripper': False}
     context = Context()
     rclpy.init(context=context)
     gateway = TaskGateway(context=context, parameter_overrides=[

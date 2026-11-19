@@ -2358,6 +2358,7 @@
      }
     }
    },
+   "object_target_max_sigma_ratio": 0.5,
    "use_sim_time": false
   },
   "remappings": [],
