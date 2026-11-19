@@ -601,6 +601,8 @@
   "parameters": {
    "allow_exploration": false,
    "allow_navigation": true,
+   "allow_reach": false,
+   "allow_skills": false,
    "map_bundle": "$(share lekiwi_rmf)/maps/bundles/cleanroom-development.yaml",
    "use_sim_time": true
   },

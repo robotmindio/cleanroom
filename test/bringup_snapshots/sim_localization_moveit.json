@@ -646,6 +646,8 @@
   "parameters": {
    "allow_exploration": true,
    "allow_navigation": true,
+   "allow_reach": false,
+   "allow_skills": false,
    "map_bundle": "",
    "use_sim_time": true
   },

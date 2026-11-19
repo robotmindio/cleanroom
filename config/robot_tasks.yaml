@@ -1,0 +1,9 @@
+# lekiwi_rmf/task_gateway.py: the arm capabilities of the task API. Both stay false on the
+# physical robot until the arm trials in DEFERRED.md pass; enabling one is an operator decision
+# made here, never a parameter set after startup.
+robot_tasks:
+  ros__parameters:
+    # `skill`: qualified entries of config/robot_skills.yaml, run by the skill runner.
+    allow_skills: false
+    # `reach`: a joint target planned and executed by MoveIt's MoveGroup (needs start_moveit).
+    allow_reach: false
