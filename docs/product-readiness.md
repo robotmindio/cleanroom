@@ -45,9 +45,9 @@ within its recorded conditions; it does not qualify this changed behavior.
 | Understand task parameters before submitting | Live Explorer defaults and additive capability descriptions on this review branch | External clients must consume the contract; `available` means profile enabled and action server discovered, not physical permission |
 | Recognize a requested object | Pinned remote GPU recognizer with local fallback, latest-frame scheduling, source-age rejection, hashed evidence storage and explicit ambiguity/quality outcomes | Independent site corpus with accuracy, input-quality and latency acceptance; scene-specific canaries do not qualify a category detector |
 | Locate it metrically | RGB-D/TF grounding with map and uncertainty gates; invalid calibration leaves observations image-only | Measured Astra intrinsics, depth scale, registration and extrinsics; independent position error; approved site map |
-| Know objects, rooms and named destinations | Timestamped sightings with provenance, map revisions and capture anchors; geometric occupancy map and fixed RMF graph vertices | Loop-closure, relocalization, map-merge/relink and capture/graph-race acceptance; a class label is not a stable instance identity |
+| Know objects, rooms and named destinations | Timestamped sightings with provenance, map revisions and capture anchors; a persistent object map of anchored, last-observed landmark estimates (unqualified); geometric occupancy map and fixed RMF graph vertices | Loop-closure, relocalization, map-merge/relink and capture/graph-race acceptance; a class label is not a stable instance identity |
 | Set a durable user objective | Stationary find-object objective through Fiber: observe, resolve, verify with evidence-backed completion | Repeatable acceptance across positive, negative, ambiguous, stale, reconnect, cancellation and policy cases for the deployed tenant, profile and UI |
-| Decide and verify how to achieve an objective | Nav2 plans paths; MoveIt plans arm trajectories; the task gateway advertises navigate, explore, search, reach and skill (reach and skill off by default) | Multi-step robot skill planning and independent outcome verification |
+| Decide and verify how to achieve an objective | Nav2 plans paths; MoveIt plans arm trajectories; the task gateway advertises navigate (to a pose, an anchored pose, a map point or an object-map entry), explore, search, reach, gripper and skill (reach, gripper and skill off by default), each with a self-describing schema and structured refusals | Multi-step robot skill planning and independent outcome verification |
 | Search for an object while moving | Search action with view selection, bounded travel/time, cancellation and coverage bookkeeping; `allow_search: true` permits explicitly requested attended trials | Live moving-search qualification, measured detectability and 3D occlusion/coverage |
 | Execute arm motion reliably | MoveIt and guarded trajectories; stow and torque-hold recovery; skill registry, training and execution infrastructure; one loaded HOME cycle at 0.10 scaling | Measured workspace coverage, intrusion stopping, payload retention/endurance and wrist-camera reliability; `config/robot_skills.yaml` registers no skills, so grasp/carry/place is not delivered |
 | Keep sensors and control connected | Immutable split releases, service hardening, mTLS sensor bridge on three isolated sessions, CURVE motor transport, sleep inhibitor | Sustained transport/endurance, saturation and outage acceptance; service readiness is not uninterrupted sensor freshness |
@@ -367,8 +367,13 @@ policy; do not add a competing goal scheduler to ROS.
 preconditions, failure reasons and bounded recovery.
 
 **Current gap:** Nav2 and MoveIt solve geometric motion problems. The task
-gateway advertises navigate, explore, search, reach and skill; reach and skill
-are off by default (`allow_reach`, `allow_skills`) pending arm trials. There is no inspected robot
+gateway advertises navigate, explore, search, reach, gripper and skill; reach,
+gripper and skill are off by default (`allow_reach`, `allow_gripper`,
+`allow_skills`) pending arm trials. Navigate accepts generic targets (a pose, an
+anchored pose, a map point with a standoff, an object-map entry), every
+capability publishes the schema its validation enforces, and a refusal states
+`retryable`, `next_condition` and the `field` at fault. The object map gives
+last-observed, unqualified landmark estimates. There is no inspected robot
 task planner that chooses observe, search, approach, inspect and verify steps
 against a semantic goal.
 

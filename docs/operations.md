@@ -54,9 +54,12 @@ rate with the provider loaded). A budget never widens an age gate.
   exploration, the detector's per-camera `lekiwi/perception/<camera>` status
   for recognition.
 - Capabilities are `/robot/capabilities`: each capability's availability,
-  parameters and defaults, the observation services and the perception query.
-  `available` means enabled and discovered, not physically permitted; ready for
-  image-only grounding (`grounding: image_only`) is not ready for 3D pose.
+  parameters and defaults, the observation services, the perception query, the
+  object map and spatial memory. `available` means enabled and discovered, not
+  physically permitted. An available observation or object service is not ready
+  for 3D pose: each observation states its own `grounding` (`image_only`
+  without a validated calibration) and each object-map entry its `method` and
+  `qualified`.
 
 ## Learned code and model loading
 
@@ -84,8 +87,11 @@ robot-local classes; retention references the parameter that enforces it.
 | Pinned evidence | Observation store pins | Pin expires `retention_sec` after pinning; at most half the quota | 0600 |
 | Training samples | `~/.ros/lekiwi/episodes` | Never automatic; removed by the operator after the cluster export is acknowledged | 0700 |
 | Model artifacts | `~/.ros/lekiwi/models`, `~/.ros/lekiwi/skills` | Kept while tracked configuration references them | 0775 |
+| Object map | The spatial memory store (`config/spatial_memory.yaml`, `objects_*`) | Never by age: at most `objects_max_objects` (2,000) entries and `objects_max_history` (20,000) events; only an entry proven `absent_at_last_place` is removed, after `objects_absent_retention_sec` (30 days) or to make room | 0600 |
 
 `scripts/robot-data.py audit` reports anything more permissive than its class.
+The object map is working memory inside the spatial memory store, which
+`config/data_retention.yaml` lists as a backed-up store and not as a class.
 Backups snapshot the task journal, observation store (records and evidence),
 spatial memory and arm calibration with SQLite's online backup, and list model
 and skill files by size and digest; weights are reinstalled from their pinned
@@ -113,6 +119,7 @@ Restore and verify:
 | `/robot/tasks/*`, `/robot/capabilities` (`schema` 1) | `robot_tasks` | Fiber robot connector | Additive fields only; request IDs, defaults and budgets of navigate/explore are unchanged |
 | Observation store (`user_version` 1), documents and `/robot/observations/*` (`schema` 1) | `object_observations` | Fiber sighting importer, search evidence | IDs are content digests; a reused ID with other content is refused |
 | `robotmind.spacetime/1` | `spatial_memory` | Knowledge spacetime memory, search | Shared conventions in [spatial memory](spatial-memory.md) |
+| `lekiwi.object_map/1` (`/robot/objects/query`; tables of spatial database version 2) | `spatial_memory` | `robot_tasks` object targets; allow-listed for Fiber | `robot_tasks` refuses an answer under another schema; a version 1 database gains the tables on opening |
 | `/robot/perception/profile` (`schema` 1) | `object_detector` | search, Fiber | Every frame records the model and query revision it ran under |
 | Perception provider `/v1/infer` (`schema` 1) | RobotMind perception-provider | `object_recognition` | A response outside the pinned operating point is refused; `timings_ms` is optional |
 | Skill registry | `config/robot_skills.yaml` | `skill_runner`, `robot_tasks` | Exact field set; a malformed entry rejects the registry |
