@@ -97,11 +97,14 @@ def regressions(current, candidate, labels, tolerance=MAX_LABEL_REGRESSION):
     return found
 
 
-def run_study(evaluate, recognizer, current, candidates, *, manifest_sha256, labels, objective='macro_f1'):
+def run_study(evaluate, recognizer, current, candidates, *, manifest_sha256, labels, query=None,
+              objective='macro_f1'):
     """`evaluate(profile, split)` returns the evaluator's report for that split under `profile`.
 
     The frozen protocol is recorded before any search; development picks one candidate; held-out is read
-    exactly once for the current profile and once for that candidate.
+    exactly once for the current profile and once for that candidate. `query` is the query document every
+    evaluation of an open recognizer answers, or None for a closed catalogue; a report under another
+    query is refused.
     """
     if not candidates or len({candidate.revision for candidate in candidates}) != len(candidates):
         raise ValueError('a study needs distinct candidate profiles')
@@ -109,7 +112,7 @@ def run_study(evaluate, recognizer, current, candidates, *, manifest_sha256, lab
         raise ValueError('every candidate must belong to the current recognizer backend')
     if current.revision in {candidate.revision for candidate in candidates}:
         raise ValueError('the current profile is the baseline, not a candidate')
-    protocol = {'manifest_sha256': manifest_sha256, 'labels': list(labels), 'objective': objective,
+    protocol = {'manifest_sha256': manifest_sha256, 'labels': list(labels), 'query': query, 'objective': objective,
                 'search_split': 'development', 'comparison_split': 'heldout',
                 'selection': 'held-out paired bootstrap lower bound of macro-F1 gain above 0',
                 'regression': {'max_drop': MAX_LABEL_REGRESSION, 'metrics': ['f1', 'recall'],
@@ -120,6 +123,8 @@ def run_study(evaluate, recognizer, current, candidates, *, manifest_sha256, lab
         report = evaluate(candidate, 'development')
         if report.get('manifest_sha256') != manifest_sha256:
             raise ValueError('the corpus changed during the study')
+        if report.get('query') != query:
+            raise ValueError('an evaluation answered another query than the protocol froze')
         development[candidate.revision] = {'profile': candidate.document(), **summarize(report['scenes'], labels),
                                            'conditions': by_condition(report['scenes'], labels)}
     ranked = sorted(candidates, key=lambda c: -(development[c.revision]['macro_f1'] or -1))
@@ -127,6 +132,8 @@ def run_study(evaluate, recognizer, current, candidates, *, manifest_sha256, lab
     held_current, held_best = evaluate(current, 'heldout'), evaluate(best, 'heldout')
     if {held_current.get('manifest_sha256'), held_best.get('manifest_sha256')} != {manifest_sha256}:
         raise ValueError('the corpus changed during the study')
+    if held_current.get('query') != query or held_best.get('query') != query:
+        raise ValueError('an evaluation answered another query than the protocol froze')
     paired = paired_bootstrap(held_current['scenes'], held_best['scenes'], labels)
     regressed = regressions(held_current['scenes'], held_best['scenes'], labels)
     reasons = []

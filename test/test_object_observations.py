@@ -481,8 +481,8 @@ def test_evaluation_rejects_duplicate_content_with_new_scene_ids(tmp_path, evalu
     cv2.imwrite(str(tmp_path / ('two' + extension)), pixels)
     manifest = tmp_path / 'scenes.json'
     manifest.write_text(json.dumps([
-        {'scene_id': 'first', 'split': 'heldout', 'image': 'one.png', 'cups': []},
-        {'scene_id': 'second', 'split': split, 'image': 'two' + extension, 'cups': []}]))
+        {'scene_id': 'first', 'split': 'heldout', 'image': 'one.png', 'objects': []},
+        {'scene_id': 'second', 'split': split, 'image': 'two' + extension, 'objects': []}]))
     with pytest.raises(ValueError, match='duplicate image content'):
         evaluator.load_scenes(manifest)
 
@@ -491,7 +491,7 @@ def test_evaluation_validates_development_labels_before_inference(tmp_path, eval
     cv2.imwrite(str(tmp_path / 'one.png'), np.zeros((40, 60, 3), np.uint8))
     manifest = tmp_path / 'scenes.json'
     manifest.write_text(json.dumps([{'scene_id': 'development', 'split': 'development',
-        'image': 'one.png', 'cups': [{'bbox': [50, 0, 20, 10], 'blue': True}]}]))
+        'image': 'one.png', 'objects': [{'label': 'cup', 'bbox': [50, 0, 20, 10], 'blue': True}]}]))
     with pytest.raises(ValueError, match='exceeds its image'):
         evaluator.load_scenes(manifest)
 
@@ -502,11 +502,11 @@ def test_evaluation_reports_failed_scene_and_keeps_small_corpus_unqualified(tmp_
     cv2.imwrite(str(tmp_path / 'one.png'), pixels)
     manifest = tmp_path / 'scenes.json'
     manifest.write_text(json.dumps([{'scene_id': 'test-fixture', 'split': 'heldout',
-        'image': 'one.png', 'cups': [{'bbox': [10, 10, 20, 20], 'blue': True}]}]))
+        'image': 'one.png', 'objects': [{'label': 'cup', 'bbox': [10, 10, 20, 20], 'blue': True}]}]))
     model = tmp_path / 'fixture.onnx'
     model.write_bytes(b'fixture')
     monkeypatch.setattr(evaluator, 'Recognizer', lambda *args, **kwargs: SimpleNamespace(
-        predict=lambda *_: [], sha256=MODEL_SHA256, identity={}, default_query=None, default_profile=PROFILE))
+        predict=lambda *_: [], sha256=MODEL_SHA256, identity={}, open_vocabulary=False, default_profile=PROFILE))
     result = evaluator.evaluate(manifest, model)
     assert not result['passed'] and not result['gates']['heldout_scenes']
     assert result['metrics']['cup']['fn'] == 1 and result['scenes'][0]['scene_id'] == 'test-fixture'
@@ -520,12 +520,12 @@ def test_evaluation_rejects_images_changed_after_preflight(tmp_path, evaluator, 
     cv2.imwrite(str(image), np.zeros((40, 60, 3), np.uint8))
     manifest = tmp_path / 'scenes.json'
     manifest.write_text(json.dumps([{'scene_id': 'test-fixture', 'split': 'heldout',
-        'image': 'one.png', 'cups': []}]))
+        'image': 'one.png', 'objects': [{'label': 'cup', 'bbox': [10, 10, 20, 20]}]}]))
     model = tmp_path / 'fixture.onnx'
     model.write_bytes(b'fixture')
     def change_image(*args, **kwargs):
         cv2.imwrite(str(image), np.full((40, 60, 3), 255, np.uint8))
-        return SimpleNamespace(predict=lambda *_: [], sha256=MODEL_SHA256, identity={}, default_query=None,
+        return SimpleNamespace(predict=lambda *_: [], sha256=MODEL_SHA256, identity={}, open_vocabulary=False,
                                default_profile=PROFILE)
     monkeypatch.setattr(evaluator, 'Recognizer', change_image)
     with pytest.raises(ValueError, match='changed after dataset validation'):
@@ -554,7 +554,7 @@ def test_evaluation_rejects_related_views_crossing_splits(tmp_path, evaluator):
         name = f'{index}.png'
         cv2.imwrite(str(tmp_path / name), np.full((40, 60, 3), index, np.uint8))
         scenes.append({'scene_id': str(index), 'scene_group': 'same-arrangement',
-                       'split': split, 'image': name, 'cups': []})
+                       'split': split, 'image': name, 'objects': []})
     manifest = tmp_path / 'scenes.json'
     manifest.write_text(json.dumps(scenes))
     with pytest.raises(ValueError, match='group crosses'):
@@ -588,22 +588,56 @@ def test_classes_are_scored_separately_and_unlabeled_classes_are_not_false_posit
     assert 'blue cup' not in result['goals']
 
 
-def test_multiclass_manifest_defines_vocabulary_and_keeps_legacy_cups(tmp_path, evaluator):
+def test_multiclass_manifest_defines_the_vocabulary(tmp_path, evaluator):
     for name, value in [('one.png', 0), ('two.png', 255)]:
         cv2.imwrite(str(tmp_path / name), np.full((40, 60, 3), value, np.uint8))
     manifest = tmp_path / 'scenes.json'
     manifest.write_text(json.dumps([
-        {'scene_id': 'one', 'split': 'heldout', 'image': 'one.png', 'cups': [{'bbox': [0, 0, 5, 5], 'blue': True}]},
+        {'scene_id': 'one', 'split': 'heldout', 'image': 'one.png',
+         'objects': [{'label': 'cup', 'bbox': [0, 0, 5, 5], 'blue': True}]},
         {'scene_id': 'two', 'split': 'heldout', 'image': 'two.png',
          'objects': [{'label': 'potted plant', 'bbox': [0, 0, 5, 5]}]}]))
     _, selected, labels, blue_labels = evaluator.load_scenes(manifest)
     assert labels == ['cup', 'potted plant'] and blue_labels == ['cup']
     assert selected[0][0]['objects'] == [{'label': 'cup', 'bbox': [0, 0, 5, 5], 'blue': True}]
-    for bad in [{'cups': [], 'objects': []}, {}, {'objects': [{'bbox': [0, 0, 5, 5]}]},
+    for bad in [{'cups': [], 'objects': []}, {'cups': []}, {}, {'objects': [{'bbox': [0, 0, 5, 5]}]},
                 {'objects': [{'label': 'cup', 'bbox': [0, 0, 5, 5], 'blue': 'yes'}]}]:
         manifest.write_text(json.dumps([{'scene_id': 'one', 'split': 'heldout', 'image': 'one.png', **bad}]))
         with pytest.raises(ValueError):
             evaluator.load_scenes(manifest)
+
+
+def test_open_recognizer_is_evaluated_under_the_manifest_vocabulary(tmp_path, evaluator):
+    from lekiwi_rmf.perception_query import make_query
+    boxes = {'spoon': [5, 5, 10, 10], 'bowl': [20, 5, 10, 10]}
+    scenes = []
+    for label, value in [('spoon', 60), ('bowl', 120)]:
+        cv2.imwrite(str(tmp_path / f'{label}.png'), np.full((40, 60, 3), value, np.uint8))
+        scenes.append({'scene_id': label, 'split': 'heldout', 'image': f'{label}.png',
+                       'objects': [{'label': label, 'bbox': boxes[label]}]})
+    manifest = tmp_path / 'scenes.json'
+    manifest.write_text(json.dumps(scenes))
+    asked = []
+
+    def predict(image, query, profile, artifact):
+        # Like a real open recognizer, it localizes only the labels it is asked for.
+        asked.append(query.labels)
+        label = 'spoon' if image.mean() < 90 else 'bowl'
+        return [[*boxes[label], .9, label]] if label in query.labels else []
+    recognizer = fake_recognizer(predict, 'remote_grounding_dino', open_vocabulary=True, identity={})
+    report = evaluator.evaluate(manifest, recognizer=recognizer)
+    assert asked == [('bowl', 'spoon')] * 2 and report['query']['labels'] == ['bowl', 'spoon']
+    assert report['metrics']['spoon']['tp'] == report['metrics']['bowl']['tp'] == 1
+    assert not report['metrics']['spoon']['fn'] and not report['metrics']['bowl']['fn']
+    # A query that cannot report a manifest label would score it as a guaranteed miss.
+    with pytest.raises(ValueError, match="cannot report manifest labels \\['bowl'\\]"):
+        evaluator.evaluate(manifest, recognizer=recognizer, query=make_query(['spoon']))
+    with pytest.raises(ValueError, match='closed-vocabulary'):
+        evaluator.evaluate(manifest, recognizer=fake_recognizer(predict, identity={}), query=make_query(['spoon']))
+    scenes[0]['objects'][0]['label'] = 'Spoon'
+    manifest.write_text(json.dumps(scenes))
+    with pytest.raises(ValueError, match='canonical lower-case'):
+        evaluator.evaluate(manifest, recognizer=recognizer)
 
 
 def preparation_request(**changes):

@@ -20,6 +20,7 @@ from lekiwi_rmf.object_detector import detect
 from lekiwi_rmf.object_recognition import Recognizer, use_model_runtime
 from lekiwi_rmf.object_observations import artifact_pixels, capture_artifact, observation
 from lekiwi_rmf.perception_profiles import make_profile, tracked_profiles
+from lekiwi_rmf.perception_query import make_query
 from lekiwi_rmf.threshold_calibration import matches, overlap
 
 # Hard conditions the corpus must cover before its results describe them (spec T-15); the report lists
@@ -42,15 +43,22 @@ def interval(successes, total):
     return [max(0, centre - margin), min(1, centre + margin)]
 
 
-def scene_objects(scene):
-    """Schema-1 manifests labeled only cups; they remain valid as the label `cup`."""
-    if ('objects' in scene) == ('cups' in scene):
-        raise ValueError('each scene requires exactly one of objects or legacy cups')
-    if 'cups' in scene:
-        if not isinstance(scene['cups'], list):
-            raise ValueError('cups must be a list')
-        return [{'label': 'cup', **cup} if isinstance(cup, dict) else cup for cup in scene['cups']]
-    return scene['objects']
+def corpus_query(model, labels, query=None):
+    """The query an open recognizer is evaluated under: by default the manifest's whole label vocabulary.
+
+    An open recognizer localizes only what it is asked for, so any label the query cannot report would be
+    scored as a guaranteed miss; such a query is refused. A closed recognizer reports its native catalogue.
+    """
+    if not model.open_vocabulary:
+        if query is not None:
+            raise ValueError('a closed-vocabulary recognizer cannot answer a query')
+        return None
+    query = query or make_query(labels)
+    unasked = sorted(set(labels) - set(query.reportable))
+    if unasked:
+        raise ValueError(f'the query cannot report manifest labels {unasked}; open-vocabulary manifests '
+                         'use canonical lower-case labels, each named by the query')
+    return query
 
 
 def load_scenes(manifest, split='heldout'):
@@ -64,17 +72,15 @@ def load_scenes(manifest, split='heldout'):
     seen, image_hashes, pixel_hashes, selected, groups = set(), {}, {}, [], {}
     labels, blue_labels = set(), set()
     for scene in scenes:
-        if (not isinstance(scene, dict) or not {'scene_id', 'split', 'image'} <= set(scene)
-                or set(scene) - {'scene_id', 'scene_group', 'split', 'image', 'objects', 'cups', 'conditions'}):
+        if (not isinstance(scene, dict) or not {'scene_id', 'split', 'image', 'objects'} <= set(scene)
+                or set(scene) - {'scene_id', 'scene_group', 'split', 'image', 'objects', 'conditions'}):
             raise ValueError('each scene requires scene_id, split, image and objects')
         conditions = scene.get('conditions', [])
         if (not isinstance(conditions, list) or len(conditions) > 8 or len(set(conditions)) != len(conditions)
                 or any(not isinstance(tag, str) or not 1 <= len(tag) <= 32
                        or any(c not in 'abcdefghijklmnopqrstuvwxyz_' for c in tag) for tag in conditions)):
             raise ValueError('conditions are up to 8 distinct lower-case tags')
-        objects = scene_objects(scene)
-        if 'cups' in scene:
-            labels.add('cup')  # A legacy cup list declares cups labeled even when this scene has none.
+        objects = scene['objects']
         identifier = scene['scene_id']
         if not isinstance(identifier, str) or not 1 <= len(identifier) <= 128 or identifier in seen:
             raise ValueError('scene IDs must be unique; split by scene, not adjacent video frames')
@@ -124,7 +130,7 @@ def load_scenes(manifest, split='heldout'):
             if x + w > pixels.shape[1] or y + h > pixels.shape[0]:
                 raise ValueError('labeled box exceeds its image')
         if scene['split'] == split:
-            selected.append(({**scene, 'objects': objects}, image_path, digest))
+            selected.append((scene, image_path, digest))
     if not selected:
         raise ValueError(f'manifest requires {split} scenes')
     if not labels:
@@ -174,7 +180,11 @@ def scene_metrics(detections, objects, blue_threshold, labels, blue_labels):
 
 def evaluate(manifest, model_path=None, *, name='yolox', split='heldout', profile=None, blue_threshold=.35,
              recognizer=None, query=None):
-    """Score one recognizer under one proposal profile; defaults to the tracked default profile."""
+    """Score one recognizer under one proposal profile; defaults to the tracked default profile.
+
+    An open recognizer is asked for the manifest's label vocabulary unless a study fixes another `query`
+    that reports every manifest label; the report records the query used.
+    """
     if split not in ('development', 'heldout') or not 0 <= blue_threshold <= 1:
         raise ValueError('invalid frozen evaluation operating point')
     manifest_hash, heldout, labels, blue_labels = load_scenes(manifest, split)
@@ -182,8 +192,7 @@ def evaluate(manifest, model_path=None, *, name='yolox', split='heldout', profil
     cv2.setNumThreads(2)
     model, bridge = recognizer or Recognizer(name, model_path, allow_experimental=True), CvBridge()
     profile = profile or model.default_profile
-    # An open recognizer is evaluated under its tracked default query unless a study fixes another.
-    query = query or model.default_query
+    query = corpus_query(model, labels, query)
     totals, attribute = {key: [0, 0, 0] for key in keys}, [0, 0, 0, 0]
     durations, hashes, results = [], [], []
     groups = {key: {'positive': set(), 'negative': set(), 'ambiguous': set()} for key in keys}

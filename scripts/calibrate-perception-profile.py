@@ -53,10 +53,13 @@ def main():
     if current is None:
         raise SystemExit(f'{args.current} is not a tracked {recognizer.backend} profile')
     manifest_sha256, _, labels, _ = module.load_scenes(args.manifest, 'heldout')
+    # Frozen with the protocol: every candidate and both splits answer the same query.
+    query = module.corpus_query(recognizer, labels)
     record = run_study(lambda profile, split: module.evaluate(args.manifest, split=split, profile=profile,
-                                                              recognizer=recognizer),
+                                                              recognizer=recognizer, query=query),
                        recognizer, current, candidates_from(args.candidates, current),
-                       manifest_sha256=manifest_sha256, labels=labels)
+                       manifest_sha256=manifest_sha256, labels=labels,
+                       query=None if query is None else query.document())
     path = save(record, args.store)
     output = Path(args.output).expanduser()
     output.parent.mkdir(parents=True, exist_ok=True)

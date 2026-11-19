@@ -238,7 +238,8 @@ untracked profile needs a selected study.
 ## Calibration studies and learned concepts
 
 `scripts/calibrate-perception-profile.py MANIFEST --model-name NAME --candidates
-CANDIDATES.json --output REPORT` freezes the corpus hash, splits, objective
+CANDIDATES.json --output REPORT` freezes the corpus hash, splits, the query an
+open-vocabulary recognizer answers (the manifest's label vocabulary), objective
 (macro F1 over labels), regression rule (no label F1 or recall, and no condition
 with at least five scenes, may drop by more than 0.02) and a seeded paired
 bootstrap over scene groups. It searches the candidates on development, then
@@ -387,10 +388,12 @@ Prepare a private manifest; images stay outside Git:
 
 Labels are the detector's native labels. The manifest's vocabulary is every
 label it uses, so label every visible instance of every vocabulary class in
-every scene: absence is scored as a true negative. Predictions of classes
+every scene: absence is scored as a true negative. An open-vocabulary
+recognizer is queried for exactly that vocabulary (at most 16 canonical
+lower-case labels), and the report records the `query` it answered; the
+deployment's default query plays no part in evaluation. Predictions of classes
 outside the vocabulary are reported as `unscored_predictions`, not false
-positives. `blue` is optional per object. Earlier manifests with
-`"cups":[{"bbox":…,"blue":…}]` remain valid and declare the label `cup`. Keep adjacent frames, crops and alternate cameras from
+positives. `blue` is optional per object. Keep adjacent frames, crops and alternate cameras from
 the same arrangement/session in the same scene group and split. The loader
 validates both splits, rejects group leakage, repeated bytes and identical
 decoded pixels, and checks that images did not change after preflight. Group

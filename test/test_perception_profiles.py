@@ -335,6 +335,23 @@ def test_study_rejects_a_gain_inside_sampling_variation_and_a_regressing_label()
     assert {(item['name'], item['metric']) for item in record['heldout']['regressions']} >= {('mug', 'recall')}
 
 
+def test_study_freezes_the_query_and_refuses_a_report_that_answered_another():
+    from types import SimpleNamespace
+    from lekiwi_rmf.perception_query import make_query
+    current, better = scenes([True] * 30)
+    query = make_query(['cup', 'bowl']).document()
+
+    def evaluate(profile, split):
+        return {'manifest_sha256': 'm' * 64, 'query': query,
+                'scenes': better if profile.revision == CANDIDATES[0].revision else current}
+    recognizer = SimpleNamespace(name='grounding_dino_tiny_gpu', sha256='a' * 64)
+    record = run_study(evaluate, recognizer, OPEN, CANDIDATES, manifest_sha256='m' * 64, labels=['cup'], query=query)
+    assert record['protocol']['query'] == query and record['decision'] == 'selected'
+    with pytest.raises(ValueError, match='another query'):
+        run_study(evaluate, recognizer, OPEN, CANDIDATES, manifest_sha256='m' * 64, labels=['cup'],
+                  query=make_query(['cup']).document())
+
+
 def test_study_refuses_a_corpus_that_changes_and_a_baseline_posing_as_a_candidate():
     current, _ = scenes([False] * 5)
     with pytest.raises(ValueError, match='corpus changed'):
