@@ -55,6 +55,29 @@ def test_pruning_refuses_process_references(tmp_path, pruner, reference):
         pruner.inspect_release(tmp_path, release.name, processes)
 
 
+@pytest.mark.parametrize('cmdline, refused', [(b'/usr/lib/systemd/systemd\0--user\0', False), (None, True)])
+def test_pruning_judges_a_non_dumpable_owned_process_by_its_command_line(tmp_path, pruner, cmdline, refused):
+    release = cached_release(tmp_path)
+    process = tmp_path / 'proc' / '123'
+    process.mkdir(parents=True)
+    (process / 'cwd').mkdir(mode=0)  # as for the login's user manager: resolving it is denied
+    (process / 'cmdline').write_bytes(str(release).encode() if cmdline is None else cmdline)
+    real = type(process).resolve
+
+    def resolve(path, *args, **kwargs):
+        if path.name == 'cwd':
+            raise PermissionError(13, 'Permission denied')
+        return real(path, *args, **kwargs)
+
+    import unittest.mock
+    with unittest.mock.patch.object(type(process), 'resolve', resolve):
+        if refused:
+            with pytest.raises(ValueError, match='process 123 references'):
+                pruner.inspect_release(tmp_path, release.name, tmp_path / 'proc')
+        else:
+            assert pruner.inspect_release(tmp_path, release.name, tmp_path / 'proc') == release
+
+
 def test_pruning_preserves_sources_evidence_and_external_symlink_targets(tmp_path, pruner):
     release = cached_release(tmp_path)
     for name in ('source', 'src', 'build/lekiwi_rmf', 'log', 'test-tmp'):

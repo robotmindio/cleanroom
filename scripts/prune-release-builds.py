@@ -49,10 +49,20 @@ def inspect_release(workspace, revision, processes=Path('/proc')):
         except (FileNotFoundError, ProcessLookupError):
             continue
         except PermissionError:
-            if process.exists() and process.stat().st_uid == os.getuid():
-                raise ValueError(f'cannot inspect owned process {process.name}')
             # Other users' details may be private; managed services run as this user.
-            continue
+            if not process.exists() or process.stat().st_uid != os.getuid():
+                continue
+            # The login's own `systemd --user` and `(sd-pam)` are non-dumpable: even their owner
+            # may read only the command line. Nothing in a release is such a program, so that
+            # line decides; without this every SSH session made the tool refuse.
+            try:
+                referenced = marker in (process / 'cmdline').read_bytes()
+            except (FileNotFoundError, ProcessLookupError):
+                continue
+            except PermissionError:
+                raise ValueError(f'cannot inspect owned process {process.name}') from None
+            if referenced:
+                raise ValueError(f'{revision}: process {process.name} references this release')
     return release
 
 
