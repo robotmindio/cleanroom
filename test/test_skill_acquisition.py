@@ -398,6 +398,34 @@ def test_wilson_interval_and_predicate_contract():
     assert not holds and [item['satisfied'] for item in evidence] == [True, False]
 
 
+def test_a_volume_predicate_reads_measured_positions_and_is_never_satisfied_blind():
+    def seen(identifier, position):
+        return {'id': identifier, 'camera_id': 'astra_color', 'stamp': {}, 'evidence': {'sha256': 'e'}, 'width': 100,
+                'height': 100, 'detections': [{'label': 'cup', 'score': .9, 'bbox': [10, 10, 10, 10], 'position': position}]}
+    lifted = seen('a', {'mode': 'camera', 'xyz': [0, 0, .5], 'map': {'mode': 'map', 'xyz': [1.0, 2.0, .30]}})
+    resting = seen('b', {'mode': 'camera', 'xyz': [0, .1, .5], 'map': {'mode': 'map', 'xyz': [1.0, 2.0, .02]}})
+    camera_only = seen('c', {'mode': 'camera', 'xyz': [0, 0, .5]})
+    ungrounded = seen('d', None)
+    above = {'frame': 'map', 'min': [0, 0, .2], 'max': [2, 3, 1]}
+    predicate = evaluate.success_predicate({'label': 'cup', 'volume': above, 'min_observations': 1})
+    assert evaluate.judge([lifted], predicate)[0]
+    for other in (resting, camera_only, ungrounded):
+        assert not evaluate.judge([other], predicate)[0]
+    near = evaluate.success_predicate({'label': 'cup', 'min_observations': 1,
+                                       'volume': {'frame': 'camera', 'min': [-1, -1, 0], 'max': [1, 1, 1]}})
+    assert evaluate.judge([camera_only], near)[0] and not evaluate.judge([ungrounded], near)[0]
+    # Absence from the volume holds only when every detection of the label is measured outside it.
+    gone = evaluate.success_predicate({'label': 'cup', 'present': False, 'volume': above, 'min_observations': 1})
+    assert evaluate.judge([resting], gone)[0]
+    assert not evaluate.judge([lifted], gone)[0] and not evaluate.judge([ungrounded], gone)[0]
+    for bad in ({'frame': 'base', 'min': [0, 0, 0], 'max': [1, 1, 1]}, {'frame': 'map', 'min': [0, 0, 1], 'max': [1, 1, 1]},
+                {'frame': 'map', 'min': [0, 0], 'max': [1, 1]}, {'frame': 'map', 'min': [0, 0, 0]}):
+        with pytest.raises(ValueError, match='volume'):
+            evaluate.success_predicate({'label': 'cup', 'volume': bad})
+    # A predicate without a volume keeps its stored protocol digest.
+    assert 'volume' not in evaluate.success_predicate('{"label": "cup"}')
+
+
 class FakeWorld(Node):
     """A skill runner and an observation store that see one shared scene, independently."""
 

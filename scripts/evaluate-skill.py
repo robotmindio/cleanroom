@@ -11,6 +11,9 @@ Domains:
 - physical (default): the verifier is the object observation store (/robot/observations/query).
   Optionally run a reset command, observe, run, settle, observe again; the success predicate
   must hold in every observation after the run and not before it. Evidence is pinned.
+  The predicate is a label that is present or absent, optionally inside an image region and
+  inside a metric box (`volume`) in the camera or map frame. A volume needs detections that
+  depth grounded (a calibrated depth camera): an ungrounded detection never satisfies it.
 - sim (`--sim-scene ID`): the simulator's ground truth (lekiwi_rmf/sim_scene.py). Each trial
   resets the scene deterministically for its index and confirms the initial state; an
   unconfirmed reset makes the trial invalid. A sim report says `domain: sim` and
@@ -43,7 +46,7 @@ REPOSITORY = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPOSITORY))
 from lekiwi_rmf.qualification import canonical_sha256  # noqa: E402
 
-PREDICATE_FIELDS = {'label', 'present', 'min_score', 'camera_id', 'region', 'min_observations'}
+PREDICATE_FIELDS = {'label', 'present', 'min_score', 'camera_id', 'region', 'volume', 'min_observations'}
 PROTOCOL_FIELDS = ('domain', 'success', 'parameters', 'trials', 'min_trials', 'confidence', 'required_lower_bound',
                    'observe_sec', 'settle_sec', 'timeout_sec', 'reset_command', 'sim_scene')
 
@@ -79,12 +82,27 @@ def success_predicate(text):
                                or any(type(item) not in (int, float) for item in region)
                                or not 0 <= region[0] < region[2] <= 1 or not 0 <= region[1] < region[3] <= 1):
         raise ValueError('region is [x0, y0, x1, y1] in normalized image coordinates')
+    volume = value.get('volume')
+    if volume is not None:
+        if (not isinstance(volume, dict) or set(volume) != {'frame', 'min', 'max'} or volume['frame'] not in ('camera', 'map')
+                or any(not isinstance(volume[key], list) or len(volume[key]) != 3
+                       or any(type(item) not in (int, float) or not math.isfinite(item) for item in volume[key])
+                       for key in ('min', 'max'))
+                or any(low >= high for low, high in zip(volume['min'], volume['max']))):
+            raise ValueError('volume is {"frame": "camera"|"map", "min": [x, y, z], "max": [x, y, z]} in metres')
+        # Only present when stated, so the digest of a protocol without a volume is unchanged.
+        predicate['volume'] = volume
     return predicate
 
 
 def matching(observation, predicate):
-    """Detections that satisfy the predicate's label, score and optional image region."""
-    found = []
+    """Detections that satisfy the label, score, image region and volume, and those depth did not ground.
+
+    A detection of the label whose position is unknown can neither be counted inside the volume
+    nor ruled out of it.
+    """
+    found, ungrounded = [], []
+    volume = predicate.get('volume')
     for detection in observation.get('detections', []):
         if detection.get('label') != predicate['label'] or detection.get('score', 0) < predicate['min_score']:
             continue
@@ -94,18 +112,28 @@ def matching(observation, predicate):
             x0, y0, x1, y1 = predicate['region']
             if not (x0 <= cx <= x1 and y0 <= cy <= y1):
                 continue
+        if volume is not None:
+            position = detection.get('position') or {}
+            xyz = (position.get('map') or {}).get('xyz') if volume['frame'] == 'map' else position.get('xyz')
+            if xyz is None:
+                ungrounded.append(detection)
+                continue
+            if not all(low <= item <= high for low, item, high in zip(volume['min'], xyz, volume['max'])):
+                continue
         found.append(detection)
-    return found
+    return found, ungrounded
 
 
 def judge(observations, predicate):
     """Holds only when enough observations exist and every one of them satisfies the predicate."""
     evidence = []
     for observation in observations:
-        found = matching(observation, predicate)
+        found, ungrounded = matching(observation, predicate)
+        # Absence from a volume is not shown while a detection of the label has no measured position.
+        satisfied = bool(found) if predicate['present'] else not found and not ungrounded
         evidence.append({'observation_id': observation['id'], 'camera_id': observation['camera_id'],
                          'stamp': observation['stamp'], 'evidence_sha256': observation['evidence']['sha256'],
-                         'matching_detections': found, 'satisfied': bool(found) == predicate['present']})
+                         'matching_detections': found, 'satisfied': satisfied})
     holds = len(evidence) >= predicate['min_observations'] and all(item['satisfied'] for item in evidence)
     return holds, evidence
 
@@ -360,7 +388,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('skill_id')
     parser.add_argument('--success', help='physical: {"label": ..., "present": true, "min_score": .5, "camera_id": null, '
-                        '"region": [x0, y0, x1, y1], "min_observations": 3}; sim: {"object": ..., "region": '
+                        '"region": [x0, y0, x1, y1], "volume": {"frame": "camera"|"map", "min": [x, y, z], "max": [x, y, z]}, '
+                        '"min_observations": 3}; sim: {"object": ..., "region": '
                         '[x0, y0, x1, y1] (world), "min_z": .., "max_z": .., "min_displacement_m": ..}')
     parser.add_argument('--sim-scene', help='evaluate in this config/sim_scenes.yaml scene, judged by ground truth')
     parser.add_argument('--suite', help='evaluate exactly this stored qualification suite of the skill')
