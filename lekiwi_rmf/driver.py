@@ -65,8 +65,9 @@ class DriverSettings:
     command_timeout: float = 0.4
     link_timeout: float = 1.0
     trajectory_path_tolerance: float = 0.20
-    # Match the production travel-stow gate: a successful MoveIt action
-    # must not leave the arm outside its base-motion stow tolerance.
+    # Tighter than the production travel-stow gate (stow_tolerance, 0.08 rad in
+    # config/safety_production.yaml): a successful MoveIt action never leaves the
+    # arm outside its base-motion stow tolerance.
     trajectory_tolerance: float = 0.02
     gripper_trajectory_tolerance: float = 0.005
     trajectory_timeout: float = 5.0
