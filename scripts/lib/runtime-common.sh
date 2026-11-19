@@ -49,12 +49,28 @@ first_match() { # first existing path matching a glob, empty if none
   return 0
 }
 
-wait_for() { # wait_for <seconds> <command...>
-  local deadline=$((SECONDS + $1)); shift
-  until "$@" >/dev/null 2>&1; do
+wait_for() { # wait_for <seconds> <command...>: retry until it succeeds or the time is up
+  local deadline=$((SECONDS + $1)) remaining; shift
+  while true; do
+    # A program that blocks (ros2 against a wedged daemon) must not outlive the wait, so
+    # each attempt gets only the time that is left. timeout cannot run a shell function;
+    # the functions passed here only probe local state and return at once.
+    remaining=$((deadline - SECONDS))
+    if [[ $(type -t "$1") == file ]]; then
+      timeout -k 2 "$((remaining > 1 ? remaining : 1))" "$@" >/dev/null 2>&1 && return 0
+    else
+      "$@" >/dev/null 2>&1 && return 0
+    fi
     (( SECONDS < deadline )) || return 1
     sleep 1
   done
+}
+
+reset_ros2_daemon() {
+  # The ros2 daemon binds its network interface once. One started before a Wi-Fi change
+  # answers nothing, and `ros2 service type` then blocks forever. A wedged daemon ignores
+  # both `daemon stop` and SIGTERM, so kill it; the next ros2 command starts a fresh one.
+  timeout 10 ros2 daemon stop >/dev/null 2>&1 || pkill -KILL -u "$(id -u)" -f 'ros2cli.daemon' || true
 }
 
 tcp_port_listening() { # tcp_port_listening <port>: exact local port, not :55550

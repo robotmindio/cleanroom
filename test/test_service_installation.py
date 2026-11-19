@@ -92,6 +92,52 @@ exit "$CLI_STATUS"
     assert response in result.stdout + result.stderr
 
 
+def test_rearm_replaces_a_wedged_ros2_daemon_instead_of_hanging(tmp_path):
+    scripts = tmp_path / 'scripts'
+    (scripts / 'lib').mkdir(parents=True)
+    for name in ('rearm-robot.sh', 'lib/runtime-common.sh'):
+        shutil.copy2(ROOT / 'scripts' / name, scripts / name)
+    (scripts / 'setup.bash').write_text('')
+    fakes = tmp_path / 'bin'
+    calls = tmp_path / 'calls'
+    killed = tmp_path / 'daemon-killed'
+    # Every command blocks, as against a wedged daemon, until that daemon is killed.
+    _executable(fakes / 'ros2', f'''
+[[ -f "{killed}" ]] || exec sleep 60
+if [[ $2 == type ]]; then exit 0; fi
+echo "std_srvs.srv.Trigger_Response(success=True, message='armed')"
+''')
+    _executable(fakes / 'timeout', f'''
+[[ $1 != -k ]] || shift 2
+shift
+if [[ -f "{killed}" ]]; then exec "$@"; fi
+echo "timed out: $*" >> "{calls}"
+exit 124
+''')
+    _executable(fakes / 'pkill', f'echo "pkill $*" >> "{calls}"; touch "{killed}"\n')
+    env = {**os.environ, 'PATH': f"{fakes}:{os.environ['PATH']}"}
+    result = subprocess.run(['bash', str(scripts / 'rearm-robot.sh')], env=env,
+                            text=True, capture_output=True, timeout=20)
+    assert result.returncode == 0, result.stderr
+    log = calls.read_text().splitlines()
+    assert log[:2] == ['timed out: ros2 service type /safety/arm', 'timed out: ros2 daemon stop']
+    assert log[2].startswith('pkill -KILL') and log[2].endswith('ros2cli.daemon')
+    assert len(log) == 3
+
+
+def test_wait_for_bounds_a_blocking_program_and_still_runs_shell_functions():
+    result = _bash('''source "$LIB/runtime-common.sh"
+SECONDS=0
+if wait_for 2 sleep 60; then exit 1; fi
+(( SECONDS < 10 ))
+attempts=0
+probe() { (( ++attempts >= 2 )); }
+wait_for 5 probe
+(( attempts == 2 ))
+''')
+    assert result.returncode == 0, result.stderr
+
+
 @pytest.mark.parametrize('inhibit_status', [0, 13, None])
 def test_ros_start_inhibits_sleep_and_records_the_signalable_launcher(tmp_path, inhibit_status):
     import json
