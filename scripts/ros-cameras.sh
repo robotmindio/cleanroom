@@ -13,8 +13,6 @@ set -Eeuo pipefail
 cd "$(dirname "$0")/.."
 # shellcheck source=/dev/null
 source scripts/lib/runtime-common.sh
-# shellcheck source=/dev/null
-source scripts/lib/self-heal.sh
 
 load_lekiwi_env
 source_device_ros_env
@@ -40,7 +38,6 @@ while :; do
   fi
   # The wrist camera is optional: unplugged or LEKIWI_WRIST=none runs without it.
   WRIST="${LEKIWI_WRIST:-$(first_match '/dev/v4l/by-id/*JYU2C*-video-index0')}"
-  self_heal
   # shellcheck disable=SC2093 # ros2 launch becomes this service's main process.
   exec ros2 launch launch/pi_cameras.launch.py \
     front_device:="$FRONT" wrist_device:="${WRIST:-none}" \

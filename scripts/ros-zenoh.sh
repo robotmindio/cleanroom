@@ -5,8 +5,6 @@ set -Eeuo pipefail
 cd "$(dirname "$0")/.."
 # shellcheck source=/dev/null
 source scripts/lib/runtime-common.sh
-# shellcheck source=/dev/null
-source scripts/lib/self-heal.sh
 source_device_ros_env
 export PATH="$HOME/.local/bin:$PATH"
 
@@ -19,6 +17,4 @@ for file in ca.crt device.crt device.key; do
   }
 done
 
-# The bridge's DDS side binds the network interface like any other participant.
-self_heal
 exec zenoh-bridge-ros2dds -c config/zenoh_device.json5
