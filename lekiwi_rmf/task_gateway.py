@@ -14,67 +14,66 @@ from action_msgs.msg import GoalStatus, GoalStatusArray
 from action_msgs.srv import CancelGoal
 from diagnostic_msgs.msg import DiagnosticArray
 from geometry_msgs.msg import PoseStamped
+from nav_msgs.msg import OccupancyGrid, Odometry
 from moveit_msgs.action import MoveGroup
 from moveit_msgs.msg import Constraints, JointConstraint, MoveItErrorCodes
 from nav2_msgs.action import NavigateToPose
 from nav2_msgs.msg import CollisionMonitorState
-from nav_msgs.msg import Odometry
 import rclpy
 from rclpy.action import ActionClient
 from rclpy.clock import Clock, ClockType
+from rclpy.executors import SingleThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from rosidl_runtime_py.convert import message_to_ordereddict
 from std_msgs.msg import Bool, String
 from std_srvs.srv import Trigger
+from tf2_ros import Buffer, TransformException, TransformListener
 from unique_identifier_msgs.msg import UUID
+import yaml
 
 from lekiwi_rmf.action import Explore, RunSkill, Search
-from lekiwi_rmf.exploration import task_limits
+from lekiwi_rmf.exploration import load_navigation_footprint, map_geometry, task_limits
 from lekiwi_rmf.exploration_owner_guard import owned_goal_id
 from lekiwi_rmf.latency_budget import LatencyBudget
-from lekiwi_rmf.srv import ApplyPerceptionProfile, CancelTask, GetTask, SetPerceptionQuery, SubmitTask, TaskApi
+from lekiwi_rmf.srv import (
+    ApplyPerceptionProfile, CancelTask, GetTask, QuerySpatial, SetPerceptionQuery, SubmitTask, TaskApi,
+)
 from lekiwi_rmf.perception_query import limits as query_limits
-from lekiwi_rmf.task_journal import CAPABILITY_RESOURCES, TERMINAL, Refused, TaskJournal
-from lekiwi_rmf.navigation_pause import NavigationPause
+from lekiwi_rmf.task_journal import CAPABILITY_RESOURCES, REFUSALS, TERMINAL, Refused, TaskJournal
+from lekiwi_rmf.navigation_pause import CODES as NAVIGATION_PAUSE_CODES, NavigationPause
+from lekiwi_rmf.navigation_targets import (
+    DEFAULT_STANDOFF_M, MAX_STANDOFF_M, MIN_STANDOFF_M, NoStandoff, approach_pose,
+)
 from lekiwi_rmf.navigation_observer import NavigationObserver, server_instance
 from lekiwi_rmf.navigation_distance import NavigationDistance
 from lekiwi_rmf.map_bundle import validate_map_bundle
 from lekiwi_rmf.motion_constraints import (
-    GROUP, MAX_CONSTRAINTS, MAX_REGION_M, MAX_TIME_SEC as MOTION_MAX_TIME_SEC, OPERATIONS as MOTION_OPERATIONS,
-    PLANNING_FRAME, SCHEMA as MOTION_SCHEMA, TOOL_LINK,
+    GRIPPER_GROUP, GRIPPER_JOINT, GROUP, MAX_CONSTRAINTS, MAX_REGION_M, MAX_TIME_SEC as MOTION_MAX_TIME_SEC,
+    OPERATIONS as MOTION_OPERATIONS, PLANNING_FRAME, SCHEMA as MOTION_SCHEMA, TOOL_LINK, group_states,
 )
+from lekiwi_rmf.object_cameras import config_directory
 from lekiwi_rmf.arm_trajectory import ARM_JOINTS, JOINT_LIMITS
 from lekiwi_rmf.skills import (
     BASE_COMMANDS, KINDS, SKILL_ID, UNDECLARED_EFFECTS, catalog, load_registry, skill_parameters,
 )
 
 
-ACTIONS = {'navigate': ('/navigate_to_pose', NavigateToPose), 'explore': ('/robot/explore', Explore),
-           'skill': ('/robot/skills/run', RunSkill), 'search': ('/robot/search', Search),
-           'reach': ('/move_action', MoveGroup)}
 # The arm planning group: a reach moves these joints and holds the gripper where it is.
-REACH_JOINTS = tuple(name for name in ARM_JOINTS if name != 'arm_gripper')
+REACH_JOINTS = tuple(name for name in ARM_JOINTS if name != GRIPPER_JOINT)
+# Named targets are MoveIt's own SRDF group states, never a second table.
+SRDF = config_directory() / 'lekiwi.srdf'
+ARM_STATES = {name: joints for name, joints in group_states(SRDF.read_text()).get(GROUP, {}).items()
+              if set(joints) == set(REACH_JOINTS)}
+GRIPPER_STATES = {name: joints[GRIPPER_JOINT]
+                  for name, joints in group_states(SRDF.read_text()).get(GRIPPER_GROUP, {}).items()}
 MOTION_SERVICE = '/robot/motion/solve'
-# The feedback field that names what a running goal is doing; Nav2 reports poses, not a stage.
-FEEDBACK_FIELD = {'explore': 'stage', 'search': 'stage', 'skill': 'stage', 'reach': 'state'}
-SEARCH_PARAMETERS = ('query', 'region', 'max_duration_sec', 'max_travel_m', 'target_coverage')
+SPATIAL_SERVICE = '/robot/spatial/query'
 SEARCH_LIMITS = ('max_duration_sec', 'max_travel_m')
 # Schema 1 is SubmitTask/GetTask/CancelTask; schema 2 is the TaskApi services below.
 API_SCHEMAS = (1, 2)
 TASK_API = {name: f'/robot/tasks/v2/{name}'
             for name in ('validate', 'submit', 'status', 'events', 'cancel', 'transfer', 'compensate')}
-# Base motion creates no intended material change, and the base can drive back.
-EFFECTS = {name: {'reversibility': 'reversible', 'compensation': text} for name, text in (
-    ('navigate', 'Navigate back to the starting pose.'),
-    ('explore', 'Map growth is data; navigate back to the starting pose.'),
-    ('search', 'Observations are data; navigate back to the starting pose.'),
-    ('reach', 'Move the arm back to its starting joint positions.'))}
-UNITS = {'navigate': {'x': 'm', 'y': 'm', 'yaw': 'rad', 'deadline_unix_sec': 's', 'max_travel_m': 'm'},
-         'explore': {'max_duration_sec': 's', 'max_radius_m': 'm'},
-         'search': {'region': 'm', 'max_duration_sec': 's', 'max_travel_m': 'm', 'target_coverage': 'fraction'},
-         'skill': {}, 'reach': {'joints': 'rad'}}
-FRAMES = {'navigate': 'map', 'search': 'map'}
 # The joint and base-command mapping a plan was made for; a different body is refused, never guessed.
 BODY_PROFILE = 'lekiwi:' + hashlib.sha256(json.dumps([*ARM_JOINTS, *BASE_COMMANDS]).encode()).hexdigest()[:16]
 REFERENCE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$')
@@ -84,103 +83,131 @@ CHECKPOINT_FIELDS = {'summary', 'goal', 'interpretation', 'references', 'plan', 
 COMPENSATION_INTENTS = {'restore': ('reversible',), 'repair': ('reversible', 'compensable'),
                         'isolate': ('reversible', 'compensable', 'irreversible'),
                         'record': ('reversible', 'compensable', 'irreversible')}
+# Stable `reason_code` values beside the readable detail. Every capability can end with the
+# terminal ones; a capability adds its executor's own under `reasons`.
+TERMINAL_CODES = ('succeeded', 'canceled', 'canceled_before_dispatch', 'goal_rejected', 'capability_disabled',
+                  'executor_error', 'executor_aborted', 'incomplete', 'outcome_unknown')
+PAUSE_CODES = (*NAVIGATION_PAUSE_CODES, 'awaiting_navigation_stop', 'navigation_stopped', 'executor_paused')
+UNKNOWN_CODES = ('result_unconfirmed', 'acceptance_unconfirmed', 'arm_stop_unconfirmed', 'pause_stop_unconfirmed')
 
 
-def task_goal(capability, text):
-    """Keep untrusted commands finite, small and limited to the advertised fields."""
-    if len(text.encode()) > 4096:
-        raise ValueError('parameters exceed 4096 bytes')
-    try:
-        values = json.loads(text)
-    except RecursionError as error:
-        raise ValueError('parameters JSON is nested too deeply') from error
-    if not isinstance(values, dict):
-        raise ValueError('parameters must be an object')
-    if capability == 'navigate':
-        if set(values) - {'x', 'y', 'yaw', 'deadline_unix_sec', 'max_travel_m'} or not {'x', 'y'} <= values.keys():
-            raise ValueError('navigate requires x, y and optional yaw in map coordinates')
-        for value in values.values():
-            if type(value) not in (float, int) or not math.isfinite(value):
-                raise ValueError('navigation coordinates must be finite numbers')
-        if 'max_travel_m' in values and not 0 < values['max_travel_m'] <= 10:
-            raise ValueError('max_travel_m must be in (0,10]')
-        if 'deadline_unix_sec' in values and values['deadline_unix_sec'] <= 0:
-            raise ValueError('navigation deadline must be positive')
-        pose = PoseStamped()
-        pose.header.frame_id = 'map'
-        pose.pose.position.x, pose.pose.position.y = float(values['x']), float(values['y'])
-        yaw = values.get('yaw', 0.0)
-        pose.pose.orientation.z, pose.pose.orientation.w = math.sin(yaw / 2), math.cos(yaw / 2)
-        goal = NavigateToPose.Goal(pose=pose)
-    elif capability == 'explore':
-        if set(values) - {'revisit_known', 'max_duration_sec', 'max_radius_m', 'resume_task_id'}:
-            raise ValueError('unknown exploration parameter')
-        if type(values.get('revisit_known', False)) is not bool:
-            raise ValueError('revisit_known must be boolean')
-        for name in ('max_duration_sec', 'max_radius_m'):
-            value = values.get(name, 0.0)
-            if type(value) not in (float, int) or not math.isfinite(value) or value < 0:
-                raise ValueError(f'{name} must be finite and nonnegative')
-        resume = values.get('resume_task_id', '')
-        if not isinstance(resume, str) or (resume and (len(resume) != 32 or any(c not in '0123456789abcdef' for c in resume))):
-            raise ValueError('invalid exploration resume ID')
-        if resume and (values.get('max_duration_sec') or values.get('max_radius_m')):
-            raise ValueError('resumed exploration preserves its original duration and radius')
-        goal = Explore.Goal(revisit_known=values.get('revisit_known', False),
-                            max_duration_sec=float(values.get('max_duration_sec', 0.0)),
-                            max_radius_m=float(values.get('max_radius_m', 0.0)), resume_task_id=resume)
-    elif capability == 'search':
-        if set(values) - set(SEARCH_PARAMETERS) or 'query' not in values:
-            raise ValueError('search requires query and accepts only region, max_duration_sec, max_travel_m, target_coverage')
-        query = values['query']
-        if not isinstance(query, str) or not 1 <= len(' '.join(query.split())) <= 128:
-            raise ValueError('search query must be a label of 1..128 characters')
-        for name in (*SEARCH_LIMITS, 'target_coverage'):
-            value = values.get(name, 0.0)
-            if type(value) not in (float, int) or not math.isfinite(value) or value < 0:
-                raise ValueError(f'{name} must be finite and nonnegative')
-        if values.get('target_coverage', 0.0) > 1:
-            raise ValueError('target_coverage must be within (0,1]')
-        region = values.get('region', {'x': 0.0, 'y': 0.0, 'radius_m': 0.0})
-        if (not isinstance(region, dict) or set(region) != {'x', 'y', 'radius_m'}
-                or any(type(v) not in (float, int) or not math.isfinite(v) for v in region.values())
-                or ('region' in values and region['radius_m'] <= 0)):
-            raise ValueError('region requires finite map-frame x, y and a positive radius_m')
-        goal = Search.Goal(query=query, region_x=float(region['x']), region_y=float(region['y']),
-                           region_radius_m=float(region['radius_m']),
-                           max_duration_sec=float(values.get('max_duration_sec', 0.0)),
-                           max_travel_m=float(values.get('max_travel_m', 0.0)),
-                           target_coverage=float(values.get('target_coverage', 0.0)))
-    elif capability == 'skill':
-        # Only the shape; admission resolves the registry entry, its pins and its declared parameters.
-        if set(values) - {'skill_id', 'parameters', 'version', 'artifact_sha256'} \
-                or not isinstance(values.get('skill_id'), str) or not SKILL_ID.match(values['skill_id']) \
-                or not isinstance(values.get('parameters', {}), dict) \
-                or type(values.get('version', 1)) is not int or not isinstance(values.get('artifact_sha256', ''), str):
-            raise ValueError('skill requires a registered skill_id and accepts only a parameters object, '
-                             'an integer version and an artifact_sha256')
-        goal = RunSkill.Goal(skill_id=values['skill_id'],
-                             parameters_json=json.dumps(values.get('parameters', {}), sort_keys=True, allow_nan=False))
-    elif capability == 'reach':
-        # A joint target, normally a /robot/motion/solve solution; MoveIt plans and checks collisions again.
-        if set(values) != {'joints'} or not isinstance(values['joints'], dict) \
-                or set(values['joints']) != set(REACH_JOINTS):
-            raise ValueError(f'reach requires only joints, for exactly {list(REACH_JOINTS)}')
-        for name, value in values['joints'].items():
-            lower, upper = JOINT_LIMITS[name]
-            if type(value) not in (float, int) or not math.isfinite(value) or not lower <= value <= upper:
-                raise ValueError(f'{name} must be a finite angle within [{lower}, {upper}] rad')
-        goal = MoveGroup.Goal()
-        goal.request.group_name = GROUP
-        goal.request.num_planning_attempts, goal.request.allowed_planning_time = 3, 5.0
-        goal.request.start_state.is_diff = True
-        goal.request.goal_constraints = [Constraints(joint_constraints=[
-            JointConstraint(joint_name=name, position=float(values['joints'][name]),
-                            tolerance_above=0.01, tolerance_below=0.01, weight=1.0) for name in REACH_JOINTS])]
-        goal.planning_options.plan_only = False
-    else:
-        raise ValueError('unsupported capability')
-    return goal, json.dumps(values, sort_keys=True, allow_nan=False)
+def check_value(spec, value, field, now=None):
+    """Enforce exactly what a parameter descriptor states; the manifest publishes the same descriptor."""
+    kind = spec['type']
+    if kind == 'object':
+        if not isinstance(value, dict):
+            raise Refused('invalid_request', f'{field} must be an object', field=field)
+        if 'properties' in spec:
+            check_object(spec, value, f'{field}.', now)
+        return
+    valid = {'boolean': type(value) is bool, 'integer': type(value) is int, 'string': isinstance(value, str),
+             'number': type(value) in (float, int) and math.isfinite(value)}[kind]
+    if not valid:
+        raise Refused('invalid_request', f'{field} must be a {"finite " * (kind == "number")}{kind}', field=field)
+    if kind == 'string':
+        # Lengths count the text with its whitespace collapsed; a pattern matches the whole string.
+        length = len(' '.join(value.split()))
+        if not spec.get('min_length', 0) <= length <= spec.get('max_length', math.inf):
+            raise Refused('invalid_request', f'{field} must have {spec.get("min_length", 0)}..'
+                          f'{spec.get("max_length")} characters', field=field)
+        if 'pattern' in spec and not re.fullmatch(spec['pattern'], value):
+            raise Refused('invalid_request', f'{field} must match {spec["pattern"]}', field=field)
+    elif kind != 'boolean':
+        if (value < spec.get('min', -math.inf) or value > spec.get('max', math.inf)
+                or value <= spec.get('exclusive_min', -math.inf)):
+            lower = f'({spec["exclusive_min"]}' if 'exclusive_min' in spec else f'[{spec.get("min", "-inf")}'
+            raise Refused('invalid_request', f'{field} must be within {lower}, {spec.get("max", "inf")}]'
+                          f'{" " + spec["unit"] if "unit" in spec else ""}', field=field)
+        if now is not None and 'max_ahead_sec' in spec and not now < value <= now + spec['max_ahead_sec']:
+            raise Refused('precondition_failed', f'{field} must be within the next {spec["max_ahead_sec"]} seconds',
+                          field=field)
+    if 'enum' in spec and value not in spec['enum']:
+        raise Refused('invalid_request', f'{field} must be one of {spec["enum"]}', field=field)
+
+
+def check_object(spec, values, prefix='', now=None):
+    """An object's fields, its `alternatives` (exactly one group of fields) and its `excludes`."""
+    properties = spec['properties']
+    unknown = sorted(set(values) - set(properties))
+    if unknown:
+        raise Refused('invalid_request', f'unknown parameter {prefix}{unknown[0]}; accepted: {list(properties)}',
+                      field=f'{prefix}{unknown[0]}')
+    for name, item in properties.items():
+        if name in values:
+            check_value(item, values[name], f'{prefix}{name}', now)
+        elif item.get('required'):
+            raise Refused('invalid_request', f'{prefix}{name} is required', field=f'{prefix}{name}')
+    alternatives = spec.get('alternatives')
+    if alternatives:
+        given = [item for item in alternatives
+                 if any(name in values for name in (*item['required'], *item.get('optional', ())))]
+        if len(given) != 1 or not set(given[0]['required']) <= values.keys():
+            choices = ' or '.join('{' + ', '.join(item['required']) + '}' for item in alternatives)
+            raise Refused('invalid_request', f'{prefix or "parameters "}requires exactly one of {choices}',
+                          field=prefix.rstrip('.') or None)
+    for name, others in spec.get('excludes', {}).items():
+        for other in others:
+            if (values.get(name, properties[name]['default']) != properties[name]['default']
+                    and values.get(other, properties[other]['default']) != properties[other]['default']):
+                raise Refused('invalid_request', f'{prefix}{name} cannot be combined with {prefix}{other}',
+                              field=f'{prefix}{other}')
+
+
+def _navigate_goal(values):
+    target = values.get('target', {}).get('pose', values)
+    if 'x' not in target:
+        raise ValueError('an anchored or point target becomes a pose at admission')
+    pose = PoseStamped()
+    pose.header.frame_id = 'map'
+    pose.pose.position.x, pose.pose.position.y = float(target['x']), float(target['y'])
+    yaw = target.get('yaw', 0.0)
+    pose.pose.orientation.z, pose.pose.orientation.w = math.sin(yaw / 2), math.cos(yaw / 2)
+    return NavigateToPose.Goal(pose=pose)
+
+
+def _explore_goal(values):
+    return Explore.Goal(revisit_known=values.get('revisit_known', False),
+                        max_duration_sec=float(values.get('max_duration_sec', 0.0)),
+                        max_radius_m=float(values.get('max_radius_m', 0.0)),
+                        resume_task_id=values.get('resume_task_id', ''))
+
+
+def _search_goal(values):
+    region = values.get('region', {'x': 0.0, 'y': 0.0, 'radius_m': 0.0})
+    return Search.Goal(query=values['query'], region_x=float(region['x']), region_y=float(region['y']),
+                       region_radius_m=float(region['radius_m']),
+                       max_duration_sec=float(values.get('max_duration_sec', 0.0)),
+                       max_travel_m=float(values.get('max_travel_m', 0.0)),
+                       target_coverage=float(values.get('target_coverage', 0.0)))
+
+
+def _skill_goal(values):
+    return RunSkill.Goal(skill_id=values['skill_id'],
+                         parameters_json=json.dumps(values.get('parameters', {}), sort_keys=True, allow_nan=False))
+
+
+def _joint_goal(group, joints):
+    """MoveIt plans from the current state to these joints, checks the current scene and executes."""
+    goal = MoveGroup.Goal()
+    goal.request.group_name = group
+    goal.request.num_planning_attempts, goal.request.allowed_planning_time = 3, 5.0
+    goal.request.start_state.is_diff = True
+    goal.request.goal_constraints = [Constraints(joint_constraints=[
+        JointConstraint(joint_name=name, position=float(position), tolerance_above=0.01, tolerance_below=0.01,
+                        weight=1.0) for name, position in joints.items()])]
+    goal.planning_options.plan_only = False
+    return goal
+
+
+def _reach_goal(values):
+    # A joint target, normally a /robot/motion/solve solution, or one of the SRDF's named arm states.
+    joints = values['joints'] if 'joints' in values else ARM_STATES[values['named']]
+    return _joint_goal(GROUP, {name: joints[name] for name in REACH_JOINTS})
+
+
+def _gripper_goal(values):
+    return _joint_goal(GRIPPER_GROUP, {GRIPPER_JOINT: values['position_rad'] if 'position_rad' in values
+                                       else GRIPPER_STATES[values['state']]})
 
 
 def reach_result(result):
@@ -202,6 +229,233 @@ def arm_stopped(result):
     return isinstance(report, dict) and report.get('arm_stopped', True) is not False
 
 
+def _navigate_effective(gateway, values):
+    pose = (gateway.resolve_target(values['target']) if 'target' in values
+            else {'x': values['x'], 'y': values['y'], 'yaw': values.get('yaw', 0.0)})
+    return {**{name: value for name, value in values.items() if name != 'target'}, **pose,
+            'max_duration_sec': gateway._timeout}
+
+
+def _explore_effective(gateway, values):
+    limits = gateway._exploration_defaults
+    if limits is None or values.get('resume_task_id'):
+        return None
+    duration, radius = task_limits(values.get('max_duration_sec', 0.0), values.get('max_radius_m', 0.0),
+                                   limits['max_duration_sec'], limits['max_radius_m'])
+    return {'max_duration_sec': duration, 'max_radius_m': radius,
+            'revisit_known': values.get('revisit_known', False), 'resume_task_id': ''}
+
+
+def _search_effective(gateway, values):
+    defaults = gateway._search_defaults
+    if defaults is None:
+        return None
+    return {**values, **{name: values.get(name, 0.0) or defaults[name] for name in (*SEARCH_LIMITS, 'target_coverage')}}
+
+
+def _search_effect(state, result):
+    if result.get('found') and result.get('evidence_ids'):
+        return {'kind': 'label_detected', 'evidence_ids': result['evidence_ids']}
+    return None
+
+
+def _skill_advertisement(gateway):
+    return {'effective_defaults': {'parameters': {}},
+            'skills': [{**skill, 'requires_schema': 1 if skill['effects']['reversibility'] == 'reversible' else 2}
+                       for skill in gateway._skills],
+            # The implementation kinds the runner executes, so a client acquires only runnable skills.
+            'implementation_kinds': list(KINDS),
+            'effects': {'per_skill': True, 'undeclared': UNDECLARED_EFFECTS}, 'requires_schema': 'per_skill'}
+
+
+_NUMBER, _METRES = {'type': 'number'}, {'type': 'number', 'unit': 'm'}
+_POSE = {'x': {**_METRES, 'required': True}, 'y': {**_METRES, 'required': True},
+         'yaw': {'type': 'number', 'unit': 'rad', 'default': 0.0}}
+_REFERENCE = {'type': 'string', 'min_length': 1, 'max_length': 128, 'required': True}
+_BUDGET = {'type': 'number', 'min': 0, 'default': 0.0}
+# One descriptor per capability. Request validation, the capability manifest and execution all
+# read it, so what is advertised is what is enforced:
+#   action       the ROS action that executes it; `feedback` names the field telling what a goal is doing
+#   switch       the gateway parameter that enables it in this deployment, and its default
+#   schema       `properties` {type, unit, min, max, exclusive_min, default, required, enum, ...},
+#                `alternatives` (exactly one group of fields) and `excludes` (fields refused together)
+#   bounds       tracked limits of this deployment, layered over `schema` at admission and in the manifest
+#   goal         the action goal for validated parameters
+#   check        refusals that need the gateway's state, before anything is held
+#   effective    the parameters that will run, resolved once the resources are free; they are dispatched
+#   effects      reversibility and the compensation an owner may plan; None when a skill declares its own
+#   reasons      reason codes of its executor, beside the terminal ones every capability shares
+#   result       what is kept of the native result; `stopped` whether it proves the executor stopped
+#   effect       the evidence of an effect a finished task carries, if any
+#   advertise    manifest keys beyond the derived ones: effective defaults and what a client may name
+# Adding a capability is one entry here plus its resources in task_journal.CAPABILITY_RESOURCES.
+CAPABILITIES = {
+    'navigate': {
+        'action': ('/navigate_to_pose', NavigateToPose), 'switch': ('allow_navigation', True), 'frame': 'map',
+        'schema': {
+            'properties': {
+                'x': _METRES, 'y': _METRES, 'yaw': _POSE['yaw'],
+                'deadline_unix_sec': {'type': 'number', 'unit': 's', 'exclusive_min': 0, 'max_ahead_sec': 300},
+                'max_travel_m': {**_METRES, 'exclusive_min': 0, 'max': 10},
+                'target': {'type': 'object', 'properties': {
+                    'pose': {'type': 'object', 'properties': _POSE},
+                    'anchored': {'type': 'object', 'properties': {
+                        'map_pose': {'type': 'object', 'required': True, 'properties': _POSE},
+                        'site_ref': _REFERENCE, 'map_ref': _REFERENCE, 'revision': _REFERENCE}},
+                    'point': {'type': 'object', 'properties': {'x': _POSE['x'], 'y': _POSE['y']}},
+                    'standoff_m': {**_METRES, 'min': MIN_STANDOFF_M, 'max': MAX_STANDOFF_M,
+                                   'default': DEFAULT_STANDOFF_M}},
+                    'alternatives': [{'required': ['pose']}, {'required': ['anchored']},
+                                     {'required': ['point'], 'optional': ['standoff_m']}]}},
+            'alternatives': [{'required': ['x', 'y'], 'optional': ['yaw']}, {'required': ['target']}]},
+        'goal': _navigate_goal, 'effective': _navigate_effective,
+        'effects': {'reversibility': 'reversible', 'compensation': 'Navigate back to the starting pose.'},
+        'effect': lambda state, _result: {'kind': 'pose_reached', 'source': 'nav2'} if state == 'succeeded' else None,
+        'reasons': ('budget_exhausted',),
+        'advertise': lambda gateway: {'effective_defaults': {'yaw': 0.0, 'max_duration_sec': gateway._timeout},
+                                      'targets': gateway.target_kinds()},
+        'description': 'Map-frame x, y; yaw in radians. Or one target: {pose}, {anchored} (a pose remembered under '
+                       'an earlier map revision, reprojected into the current one) or {point, standoff_m} (stand '
+                       'that far from a map point, facing it). effective_parameters report the pose that runs. '
+                       'Pauses preserve the active-time budget.'},
+    'explore': {
+        'action': ('/robot/explore', Explore), 'switch': ('allow_exploration', True), 'feedback': 'stage',
+        'schema': {
+            'properties': {
+                'revisit_known': {'type': 'boolean', 'default': False},
+                'max_duration_sec': {**_BUDGET, 'unit': 's'}, 'max_radius_m': {**_BUDGET, 'unit': 'm'},
+                'resume_task_id': {'type': 'string', 'pattern': '([0-9a-f]{32})?', 'default': ''}},
+            'excludes': {'resume_task_id': ['max_duration_sec', 'max_radius_m']}},
+        'bounds': lambda gateway: {name: {'max': value} for name, value in (gateway._exploration_defaults or {}).items()},
+        'goal': _explore_goal, 'effective': _explore_effective,
+        'effects': {'reversibility': 'reversible',
+                    'compensation': 'Map growth is data; navigate back to the starting pose.'},
+        'advertise': lambda gateway: {'effective_defaults': (
+            {**gateway._exploration_defaults, 'revisit_known': False, 'resume_task_id': ''}
+            if gateway._exploration_defaults is not None else None)},
+        'description': ('Omit parameters to explore unmapped space. revisit_known=true also revisits mapped space. '
+                        'Omitted/zero limits use the tracked robot limits; positive limits may only reduce them. '
+                        'Duration is active seconds, radius is metres around the starting pose. '
+                        'resume_task_id is a saved native exploration UUID and preserves its original bounds.')},
+    'search': {
+        'action': ('/robot/search', Search), 'switch': ('allow_search', True), 'feedback': 'stage', 'frame': 'map',
+        'schema': {'properties': {
+            'query': {'type': 'string', 'min_length': 1, 'max_length': 128, 'required': True},
+            'region': {'type': 'object', 'unit': 'm', 'default': None, 'properties': {
+                'x': _POSE['x'], 'y': _POSE['y'], 'radius_m': {**_METRES, 'exclusive_min': 0, 'required': True}}},
+            'max_duration_sec': {**_BUDGET, 'unit': 's'}, 'max_travel_m': {**_BUDGET, 'unit': 'm'},
+            'target_coverage': {**_BUDGET, 'unit': 'fraction', 'max': 1}}},
+        'bounds': lambda gateway: ({name: {'max': gateway._search_defaults[name]} for name in SEARCH_LIMITS}
+                                   if gateway._search_defaults else {}),
+        'goal': _search_goal, 'effective': _search_effective,
+        'effects': {'reversibility': 'reversible',
+                    'compensation': 'Observations are data; navigate back to the starting pose.'},
+        'effect': _search_effect,
+        'reasons': ('found', 'coverage_reached', 'inaccessible', 'budget_exhausted', 'incapable'),
+        'advertise': lambda gateway: {
+            'effective_defaults': (dict(gateway._search_defaults, region=None)
+                                   if gateway._search_defaults is not None else None),
+            'labels': '/robot/perception/profile',
+            'outcomes': ['found', 'coverage_reached', 'inaccessible', 'budget_exhausted', 'incapable', 'canceled',
+                         'failed']},
+        'description': ('Moves the base between viewpoints chosen by expected information gain until the query '
+                        'label is detected, target_coverage of the searchable mapped region has fresh evidence '
+                        'of absence, or a budget ends. query is a native label of the perception profile; '
+                        'region {x, y, radius_m} is map-frame, default the tracked motion bound. Results carry '
+                        'evidence_ids, coverage_fraction and a negative-evidence report; "not found" holds only '
+                        'for the covered cells. Zero/omitted limits use the tracked limits; positive limits may '
+                        'only reduce them.')},
+    'skill': {
+        'action': ('/robot/skills/run', RunSkill), 'switch': ('allow_skills', False), 'feedback': 'stage',
+        # Only the shape; admission resolves the registry entry, its pins and its declared parameters.
+        'schema': {'properties': {
+            'skill_id': {'type': 'string', 'pattern': SKILL_ID.pattern, 'required': True},
+            'parameters': {'type': 'object', 'default': {}}, 'version': {'type': 'integer'},
+            'artifact_sha256': {'type': 'string'}}},
+        'goal': _skill_goal, 'check': lambda gateway, values: gateway._check_skill(values),
+        'effects': None, 'stopped': arm_stopped, 'advertise': _skill_advertisement,
+        'description': 'Run a qualified registered skill implementation on the arm; version and '
+                       'artifact_sha256 pin the entry a plan was made for. Success means the implementation '
+                       'finished, not that the world reached the goal; verify the effect independently. '
+                       'Each skill lists the resources it commands or reads (arm, base, camera); '
+                       'admission holds the capability resources whatever the skill uses.'},
+    'reach': {
+        'action': ('/move_action', MoveGroup), 'switch': ('allow_reach', False), 'feedback': 'state',
+        'schema': {
+            'properties': {
+                'joints': {'type': 'object', 'unit': 'rad', 'properties': {
+                    name: {'type': 'number', 'unit': 'rad', 'min': JOINT_LIMITS[name][0], 'max': JOINT_LIMITS[name][1],
+                           'required': True} for name in REACH_JOINTS}},
+                'named': {'type': 'string', 'enum': sorted(ARM_STATES)}},
+            'alternatives': [{'required': ['joints']}, {'required': ['named']}]},
+        'goal': _reach_goal, 'result': reach_result,
+        'effective': lambda _gateway, values: {'joints': ARM_STATES[values['named']]} if 'named' in values else None,
+        'effects': {'reversibility': 'reversible',
+                    'compensation': 'Move the arm back to its starting joint positions.'},
+        'advertise': lambda _gateway: {
+            'effective_defaults': {}, 'joints': list(REACH_JOINTS),
+            'limits': {name: list(JOINT_LIMITS[name]) for name in REACH_JOINTS},
+            'named_states': ARM_STATES, 'solver': MOTION_SERVICE},
+        'description': 'Move the arm to a joint target, normally a feasible solution from '
+                       f'{MOTION_SERVICE}, or to a named SRDF arm state. MoveIt plans from the current state '
+                       'and checks the current scene again; success means the motion finished, not that a '
+                       'constraint holds. Verify it with the solver.'},
+    'gripper': {
+        'action': ('/move_action', MoveGroup), 'switch': ('allow_gripper', False), 'feedback': 'state',
+        'schema': {
+            'properties': {
+                'state': {'type': 'string', 'enum': sorted(GRIPPER_STATES)},
+                'position_rad': {'type': 'number', 'unit': 'rad', 'min': JOINT_LIMITS[GRIPPER_JOINT][0],
+                                 'max': JOINT_LIMITS[GRIPPER_JOINT][1]}},
+            'alternatives': [{'required': ['state']}, {'required': ['position_rad']}]},
+        'bounds': lambda gateway: {'position_rad': dict(zip(('min', 'max'), gateway._gripper_limits))},
+        'goal': _gripper_goal, 'result': reach_result,
+        'effective': lambda gateway, values: ({'position_rad': gateway._gripper_states[values['state']]}
+                                              if 'state' in values else None),
+        # Opening releases what the claw holds and closing may grasp: moving it back restores neither.
+        'effects': {'reversibility': 'compensable',
+                    'compensation': 'Move the gripper back to its starting position and verify what it holds.'},
+        'advertise': lambda gateway: {'effective_defaults': {}, 'joint': GRIPPER_JOINT,
+                                      'named_states': gateway._gripper_states},
+        'description': 'Move the claw to a named SRDF gripper state or to position_rad within its limits, through '
+                       'MoveIt and the arm controller like a reach. Success means the motion finished, not that '
+                       'anything is held; verify a grasp or a release independently.'},
+}
+
+
+def task_values(capability, text):
+    """Keep untrusted commands finite, small and limited to what the capability's descriptor states."""
+    if capability not in CAPABILITIES:
+        raise Refused('invalid_request', 'unsupported capability', field='capability')
+    if len(text.encode()) > 4096:
+        raise Refused('invalid_request', 'parameters exceed 4096 bytes')
+    try:
+        values = json.loads(text)
+    except RecursionError as error:
+        raise Refused('invalid_request', 'parameters JSON is nested too deeply') from error
+    if not isinstance(values, dict):
+        raise Refused('invalid_request', 'parameters must be an object')
+    check_object(CAPABILITIES[capability]['schema'], values)
+    return values
+
+
+def task_goal(capability, text):
+    """The action goal of validated parameters, with their canonical JSON."""
+    values = task_values(capability, text)
+    return CAPABILITIES[capability]['goal'](values), json.dumps(values, sort_keys=True, allow_nan=False)
+
+
+def reason_code(capability, state, result):
+    """The stable reason of a terminal native result: the executor's own outcome when it declares one."""
+    if result.get('outcome') in CAPABILITIES[capability].get('reasons', ()):
+        return result['outcome']
+    if state != 'failed':
+        return state
+    if result.get('error_code', 0):
+        return 'executor_error'
+    return 'incomplete' if result.get('complete') is False else 'executor_aborted'
+
+
 class TaskGateway(Node):
     def __init__(self, **kwargs):
         super().__init__('robot_tasks', **kwargs)
@@ -211,21 +465,16 @@ class TaskGateway(Node):
             suffix += '_sim'
         self.declare_parameter('database_path', str(Path.home() / f'.ros/lekiwi_tasks{suffix}.sqlite3'))
         self.declare_parameter('navigation_timeout_sec', 180.0)
-        self.declare_parameter('allow_navigation', True)
-        self.declare_parameter('allow_exploration', True)
-        # The arm capabilities; config/robot_tasks.yaml is their tracked switch.
-        self.declare_parameter('allow_skills', False)
-        self.declare_parameter('allow_reach', False)
+        # The arm capabilities are off unless config/robot_tasks.yaml, their tracked switch, enables them.
+        # The explorer's tracked allow_search owns availability of the search action server.
+        self._enabled = {name: self.declare_parameter(*spec['switch']).value for name, spec in CAPABILITIES.items()}
         # Empty selects config/robot_skills.yaml, as in the skill runner; set both or neither.
         self.declare_parameter('registry_file', '')
-        # The explorer's tracked allow_search owns availability of the action server.
-        self.declare_parameter('allow_search', True)
         self.declare_parameter('map_bundle', '')
-        self._enabled = {'navigate': self.get_parameter('allow_navigation').value,
-                         'explore': self.get_parameter('allow_exploration').value,
-                         'skill': self.get_parameter('allow_skills').value,
-                         'search': self.get_parameter('allow_search').value,
-                         'reach': self.get_parameter('allow_reach').value}
+        # The Nav2 profile whose footprint admits a standoff pose; the launch passes the one Nav2 runs.
+        self.declare_parameter('navigation_params_file', str(config_directory() / 'nav2_params.yaml'))
+        # The calibration MoveIt applies to the claw's limits and endpoints; empty in simulation.
+        self.declare_parameter('arm_calibration_file', '')
         try:
             # Experimental skills run only through an acquisition protocol, never a user task.
             self._registry = load_registry(self.get_parameter('registry_file').value or None)
@@ -249,7 +498,7 @@ class TaskGateway(Node):
         # Monotonic admission and dispatch times of tasks this process saw; a restart loses only samples.
         self._budget, self._admitted_at, self._dispatched_at = LatencyBudget('task'), {}, {}
         self._recovering = {row['id'] for row in self._active() if row['dispatched']}
-        self._observed = {capability: set() for capability in ACTIONS}
+        self._observed = {capability: set() for capability in CAPABILITIES}
         self._terminal_seen = {}
         self._navigation = NavigationPause()
         self._children = NavigationObserver(self)
@@ -287,13 +536,20 @@ class TaskGateway(Node):
                                                                        msg.polygon_name, time.monotonic()), 1)
         self.create_subscription(Bool, '/robot/explore/navigation_guard_ready', self._guard_ready, 1)
         self.create_subscription(UUID, '/robot/explore/navigation_guarded', self._guard_ack, 10)
-        for capability, (name, action) in ACTIONS.items():
-            self._action_clients[capability] = ActionClient(self, action, name)
-            self._result_clients[capability] = self.create_client(action.Impl.GetResultService, f'{name}/_action/get_result')
-            self._cancel_clients[capability] = self.create_client(CancelGoal, f'{name}/_action/cancel_goal')
-            self.create_subscription(action.Impl.FeedbackMessage, f'{name}/_action/feedback', self._feedback, 10)
-            self.create_subscription(GoalStatusArray, f'{name}/_action/status',
-                                     lambda message, name=capability: self._status(message, name), latched)
+        clients = {}
+        for capability, spec in CAPABILITIES.items():
+            name, action = spec['action']
+            if name not in clients:
+                # Capabilities executed by one action server share its clients and observations.
+                clients[name] = (ActionClient(self, action, name),
+                                 self.create_client(action.Impl.GetResultService, f'{name}/_action/get_result'),
+                                 self.create_client(CancelGoal, f'{name}/_action/cancel_goal'))
+                users = [other for other, item in CAPABILITIES.items() if item['action'][0] == name]
+                self.create_subscription(action.Impl.FeedbackMessage, f'{name}/_action/feedback', self._feedback, 10)
+                self.create_subscription(GoalStatusArray, f'{name}/_action/status',
+                                         lambda message, users=users: self._status(message, users), latched)
+            (self._action_clients[capability], self._result_clients[capability],
+             self._cancel_clients[capability]) = clients[name]
         self.create_service(SubmitTask, '/robot/tasks/submit', self._submit)
         self.create_service(GetTask, '/robot/tasks/get', self._get)
         self.create_service(CancelTask, '/robot/tasks/cancel', self._cancel)
@@ -313,6 +569,8 @@ class TaskGateway(Node):
         self._perception_profile = self.create_client(ApplyPerceptionProfile, '/robot/perception/apply_profile')
         # Only to report availability; planners call the motion solver directly.
         self._motion = self.create_client(TaskApi, MOTION_SERVICE)
+        self._gripper_states, self._gripper_limits = self._gripper_model()
+        self._resolver_setup()
         self._distance = NavigationDistance()
         self.create_subscription(Odometry, '/odom', self._distance.update, 1)
         self.create_service(Trigger, '/robot/navigation/odometry', self._odometry)
@@ -331,12 +589,12 @@ class TaskGateway(Node):
     def _row(self, identifier):
         return self._journal.row(identifier)
 
-    def _update(self, identifier, state, detail, result=None):
+    def _update(self, identifier, state, detail, result=None, code=None):
         if result is not None:
             metadata = json.loads(self._row(identifier)['result']).get('_task')
             if metadata is not None:
                 result = {**result, '_task': metadata}
-        if not self._journal.update(identifier, state, detail, result):
+        if not self._journal.update(identifier, state, detail, result, code):
             return
         row = self._row(identifier)
         self._events.publish(String(data=json.dumps(dict(row), default=lambda value: bytes(value).hex())))
@@ -368,9 +626,17 @@ class TaskGateway(Node):
         self._unknown_since.pop(identifier, None)
 
     def _effects(self, capability, values):
-        if capability == 'skill':
-            return self._skill_effects.get(values.get('skill_id'), UNDECLARED_EFFECTS)
-        return EFFECTS[capability]
+        return CAPABILITIES[capability]['effects'] or self._skill_effects.get(values.get('skill_id'), UNDECLARED_EFFECTS)
+
+    def _schema(self, capability):
+        """The capability's parameter descriptor under this deployment's tracked limits.
+
+        Admission enforces it and the manifest publishes it, so the two cannot differ.
+        """
+        spec = CAPABILITIES[capability]
+        bounds = spec['bounds'](self) if 'bounds' in spec else {}
+        return {**spec['schema'], 'properties': {name: {**item, **bounds.get(name, {})}
+                                                 for name, item in spec['schema']['properties'].items()}}
 
     def _admit(self, task_id, capability, parameters_json, request=None, dry_run=False):
         """Every admission check for SubmitTask (no request) and the negotiated API, before any dispatch.
@@ -381,10 +647,13 @@ class TaskGateway(Node):
         if not isinstance(task_id, str) or not TASK_ID.match(task_id):
             raise Refused('invalid_request', 'task_id requires 1..128 ASCII letters, numbers, dots, hyphens or underscores')
         try:
-            _, parameters = task_goal(capability, parameters_json)
+            values = task_values(capability, parameters_json)
+        except Refused:
+            raise
         except (ValueError, TypeError, OverflowError) as error:
             raise Refused('invalid_request', str(error)) from error
-        values = json.loads(parameters)
+        parameters = json.dumps(values, sort_keys=True, allow_nan=False)
+        spec = CAPABILITIES[capability]
         effects = self._effects(capability, values)
         if request is None and effects['reversibility'] != 'reversible':
             # Schema 1 reports an implementation that finished as succeeded; with effects
@@ -403,10 +672,12 @@ class TaskGateway(Node):
                 raise Refused('identity_conflict', 'task_id already has different parameters', task_id=task_id)
             # A retry after a lost reply returns what was admitted; it never sends a second goal.
             return row, None
+        # The tracked limits and deadlines of this moment, exactly as the manifest states them.
+        check_object(self._schema(capability), values, now=time.time())
         if not self._enabled[capability]:
             raise Refused('capability_unavailable', 'capability disabled by this deployment profile')
-        if capability == 'skill':
-            self._check_skill(values)
+        if 'check' in spec:
+            spec['check'](self, values)
         resources = CAPABILITY_RESOURCES[capability]
         if request is not None:
             self._check_request(capability, request, resources, values)
@@ -415,33 +686,15 @@ class TaskGateway(Node):
             raise Refused('resource_busy', 'another ROS client has an active navigation, exploration, search, skill or arm goal',
                           holders=[{'resource': 'base', 'task_id': '', 'owner': 'external ROS client'}])
         if not self._action_clients[capability].server_is_ready():
-            raise Refused('capability_unavailable', 'capability action server unavailable')
-        effective = None
-        if capability == 'navigate' and 'deadline_unix_sec' in values and not (
-                time.time() < values['deadline_unix_sec'] <= time.time() + 300):
-            raise Refused('precondition_failed', 'navigation deadline must be within the next 300 seconds')
-        if capability == 'navigate':
-            effective = {**values, 'yaw': values.get('yaw', 0.0), 'max_duration_sec': self._timeout}
-        elif (capability == 'explore' and self._exploration_defaults is not None
-              and not values.get('resume_task_id')):
-            duration, radius = task_limits(
-                values.get('max_duration_sec', 0.0), values.get('max_radius_m', 0.0),
-                self._exploration_defaults['max_duration_sec'], self._exploration_defaults['max_radius_m'])
-            effective = {'max_duration_sec': duration, 'max_radius_m': radius}
-            effective['revisit_known'] = values.get('revisit_known', False)
-            effective['resume_task_id'] = ''
-        elif capability == 'search' and self._search_defaults is not None:
-            effective = dict(values)
-            for name in SEARCH_LIMITS:
-                if values.get(name, 0.0) > self._search_defaults[name]:
-                    raise Refused('invalid_request', f'{name} exceeds the tracked limit {self._search_defaults[name]}')
-                effective[name] = values.get(name, 0.0) or self._search_defaults[name]
-            effective['target_coverage'] = values.get('target_coverage', 0.0) or self._search_defaults['target_coverage']
+            raise Refused('capability_unavailable', 'capability action server unavailable',
+                          retryable=True, next_condition='wait_capability_ready')
+        effective = spec['effective'](self, values) if 'effective' in spec else None
         metadata = {'parameters': values, 'effective_parameters': effective}
         if capability == 'navigate' and 'max_travel_m' in values:
             meter = self._distance.status()
             if not meter['ready']:
-                raise Refused('precondition_failed', 'bounded navigation requires fresh odometry')
+                raise Refused('precondition_failed', 'bounded navigation requires fresh odometry',
+                              retryable=True, next_condition='wait_odometry')
             metadata['odometry_origin'] = {'epoch': meter['epoch'], 'meters': meter['meters']}
         if request is not None:
             metadata['request'] = {key: request[key] for key in
@@ -481,15 +734,15 @@ class TaskGateway(Node):
         body = request.get('body_profile')
         if body is not None and body != BODY_PROFILE:
             raise Refused('body_profile_mismatch', f'request is for body {body}; this robot is {BODY_PROFILE}')
-        frame = request.get('frame')
-        if frame is not None and frame != FRAMES.get(capability):
-            raise Refused('map_unaligned', f'{capability} takes {FRAMES.get(capability) or "no"} frame coordinates, '
-                          f'not {frame!r}')
+        frame, native = request.get('frame'), CAPABILITIES[capability].get('frame')
+        if frame is not None and frame != native:
+            raise Refused('map_unaligned', f'{capability} takes {native or "no"} frame coordinates, not {frame!r}',
+                          next_condition='fix_request', field='frame')
         if request.get('units', 'si') != 'si':
-            raise Refused('unit_mismatch', 'parameters are SI: metres, radians, seconds')
+            raise Refused('unit_mismatch', 'parameters are SI: metres, radians, seconds', field='units')
         declared = request.get('resources')
         if declared is not None and (len(set(declared)) != len(declared) or set(declared) != set(resources)):
-            raise Refused('resource_mismatch', f'{capability} uses exactly {sorted(resources)}')
+            raise Refused('resource_mismatch', f'{capability} uses exactly {sorted(resources)}', field='resources')
         compensates = request.get('compensates')
         if compensates is not None:
             self._journal.fence(compensates['task_id'], compensates['generation'], request['owner'], reconciled=True)
@@ -523,6 +776,7 @@ class TaskGateway(Node):
                 response.response_json = json.dumps(error.data, allow_nan=False, sort_keys=True)
             except (ValueError, TypeError, KeyError, OverflowError, RecursionError) as error:
                 response.ok, response.error, response.detail = False, 'invalid_request', str(error)
+                response.response_json = json.dumps(Refused('invalid_request', '').data, sort_keys=True)
             return response
         return call
 
@@ -532,8 +786,8 @@ class TaskGateway(Node):
                    'resources', 'authority', 'compensates'}
         if set(values) - allowed:
             raise Refused('invalid_request', f'unknown request fields {sorted(set(values) - allowed)}')
-        if values.get('capability') not in ACTIONS:
-            raise Refused('invalid_request', 'unsupported capability')
+        if values.get('capability') not in CAPABILITIES:
+            raise Refused('invalid_request', 'unsupported capability', field='capability')
         parameters = values.get('parameters', {})
         if not isinstance(parameters, dict):
             raise Refused('invalid_request', 'parameters must be an object')
@@ -648,14 +902,16 @@ class TaskGateway(Node):
             raise Refused('invalid_request', f'plan has intent {sorted(COMPENSATION_INTENTS)}, at most 8 steps and a note')
         steps = plan.get('steps', [])
         for step in steps:
-            if not isinstance(step, dict) or set(step) != {'capability', 'parameters'} or step['capability'] not in ACTIONS:
+            if (not isinstance(step, dict) or set(step) != {'capability', 'parameters'}
+                    or step['capability'] not in CAPABILITIES):
                 raise Refused('invalid_request', 'each step is {capability, parameters}')
             try:
-                task_goal(step['capability'], json.dumps(step['parameters'], allow_nan=False))
+                task_values(step['capability'], json.dumps(step['parameters'], allow_nan=False))
             except (ValueError, TypeError) as error:
                 raise Refused('invalid_request', f'step {step["capability"]}: {error}') from error
         if row['state'] not in TERMINAL:
-            raise Refused('precondition_failed', 'cancel the task and wait for its confirmed stop before compensating')
+            raise Refused('precondition_failed', 'cancel the task and wait for its confirmed stop before compensating',
+                          retryable=True, next_condition='wait_task_terminal')
         reversibility = self._effects(row['capability'], json.loads(row['parameters']))['reversibility']
         if reversibility not in COMPENSATION_INTENTS[plan['intent']]:
             raise Refused('irreversible_effect', f'a {reversibility} effect cannot be {plan["intent"]}d; '
@@ -704,11 +960,8 @@ class TaskGateway(Node):
             stop = 'stopping'
         else:
             stop = 'not_requested'
-        effect = {'observed': False, 'verified_by_robot': False}
-        if row['capability'] == 'search' and result.get('found') and result.get('evidence_ids'):
-            effect.update(observed=True, kind='label_detected', evidence_ids=result['evidence_ids'])
-        elif row['capability'] == 'navigate' and state == 'succeeded':
-            effect.update(observed=True, kind='pose_reached', source='nav2')
+        observed = CAPABILITIES[row['capability']].get('effect', lambda _state, _result: None)(state, result)
+        effect = {'observed': observed is not None, 'verified_by_robot': False, **(observed or {})}
         effects = self._effects(row['capability'], json.loads(row['parameters']))
         compensation = json.loads(row['compensation'] or 'null')
         request = metadata.get('request', {})
@@ -718,6 +971,8 @@ class TaskGateway(Node):
                        'reason': 'deadline' if row['cancel_requested'] == 2 else 'requested'}
         return {
             'task_id': identifier, 'capability': row['capability'], 'state': state, 'detail': row['detail'],
+            # The stable reason of a pause, an unconfirmed state or a terminal result; `detail` is for people.
+            'reason_code': result.get('reason_code'),
             'api_schema': row['api_schema'], 'owner': row['owner'], 'generation': row['generation'],
             'reconciled': row['reconciled_generation'] == row['generation'],
             'resources': json.loads(row['resources']), 'holding_resources': not terminal,
@@ -794,79 +1049,43 @@ class TaskGateway(Node):
             return
         self._search_defaults = values
 
-    def _capability(self, name, client):
-        entry = {'name': name, 'available': self._enabled[name] and client.server_is_ready()}
-        if name == 'navigate':
-            return {**entry, 'parameters': ['x', 'y', 'yaw', 'deadline_unix_sec', 'max_travel_m'],
-                    'required_parameters': ['x', 'y'], 'defaults': {'yaw': 0.0},
-                    'effective_defaults': {'yaw': 0.0, 'max_duration_sec': self._timeout},
-                    'description': 'Map-frame x, y; yaw in radians. Pauses preserve the active-time budget.'}
-        if name == 'explore':
-            return {**entry, 'parameters': ['revisit_known', 'max_duration_sec', 'max_radius_m', 'resume_task_id'],
-                    'required_parameters': [],
-                    'defaults': {'revisit_known': False, 'max_duration_sec': 0.0, 'max_radius_m': 0.0, 'resume_task_id': ''},
-                    'effective_defaults': ({**self._exploration_defaults, 'revisit_known': False, 'resume_task_id': ''}
-                                           if self._exploration_defaults is not None else None),
-                    'description': ('Omit parameters to explore unmapped space. revisit_known=true also revisits mapped space. '
-                                    'Omitted/zero limits use the tracked robot limits; positive limits may only reduce them. '
-                                    'Duration is active seconds, radius is metres around the starting pose. '
-                                    'resume_task_id is a saved native exploration UUID and preserves its original bounds.')}
-        if name == 'reach':
-            return {**entry, 'parameters': ['joints'], 'required_parameters': ['joints'],
-                    'defaults': {}, 'effective_defaults': {}, 'joints': list(REACH_JOINTS),
-                    'limits': {name: list(JOINT_LIMITS[name]) for name in REACH_JOINTS},
-                    'solver': MOTION_SERVICE,
-                    'description': 'Move the arm to a joint target, normally a feasible solution from '
-                                   f'{MOTION_SERVICE}. MoveIt plans from the current state and checks the current '
-                                   'scene again; success means the motion finished, not that a constraint holds. '
-                                   'Verify it with the solver.'}
-        if name == 'skill':
-            return {**entry, 'parameters': ['skill_id', 'parameters', 'version', 'artifact_sha256'],
-                    'required_parameters': ['skill_id'],
-                    'defaults': {'parameters': {}}, 'effective_defaults': {'parameters': {}}, 'skills': self._skills,
-                    # The implementation kinds the runner executes, so a client acquires only runnable skills.
-                    'implementation_kinds': list(KINDS),
-                    'description': 'Run a qualified registered skill implementation on the arm; version and '
-                                   'artifact_sha256 pin the entry a plan was made for. Success means the implementation '
-                                   'finished, not that the world reached the goal; verify the effect independently. '
-                                   'Each skill lists the resources it commands or reads (arm, base, camera); '
-                                   'admission holds the capability resources whatever the skill uses.'}
-        return {**entry, 'parameters': list(SEARCH_PARAMETERS), 'required_parameters': ['query'],
-                'defaults': {'region': None, 'max_duration_sec': 0.0, 'max_travel_m': 0.0, 'target_coverage': 0.0},
-                'effective_defaults': (dict(self._search_defaults, region=None)
-                                       if self._search_defaults is not None else None),
-                'labels': '/robot/perception/profile',
-                'outcomes': ['found', 'coverage_reached', 'inaccessible', 'budget_exhausted', 'incapable', 'canceled', 'failed'],
-                'description': ('Moves the base between viewpoints chosen by expected information gain until the query '
-                                'label is detected, target_coverage of the searchable mapped region has fresh evidence '
-                                'of absence, or a budget ends. query is a native label of the perception profile; '
-                                'region {x, y, radius_m} is map-frame, default the tracked motion bound. Results carry '
-                                'evidence_ids, coverage_fraction and a negative-evidence report; "not found" holds only '
-                                'for the covered cells. Zero/omitted limits use the tracked limits; positive limits may only reduce them.')}
+    def _capability(self, name):
+        """One manifest entry, derived from the descriptor that validates and executes the capability."""
+        spec, schema = CAPABILITIES[name], self._schema(name)
+        properties, effects = schema['properties'], spec['effects']
+        preconditions = [
+            {'condition': 'capability_enabled', 'switch': spec['switch'][0], 'satisfied': bool(self._enabled[name])},
+            {'condition': 'action_server_ready', 'action': spec['action'][0],
+             'satisfied': self._action_clients[name].server_is_ready()}]
+        return {
+            'name': name, 'available': all(item['satisfied'] for item in preconditions),
+            'parameters': list(properties),
+            'required_parameters': [*(key for key, item in properties.items() if item.get('required')),
+                                    *schema.get('alternatives', [{'required': []}])[0]['required']],
+            'defaults': {key: item['default'] for key, item in properties.items() if 'default' in item},
+            'description': spec['description'], 'resources': list(CAPABILITY_RESOURCES[name]),
+            'units': {key: item['unit'] for key, item in properties.items() if 'unit' in item},
+            'frame': spec.get('frame'), 'effects': effects,
+            'requires_schema': 1 if effects and effects['reversibility'] == 'reversible' else 2,
+            # What validation enforces, what the capability holds and needs, and how it can end.
+            'schema': {**schema, 'resources': list(CAPABILITY_RESOURCES[name]), 'preconditions': preconditions,
+                       'reason_codes': [*TERMINAL_CODES, *spec.get('reasons', ())]},
+            **spec['advertise'](self)}
 
     @staticmethod
     def _body_profile():
         return {'id': BODY_PROFILE, 'arm_joints': list(ARM_JOINTS), 'base_commands': list(BASE_COMMANDS)}
 
-    def _contract(self, entry):
-        """Resources, units, frame and effects every capability declares, for planning and validation."""
-        name = entry['name']
-        entry = {**entry, 'resources': list(CAPABILITY_RESOURCES[name]), 'units': UNITS[name],
-                 'frame': FRAMES.get(name)}
-        if name == 'skill':
-            entry['skills'] = [{**skill, 'requires_schema': 1 if skill['effects']['reversibility'] == 'reversible' else 2}
-                               for skill in entry['skills']]
-            entry['effects'] = {'per_skill': True, 'undeclared': UNDECLARED_EFFECTS}
-            entry['requires_schema'] = 'per_skill'
-        else:
-            entry['effects'], entry['requires_schema'] = EFFECTS[name], 1
-        return entry
-
     def _capabilities(self, _request, response):
         response.success = True
-        response.message = json.dumps({'schema': 1, 'capabilities': [
-            self._contract(self._capability(name, client)) for name, client in self._action_clients.items()],
+        response.message = json.dumps({'schema': 1, 'capabilities': [self._capability(name) for name in CAPABILITIES],
             'terminal_states': sorted(TERMINAL),
+            # `reason_code` values of a task by kind of state, and what each refusal code means for a retry.
+            'reason_codes': {'terminal': sorted({*TERMINAL_CODES, *(code for spec in CAPABILITIES.values()
+                                                                    for code in spec.get('reasons', ()))}),
+                             'paused': list(PAUSE_CODES), 'unknown': list(UNKNOWN_CODES)},
+            'refusals': {code: {'retryable': retryable, 'next_condition': condition}
+                         for code, (retryable, condition) in REFUSALS.items()},
             'task_api': {'schemas': list(API_SCHEMAS), 'type': 'lekiwi_rmf/srv/TaskApi', 'services': TASK_API,
                          'body_profile': self._body_profile(), 'journal_id': self._journal.journal_id,
                          'resources': self._journal.resource_state(), 'resource_topic': '/robot/resources',
@@ -943,13 +1162,17 @@ class TaskGateway(Node):
             return
         if row['id'] in self._pausing:
             return
-        field = FEEDBACK_FIELD.get(row['capability'])
+        # The feedback field that names what a running goal is doing; Nav2 reports poses, not a stage.
+        field = CAPABILITIES[row['capability']].get('feedback')
         stage = getattr(message.feedback, field) if field else 'navigating'
-        self._update(row['id'], 'paused' if stage.startswith('paused:') else 'running', stage)
+        paused = stage.startswith('paused:')
+        self._update(row['id'], 'paused' if paused else 'running', stage, code='executor_paused' if paused else None)
 
-    def _status(self, message, capability):
-        self._observed[capability] = {bytes(status.goal_info.goal_id.uuid) for status in message.status_list
-                                      if status.status not in (GoalStatus.STATUS_SUCCEEDED, GoalStatus.STATUS_CANCELED, GoalStatus.STATUS_ABORTED)}
+    def _status(self, message, capabilities):
+        for capability in capabilities:
+            self._observed[capability] = {
+                bytes(status.goal_info.goal_id.uuid) for status in message.status_list
+                if status.status not in (GoalStatus.STATUS_SUCCEEDED, GoalStatus.STATUS_CANCELED, GoalStatus.STATUS_ABORTED)}
         for status in message.status_list:
             row = self._journal.goal(bytes(status.goal_info.goal_id.uuid))
             if row is not None and row['state'] not in TERMINAL and not row['navigation_stopped']:
@@ -965,7 +1188,7 @@ class TaskGateway(Node):
         if (key in self._pending or not client.service_is_ready()
                 or time.monotonic() - self._queried.get(key, 0.0) < 1.0):
             return
-        action = ACTIONS[row['capability']][1]
+        action = CAPABILITIES[row['capability']]['action'][1]
         request = action.Impl.GetResultService.Request(goal_id=UUID(uuid=list(row['goal_id'])))
         server_id = self._server_id(row['capability'])
         future = client.call_async(request)
@@ -981,55 +1204,60 @@ class TaskGateway(Node):
             self._pending.pop(key)
         if self._row(identifier)['state'] in TERMINAL or self._row(identifier)['navigation_stopped']:
             return
+        capability = self._row(identifier)['capability']
+        spec = CAPABILITIES[capability]
         try:
             response = future.result()
-            result = dict(message_to_ordereddict(response.result))
-            if self._row(identifier)['capability'] == 'reach':
-                result = reach_result(result)
+            result = spec.get('result', dict)(dict(message_to_ordereddict(response.result)))
             json.dumps(result, allow_nan=False)
         except Exception as error:
             self.get_logger().error(f'task result unconfirmed: {error}')
-            self._update(identifier, 'unknown', 'result transport failed; termination unconfirmed')
+            self._update(identifier, 'unknown', 'result transport failed; termination unconfirmed',
+                         code='result_unconfirmed')
             return
         if response.status == GoalStatus.STATUS_UNKNOWN:
             self._recovering.add(identifier)
-            if server_id and self._server_id(self._row(identifier)['capability']) == server_id:
+            if server_id and self._server_id(capability) == server_id:
                 if self._unknown_results.get(identifier) != server_id:
                     self._unknown_since[identifier] = time.monotonic()
                 self._unknown_results[identifier] = server_id
-            self._update(identifier, 'unknown', 'ROS server has no result; delivery or termination remains unconfirmed')
+            self._update(identifier, 'unknown', 'ROS server has no result; delivery or termination remains unconfirmed',
+                         code='result_unconfirmed')
             return
         states = {GoalStatus.STATUS_SUCCEEDED: 'succeeded', GoalStatus.STATUS_CANCELED: 'canceled', GoalStatus.STATUS_ABORTED: 'failed'}
         if response.status not in states:
-            self._update(identifier, 'unknown', 'nonterminal ROS result')
+            self._update(identifier, 'unknown', 'nonterminal ROS result', code='result_unconfirmed')
             return
         state = states[response.status]
-        if self._row(identifier)['capability'] == 'skill' and not arm_stopped(result):
+        if 'stopped' in spec and not spec['stopped'](result):
             # The runner ended but the arm may still be moving: not a stop, so nothing is released.
             detail = f'skill {state}, but the arm controller did not confirm the arm stopped'
             if self._row(identifier)['detail'] != detail:
-                self._update(identifier, 'unknown', detail, {**result, 'arm_stopped': False})
+                self._update(identifier, 'unknown', detail, {**result, 'arm_stopped': False}, 'arm_stop_unconfirmed')
             return
         if state == 'succeeded' and (result.get('complete') is False or result.get('error_code', 0)):
             state = 'failed'
         detail = result.get('message') or result.get('error_msg') or result.get('detail') or state
+        code = reason_code(capability, state, result)
         if self._row(identifier)['cancel_requested'] == 2:
-            state, detail = 'failed', f'navigation deadline reached; ROS terminal state: {state}'
+            state, detail, code = 'failed', f'navigation deadline reached; ROS terminal state: {state}', 'budget_exhausted'
         row = self._row(identifier)
         if row['capability'] == 'navigate' and identifier in self._pausing and not row['cancel_requested']:
             if response.status == GoalStatus.STATUS_SUCCEEDED and not result.get('error_code', 0):
-                self._update(identifier, state, detail, result)
+                self._update(identifier, state, detail, result, code)
             else:
                 self._journal.navigation_stopped(identifier)
                 self._release_requests(identifier, row)
-                self._update(identifier, 'paused', 'paused: navigation stopped; waiting for safety recovery')
+                self._update(identifier, 'paused', 'paused: navigation stopped; waiting for safety recovery',
+                             code='navigation_stopped')
             return
-        self._update(identifier, state, detail, result)
+        self._update(identifier, state, detail, result, code)
 
     def _delivery_failed(self, identifier, error):
         self.get_logger().error(f'task acceptance unconfirmed: {error}')
         self._recovering.add(identifier)
-        self._update(identifier, 'unknown', 'action acceptance unconfirmed; not resubmitted')
+        self._update(identifier, 'unknown', 'action acceptance unconfirmed; not resubmitted',
+                     code='acceptance_unconfirmed')
 
     def _accepted(self, identifier, future):
         self._pending.pop(('send', identifier), None)
@@ -1042,7 +1270,8 @@ class TaskGateway(Node):
             return
         if not accepted:
             # A rejected goal never executed, so it left nothing to compensate.
-            self._update(identifier, 'failed', 'ROS action server rejected the goal', {'goal_rejected': True})
+            self._update(identifier, 'failed', 'ROS action server rejected the goal', {'goal_rejected': True},
+                         'goal_rejected')
             return
         row = self._row(identifier)
         if not row['cancel_requested'] and identifier not in self._pausing:
@@ -1071,7 +1300,8 @@ class TaskGateway(Node):
         identifier, capability = row['id'], row['capability']
         goal_id = UUID(uuid=list(row['goal_id']))
         if not self._enabled[capability]:
-            self._update(identifier, 'failed', 'capability disabled by this deployment profile before submission')
+            self._update(identifier, 'failed', 'capability disabled by this deployment profile before submission',
+                         code='capability_disabled')
             return
         if any(self._observed.values()) or self._children.busy():
             return
@@ -1084,15 +1314,17 @@ class TaskGateway(Node):
         if not client.server_is_ready():
             return
         parameters = row['parameters']
-        if capability in ('explore', 'search'):
-            effective = json.loads(row['result']).get('_task', {}).get('effective_parameters')
-            if effective is not None:
-                parameters = json.dumps(effective, allow_nan=False)
+        # What admission resolved is what runs: captured limits, a target's pose, a named state's joints.
+        effective = json.loads(row['result']).get('_task', {}).get('effective_parameters')
+        if effective is not None:
+            declared = CAPABILITIES[capability]['schema']['properties']
+            parameters = json.dumps({name: value for name, value in effective.items() if name in declared},
+                                    allow_nan=False)
         goal, _ = task_goal(capability, parameters)
         if capability == 'navigate':
-            reason = self._navigation.reason(now)
-            if reason:
-                self._update(identifier, 'paused', f'paused: {reason}')
+            cause = self._navigation.cause(now)
+            if cause:
+                self._update(identifier, 'paused', f'paused: {cause[1]}', code=cause[0])
                 return
             if row['remaining_sec'] is None:
                 self._journal.navigation_budget(identifier, self._timeout)
@@ -1163,8 +1395,9 @@ class TaskGateway(Node):
                 self._lookup_result(row)
             if row['navigation_stopped']:
                 if row['cancel_requested']:
-                    self._update(identifier, 'canceled', 'canceled after confirmed navigation stop')
-                elif not self._navigation.reason(now) and not any(self._observed.values()) and not self._children.busy():
+                    self._update(identifier, 'canceled', 'canceled after confirmed navigation stop',
+                                 code='budget_exhausted' if row['cancel_requested'] == 2 else 'canceled')
+                elif not self._navigation.cause(now) and not any(self._observed.values()) and not self._children.busy():
                     self._release_requests(identifier, row)
                     self._journal.resume_navigation(identifier, bytes(owned_goal_id().uuid))
                     self._dispatch(self._row(identifier), now)
@@ -1174,7 +1407,8 @@ class TaskGateway(Node):
                 self._lookup_result(row)
             elif identifier not in self._sent:
                 if row['cancel_requested']:
-                    self._update(identifier, 'canceled', 'canceled before action submission')
+                    self._update(identifier, 'canceled', 'canceled before action submission',
+                                 code='budget_exhausted' if row['cancel_requested'] == 2 else 'canceled_before_dispatch')
                     continue
                 self._dispatch(row, now)
             elif capability == 'navigate' and not row['cancel_requested']:
@@ -1225,22 +1459,23 @@ class TaskGateway(Node):
                   else 'action server has no such goal after a gateway restart; outcome unavailable')
         if row['cancel_requested'] == 2:
             detail = f'navigation deadline reached; {detail}'
-        self._update(identifier, 'failed', detail, {'outcome_known': False, 'termination_confirmed': True})
+        self._update(identifier, 'failed', detail, {'outcome_known': False, 'termination_confirmed': True},
+                     'outcome_unknown')
         return True
 
     def _server_id(self, capability):
-        return server_instance(self, ACTIONS[capability][0])
+        return server_instance(self, CAPABILITIES[capability]['action'][0])
 
     def _queue_reply(self, kind, row, future, server_id=''):
         self._replies.put((kind, row['id'], row['goal_id'], server_id, future))
 
     def _navigation_tick(self, row, now):
         identifier = row['id']
-        reason = self._navigation.reason(now)
+        cause = self._navigation.cause(now)
         previous = self._started.get(identifier, now)
         self._started[identifier] = now
         remaining = row['remaining_sec']
-        if not reason and identifier not in self._pausing:
+        if not cause and identifier not in self._pausing:
             remaining -= max(0.0, now - previous)
             self._journal.navigation_budget(identifier, remaining)
         if remaining <= 0:
@@ -1249,19 +1484,174 @@ class TaskGateway(Node):
             return
         if identifier in self._pausing and now - self._pause_started[identifier] >= 3.0:
             self._recovering.add(identifier)
-            self._update(identifier, 'unknown', 'navigation pause stop unconfirmed; ownership lease no longer renewed')
+            self._update(identifier, 'unknown', 'navigation pause stop unconfirmed; ownership lease no longer renewed',
+                         code='pause_stop_unconfirmed')
             return
         self._owner.publish(UUID(uuid=list(row['goal_id'])))
-        if reason or identifier in self._pausing:
+        if cause or identifier in self._pausing:
             if identifier not in self._pausing:
                 self._journal.request_navigation_pause(identifier)
             self._pause_started.setdefault(identifier, now)
             self._pausing.add(identifier)
-            self._update(identifier, 'paused', f'paused: {reason or "awaiting confirmed navigation stop"}')
+            code, text = cause or ('awaiting_navigation_stop', 'awaiting confirmed navigation stop')
+            self._update(identifier, 'paused', f'paused: {text}', code=code)
+
+    def _gripper_model(self):
+        """The claw's named positions and limits as MoveIt holds them: the SRDF and joint limits, calibrated."""
+        states, limits = dict(GRIPPER_STATES), JOINT_LIMITS[GRIPPER_JOINT]
+        calibration = Path(self.get_parameter('arm_calibration_file').value).expanduser()
+        if not calibration.is_file():
+            return states, limits
+        parameters = {'robot_description_semantic': SRDF.read_text(), 'robot_description_planning': {
+            'joint_limits': {GRIPPER_JOINT: dict(zip(('min_position', 'max_position'), limits))}}}
+        try:
+            # Only a calibrated physical arm needs MoveIt's configuration tools; without them or with
+            # a calibration MoveIt would reject, the claw is unavailable and nothing else is affected.
+            from lekiwi_rmf.moveit_config import apply_gripper_calibration
+            apply_gripper_calibration(parameters, calibration)
+        except (ImportError, ValueError) as error:
+            self.get_logger().error(f'gripper unavailable: {error}')
+            self._enabled['gripper'] = False
+            return states, limits
+        configured = parameters['robot_description_planning']['joint_limits'][GRIPPER_JOINT]
+        return ({name: joints[GRIPPER_JOINT] for name, joints in
+                 group_states(parameters['robot_description_semantic'])[GRIPPER_GROUP].items()},
+                (configured['min_position'], configured['max_position']))
+
+    def _resolver_setup(self):
+        """A second node, spun only while a navigation target is being resolved.
+
+        A service callback cannot wait on this node's own executor, and the map, the transforms and
+        the spatial query are needed only then, so between requests they cost nothing.
+        """
+        self._resolver = rclpy.create_node('robot_tasks_resolver', context=self.context,
+                                           use_global_arguments=False, start_parameter_services=False)
+        self._resolver_executor = SingleThreadedExecutor(context=self.context)
+        self._resolver_executor.add_node(self._resolver)
+        self._spatial = self._resolver.create_client(QuerySpatial, SPATIAL_SERVICE)
+        self._tf = Buffer()
+        self._tf_listener = TransformListener(self._tf, self._resolver)
+        self._map = None
+        self._resolver.create_subscription(OccupancyGrid, '/map', lambda message: setattr(self, '_map', message),
+                                           QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
+        # A standoff pose is admitted with the explorer's own tracked clearance and the footprint Nav2 runs.
+        explorer = yaml.safe_load((config_directory() / 'exploration.yaml').read_text())['robot_explorer']['ros__parameters']
+        self._standoff = {name: explorer[name] for name in ('clearance_m', 'free_threshold', 'max_map_cells',
+                                                           'data_timeout_sec')}
+        try:
+            self._footprint = load_navigation_footprint(
+                Path(self.get_parameter('navigation_params_file').value).expanduser())[0]
+        except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError) as error:
+            self.get_logger().error(f'point targets unavailable: {error}')
+            self._footprint = None
+
+    def _resolve(self, ready, wait_sec=1.0):
+        """Spin the resolver until `ready()` gives a value; None when the wait ends first."""
+        deadline = time.monotonic() + wait_sec
+        while True:
+            value = ready()
+            if value is not None or time.monotonic() >= deadline:
+                return value
+            self._resolver_executor.spin_once(timeout_sec=0.05)
+
+    def target_kinds(self):
+        return {'pose': {'available': True},
+                'anchored': {'available': self._spatial.service_is_ready(), 'service': SPATIAL_SERVICE},
+                'point': {'available': self._footprint is not None and self._resolver.count_publishers('/map') > 0,
+                          'map': '/map'}}
+
+    def resolve_target(self, target):
+        """The map pose a navigation target stands for now, and how it was found; one method per kind."""
+        kind = next(name for name in ('pose', 'anchored', 'point') if name in target)
+        x, y, yaw, resolved = getattr(self, f'_target_{kind}')(target)
+        return {'x': x, 'y': y, 'yaw': yaw, 'resolved': {'target': kind, **resolved}}
+
+    @staticmethod
+    def _target_pose(target):
+        pose = target['pose']
+        return pose['x'], pose['y'], pose.get('yaw', 0.0), {}
+
+    def _spatial_query(self, request):
+        unavailable = Refused('precondition_failed', 'spatial memory is not answering', retryable=True,
+                              next_condition='wait_spatial_memory', field='target.anchored')
+        if not self._spatial.service_is_ready():
+            raise unavailable
+        future = self._spatial.call_async(QuerySpatial.Request(request_json=json.dumps(request, allow_nan=False)))
+        reply = self._resolve(lambda: future.result() if future.done() else None)
+        if reply is None:
+            self._spatial.remove_pending_request(future)
+            raise unavailable
+        if not reply.success:
+            raise Refused('precondition_failed', f'spatial memory refused the query: {reply.detail}',
+                          field='target.anchored')
+        return json.loads(reply.response_json)
+
+    def _target_anchored(self, target):
+        """A pose remembered under an earlier map revision, carried by its anchor into the current one."""
+        anchored = target['anchored']
+        current = self._spatial_query({'op': 'current'})
+        if not current.get('ready'):
+            raise Refused('precondition_failed', f'no current map revision: {current.get("reason")}', retryable=True,
+                          next_condition='needs_map', field='target.anchored')
+        pose, revision = anchored['map_pose'], current['revision']
+        yaw = pose.get('yaw', 0.0)
+        capture = {**{name: anchored[name] for name in ('site_ref', 'map_ref', 'revision')},
+                   'pose': {'t': [pose['x'], pose['y'], 0.0], 'q': [0.0, 0.0, math.sin(yaw / 2), math.cos(yaw / 2)]}}
+        # Naming the current revision as the target refuses a pose from a map the robot is not in.
+        result = self._spatial_query({'op': 'project', 'items': [{'id': 'target', 'map_pose': capture}],
+                                      'target': {name: revision[name] for name in ('map_ref', 'revision')}})['items'][0]
+        if not result['ok']:
+            code = result['code'] if result['code'] in ('site_mismatch', 'map_unaligned', 'revision_unknown') \
+                else 'precondition_failed'
+            raise Refused(code, f'the anchored pose has no place in the current map: {result["detail"]}',
+                          next_condition='refresh_reference', field='target.anchored', spatial_code=result['code'])
+        (x, y, _), (qx, qy, qz, qw) = result['camera_pose']['t'], result['camera_pose']['q']
+        return x, y, math.atan2(2 * (qw * qz + qx * qy), 1 - 2 * (qy * qy + qz * qz)), {
+            name: result[name] for name in ('site_ref', 'map_ref', 'revision', 'capture_revision', 'method', 'shift_m')}
+
+    def _robot_position(self):
+        try:
+            transform = self._tf.lookup_transform('map', 'base_footprint', rclpy.time.Time())
+        except TransformException:
+            return None
+        age = (self.get_clock().now() - rclpy.time.Time.from_msg(transform.header.stamp)).nanoseconds / 1e9
+        t = transform.transform.translation
+        if not -0.3 <= age <= self._standoff['data_timeout_sec'] or not (math.isfinite(t.x) and math.isfinite(t.y)):
+            return None
+        return t.x, t.y
+
+    def _target_point(self, target):
+        """Near a map point and facing it: a clear, known standoff pose, the one nearest the robot."""
+        point = (target['point']['x'], target['point']['y'])
+        standoff = target.get('standoff_m', DEFAULT_STANDOFF_M)
+        if self._footprint is None:
+            raise Refused('capability_unavailable', 'point targets need the Nav2 footprint of this deployment',
+                          next_condition='fix_deployment', field='target.point')
+        # Take what queued up since the last request first: the newest map and transforms.
+        self._resolve(lambda: None, wait_sec=0.1)
+        robot = self._resolve(self._robot_position)
+        if robot is None:
+            raise Refused('precondition_failed', 'the robot has no fresh pose in the map', retryable=True,
+                          next_condition='needs_localization', field='target.point')
+        try:
+            grid = map_geometry(self._resolve(lambda: self._map), self._standoff['max_map_cells'])
+        except (AttributeError, ValueError) as error:
+            raise Refused('precondition_failed', f'no usable occupancy map: {error}', retryable=True,
+                          next_condition='needs_map', field='target.point') from error
+        try:
+            x, y, yaw = approach_pose(*grid, point, standoff, robot, clearance=self._standoff['clearance_m'],
+                                      footprint=self._footprint, free_threshold=self._standoff['free_threshold'])
+        except NoStandoff as error:
+            raise Refused('precondition_failed', f'no standoff pose {standoff} m from the point: {error}',
+                          retryable=error.unmapped, next_condition='needs_map' if error.unmapped else 'change_standoff',
+                          field='target.point' if error.unmapped else 'target.standoff_m') from error
+        return x, y, yaw, {'point': list(point), 'standoff_m': standoff, 'robot': list(robot)}
 
     def destroy_node(self):
-        for client in self._action_clients.values():
+        for client in set(self._action_clients.values()):
             client.destroy()
+        self._resolver_executor.shutdown()
+        self._resolver.destroy_node()
         self._journal.close()
         return super().destroy_node()
 

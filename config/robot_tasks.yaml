@@ -1,4 +1,4 @@
-# lekiwi_rmf/task_gateway.py: the arm capabilities of the task API. Both stay false on the
+# lekiwi_rmf/task_gateway.py: the arm capabilities of the task API. All stay false on the
 # physical robot until the arm trials in DEFERRED.md pass; enabling one is an operator decision
 # made here, never a parameter set after startup.
 robot_tasks:
@@ -7,3 +7,5 @@ robot_tasks:
     allow_skills: false
     # `reach`: a joint target planned and executed by MoveIt's MoveGroup (needs start_moveit).
     allow_reach: false
+    # `gripper`: an SRDF gripper state or a claw position, through the same MoveGroup path as `reach`.
+    allow_gripper: false

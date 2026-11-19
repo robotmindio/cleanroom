@@ -432,10 +432,13 @@
   "output": "screen",
   "parameters": {
    "allow_exploration": false,
+   "allow_gripper": false,
    "allow_navigation": false,
    "allow_reach": false,
    "allow_skills": false,
+   "arm_calibration_file": "$(env HOME)/.ros/lekiwi_arm_calibration.json",
    "map_bundle": "$(share lekiwi_rmf)/maps/bundles/cleanroom-development.yaml",
+   "navigation_params_file": "$(share lekiwi_rmf)/config/nav2_params.yaml",
    "use_sim_time": false
   },
   "remappings": [],

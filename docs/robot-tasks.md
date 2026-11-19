@@ -12,7 +12,8 @@ ROS owns physical execution, collision checking and the local motion guards.
 | `/robot/tasks/cancel` (`lekiwi_rmf/srv/CancelTask`) | task ID; empty selects the managed active task | cancellation requested, **not a confirmed stop** |
 | `/robot/tasks/v2/*` (`lekiwi_rmf/srv/TaskApi`) | schema 2 and a JSON request | see [negotiated task API](#negotiated-task-api-schema-2) |
 
-`navigate` accepts finite map-frame `x`, `y` and optional `yaw` (radians), and
+`navigate` accepts finite map-frame `x`, `y` and optional `yaw` (radians), or one
+[`target`](#navigation-targets) instead of them, and
 uses the normal Nav2 controller. It has a 180-second active-time budget. A collision STOP, stale collision state or
 denied/stale base permission pauses the managed task without spending that budget.
 The gateway cancels its current Nav2 attempt and waits for a terminal native
@@ -35,10 +36,52 @@ RGB-D; unsupported sensor and fleet topologies keep it unavailable. Physical
 qualification remains open. A search `succeeded` only when it found the label
 or reached its target coverage; budget, inaccessible space and missing
 instruments are `failed` with the outcome and an honest coverage report.
-`skill` and `reach` command the arm and are off unless `allow_skills` or
-`allow_reach` is true in `config/robot_tasks.yaml`, the only switch for them.
-Both are false; turning one on for the physical robot is an operator decision
-that follows the arm trials in `DEFERRED.md`.
+`skill`, `reach` and `gripper` command the arm and are off unless `allow_skills`,
+`allow_reach` or `allow_gripper` is true in `config/robot_tasks.yaml`, the only
+switch for them. All are false; turning one on for the physical robot is an
+operator decision that follows the arm trials in `DEFERRED.md`.
+
+## Navigation targets
+
+`navigate` takes either `x`, `y` and optional `yaw`, or a `target` object holding
+exactly one of the shapes below. Language, named places and object references
+belong to the orchestrator; the robot only turns a geometric reference into a pose.
+
+| `target` | Meaning | Resolved by |
+| --- | --- | --- |
+| `{pose: {x, y, yaw}}` | a map-frame pose, the same as `x`, `y`, `yaw` | nothing |
+| `{anchored: {map_pose: {x, y, yaw}, site_ref, map_ref, revision}}` | a pose remembered under an earlier map revision | `/robot/spatial/query`: `current`, then `project` into the current revision |
+| `{point: {x, y}, standoff_m}` | stand `standoff_m` (0.3 to 3 m, default 0.6) from a map point and face it | the latched `/map` occupancy grid and the robot's pose in `map` |
+
+The target is resolved once, at `validate` and at `submit`, after the base is known
+to be free. The task's `effective_parameters` hold the resolved `x`, `y`, `yaw`
+and `resolved` (the target kind and how it was found: the revision, method and
+`shift_m` of a projection, or the point, standoff and robot position of an
+approach); `parameters` keep the request. That pose is what is sent to Nav2 and
+resent after a pause, through the same owner guard, limits and budgets as a raw
+pose. The request digest covers the request, so a retry with the same `task_id`
+returns the admitted task and its pose.
+
+An anchored pose follows the map anchor nearest to it, like a stored observation
+([spatial memory](spatial-memory.md)). It is refused with `site_mismatch` for
+another site, `revision_unknown` when its revision is unknown or pruned and
+`map_unaligned` when its map has no alignment with the map the robot is in;
+`precondition_failed` covers a spatial memory that is not answering
+(`wait_spatial_memory`), no current revision (`needs_map`) and any other
+projection error. Each carries the store's own `spatial_code`.
+
+A point target is an approach pose chosen by `lekiwi_rmf/navigation_targets.py`:
+poses on the circle of radius `standoff_m` around the point, each facing it,
+tried nearest the robot first. A pose is admitted only where the explorer's
+tracked `clearance_m` holds on known free cells, the whole oriented Nav2 footprint
+lies on known free cells (`free_threshold` of `config/exploration.yaml`) and the
+straight line to the point crosses only free cells before the occupied or unknown
+cells the point itself lies in, so a wall in between hides it. Without such a pose
+the request is `precondition_failed`: `needs_map` when part of the circle is
+unmapped, `change_standoff` when all of it is mapped and blocked,
+`needs_localization` without a `map` to `base_footprint` transform younger than
+the explorer's `data_timeout_sec`. Nav2 still plans and validates the route.
+The `navigate` manifest entry lists which kinds can resolve now under `targets`.
 
 States are `starting`, `running`, `paused`, `canceling`, `succeeded`, `canceled`,
 `failed` and `unknown`. Only `succeeded`, `canceled` and `failed` are terminal.
@@ -92,7 +135,8 @@ available. A canceled request alone is never proof that motion stopped.
 `[1, 2]`, the `TaskApi` services, the body profile, the journal ID and the
 current resource holders. Each capability declares its `resources`, SI `units`,
 `frame`, `effects` (`reversible`, `compensable` or `irreversible`, with a
-compensation description) and `requires_schema`. A `TaskApi` request with any
+compensation description), `requires_schema` and its
+[`schema`](#self-describing-capabilities). A `TaskApi` request with any
 schema other than 2 is refused with `schema_incompatible`, never reinterpreted.
 A capability whose effects are not reversible is refused through `SubmitTask`,
 because schema 1 reports an implementation that ran to its end as `succeeded`.
@@ -103,6 +147,55 @@ the runner executes (`lerobot_policy`), and each advertised skill carries its
 arm joints give `arm`, base commands `base` and cameras `camera`. These are
 additive schema 1 fields. Admission still holds the capability's `resources`
 (the arm, and the base kept still) for every skill.
+
+## Self-describing capabilities
+
+`task_gateway.py` holds one descriptor per capability (`CAPABILITIES`). Request
+validation, the manifest entry and execution read the same descriptor, so the
+manifest states exactly what is enforced. A client needs no prior knowledge of a
+capability: its entry carries
+
+- `schema.properties`: per parameter `type` (`number`, `integer`, `boolean`,
+  `string`, `object`), `unit`, `min`, `max`, `exclusive_min`, `default`,
+  `required`, `enum`, `pattern` (matches the whole string), `min_length` and
+  `max_length` (of the text with its whitespace collapsed) and, for objects,
+  nested `properties`. `max_ahead_sec` bounds a Unix time relative to now. Only
+  the keys that apply are present, and unknown parameters are refused.
+- `schema.alternatives`: groups of parameters of which exactly one group is
+  given, each `{required, optional}`; `schema.excludes`: parameters that cannot
+  be combined with a non-default value of another.
+- `schema.resources`, `schema.preconditions` (`capability_enabled` with its
+  `switch`, `action_server_ready` with its `action`, each with `satisfied`;
+  `available` is their conjunction) and `schema.reason_codes`, the stable reasons
+  a task of this capability can end with.
+
+Limits tracked by this deployment are part of the schema: the Explorer's
+exploration and search maxima and the claw's calibrated range appear as `max` and
+`min` once known. `parameters`, `required_parameters`, `defaults` and `units` are
+views of the same descriptor.
+
+A refusal answers with `ok: false`, the `error` code, a readable `detail` and a
+`response_json` that always holds `retryable` (whether the unchanged request can
+succeed later) and `next_condition` (what must hold first), plus `field` (the
+dotted parameter path, such as `target.point.y`) when one parameter is at fault.
+The manifest's `refusals` table gives each code's default pair; a refusal may
+state a more specific one. Conditions in use: `fix_request`,
+`use_supported_schema`, `use_new_task_id`, `enable_capability`,
+`wait_capability_ready`, `acquire_skill`, `wait_resource_free`, `reconcile_task`,
+`wait_task_terminal`, `wait_odometry`, `wait_spatial_memory`, `needs_map`,
+`needs_localization`, `change_standoff`, `refresh_reference`, `replan_for_body`,
+`read_status`, `use_owner`, `isolate_or_record` and `fix_deployment`.
+
+Every state that needs an explanation carries a stable `reason_code` beside the
+readable `detail`: in the task view, in `result_json` and in the journal's state
+events. A state without one clears it. The manifest lists them under
+`reason_codes`:
+
+| Kind | Codes |
+| --- | --- |
+| `terminal` | `succeeded`, `canceled`, `canceled_before_dispatch`, `goal_rejected`, `capability_disabled`, `executor_error` (a nonzero native error code), `executor_aborted`, `incomplete`, `outcome_unknown` (termination proven, outcome not), `budget_exhausted` (navigation deadline, active time or travel bound), and a search's own `found`, `coverage_reached`, `inaccessible`, `budget_exhausted`, `incapable` |
+| `paused` | `collision_stop`, `collision_settling`, `base_motion_denied`, `safety_input_stale`, `safety_inputs_unavailable`, `awaiting_navigation_stop`, `navigation_stopped`, `executor_paused` (an exploration or search pausing itself) |
+| `unknown` | `result_unconfirmed`, `acceptance_unconfirmed`, `arm_stop_unconfirmed`, `pause_stop_unconfirmed` |
 
 `skill` takes `skill_id`, an optional `parameters` object and optional `version`
 and `artifact_sha256` pins. `validate` and `submit` resolve the registry entry
@@ -126,8 +219,8 @@ the runner directly.
 | `compensate` | `task_id`, `generation`, `owner`, `plan {intent, steps, note}` | recorded compensation plan |
 
 Resources are `base`, `arm` and `perception_query`. Navigation and exploration
-hold the base; search holds the base and the active perception query; a skill or reach
-holds the arm and keeps the base still. A task holds them from admission until its
+hold the base; search holds the base and the active perception query; a skill, reach
+or gripper task holds the arm and keeps the base still. A task holds them from admission until its
 journal row is terminal, which requires native terminal evidence or the
 reconciliation proof above; a timeout or an empty process never releases them. A
 holder in `unknown` makes admission fail with `execution_uncertain`. The gateway
@@ -150,9 +243,9 @@ and compensation target) returns the existing task without a second command; a
 different digest is `identity_conflict`. Refusal codes include
 `invalid_request`, `capability_unavailable`, `competence_insufficient`, `resource_busy`,
 `execution_uncertain`, `resource_mismatch`, `body_profile_mismatch`,
-`map_unaligned`, `unit_mismatch`, `precondition_failed`, `stale_generation`,
-`authority_denied`, `identity_conflict`, `irreversible_effect`, `not_found` and
-`schema_incompatible`.
+`map_unaligned`, `site_mismatch`, `revision_unknown`, `unit_mismatch`,
+`precondition_failed`, `stale_generation`, `authority_denied`, `identity_conflict`,
+`irreversible_effect`, `not_found` and `schema_incompatible`.
 
 The task view keeps the legacy `state` and adds separate dimensions:
 `execution.phase` (`admitted`, `running`, `paused`, `uncertain`,
@@ -165,8 +258,8 @@ checkpoint, compensation, effective parameters, admission/dispatch/finish times
 and the task's latest event cursor. After a gateway restart a dispatched task is
 `uncertain` until this process observes it live or a native result arrives.
 While a task runs, `detail` is the executor's own feedback: the `stage` of an
-exploration, search or skill, MoveIt's `state` for a reach, and `navigating` for
-Nav2. A goal the action server rejected is `failed` with `goal_rejected: true`
+exploration, search or skill, MoveIt's `state` for a reach or gripper task, and
+`navigating` for Nav2. A goal the action server rejected is `failed` with `goal_rejected: true`
 in its result; it never executed, so `compensation_required` stays false.
 A skill's `result_json` carries `arm_stopped`. When it is `false` (or the report
 is unreadable) the arm controller never confirmed the last chunk terminal, so
@@ -200,7 +293,7 @@ and the plan always reports `counts_as_goal_success: false`.
 Events accelerate observation; the journal/status service is authoritative
 because a disconnected stream can miss events.
 
-## Geometric feasibility and reach
+## Geometric feasibility, reach and gripper
 
 `motion_solver` (started with MoveIt) serves `/robot/motion/solve`
 (`lekiwi_rmf/srv/TaskApi`, motion schema 1). It never moves anything. MoveIt owns
@@ -240,9 +333,13 @@ inputs are `unknown`, never `infeasible`: `joint_state_stale`,
 `checked_at`, `valid_until` (5 s later), the resolved `targets` and its assumptions;
 it describes that scene only, so a planner checks again right before it moves.
 
-`reach` takes `joints` for exactly `arm_shoulder_pan`, `arm_shoulder_lift`,
-`arm_elbow_flex`, `arm_wrist_flex` and `arm_wrist_roll` within the joint limits, and
-nothing else. The gateway sends MoveIt's `MoveGroup` action (`/move_action`)
+`reach` takes either `joints` for exactly `arm_shoulder_pan`, `arm_shoulder_lift`,
+`arm_elbow_flex`, `arm_wrist_flex` and `arm_wrist_roll` within the joint limits, or
+`named`, an arm group state of `config/lekiwi.srdf` (`home`, `travel_stow`,
+`supported_rest`), and nothing else. The gateway reads the named states from the
+SRDF at startup and advertises them as `named_states`; a named reach reports the
+joints it stands for in `effective_parameters`. The gateway sends MoveIt's
+`MoveGroup` action (`/move_action`)
 a joint goal (0.01 rad tolerance) with `plan_only: false`: MoveIt plans again from
 the current state, checks the current scene and executes through the same controller
 and safety path as RViz. It holds the arm and keeps the base still, its effect is
@@ -251,6 +348,21 @@ MoveIt's code, planning time and final joints, not the trajectories. Success mea
 the motion finished, not that a constraint holds; check that with `verify`.
 `allow_reach` in `config/robot_tasks.yaml` is false, like `allow_skills`, until arm
 planning is qualified on this body.
+
+`gripper` takes either `state`, a gripper group state of the SRDF (`open`, `closed`,
+`travel_stow`), or `position_rad` within the claw's joint limits. It is the same
+`MoveGroup` request for the `gripper` planning group, which MoveIt executes through
+the arm controller, so it passes the same planning, collision check, arm permission
+and safety path as a reach, holds the same resources (the arm, and the base kept
+still) and reports the same result. On the physical robot the gateway applies the
+arm calibration MoveIt applies (`arm_calibration_file`): `closed` is jaw contact
+(0 rad), `open` and the upper limit are the calibrated opening, and the manifest's
+`named_states` and `position_rad` bounds show those values. Its effects are
+`compensable`, not reversible: opening releases what the claw holds and closing may
+grasp, so it needs schema 2 and a failed task asks for a compensation plan. Success
+means the motion finished, not that anything is held. `allow_gripper` in
+`config/robot_tasks.yaml` is false. Picking, placing and handing over are learned
+skills, not capabilities of this API.
 
 ## Fiber and permissions
 
@@ -277,7 +389,7 @@ matching option). Never bind the unauthenticated bridge to a public
 interface. Fiber's integration URL must match the compute host's tailnet IP;
 its encrypted integration configuration is maintained through Fiber's API.
 
-This contract exposes navigation, exploration, observation by base motion and, when enabled, arm reach to a solved target. It does not qualify household
+This contract exposes navigation, exploration, observation by base motion and, when enabled, arm reach to a solved or named target and claw motion. It does not qualify household
 manipulation, docking, unrestricted unattended operation or learned skills.
 
 
@@ -311,8 +423,9 @@ No exploration parameters means `revisit_known=false`, empty `resume_task_id`,
 and zero duration/radius overrides. Zero selects the Explorer's tracked limits,
 currently 900 active seconds and 10 m in `config/exploration.yaml`; a positive
 override may only reduce those limits. An agent uses `revisit_known=true` when
-the user's intent includes surveying already mapped space. Navigation still
-requires map-frame `x` and `y`; omitted `yaw` is zero radians.
+the user's intent includes surveying already mapped space. Navigation
+requires map-frame `x` and `y` (omitted `yaw` is zero radians) or one
+[target](#navigation-targets).
 When live Explorer defaults are known, an override above either maximum is
 rejected before durable admission. A resume request cannot supply positive
 duration/radius overrides; the saved task owns those bounds.

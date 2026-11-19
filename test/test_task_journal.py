@@ -5,7 +5,7 @@ import sqlite3
 
 import pytest
 
-from lekiwi_rmf.task_journal import Refused, TaskJournal
+from lekiwi_rmf.task_journal import REFUSALS, Refused, TaskJournal
 
 SCHEMA_5_COLUMNS = ('owner', 'generation', 'reconciled_generation', 'resources', 'api_schema', 'digest',
                     'cancel_receipt', 'checkpoint', 'compensation', 'compensates')
@@ -181,6 +181,7 @@ def test_schema_4_active_task_keeps_its_resources_after_migration(tmp_path):
         with pytest.raises(Refused) as refused:
             journal.admit('next', 'skill', '{}', bytes(16), resources=('arm', 'base'))
         assert refused.value.code == 'resource_busy'
+        assert (refused.value.data['retryable'], refused.value.data['next_condition']) == (True, 'wait_resource_free')
         assert journal.row('next') is None
         assert journal.events_since(0)['events'] == []
     finally:
@@ -338,12 +339,14 @@ def test_compensation_steps_run_in_order_with_their_own_parameters_and_a_failed_
         for capability, parameters in (('explore', {}), ('navigate', {'x': 0, 'y': 0}), ('navigate', {'x': 1, 'y': 1})):
             with pytest.raises(Refused) as refused:
                 step('wrong', capability, parameters)
-            assert refused.value.code == 'precondition_failed' and refused.value.data == {'step': 0}
+            assert refused.value.code == 'precondition_failed' and refused.value.data == {
+                'step': 0, 'retryable': False, 'next_condition': 'fix_request'}
         assert journal.row('wrong') is None and status() == 'planned'
         step('first', 'navigate', {'x': 1.0, 'y': 0})
         assert status() == 'in_progress'
-        with pytest.raises(Refused, match='first has not finished'):
+        with pytest.raises(Refused, match='first has not finished') as waiting:
             journal.compensation_step('weld', 'explore', {})
+        assert waiting.value.data == {'retryable': True, 'next_condition': 'wait_task_terminal'}
         journal.update('first', 'canceled', 'stopped')
         assert status() == 'failed'
         # The failed step stays the next step; the one after it is still refused.
@@ -365,5 +368,39 @@ def test_compensation_steps_run_in_order_with_their_own_parameters_and_a_failed_
         assert [(item['task_id'], item['step']) for item in started] == [
             ('first', 0), ('first-again', 0), ('second', 1), ('third', 2)]
         assert journal.row('weld')['state'] == 'failed'
+    finally:
+        journal.close()
+
+
+def test_a_refusal_always_says_whether_a_retry_can_help():
+    assert set(REFUSALS) >= {'invalid_request', 'resource_busy', 'execution_uncertain', 'capability_unavailable',
+                             'precondition_failed', 'map_unaligned', 'site_mismatch', 'revision_unknown'}
+    for code, (retryable, condition) in REFUSALS.items():
+        assert Refused(code, 'refused').data == {'retryable': retryable, 'next_condition': condition}
+    specific = Refused('precondition_failed', 'no map yet', retryable=True, next_condition='needs_map',
+                       field='target.point', holders=[])
+    assert specific.data == {'retryable': True, 'next_condition': 'needs_map', 'field': 'target.point', 'holders': []}
+    assert str(specific) == 'no map yet' and isinstance(specific, ValueError)
+    # An unlisted code would leave a client guessing, so it cannot be raised.
+    with pytest.raises(KeyError):
+        Refused('surprise', 'undocumented')
+
+
+def test_a_reason_code_belongs_to_its_state_and_is_journaled_with_it(tmp_path):
+    journal = TaskJournal(tmp_path / 'tasks.db')
+    try:
+        journal.admit('task', 'navigate', '{}', bytes(16), result={'_task': {'parameters': {'x': 1}}})
+        assert journal.update('task', 'paused', 'paused: collision monitor stop: StopZone', code='collision_stop')
+        assert json.loads(journal.row('task')['result']) == {
+            '_task': {'parameters': {'x': 1}}, 'reason_code': 'collision_stop'}
+        # The same state and text is one event, whatever else is said about it.
+        assert not journal.update('task', 'paused', 'paused: collision monitor stop: StopZone', code='collision_stop')
+        assert journal.update('task', 'running', 'navigating')
+        assert json.loads(journal.row('task')['result']) == {'_task': {'parameters': {'x': 1}}}
+        assert journal.update('task', 'failed', 'Nav2 aborted', {'error_code': 204}, 'executor_error')
+        assert json.loads(journal.row('task')['result']) == {'error_code': 204, 'reason_code': 'executor_error'}
+        states = [event['data'] for event in journal.events_since(0, 'task')['events'] if event['kind'] == 'state']
+        assert [(event['state'], event.get('reason_code')) for event in states] == [
+            ('paused', 'collision_stop'), ('running', None), ('failed', 'executor_error')]
     finally:
         journal.close()

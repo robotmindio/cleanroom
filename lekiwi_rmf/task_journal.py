@@ -23,16 +23,36 @@ RESOURCES = ('base', 'arm', 'perception_query')
 # A learned skill keeps the base still while it moves the arm; search changes
 # what perception reports, so it reserves the active open-vocabulary query.
 CAPABILITY_RESOURCES = {'navigate': ('base',), 'explore': ('base',),
-                        'search': ('base', 'perception_query'), 'skill': ('arm', 'base'), 'reach': ('arm', 'base')}
+                        'search': ('base', 'perception_query'), 'skill': ('arm', 'base'), 'reach': ('arm', 'base'),
+                        'gripper': ('arm', 'base')}
 EVENT_RETENTION = 10000
+# Per refusal code: whether the unchanged request can succeed later, and what must hold first.
+# A refusal may state a more specific pair; a client decides its recovery from these, never from text.
+REFUSALS = {
+    'invalid_request': (False, 'fix_request'), 'schema_incompatible': (False, 'use_supported_schema'),
+    'unit_mismatch': (False, 'fix_request'), 'resource_mismatch': (False, 'fix_request'),
+    'body_profile_mismatch': (False, 'replan_for_body'), 'identity_conflict': (False, 'use_new_task_id'),
+    'capability_unavailable': (False, 'enable_capability'), 'competence_insufficient': (False, 'acquire_skill'),
+    'resource_busy': (True, 'wait_resource_free'), 'execution_uncertain': (True, 'reconcile_task'),
+    'precondition_failed': (False, 'fix_request'), 'map_unaligned': (False, 'refresh_reference'),
+    'site_mismatch': (False, 'refresh_reference'), 'revision_unknown': (False, 'refresh_reference'),
+    'stale_generation': (False, 'read_status'), 'authority_denied': (False, 'use_owner'),
+    'irreversible_effect': (False, 'isolate_or_record'), 'not_found': (False, 'fix_request')}
 
 
 class Refused(ValueError):
-    """A request refused before any state changed, with a stable machine-readable code."""
+    """A request refused before any state changed, with a stable machine-readable code.
 
-    def __init__(self, code, detail, **data):
+    ``data`` always says whether retrying can help (``retryable``, ``next_condition``) and
+    names the parameter at fault (``field``) when there is one.
+    """
+
+    def __init__(self, code, detail, *, retryable=None, next_condition=None, field=None, **data):
         super().__init__(detail)
-        self.code, self.data = code, data
+        default = REFUSALS[code]
+        self.code = code
+        self.data = {**data, 'retryable': default[0] if retryable is None else retryable,
+                     'next_condition': next_condition or default[1], **({'field': field} if field else {})}
 
 
 def _json(value):
@@ -169,7 +189,8 @@ class TaskJournal:
         tasks, steps = plan.get('tasks', {}), plan['plan']['steps']
         running = sorted(task for task, state in tasks.items() if state not in TERMINAL)
         if running:
-            raise Refused('precondition_failed', f'compensation step task {running[0]} has not finished')
+            raise Refused('precondition_failed', f'compensation step task {running[0]} has not finished',
+                          retryable=True, next_condition='wait_task_terminal')
         # An open plan always has a step left: the last success closes it.
         index = sum(state == 'succeeded' for state in tasks.values())
         if (capability, values) != (steps[index]['capability'], steps[index]['parameters']):
@@ -202,15 +223,21 @@ class TaskJournal:
                 self._event(original, 'compensation_started', {'task_id': identifier, 'step': step})
         return row
 
-    def update(self, identifier, state, detail, result=None):
+    def update(self, identifier, state, detail, result=None, code=None):
+        """Record a state with its readable detail; ``code`` is the stable reason, kept in the result."""
         row = self.row(identifier)
         if row['state'] in TERMINAL or (row['state'] == state and row['detail'] == detail and result is None):
             return False
+        stored = json.dumps(result, allow_nan=False) if result is not None else row['result']
+        if code or '"reason_code"' in stored:
+            # The reason belongs to this state only: a state without one clears the previous one.
+            values = {key: value for key, value in json.loads(stored).items() if key != 'reason_code'}
+            stored = json.dumps({**values, **({'reason_code': code} if code else {})}, allow_nan=False)
         with self._db:
-            self._db.execute('UPDATE tasks SET state=?,detail=?,result=? WHERE id=?',
-                             (state, detail, json.dumps(result, allow_nan=False) if result is not None else row['result'], identifier))
+            self._db.execute('UPDATE tasks SET state=?,detail=?,result=? WHERE id=?', (state, detail, stored, identifier))
             terminal = state in TERMINAL
             self._event(row, 'state', {'state': state, 'detail': detail, 'terminal': terminal,
+                                       **({'reason_code': code} if code else {}),
                                        **({'released': json.loads(row['resources'])} if terminal else {})})
             if terminal and row['compensates']:
                 self._compensation_finished(row, state)

@@ -348,6 +348,9 @@ def _stack(context):
             package="lekiwi_rmf", executable="robot_tasks", name="robot_tasks",
             parameters=[config("robot_tasks.yaml"),
                         {"use_sim_time": sim, "allow_navigation": not topology.start_rmf,
+                         # The footprint Nav2 runs and the claw calibration MoveIt applies (none in simulation).
+                         "navigation_params_file": params_file,
+                         "arm_calibration_file": "" if sim else arm_calibration_file,
                           "map_bundle": LaunchConfiguration('map_bundle') if topology.static_map or LaunchConfiguration('localization').perform(context) == 'amcl' else '',
                           "allow_exploration": topology.visual_slam and not (topology.static_map or topology.start_rmf)}],
             output="screen", respawn=True, respawn_delay=2.0,

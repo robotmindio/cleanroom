@@ -5,12 +5,15 @@ servers are test doubles, so these prove the gateway's contract, not robot motio
 """
 
 import json
+import math
 import sqlite3
 import threading
 import time
 from types import SimpleNamespace
 
 from action_msgs.msg import GoalStatus
+from geometry_msgs.msg import TransformStamped
+from nav_msgs.msg import OccupancyGrid
 import pytest
 import rclpy
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
@@ -21,17 +24,22 @@ from rclpy.node import Node
 from rclpy.parameter import Parameter
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from rclpy.task import Future
+from rtabmap_msgs.msg import MapGraph
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
+from tf2_ros import TransformBroadcaster
 import yaml
 
 from lekiwi_rmf.action import Explore, RunSkill
 from lekiwi_rmf.exploration_owner_guard import ExplorationOwnerGuard
 from lekiwi_rmf.object_detector import ObjectDetector
 from lekiwi_rmf.perception_query import make_query
+from lekiwi_rmf.spatial_memory_node import SpatialMemory
 from lekiwi_rmf.srv import GetTask, SetPerceptionQuery, SubmitTask, TaskApi
 from lekiwi_rmf.task_gateway import BODY_PROFILE, TASK_API, TaskGateway
+from lekiwi_rmf.task_journal import Refused
 from ros_test_utils import release_graph
+from test_spatial_memory_ros import graph, rtabmap_database
 from test_task_gateway import Peers, wait as gateway_wait
 
 
@@ -83,6 +91,7 @@ class Robot:
         self.peers = ExecutionPeers(self.context)
         self.guard = ExplorationOwnerGuard(context=self.context)
         self.client = Node('execution_client', context=self.context)
+        self.extra_nodes = []
         self.resources = []
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.client.create_subscription(String, '/robot/resources',
@@ -124,7 +133,8 @@ class Robot:
             release_graph(executor=self.gateway_executor, thread=self.gateway_thread)
         finally:
             release_graph(executor=self.executor, thread=self.thread,
-                          nodes=(self.gateway, self.client, self.peers, self.guard), context=self.context)
+                          nodes=(self.gateway, self.client, self.peers, self.guard, *self.extra_nodes),
+                          context=self.context)
 
     def call(self, client, request):
         future = client.call_async(request)
@@ -235,7 +245,8 @@ def test_a_goal_the_runner_rejects_leaves_nothing_to_compensate(robot):
     assert robot.submit('weld', 'skill', SKILL).ok
     wait(lambda: robot.status('weld')['state'] == 'failed')
     view = robot.status('weld')
-    assert view['result'] == {'goal_rejected': True} and not view['compensation_required']
+    assert view['result'] == {'goal_rejected': True, 'reason_code': 'goal_rejected'}
+    assert view['reason_code'] == 'goal_rejected' and not view['compensation_required']
     assert not view['holding_resources'] and robot.peers.received == []
 
 
@@ -247,6 +258,7 @@ def test_a_skill_that_ends_without_a_confirmed_arm_stop_keeps_its_resources(robo
     wait(lambda: robot.status('weld')['state'] == 'unknown')
     view = robot.status('weld')
     assert 'did not confirm the arm stopped' in view['detail'] and view['result']['arm_stopped'] is False
+    assert view['reason_code'] == 'arm_stop_unconfirmed'
     assert view['stop'] == 'uncertain' and view['execution']['phase'] == 'uncertain' and view['holding_resources']
     assert robot.capability_catalog()['task_api']['resources']['arm']['task_id'] == 'weld'
     for capability, parameters in (('skill', SKILL), ('navigate', {'x': 0, 'y': 0})):
@@ -361,7 +373,8 @@ def test_t48_restart_between_journal_and_dispatch_never_invents_an_outcome(robot
     # process that might have sent it is gone: termination is proven, the outcome is not, nothing is replayed.
     wait(lambda: robot.status()['state'] == 'failed')
     view = robot.status()
-    assert view['result'] == {'outcome_known': False, 'termination_confirmed': True}
+    assert view['result'] == {'outcome_known': False, 'termination_confirmed': True,
+                              'reason_code': 'outcome_unknown'}
     assert view['execution']['outcome'] == 'unknown' and not view['holding_resources']
     assert view['times']['finished_at'] - view['times']['dispatched_at'] >= 3.0
     assert robot.peers.received == []
@@ -454,7 +467,8 @@ def test_t42_t52_handoff_reconciles_then_compensation_does_not_hide_failure(robo
         for operation in ('validate', 'submit'):
             other = robot.api(operation, task_id='elsewhere', capability=capability, parameters=parameters,
                               owner='agent-b', compensates=compensates)
-            assert other.error == 'precondition_failed' and other.data == {'step': 0}, other.detail
+            assert other.error == 'precondition_failed' and other.data == {
+                'step': 0, 'retryable': False, 'next_condition': 'fix_request'}, other.detail
     # A failed step leaves the plan open: a new task runs the same step again.
     assert robot.submit('away-1', 'navigate', {'x': 0, 'y': 0}, owner='agent-b', compensates=compensates).ok
     wait(lambda: robot.status('weld')['compensation']['status'] == 'failed')
@@ -498,3 +512,314 @@ def test_reserved_perception_query_refuses_direct_changes():
     response = ObjectDetector._set_query(detector, SetPerceptionQuery.Request(labels=['mug']),
                                          SetPerceptionQuery.Response())
     assert response.success and list(response.labels) == ['mug']
+
+
+# Requests that state every parameter of every capability; the manifest decides what happens at each bound.
+EXAMPLES = {
+    'navigate': [{'x': 1.0, 'y': 2.0, 'yaw': 0.5, 'deadline_unix_sec': 60, 'max_travel_m': 5},
+                 {'target': {'pose': {'x': 1, 'y': 2, 'yaw': 0.1}}},
+                 {'target': {'anchored': {'map_pose': {'x': 1, 'y': 2, 'yaw': 0.1}, 'site_ref': 'home',
+                                          'map_ref': 'map-1', 'revision': 'revision-1'}}},
+                 {'target': {'point': {'x': 1, 'y': 2}, 'standoff_m': 0.6}}],
+    'explore': [{'revisit_known': True, 'max_duration_sec': 5, 'max_radius_m': 2}, {'resume_task_id': 'a' * 32}],
+    'search': [{'query': 'cup', 'region': {'x': 0, 'y': 0, 'radius_m': 1}, 'max_duration_sec': 5,
+                'max_travel_m': 2, 'target_coverage': 0.5}],
+    'skill': [{'skill_id': 'insert_peg', 'parameters': {}, 'version': 2, 'artifact_sha256': ARTIFACT}],
+    'reach': [{'joints': {'arm_shoulder_pan': 0.2, 'arm_shoulder_lift': 0.5, 'arm_elbow_flex': -0.4,
+                          'arm_wrist_flex': 0.3, 'arm_wrist_roll': 0.0}}, {'named': 'home'}],
+    'gripper': [{'state': 'open'}, {'position_rad': 0.5}],
+}
+ABSENT = object()
+
+
+def stated(schema, values, path=()):
+    """Every (path, descriptor, enclosing descriptor, enclosing values) of a request."""
+    for name, value in values.items():
+        item = schema['properties'][name]
+        yield (*path, name), item, schema, values
+        if 'properties' in item:
+            yield from stated(item, value, (*path, name))
+
+
+def declared(schema, path=()):
+    for name, item in schema['properties'].items():
+        yield (*path, name)
+        if 'properties' in item:
+            yield from declared(item, (*path, name))
+
+
+def changed(values, path, value):
+    values = json.loads(json.dumps(values))
+    holder = values
+    for name in path[:-1]:
+        holder = holder[name]
+    if value is ABSENT:
+        del holder[path[-1]]
+    else:
+        holder[path[-1]] = value
+    return values
+
+
+def boundaries(item):
+    """What a parameter descriptor promises: (value, accepted) at and just past each bound it states."""
+    cases = [(wrong, False) for wrong in {
+        'number': ('1', True, None, float('nan')), 'integer': (1.5, True, '1'), 'boolean': (1, 'true'),
+        'string': (7, None), 'object': ([], 'x')}[item['type']]]
+    ahead = item.get('max_ahead_sec')
+    if 'min' in item:
+        cases += [(item['min'], True), (math.nextafter(item['min'], -math.inf), False)]
+    if 'exclusive_min' in item:
+        cases.append((item['exclusive_min'], False))
+        if not ahead:
+            cases.append((math.nextafter(item['exclusive_min'], math.inf), True))
+    if 'max' in item:
+        cases += [(item['max'], True), (math.nextafter(item['max'], math.inf), False)]
+    if 'enum' in item:
+        cases += [*((member, True) for member in item['enum']), ('no such member', False)]
+    if 'pattern' in item:
+        cases.append(('!', False))
+    if 'max_length' in item:
+        cases += [('x' * item['max_length'], True), ('x' * (item['max_length'] + 1), False)]
+    if item.get('min_length'):
+        cases.append(('   ', False))
+    if ahead:
+        cases += [(time.time() + ahead - 5, True), (time.time() + ahead + 5, False), (time.time() - 5, False)]
+    return cases
+
+
+def test_validation_enforces_exactly_the_schema_the_manifest_publishes(tmp_path):
+    context = Context()
+    rclpy.init(context=context)
+    gateway = TaskGateway(context=context, parameter_overrides=[
+        Parameter('database_path', value=str(tmp_path / 'tasks.sqlite3'))])
+    # Tracked limits of this deployment are part of the published schema.
+    gateway._exploration_defaults = {'max_duration_sec': 60.0, 'max_radius_m': 3.0}
+    gateway._search_defaults = {'max_duration_sec': 60.0, 'max_travel_m': 20.0, 'target_coverage': 0.9}
+
+    def refusal(capability, values):
+        # Nothing can run here, so a request the schema accepts ends at `capability_unavailable`.
+        with pytest.raises(Refused) as caught:
+            gateway._admit('probe', capability, json.dumps(values), request={'owner': 'agent-a'}, dry_run=True)
+        return caught.value
+
+    try:
+        manifest = json.loads(gateway._capabilities(None, Trigger.Response()).message)
+        entries = {entry['name']: entry for entry in manifest['capabilities']}
+        assert set(entries) == set(EXAMPLES)
+        assert entries['explore']['schema']['properties']['max_radius_m']['max'] == 3.0
+        assert entries['search']['schema']['properties']['max_travel_m']['max'] == 20.0
+        for capability, examples in EXAMPLES.items():
+            schema, seen = entries[capability]['schema'], set()
+            for example in examples:
+                if 'deadline_unix_sec' in example:
+                    example = {**example, 'deadline_unix_sec': time.time() + example['deadline_unix_sec']}
+                assert refusal(capability, example).code == 'capability_unavailable', (capability, example)
+                for path, item, parent, siblings in stated(schema, example):
+                    seen.add(path)
+                    field = '.'.join(path)
+                    for value, valid in boundaries(item):
+                        error = refusal(capability, changed(example, path, value))
+                        assert (error.code == 'capability_unavailable') == valid, (field, value, str(error))
+                        assert valid or (error.code in ('invalid_request', 'precondition_failed')
+                                         and error.data['field'] == field), (field, value, error.data)
+                    chosen = next((group['required'] for group in parent.get('alternatives', [])
+                                   if set(group['required']) <= set(siblings)), [])
+                    omitted = refusal(capability, changed(example, path, ABSENT))
+                    required = bool(item.get('required')) or path[-1] in chosen
+                    assert (omitted.code == 'invalid_request') == required, field
+                    unknown = refusal(capability, changed(example, (*path[:-1], 'unexpected'), 1))
+                    assert unknown.code == 'invalid_request', field
+                    assert unknown.data['field'] == '.'.join((*path[:-1], 'unexpected'))
+            # A parameter added to a descriptor without an example here would be untested, so it fails.
+            assert seen == set(declared(schema)), capability
+        excluded = refusal('explore', {'resume_task_id': 'a' * 32, 'max_radius_m': 1})
+        assert excluded.code == 'invalid_request' and excluded.data['field'] == 'max_radius_m'
+        assert entries['explore']['schema']['excludes'] == {'resume_task_id': ['max_duration_sec', 'max_radius_m']}
+        # The legacy keys are views of the same descriptor.
+        navigate = entries['navigate']
+        assert navigate['parameters'] == ['x', 'y', 'yaw', 'deadline_unix_sec', 'max_travel_m', 'target']
+        assert navigate['required_parameters'] == ['x', 'y'] and navigate['defaults'] == {'yaw': 0.0}
+        assert navigate['schema']['properties']['max_travel_m'] == {
+            'type': 'number', 'unit': 'm', 'exclusive_min': 0, 'max': 10}
+        assert navigate['schema']['properties']['deadline_unix_sec']['max_ahead_sec'] == 300
+        assert navigate['schema']['resources'] == navigate['resources'] == ['base']
+        assert navigate['schema']['preconditions'] == [
+            {'condition': 'capability_enabled', 'switch': 'allow_navigation', 'satisfied': True},
+            {'condition': 'action_server_ready', 'action': '/navigate_to_pose', 'satisfied': False}]
+        assert not navigate['available'] and 'budget_exhausted' in navigate['schema']['reason_codes']
+        assert entries['gripper']['schema']['preconditions'][0] == {
+            'condition': 'capability_enabled', 'switch': 'allow_gripper', 'satisfied': False}
+        assert manifest['refusals']['resource_busy'] == {'retryable': True, 'next_condition': 'wait_resource_free'}
+        assert {'collision_stop', 'executor_paused'} <= set(manifest['reason_codes']['paused'])
+        assert {'found', 'goal_rejected', 'outcome_unknown'} <= set(manifest['reason_codes']['terminal'])
+    finally:
+        gateway.destroy_node()
+        context.try_shutdown()
+
+
+def test_a_refusal_says_whether_retrying_helps_and_which_field_is_at_fault(robot):
+    wait(lambda: robot.gateway._action_clients['navigate'].server_is_ready())
+    fix, enable = {'retryable': False, 'next_condition': 'fix_request'}, {'retryable': False,
+                                                                           'next_condition': 'enable_capability'}
+    for capability, parameters, code, data in (
+            ('navigate', {'x': 1, 'y': 0, 'max_travel_m': 11}, 'invalid_request', {**fix, 'field': 'max_travel_m'}),
+            ('navigate', {'x': 1, 'y': 0, 'deadline_unix_sec': time.time() - 1}, 'precondition_failed',
+             {**fix, 'field': 'deadline_unix_sec'}),
+            ('navigate', {'x': 1, 'y': 0, 'max_travel_m': 2}, 'precondition_failed',
+             {'retryable': True, 'next_condition': 'wait_odometry'}),
+            ('navigate', {'target': {'point': {'x': 1}}}, 'invalid_request', {**fix, 'field': 'target.point.y'}),
+            ('reach', {'named': 'home'}, 'capability_unavailable', enable),
+            ('gripper', {'state': 'open'}, 'capability_unavailable', enable),
+            ('fly', {}, 'invalid_request', {**fix, 'field': 'capability'})):
+        reply = robot.api('validate', task_id='probe', capability=capability, parameters=parameters, owner='agent-a')
+        assert (reply.error, reply.data) == (code, data), (capability, reply.detail)
+    assert robot.submit().ok
+    busy = robot.submit('second', 'navigate', {'x': 0, 'y': 0})
+    assert busy.error == 'resource_busy'
+    assert busy.data['retryable'] is True and busy.data['next_condition'] == 'wait_resource_free'
+    # A request the service cannot even parse is still a structured refusal.
+    malformed = robot.call(robot.api_clients['status'], TaskApi.Request(schema=2, request_json='{'))
+    assert malformed.error == 'invalid_request' and json.loads(malformed.response_json) == fix
+
+
+def occupancy(value, size=100, resolution=0.05):
+    grid = OccupancyGrid()
+    grid.header.frame_id = 'map'
+    grid.info.resolution, grid.info.width, grid.info.height = resolution, size, size
+    grid.info.origin.position.x = grid.info.origin.position.y = -size * resolution / 2
+    grid.info.origin.orientation.w = 1.0
+    grid.data = [value] * (size * size)
+    return grid
+
+
+def arrived(robot, task_id):
+    """A target is an ordinary navigation: Nav2's result ends it, with the same evidence and reason."""
+    robot.peers.finish = True
+    wait(lambda: robot.status(task_id)['state'] == 'succeeded')
+    view = robot.status(task_id)
+    assert view['reason_code'] == 'succeeded' and view['effect']['kind'] == 'pose_reached'
+    assert view['effective_parameters']['resolved']['target'] in ('pose', 'point', 'anchored')
+
+
+def test_a_pose_target_runs_as_the_pose_it_names(robot):
+    wait(lambda: robot.gateway._action_clients['navigate'].server_is_ready())
+    both = robot.submit('both', 'navigate', {'x': 0, 'y': 0, 'target': {'pose': {'x': 1, 'y': 2}}})
+    assert both.error == 'invalid_request' and robot.journal_rows() == []
+    reply = robot.submit('go', 'navigate', {'target': {'pose': {'x': 1, 'y': 2, 'yaw': 0.5}}})
+    assert reply.ok, reply.detail
+    assert reply.data['task']['parameters'] == {'target': {'pose': {'x': 1, 'y': 2, 'yaw': 0.5}}}
+    assert reply.data['task']['effective_parameters'] == {
+        'x': 1, 'y': 2, 'yaw': 0.5, 'max_duration_sec': 180.0, 'resolved': {'target': 'pose'}}
+    wait(lambda: len(robot.peers.requests) == 1)
+    pose = robot.peers.requests[0].pose
+    assert pose.header.frame_id == 'map' and (pose.pose.position.x, pose.pose.position.y) == (1.0, 2.0)
+    assert 2 * math.atan2(pose.pose.orientation.z, pose.pose.orientation.w) == pytest.approx(0.5)
+    arrived(robot, 'go')
+
+
+def test_a_point_target_becomes_a_clear_standoff_pose_facing_it(robot):
+    wait(lambda: robot.gateway._action_clients['navigate'].server_is_ready())
+    target = {'target': {'point': {'x': 1.0, 'y': 0.0}, 'standoff_m': 0.6}}
+
+    def validate():
+        return robot.api('validate', task_id='near', capability='navigate', parameters=target, owner='agent-a')
+
+    lost = validate()
+    assert (lost.error, lost.data) == ('precondition_failed', {
+        'retryable': True, 'next_condition': 'needs_localization', 'field': 'target.point'})
+    broadcaster = TransformBroadcaster(robot.peers)
+
+    def localize():
+        transform = TransformStamped()
+        transform.header.stamp = robot.peers.get_clock().now().to_msg()
+        transform.header.frame_id, transform.child_frame_id = 'map', 'base_footprint'
+        transform.transform.translation.x, transform.transform.rotation.w = -1.0, 1.0
+        broadcaster.sendTransform(transform)
+
+    robot.peers.create_timer(0.05, localize)
+    wait(lambda: validate().data['next_condition'] == 'needs_map')
+    maps = robot.peers.create_publisher(OccupancyGrid, '/map',
+                                        QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
+    wait(lambda: robot.capability_catalog()['capabilities'][0]['targets']['point']['available'])
+    maps.publish(occupancy(-1))
+    unmapped = validate()
+    assert (unmapped.error, unmapped.data) == ('precondition_failed', {
+        'retryable': True, 'next_condition': 'needs_map', 'field': 'target.point'})
+    maps.publish(occupancy(100))
+    wait(lambda: validate().data.get('next_condition') == 'change_standoff')
+    blocked = validate()
+    assert (blocked.error, blocked.data) == ('precondition_failed', {
+        'retryable': False, 'next_condition': 'change_standoff', 'field': 'target.standoff_m'})
+    assert robot.journal_rows() == [] and robot.peers.requests == []
+    maps.publish(occupancy(0))
+    wait(lambda: validate().ok)
+    reply = robot.submit('near', 'navigate', target)
+    assert reply.ok, reply.detail
+    effective = reply.data['task']['effective_parameters']
+    # The robot is west of the point, so it stops on the west side and faces east.
+    assert (effective['x'], effective['y'], effective['yaw']) == pytest.approx((0.4, 0.0, 0.0), abs=1e-9)
+    assert effective['resolved'] == {'target': 'point', 'point': [1.0, 0.0], 'standoff_m': 0.6, 'robot': [-1.0, 0.0]}
+    assert effective['max_duration_sec'] == 180.0 and 'target' not in effective
+    wait(lambda: len(robot.peers.requests) == 1)
+    sent = robot.peers.requests[0].pose.pose
+    assert (sent.position.x, sent.position.y) == pytest.approx((0.4, 0.0), abs=1e-9)
+    assert sent.orientation.z == pytest.approx(0.0, abs=1e-9)
+    arrived(robot, 'near')
+
+
+def test_an_anchored_target_follows_its_anchor_into_the_current_map_revision(robot, tmp_path):
+    wait(lambda: robot.gateway._action_clients['navigate'].server_is_ready())
+    remembered = {'map_pose': {'x': 2.0, 'y': 0.0, 'yaw': 0.3}, 'site_ref': 'home', 'map_ref': 'm', 'revision': 'r'}
+
+    def validate(anchored):
+        return robot.api('validate', task_id='back', capability='navigate',
+                         parameters={'target': {'anchored': anchored}}, owner='agent-a')
+
+    absent = validate(remembered)
+    assert (absent.error, absent.data) == ('precondition_failed', {
+        'retryable': True, 'next_condition': 'wait_spatial_memory', 'field': 'target.anchored'})
+    database = tmp_path / 'rtabmap.db'
+    rtabmap_database(database)
+    spatial = SpatialMemory(context=robot.context, parameter_overrides=[
+        Parameter('database_path', value=str(tmp_path / 'spatial.db')),
+        Parameter('rtabmap_database', value=str(database)), Parameter('site_ref', value='home'),
+        Parameter('graph_topic', value='/test/mapGraph'), Parameter('info_topic', value='/test/info')])
+    robot.extra_nodes.append(spatial)
+    robot.executor.add_node(spatial)
+    graphs = robot.peers.create_publisher(MapGraph, '/test/mapGraph', 1)
+    revisions = []
+    robot.client.create_subscription(String, '/robot/spatial/revision',
+                                     lambda message: revisions.append(json.loads(message.data)),
+                                     QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
+    wait(lambda: graphs.get_subscription_count() == 1
+         and robot.capability_catalog()['capabilities'][0]['targets']['anchored']['available'])
+    unmapped = validate(remembered)
+    assert unmapped.error == 'precondition_failed' and unmapped.data['next_condition'] == 'needs_map'
+    now = robot.peers.get_clock().now().to_msg().sec
+    graphs.publish(graph(now - 5))
+    wait(lambda: revisions)
+    first = revisions[-1]
+    remembered = {**remembered, 'map_ref': first['map_ref'], 'revision': first['revision']}
+    same = validate(remembered)
+    assert same.ok, same.detail
+    assert same.data['request']['effective_parameters']['y'] == pytest.approx(0.0, abs=1e-6)
+    for change, code in (({'site_ref': 'office'}, 'site_mismatch'), ({'revision': 'never-seen'}, 'revision_unknown'),
+                         ({'map_ref': 'another-map'}, 'revision_unknown')):
+        refused = validate({**remembered, **change})
+        assert refused.error == code and refused.data == {
+            'retryable': False, 'next_condition': 'refresh_reference', 'field': 'target.anchored',
+            'spatial_code': code}, refused.detail
+    # The map is optimized: node 2, the pose's anchor, moves 0.2 m sideways and the pose follows it.
+    graphs.publish(graph(now - 4, shift_y=0.1))
+    wait(lambda: revisions[-1]['revision'] != first['revision'])
+    reply = robot.submit('back', 'navigate', {'target': {'anchored': remembered}})
+    assert reply.ok, reply.detail
+    effective = reply.data['task']['effective_parameters']
+    assert (effective['x'], effective['y'], effective['yaw']) == pytest.approx((2.0, 0.2, 0.3), abs=1e-6)
+    assert effective['resolved']['target'] == 'anchored' and effective['resolved']['method'] == 'anchor'
+    assert effective['resolved']['revision'] == revisions[-1]['revision']
+    assert effective['resolved']['capture_revision'] == first['revision']
+    assert effective['resolved']['shift_m'] == [pytest.approx(0.2, abs=1e-6)]
+    wait(lambda: len(robot.peers.requests) == 1)
+    assert robot.peers.requests[0].pose.pose.position.y == pytest.approx(0.2, abs=1e-6)
+    arrived(robot, 'back')

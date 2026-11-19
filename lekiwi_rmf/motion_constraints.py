@@ -12,6 +12,7 @@ from dataclasses import dataclass
 import math
 import re
 import time
+import xml.etree.ElementTree as ET
 
 import numpy as np
 from scipy.optimize import least_squares
@@ -23,12 +24,23 @@ MAX_REGION_M = 0.5
 MAX_TIME_SEC = 10.0
 # MoveIt's model frame, the arm's tool link and its planning group (config/lekiwi.srdf).
 PLANNING_FRAME, TOOL_LINK, GROUP = 'base_footprint', 'tool0', 'arm'
+# The claw's own planning group and its single joint (config/lekiwi.srdf).
+GRIPPER_GROUP, GRIPPER_JOINT = 'gripper', 'arm_gripper'
 OBSERVATION_ID = re.compile(r'^[0-9a-f]{64}$')
 FRAME = re.compile(r'^[A-Za-z0-9_/.-]{1,128}$')
 # The solver keeps this much inside each constraint, so the executed motion (MoveIt's goal
 # joint tolerance) still satisfies the unmargined check afterwards.
 POSITION_MARGIN_M = 0.01
 ORIENTATION_MARGIN_RAD = 0.03
+
+
+def group_states(semantic):
+    """The named joint targets of an SRDF document: {group: {state: {joint: radians}}}."""
+    states = {}
+    for state in ET.fromstring(semantic).findall('group_state'):
+        states.setdefault(state.get('group'), {})[state.get('name')] = {
+            joint.get('name'): float(joint.get('value')) for joint in state.findall('joint')}
+    return states
 
 
 def _vector(value, name, *, unit=False):

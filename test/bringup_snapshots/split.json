@@ -531,10 +531,13 @@
   "output": "screen",
   "parameters": {
    "allow_exploration": true,
+   "allow_gripper": false,
    "allow_navigation": true,
    "allow_reach": false,
    "allow_skills": false,
+   "arm_calibration_file": "$(env HOME)/.ros/lekiwi_arm_calibration.json",
    "map_bundle": "",
+   "navigation_params_file": "$(share lekiwi_rmf)/config/nav2_params.yaml",
    "use_sim_time": false
   },
   "remappings": [],

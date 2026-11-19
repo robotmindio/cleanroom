@@ -243,10 +243,13 @@ def test_pause_is_observable_and_does_not_finish_task(system):
     peers.paused = True
     wait(lambda: status().state == 'paused')
     assert 'StopZone' in status().detail
+    assert json.loads(status().result_json)['reason_code'] == 'executor_paused'
     peers.paused = False
     wait(lambda: status().state == 'running')
+    assert 'reason_code' not in json.loads(status().result_json)
     stop('')
     wait(lambda: status().state == 'canceled')
+    assert json.loads(status().result_json)['reason_code'] == 'canceled'
 
 
 @pytest.mark.parametrize('capability', ['navigate', 'explore', 'search'])
@@ -261,7 +264,10 @@ def test_terminal_state_comes_from_ros_result(system, capability, abort):
     peers.finish = True
     wait(lambda: status().state in ('succeeded', 'failed'))
     assert status().state == ('failed' if abort else 'succeeded')
-    assert isinstance(json.loads(status().result_json), dict)
+    # The stable reason beside the text: the executor's own outcome where it declares one.
+    assert json.loads(status().result_json)['reason_code'] == {
+        'navigate': ('succeeded', 'executor_aborted'), 'explore': ('succeeded', 'incomplete'),
+        'search': ('found', 'budget_exhausted')}[capability][abort]
     stages = peers.gateway._budget.summary()['stages']
     assert stages['queue']['count'] == stages['execution']['count'] == 1
     assert 0 <= stages['queue']['p50_sec'] <= stages['queue']['p99_sec'] < 30
@@ -490,7 +496,7 @@ def test_invalid_native_result_does_not_crash_gateway(tmp_path):
             result=Explore.Result(complete=True, mapped_area_m2=float('nan'))))
         TaskGateway._result(gateway, 'task', future)
         assert journal.row('task')['state'] == 'unknown'
-        assert journal.row('task')['result'] == '{}'
+        assert journal.row('task')['result'] == '{"reason_code": "result_unconfirmed"}'
     finally:
         journal.close()
 
@@ -507,7 +513,8 @@ def test_canceled_acceptance_request_records_uncertain_delivery():
     gateway._delivery_failed = lambda task, error: TaskGateway._delivery_failed(gateway, task, error)
     TaskGateway._accepted(gateway, 'task', future)
     assert gateway._recovering == {'task'}
-    gateway._update.assert_called_once_with('task', 'unknown', 'action acceptance unconfirmed; not resubmitted')
+    gateway._update.assert_called_once_with('task', 'unknown', 'action acceptance unconfirmed; not resubmitted',
+                                            code='acceptance_unconfirmed')
 
 
 def test_terminal_task_releases_lost_transport_requests(tmp_path):
@@ -582,6 +589,8 @@ def test_navigation_pause_waits_for_terminal_proof_then_resumes_same_destination
     else:
         peers.permission = False
     wait(lambda: peers.journal_row('task-1')['state'] == 'paused')
+    assert json.loads(peers.journal_row('task-1')['result'])['reason_code'] == (
+        'collision_stop' if fault == 'collision' else 'base_motion_denied')
     budget = peers.journal_row('task-1')['remaining_sec']
     time.sleep(1.2)
     assert peers.journal_row('task-1')['remaining_sec'] == budget
@@ -756,6 +765,7 @@ def test_navigation_active_budget_reaches_deadline(system):
     peers.on_gateway(peers.gateway._journal.navigation_budget, 'task-1', 0.01)
     wait(lambda: status().state == 'failed')
     assert 'navigation deadline reached' in status().detail
+    assert json.loads(status().result_json)['reason_code'] == 'budget_exhausted'
     assert len(peers.received) == 1
 
 
@@ -907,7 +917,7 @@ def test_exploration_overrides_above_advertised_limits_are_rejected_before_admis
                      String(data='{"max_duration_sec":60,"max_radius_m":3}'))
     response = start(parameters=parameters)
     assert not response.accepted
-    assert 'must be zero or within' in response.detail
+    assert 'must be within [0, ' in response.detail
     assert not status().found
     assert not peers.received
 
@@ -980,7 +990,7 @@ def test_search_is_advertised_with_effective_limits_and_returns_coverage_evidenc
     assert search['available'] and search['effective_defaults'] == {
         'max_duration_sec': 60.0, 'max_travel_m': 20.0, 'target_coverage': 0.9, 'region': None}
     rejected = start('search', '{"query":"any label","max_travel_m":21}', 'too-far')
-    assert not rejected.accepted and 'max_travel_m exceeds' in rejected.detail
+    assert not rejected.accepted and 'max_travel_m must be within [0, 20.0]' in rejected.detail
     assert start('search', '{"query":"any label","max_duration_sec":30}').accepted
     wait(lambda: status().state == 'running')
     assert status().detail.startswith('searching:')
