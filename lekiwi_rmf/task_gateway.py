@@ -199,7 +199,7 @@ def arm_stopped(result):
         report = json.loads(result.get('result_json') or '{}')
     except (ValueError, RecursionError):
         return False
-    return not isinstance(report, dict) or report.get('arm_stopped', True) is not False
+    return isinstance(report, dict) and report.get('arm_stopped', True) is not False
 
 
 class TaskGateway(Node):
