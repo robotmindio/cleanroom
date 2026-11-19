@@ -11,8 +11,9 @@ installed_hardware:
 validated: true
 software_revision: eb033e2d213ec3499b39957a10088258b9fbc526
 sensor_configuration: LD06 calibrated yaw/self-mask; Astra compact safety depth 10
-  Hz; front/Astra RGB-D; recaptured held folded travel_stow with unchanged 0.02 rad
-  tolerance; independent raw-LiDAR stop metrology
+  Hz; front/Astra RGB-D; recaptured held folded travel_stow (production stow_tolerance
+  0.08 rad, covered by expected_base_footprint, not by new stopping trials); independent
+  raw-LiDAR stop metrology
 payload_kg: 0.2
 surface: dry concrete
 validated_at: '2026-10-09T13:37:00.671285+00:00'
