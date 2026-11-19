@@ -935,6 +935,100 @@ def test_real_host_local_goal_holds_through_command_silence(host, tmp_path):
     assert reply["trajectory"] == loop.arm_executor.status
 
 
+def test_a_transient_bus_failure_mid_trajectory_holds_torque_and_resumes(host, tmp_path):
+    from test_local_arm_executor import setup_executor
+
+    loop, clock, socket, robot = _loop(host, tmp_path)
+    loop.control.torque_enabled = True
+    _executor, _now, observation, trajectory = setup_executor()
+
+    def read():
+        return {"x.vel": 0.0, "y.vel": 0.0, "theta.vel": 0.0, **observation}
+
+    def renew_and_step():
+        clock.now += 0.033
+        loop.host.zmq_cmd_socket.messages.append(_action(**{
+            "_lekiwi_arm_goal": trajectory["id"], "_lekiwi_arm_permission": 1,
+        }))
+        loop.step()
+
+    robot.get_observation = read
+    _command, reply = _request(loop.control, socket, robot, {
+        "command": "trajectory_start", "session": loop.telemetry_session, "trajectory": trajectory,
+    })
+    assert reply["ok"]
+    for _ in range(10):
+        renew_and_step()
+        observation.update({key: value for key, value in robot.actions[-1].items() if key.endswith(".pos")})
+    assert loop.arm_executor.status["state"] == "running"
+    elapsed = loop.arm_executor.status["elapsed"]
+    published = len(loop.host.zmq_observation_socket.sent)
+
+    def dropped():
+        raise ConnectionError("Failed to sync read 'Present_Position' after 6 tries.")
+
+    robot.get_observation = dropped
+    for _ in range(int(host.BUS_FAILURE_EXIT_S / 0.033) - 5):
+        renew_and_step()
+    # A feedback gap: nothing published, the goal paused on its last measured pose.
+    assert loop.control.torque_enabled is True
+    assert len(loop.host.zmq_observation_socket.sent) == published
+    assert loop.arm_executor.status["state"] == "paused"
+    assert loop.arm_executor.status["elapsed"] <= elapsed + 0.25
+    assert robot.actions[-1] == robot.actions[-20] and robot.actions[-1]["x.vel"] == 0
+
+    robot.get_observation = read
+    for _ in range(3):
+        renew_and_step()
+    assert loop.arm_executor.status["state"] == "running"
+    assert len(loop.host.zmq_observation_socket.sent) > published
+    # The failure clock restarted: a later gap gets the whole allowance again.
+    robot.get_observation = dropped
+    for _ in range(int(host.BUS_FAILURE_EXIT_S / 0.033) - 5):
+        renew_and_step()
+
+
+def test_a_sustained_bus_failure_ends_the_host_so_the_port_is_reopened(host, tmp_path):
+    loop, clock, _socket, robot = _loop(host, tmp_path)
+    loop.control.torque_enabled = True
+
+    def unplugged():
+        raise OSError("device reports readiness to read but returned no data")
+
+    robot.get_observation = unplugged
+    loop.step()
+    clock.now += host.BUS_FAILURE_EXIT_S
+    loop.step()
+    clock.now += 0.1
+    with pytest.raises(OSError):
+        loop.step()
+
+
+def test_a_trajectory_write_failure_is_ridden_out_like_a_read_failure(host, tmp_path):
+    from test_local_arm_executor import setup_executor
+
+    loop, clock, socket, robot = _loop(host, tmp_path)
+    loop.control.torque_enabled = True
+    _executor, _now, observation, trajectory = setup_executor()
+    robot.get_observation = lambda: {"x.vel": 0.0, "y.vel": 0.0, "theta.vel": 0.0, **observation}
+    _command, reply = _request(loop.control, socket, robot, {
+        "command": "trajectory_start", "session": loop.telemetry_session, "trajectory": trajectory,
+    })
+    assert reply["ok"]
+
+    def busy(_action):
+        raise ConnectionError("[TxRxResult] Port is in use!")
+
+    robot.send_action = busy
+    clock.now += 0.033
+    loop.step()
+    assert loop.control.torque_enabled is True and loop.arm_executor.active
+    # A goal that ends takes its failure clock with it; the next one starts afresh.
+    loop.arm_executor.cancel()
+    loop.step()
+    assert not loop._bus_failing_since
+
+
 def test_host_keeps_command_loop_fast_and_limits_observation_bandwidth(host, tmp_path):
     loop, clock, _socket, robot = _loop(host, tmp_path)
     loop.control.torque_enabled = True

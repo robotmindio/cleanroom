@@ -116,10 +116,11 @@ run_host() {
     echo "$0: a LeKiwi host already owns $PORT -- stop it first" >&2
     exit 1
   fi
-  # A dropped motor-bus packet used to terminate the host permanently and leave ROS
-  # connected to an empty ZMQ port. Keep this small supervisor alive instead. A restarted
-  # host starts torque-off; the ROS driver re-arms itself once telemetry returns, or in
-  # the strict mode (LEKIWI_DISARM_ON_FAILURE=true) waits for an explicit safety/arm.
+  # The host rides out a transient bus failure with torque held and exits only when one
+  # is sustained (a re-enumerated adapter needs its port reopened). This supervisor then
+  # reconnects instead of leaving ROS on an empty ZMQ port. A restarted host starts
+  # torque-off; the ROS driver re-arms itself once telemetry returns, or in the strict
+  # mode (LEKIWI_DISARM_ON_FAILURE=true) waits for an explicit safety/arm.
   trap 'exit 0' INT TERM HUP
   while true; do
     if run_host_once; then

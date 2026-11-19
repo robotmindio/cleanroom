@@ -42,6 +42,14 @@ HEALTH_READ_PERIOD_S = 0.10
 OBSERVATION_PERIOD_S = 0.05
 # An unconfirmed watchdog action is retried no more often than this.
 WATCHDOG_RETRY_S = 0.25
+# A failed serial transaction (LeRobot raises ConnectionError once its own read retries
+# are spent; a vanished adapter raises pyserial's OSError) is a feedback gap, not a
+# reason to exit: exiting cuts torque and the arm falls from wherever it is. The servos
+# hold their last goals meanwhile and the trajectory executor pauses on stale feedback.
+# Only a restart reopens a re-enumerated adapter, so failure sustained this long does
+# exit. It exceeds the driver's 1.0 s link_timeout: by then the driver has declared link
+# loss and has been commanding a stopped base for a second.
+BUS_FAILURE_EXIT_S = 2.0
 HEALTH_READS = (
     ("Present_Position", True),
     # Read back the register the servo actually received so tracking failures
@@ -401,6 +409,7 @@ class HostLoop:
         self.odometry = HostOdometry(*base_scales)
         self.next_observation_at = None
         self._last_command_error = None
+        self._bus_failing_since = {}
         self._last_step_started = None
         self._last_slow_log = 0.0
 
@@ -414,12 +423,14 @@ class HostLoop:
         watchdog_done = time.perf_counter()
         now = self.clock()
         if self.next_observation_at is None or now >= self.next_observation_at:
-            self.publish_observation()
             self.next_observation_at = now + self.observation_period_s
+            self._bus_transaction("observation read", self.publish_observation)
         if self.control.torque_enabled and self.arm_executor.active:
             action = self.arm_executor.step(self.local_observation, self.local_feedback_at)
             if action is not None:
-                self.send_action(action)
+                self._bus_transaction("arm goal write", lambda: self.send_action(action))
+        else:
+            self._bus_failing_since.pop("arm goal write", None)
         finished = time.perf_counter()
         gap = 0.0 if self._last_step_started is None else started - self._last_step_started
         self._last_step_started = started
@@ -431,6 +442,22 @@ class HostLoop:
                 watchdog_done - control_done, finished - watchdog_done,
             )
             self._last_slow_log = started
+
+    def _bus_transaction(self, name, transaction) -> None:
+        """Ride out a transient bus failure; re-raise one sustained past BUS_FAILURE_EXIT_S."""
+        try:
+            transaction()
+        except OSError as error:
+            now = self.clock()
+            since = self._bus_failing_since.setdefault(name, now)
+            if now - since > BUS_FAILURE_EXIT_S:
+                raise
+            if since == now:
+                logging.warning("Motor bus %s failed; holding torque and retrying: %s", name, error)
+            return
+        since = self._bus_failing_since.pop(name, None)
+        if since is not None:
+            logging.info("Motor bus %s recovered after %.2f s", name, self.clock() - since)
 
     def send_action(self, action, base_limits=None) -> None:
         validate_motion_action(
