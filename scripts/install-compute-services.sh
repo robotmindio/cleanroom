@@ -167,10 +167,13 @@ install_unit lekiwi-awake.service
 install_unit lekiwi-stack.service
 log "Installing ROS log rotation"
 install_log_rotation
+log "Installing disk hygiene"
+install_disk_hygiene
 as_root "$PROJECT_ROOT/scripts/install-time-sync.sh" compute ${REMOTE:+"$REMOTE"}
 log "Validating rendered systemd unit"
 verify_systemd_units lekiwi.slice lekiwi-awake.service lekiwi-stack.service
-verify_systemd_units lekiwi-ros-logrotate.service lekiwi-ros-logrotate.timer
+verify_systemd_units lekiwi-ros-logrotate.service lekiwi-ros-logrotate.timer \
+  lekiwi-disk-hygiene.service lekiwi-disk-hygiene.timer
 
 stack_env=/etc/default/lekiwi-stack
 printf -v stack_config '# Written by scripts/install-compute-services.sh.\nLEKIWI_STACK_ARGS=%s\n' "$STACK_ARGS"
@@ -193,7 +196,7 @@ if [[ $START_STACK == true ]]; then
 else
   as_root systemctl enable lekiwi-stack.service
 fi
-as_root systemctl enable --now lekiwi-ros-logrotate.timer
+as_root systemctl enable --now lekiwi-ros-logrotate.timer lekiwi-disk-hygiene.timer
 
 log "Granting $LEKIWI_SERVICE_USER non-interactive deployment control"
 as_root "$PROJECT_ROOT/scripts/install-deploy-sudoers.sh" compute --user "$LEKIWI_SERVICE_USER"

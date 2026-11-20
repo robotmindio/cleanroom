@@ -1,0 +1,23 @@
+# Daily disk reclamation on both hosts. Root only for the journal, the system
+# logs and the package caches; the service user's home is cleaned as that user.
+[Unit]
+Description=Reclaim disk on the LeKiwi hosts
+Documentation=file://@PROJECT_ROOT@/docs/operations.md
+
+[Service]
+Type=oneshot
+User=root
+# A full disk slows everything else down; never compete with the stack for it.
+Nice=10
+IOSchedulingClass=idle
+ExecStart=@PROJECT_ROOT@/scripts/disk-hygiene.sh --apply --user @SERVICE_USER@ --workspace @WORKSPACE@
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=false
+ReadWritePaths=/var/log /var/lib/apt @SERVICE_HOME@ @WORKSPACE@ -/var/lib/snapd -/var/cache/apt
+ProtectControlGroups=true
+# ProtectKernelTunables/Modules/Logs, LockPersonality and RestrictSUIDSGID stay
+# off: any of them makes systemd drop CAP_SETUID from the unit, which is what the
+# setuid to the service user needs for the release retention.
+UMask=0077

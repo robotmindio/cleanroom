@@ -148,7 +148,8 @@ Units installed:
 | Device | `lekiwi-zenoh.service` | Zenoh bridge exporting the sensor topics to the compute machine on `7447/tcp` |
 | Compute | `lekiwi-stack.service` | The ROS bringup (`scripts/ros-start.sh`), in `lekiwi.slice` |
 | Compute | `lekiwi.slice` | Keeps 2 GB of the stack's memory resident (`MemoryMin=2G`) and gives it ten times the default CPU and disk weight, so other workloads on a shared compute host cannot swap it out or starve it |
-| Both | `lekiwi-ros-logrotate.timer` | ROS log rotation |
+| Both | `lekiwi-ros-logrotate.timer` | ROS log rotation and the logrotate state that schedules it |
+| Both | `lekiwi-disk-hygiene.timer` | Daily disk reclamation: journal, rotated system logs, package caches, release workspaces, Trash and retired RTAB-Map databases (see [operations budgets and data](operations.md#disk-budget-and-automatic-cleanup)) |
 
 The compute installer picks the topology:
 

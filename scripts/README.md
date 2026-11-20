@@ -130,7 +130,8 @@ before using them; the robot runtime does not require it.
 - `moveit-shutdown-probe.py` qualifies orderly `move_group` shutdown.
 - `render-model.py` renders the zero-pose calibration reference image.
 - `vendor-lekiwi-model.py` vendors the generated LeKiwi Xacro as the physical model.
-- `prune-ros-logs.sh` deletes stale ROS logs (run by `lekiwi-ros-logrotate.service`).
+- `prune-ros-logs.sh [LOGROTATE_STATE]` deletes stale ROS logs (run by `lekiwi-ros-logrotate.service`) and converges logrotate's state file: entries whose log is gone are dropped and future timestamps are moved to now.
+- `disk-hygiene.sh [--apply] [--user USER] [--workspace PATH]` reclaims disk for a whole host (run daily by `lekiwi-disk-hygiene.timer`): journal, rotated system logs, snap and apt caches, release workspaces, Trash and retired RTAB-Map databases. Dry-run by default. See [operations budgets and data](../docs/operations.md#disk-budget-and-automatic-cleanup).
 - `robot-data.py audit|backup|restore|verify` applies the robot-local data classes of `config/data_retention.yaml`: permission audit, online backup of the journals and records with artifact manifests, and a restore that keeps replaced files, rebuilds indexes and reconciles observations with their evidence. See [operations budgets and data](../docs/operations.md).
 
 ## lib/

@@ -16,6 +16,10 @@ Environment=HOME=@SERVICE_HOME@
 Environment=LEKIWI_WS=@WORKSPACE@
 WorkingDirectory=@PROJECT_ROOT@
 ExecStart=@PROJECT_ROOT@/scripts/ros-zenoh.sh
+# Every DDS peer that appears or leaves is logged at INFO: 216k lines and
+# 126 MB of journal a week, all of it in both journald and rsyslog. The bridge's
+# warnings and errors are what an operator debugs the link with.
+Environment=RUST_LOG=warn
 # A broken link must not fill journald/rsyslog before it recovers.
 LogRateLimitIntervalSec=30s
 LogRateLimitBurst=1000

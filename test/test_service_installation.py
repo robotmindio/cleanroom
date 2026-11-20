@@ -418,6 +418,33 @@ def test_pi5_usb_current_config_is_idempotent(tmp_path):
     assert first.count("usb_max_current_enable=1") == 1
 
 
+def test_ros_log_pruning_converges_the_logrotate_state(tmp_path):
+    logs = tmp_path / ".ros" / "log"
+    launch = logs / "2026-11-20-10-00-00-000"
+    launch.mkdir(parents=True)
+    kept, started = logs / "node_1_1.log", launch / "launch.log"
+    kept.write_text("kept\n", encoding="utf-8")
+    started.write_text("launch\n", encoding="utf-8")
+    past = time.strftime("%Y-%m-%d-%H:%M:%S", time.localtime(time.time() - 86400))
+    future = time.strftime("%Y-%m-%d-%H:%M:%S", time.localtime(time.time() + 86400 * 400))
+    state = tmp_path / "status"
+    state.write_text(
+        "logrotate state -- version 2\n"
+        f'"{kept}" {past}\n'
+        f'"{started}" {future}\n'
+        f'"{logs / "gone.log"}" {past}\n', encoding="utf-8")
+    subprocess.run(["bash", str(ROOT / "scripts" / "prune-ros-logs.sh"), str(logs), str(state)],
+                   check=True, capture_output=True, timeout=60)
+    lines = state.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == "logrotate state -- version 2"
+    assert any(str(kept) in line for line in lines)
+    assert not any("gone.log" in line for line in lines)
+    # A clock that ran ahead must not keep forcing a rotation every five minutes.
+    stamp = next(line for line in lines if "launch.log" in line).rsplit(" ", 1)[1]
+    assert time.mktime(time.strptime(stamp, "%Y-%m-%d-%H:%M:%S")) <= time.time()
+    assert stat.S_IMODE(state.stat().st_mode) == 0o600
+
+
 def test_runtime_helpers_share_device_and_calibration_checks(tmp_path):
     calibration = tmp_path / "camera.yaml"
     calibration.write_text("image_width: 640\ncamera_matrix:\n  rows: 3\n  cols: 3\n  data: [1, 0, 0, 0, 1, 0, 0, 0, 1]\n")
@@ -472,6 +499,9 @@ done
         if unit.name in {"lekiwi-awake.service", "lekiwi-motor-network.service"}:
             assert "User=root" in text and str(ROOT) not in text
             continue
+        if unit.name == "lekiwi-disk-hygiene.service":
+            assert "User=root" in text and str(ROOT) + "/scripts/disk-hygiene.sh" in text
+            continue
         assert "User=robot" in text
         assert "Environment=HOME=/srv/robot" in text
         assert "WorkingDirectory=" + str(ROOT) in text
@@ -482,6 +512,9 @@ done
         rendered = unit.read_text(encoding="utf-8")
         if unit.name in {"lekiwi-awake.service", "lekiwi-motor-network.service"}:
             assert "NoNewPrivileges=yes" in rendered and "ProtectSystem=strict" in rendered
+            continue
+        if unit.name == "lekiwi-disk-hygiene.service":
+            assert "NoNewPrivileges=true" in rendered and "ProtectSystem=strict" in rendered
             continue
         for setting in (
             "NoNewPrivileges=true",
@@ -1640,7 +1673,9 @@ def test_port_probes_match_the_exact_local_port(tmp_path):
 def test_log_pruning_removes_only_stale_files_under_the_ros_log_directory(tmp_path):
     service = _unit("lekiwi-ros-logrotate.service")["Service"]
     # Pruning runs after logrotate even when logrotate fails, and logrotate gets its state directory.
-    assert service["ExecStopPost"] == ["-@PROJECT_ROOT@/scripts/prune-ros-logs.sh @SERVICE_HOME@/.ros/log"]
+    assert service["ExecStopPost"] == [
+        "-@PROJECT_ROOT@/scripts/prune-ros-logs.sh @SERVICE_HOME@/.ros/log"
+        " @SERVICE_HOME@/.ros/lekiwi/ros-logrotate.status"]
     assert service["ExecStartPre"] == ["/usr/bin/mkdir -p @SERVICE_HOME@/.ros/lekiwi"]
     assert any("--state @SERVICE_HOME@/.ros/lekiwi/" in command for command in service["ExecStart"])
     command = [str(ROOT / "scripts" / "prune-ros-logs.sh"), str(tmp_path / ".ros" / "log")]
@@ -1714,6 +1749,7 @@ install_log_rotation
     for installer in ("install-compute-services.sh", "install-device-services.sh"):
         text = (ROOT / "scripts" / installer).read_text(encoding="utf-8")
         assert text.index("install_log_rotation") < text.index("systemctl daemon-reload")
+        assert text.index("install_disk_hygiene") < text.index("systemctl daemon-reload")
 
 
 def test_rotation_config_compresses_rotated_launch_logs_at_once():

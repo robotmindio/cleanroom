@@ -10,8 +10,9 @@ WorkingDirectory=@PROJECT_ROOT@
 ExecStartPre=/usr/bin/mkdir -p @SERVICE_HOME@/.ros/lekiwi
 ExecStart=/usr/sbin/logrotate --state @SERVICE_HOME@/.ros/lekiwi/ros-logrotate.status /etc/lekiwi/ros-logrotate.conf
 # ExecStopPost runs even when logrotate failed, so a broken rotation cannot also stop
-# the age pruning that bounds the disk; the unit still reports the logrotate failure.
-ExecStopPost=-@PROJECT_ROOT@/scripts/prune-ros-logs.sh @SERVICE_HOME@/.ros/log
+# the age pruning and state convergence that bound the disk; the unit still reports
+# the logrotate failure.
+ExecStopPost=-@PROJECT_ROOT@/scripts/prune-ros-logs.sh @SERVICE_HOME@/.ros/log @SERVICE_HOME@/.ros/lekiwi/ros-logrotate.status
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full

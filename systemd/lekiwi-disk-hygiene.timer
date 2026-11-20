@@ -1,0 +1,12 @@
+[Unit]
+Description=Reclaim disk on the LeKiwi hosts
+
+[Timer]
+# Once a day, when nobody is driving. Persistent=true runs a missed day at the
+# next boot; a deployment-specific quiet hour is up to the site.
+OnCalendar=*-*-* 04:30
+RandomizedDelaySec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

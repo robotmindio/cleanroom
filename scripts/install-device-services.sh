@@ -196,6 +196,8 @@ else
 fi
 log "Installing ROS log rotation"
 install_log_rotation
+log "Installing disk hygiene"
+install_disk_hygiene
 if [[ -f $UNIT_DIR/lekiwi-stack.service ]]; then
   as_root "$PROJECT_ROOT/scripts/install-time-sync.sh" compute
 else
@@ -218,7 +220,8 @@ units=(lekiwi-host.service lekiwi-lidar.service)
 [[ $camera_ros_available == true ]] && units+=(lekiwi-cameras.service)
 log "Validating rendered systemd units"
 verify_systemd_units "${units[@]}"
-verify_systemd_units lekiwi-ros-logrotate.service lekiwi-ros-logrotate.timer
+verify_systemd_units lekiwi-ros-logrotate.service lekiwi-ros-logrotate.timer \
+  lekiwi-disk-hygiene.service lekiwi-disk-hygiene.timer
 
 log "Reloading systemd and enabling services"
 log "Enabling Pi 5 USB current setting by default (5 V / 5 A supply required)"
@@ -234,9 +237,9 @@ as_root systemctl daemon-reload
 defer_live_motor_units
 restart_changed_units --no-block
 if [[ $START_SERVICES == true ]]; then
-  as_root systemctl enable --now --no-block "${units[@]}" lekiwi-ros-logrotate.timer
+  as_root systemctl enable --now --no-block "${units[@]}" lekiwi-ros-logrotate.timer lekiwi-disk-hygiene.timer
 else
-  as_root systemctl enable "${units[@]}" lekiwi-ros-logrotate.timer
+  as_root systemctl enable "${units[@]}" lekiwi-ros-logrotate.timer lekiwi-disk-hygiene.timer
 fi
 
 log "Granting $LEKIWI_SERVICE_USER non-interactive deployment control"

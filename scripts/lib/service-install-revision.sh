@@ -8,6 +8,9 @@ service_fingerprint() {
     compute)
       sources=(systemd/lekiwi.slice systemd/lekiwi-stack.service systemd/lekiwi-awake.service systemd/lekiwi-ros-logrotate.conf \
         systemd/lekiwi-ros-logrotate.service systemd/lekiwi-ros-logrotate.timer \
+        systemd/journald-lekiwi.conf systemd/lekiwi-disk-hygiene.service \
+        systemd/lekiwi-disk-hygiene.timer \
+        scripts/prune-ros-logs.sh scripts/disk-hygiene.sh \
         scripts/lib/service-install-common.sh scripts/lib/runtime-common.sh \
         scripts/ros-start.sh scripts/inhibit-robot-sleep.py scripts/lib/self-heal.sh scripts/install-deploy-sudoers.sh scripts/setup-zenoh-tls.sh \
         scripts/install-compute-services.sh scripts/install-wifi-powersave.sh \
@@ -18,6 +21,9 @@ service_fingerprint() {
         systemd/lekiwi-cameras.service systemd/lekiwi-lidar.service systemd/lekiwi-zenoh.service \
         systemd/lekiwi-ros-logrotate.conf systemd/lekiwi-ros-logrotate.service \
         systemd/lekiwi-ros-logrotate.timer \
+        systemd/journald-lekiwi.conf systemd/lekiwi-disk-hygiene.service \
+        systemd/lekiwi-disk-hygiene.timer \
+        scripts/prune-ros-logs.sh scripts/disk-hygiene.sh \
         scripts/ros-astra.sh scripts/ros-cameras.sh scripts/ros-lidar.sh scripts/ros-zenoh.sh \
         scripts/lib/service-install-common.sh scripts/lib/runtime-common.sh \
         scripts/lib/self-heal.sh scripts/install-deploy-sudoers.sh scripts/install-device-services.sh \

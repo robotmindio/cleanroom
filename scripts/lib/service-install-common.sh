@@ -170,3 +170,18 @@ install_log_rotation() {
   install_unit lekiwi-ros-logrotate.service
   install_unit lekiwi-ros-logrotate.timer
 }
+
+install_disk_hygiene() {
+  # journald's default cap is 10% of the filesystem, which on the robot's card is
+  # more than everything else it needs; the timer reclaims the rest daily.
+  local before after
+  as_root install -d -m 0755 /etc/systemd/journald.conf.d
+  before=$(as_root sha256sum /etc/systemd/journald.conf.d/lekiwi.conf 2>/dev/null || true)
+  render_systemd_unit "$PROJECT_ROOT/systemd/journald-lekiwi.conf" /etc/systemd/journald.conf.d/lekiwi.conf
+  after=$(as_root sha256sum /etc/systemd/journald.conf.d/lekiwi.conf)
+  # journald re-reads nothing but a restart, and a dropped connection only makes
+  # services reconnect to its socket.
+  [[ $before == "$after" ]] || as_root systemctl restart systemd-journald
+  install_unit lekiwi-disk-hygiene.service
+  install_unit lekiwi-disk-hygiene.timer
+}

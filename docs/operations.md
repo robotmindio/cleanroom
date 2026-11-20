@@ -111,6 +111,34 @@ Restore and verify:
    every record matched its image; records restored without matching images
    recover history but report `unverified`. Exit status 1 on any failure.
 
+## Disk budget and automatic cleanup
+
+The robot and its compute host each have a fixed disk that everything else on
+the machine also writes to. Five things bound it, so a full card is not
+something an operator has to notice:
+
+| Bounds | Where | Behaviour |
+| --- | --- | --- |
+| Journal | `systemd/journald-lekiwi.conf`, installed as `/etc/systemd/journald.conf.d/lekiwi.conf` | 512 MB on disk (64 MB per file), 128 MB in RAM, two weeks of retention, and it gives space back when less than 1 GB is free |
+| ROS logs | `systemd/lekiwi-ros-logrotate.conf` and `.timer` | Hourly, 25 MB per log with six archives; removes logs untouched for four days except one a process still holds open |
+| logrotate state | `scripts/prune-ros-logs.sh`, from `lekiwi-ros-logrotate.service` | Drops entries whose log is gone and sets entries a clock jump left in the future to now; either one would otherwise make logrotate force a rotation and log an error every five minutes |
+| Release workspaces | `scripts/prune-release-builds.py --retain`, from `stage-release.sh` and the daily timer | `current`, `previous`, process-referenced, locked worktrees and the three newest sealed releases; unreferenced dependency overlays go, with a receipt for every removal |
+| Everything else | `scripts/disk-hygiene.sh` and `lekiwi-disk-hygiene.timer` | Daily journal vacuum, rotated system logs over 100 MB, snap cache and superseded revisions, apt cache, Trash older than 30 days, retired `.stale-`/`.corrupt-` RTAB-Map databases older than 14 days |
+
+`scripts/disk-hygiene.sh` is a dry run unless `--apply` is given, and it exits
+non-zero when less than 1 GiB is free after cleanup, so `systemctl --failed`
+shows it. See what the next run would remove:
+
+```bash
+sudo scripts/disk-hygiene.sh --user "$USER" --workspace "$HOME/lekiwi_ws"
+```
+
+It keeps the data classes above, qualification evidence, Trash newer than 30
+days and the active `/var/log/syslog` (its distro rotation owns that file). A
+build that fills the disk between two runs is still the operator's problem: the
+timer runs once a day, and `stage-release.sh` refuses to start under 1 GB
+(device) or 4 GB (compute) free.
+
 ## Versioned contracts and compatibility
 
 | Contract | Producer | Consumers | Compatibility |
