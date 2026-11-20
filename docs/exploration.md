@@ -44,6 +44,34 @@ coverage of accessible observation poses, not a claim to see through closed
 doors, walls or occlusions. Feedback reports the stage, current pose, successful
 and failed target counts, and known map area in the bounded region.
 
+## Exploring a region
+
+`region_x`, `region_y` and `region_radius_m` (the task API's
+`region {x, y, radius_m}`) name a map-frame disk to map; a zero radius means no
+region. Only frontiers inside the disk are chosen, `revisit_known` visits only
+its observation poses inside it, and `mapped_area_m2` counts the disk. The view of
+a frontier may stand up to `observation_distance_m` outside the disk, and the
+route there crosses already-known free space, planned by `ExploreKnown` as always.
+
+The region narrows what is mapped; it is not the motion bound. Every pose of the
+task, travel included, still stays inside the bound of `max_radius_m` around the
+starting pose with its 1.10 m stopping inset, and the task ends if the live pose
+approaches that boundary. The region's radius is limited to the tracked
+`max_radius_m`, and the disk must overlap the inset motion bound: a region the
+robot cannot stand in is rejected (`move_closer` through the task API).
+
+A region is a place in a map. A goal with a region is rejected while there is no
+`/map` or no map pose (`needs_localization` through the task API), and a start
+whose map identity changes while mapping starts ends before any motion. Explore
+without a region first. When no known free space connects the robot to the disk,
+the task ends incomplete with `no known free space connects the robot to the
+region` instead of reporting an unobserved region as observed.
+
+```bash
+ros2 action send_goal /robot/explore lekiwi_rmf/action/Explore \
+  '{region_x: 3.2, region_y: -1.5, region_radius_m: 2.0}' --feedback
+```
+
 `max_duration_sec` and `max_radius_m` equal to zero select the tracked defaults
 in `config/exploration.yaml` (900 seconds and 10 metres). Positive goal values
 can only reduce these maxima. Duration counts active exploration time; recoverable
@@ -222,7 +250,7 @@ No task resumes merely because the server starts. A running client requests the
 continuation, after the ownership guard confirms the old navigation has stopped.
 
 Checkpoints next to the mapping database retain the original center, radius,
-deadline, visited/deferred targets, retry pass and preceding mapping mode.
+deadline, region, visited/deferred targets, retry pass and preceding mapping mode.
 A paused checkpoint also records when the pause began, allowing recovery to
 retain the same remaining active time without renewing the task's budget.
 Restart recovery cannot replenish the active-time budget or recenter the travel region.
@@ -233,7 +261,8 @@ limits refuse continuation. The checkpoint records the `map_ref` that
 centre and progress points are coordinates of that map, so a resume is refused
 when RTAB-Map has since started another map or the identity is not published. Cancellation and ordinary terminal results remove the checkpoint;
 server shutdown preserves it for a running client's continuation. The optional
-resume request uses zero duration/radius and the original `revisit_known` setting.
+resume request uses zero duration/radius, no region and the original `revisit_known`
+setting; the saved task keeps its region.
 
 ## Mapping lifecycle and quotas
 

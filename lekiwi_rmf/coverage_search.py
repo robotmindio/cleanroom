@@ -9,6 +9,7 @@ else stays unobserved: a visit, a failed provider or a missing pose proves nothi
 from collections import deque
 from dataclasses import dataclass
 import math
+import unicodedata
 
 import cv2
 import numpy as np
@@ -26,12 +27,15 @@ NO_INSTRUMENT = {
     'other_query': 'the open-vocabulary query in force did not ask for the label',
     'missing_3d_geometry': 'no capture had eligible capture-time 3D geometry',
 }
+# The instrument causes a caller can act on, as the stable code reported beside `incapable`.
+INCAPABLE_CODES = {'unable_model': 'closed_vocabulary', 'other_query': 'query_unconfirmed'}
 # Bounded report lists; counts stay exact.
 REPORT_ITEMS = 20
 
 
 def normalize_label(text):
-    return ' '.join(str(text).lower().split())
+    """The spelling labels are compared in; the same as an open-vocabulary query's own labels."""
+    return ' '.join(unicodedata.normalize('NFKC', str(text)).lower().split())
 
 
 @dataclass(frozen=True)
@@ -517,6 +521,10 @@ class SearchSession:
         self.recognizers = [{**item, 'label_supported': self.label in {normalize_label(label) for label in item['labels']}}
                             for item in self.perception.get('recognizers', [])]
         self.supported = any(item['label_supported'] for item in self.recognizers)
+        # Only an open-vocabulary recognizer can be asked for a label outside the catalogues.
+        self.open_vocabulary = any(item.get('open_vocabulary') for item in self.recognizers)
+        # Set with an `incapable` end the caller can act on: a code of INCAPABLE_CODES.
+        self.cause = None
         grid, resolution, origin = geometry
         self.coverage = QueryCoverage(self.label, {item['model_sha256']: item['profile']['revision'] for item in self.recognizers
                                                    if item['label_supported']}, profile, grid.shape, resolution, origin)
@@ -611,7 +619,8 @@ class SearchSession:
         fraction = self.fraction(searchable, now)
         span = self.coverage.span if self.coverage.counts['negative_captures'] else [None, None]
         return {
-            'schema': 1, 'outcome': outcome, 'statement': statement(outcome, self.label, fraction, self.evidence_ids()),
+            'schema': 1, 'outcome': outcome, 'cause': self.cause,
+            'statement': statement(outcome, self.label, fraction, self.evidence_ids()),
             'query': {'label': self.label, 'region': {'x': self.region[0][0], 'y': self.region[0][1],
                                                       'radius_m': self.region[1]}},
             'perception': {'label_supported': self.supported, 'cameras': self.perception.get('cameras', {}),

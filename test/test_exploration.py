@@ -10,7 +10,7 @@ import pytest
 from lekiwi_rmf.exploration import (
     cell_to_world, footprint_is_free, known_safe_cells, load_navigation_footprint,
     map_geometry, select_target, task_limits, with_body_free, world_to_cell,
-    load_task_checkpoint, save_task_checkpoint, task_time,
+    load_task_checkpoint, save_task_checkpoint, task_time, region_entered, region_in_reach, unobserved_boundary,
 )
 
 FOOTPRINT, INSCRIBED_RADIUS, REGION_MARGIN = load_navigation_footprint(
@@ -38,6 +38,10 @@ def test_checkpoint_retains_original_bounds_progress_and_mapping(checkpoint):
     save_task_checkpoint(path, state)
     assert restore(path) == state
     assert path.stat().st_mode & 0o777 == 0o600
+    # A task for a region resumes with it; one saved without a region has none.
+    state["region"] = [1.0, -1.7, 0.25]
+    save_task_checkpoint(path, state)
+    assert restore(path)["region"] == [1.0, -1.7, 0.25]
 
 
 @pytest.mark.parametrize("changes", [
@@ -45,6 +49,7 @@ def test_checkpoint_retains_original_bounds_progress_and_mapping(checkpoint):
     {"radius": 20}, {"radius": 0.5}, {"boot_id": "other-boot"}, {"id": "b" * 32},
     {"visited": [[3, 0]]}, {"blocked": [[0, "bad"]]}, {"center": [0]},
     {"visited": [[0, 0]] * 101}, {"previous_mapping": None}, {"retrying": 1},
+    {"region": [0, 0]}, {"region": [0, 0, 0]}, {"region": [0, "x", 1]}, {"region": "everywhere"},
 ])
 def test_checkpoint_cannot_expand_or_reset_an_interrupted_task(checkpoint, changes):
     import json
@@ -100,11 +105,11 @@ def test_paused_checkpoint_cannot_renew_an_invalid_budget(checkpoint, monkeypatc
         restore(path)
 
 
-def choose(grid, *, revisit=False, visited=(), blocked=(), position=(0, 0), origin=(-2, -2, 0)):
+def choose(grid, *, revisit=False, visited=(), blocked=(), position=(0, 0), origin=(-2, -2, 0), target_region=None):
     return select_target(grid, 0.05, origin, position, (0, 0), 2.5, visited, blocked,
                          clearance=INSCRIBED_RADIUS, footprint=FOOTPRINT, region_margin=REGION_MARGIN,
                          observation_distance=0.8, spacing=0.5,
-                         revisit_spacing=1.0, free_threshold=20, revisit=revisit)
+                         revisit_spacing=1.0, free_threshold=20, revisit=revisit, target_region=target_region)
 
 
 def test_frontier_approach_is_known_clear_and_connected():
@@ -117,6 +122,57 @@ def test_frontier_approach_is_known_clear_and_connected():
     # A separating wall makes those frontiers unreachable.
     grid[:, 45] = 100
     assert choose(grid, position=(-0.5, 0))[0] is None
+
+
+def test_a_target_region_narrows_what_is_mapped_and_is_reached_through_the_known_bound():
+    grid = np.zeros((80, 80), dtype=np.int16)
+    grid[:, 60:] = -1  # Unknown beyond x = 1 m, along the whole map.
+    nearest, _, whole = choose(grid)
+    region = ((1.0, -1.7), 0.25)
+    target, stage, area = choose(grid, target_region=region)
+    # The view of the region's frontier, not the frontier nearest the robot.
+    assert stage == "exploring_frontiers" and nearest[1] > -0.5 > -0.6 > target[1]
+    assert math.dist(target, region[0]) <= region[1] + 0.8
+    # The robot stands in known free space of the same motion bound, outside the disk.
+    assert math.hypot(*target) < 2.5 - REGION_MARGIN and math.dist(target, region[0]) > region[1]
+    assert 0 < area < math.pi * region[1] ** 2 < whole
+    # A disk with nothing unknown has nothing to map, and revisiting stays inside it.
+    known = ((-1.0, 0.0), 0.4)
+    assert choose(grid, target_region=known)[0] is None
+    revisit, stage, _ = choose(grid, revisit=True, target_region=known)
+    assert stage == "revisiting_known_space" and math.dist(revisit, known[0]) <= known[1]
+    # A view of the region's frontier must still lie inside the motion bound.
+    assert choose(grid, position=(-1.0, 1.0), target_region=((1.0, -1.9), 0.1))[0] is None
+
+
+def test_unobserved_space_counts_only_inside_the_target_region():
+    grid = np.zeros((80, 80), dtype=np.int16)
+    grid[:, 50:] = -1
+
+    def boundary(region):
+        return unobserved_boundary(grid, grid, 0.05, (-2, -2, 0), (0, 0), (0, 0), 2.5, REGION_MARGIN, 20, region)
+
+    assert 0 < boundary(((0.5, 0.0), 0.3)) < boundary(None)
+    assert boundary(((-0.5, 0.0), 0.3)) == 0
+
+
+def test_a_region_is_entered_only_through_connected_free_space():
+    grid = np.zeros((80, 80), dtype=np.int16)
+    grid[:, 50:] = -1
+    grid[:, 20] = 100  # A wall at x = -1 m.
+    geometry = (grid, 0.05, (-2, -2, 0))
+    assert region_entered(*geometry, (0, 0), ((0.3, 0.3), 0.2), 20)
+    assert region_entered(*geometry, (0, 0), ((0.6, 0.0), 0.2), 20)  # Partly known is entered.
+    assert not region_entered(*geometry, (0, 0), ((1.5, 0.0), 0.3), 20)  # Never observed.
+    assert not region_entered(*geometry, (0, 0), ((-1.5, 0.0), 0.3), 20)  # Known, but behind the wall.
+    assert not region_entered(*geometry, (1.5, 0), ((0.3, 0.3), 0.2), 20)  # The robot is not in free space.
+
+
+def test_a_region_must_overlap_the_motion_bound():
+    assert region_in_reach(((2.0, 0.0), 1.0), (0.0, 0.0), 2.5, REGION_MARGIN)
+    assert region_in_reach(((0.0, 3.0), 1.7), (0.0, 0.0), 2.5, REGION_MARGIN)
+    assert not region_in_reach(((3.0, 0.0), 1.0), (0.0, 0.0), 2.5, REGION_MARGIN)
+    assert region_in_reach(((3.0, 0.0), 1.0), (1.0, 0.0), 2.5, REGION_MARGIN)
 
 
 def test_known_map_can_be_revisited_without_frontiers():

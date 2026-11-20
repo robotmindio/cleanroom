@@ -208,6 +208,59 @@ def test_query_service_validates_applies_and_restores_with_optimistic_revisions(
         harness.close()
 
 
+def test_a_search_reservation_asks_for_its_label_and_its_release_restores_the_query(monkeypatch, tmp_path):
+    asked = []
+    harness = Harness(monkeypatch, tmp_path, open_recognizer(lambda _image, query, *_: asked.append(query.labels) or []),
+                      closed_recognizer(lambda *_: []))
+    resources = harness.peer.create_publisher(String, '/robot/resources',
+                                              QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
+
+    def hold(holder):
+        resources.publish(String(data=json.dumps(
+            {'schema': 1, 'resources': {'base': holder, 'arm': None, 'perception_query': holder}})))
+
+    def in_force():
+        return harness.profiles[-1]['recognizers'][0]['query']
+
+    try:
+        # The query a client set, not the tracked default: restoration must be exact.
+        own = harness.set_query(['Screwdriver', 'cable tie'], part_of=['', ''])
+        assert own.success
+        search = {'task_id': 'find-keys', 'owner': 'agent-a', 'generation': 1, 'state': 'starting', 'query': [' Keys ']}
+        hold(search)
+        wait(lambda: in_force()['labels'] == ['keys'])
+        # Exactly the label: other phrases would compete for the same proposals.
+        assert harness.profiles[-1]['recognizers'][0]['labels'] == ['keys']
+        harness.send()
+        wait(lambda: asked and asked[-1] == ('keys',))
+        refused = harness.set_query(['mug'])
+        assert not refused.success and 'resource_busy' in refused.detail
+        # Its later states and an unreadable publication keep the reserved query.
+        hold({**search, 'state': 'running'})
+        resources.publish(String(data='not json'))
+        wait(lambda: harness.detector._query_holder == {'task_id': 'unknown'})
+        assert harness.detector._query.labels == ('keys',)
+        hold(None)
+        wait(lambda: in_force()['revision'] == own.revision)
+        assert in_force()['labels'] == ['screwdriver', 'cable tie']
+
+        # A label the query in force already asks for changes nothing, and the reservation still holds it.
+        hold({**search, 'task_id': 'find-tie', 'query': ['cable tie']})
+        wait(lambda: (harness.detector._query_holder or {}).get('task_id') == 'find-tie')
+        assert harness.detector._query.revision == own.revision and harness.detector._reserved is None
+        # The next holder's label replaces nothing but the client's own query, which its release restores.
+        hold({**search, 'task_id': 'find-cup', 'query': ['cup']})
+        wait(lambda: in_force()['labels'] == ['cup'])
+        # A label that cannot be an open-vocabulary phrase leaves the query alone.
+        hold({**search, 'task_id': 'find-dot', 'query': ['tv.monitor']})
+        wait(lambda: in_force()['revision'] == own.revision)
+        hold(None)
+        wait(lambda: harness.detector._query_holder is None)
+        assert harness.detector._query.revision == own.revision
+    finally:
+        harness.close()
+
+
 def test_closed_primary_rejects_queries(monkeypatch, tmp_path):
     from lekiwi_rmf import object_detector
 
@@ -218,6 +271,10 @@ def test_closed_primary_rejects_queries(monkeypatch, tmp_path):
     try:
         response = node._set_query(SetPerceptionQuery.Request(labels=['spoon']), SetPerceptionQuery.Response())
         assert not response.success and 'closed vocabulary' in response.detail and response.revision == ''
+        # Nor can a search's reservation ask it for a label.
+        node._resources_message(String(data=json.dumps({'schema': 1, 'resources': {'perception_query': {
+            'task_id': 'find-keys', 'query': ['keys']}}})))
+        assert node._query is None and node._reserved is None and node._query_holder['task_id'] == 'find-keys'
     finally:
         node.destroy_node()
         context.try_shutdown()

@@ -89,16 +89,12 @@ class Perception(Node):
         super().__init__('fake_perception', context=context)
         self.peers, self.target, self.stationary_while_moving = peers, None, False
         self.model = MODEL  # The recognizer serving frames: the primary, or the fallback while it is down.
+        self.asked = None  # The open-vocabulary query primary frames record; None records a closed frame.
         self.records = []
         self.lock = threading.Lock()
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
-        binding = camera_bindings(['front'])['front']
-        self.create_publisher(String, '/robot/perception/profile', latched).publish(String(data=json.dumps({
-            'schema': 1, 'cameras': {'front': binding['sha256']}, 'recognizers': [
-                {'role': 'primary', 'model_sha256': MODEL, 'model_name': 'fake_open', 'profile': {'revision': PROFILE_REVISION},
-                 'labels': list(labels), 'open_vocabulary': True},
-                {'role': 'fallback', 'model_sha256': FALLBACK, 'model_name': 'fake_closed',
-                 'profile': {'revision': PROFILE_REVISION}, 'labels': ['chair'], 'open_vocabulary': False}]})))
+        self.profile = self.create_publisher(String, '/robot/perception/profile', latched)
+        self.publish_profile(labels)
         self.info = self.create_publisher(CameraInfo, '/camera/front/camera_info', 10)
         self.geometry = self.create_publisher(Octomap, '/octomap_binary', latched)
         self.revisions = self.create_publisher(String, '/robot/spatial/revision', latched)
@@ -111,6 +107,19 @@ class Perception(Node):
         mount.transform.rotation.z, mount.transform.rotation.w = -0.5, 0.5
         self.static.sendTransform(mount)
         self.create_timer(0.2, self.capture)
+
+    def publish_profile(self, labels, primary=True):
+        self.profile.publish(String(data=json.dumps({
+            'schema': 1, 'cameras': {'front': camera_bindings(['front'])['front']['sha256']}, 'recognizers': [
+                {'role': 'primary', 'model_sha256': MODEL, 'model_name': 'fake_open', 'profile': {'revision': PROFILE_REVISION},
+                 'labels': list(labels), 'open_vocabulary': True}][:primary] + [
+                {'role': 'fallback', 'model_sha256': FALLBACK, 'model_name': 'fake_closed',
+                 'profile': {'revision': PROFILE_REVISION}, 'labels': ['chair'], 'open_vocabulary': False}]})))
+
+    def ask(self, labels):
+        """What the detector does with a query: frames record it and the profile republishes."""
+        self.asked = list(labels)
+        self.publish_profile(labels)
 
     def capture(self):
         info = CameraInfo(width=WIDTH, height=HEIGHT)
@@ -132,10 +141,12 @@ class Perception(Node):
             u = WIDTH / 2 - FX * math.tan(bearing) if abs(bearing) < 0.5 else -1
             if 15 <= u <= WIDTH - 15 and math.dist((cx, cy), (tx, ty)) <= 1.8:
                 detections.append({'label': label, 'score': 0.9, 'bbox': [u - 15, 300.0, 30.0, 40.0]})
+        query = self.asked if self.model == MODEL else None
         with self.lock:
             sequence = len(self.records) + 1
             identity = hashlib.sha256(f'{sequence}:{stamp.sec}:{stamp.nanosec}'.encode()).hexdigest()
             self.records.append({
+                **({'vocabulary': 'open', 'query': {'labels': query}} if query is not None else {}),
                 'schema': 1, 'id': identity, 'sequence': sequence, 'camera_id': 'front',
                 'frame_id': 'front_camera_optical_frame', 'stamp': {'sec': stamp.sec, 'nanosec': stamp.nanosec},
                 'model_sha256': self.model, 'profile': {'revision': PROFILE_REVISION},
@@ -245,13 +256,75 @@ def test_absent_label_ends_at_stated_coverage_without_claiming_absence(search_gr
     assert report['negative_evidence']['criteria']['require_stationary'] is True
 
 
+def test_a_label_outside_the_query_is_searched_only_once_the_profile_confirms_it(search_graph):
+    """The detector asks for a reserved search's label; frames under the earlier query stay silent about it."""
+    peers, perception, explorer, client = search_graph
+    peers.nav_mode = 'success'
+    perception.ask(['cup'])
+    perception.target = ('keys', (-1.2, 0.3))
+    wait(lambda: explorer._evidence.profile['recognizers'][0]['labels'] == ['cup'])
+    time.sleep(1.0)  # Frames under the earlier query are in the capture log.
+    moved = []
+
+    def confirm(message):
+        if message.feedback.stage == 'searching: awaiting the perception query':
+            moved.append(peers.nav_count)
+            perception.ask(['keys'])
+
+    _, outcome = run(client, Search.Goal(query='Keys', region_radius_m=1.8), feedback=confirm)
+    result = outcome.result
+    assert outcome.status == GoalStatus.STATUS_SUCCEEDED, result.message
+    assert moved == [0] and result.outcome == 'found' and result.evidence_ids and peers.nav_count >= 1
+    report = json.loads(result.report_json)
+    assert report['cause'] is None and report['perception']['label_supported']
+    assert report['negative_evidence']['ignored_other_query'] >= 1
+    newest = {record['id']: record for record in perception.records}
+    assert all(newest[identifier]['query'] == {'labels': ['keys']} for identifier in report['found']['evidence_ids'])
+
+
 @pytest.mark.parametrize('search_graph', [('chair',)], indirect=True)
-def test_label_outside_the_catalogue_is_incapable_and_never_moves(search_graph):
+def test_a_query_nobody_set_is_incapable_and_never_moves(search_graph):
+    """A goal sent straight to the action reserves nothing, so nobody asks the detector for its label."""
     peers, _, _, client = search_graph
     _, outcome = run(client, Search.Goal(query='cup'))
     assert outcome.status == GoalStatus.STATUS_ABORTED
     assert outcome.result.outcome == 'incapable' and peers.nav_count == 0
-    assert 'nothing is claimed' in json.loads(outcome.result.report_json)['statement']
+    report = json.loads(outcome.result.report_json)
+    assert report['cause'] == 'query_unconfirmed' and 'nothing is claimed' in report['statement']
+    _, outcome = run(client, Search.Goal(query='tv.monitor'))
+    assert outcome.result.outcome == 'incapable' and 'cannot be an open-vocabulary query' in outcome.result.message
+    assert json.loads(outcome.result.report_json)['cause'] == 'query_unconfirmed' and peers.nav_count == 0
+
+
+def test_canceling_while_the_query_is_awaited_ends_the_search_at_once(search_graph):
+    peers, perception, explorer, client = search_graph
+    handle = response(client.send_goal_async(Search.Goal(query='keys')))
+    assert handle.accepted
+    wait(lambda: explorer._stage == 'searching: awaiting the perception query')
+    response(handle.cancel_goal_async())
+    outcome = response(handle.get_result_async())
+    assert outcome.status == GoalStatus.STATUS_CANCELED and outcome.result.outcome == 'canceled'
+    assert peers.nav_count == 0
+
+
+def test_a_closed_vocabulary_cannot_be_asked_for_another_label_and_never_moves(search_graph):
+    peers, perception, explorer, client = search_graph
+    perception.model = FALLBACK
+    perception.publish_profile((), primary=False)
+    wait(lambda: len(explorer._evidence.profile['recognizers']) == 1 and explorer._evidence.fresh(1.0), timeout=15)
+    started = time.monotonic()
+    _, outcome = run(client, Search.Goal(query='keys'))
+    assert outcome.status == GoalStatus.STATUS_ABORTED and time.monotonic() - started < 2
+    assert outcome.result.outcome == 'incapable' and peers.nav_count == 0
+    report = json.loads(outcome.result.report_json)
+    assert report['cause'] == 'closed_vocabulary' and not report['perception']['label_supported']
+    assert 'closed-vocabulary' in outcome.result.message
+    # Its own catalogue is still searchable.
+    handle = response(client.send_goal_async(Search.Goal(query='chair', region_radius_m=1.2)))
+    assert handle.accepted
+    wait(lambda: peers.nav_active, timeout=15)
+    response(handle.cancel_goal_async())
+    assert response(handle.get_result_async(), timeout=15).status == GoalStatus.STATUS_CANCELED
 
 
 def test_evidence_en_route_cancels_and_replans_the_viewpoint(search_graph):
@@ -326,11 +399,12 @@ def test_fallback_frames_never_cover_a_primary_only_label(search_graph):
     _, outcome = run(client, Search.Goal(query='cup', region_radius_m=1.2, target_coverage=0.6))
     result = outcome.result
     assert outcome.status == GoalStatus.STATUS_ABORTED, result.message
-    # One dwell without a frame that can speak for the label answers; the 900 s budget is not spent revisiting it.
-    assert result.outcome == 'incapable' and result.coverage_fraction < 0.6
+    # One dwell where it stands, without a frame that can speak for the label, answers: the robot never
+    # moves and the 900 s budget is not spent.
+    assert result.outcome == 'incapable' and result.coverage_fraction < 0.6 and peers.nav_count == 0
     assert 'only a recognizer that cannot report the label served frames' in result.message
     report = json.loads(result.report_json)
-    assert report['progress']['elapsed_sec'] < 60
+    assert report['cause'] == 'closed_vocabulary' and report['progress']['elapsed_sec'] < 60
     # Only primary frames retained from before the switch count; every fallback frame was ignored.
     assert set(report['negative_evidence']['observations_by_model']) <= {MODEL}
     assert report['negative_evidence']['ignored_unable_model'] >= 10

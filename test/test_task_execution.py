@@ -329,6 +329,40 @@ def test_t41_t49_contending_capabilities_are_serialized_by_resource(robot):
     wait(lambda: len(robot.peers.received) == 2)
 
 
+@pytest.mark.parametrize('end', ['succeeded', 'canceled', 'failed', 'restart'])
+def test_a_search_reserves_the_query_with_its_label_until_it_is_terminal(robot, end):
+    """The detector asks for the reserved label and restores its own query when the holder is gone."""
+    def reserved():
+        return robot.resources[-1]['resources']['perception_query']
+
+    if end == 'failed':
+        robot.peers.abort, robot.peers.cause = True, 'closed_vocabulary'
+    assert robot.submit('find', 'search', {'query': 'my keys'}, owner='agent-a').ok
+    wait(lambda: reserved() is not None)
+    # From admission, before the search runs: the base holder states no query.
+    assert reserved()['task_id'] == 'find' and reserved()['query'] == ['my keys']
+    assert 'query' not in robot.resources[-1]['resources']['base']
+    running(robot, 'find')
+    if end == 'restart':
+        # The journal keeps the reservation, so a new gateway publishes the same holder and label.
+        robot.restart()
+        wait(lambda: robot.status('find')['state'] == 'running')
+        assert reserved()['query'] == ['my keys'] and reserved()['task_id'] == 'find'
+        end = 'succeeded'
+    if end == 'canceled':
+        assert robot.api('cancel', task_id='find').ok
+    else:
+        robot.peers.finish = True
+    wait(lambda: robot.status('find')['state'] == end)
+    wait(lambda: reserved() is None)
+    view = robot.status('find')
+    assert not view['holding_resources']
+    if end == 'failed':
+        # The executor's cause narrows its `incapable` outcome; both stay in the result.
+        assert view['reason_code'] == 'closed_vocabulary'
+        assert (view['result']['outcome'], view['result']['cause']) == ('incapable', 'closed_vocabulary')
+
+
 def test_t49_two_agents_racing_for_overlapping_resources_get_one_grant(robot):
     barrier, replies = threading.Barrier(2), {}
 
@@ -510,7 +544,7 @@ def test_t42_t52_handoff_reconciles_then_compensation_does_not_hide_failure(robo
 def test_reserved_perception_query_refuses_direct_changes():
     holder = {'task_id': 'search', 'owner': 'agent-a', 'generation': 3, 'state': 'running'}
     query = make_query(['cup'])
-    detector = SimpleNamespace(_query_lock=threading.Lock(), _query=query, _query_holder=None,
+    detector = SimpleNamespace(_query_lock=threading.Lock(), _query=query, _query_holder=None, _reserved=None,
                                get_logger=lambda: SimpleNamespace(warning=print, info=print, error=print),
                                _detector=SimpleNamespace(default_query=query), _publish_profile=lambda: None)
     message = String(data=json.dumps({'schema': 1, 'resources': {'base': holder, 'perception_query': holder}}))
@@ -535,7 +569,8 @@ EXAMPLES = {
                                           'map_ref': 'map-1', 'revision': 'revision-1'}}},
                  {'target': {'point': {'x': 1, 'y': 2}, 'standoff_m': 0.6}},
                  {'target': {'object': {'object_id': 'c' * 32, 'standoff_m': 0.6}}}],
-    'explore': [{'revisit_known': True, 'max_duration_sec': 5, 'max_radius_m': 2}, {'resume_task_id': 'a' * 32}],
+    'explore': [{'revisit_known': True, 'max_duration_sec': 5, 'max_radius_m': 2,
+                 'region': {'x': 0, 'y': 0, 'radius_m': 1}}, {'resume_task_id': 'a' * 32}],
     'search': [{'query': 'cup', 'region': {'x': 0, 'y': 0, 'radius_m': 1}, 'max_duration_sec': 5,
                 'max_travel_m': 2, 'target_coverage': 0.5}],
     'skill': [{'skill_id': 'insert_peg', 'parameters': {}, 'version': 2, 'artifact_sha256': ARTIFACT}],
@@ -648,7 +683,12 @@ def test_validation_enforces_exactly_the_schema_the_manifest_publishes(tmp_path)
             assert seen == set(declared(schema)), capability
         excluded = refusal('explore', {'resume_task_id': 'a' * 32, 'max_radius_m': 1})
         assert excluded.code == 'invalid_request' and excluded.data['field'] == 'max_radius_m'
-        assert entries['explore']['schema']['excludes'] == {'resume_task_id': ['max_duration_sec', 'max_radius_m']}
+        assert entries['explore']['schema']['excludes'] == {
+            'resume_task_id': ['max_duration_sec', 'max_radius_m', 'region']}
+        regional = refusal('explore', {'resume_task_id': 'a' * 32, 'region': {'x': 0, 'y': 0, 'radius_m': 1}})
+        assert regional.code == 'invalid_request' and regional.data['field'] == 'region'
+        # The region's radius is bounded by the same tracked limit as the motion bound.
+        assert entries['explore']['schema']['properties']['region']['properties']['radius_m']['max'] == 3.0
         # The legacy keys are views of the same descriptor.
         navigate = entries['navigate']
         assert navigate['parameters'] == ['x', 'y', 'yaw', 'deadline_unix_sec', 'max_travel_m', 'target']
@@ -727,6 +767,35 @@ def localize(robot, x=-1.0):
         broadcaster.sendTransform(transform)
 
     robot.peers.create_timer(0.05, send)
+
+
+def test_an_exploration_region_needs_a_map_pose_within_reach_of_the_motion_bound(robot):
+    robot.gateway._exploration_defaults = {'max_duration_sec': 60.0, 'max_radius_m': 3.0}
+    region = {'x': -1.0, 'y': 0.5, 'radius_m': 1.0}
+
+    def validate(parameters, **extra):
+        return robot.api('validate', task_id='room', capability='explore', parameters=parameters, owner='agent-a',
+                         **extra)
+
+    unlocalized = validate({'region': region})
+    assert (unlocalized.error, unlocalized.data) == ('precondition_failed', {
+        'retryable': True, 'next_condition': 'needs_localization', 'field': 'region'})
+    assert 'explore without a region first' in unlocalized.detail
+    # Exploring around the start pose is what creates the map: it needs no pose in one.
+    assert validate({}).ok and validate({'max_radius_m': 2}).ok
+    localize(robot)
+    wait(lambda: validate({'region': region}, frame='map').ok)
+    request = validate({'region': region, 'revisit_known': True}).data['request']
+    assert request['parameters']['region'] == region
+    assert request['effective_parameters'] == {'max_duration_sec': 60.0, 'max_radius_m': 3.0, 'revisit_known': True,
+                                               'resume_task_id': '', 'region': region}
+    # The robot is at x = -1: this disk lies beyond the 3 m bound around it, less its stopping margin.
+    far = validate({'region': {'x': 2.0, 'y': 0.0, 'radius_m': 1.0}})
+    assert (far.error, far.data) == ('precondition_failed', {
+        'retryable': True, 'next_condition': 'move_closer', 'field': 'region'})
+    wide = validate({'region': {**region, 'radius_m': 3.5}})
+    assert wide.error == 'invalid_request' and wide.data['field'] == 'region.radius_m'
+    assert robot.journal_rows() == []
 
 
 def test_a_pose_target_runs_as_the_pose_it_names(robot):

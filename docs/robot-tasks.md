@@ -21,15 +21,27 @@ result before resending the same destination with a new owned goal ID. Fresh
 safety inputs and one second of collision settling are required to resume.
 An unconfirmed stop expires the ownership lease and blocks resubmission.
 Direct legacy Nav2 clients retain their existing behavior.
-`explore` accepts `revisit_known`, `max_duration_sec`, `max_radius_m` and
-`resume_task_id`; the Explorer enforces its tracked bounds, quotas and recovery
-policy. Exploration's recoverable pauses do not finish the task or spend its
+`explore` accepts `revisit_known`, `max_duration_sec`, `max_radius_m`, an
+optional map-frame `region` `{x, y, radius_m}` and `resume_task_id`; the Explorer
+enforces its tracked bounds, quotas and recovery policy. Without a region it maps
+the motion bound around the starting pose and needs no map. With one it maps only
+what is inside that disk, reaching it through already-known free space inside the
+same motion bound; see [exploration](exploration.md#exploring-a-region). A region
+needs the robot localized in a map: otherwise the request is refused with
+`precondition_failed`, `next_condition: needs_localization`, `field: region`
+(explore without a region first), and a disk that does not overlap the motion
+bound around the robot with `next_condition: move_closer`. Exploration's recoverable pauses do not finish the task or spend its
 active-time budget. Fixed-map/RMF profiles disable exploration; RMF profiles
 also disable managed navigation so the fleet remains the navigation owner.
-`search` accepts a required `query` (a native label of the detector profile
-published on `/robot/perception/profile`), an optional map-frame `region`
-`{x, y, radius_m}`, and `max_duration_sec`, `max_travel_m` and
-`target_coverage`; see [active search](active-search.md). It runs in the Explorer
+`search` accepts a required `query` (any one label an open-vocabulary recognizer
+can be asked for, or a label of a closed recognizer's catalogue), an optional
+map-frame `region` `{x, y, radius_m}`, and `max_duration_sec`, `max_travel_m` and
+`target_coverage`; see [active search](active-search.md). One call is enough: the
+task reserves the perception query, the detector asks for exactly its label while
+it runs, and the query that was in force is back when the task is terminal,
+however it ended. While only a closed-vocabulary recognizer serves, a label
+outside its catalogue ends `incapable` with reason `closed_vocabulary` and no
+motion. It runs in the Explorer
 on the same guarded Nav2 path, so it is unavailable wherever exploration is, and
 `allow_search` in `config/exploration.yaml` enables attended search with native
 RGB-D; unsupported sensor and fleet topologies keep it unavailable. Physical
@@ -227,7 +239,7 @@ state a more specific one. Conditions in use: `fix_request`,
 `wait_capability_ready`, `acquire_skill`, `wait_resource_free`, `reconcile_task`,
 `wait_task_terminal`, `wait_odometry`, `wait_spatial_memory`, `wait_object_map`,
 `query_objects`, `run_search`, `needs_map`,
-`needs_localization`, `change_standoff`, `refresh_reference`, `replan_for_body`,
+`needs_localization`, `move_closer`, `change_standoff`, `refresh_reference`, `replan_for_body`,
 `read_status`, `use_owner`, `isolate_or_record` and `fix_deployment`.
 
 Every state that needs an explanation carries a stable `reason_code` beside the
@@ -237,7 +249,7 @@ events. A state without one clears it. The manifest lists them under
 
 | Kind | Codes |
 | --- | --- |
-| `terminal` | `succeeded`, `canceled`, `canceled_before_dispatch`, `goal_rejected`, `capability_disabled`, `executor_error` (a nonzero native error code), `executor_aborted`, `incomplete`, `outcome_unknown` (termination proven, outcome not), `budget_exhausted` (navigation deadline, active time or travel bound), and a search's own `found`, `coverage_reached`, `inaccessible`, `budget_exhausted`, `incapable`, `unmapped` |
+| `terminal` | `succeeded`, `canceled`, `canceled_before_dispatch`, `goal_rejected`, `capability_disabled`, `executor_error` (a nonzero native error code), `executor_aborted`, `incomplete`, `outcome_unknown` (termination proven, outcome not), `budget_exhausted` (navigation deadline, active time or travel bound), and a search's own `found`, `coverage_reached`, `inaccessible`, `budget_exhausted`, `incapable`, `unmapped`, and the causes that narrow `incapable`: `closed_vocabulary`, `query_unconfirmed` (the result keeps `outcome: incapable` and states the `cause`) |
 | `paused` | `collision_stop`, `collision_settling`, `base_motion_denied`, `safety_input_stale`, `safety_inputs_unavailable`, `awaiting_navigation_stop`, `navigation_stopped`, `executor_paused` (an exploration or search pausing itself) |
 | `unknown` | `result_unconfirmed`, `acceptance_unconfirmed`, `arm_stop_unconfirmed`, `pause_stop_unconfirmed` |
 
@@ -268,8 +280,10 @@ or gripper task holds the arm and keeps the base still. A task holds them from a
 journal row is terminal, which requires native terminal evidence or the
 reconciliation proof above; a timeout or an empty process never releases them. A
 holder in `unknown` makes admission fail with `execution_uncertain`. The gateway
-publishes holders on the latched `/robot/resources` topic; the detector refuses
-`set_query` while a search holds the query and treats an unreadable state as held.
+publishes holders on the latched `/robot/resources` topic; a search's holder of
+`perception_query` also states its `query` label. The detector asks for that label
+while the search holds the query, restores the query it replaced when the holder
+is gone, refuses `set_query` meanwhile and treats an unreadable state as held.
 
 Admission and every handoff take a new, monotonic `generation`. A request that
 names an older generation is refused with `stale_generation`. A cancel without a
@@ -464,7 +478,8 @@ A structured `parameters` object is preferred to JSON strings in direct calls.
 The tracked workflow remains the path for durable approval when policy gates.
 
 No exploration parameters means `revisit_known=false`, empty `resume_task_id`,
-and zero duration/radius overrides. Zero selects the Explorer's tracked limits,
+no `region` and zero duration/radius overrides. “Explore the bedroom” is a
+`region` around a map position the agent already knows for that room. Zero selects the Explorer's tracked limits,
 currently 900 active seconds and 10 m in `config/exploration.yaml`; a positive
 override may only reduce those limits. An agent uses `revisit_known=true` when
 the user's intent includes surveying already mapped space. Navigation
@@ -472,7 +487,7 @@ requires map-frame `x` and `y` (omitted `yaw` is zero radians) or one
 [target](#navigation-targets).
 When live Explorer defaults are known, an override above either maximum is
 rejected before durable admission. A resume request cannot supply positive
-duration/radius overrides; the saved task owns those bounds.
+duration/radius overrides or a region; the saved task owns those bounds.
 
 The Explorer publishes its actual configured limits on the local, latched
 `/robot/explore/defaults` topic. The task gateway exposes them as

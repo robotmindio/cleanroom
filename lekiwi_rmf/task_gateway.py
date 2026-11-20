@@ -33,7 +33,8 @@ from unique_identifier_msgs.msg import UUID
 import yaml
 
 from lekiwi_rmf.action import Explore, RunSkill, Search
-from lekiwi_rmf.exploration import load_navigation_footprint, map_geometry, task_limits
+from lekiwi_rmf.coverage_search import INCAPABLE_CODES
+from lekiwi_rmf.exploration import load_navigation_footprint, map_geometry, region_in_reach, task_limits
 from lekiwi_rmf.exploration_owner_guard import owned_goal_id
 from lekiwi_rmf.latency_budget import LatencyBudget
 from lekiwi_rmf.srv import (
@@ -171,10 +172,14 @@ def _navigate_goal(values):
 
 
 def _explore_goal(values):
-    return Explore.Goal(revisit_known=values.get('revisit_known', False),
+    goal = Explore.Goal(revisit_known=values.get('revisit_known', False),
                         max_duration_sec=float(values.get('max_duration_sec', 0.0)),
                         max_radius_m=float(values.get('max_radius_m', 0.0)),
                         resume_task_id=values.get('resume_task_id', ''))
+    region = values.get('region')
+    if region:
+        goal.region_x, goal.region_y, goal.region_radius_m = (float(region[name]) for name in ('x', 'y', 'radius_m'))
+    return goal
 
 
 def _search_goal(values):
@@ -242,13 +247,28 @@ def _navigate_effective(gateway, values):
 
 
 def _explore_effective(gateway, values):
-    limits = gateway._exploration_defaults
+    limits, region = gateway._exploration_defaults, values.get('region')
+    # A region is a place in the map: it means nothing before the robot has a pose in one.
+    robot = gateway.map_position('region', '; explore without a region first') if region else None
     if limits is None or values.get('resume_task_id'):
         return None
     duration, radius = task_limits(values.get('max_duration_sec', 0.0), values.get('max_radius_m', 0.0),
                                    limits['max_duration_sec'], limits['max_radius_m'])
-    return {'max_duration_sec': duration, 'max_radius_m': radius,
-            'revisit_known': values.get('revisit_known', False), 'resume_task_id': ''}
+    if region and not region_in_reach(((region['x'], region['y']), region['radius_m']), robot, radius,
+                                      gateway._region_margin):
+        raise Refused('precondition_failed', f'the region lies outside the {radius} m motion bound around the robot',
+                      retryable=True, next_condition='move_closer', field='region')
+    return {'max_duration_sec': duration, 'max_radius_m': radius, 'revisit_known': values.get('revisit_known', False),
+            'resume_task_id': '', **({'region': region} if region else {})}
+
+
+def _explore_bounds(gateway):
+    limits = gateway._exploration_defaults or {}
+    bounds = {name: {'max': value} for name, value in limits.items()}
+    if 'max_radius_m' in limits:
+        radius = {**_REGION['properties']['radius_m'], 'max': limits['max_radius_m']}
+        bounds['region'] = {'properties': {**_REGION['properties'], 'radius_m': radius}}
+    return bounds
 
 
 def _search_effective(gateway, values):
@@ -256,6 +276,15 @@ def _search_effective(gateway, values):
     if defaults is None:
         return None
     return {**values, **{name: values.get(name, 0.0) or defaults[name] for name in (*SEARCH_LIMITS, 'target_coverage')}}
+
+
+def search_result(result):
+    """The native result, with the cause its report states beside the outcome."""
+    try:
+        cause = json.loads(result.get('report_json') or '{}').get('cause')
+    except (ValueError, RecursionError):
+        cause = None
+    return {**result, 'cause': cause} if isinstance(cause, str) else result
 
 
 def _search_effect(state, result):
@@ -279,6 +308,9 @@ _POSE = {'x': {**_METRES, 'required': True}, 'y': {**_METRES, 'required': True},
 _REFERENCE = {'type': 'string', 'min_length': 1, 'max_length': 128, 'required': True}
 _BUDGET = {'type': 'number', 'min': 0, 'default': 0.0}
 _STANDOFF = {**_METRES, 'min': MIN_STANDOFF_M, 'max': MAX_STANDOFF_M, 'default': DEFAULT_STANDOFF_M}
+# A map-frame disk.
+_REGION = {'type': 'object', 'unit': 'm', 'default': None, 'properties': {
+    'x': _POSE['x'], 'y': _POSE['y'], 'radius_m': {**_METRES, 'exclusive_min': 0, 'required': True}}}
 # One descriptor per capability. Request validation, the capability manifest and execution all
 # read it, so what is advertised is what is enforced:
 #   action       the ROS action that executes it; `feedback` names the field telling what a goal is doing
@@ -290,7 +322,8 @@ _STANDOFF = {**_METRES, 'min': MIN_STANDOFF_M, 'max': MAX_STANDOFF_M, 'default':
 #   check        refusals that need the gateway's state, before anything is held
 #   effective    the parameters that will run, resolved once the resources are free; they are dispatched
 #   effects      reversibility and the compensation an owner may plan; None when a skill declares its own
-#   reasons      reason codes of its executor, beside the terminal ones every capability shares
+#   reasons      reason codes of its executor, beside the terminal ones every capability shares: the
+#                `cause` its result states, else its `outcome`
 #   result       what is kept of the native result; `stopped` whether it proves the executor stopped
 #   effect       the evidence of an effect a finished task carries, if any
 #   advertise    manifest keys beyond the derived ones: effective defaults and what a client may name
@@ -331,47 +364,61 @@ CAPABILITIES = {
                        'Pauses preserve the active-time budget.'},
     'explore': {
         'action': ('/robot/explore', Explore), 'switch': ('allow_exploration', True), 'feedback': 'stage',
+        'frame': 'map',
         'schema': {
             'properties': {
                 'revisit_known': {'type': 'boolean', 'default': False},
                 'max_duration_sec': {**_BUDGET, 'unit': 's'}, 'max_radius_m': {**_BUDGET, 'unit': 'm'},
+                'region': _REGION,
                 'resume_task_id': {'type': 'string', 'pattern': '([0-9a-f]{32})?', 'default': ''}},
-            'excludes': {'resume_task_id': ['max_duration_sec', 'max_radius_m']}},
-        'bounds': lambda gateway: {name: {'max': value} for name, value in (gateway._exploration_defaults or {}).items()},
-        'goal': _explore_goal, 'effective': _explore_effective,
+            'excludes': {'resume_task_id': ['max_duration_sec', 'max_radius_m', 'region']}},
+        'bounds': _explore_bounds, 'goal': _explore_goal, 'effective': _explore_effective,
         'effects': {'reversibility': 'reversible',
                     'compensation': 'Map growth is data; navigate back to the starting pose.'},
         'advertise': lambda gateway: {'effective_defaults': (
-            {**gateway._exploration_defaults, 'revisit_known': False, 'resume_task_id': ''}
+            {**gateway._exploration_defaults, 'revisit_known': False, 'region': None, 'resume_task_id': ''}
             if gateway._exploration_defaults is not None else None)},
         'description': ('Omit parameters to explore unmapped space. revisit_known=true also revisits mapped space. '
                         'Omitted/zero limits use the tracked robot limits; positive limits may only reduce them. '
-                        'Duration is active seconds, radius is metres around the starting pose. '
-                        'resume_task_id is a saved native exploration UUID and preserves its original bounds.')},
+                        'Duration is active seconds; max_radius_m bounds all motion to that many metres around '
+                        'the starting pose. region {x, y, radius_m} is a map-frame disk: only what is inside it '
+                        'is mapped or revisited, and the robot reaches it through already-known free space '
+                        'inside the motion bound. A region needs the robot localized in a map (refused with '
+                        'needs_localization otherwise: explore without one first) and within reach of the '
+                        'motion bound (move_closer). resume_task_id is a saved native exploration UUID and '
+                        'preserves its original bounds and region.')},
     'search': {
         'action': ('/robot/search', Search), 'switch': ('allow_search', True), 'feedback': 'stage', 'frame': 'map',
         'schema': {'properties': {
             'query': {'type': 'string', 'min_length': 1, 'max_length': 128, 'required': True},
-            'region': {'type': 'object', 'unit': 'm', 'default': None, 'properties': {
-                'x': _POSE['x'], 'y': _POSE['y'], 'radius_m': {**_METRES, 'exclusive_min': 0, 'required': True}}},
+            'region': _REGION,
             'max_duration_sec': {**_BUDGET, 'unit': 's'}, 'max_travel_m': {**_BUDGET, 'unit': 'm'},
             'target_coverage': {**_BUDGET, 'unit': 'fraction', 'max': 1}}},
         'bounds': lambda gateway: ({name: {'max': gateway._search_defaults[name]} for name in SEARCH_LIMITS}
                                    if gateway._search_defaults else {}),
-        'goal': _search_goal, 'effective': _search_effective,
+        'goal': _search_goal, 'effective': _search_effective, 'result': search_result,
         'effects': {'reversibility': 'reversible',
                     'compensation': 'Observations are data; navigate back to the starting pose.'},
         'effect': _search_effect,
-        'reasons': ('found', 'coverage_reached', 'inaccessible', 'budget_exhausted', 'incapable', 'unmapped'),
+        'reasons': ('found', 'coverage_reached', 'inaccessible', 'budget_exhausted', 'incapable', 'unmapped',
+                    *INCAPABLE_CODES.values()),
         'advertise': lambda gateway: {
             'effective_defaults': (dict(gateway._search_defaults, region=None)
                                    if gateway._search_defaults is not None else None),
-            'labels': '/robot/perception/profile',
+            'labels': '/robot/perception/profile', 'max_label_chars': query_limits()['max_label_chars'],
             'outcomes': ['found', 'coverage_reached', 'inaccessible', 'budget_exhausted', 'incapable', 'unmapped',
-                         'canceled', 'failed']},
+                         'canceled', 'failed'],
+            # What `incapable` is narrowed to, as the reason code, when the vocabulary is the cause.
+            'incapable_causes': sorted(INCAPABLE_CODES.values())},
         'description': ('Moves the base between viewpoints chosen by expected information gain until the query '
                         'label is detected, target_coverage of the searchable mapped region has fresh evidence '
-                        'of absence, or a budget ends. query is a native label of the perception profile; '
+                        'of absence, or a budget ends. query is any one label an open-vocabulary recognizer can '
+                        'be asked for (letters, digits, spaces, hyphens and apostrophes, up to max_label_chars): '
+                        'the search holds the perception query, the detector asks for exactly that label unless '
+                        'the query in force already includes it, and the query it replaced is in force again '
+                        'when the task ends, however it ends. While only a closed-vocabulary recognizer serves '
+                        '(the local fallback), only labels of its catalogue can be searched: another label ends '
+                        'incapable with reason closed_vocabulary and no motion. '
                         'region {x, y, radius_m} is map-frame, default the tracked motion bound. Results carry '
                         'evidence_ids, coverage_fraction and a negative-evidence report; "not found" holds only '
                         'for the covered cells. Zero/omitted limits use the tracked limits; positive limits may '
@@ -457,9 +504,10 @@ def task_goal(capability, text):
 
 
 def reason_code(capability, state, result):
-    """The stable reason of a terminal native result: the executor's own outcome when it declares one."""
-    if result.get('outcome') in CAPABILITIES[capability].get('reasons', ()):
-        return result['outcome']
+    """The stable reason of a terminal native result: the executor's own cause or outcome when it declares one."""
+    for code in (result.get('cause'), result.get('outcome')):
+        if code in CAPABILITIES[capability].get('reasons', ()):
+            return code
     if state != 'failed':
         return state
     if result.get('error_code', 0):
@@ -1008,6 +1056,11 @@ class TaskGateway(Node):
 
     def _publish_resources(self):
         state = self._journal.resource_state()
+        holder = state['perception_query']
+        row = self._row(holder['task_id']) if holder is not None else None
+        if row is not None and row['capability'] == 'search':
+            # The label the detector asks for while this search holds the query; it restores its own on release.
+            holder['query'] = [json.loads(row['parameters'])['query']]
         if state != self._resource_snapshot:
             self._resource_snapshot = state
             self._resources.publish(String(data=json.dumps(
@@ -1571,11 +1624,12 @@ class TaskGateway(Node):
         self._standoff = {name: explorer[name] for name in ('clearance_m', 'free_threshold', 'max_map_cells',
                                                            'data_timeout_sec')}
         try:
-            self._footprint = load_navigation_footprint(
-                Path(self.get_parameter('navigation_params_file').value).expanduser())[0]
+            self._footprint, _, self._region_margin = load_navigation_footprint(
+                Path(self.get_parameter('navigation_params_file').value).expanduser())
         except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError) as error:
             self.get_logger().error(f'point targets unavailable: {error}')
-            self._footprint = None
+            # Without the body's stopping margin the explorer alone refuses a region out of its reach.
+            self._footprint, self._region_margin = None, 0.0
 
     def _resolve(self, ready, wait_sec=1.0):
         """Spin the resolver until `ready()` gives a value; None when the wait ends first."""
@@ -1657,6 +1711,16 @@ class TaskGateway(Node):
             return None
         return t.x, t.y
 
+    def map_position(self, field, advice=''):
+        """The robot's fresh position in the map, for a parameter that names a place in it."""
+        # Take what queued up since the last request first: the newest map and transforms.
+        self._resolve(lambda: None, wait_sec=0.1)
+        robot = self._resolve(self._robot_position)
+        if robot is None:
+            raise Refused('precondition_failed', 'the robot has no fresh pose in the map' + advice, retryable=True,
+                          next_condition='needs_localization', field=field)
+        return robot
+
     def _target_point(self, target):
         return self._approach((target['point']['x'], target['point']['y']),
                               target.get('standoff_m', DEFAULT_STANDOFF_M), 'target.point', 'target.standoff_m')
@@ -1725,12 +1789,7 @@ class TaskGateway(Node):
         if self._footprint is None:
             raise Refused('capability_unavailable', 'point targets need the Nav2 footprint of this deployment',
                           next_condition='fix_deployment', field=field)
-        # Take what queued up since the last request first: the newest map and transforms.
-        self._resolve(lambda: None, wait_sec=0.1)
-        robot = self._resolve(self._robot_position)
-        if robot is None:
-            raise Refused('precondition_failed', 'the robot has no fresh pose in the map', retryable=True,
-                          next_condition='needs_localization', field=field)
+        robot = self.map_position(field)
         try:
             grid = map_geometry(self._resolve(lambda: self._map), self._standoff['max_map_cells'])
         except (AttributeError, ValueError) as error:

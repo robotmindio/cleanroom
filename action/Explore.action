@@ -3,7 +3,12 @@ bool revisit_known
 # Active seconds; recoverable pauses preserve the remaining budget.
 float64 max_duration_sec
 float64 max_radius_m
-# Empty starts a new task; a saved task UUID resumes its original bounds and progress.
+# A zero radius maps the whole motion bound around the start pose. A positive one is a map-frame
+# disk: only what is inside it is mapped, and it is reached through known free space in that bound.
+float64 region_x
+float64 region_y
+float64 region_radius_m
+# Empty starts a new task; a saved task UUID resumes its original bounds, region and progress.
 string resume_task_id
 ---
 # Complete means no further accessible targets in the requested area.

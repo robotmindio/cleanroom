@@ -230,6 +230,16 @@ def test_termination_found_coverage_and_incapable_with_honest_report():
     assert unsupported.outcome(unsupported.masks(grid)[0], 100) == 'incapable'
     report = unsupported.report('incapable', grid, 100, {})
     assert 'nothing is claimed' in report['statement'] and not report['perception']['label_supported']
+    # A closed catalogue cannot be asked for the label; the executor states that as the cause.
+    assert not unsupported.open_vocabulary and report['cause'] is None
+    unsupported.cause = 'closed_vocabulary'
+    assert unsupported.report('incapable', grid, 100, {})['cause'] == 'closed_vocabulary'
+    asked = dict(unsupported.perception, recognizers=[
+        {**unsupported.perception['recognizers'][0], 'open_vocabulary': True, 'labels': ['ｃｕｐ']}])
+    queried = SearchSession(' Cup ', asked, PROFILE, (grid, RESOLUTION, (-1.5, -1.5, 0.0)), started=50.0,
+                            target=0.5, region=((0.0, 0.0), 1.5))
+    # Labels compare in the spelling an open-vocabulary query gives them (NFKC, case, spaces).
+    assert queried.open_vocabulary and queried.supported and queried.label == 'cup'
 
     search, grid, origin = session()
     searchable, _ = search.masks(grid)

@@ -38,16 +38,18 @@ from unique_identifier_msgs.msg import UUID
 
 from lekiwi_rmf.action import Explore, Search
 from lekiwi_rmf.coverage_search import (
-    NO_INSTRUMENT, Profile, SearchSession, normalize_label, select_viewpoint, unproductive_cause, viewpoint_gain,
+    INCAPABLE_CODES, NO_INSTRUMENT, Profile, SearchSession, normalize_label, select_viewpoint, unproductive_cause,
+    viewpoint_gain,
 )
 from lekiwi_rmf.exploration_owner_guard import owned_goal_id
 from lekiwi_rmf.latency_budget import LatencyBudget
 from lekiwi_rmf.exploration import (
     behavior_distance, database_size, footprint_is_free, load_navigation_footprint, map_geometry, select_target,
     task_limits, with_body_free, load_task_checkpoint, save_task_checkpoint, task_time,
-    laser_free_grid, sweep_is_free, unobserved_boundary,
+    laser_free_grid, region_entered, region_in_reach, sweep_is_free, unobserved_boundary,
 )
 from lekiwi_rmf.navigation_distance import NavigationDistance
+from lekiwi_rmf.perception_query import normalize_label as query_label
 from lekiwi_rmf.search_evidence import SearchEvidence
 from lekiwi_rmf.spatial_anchors import SCHEMA as SPATIAL_SCHEMA, valid_ref
 
@@ -79,9 +81,9 @@ class Replan(Exception):
 class SearchEnded(Exception):
     """A search termination condition: found, or a time/travel budget reached."""
 
-    def __init__(self, outcome, message):
+    def __init__(self, outcome, message, cause=None):
         super().__init__(message)
-        self.outcome = outcome
+        self.outcome, self.cause = outcome, cause
 
 
 class RobotExplorer(Node):
@@ -501,11 +503,17 @@ class RobotExplorer(Node):
                                     self.config["max_duration_sec"], self.config["max_radius_m"])
             if radius <= self._region_margin:
                 raise ValueError("exploration radius is too small for the footprint")
+            region = self._requested_region(request)
             if request.resume_task_id:
                 state = self._resume_task(request.resume_task_id)
-                if (request.max_duration_sec or request.max_radius_m
+                if (request.max_duration_sec or request.max_radius_m or region is not None
                         or request.revisit_known != state["revisit_known"]):
-                    raise ValueError("resume must retain the saved task's bounds and revisit setting")
+                    raise ValueError("resume must retain the saved task's bounds, region and revisit setting")
+            if region is not None:
+                if self._unmapped():
+                    raise RuntimeError("an exploration region needs a map and a pose in it; "
+                                       "explore without a region first")
+                self._region_reachable(region, self._pose(), radius)
             with self._lock:
                 reason = self._readiness_reason()
                 if reason:
@@ -522,6 +530,18 @@ class RobotExplorer(Node):
             self._rejection = str(error)
             self.get_logger().warning(f"exploration rejected: {error}")
             return GoalResponse.REJECT
+
+    def _requested_region(self, request):
+        """The map-frame disk to map; None maps the whole motion bound around the start pose."""
+        # A zero radius is "not set", as in Search. A goal type generated before these fields has none.
+        x, y, radius = (getattr(request, name, 0.0) for name in ("region_x", "region_y", "region_radius_m"))
+        if not all(math.isfinite(v) for v in (x, y, radius)) or not 0 <= radius <= self.config["max_radius_m"]:
+            raise ValueError("exploration region must be finite with a radius up to max_radius_m")
+        return ((x, y), radius) if radius else None
+
+    def _region_reachable(self, region, pose, radius):
+        if not region_in_reach(region, (pose.pose.position.x, pose.pose.position.y), radius, self._region_margin):
+            raise ValueError("exploration region lies outside the motion bound around the robot")
 
     def _resume_task(self, identifier):
         return load_task_checkpoint(
@@ -706,6 +726,7 @@ class RobotExplorer(Node):
         try:
             duration, radius = task_limits(goal.request.max_duration_sec, goal.request.max_radius_m,
                                            self.config["max_duration_sec"], self.config["max_radius_m"])
+            region, map_ref = self._requested_region(goal.request), self._map_ref
             deadline = task_time() + duration
             # Localization in an unknown room cannot produce the first map/pose.
             # Start native mapping without inventing free space or a transform.
@@ -719,10 +740,17 @@ class RobotExplorer(Node):
                 visited, blocked = state["visited"], state["blocked"]
                 previous_mapping = state["previous_mapping"]
                 result.mapped_area_m2 = state["mapped_area_m2"]
+                if state.get("region"):
+                    region = (tuple(state["region"][:2]), state["region"][2])
             else:
+                if region is not None:
+                    if self._map_ref != map_ref:
+                        raise RuntimeError("the map changed while mapping started; the region no longer names a place in it")
+                    self._region_reachable(region, pose, radius)
                 state = {"schema": 1, "id": bytes(goal.goal_id.uuid).hex(),
                          "boot_id": Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
                          "center": center, "radius": radius, "deadline": deadline,
+                         "region": [*region[0], region[1]] if region else None,
                          "revisit_known": goal.request.revisit_known, "retrying": False,
                          "previous_mapping": previous_mapping, "map_ref": self._map_ref}
             def check():
@@ -743,7 +771,7 @@ class RobotExplorer(Node):
             save()
             while True:
                 try:
-                    if not self._explore_step(goal, check, center, radius, visited, blocked, result):
+                    if not self._explore_step(goal, check, center, radius, visited, blocked, result, region):
                         if blocked and not state["retrying"]:
                             # Retry once after other observations; temporary obstacles can clear.
                             state["retrying"] = True
@@ -976,6 +1004,35 @@ class RobotExplorer(Node):
                 time.sleep(0.05)
             return unproductive_cause({name: value - before[name] for name, value in coverage.counts.items()})
 
+        def waiting():
+            """The task's own end conditions while it stands still before its first plan."""
+            if self._shutdown_requested.is_set():
+                raise RuntimeError("exploration server is shutting down")
+            if goal.is_cancel_requested:
+                raise InterruptedError("search canceled")
+            if task_time() >= deadline:
+                raise TimeoutError("search duration reached")
+
+        def open_session():
+            return SearchSession(label, self._evidence.profile, profile, self._map, started=now(),
+                                 target=target, region=region)
+
+        def serving():
+            """Stand still until a new frame can speak for the label; otherwise return why none could."""
+            coverage = before = None
+            until = time.monotonic() + config["search_dwell_sec"]
+            while time.monotonic() < until:
+                waiting()
+                integrate()
+                if session.coverage is not coverage:
+                    # Also after a reprojection, which rebuilds the counts from the whole log.
+                    coverage, before = session.coverage, dict(session.coverage.counts)
+                new = {name: value - before[name] for name, value in coverage.counts.items()}
+                if new["captures"] > new["other_model"] + new["other_profile"] + new["other_query"]:
+                    return None
+                time.sleep(0.05)
+            return unproductive_cause(new)
+
         def check():
             current = self._checkpoint(goal, deadline, center, radius, mapping_quota=False)
             result.travel_m = travelled()
@@ -1008,14 +1065,40 @@ class RobotExplorer(Node):
             request = goal.request
             region = (((request.region_x, request.region_y), request.region_radius_m)
                       if request.region_radius_m > 0 else (center, radius))
-            session = SearchSession(label, self._evidence.profile, profile, self._map, started=now(),
-                                    target=target, region=region)
+            session = open_session()
+            if not session.supported and session.open_vocabulary:
+                try:
+                    query_label(label)
+                except ValueError as error:
+                    raise SearchEnded("incapable", f'"{label}" cannot be an open-vocabulary query: {error}',
+                                      "query_unconfirmed") from error
+                # The task gateway reserves the perception query for a search with its label, and the
+                # detector then asks for exactly that label. Nothing counts before the profile confirms it.
+                self._stage = "searching: awaiting the perception query"
+                goal.publish_feedback(Search.Feedback(stage=self._stage, current_pose=pose, **progress()))
+                until = time.monotonic() + config["service_timeout_sec"]
+                while not session.supported and time.monotonic() < until:
+                    waiting()
+                    time.sleep(0.05)
+                    if self._evidence.profile is not session.perception and self._map is not None:
+                        session = open_session()
             if not session.supported:
-                raise SearchEnded("incapable", self._evidence.profile_reason
-                                  or f'"{label}" is not a label of the perception profile in force')
+                if self._evidence.profile is None:
+                    raise SearchEnded("incapable", self._evidence.profile_reason)
+                if session.open_vocabulary:
+                    raise SearchEnded("incapable", f'the open-vocabulary query was not set to "{label}": a search '
+                                      "submitted through the task API reserves the query and has it set",
+                                      "query_unconfirmed")
+                raise SearchEnded("incapable", f'"{label}" is outside the catalogue of the closed-vocabulary '
+                                  "recognizer in force, which cannot be asked for other labels", "closed_vocabulary")
             if not self._evidence.fresh(config["search_perception_timeout_sec"]):
                 raise SearchEnded("incapable", "no fresh perception observations; the instrument is not observing")
             integrate()  # Retained captures: recent evidence of absence and prior sightings shape the first plan.
+            cause = serving()
+            if cause in NO_INSTRUMENT:
+                # For example only the closed-vocabulary fallback serves; no viewpoint changes that.
+                raise SearchEnded("incapable", f"{NO_INSTRUMENT[cause]} while the robot stood still; it did not move",
+                                  INCAPABLE_CODES.get(cause))
             while True:
                 try:
                     pose = check()
@@ -1061,7 +1144,8 @@ class RobotExplorer(Node):
                     cause = observe(viewpoint, mounts[viewpoint.camera_id])
                     if cause in NO_INSTRUMENT:
                         # No other viewpoint can do better; say so instead of spending the budget.
-                        raise SearchEnded("incapable", f"{NO_INSTRUMENT[cause]} for a whole observation dwell")
+                        raise SearchEnded("incapable", f"{NO_INSTRUMENT[cause]} for a whole observation dwell",
+                                          INCAPABLE_CODES.get(cause))
                     if cause:
                         # Never retry a view that resolved nothing; it would be chosen again until the budget.
                         unproductive.append(point)
@@ -1085,6 +1169,8 @@ class RobotExplorer(Node):
                     self._pause(goal, paused_check, reason, progress, Search.Feedback)
         except SearchEnded as end:
             result.outcome, result.message = end.outcome, str(end)
+            if session is not None:
+                session.cause = end.cause
         except TimeoutError:
             result.outcome, result.message = "budget_exhausted", "search duration reached"
         except InterruptedError:
@@ -1244,8 +1330,11 @@ class RobotExplorer(Node):
             raise RuntimeError("Nav2 controller plugin is invalid")
         return navigation.status == GoalStatus.STATUS_SUCCEEDED
 
-    def _explore_step(self, goal, check, center, radius, visited, blocked, result):
-        """Plan and drive to one target; return False when no target remains."""
+    def _explore_step(self, goal, check, center, radius, visited, blocked, result, region=None):
+        """Plan and drive to one target; return False when no target remains.
+
+        ``region`` narrows what is mapped to a disk; every pose stays inside the bound of ``center`` and ``radius``.
+        """
         pose = check()
         grid, observed = self._navigation_grid(check, pose)
         position = (pose.pose.position.x, pose.pose.position.y)
@@ -1256,17 +1345,23 @@ class RobotExplorer(Node):
                 observation_distance=self.config["observation_distance_m"],
                 spacing=self.config["target_spacing_m"], revisit_spacing=self.config["revisit_spacing_m"],
                 free_threshold=self.config["free_threshold"], revisit=goal.request.revisit_known,
+                target_region=region,
             )
         except ValueError:
             # A first RGB-D grid may not cover the robot's centre yet.
             target = None
         if target is None:
             boundary = unobserved_boundary(grid[0], observed, *grid[1:], position, center, radius,
-                                           self._region_margin, self.config["free_threshold"])
+                                           self._region_margin, self.config["free_threshold"], region)
             if boundary:
                 return self._observe_step(goal, check, center, radius, visited, blocked, result, boundary)
-            result.complete = not blocked
-            result.message = "reachable region observed" if not blocked else "remaining targets failed navigation"
+            if blocked:
+                result.message = "remaining targets failed navigation"
+            elif region is not None and not region_entered(*grid, position, region, self.config["free_threshold"]):
+                result.message = ("no known free space connects the robot to the region; nothing in it was observed. "
+                                  "Explore towards it first")
+            else:
+                result.complete, result.message = True, "reachable region observed"
             return False
         yaw = math.atan2(target[1] - pose.pose.position.y, target[0] - pose.pose.position.x)
         destination = self._destination(*target, yaw)

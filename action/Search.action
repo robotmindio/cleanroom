@@ -1,4 +1,6 @@
-# Find any native label of the perception profile in force. Observing requires base motion.
+# One label: any an open-vocabulary recognizer is asked for, or one of a closed catalogue. The
+# task gateway has the detector ask for it; a direct goal finds only labels the profile in force
+# reports. Observing requires base motion.
 string query
 # A zero radius searches mapped space inside the tracked motion bound around the start pose.
 float64 region_x

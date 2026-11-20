@@ -142,6 +142,9 @@ state owned by the detector, not a parameter. Clients set it with
   hyphens and apostrophes; `.` is Grounding DINO's phrase separator.
 - At most 16 labels of at most 48 characters, and a prompt (`a. b.`) of at most
   254 characters, so Grounding DINO's 256-token text limit never truncates it.
+- A [search](active-search.md#the-label-and-the-perception-query) task reserves the
+  query: the detector asks for exactly its label while it runs, refuses
+  `set_query` meanwhile and restores the query it replaced when the task ends.
 - Empty labels restore the tracked `default_query` list in
   `config/object_perception_deployment.yaml`, which is also the startup query of
   every open-vocabulary recognizer. It is deployment configuration: extend the

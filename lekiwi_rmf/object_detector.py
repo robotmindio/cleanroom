@@ -170,6 +170,8 @@ class ObjectDetector(Node):
                                               QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
         self._publish_profile()
         self._query_holder = None
+        # (task, the query it replaced) while a reservation's own labels are in force.
+        self._reserved = None
         self.create_service(SetPerceptionQuery, QUERY_SERVICE, self._set_query, callback_group=self._receipt_group)
         self.create_service(ApplyPerceptionProfile, PROFILE_SERVICE, self._apply_profile, callback_group=self._profile_group)
         self.create_subscription(String, RESOURCE_TOPIC, self._resources_message,
@@ -199,16 +201,39 @@ class ObjectDetector(Node):
                 for role, recognizer in self._recognizers.items()]}, ensure_ascii=False)))
 
     def _resources_message(self, message):
+        """Who reserves the query. A holder that states its `query` labels (a search) has exactly them
+        asked for while it holds the reservation, and its release puts back the query they replaced.
+        Nobody else can change the query meanwhile, so that restoration is exact."""
         try:
             holder = json.loads(message.data)['resources']['perception_query']
             if holder is not None and not isinstance(holder, dict):
                 raise TypeError('holder must be an object')
         except (ValueError, KeyError, TypeError) as error:
-            # Fail closed: an unreadable reservation is treated as held.
+            # Fail closed: an unreadable reservation is treated as held, and a reserved query stays.
             self.get_logger().error(f'invalid resource state: {error}')
-            holder = {'task_id': 'unknown'}
+            with self._query_lock:
+                self._query_holder = {'task_id': 'unknown'}
+            return
+        task = holder.get('task_id') if holder else None
         with self._query_lock:
             self._query_holder = holder
+            previous = self._query
+            if self._reserved is not None and self._reserved[0] != task:
+                self._query, self._reserved = self._reserved[1], None
+            labels = holder.get('query') if holder else None
+            if labels and self._reserved is None and self._query is not None:
+                try:
+                    query = make_query(labels)
+                    # Labels the query in force already asks for change nothing.
+                    if not set(query.labels) <= set(self._query.reportable):
+                        self._reserved, self._query = (task, self._query), query
+                except ValueError as error:
+                    self.get_logger().warning(f'task {task} reserves a query that cannot be asked: {error}')
+            query, reserved = self._query, self._reserved is not None
+        if query != previous:
+            self._publish_profile()
+            self.get_logger().info(f'perception query {query.revision[:12]}: {", ".join(query.reportable)} '
+                                   f'({f"reserved by task {task}" if reserved else "reservation released"})')
 
     def _set_query(self, request, response):
         with self._query_lock:

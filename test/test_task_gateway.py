@@ -59,6 +59,7 @@ class Peers(Node):
         super().__init__('task_peers', context=context)
         self.finish = False
         self.abort = False
+        self.cause = None
         self.hold_cancel = False
         self.completed = []
         self.paused = False
@@ -120,9 +121,9 @@ class Peers(Node):
     def search(self, goal):
         found = not self.abort
         return self.execute(goal, Search.Result(
-            complete=found, outcome='found' if found else 'budget_exhausted', found=found,
+            complete=found, outcome='found' if found else 'incapable' if self.cause else 'budget_exhausted', found=found,
             evidence_ids=['e' * 64] if found else [], coverage_fraction=0.25, target_coverage=0.9,
-            message='finished', report_json=json.dumps({'statement': 'bounded by coverage'})),
+            message='finished', report_json=json.dumps({'statement': 'bounded by coverage', 'cause': self.cause})),
             lambda: Search.Feedback(stage='searching: viewpoint 1 (front)', coverage_fraction=0.1))
 
     def explore(self, goal):
@@ -845,6 +846,16 @@ def test_exploration_defaults_are_valid_without_any_parameters():
     assert goal.revisit_known is False
     assert goal.max_duration_sec == goal.max_radius_m == 0.0
     assert goal.resume_task_id == ''
+    # No region: a zero radius is the action's "not set".
+    assert getattr(goal, 'region_radius_m', 0.0) == 0.0
+
+
+@pytest.mark.skipif('region_radius_m' not in Explore.Goal.get_fields_and_field_types(),
+                    reason='the installed Explore interface was generated before the region fields')
+def test_exploration_goal_carries_its_region():
+    goal, parameters = task_goal('explore', '{"region":{"x":1,"y":-2,"radius_m":1.5},"max_radius_m":4}')
+    assert (goal.region_x, goal.region_y, goal.region_radius_m, goal.max_radius_m) == (1.0, -2.0, 1.5, 4.0)
+    assert json.loads(parameters)['region'] == {'x': 1, 'y': -2, 'radius_m': 1.5}
 
 
 def test_capability_defaults_and_task_metadata_come_from_explorer(system):
@@ -860,7 +871,9 @@ def test_capability_defaults_and_task_metadata_come_from_explorer(system):
     explore = next(item for item in catalog['capabilities'] if item['name'] == 'explore')
     assert explore['required_parameters'] == []
     assert explore['defaults'] == {'revisit_known': False, 'max_duration_sec': 0.0,
-                                   'max_radius_m': 0.0, 'resume_task_id': ''}
+                                   'max_radius_m': 0.0, 'region': None, 'resume_task_id': ''}
+    assert explore['effective_defaults']['region'] is None and explore['frame'] == 'map'
+    assert explore['schema']['properties']['region']['properties']['radius_m']['max'] == 3.0
     assert explore['effective_defaults']['max_duration_sec'] == 60.0
     assert explore['effective_defaults']['max_radius_m'] == 3.0
     assert catalog['terminal_states'] == ['canceled', 'failed', 'succeeded']

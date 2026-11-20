@@ -82,6 +82,10 @@ def load_task_checkpoint(path, identifier, *, maximum_duration, maximum_radius, 
     for name in ("revisit_known", "retrying", "previous_mapping"):
         if type(state.get(name)) is not bool:
             raise ValueError(f"invalid checkpoint {name}")
+    region = state.get("region")
+    if region is not None and (not isinstance(region, list) or len(region) != 3 or any(
+            type(v) not in (float, int) or not math.isfinite(v) for v in region) or region[2] <= 0):
+        raise ValueError("invalid checkpoint region")
     center = state.get("center")
     groups = [state.get("visited"), state.get("blocked")]
     if (not isinstance(center, list) or len(center) != 2
@@ -192,6 +196,11 @@ def task_limits(duration, radius, maximum_duration, maximum_radius):
     return tuple(limits)
 
 
+def region_in_reach(region, position, radius, region_margin):
+    """Whether any of the disk ``region`` ((x, y), radius) lies inside the motion bound around ``position``."""
+    return math.dist(region[0], position) - region[1] < radius - region_margin
+
+
 def map_geometry(message, maximum_cells, *, frame="map"):
     info = message.info
     if (message.header.frame_id != frame or info.width < 1 or info.height < 1
@@ -229,8 +238,23 @@ def disk(radius, resolution):
     return ((x * x + y * y) * resolution ** 2 <= radius ** 2 + 1e-12).astype(np.uint8)
 
 
+def _inside(wx, wy, region):
+    return (wx - region[0][0]) ** 2 + (wy - region[0][1]) ** 2 <= region[1] ** 2
+
+
+def region_entered(grid, resolution, origin, position, region, free_threshold):
+    """Whether free space connected to the robot reaches into the disk; only then was any of it observed."""
+    x, y = world_to_cell(position, resolution, origin)
+    free = ((grid >= 0) & (grid <= free_threshold)).astype(np.uint8)
+    if not (0 <= y < grid.shape[0] and 0 <= x < grid.shape[1] and free[y, x]):
+        return False
+    cv2.floodFill(free, None, (x, y), 2, flags=4)
+    yy, xx = np.indices(grid.shape)
+    return bool(np.any((free == 2) & _inside(*cell_to_world(xx, yy, resolution, origin), region)))
+
+
 def unobserved_boundary(grid, observed, resolution, origin, position, center, radius, region_margin,
-                        free_threshold):
+                        free_threshold, target_region=None):
     """Count the connected free cells in the region that border unknown space.
 
     An exhausted candidate list does not prove that the connected space was
@@ -248,6 +272,8 @@ def unobserved_boundary(grid, observed, resolution, origin, position, center, ra
     yy, xx = np.indices(grid.shape)
     wx, wy = cell_to_world(xx, yy, resolution, origin)
     region = (wx - center[0]) ** 2 + (wy - center[1]) ** 2 < (radius - region_margin) ** 2
+    if target_region is not None:
+        region &= _inside(wx, wy, target_region)
     unknown = cv2.dilate((grid < 0).astype(np.uint8), np.ones((3, 3), dtype=np.uint8)) != 0
     # The edge of a cropped first map is also unobserved, unless outside the task region.
     unknown[[0, -1], :] = True
@@ -299,8 +325,13 @@ def known_safe_cells(grid, resolution, clearance, free_threshold):
 
 def select_target(grid, resolution, origin, position, center, radius, visited, blocked,
                   *, clearance, footprint, region_margin, observation_distance, spacing, revisit_spacing,
-                  free_threshold, revisit):
+                  free_threshold, revisit, target_region=None):
     """Choose a reachable view, staying clear of unknown cells and obstacles.
+
+    ``center`` and ``radius`` bound every pose of the task. ``target_region``
+    ((x, y), radius) narrows what is mapped: only frontiers and revisit poses
+    inside that disk are chosen, while the view of such a frontier and the
+    route to it may lie anywhere in the known free space of the bound.
 
     ponytail: nearest view first, not an optimal tour; optimize only if measured
     exploration time warrants it. OpenCV handles the grid operations.
@@ -325,6 +356,10 @@ def select_target(grid, resolution, origin, position, center, radius, visited, b
     cv2.floodFill(connected_free, None, (x, y), 2, flags=4)
     connected_free = connected_free == 2
     frontier = connected_free.astype(np.uint8) & unknown_neighbor
+    wanted = region
+    if target_region is not None:
+        wanted = _inside(wx, wy, target_region)
+        frontier &= wanted.astype(np.uint8)
     candidates = reachable & (cv2.dilate(frontier, disk(observation_distance, resolution)) != 0)
     available = connected_free & region & ((wx - position[0]) ** 2 + (wy - position[1]) ** 2 >= spacing ** 2)
     for vx, vy in (*visited, *blocked):
@@ -333,8 +368,8 @@ def select_target(grid, resolution, origin, position, center, radius, visited, b
     stages = [("exploring_frontiers", candidates)]
     if revisit:
         step = max(1, math.ceil(revisit_spacing / resolution))
-        stages.append(("revisiting_known_space", available & (xx % step == 0) & (yy % step == 0)))
-    mapped_area = float(np.count_nonzero(region & (grid >= 0))) * resolution ** 2
+        stages.append(("revisiting_known_space", available & wanted & (xx % step == 0) & (yy % step == 0)))
+    mapped_area = float(np.count_nonzero(wanted & (grid >= 0))) * resolution ** 2
     for stage, candidates in stages:
         ys, xs = np.nonzero(candidates)
         for closest in np.argsort((wx[ys, xs] - position[0]) ** 2 + (wy[ys, xs] - position[1]) ** 2):

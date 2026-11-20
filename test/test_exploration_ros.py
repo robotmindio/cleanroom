@@ -294,6 +294,27 @@ def graph(tmp_path, request):
                           nodes=(client_node, explorer, guard, peers), context=context)
 
 
+def region_goal(explorer, x, y, radius, **fields):
+    """An Explore goal for a map-frame region.
+
+    An interface generated before the region fields cannot carry one; the same
+    values then reach the explorer through its own goal reader, so its checks
+    still apply. `forget_region` undoes that for the goals that follow.
+    """
+    goal = Explore.Goal(**fields)
+    if hasattr(goal, 'region_radius_m'):
+        goal.region_x, goal.region_y, goal.region_radius_m = float(x), float(y), float(radius)
+    else:
+        read = type(explorer)._requested_region
+        explorer._requested_region = lambda _request: read(explorer, SimpleNamespace(
+            region_x=float(x), region_y=float(y), region_radius_m=float(radius)))
+    return goal
+
+
+def forget_region(explorer):
+    explorer.__dict__.pop('_requested_region', None)
+
+
 def start(graph, duration=TEST_TASK_DURATION, revisit=False):
     peers, _, client = graph
     handle = response(client.send_goal_async(Explore.Goal(
@@ -313,7 +334,8 @@ def test_mapping_start_anchors_region_only_after_all_post_switch_frames(graph, m
     peers.publish_map = peers.publish_slam = peers.publish_pose = False
     captured = []
 
-    def step(goal, check, center, radius, visited, blocked, result):
+    def step(goal, check, center, radius, visited, blocked, result, region):
+        assert region is None
         captured.append(center)
         result.complete = True
         return False
@@ -344,7 +366,7 @@ def test_mapping_start_waits_for_the_post_switch_pose_correction_to_settle(graph
     explorer.config['settle_sec'] = .4
     captured = []
 
-    def step(goal, check, center, radius, visited, blocked, result):
+    def step(goal, check, center, radius, visited, blocked, result, region):
         captured.append(center)
         result.complete = True
         return False
@@ -563,6 +585,93 @@ def test_interrupted_costmap_queries_release_the_pending_request(graph, monkeypa
     with pytest.raises(Paused if failure is ResponseTimeout else failure):
         explorer._explore_step(None, lambda: PoseStamped(), (0, 0), 2.5, [], [], Explore.Result())
     assert removed == [request]
+
+
+REGION = (1.0, -1.7, 0.25)  # At the edge of the known map, away from the frontier nearest the robot.
+
+
+def test_a_region_is_reached_through_known_space_and_only_it_is_mapped(graph):
+    import json
+
+    peers, explorer, client = graph
+    handle = response(client.send_goal_async(region_goal(
+        explorer, *REGION, max_duration_sec=TEST_TASK_DURATION, max_radius_m=4.0)))
+    assert handle.accepted
+    wait(lambda: peers.nav_active)
+    target = peers.navigation_goals[-1].pose.position
+    # A view of the region's frontier, in known free space of the motion bound around the start pose:
+    # the frontier nearest the robot, straight ahead of it, is not this task's.
+    assert target.y < -0.6 and math.dist((target.x, target.y), REGION[:2]) <= REGION[2] + 0.8
+    assert math.hypot(target.x, target.y) < 4.0 - explorer._region_margin
+    assert peers.planner_ids == ['ExploreKnown']
+    assert json.loads(explorer._task_file.read_text())['region'] == list(REGION)
+    peers.nav_mode = 'success'  # Arriving reveals the rest of this map.
+    result = response(handle.get_result_async(), timeout=TEST_TASK_DURATION)
+    assert result.status == GoalStatus.STATUS_SUCCEEDED, result.result.message
+    assert result.result.message == 'reachable region observed' and result.result.visited_targets == 1
+    assert peers.nav_count == 1 and peers.observation_goals == []
+    # Only the disk counts as mapped area.
+    assert 0 < result.result.mapped_area_m2 <= math.pi * REGION[2] ** 2 + 0.05
+
+
+def test_a_region_no_known_free_space_reaches_is_not_reported_as_observed(graph):
+    peers, explorer, client = graph
+    peers.grid.data = [0 if index % 80 < 60 else 100 if index % 80 == 60 else -1 for index in range(6400)]
+    wait(lambda: explorer._map[0][0, 60] == 100)
+    handle = response(client.send_goal_async(region_goal(explorer, 1.6, 0.0, 0.3, max_radius_m=2.5)))
+    assert handle.accepted
+    result = response(handle.get_result_async(), timeout=TEST_TASK_DURATION)
+    assert result.status == GoalStatus.STATUS_ABORTED and not result.result.complete
+    assert 'no known free space connects the robot to the region' in result.result.message
+    assert peers.nav_count == 0
+
+
+def test_a_region_beyond_the_motion_bound_or_the_tracked_radius_is_rejected(graph):
+    peers, explorer, client = graph
+    for region in ((3.0, 0.0, 0.5), (0.0, 0.0, explorer.config['max_radius_m'] + 1), (float('nan'), 0.0, 1.0),
+                   (0.0, 0.0, -1.0)):
+        assert not response(client.send_goal_async(region_goal(explorer, *region, max_radius_m=2.5))).accepted
+    assert 'region' in explorer._rejection and peers.mapping_requests == [] and peers.nav_count == 0
+    assert not explorer._busy
+
+
+@pytest.mark.parametrize('graph', ['cold_start', 'unlocalized'], indirect=True)
+def test_a_region_needs_a_map_pose_while_plain_exploration_starts_without_one(graph):
+    peers, explorer, client = graph
+    assert not response(client.send_goal_async(region_goal(explorer, 0.5, 0.0, 0.5, max_radius_m=2.5))).accepted
+    assert 'explore without a region first' in explorer._rejection and peers.mapping_requests == []
+    forget_region(explorer)
+    handle = response(client.send_goal_async(Explore.Goal(max_radius_m=2.5)))
+    assert handle.accepted
+    wait(lambda: peers.mapping_requests == [True])
+    response(handle.cancel_goal_async())
+    assert response(handle.get_result_async()).status == GoalStatus.STATUS_CANCELED
+
+
+def test_a_resumed_task_keeps_its_region(graph):
+    import json
+
+    peers, explorer, client = graph
+    handle = response(client.send_goal_async(region_goal(explorer, *REGION, max_radius_m=4.0)))
+    assert handle.accepted
+    wait(lambda: peers.nav_active)
+    saved = json.loads(explorer._task_file.read_text())
+    assert saved['region'] == list(REGION)
+    # A server shutdown keeps the checkpoint; the next server resumes it.
+    explorer._shutdown_requested.set()
+    assert response(handle.get_result_async()).status == GoalStatus.STATUS_ABORTED
+    explorer._shutdown_requested.clear()
+    wait(lambda: not explorer._readiness_reason())
+    # A resume states no region of its own: the saved one is the task's.
+    assert not response(client.send_goal_async(region_goal(explorer, 0.3, 0.3, 0.3, resume_task_id=saved['id']))).accepted
+    forget_region(explorer)
+    resumed = response(client.send_goal_async(Explore.Goal(resume_task_id=saved['id'])))
+    assert resumed.accepted
+    wait(lambda: peers.nav_count == 2 and peers.nav_active)
+    assert peers.navigation_goals[-1].pose.position.y < -0.6
+    response(resumed.cancel_goal_async())
+    assert response(resumed.get_result_async()).status == GoalStatus.STATUS_CANCELED
+    assert not explorer._task_file.exists()
 
 
 def test_small_requested_region_keeps_the_full_stopping_margin(graph):
