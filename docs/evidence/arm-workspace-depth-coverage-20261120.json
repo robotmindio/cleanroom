@@ -1,0 +1,45 @@
+{
+  "acceptance_granted": false,
+  "arm_workspace_box_m": {
+    "x": [
+      -0.35,
+      0.45
+    ],
+    "y": [
+      -0.45,
+      0.45
+    ],
+    "z": [
+      0.0,
+      0.55
+    ]
+  },
+  "base_frame_bounds_m": {
+    "maximum": [
+      -0.028,
+      2.183,
+      0.388
+    ],
+    "minimum": [
+      -1.417,
+      0.588,
+      -0.06
+    ]
+  },
+  "captured_at": "2026-11-20T12:01:59.643559+00:00",
+  "cloud_frame": "astra_camera_optical_frame",
+  "cloud_topic": "/moveit/filtered_cloud",
+  "deployed_revision": "09b51a299a28e9e6eaa5a4d225c3e7394c0e7bd7",
+  "source_revision": "778aa87",
+  "clouds_sampled": 10,
+  "conclusion": "no cloud point falls inside the arm workspace box; the cloud does not cover the arm workspace",
+  "model_frame": "base_footprint",
+  "nearest_point_to_base_m": [
+    -0.089,
+    0.77,
+    0.294
+  ],
+  "points_in_arm_workspace": 0,
+  "points_transformed": 4074,
+  "scope": "measured coverage of the production MoveIt depth cloud over the arm workspace"
+}
