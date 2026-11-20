@@ -162,10 +162,14 @@ def test_stationary_corridor_reference_keeps_the_original_area_anchor(monkeypatc
     angles=np.linspace(0,2*math.pi,360,endpoint=False)
     local=np.column_stack((np.cos(angles),np.sin(angles)))
     def wait(condition,timeout):
+        # A fresh odometry sample arrives on every call, so only a node that starts
+        # stale (stale_feedback) sees the recovery branch; otherwise a slow machine
+        # would consume a data step with it and never supply the awaited sample.
+        stale=time.monotonic()-node.odom_at>=.3
+        node.odom_at=time.monotonic()
         if condition():
             return
-        if time.monotonic()-node.odom_at>=.3:
-            node.odom_at=time.monotonic()
+        if stale:
             node.speed=0.
         elif node.speed>.001:
             raise RuntimeError('not stationary')
