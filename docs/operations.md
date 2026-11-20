@@ -134,7 +134,8 @@ sudo scripts/disk-hygiene.sh --user "$USER" --workspace "$HOME/lekiwi_ws"
 ```
 
 It keeps the data classes above, qualification evidence, Trash newer than 30
-days and the active `/var/log/syslog` (its distro rotation owns that file). A
+days, and bounds `/var/log/syslog*` at 100 MiB per file including the active one
+(a chatty desktop app took it to 1.6 GB in an hour). A
 build that fills the disk between two runs is still the operator's problem: the
 timer runs once a day, and `stage-release.sh` refuses to start under 1 GB
 (device) or 4 GB (compute) free.

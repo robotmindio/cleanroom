@@ -47,8 +47,11 @@ act 'vacuum the journal to 512M' /usr/bin/journalctl --vacuum-size=512M
 
 # /var/log/syslog* is distro logrotate's (weekly, four archives) and was 400 MB
 # for one week of a runaway driver. Truncating the rotated copies keeps the
-# archive names logrotate expects; the active file is rotated by its own timer.
-for file in /var/log/syslog.[0-9] /var/log/kern.log.[0-9] /var/log/auth.log.[0-9]; do
+# archive names logrotate expects. The active file has no size cap of its own: a
+# desktop app repeating one error took it to 1.6 GB in an hour, so it is truncated
+# in place too (rsyslog appends, so it keeps writing and the space is returned).
+for file in /var/log/syslog /var/log/kern.log /var/log/auth.log \
+            /var/log/syslog.[0-9] /var/log/kern.log.[0-9] /var/log/auth.log.[0-9]; do
   [[ -f $file ]] || continue
   size=$(stat -c %s "$file")
   (( size > 100 << 20 )) && act "truncate $file ($((size >> 20)) MiB)" truncate -s 0 "$file"
