@@ -1,0 +1,35 @@
+{
+  "scope": "independent witness of physical arm motion through the LD06 scan plane",
+  "captured_on": "2026-11-20",
+  "source_revision": "18911af",
+  "deployed_revision": "09b51a299a28e9e6eaa5a4d225c3e7394c0e7bd7",
+  "raw_topic": "/pi/lidar/scan",
+  "filtered_topic": "/scan",
+  "scan_plane_height_m": 0.129,
+  "stow_arm_returns": {
+    "angle_deg": [261.5, 271.0],
+    "range_m": [0.133, 0.152]
+  },
+  "pan_1_0_arm_return": {
+    "angle_deg": 250.3,
+    "range_m": 0.258,
+    "note": "absent at stow; the nearest return at 250 deg at stow was 0.856 m"
+  },
+  "returned_to_stow": {
+    "nearest_250_deg_m": 0.856
+  },
+  "moveit_trial": {
+    "target_pan_rad": 1.0,
+    "error_code": 1,
+    "elapsed_s": 6.93,
+    "final_pan_rad": 0.9897
+  },
+  "cancel_trial": {
+    "cancel_at_s": 2.0,
+    "error_code": -7,
+    "final_pan_rad": 0.2793,
+    "note": "MoveIt reported PREEMPTED and the arm stayed at the measured pan position"
+  },
+  "conclusion": "The unfiltered lidar sees the arm cross the scan plane and disappear when it returns to stow. The production /scan self-filter blanks those arm returns. This is a motion witness for arm trials, not a 3D workspace or collision sensor.",
+  "acceptance_granted": false
+}
