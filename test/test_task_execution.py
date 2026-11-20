@@ -694,7 +694,7 @@ def test_validation_enforces_exactly_the_schema_the_manifest_publishes(tmp_path)
         assert navigate['parameters'] == ['x', 'y', 'yaw', 'deadline_unix_sec', 'max_travel_m', 'target']
         assert navigate['required_parameters'] == ['x', 'y'] and navigate['defaults'] == {'yaw': 0.0}
         assert navigate['schema']['properties']['max_travel_m'] == {
-            'type': 'number', 'unit': 'm', 'exclusive_min': 0, 'max': 10}
+            'type': 'number', 'unit': 'm', 'exclusive_min': 0.5, 'max': 10}
         assert navigate['schema']['properties']['deadline_unix_sec']['max_ahead_sec'] == 300
         assert navigate['schema']['resources'] == navigate['resources'] == ['base']
         assert navigate['schema']['preconditions'] == [
@@ -717,6 +717,8 @@ def test_a_refusal_says_whether_retrying_helps_and_which_field_is_at_fault(robot
                                                                            'next_condition': 'enable_capability'}
     for capability, parameters, code, data in (
             ('navigate', {'x': 1, 'y': 0, 'max_travel_m': 11}, 'invalid_request', {**fix, 'field': 'max_travel_m'}),
+            # No larger than the stopping reserve: it could only be canceled at once.
+            ('navigate', {'x': 1, 'y': 0, 'max_travel_m': 0.5}, 'invalid_request', {**fix, 'field': 'max_travel_m'}),
             ('navigate', {'x': 1, 'y': 0, 'deadline_unix_sec': time.time() - 1}, 'precondition_failed',
              {**fix, 'field': 'deadline_unix_sec'}),
             ('navigate', {'x': 1, 'y': 0, 'max_travel_m': 2}, 'precondition_failed',

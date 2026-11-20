@@ -20,6 +20,9 @@ The gateway cancels its current Nav2 attempt and waits for a terminal native
 result before resending the same destination with a new owned goal ID. Fresh
 safety inputs and one second of collision settling are required to resume.
 An unconfirmed stop expires the ownership lease and blocks resubmission.
+An optional `max_travel_m` bounds the odometry travel: the task is canceled 0.5 m
+before it, the accepted stopping distance rounded up, so a bound of 0.5 m or less is
+refused; a short move is bounded by its `deadline_unix_sec` and the goal itself.
 Direct legacy Nav2 clients retain their existing behavior.
 `explore` accepts `revisit_known`, `max_duration_sec`, `max_radius_m`, an
 optional map-frame `region` `{x, y, radius_m}` and `resume_task_id`; the Explorer

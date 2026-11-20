@@ -76,6 +76,10 @@ OBJECTS_SERVICE = '/robot/objects/query'
 OBJECT_MAP_SCHEMA = 'lekiwi.object_map/1'
 # The most entries one object query returns, newest sighting first.
 SEARCH_LIMITS = ('max_duration_sec', 'max_travel_m')
+# A bounded navigation is canceled this far before its travel budget, so the base stops inside
+# it: the accepted stopping distance (config/safety_acceptance.yaml, 0.45 m) rounded up. A budget
+# no larger than this could only be canceled at once, so it is refused instead.
+TRAVEL_STOP_RESERVE_M = 0.5
 # Schema 1 is SubmitTask/GetTask/CancelTask; schema 2 is the TaskApi services below.
 API_SCHEMAS = (1, 2)
 TASK_API = {name: f'/robot/tasks/v2/{name}'
@@ -335,7 +339,7 @@ CAPABILITIES = {
             'properties': {
                 'x': _METRES, 'y': _METRES, 'yaw': _POSE['yaw'],
                 'deadline_unix_sec': {'type': 'number', 'unit': 's', 'exclusive_min': 0, 'max_ahead_sec': 300},
-                'max_travel_m': {**_METRES, 'exclusive_min': 0, 'max': 10},
+                'max_travel_m': {**_METRES, 'exclusive_min': TRAVEL_STOP_RESERVE_M, 'max': 10},
                 'target': {'type': 'object', 'properties': {
                     'pose': {'type': 'object', 'properties': _POSE},
                     'anchored': {'type': 'object', 'properties': {
@@ -1457,7 +1461,7 @@ class TaskGateway(Node):
                 if origin:
                     meter = self._distance.status()
                     expired = expired or not meter['ready'] or meter['epoch'] != origin['epoch'] or (
-                        meter['meters'] - origin['meters'] >= max(0, limits['max_travel_m'] - .5))
+                        meter['meters'] - origin['meters'] >= limits['max_travel_m'] - TRAVEL_STOP_RESERVE_M)
                 if expired:
                     self._journal.request_cancel(identifier, reason=2)
                     self._update(identifier, 'canceling', 'bounded navigation budget or telemetry lost; awaiting terminal ROS result')
