@@ -208,7 +208,9 @@ install_zenoh_bridge "$HOME/.local/bin"
 
 log "Creating the ROS-compatible Python environment"
 python3 -m venv --system-site-packages "$WORKSPACE/.venv"
-# DEBT(#14): ROS's setup files read unset variables, so -u is off while sourcing them.
+# DEBT(#14): the pinned Jazzy setup files expand variables they never default, one per exported
+# package variable (measured: AMENT_TRACE_SETUP_FILES, AMENT_PYTHON_EXECUTABLE, GZ_CONFIG_PATH,
+# ROS_DISTRO, GZ_SIM_SYSTEM_PLUGIN_PATH, ...), so no fixed declaration list makes them -u clean.
 set +u
 # shellcheck disable=SC1090,SC1091
 source "/opt/ros/$ROS_DISTRO/setup.bash"
