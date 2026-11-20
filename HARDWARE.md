@@ -199,7 +199,10 @@ for which wheel is which.
 
 The LeRobot robot type remains `lekiwi` for an SO-101 arm: it already maps the
 six follower servos to IDs 1 through 6 with the stable `arm_*` names. There is
-no separate `lekiwi_so101` type.
+no separate `lekiwi_so101` type. The published specs of the base, arm, servos,
+lidar and depth camera are collected in
+[docs/hardware-reference.md](docs/hardware-reference.md); they are reference
+values for sanity-checking the tracked limits, not acceptance evidence.
 
 ## 3. Calibrate
 

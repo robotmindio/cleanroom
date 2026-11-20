@@ -27,7 +27,9 @@ safety_supervisor:
     minimum_depth_valid_points: 16
     minimum_depth_valid_fraction: 0.01
     minimum_depth_range: 0.05
-    maximum_depth_range: 10.0
+    # The Astra Pro's published depth range ends at 8.0 m; anything beyond is not
+    # a valid return (docs/hardware-reference.md).
+    maximum_depth_range: 8.0
     # Required base inputs, acceptance and fresh stow gate base motion in both
     # modes. Hold mode recovers permission when inputs recover, without disarming.
     # MoveIt collision status always gates arm motion.

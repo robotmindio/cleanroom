@@ -55,6 +55,11 @@ electrical or mechanical failure. Arming and recovery behaviour is described in
 
 ## Physical acceptance
 
+Published vendor values for the parts are collected in
+[hardware-reference.md](hardware-reference.md). They are reference data for
+sanity-checking tracked limits and cannot grant acceptance: only measurements on
+the assembled robot can.
+
 `config/safety_acceptance.yaml` is a schema-version-4 record with
 `validated: true`, validated on 2026-10-09. Its scope is **attended autonomous
 base** operation:
